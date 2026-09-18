@@ -557,7 +557,7 @@ promote unverified bindings or to change a tune.
   it. VVT duty can also arbitrate 0x1110's ×0.5 versus ×100/255 scale only if
   the matching raw register is observed in the same window.
 
-- [ ] **D03.11 Verify the evening fixes through a real drive and stop.**
+- [~] **D03.11 Verify the evening fixes through a real drive and stop.**
   **Before departure:** record the Pi checkout SHA and running build; ensure it
   includes `7ebfa85`, `c15f66a`, `3d45680`, `2dfa0aa` and `dcde580` (or their
   descendants). Verify effective `MemoryMax`, `MemorySwapMax`, service PID and
@@ -588,6 +588,19 @@ promote unverified bindings or to change a tune.
   path remains unisolated. Check shutdown after its desk regression is fixed.
   Save the deployed versions, per-block measurements and sidecar paths in a
   September 18 drive artifact; close each verified clause with that evidence.
+
+  **2026-09-18 ([drive log](../../../data/analyses/2026-09-18-drive-log.md)), `[~]`:**
+  - Deployed build verified at `7df58f0` → `e7d2168` → `63d5e51` (hash checked each time).
+  - Compact status answers in 9–26 ms, against 1.3–2.6 s for full.
+  - Capture windows reopened after all four restarts. Tags recorded, with an
+    explicit 422 on a wrong body.
+  - **Over-budget refusal verified end to end, twice:** sidecar, WARNING, and
+    HTTP 409 `digest_refused` with the reason in 49 ms. No hang.
+  - **Still open:**
+    - a small session producing `digest.json`. At ~2,355 rows/s the budget is only
+      ~13.6 min of driving, so trip-end needs a session younger than that;
+    - the 409-on-tag-without-capture check;
+    - effective MemoryMax, which isn't enforced (D03.21).
 
 - [ ] **D03.12 Follow up the secondary DID candidates if drive time remains.**
   Use short, focused profiles after D03.8, with provisional raw decodes and
