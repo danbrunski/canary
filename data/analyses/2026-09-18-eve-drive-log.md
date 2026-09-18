@@ -64,6 +64,8 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
 | 20:05:06 | engine_running (default, 3 min after boot) | 0 | 1/**1320** | 7 | 18.34 | 0 | 39.0 | 2 | 1,982 |
 | 20:13:08 | engine_running (fuel-pw-research) | 0 | 1/1320 | 51 | — | 0 | 42.6 | 10 | 2,085 |
 | 20:38:55 | engine_running (default) | 0 | 1/**2185** | 128 | 18.12 | 0 | 39.6 | 36 | 2,170 |
+| 20:55:46 | engine_running (default) | 0 | 1/**3559** | 200 | 18.41 | 0 | 38.4 | 54 | 2,005 |
+| 21:12:07 | engine_running (default) | 0 | 1/3559 (flat) | 228 | 18.33 | 0 | 37.9 | 66 | 2,312 |
 
 ## Work notes
 - 20:01Z Pi booted (key-on). 20:04Z operator: "new drive is starting now" (4 h).
@@ -100,3 +102,8 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - The 5.0 s stalls are a silent fast **exit** (`10 81`) waiting out the 5.0 s session lapse.
   - **Live check:** `/status` shows `fast_exit_failures` = 3 since boot, equal to the three 5.0 s gaps. Session control: 212 timeouts, 0 NRCs.
   - D03.18 task text updated with both mechanisms and the minimal fixes. This is desk code work; not deploying from the road.
+- 20:56Z **Storage high-water is climbing: 1,320 (20:05, boot) → 2,185 (20:33:55, key-on after the stop) → 3,559 (20:46:45)**, with 0 drops and queue depth back at 1 each time.
+  - The 20:46:45 step is one slow flush: `max_flushing_write_ms` 2,139. At ~2,355 rows/s that's ~5k rows backed up; 10k needs a ~4 s flush.
+  - The journal shows nothing at 20:46:45, and no pull was running. Cause unattributed; an SD write-latency spike is plausible, not shown.
+  - The 1 Hz live logger was stopped at 20:57Z (no more captures planned; one less load).
+  - **Watching:** if the high-water passes ~7,000, or any drop appears, it's a regression to act on (memory: the storage-writer overload).
