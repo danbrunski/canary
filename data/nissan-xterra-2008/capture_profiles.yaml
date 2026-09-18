@@ -309,3 +309,64 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-fuel-target-research
+- name: fuel-pw-research
+  # D03.8 + D03.9, saved live on the Pi 2026-09-18 14:08Z from the road and
+  # mirrored here. fuel-target-research plus the injected-fuel candidates
+  # 0x1206/0x1207 (desk screen 2026-09-18-injected-fuel-did-screen.md), so one
+  # capture tests both 0x1134 vs PID 0x44 and fuel-from-0x1206 vs MAF x phi.
+  # ECM_MAF_GPS dropped: D04.4 found it 1:1 with Mode 01 MAF.
+  description: 'Research: target-AFR candidate 0x1134 beside PID 0x44 (D03.8) plus
+    injected-fuel candidates 0x1206/0x1207 beside PID 0x24 and Mode 01 MAF (D03.9)'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    MAF: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    FUEL_STATUS: 1.0
+    ENGINE_LOAD: 1.0
+    TIMING_ADVANCE: 1.0
+  mode22:
+  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_RPM
+  - ECM_AF_SENSOR_V_B1
+  - ECM_INJECTOR_PW_B1
+  - ECM_INTAKE_PRESSURE_1206
+  - ECM_INTAKE_PRESSURE_1207
+  - ECM_THROTTLE_POS_SENSOR_1
+  # D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most
+  # once per cycle. A 0.5 s cycle with every DID at weight 0.5 asks for exactly
+  # what the cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler,
+  # the resolved plan and the capture contract alike.
+  mode22_rate_weights:
+    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_RPM: 0.5
+    ECM_AF_SENSOR_V_B1: 0.5
+    ECM_INJECTOR_PW_B1: 0.5
+    ECM_INTAKE_PRESSURE_1206: 0.5
+    ECM_INTAKE_PRESSURE_1207: 0.5
+    ECM_THROTTLE_POS_SENSOR_1: 0.5
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: 0.5
+  round_timestamps: true
+  target_rate_hz: 4.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  expected_total_demand_hz: 42.0
+  capacity_evidence: 'Derived from fuel-target-research (2026-09-18, 39 req/s achieved,
+    0 drops): 7 Mode 01 PIDs x 4 Hz + 7 DIDs x 2 Hz = 42 channel reads/s; cycle 0.5 s
+    needs ~0.26 s at 90 req/s. ECM_MAF_GPS dropped (D04.4: 1:1 with Mode 01 MAF). Replace
+    with this revision''s own 20-min evidence.'
+  required_tuple: []
+  min_achieved_rate_hz: null
+  requires_tune_revision: true
+  builtin_revision: 0
+  # Vehicle-specific research profile naming this ECM's DIDs; the generic seed
+  # must never overwrite it.
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-fuel-pw-research
