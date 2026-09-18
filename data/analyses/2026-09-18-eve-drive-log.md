@@ -62,6 +62,9 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
 | 20:38:55 | engine_running (default) | 0 | 1/**2185** | 128 | 18.12 | 0 | 39.6 | 36 | 2,170 |
 | 20:55:46 | engine_running (default) | 0 | 1/**3559** | 200 | 18.41 | 0 | 38.4 | 54 | 2,005 |
 | 21:12:07 | engine_running (default) | 0 | 1/3559 (flat) | 228 | 18.33 | 0 | 37.9 | 66 | 2,312 |
+| 21:27:22 | engine_running (after the 530398e restart; **counters reset**) | 0 | 1/161 | 0 | 14.49 | 0 | 34.8 | 4 | 2,222 |
+| 22:04:06 | engine_running (default) | 0 | 1/356 (max flush 366 ms) | 266 | 20.34 | 0 | 38.7 | 38 | 2,366 |
+| 22:30:54 | engine_running (default) | 0 | 1/768 | 480 | 19.82 | 0 | 38.8 | 81 | 2,342 |
 
 ## Work notes
 - 20:01Z Pi booted (key-on). 20:04Z operator: "new drive is starting now" (4 h).
@@ -117,3 +120,23 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - `fast_exit_failures` 0 and `fast_exit_retries` 0: the exit-retry path wasn't exercised live.
   - Verdict fail on two clauses, both explained. `acquisition_gap` is **0x44 alone** for 2.49 s at +298 s: a single-PID miss, not a session stall; watch whether 0x44 misses recur (compare `fuel-pw-research-2`). `persistence_loss` is can0 overflow +88 (broadcast path, known).
   - One 8.5 s enrichment hold, 0 stalls inside it.
+- ~22:25Z Operator: "fix the mislabeled channels now and deploy. Keep making fixes, don't rest." Started an implementer on the rename: 0x1208 → `ECM_AIR_CHARGE`; 0x1206/0x1207 → `ECM_INJECTOR_PULSE_1/_2` (bank unverified); 0x1134 → `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE`. Old names go into `aliases` behind one shared canonicalization, and the tuning provider is re-pointed. A read-only desk agent in parallel is working on the `fuel-pw-research-2` 0x44 batch timeouts.
+- 22:31Z Anomaly emits went 38 → 81 in 27 min. Since 22:04: LSTM 28 (highway 12, city 11, idle_transient 5), fused 5, behavior air-mass/VE/fuel-trim 12 (all `idle_transient`). vehicle_state `engine_running` at ~2,340 m. **Out of distribution, not a fault:** it's the known altitude/air-mass OOD (D03.20) on July models. No action.
+- ~22:40Z Operator: "no aliases, remove wrong info." The rename implementer was redirected. It's a hard rename (no `aliases`); the wrong descriptions are deleted, not kept as history; and a one-time migration tool rewrites stored channel names (session parquet, model manifests/artifacts, saved profiles). It runs on the Pi with the daemon stopped.
+- ~22:40Z **Desk: the `fuel-pw-research-2` 0x44 timeouts ROOT-CAUSED** (`~/canary-data/scripts-0918b/out/batch044.md`). The registry gives PID **0x33 BAROMETRIC_PRESSURE `byte_length=2`**; J1979 and this ECM give 1.
+  - In a batched response, the parser swallows the next PID's id byte as baro's second byte. The result is a desync, and every later member times out.
+  - Evidence: 69 of 83 baro rows carry a 2-byte payload whose second byte is a PID id (0x42 ×33, 0x44 ×20, 0x24 ×12…). Single-PID baro reads in the same capture are 1 byte. Swallows plus truncations explain ~90 of 99 desyncs.
+  - The byte-count-limit hypothesis is **refuted**: a 19-byte plain batch parsed cleanly 4,493 times.
+  - Latent since `afbf682`. It surfaced now because capture rounds ignore tiers and put slow-tier baro into fast batches. The same class of bug is latent in 0x55–0x58 (registry 1, J1979 2).
+  - A second implementer is fixing the widths, adding an independent J1979 width table as test data, and a regression test.
+  - Side finding (queued, not yet fixed): capture_quality's `batching` block is a lifetime scheduler snapshot, not capture-scoped. That's the "cumulative counters read as capture-scoped" mistake, so this evening's per-capture desync counts were carried over from earlier.
+- ~23:00Z **`5eb1464` PID width fix committed and pushed** (implementer; I reviewed the diff and re-ran 175 targeted tests). 0x33 changed 2 → 1 and 0x55–0x58 changed 1 → 2. All 92 registry PIDs are checked against an independent J1979 table in test data, and a capture-round regression walks baro first/middle/last (it fails on the old width). Single-PID values are unchanged. **Deploy is held** so it goes out with the rename (one restart + migration). `default` doesn't batch slow-tier baro, so there's no live urgency.
+  - Caveat for other vehicles (logged, not acted on): J1979 tables list 0x55–0x58 as 2 bytes, but a 2-bank ECU might send only A. The robust fix is the report's measured-width guard: learn each PID's width from single reads, and refuse to batch on a mismatch. **Next fix candidate.**
+- ~22:45Z **`b9356bd` rename committed** (implementer; no aliases; wrong info removed; `tools/migrate_channel_names.py`). I re-ran 402 targeted tests. The tracked IF/LSTM manifests were migrated in the same commit, so the Pi's pull matches.
+- **22:53:07–22:56:04Z deploy (daemon down ~3 min, engine running).**
+  - Pi: backups at `/tmp/capture_profiles.pre-b9356bd.yaml` and `/tmp/canary.yaml.pre-b9356bd`. Stopped `canary`+`canary-mcp`, reset the daemon-dirtied profiles file, pulled `b9356bd7`.
+  - A full-`--config` dry run was scanning every session parquet (slow). I killed it: the laptop audit found 0 stored rows with old names (sessions store raw `DID_<hex>`).
+  - Migrated only what startup needs: `/etc/canary/canary.yaml` (1 name, via `sudo -S`; root ownership preserved) plus IF joblib (6) and LSTM pt (15). The profiles and behaviour models came clean from git.
+  - Started; window `9eeb2fb3…` on `2026-09-18T225605`; keepalive 200 min; 0 errors; batching 6/0; `default` mode22 now lists `ECM_AIR_CHARGE`. Dashboard `pnpm build` done on the Pi.
+  - IF shows 17/88 absent features: the known blindness (retrain owed) plus slow PIDs not yet read at +10 s. **None are renamed channels.** Re-check later.
+  - **Owed after the drive:** migrate the session-level `capture_profile.json` snapshots (refit eligibility keys by recipe name) with the daemon stopped. Also fix the stale comment on `/etc/canary/canary.yaml` line 41 ("fuel-delivery commanded").
