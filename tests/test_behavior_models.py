@@ -315,15 +315,15 @@ def test_yaml_round_trip(tmp_path: Path) -> None:
     assert fuel is not None and fuel.kind == "surface_2d"
 
 
-def test_shipped_injector_surface_is_revision_scoped() -> None:
+def test_shipped_air_charge_surface_is_revision_scoped() -> None:
     path = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
-    injector = load_behavior_models(path).by_name("injector_pw_vs_rpm_throttle_did")
+    surface = load_behavior_models(path).by_name("air_charge_vs_rpm_throttle_did")
 
-    assert injector is not None
-    assert injector.fit.tune_revision == "ZS44A-k106"
-    assert injector.fit.validation_sample_count >= 1_000
-    assert injector.fit.validation_warning_rate is not None
-    assert injector.fit.validation_warning_rate < 0.03
+    assert surface is not None
+    assert surface.fit.tune_revision == "ZS44A-k106"
+    assert surface.fit.validation_sample_count >= 1_000
+    assert surface.fit.validation_warning_rate is not None
+    assert surface.fit.validation_warning_rate < 0.03
 
 
 def test_load_rejects_unknown_field(tmp_path: Path) -> None:

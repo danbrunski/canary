@@ -665,7 +665,7 @@ def _did_scheduler() -> dict[str, Any]:
         "achieved_hz_capture": {"DID_1209": 19.4, "DID_1208": 19.1, "DID_1219": 18.9},
         "requests": [
             did("DID_1209", "ECM_MAF_GPS"),
-            did("DID_1208", "ECM_INJECTOR_PW_B1"),
+            did("DID_1208", "ECM_AIR_CHARGE"),
             did("DID_1219", "ECM_RPM"),
             did("DID_1209", "ECM_MAF_GPS"),  # a catalogue alias, listed twice
             {"channel": "DTC_STORED", "kind": "dtc", "poll_tier": "dtc", "capture_selected": True},
@@ -678,9 +678,9 @@ def _did_profile() -> dict[str, Any]:
     return {
         "name": "fuel-did-research",
         "mode01": {},
-        "mode22": ["ECM_MAF_GPS", "ECM_INJECTOR_PW_B1", "ECM_RPM"],
+        "mode22": ["ECM_MAF_GPS", "ECM_AIR_CHARGE", "ECM_RPM"],
         "target_rate_hz": 20.0,
-        "required_tuple": ["ECM_RPM", "ECM_MAF_GPS", "ECM_INJECTOR_PW_B1"],
+        "required_tuple": ["ECM_RPM", "ECM_MAF_GPS", "ECM_AIR_CHARGE"],
         "min_achieved_rate_hz": 15.0,
         "round_timestamps": True,
     }
@@ -705,7 +705,7 @@ def test_a_did_capture_is_scored_under_the_profiles_own_channel_names() -> None:
     )
     assert quality.verdict == "pass", quality.failures
     names = [row.channel for row in quality.channels]
-    assert set(names) == {"ECM_MAF_GPS", "ECM_INJECTOR_PW_B1", "ECM_RPM"}
+    assert set(names) == {"ECM_MAF_GPS", "ECM_AIR_CHARGE", "ECM_RPM"}
     assert len(names) == len(set(names))
     assert not any(name.startswith("DTC_") for name in names)
     assert quality.tuple_rate_bound_hz == pytest.approx(20.0)
@@ -716,7 +716,7 @@ def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
         "mode22_rate_weights": {
             "ECM_MAF_GPS": 0.25,
         },
-        "required_tuple": ["ECM_INJECTOR_PW_B1", "ECM_RPM"],
+        "required_tuple": ["ECM_AIR_CHARGE", "ECM_RPM"],
     }
     lifetime = _lifetime(
         {
@@ -736,6 +736,6 @@ def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
     by_name = {row.channel: row for row in quality.channels}
     assert by_name["ECM_MAF_GPS"].requested_hz == pytest.approx(5.0)
     assert by_name["ECM_MAF_GPS"].status == "ok"
-    assert by_name["ECM_INJECTOR_PW_B1"].requested_hz == pytest.approx(20.0)
+    assert by_name["ECM_AIR_CHARGE"].requested_hz == pytest.approx(20.0)
     rate_failure = next(f for f in quality.failures if f["clause"] == RATE_SHORTFALL)
     assert "ECM_MAF_GPS" not in rate_failure["channels"]

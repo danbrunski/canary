@@ -665,12 +665,9 @@ def compute_anomaly_signals(
       while spiking VE can mean MAF over-reporting or a pressure/IAT bias).
       A restriction changes both measured flow and manifold pressure, so this
       ratio alone does not identify it. Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
-      ``vehicle.displacement_l``. Optional DID cross-check
-      (``did:ECM_INTAKE_PRESSURE`` pair, 0x1206/07) deliberately **not**
-      wired here — those DIDs are still raw/scale-unpinned (Task 2.7) and
-      not yet scheduled (Task 2.4), so a cross-check would compare a
-      calibrated quantity against a wrong-scale one; noted as a follow-up
-      once 2.4/2.7 land, not forced now.
+      ``vehicle.displacement_l``. There is no DID pressure cross-check:
+      this engine has no MAP sensor, and 0x1206/0x1207 (once catalogued as
+      intake pressure) are the injected pulse, ``did:ECM_INJECTOR_PULSE_1/2``.
 
     * ``derived:STFT_BANK_BALANCE`` / ``derived:LTFT_BANK_BALANCE`` —
       short / long fuel trim difference between banks. Expected ~0

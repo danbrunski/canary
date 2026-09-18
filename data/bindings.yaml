@@ -417,9 +417,10 @@ signals:
       pair that once narrowed this was withdrawn on 2026-08-06 — see the
       retraction above — so this rests on the differential alone and is
       weaker than its `medium` grade suggests. Distinguishing load from
-      pulse width needs a reference for one of them: Mode 22 DID 0x1208
-      (ECM_INJECTOR_PW_B1) is captured by the tuning profile and would
-      settle it in one drive.
+      pulse width needs a reference for each: Mode 22 DID 0x1208
+      (ECM_AIR_CHARGE) for air charge and 0x1206/0x1207
+      (ECM_INJECTOR_PULSE_1/2) for injected pulse; enrichment or fuel cut
+      separates the two in one drive.
 
   - name: ECM_THROTTLE_TRANSIENT
     module: ECM

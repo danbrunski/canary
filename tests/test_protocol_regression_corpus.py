@@ -189,8 +189,8 @@ def test_did_coolant_temp_decodes_to_expected_engineering_value() -> None:
     assert 117 + (-40.0) == apply_scaling(entry, raw)
 
 
-def test_did_injector_pw_stays_unscaled_raw() -> None:
-    """0x1208's scale constant is still outstanding (data/dids.yaml) — the
+def test_did_air_charge_stays_unscaled_raw() -> None:
+    """0x1208 (air charge) has no pinned engineering unit (data/dids.yaml) — the
     decoded value must stay the raw count, not a guessed engineering value.
     data/sessions/2026-05-11T213407/frames.log lines 51983-51984."""
     msgs = _replay(

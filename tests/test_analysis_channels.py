@@ -364,7 +364,7 @@ def test_can_specs_decode_frame_bytes_by_signal_name(tmp_path: Path) -> None:
 def test_unpinned_scale_yields_counts_not_an_invented_value(tmp_path: Path) -> None:
     """``scale: null`` must surface as raw counts, flagged by unit.
 
-    ECM_INJECTOR_PW_B1 has no pinned scale. Emitting a plausible-looking
+    ECM_AIR_CHARGE has no pinned scale. Emitting a plausible-looking
     engineering number for it would be exactly the mistake that got the old
     ECM_AIRFLOW_PROXY_23D binding mislabelled twice.
     """
@@ -372,9 +372,7 @@ def test_unpinned_scale_yields_counts_not_an_invented_value(tmp_path: Path) -> N
         tmp_path,
         [TelemetryRecord(timestamp=T0, source="obd", channel="DID_1208", value="1362")],
     )
-    frame = read_channels(
-        session, ["did:ECM_INJECTOR_PW_B1"], bindings_path=BINDINGS, dids_path=DIDS
-    )
+    frame = read_channels(session, ["did:ECM_AIR_CHARGE"], bindings_path=BINDINGS, dids_path=DIDS)
     assert frame["value"].iloc[0] == pytest.approx(float(0x1362))
     assert frame["unit"].iloc[0] == "counts"
 

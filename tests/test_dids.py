@@ -108,16 +108,36 @@ def test_real_did_map_entries_are_self_consistent() -> None:
 def test_0x1208_is_air_charge_and_cannot_present_as_injector_milliseconds() -> None:
     """0x1208 is air charge per intake event, not injected fuel (2026-09-18:
     it ignores a measured 20 % enrichment and does not drop in DFCO; relabel
-    approved by the operator). The name ECM_INJECTOR_PW_B1 survives only as a
-    stored column / model input until a desk rename with aliases + retrain.
+    approved by the operator, renamed from ECM_INJECTOR_PW_B1 the same day).
 
-    Until then it must never be scaled or unit-labelled as pulse width, or a
-    consumer reading the catalog would get injector milliseconds that are air.
+    It must never be scaled or unit-labelled as pulse width, or a consumer
+    reading the catalog would get injector milliseconds that are air.
     """
     inj = next(e for e in load_did_map(DIDS_PATH).dids if e.did == 0x1208)
-    assert inj.name == "ECM_INJECTOR_PW_B1"
+    assert inj.name == "ECM_AIR_CHARGE"
     assert inj.scale is None, "0x1208 was scaled — it is air charge, not a pulse width"
     assert inj.unit != "ms", "0x1208 labelled as ms — it is air charge, not a pulse width"
+
+
+def test_the_2026_09_18_wrong_names_are_gone_not_aliased() -> None:
+    """Operator decision 2026-09-18: the mislabelled names are removed, not kept
+    as aliases. Stored artifacts are migrated by tools/migrate_channel_names.py
+    instead, so a surviving old name here would silently undo that decision.
+    """
+    from src.collection.obd_scheduler import parse_did_token
+
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    assert by_did[0x1206].name == "ECM_INJECTOR_PULSE_1"
+    assert by_did[0x1207].name == "ECM_INJECTOR_PULSE_2"
+    assert by_did[0x1134].name == "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE"
+    for old in (
+        "ECM_INJECTOR_PW_B1",
+        "ECM_INTAKE_PRESSURE_1206",
+        "ECM_INTAKE_PRESSURE_1207",
+        "ECM_TARGET_EQUIV_RATIO_CANDIDATE",
+    ):
+        with pytest.raises(ValueError):
+            parse_did_token(old)
 
 
 def test_0x1209_is_airflow_not_base_fuel_schedule() -> None:
@@ -139,8 +159,9 @@ def test_renaming_a_did_cannot_break_a_saved_capture_profile() -> None:
     """Capture profiles reference DIDs BY NAME and ``parse_did_token`` raises on
     an unknown one, so a rename silently breaks every saved profile still using
     the old name — including vehicle-scoped profiles on the Pi that this repo
-    cannot see. Renaming means MOVING the old name into ``aliases``, and this
-    test is what makes that non-optional rather than a docstring nobody reads.
+    cannot see. A rename either MOVES the old name into ``aliases`` (checked
+    here) or, when the old name must not survive, ships a map for
+    tools/migrate_channel_names.py (checked in test_migrate_channel_names).
     """
     from src.collection.obd_scheduler import parse_did_token
 

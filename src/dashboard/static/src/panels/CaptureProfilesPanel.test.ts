@@ -100,7 +100,7 @@ const HYBRID: CaptureProfile = {
   broadcast_decode: true,
   corpus_eligible: false,
   behavior_model_recipes: [
-    "injector_pw_vs_rpm_throttle_did",
+    "air_charge_vs_rpm_throttle_did",
     "cam_primary_vs_command_rpm_did",
     "cam_secondary_vs_command_rpm_did",
   ],

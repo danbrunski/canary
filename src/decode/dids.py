@@ -120,7 +120,8 @@ class DidEntry(_Strict):
 
     `scale`/`offset` are `None` for DIDs whose byte position is known but
     whose engineering scaling isn't pinned to ground truth yet (e.g. the
-    injector-PW scale constant still needs a steady-state multi-point).
+    air-charge register 0x1208 has a stable counts-per-gram ratio but no
+    independent instrument pinning an engineering unit).
     """
 
     did: int = Field(ge=0, le=0xFFFF)
@@ -144,7 +145,10 @@ class DidEntry(_Strict):
     #: NAME and `parse_did_token` raises on an unknown one, so a rename would
     #: otherwise break every saved profile still using the old name —
     #: including vehicle-scoped profiles on the Pi that this repo cannot see.
-    #: Renaming an entry means moving its old name here, not deleting it.
+    #: A rename either moves its old name here or, when the old name was
+    #: wrong and must not survive (the 2026-09-18 fuel relabel), migrates
+    #: every stored artifact with ``tools/migrate_channel_names.py`` before
+    #: the daemon restarts.
     aliases: list[str] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     #: Readings of this DID that were CONSIDERED AND REJECTED, with why.
@@ -279,12 +283,12 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
     row with ``channel="DID_<hex>"`` and the raw response payload as a hex
     string in ``value_text``. This decodes those against ``did_map`` into
     named, scaled signals so the rest of the pipeline sees
-    ``did:ECM_INJECTOR_PW_B1`` numeric columns (recipes target them, IF/LSTM
+    ``did:ECM_AIR_CHARGE`` numeric columns (recipes target them, IF/LSTM
     learn their residual distribution, the gauge shows them in engineering
     units).
 
     When a DID's ``scale`` isn't pinned in ``dids.yaml`` (e.g.
-    ``ECM_INJECTOR_PW_B1`` whose constant is still outstanding), the **raw
+    ``ECM_AIR_CHARGE``, whose engineering unit is still outstanding), the **raw
     integer** is emitted instead of a scaled value — anomaly detection
     works on deviation from baseline, so unscaled-but-consistent counts are
     perfectly usable; the absolute calibration only matters for human-facing

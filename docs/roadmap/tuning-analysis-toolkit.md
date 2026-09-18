@@ -141,7 +141,7 @@ session-death quirk).
   at `rpm×MAF` / `rpm×BFS`); resolves aliases so `obd:ENGINE_LOAD` and
   `did:` load equivalents are equally refused. Reports per-cell deltas
   with n, and — when a floor exists (2.3) — delta ÷ floor. BFS axis may use
-  `did:ECM_INJECTOR_PW_B1` unscaled (scale is null) with the raw-counts
+  `did:ECM_AIR_CHARGE` (0x1208, then named `ECM_INJECTOR_PW_B1`) unscaled (scale is null) with the raw-counts
   caveat carried in the output. `unsafe_axes=` overrides with a logged
   warning.
   **DONE 2026-08-05** — refusal covers `obd:ENGINE_LOAD`, bare `ENGINE_LOAD`

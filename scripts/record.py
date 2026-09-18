@@ -59,7 +59,7 @@ log = logging.getLogger(__name__)
 
 
 def _resolve_did_names_to_hex(dids: Sequence[str]) -> tuple[str, ...]:
-    """Translate symbolic DID names (``ECM_INJECTOR_PW_B1``) to 4-char hex.
+    """Translate symbolic DID names (``ECM_AIR_CHARGE``) to 4-char hex.
 
     Names not found in ``data/dids.yaml`` and inputs that already look like
     hex pass through unchanged. The downstream validator catches any
@@ -382,7 +382,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 resolve_pids(pids)  # fail fast on a typo, before the CAN capture starts
                 # DIDs may be given as 4-char hex (legacy) or as symbolic
                 # names from data/dids.yaml (the canary.example.yaml default,
-                # e.g. ECM_INJECTOR_PW_B1). Resolve names to hex so the
+                # e.g. ECM_AIR_CHARGE). Resolve names to hex so the
                 # ELM327 path accepts the same config the Canable path uses.
                 dids = _resolve_did_names_to_hex(dids)
                 for did in dids:

@@ -292,7 +292,7 @@
       "decoded:WHEEL_SPEED_PAIR_B",
       "did:ECM_AF_SENSOR_V_B1",
       "did:ECM_AF_SENSOR_V_B2",
-      "did:ECM_INJECTOR_PW_B1",
+      "did:ECM_AIR_CHARGE",
       "did:ECM_THROTTLE_POS_SENSOR_1",
       "obd:ABSOLUTE_LOAD",
       "obd:BAROMETRIC_PRESSURE",
@@ -361,7 +361,7 @@
       "decoded:WHEEL_SPEED_PAIR_B__mean",
       "did:ECM_AF_SENSOR_V_B1__mean",
       "did:ECM_AF_SENSOR_V_B2__mean",
-      "did:ECM_INJECTOR_PW_B1__mean",
+      "did:ECM_AIR_CHARGE__mean",
       "did:ECM_THROTTLE_POS_SENSOR_1__mean",
       "obd:ABSOLUTE_LOAD__mean",
       "obd:BAROMETRIC_PRESSURE__mean",
@@ -680,8 +680,8 @@
       "did:ECM_AF_SENSOR_V_B1__mean": 2.1648275975374927,
       "did:ECM_AF_SENSOR_V_B2": 2.157330294267847,
       "did:ECM_AF_SENSOR_V_B2__mean": 2.1535097801628957,
-      "did:ECM_INJECTOR_PW_B1": 12795.640495867769,
-      "did:ECM_INJECTOR_PW_B1__mean": 15620.436004045398,
+      "did:ECM_AIR_CHARGE": 12795.640495867769,
+      "did:ECM_AIR_CHARGE__mean": 15620.436004045398,
       "did:ECM_THROTTLE_POS_SENSOR_1": 0.8257491243840925,
       "did:ECM_THROTTLE_POS_SENSOR_1__mean": 0.826590774520531,
       "gps:speed": 11.070949629972082,
@@ -946,8 +946,8 @@
       "did:ECM_AF_SENSOR_V_B1__mean": 0.0871658275756906,
       "did:ECM_AF_SENSOR_V_B2": 0.2095744553847138,
       "did:ECM_AF_SENSOR_V_B2__mean": 0.15402993221119402,
-      "did:ECM_INJECTOR_PW_B1": 9285.243650639897,
-      "did:ECM_INJECTOR_PW_B1__mean": 10557.4616383925,
+      "did:ECM_AIR_CHARGE": 9285.243650639897,
+      "did:ECM_AIR_CHARGE__mean": 10557.4616383925,
       "did:ECM_THROTTLE_POS_SENSOR_1": 0.277410651606795,
       "did:ECM_THROTTLE_POS_SENSOR_1__mean": 0.27924344835715464,
       "gps:speed": 25.796399963752187,
@@ -1091,7 +1091,7 @@
       "decoded:WHEEL_SPEED_PAIR_B",
       "did:ECM_AF_SENSOR_V_B1",
       "did:ECM_AF_SENSOR_V_B2",
-      "did:ECM_INJECTOR_PW_B1",
+      "did:ECM_AIR_CHARGE",
       "did:ECM_THROTTLE_POS_SENSOR_1",
       "obd:ABSOLUTE_LOAD",
       "obd:BAROMETRIC_PRESSURE",
@@ -1160,7 +1160,7 @@
       "decoded:WHEEL_SPEED_PAIR_B__mean",
       "did:ECM_AF_SENSOR_V_B1__mean",
       "did:ECM_AF_SENSOR_V_B2__mean",
-      "did:ECM_INJECTOR_PW_B1__mean",
+      "did:ECM_AIR_CHARGE__mean",
       "did:ECM_THROTTLE_POS_SENSOR_1__mean",
       "obd:ABSOLUTE_LOAD__mean",
       "obd:BAROMETRIC_PRESSURE__mean",
@@ -1479,8 +1479,8 @@
       "did:ECM_AF_SENSOR_V_B1__mean": "float32",
       "did:ECM_AF_SENSOR_V_B2": "float32",
       "did:ECM_AF_SENSOR_V_B2__mean": "float32",
-      "did:ECM_INJECTOR_PW_B1": "float32",
-      "did:ECM_INJECTOR_PW_B1__mean": "float32",
+      "did:ECM_AIR_CHARGE": "float32",
+      "did:ECM_AIR_CHARGE__mean": "float32",
       "did:ECM_THROTTLE_POS_SENSOR_1": "float32",
       "did:ECM_THROTTLE_POS_SENSOR_1__mean": "float32",
       "gps:speed": "float32",
@@ -2955,7 +2955,7 @@
           "non_null_count": 8247,
           "unique_finite_count": 72
         },
-        "did:ECM_INJECTOR_PW_B1": {
+        "did:ECM_AIR_CHARGE": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 484,
@@ -2964,7 +2964,7 @@
           "non_null_count": 484,
           "unique_finite_count": 216
         },
-        "did:ECM_INJECTOR_PW_B1__mean": {
+        "did:ECM_AIR_CHARGE__mean": {
           "constant": false,
           "dtype": "float32",
           "finite_count": 8899,
@@ -5815,7 +5815,7 @@
         "std": 3.407324751792081,
         "threshold": 20.3791947078705
       },
-      "did:ECM_INJECTOR_PW_B1": {
+      "did:ECM_AIR_CHARGE": {
         "count": 2672,
         "maximum": 2.918926239013672,
         "mean": 0.1432287346914656,
@@ -5827,7 +5827,7 @@
         "std": 0.38827011057801597,
         "threshold": 2.792228084564216
       },
-      "did:ECM_INJECTOR_PW_B1__mean": {
+      "did:ECM_AIR_CHARGE__mean": {
         "count": 2672,
         "maximum": 2.704714298248291,
         "mean": 0.12622217985684286,
@@ -7641,7 +7641,7 @@
         "std": 3.406701569577418,
         "threshold": 20.3791947078705
       },
-      "did:ECM_INJECTOR_PW_B1": {
+      "did:ECM_AIR_CHARGE": {
         "count": 2672,
         "maximum": 2.918926239013672,
         "mean": 0.14997634218035344,

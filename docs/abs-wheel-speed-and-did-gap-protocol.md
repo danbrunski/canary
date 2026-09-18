@@ -347,7 +347,7 @@ to 122 km/h. This is the "validate on one short drive" run the profile's own
 `capacity_evidence` asks for. It validates, with caveats.
 
 **The profile does deliver coarse overlap, not simultaneity.** 1024 one-second
-cells held all seven of `did:ECM_INJECTOR_PW_B1`, `obd:MAF`, `obd:RPM`,
+cells held all seven of `did:ECM_AIR_CHARGE`, `obd:MAF`, `obd:RPM`,
 `obd:COMMANDED_EQUIV_RATIO`, `obd:FUEL_STATUS`,
 `did:ECM_BASE_FUEL_SCHEDULE_CANDIDATE` and `obd:ENGINE_LOAD` without
 forward-filling from another cell. That is useful overlap, but the persisted
@@ -535,12 +535,12 @@ engineering value.
 
 | DID | name | what would pin it |
 |---|---|---|
-| `0x1208` | `ECM_INJECTOR_PW_B1` | **Done 2026-08-07** — see the hybrid-drive results above. Pinned as **916,416 counts per gram of fuel per injection** (steady-state closed-loop only), and shown to carry no dead time. The `ms` scale is still open, because ms/count and counts/gram only convert through an injector flow rate nobody has measured directly. |
+| `0x1208` | `ECM_AIR_CHARGE` | **Re-identified 2026-09-18 as air charge per intake event, not injected fuel** (it ignores enrichment and does not drop in DFCO; `data/dids.yaml`). The 2026-08-07 closed-loop fit is ~62,240 counts per g air; no engineering unit is pinned. |
 | `0x1209` | `ECM_BASE_FUEL_SCHEDULE_CANDIDATE` | The `fuel-did-research` profile exists for exactly this. Still a candidate, not a provider. |
 | `0x1110` | `ECM_INTAKE_VVT_SOLENOID_DUTY` | Physically bounded 0-100%. Look for saturation at both rails across a full cam sweep; the rails pin the scale without a reference. |
 | `0x1139` | `..._DUTY_CANDIDATE_B2` | Same, plus agreement with 0x1110 on a bank-symmetric manoeuvre. |
-| `0x1206` | `ECM_INTAKE_PRESSURE_1206` | Cross-reference `obd:INTAKE_PRESSURE` / `obd:BAROMETRIC_PRESSURE`. Remember the ~80 kPa operating altitude — never assume sea level. |
-| `0x1207` | `ECM_INTAKE_PRESSURE_1207` | As above; also establish how it differs from 0x1206. |
+| `0x1206` | `ECM_INJECTOR_PULSE_1` | Injected pulse (matched-air-charge test PASS 2026-09-18; this engine has no MAP sensor). Pin the bank mapping and the ms scale, plus injector dead time from an idle electrical-load step with module voltage. |
+| `0x1207` | `ECM_INJECTOR_PULSE_2` | As above; its twin register (bank unverified). |
 | `0x1201` | `ECM_RPM_LOAD_CORRELATED_1201` | Against `obd:ENGINE_LOAD`, but **not** by gridding on load — it is BFS-derived. Grid on `rpm x MAF`. |
 
 The `tuning-hybrid-research` capture profile is useful for the steady-state

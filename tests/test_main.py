@@ -143,10 +143,10 @@ async def test_default_collectors_use_canable_obd_by_default(
     assert spec.can == config.hardware.can
     assert spec.pids == ("auto",)
     # canary.example.yaml ships with the high-value Nissan DIDs enabled so
-    # behavior recipes (injector_pw_vs_rpm_load, afr_bank_balance_vs_rpm,
+    # behavior recipes (air_charge_vs_rpm_throttle_did, afr_bank_balance_vs_rpm,
     # etc.) feed at the next refit. The test pins the list shape, not exact
     # contents — order is preserved from yaml.
-    assert "ECM_INJECTOR_PW_B1" in spec.dids
+    assert "ECM_AIR_CHARGE" in spec.dids
     assert "ECM_AF_SENSOR_V_B1" in spec.dids
     assert spec.did_request_id == 0x7E0
     assert captured["queue"] is queue

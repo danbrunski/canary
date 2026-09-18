@@ -1,8 +1,8 @@
 schema_version: 1
 models:
-- name: injector_pw_vs_rpm_throttle_did
+- name: air_charge_vs_rpm_throttle_did
   kind: surface_2d
-  output: did:ECM_INJECTOR_PW_B1
+  output: did:ECM_AIR_CHARGE
   output_unit: raw
   axes:
   - name: rpm
@@ -303,13 +303,14 @@ models:
     sigma_floor: 1.0
     better_direction: ignore
     std_scaled: false
-  notes: Mode-22-synchronous fuel-delivery surface. Detects a change in commanded
-    PW at the same DID RPM and throttle position. It cannot distinguish injector/fuel-pressure
-    faults from ECU compensation, and does not claim MAF drift by itself.
+  notes: Mode-22-synchronous air-charge surface. Detects a change in the ECM's air
+    charge per intake event at the same DID RPM and throttle position. It says nothing
+    about injected fuel (0x1208 ignores enrichment and does not drop in fuel cut).
   diagnostic_capabilities:
-  - commanded fueling-map drift
+  - air-charge map drift
   diagnostic_limitations:
-  - cannot uniquely identify injector wear, fuel pressure, MAF bias, or ECU compensation
+  - cannot uniquely identify intake restriction, MAF bias, or cam-phasing change; not
+    a fuelling surface
   min_cell_count: 30
   min_cell_sessions: 2
   min_cell_dwell_seconds: 10.0

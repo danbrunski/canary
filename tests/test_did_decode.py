@@ -47,13 +47,13 @@ def _did_map() -> DidMap:
             ),
             DidEntry(
                 did=0x1208,
-                name="ECM_INJECTOR_PW_B1",
+                name="ECM_AIR_CHARGE",
                 byte_start=0,
                 byte_length=2,
                 byte_order="big",
                 scale=None,  # not pinned — exercises the raw-fallback path
                 offset=None,
-                unit="ms",
+                unit="unknown",
                 confidence="high",
             ),
         ],
@@ -94,11 +94,11 @@ def test_decode_scaled_did() -> None:
 
 
 def test_decode_unpinned_scale_falls_back_to_raw() -> None:
-    """ECM_INJECTOR_PW_B1 has scale=None — emit the raw integer, unit='raw'."""
+    """ECM_AIR_CHARGE has scale=None — emit the raw integer, unit='raw'."""
     frame = _long_with_did("DID_1208", "1362")  # 0x1362 = 4962
     out = decode_did_rows(frame, _did_map())
     did = out[out["source"] == DID_SOURCE]
-    assert did.iloc[0]["channel"] == "ECM_INJECTOR_PW_B1"
+    assert did.iloc[0]["channel"] == "ECM_AIR_CHARGE"
     assert did.iloc[0]["value_number"] == 4962.0
     assert did.iloc[0]["unit"] == "raw"
 
@@ -180,7 +180,7 @@ def test_live_source_unpinned_scale_raw_fallback() -> None:
     source.observe(TelemetryRecord.obd(now.timestamp(), "DID_1208", "1362", ""))
     row = source.tick(now)
     assert row is not None
-    assert float(row["did:ECM_INJECTOR_PW_B1"].iloc[0]) == 4962.0
+    assert float(row["did:ECM_AIR_CHARGE"].iloc[0]) == 4962.0
 
 
 # --------------------------------------------------------------------------- #

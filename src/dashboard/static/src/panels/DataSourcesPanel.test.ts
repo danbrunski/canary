@@ -106,11 +106,11 @@ describe("DataSourcesPanel", () => {
   it("switches to the DID tab and overlays the live value", async () => {
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
-      polled: ["INJECTOR_PW"],
+      polled: ["INJECTOR_PULSE"],
       dids: [
         {
-          did: 0x1208,
-          name: "INJECTOR_PW",
+          did: 0x1206,
+          name: "INJECTOR_PULSE",
           unit: "ms",
           confidence: "high",
           scale: null,
@@ -121,25 +121,25 @@ describe("DataSourcesPanel", () => {
         },
       ],
     });
-    const channels = new Map([channel("did:INJECTOR_PW", 2.5, "ms")]);
+    const channels = new Map([channel("did:INJECTOR_PULSE", 2.5, "ms")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
     fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
-    expect(await screen.findByText("INJECTOR_PW")).toBeInTheDocument();
-    expect(screen.getByText("0x1208")).toBeInTheDocument();
+    expect(await screen.findByText("INJECTOR_PULSE")).toBeInTheDocument();
+    expect(screen.getByText("0x1206")).toBeInTheDocument();
     expect(screen.getByText("2.5 ms")).toBeInTheDocument();
   });
 
   it("labels an unscaled DID `raw` instead of its target unit", async () => {
-    // ECM_INJECTOR_PW_B1's scale constant is still outstanding, so the
+    // The injector-pulse DID's ms scale is still unpinned, so the
     // daemon ships the raw count. Printing the catalog unit beside it would
     // read as a 28-second injector pulse.
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
-      polled: ["INJECTOR_PW"],
+      polled: ["INJECTOR_PULSE"],
       dids: [
         {
-          did: 0x1208,
-          name: "INJECTOR_PW",
+          did: 0x1206,
+          name: "INJECTOR_PULSE",
           unit: "ms",
           confidence: "high",
           scale: null,
@@ -150,7 +150,7 @@ describe("DataSourcesPanel", () => {
         },
       ],
     });
-    const channels = new Map([channel("did:INJECTOR_PW", 28364, "raw")]);
+    const channels = new Map([channel("did:INJECTOR_PULSE", 28364, "raw")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
     fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
     expect(await screen.findByText("28364 raw")).toBeInTheDocument();
@@ -162,11 +162,11 @@ describe("DataSourcesPanel", () => {
     // catalog as "not responding" reported a fault where there is none.
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
-      polled: ["INJECTOR_PW"],
+      polled: ["INJECTOR_PULSE"],
       dids: [
         {
-          did: 0x1208,
-          name: "INJECTOR_PW",
+          did: 0x1206,
+          name: "INJECTOR_PULSE",
           unit: "ms",
           confidence: "high",
           scale: null,
@@ -188,7 +188,7 @@ describe("DataSourcesPanel", () => {
         },
       ],
     });
-    const channels = new Map([channel("did:INJECTOR_PW", 2.5, "ms")]);
+    const channels = new Map([channel("did:INJECTOR_PULSE", 2.5, "ms")]);
     render(createElement(DataSourcesPanel, { channels, status: null }));
     fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
 

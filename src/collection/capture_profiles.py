@@ -36,7 +36,12 @@ FUEL_MAP_PROFILE_NAME = "fuel-map"
 #: catalog written once pinned the built-in forever: the 2026-08-10 fuel-map
 #: capture ran at 0.28-0.78 Hz because a saved copy predating ``target_rate_hz``
 #: shadowed a source-level correction, and nothing in the system could say so.
-BUILTIN_REVISION = 2
+#:
+#: 3 — 2026-09-18 fuel relabel: ``ECM_INJECTOR_PW_B1`` became
+#:     ``ECM_AIR_CHARGE`` and its recipe ``air_charge_vs_rpm_throttle_did``,
+#:     with no alias. Operator-modified copies are migrated by
+#:     ``tools/migrate_channel_names.py`` rather than by this upgrade.
+BUILTIN_REVISION = 3
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -133,7 +138,7 @@ TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_RPM",
     "ECM_AF_SENSOR_V_B1",
     "ECM_AF_SENSOR_V_B2",
-    "ECM_INJECTOR_PW_B1",
+    "ECM_AIR_CHARGE",
     "ECM_INTAKE_CAM_ANGLE_MEASURED",
     "ECM_INTAKE_CAM_ANGLE_COMMANDED",
     "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
@@ -602,7 +607,7 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 broadcast_decode=True,
                 corpus_eligible=False,
                 behavior_model_recipes=(
-                    "injector_pw_vs_rpm_throttle_did",
+                    "air_charge_vs_rpm_throttle_did",
                     "cam_primary_vs_command_rpm_did",
                     "cam_secondary_vs_command_rpm_did",
                 ),

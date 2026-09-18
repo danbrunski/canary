@@ -179,12 +179,16 @@ the analysis UX.
   identified DIDs to the Pi window config
   (`canary.pi.example.yaml:33-37` currently polls 4 of 13):
   at minimum `ECM_INTAKE_VVT_SOLENOID_DUTY` (0x1110),
-  `ECM_INTAKE_PRESSURE` pair (0x1206/0x1207),
+  `ECM_INJECTOR_PULSE_1/2` pair (0x1206/0x1207 — injected pulse; once
+  mislabelled intake pressure),
   `ECM_THROTTLE_POS_SENSOR_2` (0x1210), `ECM_AF_SENSOR_HEATER_DUTY`
   (0x1107). Watch Mode 01 blackout cost (window knobs at
   `src/config.py:108-121`); tier the additions medium.
-- [ ] **2.5 — Pin the injector-PW scale (task 4.E.4).** Correlation
-  capture: `did:ECM_INJECTOR_PW_B1` vs computed fuel mass per cycle at
+- [ ] **2.5 — Pin the injector-PW scale (task 4.E.4).** *Retargeted
+  2026-09-18: 0x1208 is air charge (`did:ECM_AIR_CHARGE`), not injector PW;
+  the injected pulse is 0x1206/0x1207 (`did:ECM_INJECTOR_PULSE_1/2`), see
+  D03.9.* Correlation
+  capture: `did:ECM_INJECTOR_PULSE_1` vs computed fuel mass per cycle at
   steady states → resolve `scale` in `data/dids.yaml:99-119` so the
   channel reads in ms. Unblocks duty cycle (4.2) and the PW map in ms.
 - [x] **2.6 — Wire the custom-PID engine.** `custom_pids.py` is

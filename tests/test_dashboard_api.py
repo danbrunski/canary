@@ -1349,7 +1349,7 @@ dids:
     unit: V
     confidence: high
   - did: 0x1208
-    name: ECM_INJECTOR_PW_B1
+    name: ECM_AIR_CHARGE
     byte_start: 0
     byte_length: 2
     confidence: high
@@ -1381,7 +1381,7 @@ def test_dids_endpoint_reports_which_dids_are_polled(anomalies_dir: Path, tmp_pa
         .get("/dids")
         .json()
     )
-    assert body["polled"] == ["ECM_AF_SENSOR_V_B1", "ECM_INJECTOR_PW_B1"]
+    assert body["polled"] == ["ECM_AF_SENSOR_V_B1", "ECM_AIR_CHARGE"]
     assert len(body["dids"]) == 2
 
 

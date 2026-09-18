@@ -37,14 +37,14 @@ collection:
   # session windows — one window per minute, mutually exclusive with
   # Mode 01. See canary.example.yaml for the obd_did_* cadence knobs.
   obd_dids:
-    - ECM_INJECTOR_PW_B1       # fuel-delivery commanded per intake stroke
+    - ECM_AIR_CHARGE           # air charge per intake event (0x1208; not injected fuel)
     - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
     - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
     - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
     # RPM read inside the DID window itself. Mode 01 is suspended while the
     # 10 C0 session is open, so obd:RPM is stale by up to the window length —
     # too stale to be the x-axis of a DID-sampled surface. Three recipes
-    # (injector_pw_vs_rpm_throttle_did, afr_voltage_vs_rpm_throttle_did,
+    # (air_charge_vs_rpm_throttle_did, afr_voltage_vs_rpm_throttle_did,
     # tps_sensor_1_vs_sensor_2_did) skipped with "missing columns" until these
     # two were polled; both were already reverse-engineered in data/dids.yaml.
     - ECM_RPM                    # 0x1219 — co-sampled RPM for DID surfaces

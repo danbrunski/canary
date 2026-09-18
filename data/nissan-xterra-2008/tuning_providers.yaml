@@ -4,7 +4,13 @@ providers:
   - {role: operator_demand, spec: 'did:ECM_THROTTLE_POS_SENSOR_1'}
   - {role: measured_afr_b1, spec: 'did:ECM_AF_SENSOR_V_B1', transform: voltage_afr}
   - {role: measured_afr_b2, spec: 'did:ECM_AF_SENSOR_V_B2', transform: voltage_afr}
-  - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PW_B1'}
+  # Injected pulse (0x1206/0x1207) passed a pre-registered matched-air-charge
+  # test on 2026-09-18, but which bank each register serves and the ms scale
+  # are unverified, so both stay `candidate` and are not used automatically.
+  # 0x1208, which this role pointed at until 2026-09-18, is AIR CHARGE, not
+  # injected fuel (data/dids.yaml).
+  - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PULSE_1', confidence: candidate}
+  - {role: injector_pw_b2, spec: 'did:ECM_INJECTOR_PULSE_2', confidence: candidate}
   - {role: coolant_temp, spec: 'did:ECM_COOLANT_TEMP'}
   # The 2026-08-05 all-DID capture confirms a command plus two distinct
   # measured positions. Their exact physical bank mapping remains unknown, and
@@ -39,10 +45,10 @@ providers:
 #     3.5 V the modal value is 4.125 V (397 samples) and 4.120 V (259) on the
 #     two drives, falling away sharply either side. Session maxima agree to
 #     +-2.5 mV (4.175 / 4.170) across independent drives.
-#   * Injector pulse width corroborates from a channel that needs no pinned
-#     scale: at rpm > 2500 the raw median PW rises 4530 -> 16304 -> 32585
+#   * Air charge (0x1208) corroborates from a channel that needs no pinned
+#     scale: at rpm > 2500 the raw median rises 4530 -> 16304 -> 32585
 #     across the part-throttle bands, then only 34146 -> 35032 (+2.6 %) from
-#     [3,4) V to [4,4.2) V. Fuelling is saturated, so this really is WOT.
+#     [3,4) V to [4,4.2) V. Airflow is saturated, so this really is WOT.
 #   * Closed-throttle floor (p1) is 0.615 / 0.635 V on the same two drives.
 #
 # `threshold_value` sits below the stop so the approach counts, but above the

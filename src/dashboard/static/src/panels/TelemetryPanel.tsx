@@ -55,7 +55,7 @@ const DEFAULT_PIN_CANDIDATES = [
   // fresh dashboard load shows the values whenever the operator turns
   // on DID polling — keeps them visible alongside the standard PIDs
   // instead of buried in the alphabetical full list.
-  "did:ECM_INJECTOR_PW_B1",
+  "did:ECM_AIR_CHARGE",
   "did:ECM_AF_SENSOR_V_B1",
   "did:ECM_AF_SENSOR_V_B2",
   "did:ECM_THROTTLE_POS_SENSOR_1",

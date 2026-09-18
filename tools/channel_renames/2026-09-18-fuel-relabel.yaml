@@ -1,0 +1,21 @@
+# Rename map for tools/migrate_channel_names.py — the 2026-09-18 fuel relabel.
+#
+# Three DIDs were catalogued under wrong identities (D03.8, D03.9; evidence in
+# data/dids.yaml). The operator decided on no aliases: the wrong names are
+# removed from the catalog, and every stored artifact that names them is
+# rewritten by the migration tool instead.
+#
+# `channels` are bare DID names. Each also covers its `did:` column form and
+# the derived feature columns built from it (`did:<NAME>__mean`, `__std`,
+# `__roc`, ...).
+channels:
+  ECM_INJECTOR_PW_B1: ECM_AIR_CHARGE                  # 0x1208: air charge per intake event
+  ECM_INTAKE_PRESSURE_1206: ECM_INJECTOR_PULSE_1      # 0x1206: injected pulse (bank unverified)
+  ECM_INTAKE_PRESSURE_1207: ECM_INJECTOR_PULSE_2      # 0x1207: injected pulse (bank unverified)
+  ECM_TARGET_EQUIV_RATIO_CANDIDATE: ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE  # 0x1134
+
+# Exact identifiers that are not channels: the behavior-model recipe fitted on
+# 0x1208, named in behavior_models.yaml and in capture profiles'
+# `behavior_model_recipes` (which gate refit eligibility of stored captures).
+identifiers:
+  injector_pw_vs_rpm_throttle_did: air_charge_vs_rpm_throttle_did

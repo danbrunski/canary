@@ -471,7 +471,7 @@ def _build_channels(  # noqa: PLR0913
         channels.append(
             ChannelQuality(
                 # Reported under the profile's name, not the transport's:
-                # "ECM_INJECTOR_PW_B1" is what the operator selected,
+                # "ECM_AIR_CHARGE" is what the operator selected,
                 # "DID_1208" is what they then have to look up.
                 channel=profile_channel,
                 transport_channel=channel,

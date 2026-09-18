@@ -7,7 +7,7 @@ profiles:
     AUTO: 1.0
   mode22:
   - ECM_RPM
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
   - ECM_THROTTLE_POS_SENSOR_1
@@ -95,7 +95,7 @@ profiles:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_INTAKE_CAM_ANGLE_MEASURED
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
@@ -120,7 +120,7 @@ profiles:
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
-  - injector_pw_vs_rpm_throttle_did
+  - air_charge_vs_rpm_throttle_did
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did

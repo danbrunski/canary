@@ -7,7 +7,7 @@ profiles:
     AUTO: 1.0
   mode22:
   - ECM_RPM
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
   - ECM_THROTTLE_POS_SENSOR_1
@@ -96,7 +96,7 @@ profiles:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_INTAKE_CAM_ANGLE_MEASURED
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
@@ -126,7 +126,7 @@ profiles:
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
-  - injector_pw_vs_rpm_throttle_did
+  - air_charge_vs_rpm_throttle_did
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did
@@ -145,7 +145,7 @@ profiles:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_INTAKE_AIR_TEMP
   - ECM_MAF_GPS
@@ -173,7 +173,7 @@ profiles:
   - ECM_RPM
   - ECM_MAF_GPS
   - ECM_INTAKE_AIR_TEMP
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   # 20 Hz requested; a floor of 15 leaves room for scheduling jitter while still
   # refusing the failure this exists to catch. Rungs are held ~10 s, so 15 Hz is
   # 150 samples per rung — far more than the fit needs. Range, not rate, is the
@@ -189,7 +189,7 @@ profiles:
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
-  - injector_pw_vs_rpm_throttle_did
+  - air_charge_vs_rpm_throttle_did
   storage_prefix: _capture-fuel-did-research
 - name: tuning-hybrid-research
   description: Experimental 4 Hz Mode 01 plus Mode 22 capture using the confirmed
@@ -208,7 +208,7 @@ profiles:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
   - ECM_AF_SENSOR_V_B2
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_INTAKE_CAM_ANGLE_MEASURED
   - ECM_INTAKE_CAM_ANGLE_COMMANDED
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
@@ -241,7 +241,7 @@ profiles:
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
-  - injector_pw_vs_rpm_throttle_did
+  - air_charge_vs_rpm_throttle_did
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-hybrid-research
@@ -262,10 +262,10 @@ profiles:
     ENGINE_LOAD: 1.0
     TIMING_ADVANCE: 1.0
   mode22:
-  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
-  - ECM_INJECTOR_PW_B1
+  - ECM_AIR_CHARGE
   - ECM_MAF_GPS
   - ECM_THROTTLE_POS_SENSOR_1
   # D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most
@@ -273,10 +273,10 @@ profiles:
   # what the cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler,
   # the resolved plan and the capture contract alike.
   mode22_rate_weights:
-    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
     ECM_RPM: 0.5
     ECM_AF_SENSOR_V_B1: 0.5
-    ECM_INJECTOR_PW_B1: 0.5
+    ECM_AIR_CHARGE: 0.5
     ECM_MAF_GPS: 0.5
     ECM_THROTTLE_POS_SENSOR_1: 0.5
   mode01_enabled: true
@@ -327,24 +327,24 @@ profiles:
     ENGINE_LOAD: 1.0
     TIMING_ADVANCE: 1.0
   mode22:
-  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
-  - ECM_INJECTOR_PW_B1
-  - ECM_INTAKE_PRESSURE_1206
-  - ECM_INTAKE_PRESSURE_1207
+  - ECM_AIR_CHARGE
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
   - ECM_THROTTLE_POS_SENSOR_1
   # D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most
   # once per cycle. A 0.5 s cycle with every DID at weight 0.5 asks for exactly
   # what the cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler,
   # the resolved plan and the capture contract alike.
   mode22_rate_weights:
-    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
     ECM_RPM: 0.5
     ECM_AF_SENSOR_V_B1: 0.5
-    ECM_INJECTOR_PW_B1: 0.5
-    ECM_INTAKE_PRESSURE_1206: 0.5
-    ECM_INTAKE_PRESSURE_1207: 0.5
+    ECM_AIR_CHARGE: 0.5
+    ECM_INJECTOR_PULSE_1: 0.5
+    ECM_INJECTOR_PULSE_2: 0.5
     ECM_THROTTLE_POS_SENSOR_1: 0.5
   mode01_enabled: true
   mode22_enabled: true
@@ -394,20 +394,20 @@ profiles:
     SHORT_FUEL_TRIM_1: 0.5
     LONG_FUEL_TRIM_1: 0.25
   mode22:
-  - ECM_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
-  - ECM_INJECTOR_PW_B1
-  - ECM_INTAKE_PRESSURE_1206
-  - ECM_INTAKE_PRESSURE_1207
+  - ECM_AIR_CHARGE
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
   - ECM_THROTTLE_POS_SENSOR_1
   mode22_rate_weights:
-    ECM_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
+    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
     ECM_RPM: 0.5
     ECM_AF_SENSOR_V_B1: 0.5
-    ECM_INJECTOR_PW_B1: 0.5
-    ECM_INTAKE_PRESSURE_1206: 0.5
-    ECM_INTAKE_PRESSURE_1207: 0.5
+    ECM_AIR_CHARGE: 0.5
+    ECM_INJECTOR_PULSE_1: 0.5
+    ECM_INJECTOR_PULSE_2: 0.5
     ECM_THROTTLE_POS_SENSOR_1: 0.5
   mode01_enabled: true
   mode22_enabled: true
@@ -449,14 +449,14 @@ profiles:
     CONTROL_MODULE_VOLTAGE: 1.0
   mode22:
   - ECM_RPM
-  - ECM_INJECTOR_PW_B1
-  - ECM_INTAKE_PRESSURE_1206
-  - ECM_INTAKE_PRESSURE_1207
+  - ECM_AIR_CHARGE
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
   mode22_rate_weights:
     ECM_RPM: 0.5
-    ECM_INJECTOR_PW_B1: 0.5
-    ECM_INTAKE_PRESSURE_1206: 0.5
-    ECM_INTAKE_PRESSURE_1207: 0.5
+    ECM_AIR_CHARGE: 0.5
+    ECM_INJECTOR_PULSE_1: 0.5
+    ECM_INJECTOR_PULSE_2: 0.5
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null

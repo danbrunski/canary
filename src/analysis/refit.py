@@ -564,8 +564,8 @@ def default_recipes() -> list[Recipe]:
         ),
         # ----- Phase 2: DID-dependent surfaces (skip until DIDs are polled) --
         Surface2DRecipe(
-            name="injector_pw_vs_rpm_throttle_did",
-            output="did:ECM_INJECTOR_PW_B1",
+            name="air_charge_vs_rpm_throttle_did",
+            output="did:ECM_AIR_CHARGE",
             output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
             x_column="did:ECM_RPM",
             y_column="did:ECM_THROTTLE_POS_SENSOR_1",
@@ -579,15 +579,15 @@ def default_recipes() -> list[Recipe]:
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
             ),
             notes=(
-                "Mode-22-synchronous fuel-delivery surface. Detects a change in "
-                "commanded PW at the same DID RPM and throttle position. It cannot "
-                "distinguish injector/fuel-pressure faults from ECU compensation, "
-                "and does not claim MAF drift by itself."
+                "Mode-22-synchronous air-charge surface. Detects a change in the "
+                "ECM's air charge per intake event at the same DID RPM and throttle "
+                "position. It says nothing about injected fuel (0x1208 ignores "
+                "enrichment and does not drop in fuel cut)."
             ),
-            diagnostic_capabilities=("commanded fueling-map drift",),
+            diagnostic_capabilities=("air-charge map drift",),
             diagnostic_limitations=(
-                "cannot uniquely identify injector wear, fuel pressure, "
-                "MAF bias, or ECU compensation",
+                "cannot uniquely identify intake restriction, MAF bias, "
+                "or cam-phasing change; not a fuelling surface",
             ),
         ),
         Surface2DRecipe(

@@ -67,7 +67,7 @@ def _torch():
 def test_channel_rate_class() -> None:
     assert channel_rate_class("obd:RPM") == "slow"
     assert channel_rate_class("obd:RPM__mean") == "slow"  # suffix keeps the source
-    assert channel_rate_class("did:ECM_INJECTOR_PW_B1") == "slow"
+    assert channel_rate_class("did:ECM_AIR_CHARGE") == "slow"
     assert channel_rate_class("gps:speed") == "slow"
     assert channel_rate_class("decoded:WHEEL_SPEED_FL") == "dense"
     assert channel_rate_class("dbc:STEERING_ANGLE") == "dense"
