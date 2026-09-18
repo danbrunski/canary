@@ -523,6 +523,14 @@ promote unverified bindings or to change a tune.
   - **Reading:** a rich-side (power-enrichment) target that 0x44 follows when
     it's the active source, not the final command.
   - **Remaining (desk):** re-describe and rename the candidate accordingly.
+  **Late 2026-09-18 (desk, `~/canary-data/scripts-0918b/out/enrich_trigger.md`):**
+  0x1134 is the **active open-loop rich target**. It switches within one sample
+  of 0x44 and reads 65–77 on map-driven rich runs. The 1.06 counterexample was
+  after-start enrichment (FUEL_STATUS 1), a different source. Mid-rpm φ 1.1641
+  is a **pedal switch at ≥ ~227/255** into the fuel map's last load column
+  (20 errors in 27,415 rows; residual 0.000 % on 439 rows). Renamed in
+  `b9356bd` to `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE`; the evidence
+  block should gain this finding at the desk.
 
 - [~] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
   open-loop data; collect only missing coverage tomorrow.** Blocks 6 and 9
