@@ -133,6 +133,12 @@ are about to test, write them into the log before the capture starts.
   refuse to continue if not), then the written predictions. Report pass /
   fail / unresolved per claim with `n_pairs`. An empty result names which
   kind of empty it is.
+- **`decoded:` rows are RAW counts by design** (the model features are raw),
+  even when their `unit` says `degC` or `V`. Read engineering values through
+  `read_channels` / `bindings.apply_scaling`, never from a stored or
+  `/telemetry/latest` decoded row. On 2026-09-18 a raw 130 read as "130 °C"
+  produced a false decode-bug alarm. Mode 22 DID rows carry the raw hex in
+  `value_text` with `value_number` NaN.
 
 ## Standing objectives
 
