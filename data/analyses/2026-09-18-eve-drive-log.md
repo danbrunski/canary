@@ -3,6 +3,58 @@
 _State file for the third /loop drive of the day. Resume from here; don't redo work._
 _Earlier today: `2026-09-18-drive-log.md` (AM), `2026-09-18-pm-drive-log.md` (PM). Plans: `2026-09-18-next-drive-deploy-plan.md` (criteria, per the operator, unchanged) and `2026-09-18-pm-next-drive-deploy-plan.md` (the added tests below)._
 
+## Summary
+
+**Run: 2026-09-18 20:04Z → 2026-09-19 00:18Z (~4 h 15 min), 1,700–3,350 m. Ended by the operator ("parked"), engine off 00:18Z.** Isolated captures ~47 min of 80. 0 dropped records all drive. **Seven deploys**, each verified live.
+
+### The OUTCOME, per claim
+| claim | state | evidence |
+|---|---|---|
+| D03.9 0x1206/0x1207 = injected pulse | **PASS** (the added pre-registered matched-air-charge test) | +1.0 % / −0.5 %, n 184 of 188, closed-loop rows covering the enriched air band. The operator-plan straight-line test gave +7.4 % (unresolved; known ill-posed) |
+| D03.9 0x1208 | **air charge × tune K**: behaves as Nissan BFS (Tp), a candidate | per g air +0.5 % rich vs CL (pass); rich residual −13.0 % vs the −14..−18 band (narrow miss). K-step +7.5 % at the 07-27 reflash, matching UpRev BFS/air. BFS_ms ≈ raw/2040, not same-instant paired |
+| D03.8 0x1134 = commanded φ | **falsified as the final command**; it is **the active open-loop rich target** | switches with 0x44 within one sample; 64 during after-start enrichment (a different source); raw/64 = floor(0x44·64) where it moves |
+| Mid-rpm WOT enrichment | **a pedal switch (≥ ~227/255) into the fuel map's last load column**, no timer | 20 errors / 27,415 rows; residual 0.000 % on 439 rows; onset ~0.15 s |
+| D04.3 transport delay | **unresolved** | no clear minimum; blocked on splitting 0x44/0x24 into separate batches |
+| D04.2 coasts | data in hand, analysis partial | 41 + 32 coasts; floor 0x1206 52–58 counts |
+| Injector dead time (added) | **unresolved** | the alternator held voltage within 0.16 V; post hoc, a ~49-count intercept |
+| THIS DRIVE: stalls inside holds | **0** in 13 holds (block 1). D03.18 was then fixed, deployed and validated (0 stalls in 10.6 min where ~6 were expected) | |
+
+### Fixes deployed (all verified live)
+- `530398e` **D03.18:** a silent session entry exits first; a silent exit is retried.
+- `5eb1464` **PID 0x33 width 2→1:** it desynced every Mode 01 batch holding baro.
+- `b9356bd` **Mislabelled channel renames, no aliases:** ECM_AIR_CHARGE, ECM_INJECTOR_PULSE_1/_2, ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE. The migration tool was run on the Pi.
+- `03e9d51` **Capture-quality batching counters** are capture-scoped.
+- `ad0a0bb` **Structural blindness:** a sustained-window verdict, not the first window.
+- `ed42ccd` **Mode 01 measured-width batch guard.**
+- Undeployed but committed: `32fa211` manifest-producibility CI check, `9fd6032` candidate BFS tuning provider, `dd5e098`/`c309688` profiles.
+
+### Beliefs verified or falsified
+- **Falsified:** "D03.18 is a timed-out DID read". It's a silent session entry (2.4 s) and a silent exit (5.0 s).
+- **Falsified:** "0x44 batch timeouts are a response-length limit". It was a wrong registry width.
+- **Falsified:** "/status structural blindness 17/88". It's 6/88; the rest was startup sparsity.
+- **Falsified:** "0x1208 is bare air charge". It's air × K.
+- **Falsified:** "the mid-rpm enrichment isn't table-governed". It's the last column, selected by pedal.
+- **Falsified (mine, retracted):** "the coolant decode drops its offset". `decoded:` is raw by design.
+- **Found:** mode labelling has compared raw decoded counts to engineering thresholds since `998668a` (fix in progress; deploy held for the retrain).
+- **Found:** the LSTM also carries retracted-binding debt (8/263).
+
+### For the operator (decisions, below)
+The retrain corpus (D02.5), which also gates deploying the mode-label fix. D03.21 memory cgroup.
+
+### Next drive
+`data/analyses/2026-09-19-next-drive-deploy-plan.md`. The one decisive item is **a drive with UpRev logging B-FUEL SCHDL** for the BFS same-instant confirmation, plus the pedal staircase.
+
+## Glance
+- **Drive over (parked 00:12Z, engine off 00:18Z).** Summary above; next-drive plan `2026-09-19-next-drive-deploy-plan.md`.
+- **Fuel workflow:** 0x1206 = injected pulse PASSED; 0x1208 = air × K ≈ BFS (candidate, raw/2040); 0x1134 = the active rich target; WOT enrichment = a pedal switch into the map's last column.
+- **One decision for you:** the retrain corpus (below). It also gates the mode-label fix deploy.
+
+## For the operator (decisions, below)
+The retrain corpus (D02.5), which also gates deploying the mode-label fix. D03.21 memory cgroup.
+
+### Next drive
+`data/analyses/2026-09-19-next-drive-deploy-plan.md`. The one decisive item is **a drive with UpRev logging B-FUEL SCHDL** for the BFS same-instant confirmation, plus the pedal staircase.
+
 ## Glance
 - **D03.18 fixed, deployed and validated live** (`530398e`, 21:27Z): 10.6 min on `fuel-pw-research` with 0 all-channel stalls, where ~6 were expected. Six silent entries were handled by the new path.
 - Earlier: 0x1206/0x1207 = injected pulse PASS (matched air); 0x1134 is not commanded φ; 0x1208 = air charge. D04.3 unresolved at this resolution.
