@@ -201,3 +201,14 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - The tests missed it: the segmenter fixtures fed engineering units into `decoded:` columns, and the ground-truth suite only exercises `read_channels`.
   - **Affected:** mode labels in training fits since 2026-08-06, live per-mode threshold selection, behaviour-refit mode filters, and the live idle-time count. **Not affected:** model feature values (raw in and raw out, consistent).
   - Implementer dispatched on Option A: one shared engineering-value accessor on `bindings.apply_scaling`, routed through every physical consumer, with fail-before tests on raw bytes. **The deploy is held for the retrain decision**, since correcting labels changes which per-mode thresholds apply to models calibrated on the wrong labels.
+- 00:12Z Operator: "alright I'm parked", engine idling warm (93 °C). **Injector dead-time step run: `_capture-injector-deadtime-idle-2026-09-19T001258`** (00:12:58–00:16:26Z, 3.5 min). Operator tags: base "most stuff off" 00:14:05, on 00:14:31, off 00:14:58, on 00:15:32, off 00:16:13. Verdict fail on two clauses: `acquisition_gap` on 3 DIDs (to check at the desk) and can0 overflow (known). **The capture-scoped batching block reported `status: verified` live**, the first live confirmation of `03e9d51`.
+  - Per-phase medians (skipping 3 s after each switch; DIDs decoded from `value_text`; script `~/canary-data/scripts-0918b/deadtime.py`):
+    | phase | V | rpm | MAF g/s | 0x1206 | 0x1207 | 0x1208 |
+    |---|---|---|---|---|---|---|
+    | base ("most off") | 14.00 | 762 | 4.52 | 269 | 264 | 7,325 |
+    | on1 | 14.00 | 762 | 4.74 | 273 | 275 | 7,817 |
+    | off1 | 14.08 | 750 | 3.24 | 204.5 | 207 | 5,414 |
+    | on2 | 14.00 | 762 | 4.69 | 269 | 273 | 7,746 |
+    | off2 | 14.16 | 750 | 3.26 | 202 | 201 | 5,388 |
+  - **Pre-registered dead-time test: UNRESOLVED.** The alternator regulated the load away: the voltage step was ≤ 0.16 V, never ≥ 0.4 V. The load changed air charge instead (0x1208 5.4k ↔ 7.8k), so the "constant 0x1208" condition failed too. The "base" phase looks like the loads-on state (MAF 4.5), not off.
+  - **POST-HOC, labelled:** across phases, 0x1206 ≈ 0.0288·0x1208 + ~49 counts (≈ 0.49 ms at a hypothesised 0.01 ms/count). That's close to the DFCO floor (52–58) and the AM closed-loop intercept (41), consistent with 0x1206 including injector dead time at ~14 V. Voltage dependence untested. **Deciding it needs the voltage moved:** engine-off KOER isn't possible, so try the alternator loaded near its limit, or a battery-charging state after a long crank.
