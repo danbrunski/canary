@@ -259,9 +259,10 @@ def _add_warmup_stat(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     warm_mask = coolant >= _OPERATING_TEMP_C
     if not warm_mask.any():
         return  # never reached operating temp
-    warm_idx = warm_mask.idxmax()
     ts = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
-    duration = (ts.loc[warm_idx] - ts.loc[first_valid]).total_seconds()
+    # First warm sample minus first valid sample. Selecting by mask keeps this
+    # label-safe (`idxmax()` is typed as a bare Hashable, which `.loc` refuses).
+    duration = (ts[warm_mask].iloc[0] - ts[coolant.notna()].iloc[0]).total_seconds()
     if duration <= 0:
         return
     stats["warmup_time_constant_s"] = float(duration)
@@ -333,9 +334,8 @@ def _add_cranking_stat(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     running_mask = rpm >= _RUNNING_RPM
     if not running_mask.any():
         return  # engine never reached a running RPM this session
-    running_idx = running_mask.idxmax()
     ts = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
-    duration = (ts.loc[running_idx] - ts.loc[first_valid]).total_seconds()
+    duration = (ts[running_mask].iloc[0] - ts[rpm.notna()].iloc[0]).total_seconds()
     if duration < 0:
         return
     stats["cranking_duration_s"] = float(duration)

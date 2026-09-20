@@ -49,8 +49,10 @@ def detect_cold_starts(
     if not mask.any():
         return []
 
-    first_idx = int(mask.idxmax())
-    first_row = segmented.iloc[first_idx]
+    # `idxmax` returns a LABEL; `iloc` wants a POSITION. They agree only on a
+    # RangeIndex, so take the position directly.
+    first_pos = int(mask.to_numpy().argmax())
+    first_row = segmented.iloc[first_pos]
     return [
         DetectedEvent(
             timestamp=format_timestamp(first_row[TIMESTAMP_COLUMN]),

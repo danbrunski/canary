@@ -48,6 +48,22 @@ def test_cold_start_fires_when_coolant_cold_and_run_time_low() -> None:
     assert events[0].fields["coolant_temp_c"] == 25.0
 
 
+def test_cold_start_reads_the_right_row_when_the_index_is_not_positional() -> None:
+    """The detector took a LABEL from `idxmax()` and fed it to `.iloc`, which is
+    positional. On a RangeIndex the two agree, so every fixture here hid it; on a
+    filtered or concatenated frame it reads a different row (or raises).
+    """
+    frame = _base_frame(10)
+    frame["obd:COOLANT_TEMP"] = [90.0, 90.0, 25.0, 28.0, 32.0, 36.0, 45.0, 60.0, 70.0, 80.0]
+    frame["obd:RUN_TIME"] = [400.0, 401.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
+    shifted = frame.set_index(frame.index + 500)
+
+    events = detect_cold_starts(shifted, [])
+
+    assert len(events) == 1
+    assert events[0].fields["coolant_temp_c"] == 25.0
+
+
 def test_cold_start_does_not_fire_on_warm_restart() -> None:
     """RUN_TIME=2 but coolant already at thermostat — that's a warm restart."""
     frame = _base_frame(5)

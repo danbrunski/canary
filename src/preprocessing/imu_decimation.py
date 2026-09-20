@@ -79,7 +79,7 @@ def decimate_imu_wide(wide: pd.DataFrame, *, hz: float) -> pd.DataFrame:
     out = wide.copy()
     tick = pd.Timedelta(seconds=1.0 / hz)
     timestamps = pd.to_datetime(out[TIMESTAMP_COLUMN], utc=True)
-    bin_start = timestamps.dt.floor(tick)  # type: ignore[arg-type]
+    bin_start = timestamps.dt.floor(tick)
     session = (
         out[SESSION_COLUMN].astype(str)
         if SESSION_COLUMN in out.columns

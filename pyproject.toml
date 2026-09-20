@@ -50,7 +50,11 @@ dev = [
     # execution is the main lever. Required for a bare `pytest` to run.
     "pytest-xdist>=3.6",
     "types-pyyaml",
-    "pandas-stubs",
+    # Pinned: an unpinned stub release changed mypy's verdict on code nobody
+    # touched (2026-09-19 CI failure — idxmax typing and an ignore that became
+    # unused), so CI type-checked something the laptop never ran. Bump this
+    # deliberately, with the whole-repo gate green.
+    "pandas-stubs==3.0.5.260914",
     # tools/extract_fsm_signals.py — pulls CONSULT-III parameter names from
     # vendor FSM PDFs into data/fsm/signals.json. Dev-only.
     "pdfplumber>=0.11",
