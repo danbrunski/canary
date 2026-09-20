@@ -275,13 +275,7 @@ def request_verdict(request: Any) -> Eligibility:
     # still pass); nothing else is guessed.
     kind = str(getattr(request, "kind", None) or "pid")
     channel = str(getattr(request, "channel", ""))
-    # A memory request may be a WINDOW: one read carrying several channels,
-    # named after the window rather than any one of them. Matching the
-    # profile's selection against that name finds nothing, which silently
-    # dropped every windowed read on the vehicle. The members are on the
-    # request, so ask them instead of parsing the name.
-    memory_read = getattr(request, "memory_read", None)
-    names = tuple(c.name for c in memory_read.channels) if memory_read is not None else (channel,)
+    names = request_channel_names(request)
     with _lock:
         profile = _profile
         paused = _paused
@@ -316,10 +310,34 @@ def profile_class() -> ProfileClass:
         return classify_profile(_profile)
 
 
-def selection_exclusion(kind: str, channel: str) -> str | None:
-    """Why the active profile's selection excludes this channel, or ``None``."""
+def request_channel_names(request: Any) -> tuple[str, ...]:
+    """Every catalog channel `request` would produce a reading for.
+
+    One for most kinds. A memory WINDOW carries several and is named after
+    the window, so its own channel name matches nothing in a profile's
+    selection — which silently dropped every windowed read on the vehicle.
+    """
+    memory_read = getattr(request, "memory_read", None)
+    if memory_read is not None:
+        return tuple(c.name for c in memory_read.channels)
+    return (str(getattr(request, "channel", "")),)
+
+
+def selection_exclusion(request: Any) -> str | None:
+    """Why the active profile's selection excludes `request`, or ``None``.
+
+    Takes the request rather than ``(kind, channel)`` on purpose. A window's
+    membership lives on the request, and a signature accepting a bare
+    channel string lets a caller silently ask the wrong question — this
+    function had two callers and only one was fixed when windows landed,
+    which cost a drive.
+    """
+    kind = str(getattr(request, "kind", None) or "pid")
+    channel = str(getattr(request, "channel", ""))
     with _lock:
-        return _selection_exclusion(_profile, _did_channels, kind, channel)
+        return _selection_exclusion(
+            _profile, _did_channels, kind, channel, request_channel_names(request)
+        )
 
 
 def _selection_exclusion(

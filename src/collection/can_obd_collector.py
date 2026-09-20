@@ -166,11 +166,7 @@ def _loop_request_verdict(
         request.kind,
         tuning_profile.profile_class(),
         phase,
-        selection=(
-            tuning_profile.selection_exclusion(request.kind, request.channel)
-            if profile_gated
-            else None
-        ),
+        selection=(tuning_profile.selection_exclusion(request) if profile_gated else None),
         paused=tuning_profile.is_paused() if profile_gated else False,
         forced=index in forced,
     )
