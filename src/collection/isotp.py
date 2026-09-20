@@ -80,7 +80,7 @@ def build_memory_read_payload(address: int, length: int) -> bytes:
 
     Emits the KWP32 body -- a 32-bit address followed by a 16-bit length:
 
-    ``06 23 <addr:4 big-endian> <len:2 big-endian>``
+    ``07 23 <addr:4 big-endian> <len:2 big-endian>``
 
     This is the *only* form verified to work on the 2008 Nissan ECM. The
     KWP24 (24-bit address / 8-bit length) and UDS addressAndLengthFormat-
@@ -90,16 +90,19 @@ def build_memory_read_payload(address: int, length: int) -> bytes:
     function builds one shape instead of taking a format argument that
     would let a caller re-derive the same two failures.
 
-    The body is exactly 8 bytes, which is the whole frame -- no padding is
-    needed here, unlike the short PID/DID requests this ECM ignores when
-    they arrive under-length.
+    The diagnostic message is seven bytes: one service byte plus the six-byte
+    KWP32 body. ISO-TP's first byte therefore MUST be ``07``. ``06`` truncates
+    the final length byte from the ECU's point of view and this ECM answers
+    NRC 0x12; the standalone ``query_raw`` path caught this on live hardware
+    because it computes ``1 + len(body)`` rather than taking a prebuilt frame.
+    The resulting eight-byte CAN frame needs no padding.
     """
     if not 0 <= address <= 0xFFFFFFFF:
         raise ValueError(f"memory address out of 32-bit range: 0x{address:X}")
     if not 1 <= length <= 0xFFFF:
         raise ValueError(f"memory read length out of range: {length}")
     body = (
-        bytes([0x06, MEMORY_READ_SERVICE]) + address.to_bytes(4, "big") + length.to_bytes(2, "big")
+        bytes([0x07, MEMORY_READ_SERVICE]) + address.to_bytes(4, "big") + length.to_bytes(2, "big")
     )
     return body + bytes(8 - len(body))
 

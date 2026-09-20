@@ -41,7 +41,7 @@ _TARGET = MemoryChannel(
 
 def test_request_frame_matches_the_form_verified_on_the_vehicle() -> None:
     """KWP32 body. KWP24 and UDS-ALFID both answered NRC 0x12 on this ECM."""
-    assert build_memory_read_payload(0xFFFF26BE, 2) == bytes.fromhex("0623ffff26be0002")
+    assert build_memory_read_payload(0xFFFF26BE, 2) == bytes.fromhex("0723ffff26be0002")
 
 
 @pytest.mark.parametrize(
