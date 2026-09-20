@@ -277,3 +277,10 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - **Owed job done:** the 22 of 25 `capture_profile.json` snapshots still on old channel names were migrated (101 names, 0 failures, daemon stopped).
   - After start: http 200, `model_versions` = the two 2026-09-20 artifacts, no version mismatches, no structural blindness entries, batching 6/0, no width mismatches, 0 drops, 0 errors. `engine_off`, so detector behaviour is unobserved until the engine runs.
   - These are the OTHER agent's 2026-09-20 models (false alarms fixed, IF recall 4–16 %). The policy-trimmed retrain is still running on the laptop and is NOT deployed.
+- **~16:05Z retrain cancelled by the operator** (a Windows restart for USB capture, and it couldn't finish before the drive).
+  - It was ~55 min into a single-worker feature rebuild at 10 GB RSS, before any model fitting; nothing was produced, and the staging dir `~/canary-data/models-0920b/` is empty.
+  - The policy and calibration code is committed (`a4a58a4`) and untested by a real training run.
+  - Evaluation outputs and the resume command are saved at `~/canary-data/desk-0920/` (`RESUME-retrain.md`).
+  - **The Pi runs the other agent's 2026-09-20 models** (`models-0920a`): LSTM 0 false positives on 8,567 unseen windows with recall unmeasured; IF ~1.9 alerts/h with recall 4–16 %.
+  - Better to re-run after the drive with its sessions added, since more complete rows is the real lever.
+  - **Queued defect:** the feature build logs nothing per session and sizes itself to one worker, so a 33-session rebuild is ~2 h of silence.
