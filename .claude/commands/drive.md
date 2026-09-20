@@ -57,7 +57,11 @@ Timestamps come from `date -u`, never from memory.
 
 **Predictions are written before the data.** If the plan has pass/fail
 criteria, do not move them after seeing data; if it has none for a claim you
-are about to test, write them into the log before the capture starts.
+are about to test, write them into the log before the capture starts. For
+each test the plan states its prerequisites, its sample target, its pass /
+fail / unresolved criteria, and the acquisition resolution it can achieve.
+Earlier results and criteria stay intact: a new test is labelled as new, with
+its own criteria frozen before its data.
 
 ## First wake-up, before any capture
 
@@ -107,7 +111,10 @@ are about to test, write them into the log before the capture starts.
 3. A regression is diagnosed before anything else. Read `vehicle_state`
    before concluding anything about detectors; a burst of anomalies at an
    altitude or condition outside the corpus is out-of-distribution, not a
-   fault — say which.
+   fault — say which. Take full-status detector provenance before
+   interpreting alerts OR silence: a withheld or structurally blind detector
+   is not a clean baseline. Never raise a threshold to quiet
+   out-of-distribution alerts; retraining and replay are desk work.
 4. Otherwise the next item that moves the OUTCOME. Schedule the next wake-up:
    ~5 min during a maneuver set, 10–15 while a block runs or you are
    working, 20–30 while watching.
@@ -124,8 +131,18 @@ are about to test, write them into the log before the capture starts.
   rather than editing a saved one.
 - Read every stop verdict: each `fail` clause is explained or becomes a
   task, never ignored.
-- Isolated captures ≤ one third of driving time. Stop one before a stop that
-  ends a block.
+- Isolated captures ≤ one third of driving time. Stop one as soon as its
+  sample target is met, and before a stop that ends a block.
+- **A prerequisite is measured, not configured.** Before spending maneuvers
+  on a test, confirm from stored acquisition timestamps that the profile
+  achieves the rate and separation the test needs — separate batches, for
+  instance, do not by themselves establish timing resolution. If the
+  prerequisite fails, log the blocker and return to `default`.
+- **Instruments that disagree:** report the disagreement without guessing its
+  cause unless a third instrument decides it, and leave every conclusion that
+  depends on the unsettled reference unresolved.
+- A pass needs the span of the measured quantity itself (kPa of baro, not
+  metres climbed; enriched seconds, not pulls attempted).
 - Pull only CLOSED sessions, with
   `ssh <pi> 'cd <sessions> && nice -n 19 ionice -c3 tar cf - <dir>' | tar xf -`,
   and analyse on the laptop within minutes of the block closing: known answer
@@ -161,6 +178,15 @@ are about to test, write them into the log before the capture starts.
   cannot prove.
 - **Retire what you disproved.** Stale claims in memory and docs are
   corrected or deleted, not layered over.
+- **Record coverage.** Log which operating modes and barometric pressures
+  the drive covered on `default`, and which the corpus still lacks.
+- **Close only the paths a drive exercised.** A fix whose branch never fired
+  is verified by its tests only, and an idling start cannot verify a key-off
+  boot. For a deployed fix, watch its own counters plus all-channel gaps, and
+  say whether any gap overlapped a maneuver window.
+- **Keep loss counts separate:** storage drops, CAN-controller overflow and
+  socket loss are different faults. Scope each to its block and bridge
+  restarts (counters reset) rather than quoting a lifetime total.
 
 ## Hard rules
 
@@ -191,8 +217,16 @@ today — the Pi may be powered off without warning.
 
 Stop on: `engine_off` for 20+ min (gas stops of 10–15 min are normal), the
 operator saying so or powering the Pi off, or the Pi unreachable 30+ min.
+**The final stop is the trip-end test.** Ask the operator to leave the Pi
+powered for ≥ 5 min stationary — on 2026-09-18 a shutdown 8 min after the
+pre-parking restart pre-empted the digest. Then verify `digest.json`, or a
+`digest_skipped.json` that names its reason, and that collection and HTTP
+stayed responsive throughout. A small-session digest does not close
+long-session acceptance. Disarm the keepalive only after this check.
+
 Then: stop the capture window if the Pi still answers; final summary = the
-OUTCOME's state per claim (promoted, falsified, or unresolved and why),
+OUTCOME's state per claim or priority (completed, falsified, or unresolved
+with the specific evidence still missing),
 beliefs verified or falsified, commits, candidates, the operator's decision
 list, and what the next drive must produce; write that next-drive plan as
 `data/analyses/<today>-next-drive-deploy-plan.md`; preserve the poller JSONL
