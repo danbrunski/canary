@@ -593,6 +593,10 @@ signals:
     unit: unknown
     confidence: hypothesized
     model_feature: false  # body/motion — not engine behaviour
+    # The high byte of VEHICLE_SPEED_2D1 (bytes 1-2 little-endian, identified
+    # 2026-09-20 against DID 0x121A). Kept only because stored telemetry and
+    # older model manifests name it; new consumers read VEHICLE_SPEED_2D1.
+    superseded_by: VEHICLE_SPEED_2D1
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison

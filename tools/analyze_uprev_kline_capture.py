@@ -30,6 +30,7 @@ DEFAULT_REFERENCES = (
     "decoded:ECM_ACCEL_PEDAL_POS_V",
     "gps:speed",
 )
+EXTERNAL_REFERENCE_SOURCES = frozenset({"decoded", "gps", "obd"})
 
 
 def load_uprev_samples(path: Path) -> pd.DataFrame:
@@ -150,10 +151,10 @@ def load_reference_rows(
         source, separator, channel = spec.partition(":")
         if separator and source == "uprev":
             continue
-        if not separator or source not in {"decoded", "gps"}:
+        if not separator or source not in EXTERNAL_REFERENCE_SOURCES:
             raise ValueError(
                 f"reference {spec!r} is unsupported here; use decoded:<channel>, "
-                "gps:<channel>, or uprev:DID_<hex>"
+                "gps:<channel>, obd:<channel>, or uprev:DID_<hex>"
             )
         wanted.add((source, channel))
 
@@ -220,7 +221,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         dest="references",
         help=(
-            "decoded:<channel>, gps:<channel>, or uprev:DID_<hex>; repeatable "
+            "decoded:<channel>, gps:<channel>, obd:<channel>, or "
+            "uprev:DID_<hex>; repeatable "
             "(defaults to common road references)"
         ),
     )

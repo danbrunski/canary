@@ -62,7 +62,7 @@ collection:
   # CANary has a decoder for. Add explicit names/hex PIDs to force extras.
   obd_pids: [auto]
   # Known Mode-22 DIDs to poll as ``did:<NAME>`` readings, characterized in
-  # data/dids.yaml. These four unlock the high-value fuel/air behavior
+  # data/dids.yaml. These eight unlock the high-value fuel/air behavior
   # surfaces (air_charge_vs_rpm_throttle_did, afr_bank_balance_vs_rpm,
   # afr_voltage_vs_rpm_load, tps_voltage_per_pct) — recipes that target
   # ``did:*`` outputs silently skip if the DID isn't being polled.
@@ -80,6 +80,8 @@ collection:
     - ECM_AIR_CHARGE           # air charge per intake event (0x1208; not injected fuel)
     - ECM_AF_SENSOR_V_B1       # wideband AFR sensor V, bank 1 (pre-cat)
     - ECM_AF_SENSOR_V_B2       # wideband AFR sensor V, bank 2 (pre-cat)
+    - ECM_INJECTOR_PULSE_1     # injected pulse width, bank 1 (0x1206; ms)
+    - ECM_INJECTOR_PULSE_2     # injected pulse width, bank 2 (0x1207; ms)
     - ECM_THROTTLE_POS_SENSOR_1  # raw TPS voltage, for sensor-drift detection
     - ECM_THROTTLE_POS_SENSOR_2  # redundant TPS track for cross-checking
   # Batch up to N PIDs per Mode-01 request (SAE J1979 allows 6). Batched PIDs

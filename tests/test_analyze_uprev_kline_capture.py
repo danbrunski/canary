@@ -93,18 +93,28 @@ def test_load_reference_rows_filters_time_and_channel(
     frame = pd.DataFrame(
         {
             "timestamp": pd.to_datetime(
-                ["2026-09-20T18:00:00Z", "2026-09-20T18:00:01Z", "2026-09-20T18:00:01Z"],
+                [
+                    "2026-09-20T18:00:00Z",
+                    "2026-09-20T18:00:01Z",
+                    "2026-09-20T18:00:01Z",
+                    "2026-09-20T18:00:01Z",
+                ],
                 utc=True,
             ),
-            "source": ["decoded", "decoded", "gps"],
-            "channel": ["ECM_RPM", "OTHER", "speed"],
+            "source": ["decoded", "decoded", "gps", "obd"],
+            "channel": ["ECM_RPM", "OTHER", "speed", "SHORT_FUEL_TRIM_1"],
         }
     )
     monkeypatch.setattr("tools.analyze_uprev_kline_capture.read_session", lambda _: frame)
 
     result = load_reference_rows(
         tmp_path,
-        ("decoded:ECM_RPM", "gps:speed", "uprev:DID_1201"),
+        (
+            "decoded:ECM_RPM",
+            "gps:speed",
+            "obd:SHORT_FUEL_TRIM_1",
+            "uprev:DID_1201",
+        ),
         pd.Timestamp("2026-09-20T17:59:59Z"),
         pd.Timestamp("2026-09-20T18:00:02Z"),
     )
@@ -112,6 +122,7 @@ def test_load_reference_rows_filters_time_and_channel(
     assert list(zip(result["source"], result["channel"], strict=True)) == [
         ("decoded", "ECM_RPM"),
         ("gps", "speed"),
+        ("obd", "SHORT_FUEL_TRIM_1"),
     ]
 
 

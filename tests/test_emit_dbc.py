@@ -8,7 +8,10 @@ fails loudly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import cantools
+import pytest
 
 from src.decode.bindings import load_bindings
 from tools.emit_dbc import build_database
@@ -94,3 +97,60 @@ def test_model_feature_flag_does_not_change_the_emitted_dbc(tmp_path) -> None:  
     )
     assert load_bindings(flagged).signals[1].model_feature is False
     assert build_database(flagged).as_dbc_string() == build_database(plain).as_dbc_string()
+
+
+_OVERLAPPING = """\
+schema_version: 1
+vehicle: {make: Nissan}
+signals:
+  - name: VEHICLE_SPEED_2D1
+    module: ECM
+    can_id: 0x2D1
+    byte_start: 1
+    byte_length: 2
+    byte_order: little
+    scale: 0.1
+    offset: 0.0
+    unit: km/h
+    confidence: high
+  - name: MOTION_SIGNAL_2D1_1
+    module: unknown
+    can_id: 0x2D1
+    byte_start: 1
+    byte_length: 1
+    byte_order: big
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: hypothesized
+__SUPERSEDED__
+"""
+
+
+def test_superseded_binding_is_not_emitted(tmp_path: Path) -> None:
+    """The real 0x2D1 case: the legacy byte is the new signal's high byte.
+
+    It has to stay in bindings.yaml because stored telemetry names it, so
+    the emit — not the file — is where the two stop coexisting.
+    """
+    path = tmp_path / "bindings.yaml"
+    path.write_text(_OVERLAPPING.replace("__SUPERSEDED__", "    superseded_by: VEHICLE_SPEED_2D1"))
+
+    db = build_database(path)
+
+    names = [signal.name for message in db.messages for signal in message.signals]
+    assert names == ["VEHICLE_SPEED_2D1"]
+
+
+def test_overlapping_live_bindings_name_both_signals(tmp_path: Path) -> None:
+    """Without the supersede record this is a genuine conflict, not noise."""
+    path = tmp_path / "bindings.yaml"
+    path.write_text(_OVERLAPPING.replace("__SUPERSEDED__", ""))
+
+    with pytest.raises(ValueError, match="claimed by both"):
+        build_database(path)
+
+
+def test_real_bindings_have_no_overlapping_live_signals() -> None:
+    """The shipped file must stay emittable; 911d0f1 made it briefly not."""
+    build_database(Path("data/bindings.yaml"))

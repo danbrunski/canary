@@ -2,6 +2,13 @@ schema_version: 1
 profiles:
 - name: default
   description: Normal telemetry and anomaly-detection collection
+  notes: "Present so an ordinary drive settles the contested DID 0x1101 offset, which\
+    \ no capture on hand can: the two recorded offsets differ by exactly 10 degC,\
+    \ and separating them needs this DID and Mode 01 PID 0x05 in ONE session. Only\
+    \ the default profile can do that \u2014 the tuning profile disables Mode 01.\
+    \ Verified 2026-08-06 that 0x1101 was in the scheduler plan but never requested,\
+    \ because the DID window polls this list, not the plan: four consecutive windows\
+    \ sent 0 requests for it while ECM_RPM got one each."
   experimental: false
   mode01:
     AUTO: 1.0
@@ -13,13 +20,6 @@ profiles:
   - ECM_AF_SENSOR_V_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_THROTTLE_POS_SENSOR_2
-  # Present so an ordinary drive settles the contested DID 0x1101 offset, which
-  # no capture on hand can: the two recorded offsets differ by exactly 10 degC,
-  # and separating them needs this DID and Mode 01 PID 0x05 in ONE session.
-  # Only the default profile can do that — the tuning profile disables Mode 01.
-  # Verified 2026-08-06 that 0x1101 was in the scheduler plan but never
-  # requested, because the DID window polls this list, not the plan: four
-  # consecutive windows sent 0 requests for it while ECM_RPM got one each.
   - ECM_COOLANT_TEMP
   mode22_rate_weights: {}
   mode01_enabled: true
@@ -45,6 +45,7 @@ profiles:
   storage_prefix: ''
 - name: fuel-map
   description: High-rate fueling and timing capture
+  notes: ''
   experimental: false
   mode01:
     RPM: 1.0
@@ -99,6 +100,7 @@ profiles:
   storage_prefix: _capture-fuel-map
 - name: tuning-did
   description: All-DID tuning capture (session held open)
+  notes: ''
   experimental: false
   mode01: {}
   mode01_batch_groups: []

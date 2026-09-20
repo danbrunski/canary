@@ -4,13 +4,13 @@ providers:
   - {role: operator_demand, spec: 'did:ECM_THROTTLE_POS_SENSOR_1'}
   - {role: measured_afr_b1, spec: 'did:ECM_AF_SENSOR_V_B1', transform: voltage_afr}
   - {role: measured_afr_b2, spec: 'did:ECM_AF_SENSOR_V_B2', transform: voltage_afr}
-  # Injected pulse (0x1206/0x1207) passed a pre-registered matched-air-charge
-  # test on 2026-09-18, but which bank each register serves and the ms scale
-  # are unverified, so both stay `candidate` and are not used automatically.
+  # UpRev's operator-selected Bank 1/Bank 2 streams directly identify
+  # 0x1206/0x1207, and the overlapping ROM Editor export pins both scales to
+  # raw * 0.01 ms (2026-09-20). They are therefore safe for automatic use.
   # 0x1208, which this role pointed at until 2026-09-18, is AIR CHARGE, not
   # injected fuel (data/dids.yaml).
-  - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PULSE_1', confidence: candidate}
-  - {role: injector_pw_b2, spec: 'did:ECM_INJECTOR_PULSE_2', confidence: candidate}
+  - {role: injector_pw_b1, spec: 'did:ECM_INJECTOR_PULSE_1'}
+  - {role: injector_pw_b2, spec: 'did:ECM_INJECTOR_PULSE_2'}
   - {role: coolant_temp, spec: 'did:ECM_COOLANT_TEMP'}
   # Base Fuel Schedule (UpRev "B-FUEL SCHDL", ms) — the load axis of the
   # fuel-target map. 0x1208 (ECM_AIR_CHARGE) behaves as air per event x K,

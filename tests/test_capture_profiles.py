@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -1268,3 +1269,44 @@ def test_bus_budget_ttl_allows_a_capture_length_override() -> None:
     assert BusBudgetRequest(requests_per_second=40, ttl_seconds=14400).ttl_seconds == 14400
     with pytest.raises(ValidationError):
         BusBudgetRequest(requests_per_second=40, ttl_seconds=21601)
+
+
+_SHIPPED_CATALOGS = (
+    Path("data/capture_profiles.yaml"),
+    Path("data/nissan-xterra-2008/capture_profiles.yaml"),
+)
+
+
+@pytest.mark.parametrize("path", _SHIPPED_CATALOGS, ids=lambda p: p.parent.name)
+def test_shipped_catalog_keeps_rationale_in_notes_not_comments(path: Path) -> None:
+    """A YAML comment in this file is deleted by the next seed upgrade.
+
+    ``load_capture_profiles`` writes the catalog back through
+    ``yaml.safe_dump`` whenever it upgrades or appends a built-in, and that
+    drops every comment. It did: a single upgrade erased 64 comment blocks
+    across these two files, including why PID 0x25 must stay out of this
+    ECM's profile and why three profiles are seed-protected. Rationale goes
+    in ``notes``, which is a field and survives the round-trip.
+    """
+    offenders = [
+        f"{path}:{number}"
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if line.strip().startswith("#")
+    ]
+    assert not offenders, (
+        f"comments do not survive a seed upgrade; move them into `notes`: {offenders}"
+    )
+
+
+@pytest.mark.parametrize("path", _SHIPPED_CATALOGS, ids=lambda p: p.parent.name)
+def test_shipped_catalog_rationale_survives_a_write_back(path: Path, tmp_path: Path) -> None:
+    """The whole point of the field: safe_dump must preserve it."""
+    original = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    documented = {p.name: p.notes for p in original.profiles if p.notes}
+    assert documented, f"{path} carries no rationale at all — did a write-back eat it?"
+
+    round_tripped = tmp_path / "catalog.yaml"
+    save_capture_profiles(round_tripped, original)
+    reloaded = CaptureProfileCatalog.model_validate(yaml.safe_load(round_tripped.read_text()))
+
+    assert {p.name: p.notes for p in reloaded.profiles if p.notes} == documented

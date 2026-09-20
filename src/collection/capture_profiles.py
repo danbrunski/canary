@@ -156,6 +156,21 @@ class _Strict(BaseModel):
 class CaptureProfile(_Strict):
     name: str
     description: str = ""
+    #: Why this profile is the way it is — the reasoning a future editor needs
+    #: before changing it. ``description`` is the one-line label a UI shows;
+    #: this is the rationale.
+    #:
+    #: It is a *field* rather than a YAML comment because the catalog is
+    #: written back through ``yaml.safe_dump`` whenever a built-in is upgraded
+    #: or appended, and that drops comments silently. It did: a seed upgrade
+    #: deleted 64 comment blocks across the two shipped catalogs, including
+    #: why PID 0x25 must stay out of this ECM's profile and why three profiles
+    #: are seed-protected. Restoring them by hand only bought time until the
+    #: next ``BUILTIN_REVISION`` bump.
+    #:
+    #: Built-ins carry their notes in :func:`seed_catalog`, so an upgrade
+    #: rewrites the rationale along with the values instead of erasing it.
+    notes: str = ""
     #: Research profiles are intentionally operator-visible but have not yet
     #: earned the same trust as routine captures.  Keep that status in the
     #: schema so every UI/API consumer can render it; parsing words such as
@@ -570,6 +585,17 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
             CaptureProfile(
                 name=DEFAULT_PROFILE_NAME,
                 description="Normal telemetry and anomaly-detection collection",
+                notes=(
+                    "ECM_COOLANT_TEMP is present so an ordinary drive settles the "
+                    "contested DID 0x1101 offset, which no capture on hand can: the "
+                    "two recorded offsets differ by exactly 10 degC, and separating "
+                    "them needs this DID and Mode 01 PID 0x05 in ONE session. Only "
+                    "the default profile can do that \u2014 the tuning profile "
+                    "disables Mode 01. Verified 2026-08-06 that 0x1101 was in the "
+                    "scheduler plan but never requested, because the DID window "
+                    "polls this list, not the plan: four consecutive windows sent 0 "
+                    "requests for it while ECM_RPM got one each."
+                ),
                 mode01=default_channels,
                 mode22=tuple(collection.obd_dids),
                 broadcast_decode=bool(collection.persist_decoded_confidence),

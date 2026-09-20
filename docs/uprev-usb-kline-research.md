@@ -377,6 +377,43 @@ put both injector registers at raw 45–49 while both A/F sensors reached the
 The addresses are ROM/calibration-specific vehicle-profile facts. Do not put
 them in shared protocol code or assume another ECU exposes the same RAM map.
 
+### CAN collection parity
+
+The UpRev discoveries are not limited to the USB/K-line cable. Every high-value
+fuel channel in the combined definition is reachable through the ECM's CAN
+diagnostic endpoint (`0x7E0` request, `0x7E8` response):
+
+| UpRev item | CAN request | CANary status |
+|---|---|---|
+| injector pulse Bank 1/2 | Mode 22 DIDs `0x1206` / `0x1207` | confirmed, `raw * 0.01 ms` |
+| BFS / air-charge coordinate | Mode 22 DID `0x1208` | confirmed identity; exact `2040` vs `2048` counts/ms remains provisional |
+| A/F WB Bank 1/2 | Mode 22 DIDs `0x1225` / `0x1226` | confirmed, `raw * 0.005 V` |
+| coarse rich-side target phi | Mode 22 DID `0x1134` | confirmed as a clamped/floored view, not the final target |
+| final Target AFR / phi | service `0x23`, KWP32 body `FF FF 26 BE 00 02` | positive response; Q14 word, zero means fuel cut |
+
+The decisive service-`0x23` check was made through the Pi's normal ISO-TP CAN
+client while the daemon stayed passive. After session `0xC0`, the KWP32 request
+returned payload `4000`; the KWP24 and UDS-ALFID forms both returned NRC `0x12`.
+The result is preserved as
+`/data/canary/_uprev-usb/2026-09-20/can-target-afr-memory-probe.json` on the Pi.
+This proves transport parity for the exact target word; it is not yet a
+first-class recurring CANary channel because the scheduler currently records
+Mode 01 PIDs and Mode 22 DIDs, while arbitrary `0x23` bodies remain a probe
+operation.
+
+These are **active diagnostic CAN reads**, not passive broadcast bindings. No
+passive frame has been proven to contain the same injector, BFS, A/F-voltage,
+or final-target values. In particular, aggregate similarity is not evidence of
+a broadcast duplicate; any future binding must pass same-instant
+`compare_channels` validation.
+
+The transports also cannot be collected actively at the same time on this ECM.
+During a controlled test, a K-line stream kept responding while the Pi's CAN
+Mode 01 collection went silent for roughly 132 seconds; passive broadcast CAN
+continued normally. A production capture should therefore use either UpRev
+K-line diagnostics or CAN diagnostics for the active ECM session, while the
+passive broadcast collector may run beside either.
+
 ## Additional single-channel captures (2026-09-20)
 
 The five later files contain 2,723 checksum-valid stream request/reply pairs.

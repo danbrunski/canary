@@ -66,14 +66,42 @@ def _to_signal(b: Binding) -> Signal:
     )
 
 
+def _check_no_overlap(can_id: int, sigs: list[Binding]) -> None:
+    """Refuse two live bindings that claim the same byte.
+
+    cantools rejects this too, but from inside its bit-packing with no
+    indication of what to do about it. Two bindings on one byte range mean
+    either a genuine conflict or that one replaced the other, and only the
+    file can say which — hence ``superseded_by``.
+    """
+    claimed: dict[int, str] = {}
+    for b in sigs:
+        for byte in range(b.byte_start, b.byte_start + b.byte_length):
+            other = claimed.get(byte)
+            if other is not None:
+                raise ValueError(
+                    f"0x{can_id:03X} byte {byte} is claimed by both {other} and "
+                    f"{b.name}. If one replaced the other, record it as "
+                    f"`superseded_by: <name>` on the older binding; otherwise "
+                    f"one of the two bindings is wrong."
+                )
+            claimed[byte] = b.name
+
+
 def build_database(bindings_path: Path, min_rank: int = 0) -> Database:
     bindings = load_bindings(bindings_path)
     by_id: dict[int, list[Binding]] = defaultdict(list)
     for b in bindings.signals:
+        # A superseded binding still decodes stored telemetry under its old
+        # name, but it is not a reading of the frame any more — emitting it
+        # would collide with whatever replaced it.
+        if b.superseded_by is not None:
+            continue
         if _CONF_RANK.get(b.confidence, 0) >= min_rank:
             by_id[b.can_id].append(b)
     messages: list[Message] = []
     for can_id, sigs in sorted(by_id.items()):
+        _check_no_overlap(can_id, sigs)
         messages.append(
             Message(
                 frame_id=can_id,

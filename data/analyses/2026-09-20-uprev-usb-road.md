@@ -179,6 +179,30 @@ precision. `compare_channels` at a 10 ms policy gave 312 same-instant pairs,
 the intended conversion to `raw * 0.01 ms` for both bank registers. Injector
 dead time is still not established by this result.
 
+### Diagnostic-CAN parity and the remaining integration gap
+
+All values in the combined UpRev fuel stream are available over CAN diagnostics,
+not merely over the USB cable. DIDs `0x1206`, `0x1207`, `0x1208`, `0x1225`, and
+`0x1226` are already handled by CANary's Mode 22 collector. The final Target AFR
+word is also readable: after entering session `0xC0`, a service `0x23` KWP32
+request with body `FF FF 26 BE 00 02` returned positive payload `4000` through
+the Pi's ISO-TP CAN client. The KWP24 and UDS-ALFID request forms returned NRC
+`0x12`. Evidence is preserved on the Pi at
+`/data/canary/_uprev-usb/2026-09-20/can-target-afr-memory-probe.json`.
+
+Thus the remaining gap is software integration, not ECU or transport access:
+CANary schedules and persists PIDs and DIDs, but does not yet model a recurring
+ReadMemoryByAddress channel. Until that is added, `0x1134` supplies only the
+confirmed low-resolution, rich-side/clamped target view; it cannot distinguish
+fuel cut from stoich and must not be presented as the final target.
+
+No equivalent passive-broadcast fields are claimed. These observations use the
+ECM's active diagnostic endpoint. A simultaneous transport trial also showed
+that an active K-line stream starves active CAN diagnostics (Mode 01 produced
+only the opening seconds, then no samples for about 132 seconds), although
+passive CAN frames remain available. Collection must choose one active diagnostic
+transport at a time.
+
 ## Rejected or still-open readings
 
 - A later 7,886-reply same-stream screen covered a transition from nonzero

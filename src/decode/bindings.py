@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class _Strict(BaseModel):
@@ -96,6 +96,22 @@ class Signal(_Strict):
     # without scaling or signals whose plausible range isn't yet known.
     plausible_min: float | None = None
     plausible_max: float | None = None
+    #: The binding that replaced this one, named explicitly.
+    #:
+    #: A superseded binding stays here because stored telemetry and older
+    #: model manifests still reference its name, but it is no longer the
+    #: right way to read the quantity. Two bindings that describe the same
+    #: bytes then *overlap* by construction, which is a contradiction to
+    #: anything consuming the geometry — the DBC emit refused the whole
+    #: file when ``MOTION_SIGNAL_2D1_1`` and ``VEHICLE_SPEED_2D1`` both
+    #: claimed byte 1 of 0x2D1.
+    #:
+    #: Recording the relationship makes that resolvable without guessing:
+    #: consumers that need one reading per quantity skip superseded
+    #: bindings, and an overlap between two *live* bindings stays the error
+    #: it should be. The name is validated against the file, so a rename or
+    #: a typo cannot leave a dangling pointer.
+    superseded_by: str | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
 
@@ -113,6 +129,20 @@ class Bindings(_Strict):
     # distinguishable from "we looked with a well-powered sweep and it is not
     # there". Not consumed by the decoder.
     absent_signals: list[dict[str, Any]] | None = None
+
+    @model_validator(mode="after")
+    def _check_superseded_targets(self) -> Bindings:
+        """Every ``superseded_by`` must name a signal in this file."""
+        names = {signal.name for signal in self.signals}
+        dangling = {
+            signal.name: signal.superseded_by
+            for signal in self.signals
+            if signal.superseded_by is not None and signal.superseded_by not in names
+        }
+        if dangling:
+            rendered = ", ".join(f"{k} -> {v}" for k, v in sorted(dangling.items()))
+            raise ValueError(f"superseded_by names no such signal: {rendered}")
+        return self
 
 
 #: Binding confidences a model may train on. `medium` and below are working

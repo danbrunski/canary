@@ -27,6 +27,7 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from src.decode.bindings import Signal, apply_scaling, decode_raw, is_plausible, load_bindings
 
@@ -130,3 +131,23 @@ def test_at_least_one_confirmed_signal_observed() -> None:
         "test will silently pass on staleness; check session retention / "
         "bindings.yaml confidence levels"
     )
+
+
+def test_superseded_by_must_name_a_real_signal(tmp_path: Path) -> None:
+    """A dangling supersede pointer is a rename that was half-done."""
+    path = tmp_path / "bindings.yaml"
+    path.write_text(
+        "schema_version: 1\n"
+        "vehicle: {make: Nissan}\n"
+        "signals:\n"
+        "  - name: OLD_NAME\n"
+        "    module: ECM\n"
+        "    can_id: 0x2D1\n"
+        "    byte_start: 1\n"
+        "    byte_length: 1\n"
+        "    confidence: hypothesized\n"
+        "    superseded_by: NAME_THAT_IS_NOT_HERE\n"
+    )
+
+    with pytest.raises(ValidationError, match="superseded_by names no such signal"):
+        load_bindings(path)

@@ -193,6 +193,19 @@ def test_the_shipped_registry_declares_bfs_as_a_candidate_with_its_envelope() ->
     assert bfs.evidence and "bfs1208.md" in bfs.evidence
 
 
+def test_the_shipped_registry_uses_confirmed_injector_pulse_providers() -> None:
+    registry = load_provider_registry(PROVIDERS)
+    injectors = {
+        provider.role: provider
+        for provider in registry.providers
+        if provider.role in {"injector_pw_b1", "injector_pw_b2"}
+    }
+    assert set(injectors) == {"injector_pw_b1", "injector_pw_b2"}
+    assert injectors["injector_pw_b1"].spec == "did:ECM_INJECTOR_PULSE_1"
+    assert injectors["injector_pw_b2"].spec == "did:ECM_INJECTOR_PULSE_2"
+    assert all(provider.confidence == "confirmed" for provider in injectors.values())
+
+
 def _air_charge_session(tmp_path: Path) -> Path:
     session = tmp_path / "_capture-fuel-pw-research-2026-09-18T200000"
     stamp = datetime(2026, 9, 18, 20, 0, tzinfo=UTC)
