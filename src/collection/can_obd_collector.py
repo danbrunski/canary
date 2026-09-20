@@ -139,8 +139,9 @@ from src.collection.reconnect import (
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import CanBusConfig, VehicleConfig
 from src.decode.dids import (
+    MEMORY_SOURCE,
     apply_memory_scaling,
-    decode_memory_raw,
+    decode_memory_window,
     is_memory_sentinel,
 )
 from src.session import SessionPaths
@@ -1781,37 +1782,50 @@ def _decode_response(
         return [ObdReading(timestamp, request.channel, value, unit, payload=response.payload)]
 
     if request.kind == "memory":
-        assert request.memory_channel is not None
-        memory_channel = request.memory_channel
-        raw = decode_memory_raw(memory_channel, response.payload)
-        if raw is None:
-            return []
-        if is_memory_sentinel(memory_channel, raw):
-            # "Polled, and the ECU is commanding nothing" is an answer about
-            # the engine; emitting no row at all would be indistinguishable
-            # from "not polled", and scaling the sentinel would put a
-            # fabricated value into every mean that follows.
-            return [
+        assert request.memory_read is not None
+        window_readings: list[ObdReading] = []
+        for memory_channel, offset in zip(
+            request.memory_read.channels, request.memory_read.offsets, strict=True
+        ):
+            channel = f"{MEMORY_SOURCE}:{memory_channel.name}"
+            raw = decode_memory_window(memory_channel, response.payload, offset)
+            if raw is None:
+                continue
+            if is_memory_sentinel(memory_channel, raw):
+                # "Polled, and the ECU is commanding nothing" is an answer
+                # about the engine; emitting no row would be
+                # indistinguishable from "not polled", and scaling the
+                # sentinel would put a fabricated value into every mean
+                # that follows.
+                window_readings.append(
+                    ObdReading(
+                        timestamp,
+                        f"{channel}_SENTINEL",
+                        memory_channel.sentinel_meaning or "sentinel",
+                        "",
+                        payload=response.payload,
+                    )
+                )
+                continue
+            scaled = apply_memory_scaling(memory_channel, raw)
+            if scaled is None:
+                # Scale deliberately unpinned: report raw counts rather than
+                # inventing engineering units, matching the `did:` contract.
+                window_readings.append(
+                    ObdReading(timestamp, channel, float(raw), "counts", payload=response.payload)
+                )
+                continue
+            window_readings.append(
                 ObdReading(
                     timestamp,
-                    f"{request.channel}_SENTINEL",
-                    memory_channel.sentinel_meaning or "sentinel",
-                    "",
+                    channel,
+                    scaled,
+                    memory_channel.unit,
                     payload=response.payload,
                 )
-            ]
-        scaled = apply_memory_scaling(memory_channel, raw)
-        if scaled is None:
-            return []
-        return [
-            ObdReading(
-                timestamp,
-                request.channel,
-                scaled,
-                memory_channel.unit,
-                payload=response.payload,
             )
-        ]
+        # Every reading here shares one ECU operation, not merely one round.
+        return window_readings
 
     if request.kind == "custom":
         # Task 2.6 — decode through the definition's sandboxed formula
@@ -2290,10 +2304,10 @@ def _query_with_tap(
     # must be None for the assembler too, or it would look for an echo that
     # is never sent and drop every reply.
     if request.kind == "memory":
-        assert request.memory_channel is not None
+        assert request.memory_read is not None
         identifier = None
         request_data = build_memory_read_payload(
-            request.memory_channel.address, request.memory_channel.length
+            request.memory_read.address, request.memory_read.length
         )
     else:
         identifier = None if request.kind == "dtc" else request.identifier

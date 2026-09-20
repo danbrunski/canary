@@ -23,11 +23,13 @@ from src.collection.obd_scheduler import CanObdSpec, _PollRequest, build_poll_re
 from src.collection.request_eligibility import SESSION_PHASES, evaluate
 from src.config import CanBusConfig
 from src.decode.dids import (
+    DidMap,
     MemoryChannel,
     apply_memory_scaling,
     decode_memory_raw,
     is_memory_sentinel,
     memory_channels_for_revision,
+    plan_memory_reads,
 )
 
 _TARGET = MemoryChannel(
@@ -147,7 +149,8 @@ def test_scheduler_builds_a_session_endpoint_request() -> None:
     assert request.service == 0x23
     assert request.request_id == 0x7E0
     assert request.channel == "mem:ECM_TARGET_EQUIV_RATIO"
-    assert request.memory_channel is _TARGET
+    assert request.memory_read is not None
+    assert request.memory_read.channels == (_TARGET,)
 
 
 def _request() -> _PollRequest:
@@ -157,7 +160,7 @@ def _request() -> _PollRequest:
         identifier=0,
         request_id=0x7E0,
         channel="mem:ECM_TARGET_EQUIV_RATIO",
-        memory_channel=_TARGET,
+        memory_read=plan_memory_reads([_TARGET])[0],
     )
 
 
@@ -306,3 +309,103 @@ def test_fueling_active_is_true_wherever_a_target_exists(tmp_path: Path) -> None
     frame = build_tuning_frame(session, providers_path=registry).values
 
     assert frame["fueling_active"].tolist() == [True]
+
+
+# --------------------------------------------------------------------------
+# Multi-field windows: the only same-instant multi-channel read this ECM has.
+# --------------------------------------------------------------------------
+
+_PERIOD = MemoryChannel(
+    name="ECM_ENGINE_PERIOD",
+    address=0xFFFF26AE,
+    length=2,
+    byte_length=2,
+    confidence="high",
+    verified_tune_revision="ZS44A-k106",
+    window="fuel_target",
+)
+_TARGET_WINDOWED = _TARGET.model_copy(update={"window": "fuel_target"})
+
+
+def test_a_window_becomes_one_read_spanning_its_members() -> None:
+    reads = plan_memory_reads([_TARGET_WINDOWED, _PERIOD])
+
+    assert len(reads) == 1
+    assert reads[0].address == 0xFFFF26AE
+    assert reads[0].length == 18  # 0x26AE..0x26BF inclusive
+    assert reads[0].offsets == (16, 0)
+
+
+def test_an_unwindowed_channel_is_a_read_of_its_own() -> None:
+    reads = plan_memory_reads([_TARGET, _PERIOD.model_copy(update={"window": None})])
+
+    assert [r.length for r in reads] == [2, 2]
+
+
+def test_one_reply_decodes_every_field_on_one_timestamp() -> None:
+    """The point of the window: two quantities from one ECU operation.
+
+    This ECM refuses batched Mode 22, so two DIDs are always two requests
+    milliseconds apart. Anything asserting simultaneity has to come from
+    here.
+    """
+    read = plan_memory_reads([_TARGET_WINDOWED, _PERIOD])[0]
+    request = _PollRequest(
+        kind="memory",
+        service=0x23,
+        identifier=0,
+        request_id=0x7E0,
+        channel="mem:fuel_target",
+        memory_read=read,
+    )
+    # period 0x0BB8 at +0, then filler, then target 0x4A80 at +16
+    payload = bytes.fromhex("0bb8") + bytes(14) + bytes.fromhex("4a80")
+
+    readings = _decode_response(request, _response(payload.hex()), timestamp=7.0)
+
+    assert {r.pid for r in readings} == {
+        "mem:ECM_ENGINE_PERIOD",
+        "mem:ECM_TARGET_EQUIV_RATIO",
+    }
+    assert {r.timestamp for r in readings} == {7.0}
+    by_name = {r.pid: r for r in readings}
+    assert by_name["mem:ECM_TARGET_EQUIV_RATIO"].value == pytest.approx(1.1640625)
+    # Scale deliberately unpinned (the rpm relation is reciprocal), so raw.
+    assert by_name["mem:ECM_ENGINE_PERIOD"].value == 3000.0
+    assert by_name["mem:ECM_ENGINE_PERIOD"].unit == "counts"
+
+
+def test_a_window_over_the_measured_ceiling_is_refused_at_load() -> None:
+    """An oversized window answers NRC 0x12 for the whole group at drive
+    time; this turns that into a load error."""
+    far = _PERIOD.model_copy(update={"address": 0xFFFF26AE + 200, "name": "FAR"})
+    with pytest.raises(ValidationError, match="over this ECM's measured 63-byte"):
+        DidMap.model_validate(
+            {
+                "schema_version": 1,
+                "access": {
+                    "ecu_request_id": 0x7E0,
+                    "ecu_response_id": 0x7E8,
+                    "max_memory_read_length": 63,
+                },
+                "dids": [],
+                "memory": [_TARGET_WINDOWED.model_dump(), far.model_dump()],
+            }
+        )
+
+
+def test_a_window_may_not_mix_calibrations() -> None:
+    other = _PERIOD.model_copy(update={"verified_tune_revision": "SOME-OTHER-ROM"})
+    with pytest.raises(ValidationError, match="mixes calibrations"):
+        DidMap.model_validate(
+            {
+                "schema_version": 1,
+                "access": {
+                    "ecu_request_id": 0x7E0,
+                    "ecu_response_id": 0x7E8,
+                    "max_memory_read_length": 63,
+                },
+                "dids": [],
+                "memory": [_TARGET_WINDOWED.model_dump(), other.model_dump()],
+            }
+        )

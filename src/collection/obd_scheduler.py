@@ -28,12 +28,12 @@ from src.collection.obd_registry import PollTier, lookup
 from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
-from src.decode.dids import MEMORY_SOURCE
+from src.decode.dids import MEMORY_SOURCE, plan_memory_reads
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
     from src.collection.discovery import SupportProbe
-    from src.decode.dids import DidAccess, DidMap, MemoryChannel
+    from src.decode.dids import DidAccess, DidMap, MemoryChannel, MemoryRead
 
 log = logging.getLogger(__name__)
 
@@ -825,11 +825,11 @@ class _PollRequest:
     #: decodes the response through (formula, unit). ``None`` for every other
     #: kind, which all decode via the static PID_DECODERS/DTC tables instead.
     custom_pid: CustomPid | None = None
-    #: Set only for ``kind="memory"`` — carries the address, the read
-    #: length and the decode. ``identifier`` is unused for these: a
-    #: service-0x23 request has no identifier byte and its response
-    #: echoes none, so there is nothing for the assembler to match.
-    memory_channel: MemoryChannel | None = None
+    #: Set only for ``kind="memory"`` — the address, the read length and
+    #: every channel decoded from the one reply. ``identifier`` is unused
+    #: for these: a service-0x23 request has no identifier byte and its
+    #: response echoes none, so there is nothing for the assembler to match.
+    memory_read: MemoryRead | None = None
 
 
 @dataclass
@@ -1880,21 +1880,25 @@ def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) ->
                 priority=custom.name.strip().upper() in priority_channels,
             )
         )
-    for memory_channel in spec.memory:
+    for memory_read in plan_memory_reads(spec.memory):
+        names = [c.name for c in memory_read.channels]
         requests.append(
             _PollRequest(
                 kind="memory",
                 service=MEMORY_READ_SERVICE,
                 # No identifier on the wire: `_query_with_tap` builds the
-                # address/length body from `memory_channel` instead, and the
+                # address/length body from `memory_read` instead, and the
                 # assembler is given None because 0x23 echoes nothing.
                 identifier=0,
                 # Same endpoint and same gating session as Mode 22.
                 request_id=spec.did_request_id,
-                channel=f"{MEMORY_SOURCE}:{memory_channel.name}",
+                # A window carries several channels, so the request channel
+                # names the window; each decoded reading gets its own
+                # `mem:<NAME>` channel from the one reply.
+                channel=f"{MEMORY_SOURCE}:{memory_read.name}",
                 poll_tier="medium",
-                memory_channel=memory_channel,
-                priority=memory_channel.name.strip().upper() in priority_channels,
+                memory_read=memory_read,
+                priority=any(name.strip().upper() in priority_channels for name in names),
             )
         )
     if spec.dtc_poll_interval_seconds > 0:

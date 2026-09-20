@@ -118,6 +118,13 @@ class DidAccess(_Strict):
     #: Absent means the scheduler's default grace.
     exit_grace_seconds: float | None = Field(default=None, ge=0)
     keepalive_seconds: float | None = None
+    #: Largest service-0x23 read this ECM answers, in bytes. A measured
+    #: vehicle constraint, not a protocol limit: the 2026-09-20 sweep got
+    #: positive responses at 32/33/40/48/56/60/62/63 and NRC 0x12 at 64
+    #: while every interleaved DID kept answering. Required before a window
+    #: can be declared, because an oversized window fails as a refusal at
+    #: drive time rather than at load.
+    max_memory_read_length: int | None = Field(default=None, ge=1)
     notes: str | None = None
 
 
@@ -255,6 +262,17 @@ class MemoryChannel(_Strict):
     sentinel_meaning: str | None = None
     #: How to prove this address still holds this quantity after a reflash.
     known_answer: MemoryKnownAnswer | None = None
+    #: Read this channel in one request with every other channel naming the
+    #: same window.
+    #:
+    #: This is the only way to sample two quantities at the same instant on
+    #: this ECM: it refuses batched Mode 22, so two DIDs are always two
+    #: requests and always milliseconds apart. One 0x23 read spanning both
+    #: addresses returns both from a single ECU operation. Named rather
+    #: than inferred from address proximity, so "these must be same-instant"
+    #: is a statement the catalog makes and the loader checks, not a
+    #: coincidence of layout that a later edit could silently break.
+    window: str | None = None
     aliases: list[str] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     evidence_against: list[Evidence] = Field(default_factory=list)
@@ -305,6 +323,69 @@ def apply_memory_scaling(channel: MemoryChannel, raw: int) -> float | None:
 def is_memory_sentinel(channel: MemoryChannel, raw: int) -> bool:
     """Whether `raw` is the channel's declared no-measurement state."""
     return channel.sentinel_raw is not None and raw == channel.sentinel_raw
+
+
+@dataclass(frozen=True)
+class MemoryRead:
+    """One service-0x23 request and the channels it decodes.
+
+    A single-channel entry is a window of one, so the collector has one code
+    path rather than a special case that only the multi-field form exercises.
+    ``offsets`` gives each channel's byte offset within the reply, because a
+    channel's ``byte_start`` is relative to its own address, not to the start
+    of the window it ended up in.
+    """
+
+    address: int
+    length: int
+    channels: tuple[MemoryChannel, ...]
+    offsets: tuple[int, ...]
+
+    @property
+    def name(self) -> str:
+        window = self.channels[0].window
+        return window if window else self.channels[0].name
+
+
+def plan_memory_reads(channels: Sequence[MemoryChannel]) -> list[MemoryRead]:
+    """Group `channels` into the requests that will actually be sent.
+
+    Channels naming the same ``window`` become one read spanning all of
+    them; an unwindowed channel becomes a read of its own. Order is stable
+    so a plan is reproducible.
+    """
+    groups: dict[str, list[MemoryChannel]] = {}
+    order: list[str] = []
+    for channel in channels:
+        key = channel.window or f"\x00{channel.name}"
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(channel)
+
+    reads: list[MemoryRead] = []
+    for key in order:
+        members = groups[key]
+        start = min(c.address for c in members)
+        end = max(c.address + c.length for c in members)
+        reads.append(
+            MemoryRead(
+                address=start,
+                length=end - start,
+                channels=tuple(members),
+                offsets=tuple(c.address - start for c in members),
+            )
+        )
+    return reads
+
+
+def decode_memory_window(channel: MemoryChannel, payload: bytes, offset: int) -> int | None:
+    """Raw integer for `channel` from a window reply starting `offset` earlier."""
+    start = offset + channel.byte_start
+    end = start + channel.byte_length
+    if len(payload) < end:
+        return None
+    return int.from_bytes(payload[start:end], byteorder=channel.byte_order)
 
 
 def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
@@ -375,7 +456,39 @@ class DidMap(_Strict):
             raise ValueError(
                 f"memory channel names collide with existing channels: {sorted(set(clashes))}"
             )
+        self._check_windows()
         return self
+
+    def _check_windows(self) -> None:
+        """A declared window must be readable, and must mean one thing.
+
+        Both failures below are silent at drive time and obvious here. An
+        oversized window comes back NRC 0x12 for the whole group, losing
+        every channel in it at once. A window whose members disagree about
+        the calibration would hand one reply to two different claims about
+        what the ROM is.
+        """
+        ceiling = self.access.max_memory_read_length
+        for read in plan_memory_reads(self.memory):
+            members = read.channels
+            if len(members) == 1 and members[0].window is None:
+                continue
+            if ceiling is None:
+                raise ValueError(
+                    f"window {read.name!r} needs access.max_memory_read_length "
+                    "recorded before it can be declared readable"
+                )
+            if read.length > ceiling:
+                raise ValueError(
+                    f"window {read.name!r} spans {read.length} bytes, over this "
+                    f"ECM's measured {ceiling}-byte service-0x23 ceiling"
+                )
+            revisions = {c.verified_tune_revision for c in members}
+            if len(revisions) > 1:
+                raise ValueError(
+                    f"window {read.name!r} mixes calibrations {sorted(revisions)}; "
+                    "one reply cannot be valid under two ROM builds"
+                )
 
 
 def load_did_map(path: Path) -> DidMap:

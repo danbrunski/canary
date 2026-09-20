@@ -92,11 +92,12 @@ def test_moved_address_is_caught_even_while_decoding_plausibly() -> None:
 
     verdict = verify_channel(ecu, _channel(), samples=2, request_id=0x7E0, session=0xC0)
 
-    assert verdict.passed is False
+    assert verdict.outcome == "fail"
     assert "probably moved" in verdict.reason
 
 
-def test_channel_without_a_declared_check_cannot_be_verified() -> None:
+def test_channel_without_a_declared_check_is_skipped_not_failed() -> None:
+    """A catalog gap must not block re-stamping every other channel."""
     verdict = verify_channel(
         _FakeEcu([0x4000], _truthful),
         _channel(known_answer=None),
@@ -105,6 +106,7 @@ def test_channel_without_a_declared_check_cannot_be_verified() -> None:
         session=0xC0,
     )
 
+    assert verdict.outcome == "unverifiable"
     assert verdict.passed is False
     assert "plausibility alone" in verdict.reason
 

@@ -306,7 +306,15 @@ profiles:
     at a RAM address, so DID 0x1134 -- the floor-clamped rich-side view that cannot
     tell fuel cut from stoich -- was the closest this capture could previously get.
     The channel is withheld automatically if the running calibration is not the one
-    the address was verified against.'
+    the address was verified against.
+
+
+    Both memory channels name the `fuel_target` window, so one service-0x23 read returns
+    the commanded target and the engine-period counter from a single ECU operation.
+    That is the only same-instant multi-channel sample available on this ECM: it refuses
+    batched Mode 22, so any two DIDs are two requests milliseconds apart. Engine period
+    is not the collection route for rpm -- DID 0x1201 is, and is calibration-independent
+    -- it is here so a target can be paired with engine speed at zero skew.'
   experimental: true
   mode01:
     RPM: 1.0
@@ -333,6 +341,7 @@ profiles:
     ECM_THROTTLE_POS_SENSOR_1: 0.5
   memory:
   - ECM_TARGET_EQUIV_RATIO
+  - ECM_ENGINE_PERIOD
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null

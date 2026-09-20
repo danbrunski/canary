@@ -28,6 +28,10 @@ access:
   exit_session: 0x81          # return to default session — ends the Mode-01 blackout
   exit_grace_seconds: 0.05    # Mode 01 answered on the *next request* after 10 81 (2026-08-04)
   keepalive_seconds: 2.0      # re-send 10 C0; 0x81/0x85 open but don't unlock 0x22
+  # Measured 2026-09-20, engine running: lengths 32/33/40/48/56/60/62/63 all
+  # answered positively and 64 returned NRC 0x12, while every interleaved DID
+  # kept answering. A vehicle/calibration constraint, not a service-0x23 limit.
+  max_memory_read_length: 63
   notes: |
     The 2008 Nissan ECM refuses service 0x22 in the default session
     (7F 22 80). Sub-functions 0x81/0x85/0xC0 all return positive 50 xx
@@ -1049,6 +1053,7 @@ memory:
     plausible_min: 0.9
     plausible_max: 1.4
     verified_tune_revision: ZS44A-k106
+    window: fuel_target
     sentinel_raw: 0
     sentinel_meaning: >
       Fuel cut -- no AFR target commanded. NOT a phi of zero: scaling it
@@ -1110,3 +1115,52 @@ memory:
 
       The address is specific to this ROM/calibration. Do not copy it into
       shared code or assume another ECU exposes the same map.
+
+  - name: ECM_ENGINE_PERIOD
+    address: 0xFFFF26AE
+    length: 2
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    # Unpinned on purpose: the relation to rpm is RECIPROCAL, not linear, so
+    # a scale/offset pair cannot express it and inventing one would be worse
+    # than reporting raw counts. Consumers read counts and invert; see notes.
+    scale: null
+    offset: null
+    unit: unknown
+    confidence: high
+    # word = 6.25e6 / rpm, so the bounds are an rpm range read backwards:
+    # 20000 counts is ~312 rpm (below any running engine) and 800 counts is
+    # ~7800 rpm (above the VQ40DE's redline).
+    plausible_min: 800
+    plausible_max: 20000
+    verified_tune_revision: ZS44A-k106
+    window: fuel_target
+    evidence:
+      - session: can-memory-ffff26a0-63-fuel-dids-highway
+        method: same_reply_transform_vs_did_1201
+        finding: >
+          Transforming every observation as 500000/word and comparing with
+          raw coarse-RPM DID 0x1201 through compare_channels gave r2=0.99910
+          over 2,499 same-reply pairs, slope 0.999007, offset -0.3634, and
+          0.69% slope drift (stable). The 4.2-rpm residual spread is
+          consistent with the DID's own 12.5-rpm quantization plus the 8-10 ms
+          acquisition separation between the two reads.
+    notes: |
+      Big-endian engine-period counter. In engineering units the observed
+      mapping is approximately rpm = 6,250,000 / word.
+
+      It is catalogued for one reason: it shares a window with
+      ECM_TARGET_EQUIV_RATIO, so a single service-0x23 read returns engine
+      speed and the commanded target from ONE ECU operation. This ECM
+      refuses batched Mode 22, so that is otherwise unobtainable -- two DIDs
+      are always two requests and always milliseconds apart.
+
+      As a collection route for rpm on its own it is WORSE than DID 0x1201:
+      the DID is calibration-independent, and this address is not. Use the
+      DID unless same-instant pairing is the point.
+
+      No known_answer is declared because the available relation is
+      reciprocal and `MemoryKnownAnswer` currently models only the clamped
+      high-byte form; verify_memory_channels therefore reports this channel
+      as unverifiable rather than passed, which is the honest state.

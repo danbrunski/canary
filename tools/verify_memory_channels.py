@@ -38,6 +38,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
 
@@ -65,17 +66,28 @@ from tools.did_log import (
 
 @dataclass(frozen=True)
 class ChannelVerdict:
-    """What one channel's re-verification found."""
+    """What one channel's re-verification found.
+
+    Three outcomes, not two. "Failed its declared check" and "declares no
+    check" are different facts: the first says the address moved, the second
+    says nobody has written down how to tell. Collapsing them would either
+    block re-stamping every other channel over a catalog gap, or quietly
+    stamp an address nothing verified.
+    """
 
     channel: str
-    passed: bool
+    outcome: Literal["pass", "fail", "unverifiable"]
     reason: str
     samples: int = 0
     agreements: int = 0
     sentinels: int = 0
 
+    @property
+    def passed(self) -> bool:
+        return self.outcome == "pass"
+
     def render(self) -> str:
-        mark = "PASS" if self.passed else "FAIL"
+        mark = {"pass": "PASS", "fail": "FAIL", "unverifiable": "SKIP"}[self.outcome]
         counts = f"{self.agreements}/{self.samples} agreed"
         if self.sentinels:
             counts += f", {self.sentinels} sentinel"
@@ -100,11 +112,12 @@ def verify_channel(
     if known is None:
         return ChannelVerdict(
             channel.name,
-            False,
-            "no known-answer check declared; cannot re-verify an address on plausibility alone",
+            "unverifiable",
+            "no known-answer check declared; an address cannot be re-verified "
+            "on plausibility alone",
         )
     if session is not None and not client.enter_diagnostic_session(session, request_id=request_id):
-        return ChannelVerdict(channel.name, False, f"session 0x{session:02X} refused")
+        return ChannelVerdict(channel.name, "fail", f"session 0x{session:02X} refused")
 
     body = kwp32_memory_body(channel.address, channel.length)
     agreements = 0
@@ -137,11 +150,11 @@ def verify_channel(
             out_of_range.append(value)
 
     if observed == 0:
-        return ChannelVerdict(channel.name, False, "no usable replies")
+        return ChannelVerdict(channel.name, "fail", "no usable replies")
     if agreements != observed:
         return ChannelVerdict(
             channel.name,
-            False,
+            "fail",
             f"known-answer check failed on {observed - agreements} of {observed} "
             f"reads ({known.relation} vs DID 0x{known.did:04X}); the address has "
             "probably moved",
@@ -152,7 +165,7 @@ def verify_channel(
     reason = "known-answer relation held on every read"
     if out_of_range:
         reason += f"; WARNING {len(out_of_range)} value(s) outside plausible bounds"
-    return ChannelVerdict(channel.name, True, reason, observed, agreements, sentinels)
+    return ChannelVerdict(channel.name, "pass", reason, observed, agreements, sentinels)
 
 
 def restamp(dids_path: Path, passed: Sequence[str], revision: str) -> int:
@@ -277,20 +290,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     for verdict in verdicts:
         print(verdict.render())
 
-    passed = [v.channel for v in verdicts if v.passed]
+    passed = [v.channel for v in verdicts if v.outcome == "pass"]
+    failed = [v.channel for v in verdicts if v.outcome == "fail"]
+    skipped = [v.channel for v in verdicts if v.outcome == "unverifiable"]
     if args.record_revision:
-        if len(passed) != len(verdicts):
+        if failed:
             print(
-                "not recording: a channel failed, and stamping a calibration onto "
-                "a catalog that still contains a moved address is the failure this "
-                "tool exists to prevent",
+                "not recording: "
+                + ", ".join(failed)
+                + " failed, and stamping a calibration onto a catalog that still "
+                "contains a moved address is the failure this tool exists to prevent",
                 file=sys.stderr,
             )
         else:
             changed = restamp(args.dids, passed, args.record_revision)
             print(f"stamped {changed} channel(s) as verified on {args.record_revision}")
+            if skipped:
+                print(
+                    "left unstamped (no declared check): " + ", ".join(skipped),
+                    file=sys.stderr,
+                )
 
-    return 0 if len(passed) == len(verdicts) else 1
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
