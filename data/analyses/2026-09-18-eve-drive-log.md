@@ -49,16 +49,6 @@ The retrain corpus (D02.5), which also gates deploying the mode-label fix. D03.2
 - **Fuel workflow:** 0x1206 = injected pulse PASSED; 0x1208 = air × K ≈ BFS (candidate, raw/2040); 0x1134 = the active rich target; WOT enrichment = a pedal switch into the map's last column.
 - **One decision for you:** the retrain corpus (below). It also gates the mode-label fix deploy.
 
-## For the operator (decisions, below)
-The retrain corpus (D02.5), which also gates deploying the mode-label fix. D03.21 memory cgroup.
-
-### Next drive
-`data/analyses/2026-09-19-next-drive-deploy-plan.md`. The one decisive item is **a drive with UpRev logging B-FUEL SCHDL** for the BFS same-instant confirmation, plus the pedal staircase.
-
-## Glance
-- **D03.18 fixed, deployed and validated live** (`530398e`, 21:27Z): 10.6 min on `fuel-pw-research` with 0 all-channel stalls, where ~6 were expected. Six silent entries were handled by the new path.
-- Earlier: 0x1206/0x1207 = injected pulse PASS (matched air); 0x1134 is not commanded φ; 0x1208 = air charge. D04.3 unresolved at this resolution.
-- Back on `default` for the corpus. No maneuvers needed. Health clean.
 
 ## For the operator
 1. **The tuning provider `injector_pw_b1` still maps to 0x1208 (air charge) at `confirmed`.** You said to fix mislabels and then "we'll fix those later". The plan is in D03.9 (`9b1c788`). Nothing to decide now; it's listed so it isn't lost.
