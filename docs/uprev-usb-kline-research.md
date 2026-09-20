@@ -569,6 +569,19 @@ Daemon wiring remains deliberately pending. The research CLI is already a
 complete direct-cable acquisition path and keeps captures separate from the
 training corpus.
 
+The CAN-side follow-up now has two matching research tools:
+`tools/can_memory_log.py` records bounded KWP32 service-0x23 windows with
+interleaved DIDs, and `tools/analyze_can_memory_log.py` runs each byte/word
+candidate through same-time `compare_channels` pairing. On the ZS44A-k106
+ECM, 63-byte reads succeed and 64-byte reads return NRC `0x12`; this is a
+vehicle/calibration constraint, not a shared transport constant. A contiguous
+`0xFFFF26A0..0xFFFF279B` road sweep found an RPM period counter at
+`0xFFFF26AE` (`rpm ~= 6,250,000 / word`) and twelve 1:1 injector-count mirrors
+at `0xFFFF2710..0xFFFF2726`. It also rejected a tempting BFS candidate at
+`0xFFFF2742` when a later 3,000-pair reproduction changed the fitted scale.
+Full statistics and quarantined evidence hashes are in
+`data/analyses/2026-09-20-uprev-usb-road.md`.
+
 ## Next hardware steps
 
 1. Minimize the working cold-start sequence one operation at a time, preserving

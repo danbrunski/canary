@@ -222,6 +222,63 @@ longer run; the best long-window A/F relation reached r2 0.73 but was
 unresolvable. These are candidates for a tagged transient, not telemetry
 bindings.
 
+### Contiguous CAN RAM sweep and same-time DID comparison
+
+A later engine-running highway experiment swept four adjacent 63-byte windows
+from `0xFFFF26A0` through `0xFFFF279B`. Each window completed 2,500/2,500
+memory reads and 17,500/17,500 interleaved DID reads (`0x1201`, `0x1134`,
+`0x1206`, `0x1207`, `0x1208`, `0x1225`, and `0x1226`). The daemon remained
+passive while its broadcast collector stayed fresh. `tools/analyze_can_memory_log.py`
+compared every U8 and big-endian U16 view with every raw DID using one-to-one
+acquisition-time pairing within 15 ms; no aggregate-to-aggregate comparisons
+were used.
+
+This ECM's accepted KWP32 response-size boundary is 63 bytes. Lengths 32, 33,
+40, 48, 56, 60, 62, and 63 all returned positive responses; every 64-byte
+request returned NRC `0x12` while all interleaved DIDs still answered. That is
+a measured constraint of this ECM/calibration, not a generic service-0x23
+protocol limit.
+
+The sweep produced two reproducible findings and one deliberate rejection:
+
+- `0xFFFF26AE` is a big-endian engine-period counter. Transforming every
+  observation as `500000 / word` and comparing it with raw coarse-RPM DID
+  `0x1201` gave r2 `0.99910`, 2,499 pairs, slope `0.999007`, offset `-0.3634`,
+  and 0.69% slope drift (`stable`). In engineering units the observed mapping
+  is approximately `rpm = 6,250,000 / word`; its 4.2-rpm residual spread is
+  consistent with the DID's 12.5-rpm quantization plus the 8-10 ms acquisition
+  separation. The DID remains the calibration-independent collection route.
+- Six big-endian Bank-1 injector mirrors occupy `0xFFFF2710`, `2714`, `2718`,
+  `271C`, `2720`, and `2724`; six Bank-2 mirrors occupy `0xFFFF2712`, `2716`,
+  `271A`, `271E`, `2722`, and `2726`. Their same-time comparisons with
+  `0x1206`/`0x1207` gave r2 `0.99883-0.99965` and fitted slopes
+  `0.99909-0.99971`, all stable. This independently confirms that the RAM
+  block carries the injector raw counts, but Mode 22 is the cleaner source
+  and already supplies the pinned `0.01 ms/count` conversion.
+- `0xFFFF2742` initially tracked BFS `0x1208` at r2 `0.99944`, slope
+  `10.8304`, offset `-122.55`, and 0.88% drift. A required reproduction 4-5
+  minutes later disproved a fixed scale: 3,000 new pairs gave r2 `0.94005`,
+  slope `8.6273`, offset `829.16`, and a `drifting` verdict. It remains an
+  ordinary load-correlated candidate and is not a telemetry binding.
+
+The quarantined evidence is on the Pi under
+`/data/canary/_uprev-usb/2026-09-20/`:
+
+- `can-memory-ffff26a0-63-fuel-dids-highway.jsonl` — SHA-256
+  `24462a0d9b537348c446dd639739be3b2e8ab8de89b4e701b853f6b498c55f94`
+- `can-memory-ffff26df-63-fuel-dids-highway.jsonl` — SHA-256
+  `fab571979b24fe142b35ade5e67c46f8c601f989f9f65751e653b431b9d9b393`
+- `can-memory-ffff271e-63-fuel-dids-highway.jsonl` — SHA-256
+  `c61d1f915f3aefe55c6592ddfa998087e51c155aafc3bd90f018d4d0765b4bb8`
+- `can-memory-ffff275d-63-fuel-dids-highway.jsonl` — SHA-256
+  `cb08f2f73297194104ed3a6633f3226b591d3239ad82379d0a7c8aa92c523c8a`
+- `can-memory-ffff2742-bfs-repro.jsonl` — the independent BFS-candidate
+  rejection window, SHA-256
+  `1c46efa0e15a130fbe433567598f09f98e1cd3529a031430b1ac59fb00e201f5`
+
+These are active diagnostic-CAN observations. They do not establish passive
+broadcast fields for injector pulse, BFS, A/F voltage, or final target AFR.
+
 ## Rejected or still-open readings
 
 - A later 7,886-reply same-stream screen covered a transition from nonzero
