@@ -5,6 +5,7 @@ profiles:
   experimental: false
   mode01:
     AUTO: 1.0
+  mode01_batch_groups: []
   mode22:
   - ECM_RPM
   - ECM_AIR_CHARGE
@@ -12,17 +13,21 @@ profiles:
   - ECM_AF_SENSOR_V_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_THROTTLE_POS_SENSOR_2
+  mode22_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null
+  did_cycle_seconds: null
   round_timestamps: false
   target_rate_hz: null
   did_continuous: false
   bus_budget_override: null
+  priority_channels: null
   expected_total_demand_hz: null
   capacity_evidence: ''
   required_tuple: []
   min_achieved_rate_hz: null
+  max_tuple_skew_s: null
   requires_tune_revision: false
   builtin_revision: 0
   operator_modified: false
@@ -55,14 +60,18 @@ profiles:
     LONG_FUEL_TRIM_1: 0.25
     LONG_FUEL_TRIM_2: 0.25
     EVAPORATIVE_PURGE: 0.25
+  mode01_batch_groups: []
   mode22: []
+  mode22_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null
+  did_cycle_seconds: null
   round_timestamps: true
   target_rate_hz: 4.0
   did_continuous: false
   bus_budget_override: 20.0
+  priority_channels: null
   expected_total_demand_hz: 40.0
   capacity_evidence: '8 fast x 4 Hz + 8 context x 1 Hz = 40 channel-reads/s (one below
     the generic seed, which keeps bank-2 lambda), against 478/s measured batched on
@@ -77,6 +86,7 @@ profiles:
   - COMMANDED_EQUIV_RATIO
   - O2_WR_LAMBDA_S1
   min_achieved_rate_hz: 3.0
+  max_tuple_skew_s: null
   requires_tune_revision: true
   builtin_revision: 1
   # Diverged from the seed on purpose (bank-2 lambda removed above), so the
@@ -92,6 +102,7 @@ profiles:
   description: All-DID tuning capture (session held open)
   experimental: false
   mode01: {}
+  mode01_batch_groups: []
   mode22:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
@@ -104,24 +115,28 @@ profiles:
   - ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_COOLANT_TEMP
+  mode22_rate_weights:
+    ECM_COOLANT_TEMP: 0.06666666666666667
   mode01_enabled: false
   mode22_enabled: true
   did_interval_seconds: null
+  did_cycle_seconds: null
   round_timestamps: true
   target_rate_hz: 15.0
   did_continuous: true
   bus_budget_override: 180.0
-  expected_total_demand_hz: 165.0
-  capacity_evidence: 'Active transport is single-DID (`obd_did_batch_max_dids: 1`):
-    11 DIDs x 15 Hz = 165 diagnostic requests/s fallback demand. 2026-08-04
-    KOEO bench: a four-DID single-request rotation ran 8 s at 658 reads/s,
-    zero failures, p50 1.09 ms. The 2026-08-07 25-minute drive achieved 14.93
-    Hz/channel; its exact request/frame accounting predates C09 and remains
-    unverified until C10.'
+  priority_channels: null
+  expected_total_demand_hz: 151.0
+  capacity_evidence: '2026-08-04 bench: 658 DID reads/s. 10 DIDs x 15 Hz + ECM_COOLANT_TEMP
+    x 1 Hz = 151 reads/s. The 2026-09-10 H8 drive sustained 116.8 req/s with 11 DIDs
+    at 10.4 Hz each, 41 timeouts in 167,885 requests and 0 bus errors, so the ECM
+    is not the binding constraint; coolant''s 15 Hz share was simply wasted (0.2 %
+    of its samples changed while it took 1/11 of the budget).'
   required_tuple: []
   min_achieved_rate_hz: 12.0
+  max_tuple_skew_s: null
   requires_tune_revision: true
-  builtin_revision: 1
+  builtin_revision: 3
   operator_modified: false
   broadcast_decode: true
   corpus_eligible: false
@@ -141,6 +156,7 @@ profiles:
     and validate injector PW as the fuel-edit instrument'
   experimental: true
   mode01: {}
+  mode01_batch_groups: []
   mode22:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
@@ -149,13 +165,16 @@ profiles:
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_INTAKE_AIR_TEMP
   - ECM_MAF_GPS
+  mode22_rate_weights: {}
   mode01_enabled: false
   mode22_enabled: true
   did_interval_seconds: null
+  did_cycle_seconds: null
   round_timestamps: true
   target_rate_hz: 20.0
   did_continuous: true
   bus_budget_override: 160.0
+  priority_channels: null
   expected_total_demand_hz: 140.0
   capacity_evidence: 'Active transport is single-DID (`obd_did_batch_max_dids: 1`):
     7 DIDs x 20 Hz = 140 diagnostic requests/s fallback demand. Best-case three-DID
@@ -179,6 +198,7 @@ profiles:
   # 150 samples per rung — far more than the fit needs. Range, not rate, is the
   # binding constraint on this experiment.
   min_achieved_rate_hz: 15.0
+  max_tuple_skew_s: null
   # Injector PW and BFS both move with a fuel edit, so a capture whose
   # calibration is unrecorded cannot be compared with any other.
   requires_tune_revision: true
@@ -204,6 +224,7 @@ profiles:
     COMMANDED_EQUIV_RATIO: 1.0
     FUEL_STATUS: 1.0
     O2_WR_LAMBDA_S1: 1.0
+  mode01_batch_groups: []
   mode22:
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
@@ -214,6 +235,7 @@ profiles:
   - ECM_INTAKE_CAM_ANGLE_MEASURED_B
   - ECM_THROTTLE_POS_SENSOR_1
   - ECM_MAF_GPS
+  mode22_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: 0.25
@@ -225,6 +247,7 @@ profiles:
   target_rate_hz: 4.0
   did_continuous: false
   bus_budget_override: 90.0
+  priority_channels: null
   expected_total_demand_hz: 68.0
   capacity_evidence: '2026-08-07 drive (25 min, _capture-tuning-hybrid-research-2026-08-07T170918):
     the fast exit works and Mode 01 survives a full drive, but delivered rate is far
@@ -235,6 +258,7 @@ profiles:
     median separation), so restrict to steady state for cross-mode pairings.'
   required_tuple: []
   min_achieved_rate_hz: null
+  max_tuple_skew_s: null
   requires_tune_revision: false
   builtin_revision: 0
   operator_modified: false
@@ -261,6 +285,7 @@ profiles:
     FUEL_STATUS: 1.0
     ENGINE_LOAD: 1.0
     TIMING_ADVANCE: 1.0
+  mode01_batch_groups: []
   mode22:
   - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
@@ -287,6 +312,7 @@ profiles:
   target_rate_hz: 4.0
   did_continuous: false
   bus_budget_override: 90.0
+  priority_channels: null
   expected_total_demand_hz: 40.0
   capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 6 DIDs x 2 Hz = 40 channel reads/s,
     plus 2 session requests per 0.5 s cycle (~44 req/s unbatched) against the 90 req/s
@@ -300,6 +326,7 @@ profiles:
     revision (per-channel cadence, pairing skew, loss deltas, quality verdict).'
   required_tuple: []
   min_achieved_rate_hz: null
+  max_tuple_skew_s: null
   requires_tune_revision: true
   builtin_revision: 0
   # Vehicle-specific research profile naming this ECM's DIDs; the generic seed
@@ -326,6 +353,7 @@ profiles:
     FUEL_STATUS: 1.0
     ENGINE_LOAD: 1.0
     TIMING_ADVANCE: 1.0
+  mode01_batch_groups: []
   mode22:
   - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
@@ -354,6 +382,7 @@ profiles:
   target_rate_hz: 4.0
   did_continuous: false
   bus_budget_override: 90.0
+  priority_channels: null
   expected_total_demand_hz: 42.0
   capacity_evidence: 'Derived from fuel-target-research (2026-09-18, 39 req/s achieved,
     0 drops): 7 Mode 01 PIDs x 4 Hz + 7 DIDs x 2 Hz = 42 channel reads/s; cycle 0.5 s
@@ -361,6 +390,7 @@ profiles:
     with this revision''s own 20-min evidence.'
   required_tuple: []
   min_achieved_rate_hz: null
+  max_tuple_skew_s: null
   requires_tune_revision: true
   builtin_revision: 0
   # Vehicle-specific research profile naming this ECM's DIDs; the generic seed
@@ -393,6 +423,7 @@ profiles:
     BAROMETRIC_PRESSURE: 0.25
     SHORT_FUEL_TRIM_1: 0.5
     LONG_FUEL_TRIM_1: 0.25
+  mode01_batch_groups: []
   mode22:
   - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
@@ -447,6 +478,7 @@ profiles:
     O2_WR_LAMBDA_S1: 1.0
     FUEL_STATUS: 1.0
     CONTROL_MODULE_VOLTAGE: 1.0
+  mode01_batch_groups: []
   mode22:
   - ECM_RPM
   - ECM_AIR_CHARGE
@@ -502,9 +534,11 @@ profiles:
     - MAF
     - THROTTLE_POS
   mode22: []
+  mode22_rate_weights: {}
   mode01_enabled: true
   mode22_enabled: false
   did_interval_seconds: null
+  did_cycle_seconds: null
   round_timestamps: false
   target_rate_hz: 20.0
   did_continuous: false

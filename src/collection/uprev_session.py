@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from src.collection.uprev_protocol import STREAM_DATA_PREFIX
 from src.collection.uprev_usb import UpRevUsbError, UpRevUsbTransport
 
 _CABLE_INFO = bytes.fromhex("08")
@@ -84,6 +85,23 @@ def _negative_response(payload: bytes) -> UpRevNegativeResponseError | None:
     if len(payload) >= 5 and payload[:3] == bytes.fromhex("66037f"):
         return UpRevNegativeResponseError(payload[3], payload[4], payload)
     return None
+
+
+def _is_stale_reply(payload: bytes, identifier: int) -> bool:
+    """Whether ``payload`` is a complete reply to some *earlier* request.
+
+    The cable can leave a finished stream reply or a previous DID reply queued
+    ahead of the reply just requested; the hardware reproduced this on
+    2026-09-20 after a bulk-write timeout. Those two shapes are recognisable —
+    a stream reply carries the ``61 81`` data prefix, and a value read echoes
+    ``62 <identifier>`` — so they can be drained. Anything else, malformed
+    replies included, belongs to this request and must still surface.
+    """
+    if len(payload) < 5 or payload[0] != 0x66:
+        return False
+    if payload[2:4] == STREAM_DATA_PREFIX:
+        return True
+    return payload[2] == 0x62 and payload[3:5] != identifier.to_bytes(2, "big")
 
 
 def parse_did_response(payload: bytes, identifier: int, *, checksummed: bool = True) -> bytes:
@@ -361,6 +379,8 @@ class UpRevDiagnosticSession:
                     continue
                 if last == bytes.fromhex("7f04"):
                     break
+                if _is_stale_reply(last, identifier):
+                    continue
                 return parse_did_response(last, identifier)
             if attempt < 2:
                 time.sleep(0.05)

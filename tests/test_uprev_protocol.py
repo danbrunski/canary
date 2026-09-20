@@ -18,6 +18,7 @@ from src.collection.uprev_protocol import (
     parse_memory_byte_stream_definition,
     parse_stream_data,
     parse_stream_definition,
+    parse_stream_descriptors,
     parse_stream_response,
 )
 
@@ -50,12 +51,31 @@ def test_stream_decoder_resynchronizes_after_leading_noise() -> None:
     assert decoder.discarded_bytes == 5
 
 
-def test_stream_decoder_rejects_bad_outer_checksum() -> None:
+def test_stream_decoder_counts_bad_outer_checksum_without_raising() -> None:
     decoder = UprvStreamDecoder()
     wire = bytearray(encode_message(b"\x07"))
     wire[11] = 0x08
-    with pytest.raises(UprvProtocolError, match="checksum mismatch"):
-        decoder.feed(bytes(wire))
+
+    assert decoder.feed(bytes(wire)) == []
+    assert decoder.checksum_failures == 1
+    assert decoder.discarded_bytes == len(wire)
+
+
+def test_stream_decoder_keeps_good_frames_around_a_corrupt_one() -> None:
+    """One bad frame must not discard its neighbours in the same read.
+
+    A capture is one continuous stream, so raising here would end a
+    15,000-sample road run over a single corrupted frame and take the
+    already-decoded replies with it.
+    """
+    corrupt = bytearray(encode_message(b"\x07"))
+    corrupt[11] = 0x08
+    decoder = UprvStreamDecoder()
+
+    messages = decoder.feed(encode_message(b"\x06") + bytes(corrupt) + encode_message(b"\x05"))
+
+    assert [message.payload for message in messages] == [b"\x06", b"\x05"]
+    assert decoder.checksum_failures == 1
 
 
 def test_fixture_definitions_round_trip() -> None:
@@ -83,6 +103,37 @@ def test_mixed_definition_preserves_did_then_memory_order() -> None:
     ) == bytes.fromhex("0200ac8102120102121a83ffff26be83ffff26bf")
 
 
+def test_captured_mixed_definition_preserves_memory_then_did_order() -> None:
+    payload = build_mixed_stream_definition(
+        [0x1207, 0x1225, 0x1226, 0x1208, 0x1206],
+        [0xFFFF26BE, 0xFFFF26BF],
+        memory_first=True,
+    )
+    assert payload == bytes.fromhex("0200ac8183ffff26be83ffff26bf021207021225021226021208021206")
+    assert parse_stream_descriptors(payload) == (
+        ("memory_byte", 0xFFFF26BE),
+        ("memory_byte", 0xFFFF26BF),
+        ("did", 0x1207),
+        ("did", 0x1225),
+        ("did", 0x1226),
+        ("did", 0x1208),
+        ("did", 0x1206),
+    )
+
+
+def test_captured_mixed_reply_decodes_in_descriptor_order() -> None:
+    payload = bytes.fromhex("660e6181400000c001a801ba14ec00c71b")
+    assert parse_stream_data(payload, [1, 1, 2, 2, 2, 2, 2]) == (
+        b"\x40",
+        b"\x00",
+        b"\x00\xc0",
+        b"\x01\xa8",
+        b"\x01\xba",
+        b"\x14\xec",
+        b"\x00\xc7",
+    )
+
+
 def test_target_afr_memory_reply_decodes_in_descriptor_order() -> None:
     # 0x4000 was returned in all 525 captured Target AFR samples.
     payload = bytes.fromhex("66046181400026")
@@ -92,6 +143,19 @@ def test_target_afr_memory_reply_decodes_in_descriptor_order() -> None:
 def test_memory_definition_rejects_did_descriptor() -> None:
     with pytest.raises(UprvProtocolError, match="malformed memory-stream descriptors"):
         parse_memory_byte_stream_definition(bytes.fromhex("0200ac81021208"))
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ("0200ac810212", "truncated DID descriptor"),
+        ("0200ac8183ffff26", "truncated memory descriptor"),
+        ("0200ac818212", "unsupported stream descriptor"),
+    ],
+)
+def test_mixed_descriptor_parser_rejects_malformed_payload(payload: str, message: str) -> None:
+    with pytest.raises(UprvProtocolError, match=message):
+        parse_stream_descriptors(bytes.fromhex(payload))
 
 
 def test_fixture_stream_responses_decode() -> None:

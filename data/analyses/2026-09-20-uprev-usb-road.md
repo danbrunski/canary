@@ -161,8 +161,35 @@ The later Linux JSONL captures and comparison output were preserved beside
 the Windows PCAPNG evidence as `linux-target-*.jsonl/json` in the external
 capture directory documented by `docs/uprev-usb-kline-research.md`.
 
+A later Windows combined capture independently exercised the reverse mixed
+descriptor order: both Target AFR RAM bytes first, then injector B2, A/F B1,
+A/F B2, BFS, and injector B1. All 387 replies were checksum-valid. Its 131
+zero-target observations put both injector pulses at 0.45-0.49 ms and both
+wideband sensors at the 5.065 V lean rail, reproducing the fuel-cut
+interpretation with both banks in the same ECU reply.
+
+### DIDs 0x1206/0x1207 — injector pulse width and scale
+
+The isolated operator-selected definitions directly identify `0x1206` as
+Bank 1 and `0x1207` as Bank 2. An UpRev autosave CSV overlapping the Bank 2
+PCAP supplies the engineering-unit known answer. All 481 ordered display rows
+equal the corresponding raw reply times `0.01` within the CSV's 0.05 ms
+precision. `compare_channels` at a 10 ms policy gave 312 same-instant pairs,
+`r2=0.995112`, slope `0.0100504 ms/count`, and offset `-0.00325 ms`; this pins
+the intended conversion to `raw * 0.01 ms` for both bank registers. Injector
+dead time is still not established by this result.
+
 ## Rejected or still-open readings
 
+- A later 7,886-reply same-stream screen covered a transition from nonzero
+  coarse RPM/load to 3,425 replies with both at zero. It strengthens the
+  structural pairing of `0x1123/0x1124`, `0x1125/0x1126`, `0x114E/0x114F`,
+  and `0x1159/0x115A`, but does not identify them. In the zero-RPM state the
+  four pairs settled respectively at `100/100`, `99/99`, `250/250`, and
+  `0/0`; during nonzero RPM their ranges were `88..125/89..125`,
+  `95..101/94..105`, `63..250/74..250`, and `0..24/0..20`. Pairwise
+  `compare_channels` results were unresolved, so these are discriminating
+  observations for a future operator-labelled capture, not decoded channels.
 - `0x120D/0x120E` looked like pedal voltage in a 31-second slice
   (`r2≈0.978`) but fell to `r2≈0.24` over 5,000 pairs with an unstable scale.
   They remain the existing pedal candidates; this drive does not identify or

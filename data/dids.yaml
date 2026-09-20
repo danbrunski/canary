@@ -513,6 +513,15 @@ dids:
     unit: V
     confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-combined-fuel
+        method: operator_selected_uprev_mixed_dynamic_stream
+        finding: >
+          Direct USB evidence: the combined UpRev stream placed descriptor
+          `02 12 26` immediately after the Bank 1 `02 12 25` descriptor.
+          All 387 combined replies were checksum-valid; this value spanned
+          raw 57-1,013 (0.285-5.065 V) and tracked Bank 1 at r=0.994601 with
+          median raw difference zero. This resolves the missing definition in
+          the earlier Bank 2-only PCAP and directly confirms the paired DID.
       - session: 2026-05-16T223328
         method: four_state_plus_nt510_name
         finding: x0.005 ≈ 2.15 V; NT510 "A/F sen1 b2" = 2.15. Pairs with 0x1225 (≈ equal banks).
@@ -574,20 +583,31 @@ dids:
     response_length: 2
     response_length_source: 'UpRev USB dynamic stream selected as injector pulse Bank 1; 621 checksum-valid replies on 2026-09-20, all exactly 2 bytes.'
     byte_order: big
-    scale: null          # 0.01 ms/count is a hypothesis (~260-290 cc/min); not pinned
-    offset: null
-    unit: unknown
-    confidence: medium   # identity and Bank 1 mapping confirmed; ms scale remains unverified
+    scale: 0.01
+    offset: 0.0
+    unit: ms
+    confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-inj-pulse-b2
+        method: pcap_to_uprev_autosave_same_instant_pairing
+        finding: >
+          UpRev autosave `autosave_2026-09-20 13_48_55Z.csv` overlaps the
+          Bank 2 PCAP. Pairing the 482 raw replies with 481 displayed
+          `INJ PULSE-B2 (ms)` rows through compare_channels gave 312 pairs
+          within 10 ms, r2=0.995112, slope=0.0100504 ms/count, and
+          offset=-0.00325 ms. Sequence-order comparison was stronger: all
+          481 displayed values equal raw*0.01 within the CSV's 0.05 ms
+          display precision (458 equal Python round(raw*0.01, 1) exactly).
+          This pins the intended conversion to 0.01 ms/count. CSV SHA-256:
+          d154b64c4db5931e3bdaf7edf82dda63a7309396a52ad6353937d432a3f69b2b.
       - session: _uprev-usb-2026-09-20-inj-pulse-b1
         method: operator_selected_uprev_dynamic_stream
         finding: >
           Direct USB evidence: the operator-selected UpRev injector-pulse
           Bank 1 item emitted definition `02 00 ac 81 02 12 06`. All 621
           request/reply pairs were checksum-valid and raw values spanned
-          156-803. The range is consistent with the 0.01 ms/count hypothesis
-          (1.56-8.03 ms), but the PCAP does not contain displayed values and
-          therefore does not pin that scale.
+          156-803 (1.56-8.03 ms). The paired Bank 2 UpRev autosave pins the
+          common injector conversion at 0.01 ms/count.
       - session: _capture-fuel-pw-research-2026-09-18T200809
         method: matched_air_charge_enrichment_prediction
         finding: >
@@ -616,8 +636,8 @@ dids:
       reading was wrong; this engine has no MAP sensor). UpRev's directly
       captured operator-selected definition now confirms this is Bank 1.
       The compatibility name still uses "_1" because trained artifacts and
-      stored telemetry already depend on it. The ms scale and injector dead
-      time remain unverified.
+      stored telemetry already depend on it. The 0.01 ms/count scale is now
+      directly pinned; injector dead time remains unverified.
 
   - did: 0x1207
     name: ECM_INJECTOR_PULSE_2
@@ -626,20 +646,28 @@ dids:
     response_length: 2
     response_length_source: 'UpRev USB dynamic stream selected as injector pulse Bank 2; 482 checksum-valid replies on 2026-09-20, all exactly 2 bytes.'
     byte_order: big
-    scale: null
-    offset: null
-    unit: unknown
-    confidence: medium   # identity and Bank 2 mapping confirmed; ms scale remains unverified
+    scale: 0.01
+    offset: 0.0
+    unit: ms
+    confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-inj-pulse-b2
+        method: pcap_to_uprev_autosave_same_instant_pairing
+        finding: >
+          Direct display-scale confirmation from UpRev's own autosave: all
+          481 displayed Bank 2 values equal the ordered PCAP raw replies times
+          0.01 within the CSV's 0.05 ms display precision. Same-instant
+          compare_channels pairing at 10 ms gave n=312, r2=0.995112,
+          slope=0.0100504, and offset=-0.00325 ms. CSV SHA-256:
+          d154b64c4db5931e3bdaf7edf82dda63a7309396a52ad6353937d432a3f69b2b.
       - session: _uprev-usb-2026-09-20-inj-pulse-b2
         method: operator_selected_uprev_dynamic_stream
         finding: >
           Direct USB evidence: the operator-selected UpRev injector-pulse
           Bank 2 item emitted definition `02 00 ac 81 02 12 07`. All 482
           request/reply pairs were checksum-valid and raw values spanned
-          51-755. The range is consistent with the 0.01 ms/count hypothesis
-          (0.51-7.55 ms), but the PCAP does not contain displayed values and
-          therefore does not pin that scale.
+          51-755 (0.51-7.55 ms). The overlapping UpRev autosave directly pins
+          the conversion at 0.01 ms/count.
       - session: _capture-fuel-pw-research-2026-09-18T200809
         method: matched_air_charge_enrichment_prediction
         finding: >
@@ -656,7 +684,8 @@ dids:
       Injected pulse, renamed 2026-09-18 from ECM_INTAKE_PRESSURE_1207 (that
       reading was wrong). UpRev's directly captured operator-selected
       definition confirms this is Bank 2. The compatibility name remains
-      "_2"; scale and dead time remain open. See 0x1206.
+      "_2". The 0.01 ms/count scale is directly pinned; injector dead time
+      remains open. See 0x1206.
 
   - did: 0x1201
     name: ECM_RPM_COARSE
@@ -750,7 +779,11 @@ dids:
     offset: 0.0
     unit: km/h
     confidence: high
-    plausible_min: 30.0
+    # The clamp itself decodes to 533 x 0.05625 = 29.98125 km/h, and
+    # is_plausible compares strictly, so a 30.0 floor marks every stopped
+    # sample of this DID implausible -- the exact boundary this entry exists
+    # to document.
+    plausible_min: 29.9
     plausible_max: 250.0
     evidence:
       - session: _uprev-usb-2026-09-20-road

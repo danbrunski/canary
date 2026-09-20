@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal, TypeAlias
 
 MAGIC = b"UPRV"
 HEADER_LENGTH = 12
@@ -21,6 +22,8 @@ STREAM_POLL = bytes.fromhex("020021810401")
 STREAM_RESPONSE_PREFIX = bytes.fromhex("66")
 STREAM_DATA_PREFIX = bytes.fromhex("6181")
 MEMORY_BYTE_DESCRIPTOR = 0x83
+
+StreamDescriptor: TypeAlias = tuple[Literal["did", "memory_byte"], int]
 
 
 class UprvProtocolError(ValueError):
@@ -59,6 +62,7 @@ class UprvStreamDecoder:
     def __init__(self) -> None:
         self._buffer = bytearray()
         self.discarded_bytes = 0
+        self.checksum_failures = 0
 
     def feed(self, data: bytes) -> list[UprvMessage]:
         self._buffer.extend(data)
@@ -89,9 +93,15 @@ class UprvStreamDecoder:
             expected = int.from_bytes(frame[10:12], "big")
             actual = sum(payload) & 0xFFFF
             if actual != expected:
-                raise UprvProtocolError(
-                    f"UPRV checksum mismatch: calculated 0x{actual:04x}, received 0x{expected:04x}"
-                )
+                # Drop the corrupt frame and keep going. Raising here would
+                # discard the valid envelopes already decoded from this same
+                # read and, because a long capture is a single stream, would
+                # end a 15,000-sample road run over one bad frame. Corruption
+                # stays visible through ``checksum_failures``, which capture
+                # tooling reports alongside ``discarded_bytes``.
+                self.checksum_failures += 1
+                self.discarded_bytes += frame_length
+                continue
             messages.append(UprvMessage(payload=payload, reserved=frame[6:10]))
 
 
@@ -134,19 +144,59 @@ def build_memory_byte_stream_definition(addresses: Sequence[int]) -> bytes:
     return STREAM_DEFINITION_PREFIX + bytes(descriptors)
 
 
-def build_mixed_stream_definition(identifiers: Sequence[int], addresses: Sequence[int]) -> bytes:
-    """Build one ordered DID-then-memory definition for paired observations.
+def build_mixed_stream_definition(
+    identifiers: Sequence[int],
+    addresses: Sequence[int],
+    *,
+    memory_first: bool = False,
+) -> bytes:
+    """Build one mixed DID/memory definition for paired observations.
 
-    Both descriptor encodings are capture-proven independently.  Keeping the
-    two typed input sequences makes descriptor ordering and response splitting
-    explicit while allowing a live experiment to determine whether the cable
-    accepts both forms in one dynamic definition.
+    Captures prove that the cable accepts both DID-then-memory and
+    memory-then-DID order. Response values follow descriptor order, so callers
+    must select the order explicitly when splitting the reply.
     """
     if not identifiers or not addresses:
         raise UprvProtocolError("mixed stream definition needs DIDs and memory addresses")
     did_definition = build_stream_definition(identifiers)
     memory_definition = build_memory_byte_stream_definition(addresses)
+    if memory_first:
+        return memory_definition + did_definition[len(STREAM_DEFINITION_PREFIX) :]
     return did_definition + memory_definition[len(STREAM_DEFINITION_PREFIX) :]
+
+
+def parse_stream_descriptors(payload: bytes) -> tuple[StreamDescriptor, ...]:
+    """Parse DID and absolute-memory descriptors without losing their order."""
+    if not payload.startswith(STREAM_DEFINITION_PREFIX):
+        raise UprvProtocolError("not an UpRev stream-definition payload")
+
+    encoded = payload[len(STREAM_DEFINITION_PREFIX) :]
+    if not encoded:
+        raise UprvProtocolError("stream definition has no descriptors")
+
+    descriptors: list[StreamDescriptor] = []
+    offset = 0
+    while offset < len(encoded):
+        kind = encoded[offset]
+        if kind == 2:
+            end = offset + 3
+            if end > len(encoded):
+                raise UprvProtocolError(f"truncated DID descriptor at offset {offset}")
+            descriptors.append(("did", int.from_bytes(encoded[offset + 1 : end], "big")))
+        elif kind == MEMORY_BYTE_DESCRIPTOR:
+            end = offset + 5
+            if end > len(encoded):
+                raise UprvProtocolError(f"truncated memory descriptor at offset {offset}")
+            descriptors.append(("memory_byte", int.from_bytes(encoded[offset + 1 : end], "big")))
+        else:
+            raise UprvProtocolError(
+                f"unsupported stream descriptor 0x{kind:02x} at offset {offset}"
+            )
+        offset = end
+
+    if len(set(descriptors)) != len(descriptors):
+        raise UprvProtocolError("stream definition contains duplicate descriptors")
+    return tuple(descriptors)
 
 
 def parse_stream_definition(payload: bytes) -> tuple[int, ...]:
@@ -159,8 +209,12 @@ def parse_stream_definition(payload: bytes) -> tuple[int, ...]:
     identifiers: list[int] = []
     for offset in range(0, len(descriptors), 3):
         if descriptors[offset] != 2:
+            # 0x02 is the addressing-mode tag, not a value width: DID 0x1101
+            # rides an 02 descriptor and answers with a single byte. Widths
+            # come from the catalog, which is why parse_stream_response needs
+            # them passed in.
             raise UprvProtocolError(
-                f"unsupported descriptor width {descriptors[offset]} at offset {offset}"
+                f"unsupported descriptor tag 0x{descriptors[offset]:02x} at offset {offset}"
             )
         identifiers.append(int.from_bytes(descriptors[offset + 1 : offset + 3], "big"))
     if len(set(identifiers)) != len(identifiers):

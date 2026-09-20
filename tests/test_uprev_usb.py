@@ -101,7 +101,10 @@ def test_strip_ftdi_status_from_every_packet() -> None:
 
 
 def test_strip_ftdi_status_rejects_one_byte_packet() -> None:
-    with pytest.raises(UprvProtocolError, match="two status bytes"):
+    # UpRevUsbError, not UprvProtocolError: this is a transport failure, and
+    # the session bootstrap and probe retry loop only catch the transport
+    # family. A ValueError here escapes them and kills the capture.
+    with pytest.raises(UpRevUsbError, match="two status bytes"):
         strip_ftdi_status(b"\x10")
 
 
@@ -168,6 +171,26 @@ def test_short_bulk_write_is_refused() -> None:
 
     with pytest.raises(UpRevUsbError, match="short UpRev USB write"):
         transport.send(b"\x07")
+
+
+def test_receive_reports_framing_failure_as_a_transport_error() -> None:
+    """Protocol errors must not cross the transport boundary as ValueError.
+
+    UprvProtocolError is a ValueError; the session bootstrap and the probe's
+    retry loop only catch (TimeoutError, UpRevUsbError). Anything else escapes
+    both and ends a capture with a bare traceback.
+    """
+    device = _Device([b"\x10\x00" + encode_message(b"\x06")])
+    transport, _usb_util = _transport(device)
+    transport.open()
+
+    def _explode(_data: bytes) -> list[object]:
+        raise UprvProtocolError("synthetic framing failure")
+
+    transport._decoder.feed = _explode  # type: ignore[method-assign]
+
+    with pytest.raises(UpRevUsbError, match="framing failed"):
+        transport.receive()
 
 
 def test_exchange_requires_an_open_transport() -> None:

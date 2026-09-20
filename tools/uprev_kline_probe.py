@@ -27,6 +27,7 @@ from src.collection.uprev_protocol import (
 from src.collection.uprev_session import (
     UpRevDiagnosticSession,
     UpRevNegativeResponseError,
+    UpRevSessionError,
     supported_dids,
 )
 from src.collection.uprev_usb import UpRevUsbError, UpRevUsbTransport
@@ -68,7 +69,15 @@ def _address(value: str) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--serial", default="12345678")
+    parser.add_argument(
+        "--serial",
+        default=None,
+        help=(
+            "FTDI serial of the cable to open. Omit it when exactly one "
+            "UpRev cable is attached; the serial of any one rig is not a "
+            "usable default for a shared tool."
+        ),
+    )
     parser.add_argument(
         "--scan-supported",
         action="store_true",
@@ -154,11 +163,35 @@ class _Emitter:
             path.parent.mkdir(parents=True, exist_ok=True)
             self._handle = path.open("x", encoding="utf-8")
 
-    def emit(self, kind: str, **fields: object) -> None:
+    def emit(self, kind: str, *, started_ns: int | None = None, **fields: object) -> None:
+        """Write one JSONL row, timestamped at the acquisition instant.
+
+        ``started_ns`` is when the request went out. Given it, the row is
+        stamped at the MIDPOINT of the exchange rather than at completion:
+        the ECU sampled the value somewhere inside the round trip, so
+        stamping the end biases every row late by a full K-line round trip
+        (~20 ms median). That is the same order as the pairing tolerances
+        these captures are compared at, and a constant bias is invisible in
+        the median-separation check, so it cannot be caught downstream.
+
+        ``latency_ms`` is derived here rather than at each call site, and
+        ``started_ns`` is kept, so a consumer can re-derive either edge.
+        """
+        completed_ns = time.time_ns()
+        timing: dict[str, object] = {}
+        if started_ns is None:
+            acquired_ns = completed_ns
+        else:
+            acquired_ns = (started_ns + completed_ns) // 2
+            timing = {
+                "started_ns": started_ns,
+                "latency_ms": (completed_ns - started_ns) / 1_000_000,
+            }
         row = {
-            "timestamp": datetime.now(UTC).isoformat(),
-            "time_ns": time.time_ns(),
+            "timestamp": datetime.fromtimestamp(acquired_ns / 1e9, UTC).isoformat(),
+            "time_ns": acquired_ns,
             "kind": kind,
+            **timing,
             **fields,
         }
         line = json.dumps(row, separators=(",", ":"))
@@ -189,7 +222,7 @@ def _scan(
                 raw=raw.hex(),
                 raw_int=int.from_bytes(raw, "big"),
                 width=len(raw),
-                latency_ms=(time.time_ns() - started_ns) / 1_000_000,
+                started_ns=started_ns,
             )
             widths[identifier] = len(raw)
         except UpRevNegativeResponseError as exc:
@@ -198,7 +231,18 @@ def _scan(
                 did=f"0x{identifier:04x}",
                 service=f"0x{exc.service:02x}",
                 nrc=f"0x{exc.code:02x}",
-                latency_ms=(time.time_ns() - started_ns) / 1_000_000,
+                started_ns=started_ns,
+            )
+        except UpRevSessionError as exc:
+            # A persistent 7f04, a timeout, or a checksum/identifier mismatch
+            # is about this one identifier. Letting it propagate would abort a
+            # sweep of several hundred DIDs, force another ~10 s bootstrap,
+            # and on the final attempt lose the whole capture.
+            emitter.emit(
+                "did_error",
+                did=f"0x{identifier:04x}",
+                error=str(exc),
+                started_ns=started_ns,
             )
     return widths
 
@@ -224,7 +268,7 @@ def _stream(
         emitter.emit(
             "stream_sample",
             sequence=sequence,
-            latency_ms=(time.time_ns() - started_ns) / 1_000_000,
+            started_ns=started_ns,
             values={
                 f"0x{identifier:04x}": {
                     "raw": raw.hex(),
@@ -255,7 +299,7 @@ def _memory_byte_stream(
         emitter.emit(
             "memory_stream_sample",
             sequence=sequence,
-            latency_ms=(time.time_ns() - started_ns) / 1_000_000,
+            started_ns=started_ns,
             values={
                 f"0x{address:08x}": {"raw": raw.hex(), "raw_int": raw[0], "width": 1}
                 for address, raw in zip(addresses, readings, strict=True)
@@ -291,7 +335,7 @@ def _mixed_stream(
         emitter.emit(
             "mixed_stream_sample",
             sequence=sequence,
-            latency_ms=(time.time_ns() - started_ns) / 1_000_000,
+            started_ns=started_ns,
             dids={
                 f"0x{identifier:04x}": {
                     "raw": raw.hex(),
@@ -340,7 +384,14 @@ def _run_once(args: argparse.Namespace, emitter: _Emitter) -> None:
 
 def main() -> int:
     args = parse_args()
-    emitter = _Emitter(args.out, quiet=args.quiet)
+    try:
+        emitter = _Emitter(args.out, quiet=args.quiet)
+    except OSError as exc:
+        # --out refuses to clobber an existing capture. Re-running after a
+        # failed drive is the common case, so report it as an error rather
+        # than a bare FileExistsError traceback.
+        print(f"uprev_kline_probe: cannot open --out: {exc}", file=sys.stderr)
+        return 1
     try:
         for attempt in range(1, args.attempts + 1):
             try:

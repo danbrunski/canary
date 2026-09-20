@@ -74,7 +74,7 @@ def strip_ftdi_status(data: bytes, *, packet_size: int = UPREV_USB_PACKET_SIZE) 
     for offset in range(0, len(data), packet_size):
         packet = data[offset : offset + packet_size]
         if len(packet) < 2:
-            raise UprvProtocolError(
+            raise UpRevUsbError(
                 f"FTDI bulk-IN packet has {len(packet)} byte; two status bytes are required"
             )
         payload.extend(packet[2:])
@@ -279,7 +279,14 @@ class UpRevUsbTransport:
                     continue
                 raise UpRevUsbError(f"UpRev USB bulk read failed: {exc}") from exc
             application_data = strip_ftdi_status(raw)
-            self._pending.extend(self._decoder.feed(application_data))
+            try:
+                self._pending.extend(self._decoder.feed(application_data))
+            except UprvProtocolError as exc:
+                # UprvProtocolError is a ValueError, so without this it would
+                # sail past every `except (TimeoutError, UpRevUsbError)` in
+                # the session bootstrap and the probe retry loop and abort a
+                # capture with a bare traceback.
+                raise UpRevUsbError(f"UpRev USB framing failed: {exc}") from exc
             if self._pending:
                 return self._pending.popleft()
 

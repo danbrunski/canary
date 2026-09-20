@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from src.collection.uprev_protocol import UprvMessage
 from src.collection.uprev_session import (
+    UpRevDiagnosticSession,
     UpRevNegativeResponseError,
     UpRevSessionError,
     build_did_request,
@@ -56,3 +58,59 @@ def test_supported_dids_expands_masks_but_excludes_next_group_bit() -> None:
 def test_supported_dids_requires_four_byte_masks() -> None:
     with pytest.raises(UpRevSessionError, match="expected 4"):
         supported_dids({0x1100: b"\x80"})
+
+
+class _FakeTransport:
+    """Replays a fixed reply queue; records what was sent."""
+
+    def __init__(self, replies: list[bytes]) -> None:
+        self._replies = list(replies)
+        self.sent: list[bytes] = []
+
+    def send(self, payload: bytes) -> None:
+        self.sent.append(payload)
+
+    def receive(self, *, timeout_seconds: float = 1.0) -> UprvMessage:
+        if not self._replies:
+            raise TimeoutError("no more replies")
+        return UprvMessage(payload=self._replies.pop(0))
+
+
+def test_read_did_drains_a_stale_reply_for_a_previous_did() -> None:
+    """A queued reply for an earlier DID is not this request's answer.
+
+    The cable leaves complete replies queued after a bulk-write timeout
+    (reproduced on hardware 2026-09-20). Treating one as a fatal identifier
+    mismatch fails a read that would otherwise have succeeded.
+    """
+    transport = _FakeTransport(
+        [
+            bytes.fromhex("6604621103a721"),  # stale: answers 0x1103
+            bytes.fromhex("6604621104b833"),  # the reply actually requested
+        ]
+    )
+    session = UpRevDiagnosticSession(transport)  # type: ignore[arg-type]
+
+    assert session.read_did(0x1104) == b"\xb8"
+    assert len(transport.sent) == 1
+
+
+def test_read_did_drains_a_stale_stream_reply() -> None:
+    transport = _FakeTransport(
+        [
+            bytes.fromhex("6605618100d88d4c"),  # stale dynamic-stream reply
+            bytes.fromhex("6604621103a721"),
+        ]
+    )
+    session = UpRevDiagnosticSession(transport)  # type: ignore[arg-type]
+
+    assert session.read_did(0x1103) == b"\xa7"
+
+
+def test_read_did_still_surfaces_a_malformed_reply() -> None:
+    """Draining must not swallow a genuinely broken answer to this request."""
+    transport = _FakeTransport([bytes.fromhex("6604621103a720")] * 3)
+    session = UpRevDiagnosticSession(transport)  # type: ignore[arg-type]
+
+    with pytest.raises(UpRevSessionError, match="checksum mismatch"):
+        session.read_did(0x1103)

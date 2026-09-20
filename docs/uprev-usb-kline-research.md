@@ -48,6 +48,7 @@ outside Git:
 | `uprev-afr_wb_bank2.pcapng` | `2d5367edc69f61948010675475081d2e240a5b153619fab507a4eb41c7659b64` | A/F wideband Bank 2; capture begins after its definition |
 | `uprev-inj_pulse_b1.pcapng` | `fe39ed2584bfb7c4e5aed6129ed4fb9e65202b12f4f111ecb3d53163789c486c` | injector pulse Bank 1, directly defining DID `0x1206` |
 | `uprev-inj_pulse_b2.pcapng` | `0b32c43d4bac84fd17e8a6894822a599498a97883aab7ba4ed2f4410e60a3dd8` | injector pulse Bank 2, directly defining DID `0x1207` |
+| `uprev-inj_pulse-af_wb-bfs-afr.pcapng` | `bc31a91fdf5ab45838fd951fb408d40850b4f706c5e3e8dddb6cbae9f57a8a14` | combined Target AFR, both injector pulses, both A/F sensors, and BFS |
 
 Windows location:
 
@@ -86,6 +87,9 @@ Capture facts:
 - Injector pulse Bank 2: 22,162 packets, 1,401,560 bytes, 14.500860 s;
   490 OUT and 491 IN UPRV messages; zero discarded bytes or envelope-checksum
   failures.
+- Combined fuel/AFR: 26,523 packets, 1,672,192 bytes, 20.135170 s; 408 OUT
+  and 409 IN UPRV messages; zero discarded bytes or envelope-checksum
+  failures. All 387 combined stream replies also passed the inner checksum.
 
 Compact, sanitized application transcripts and an aggregate descriptor/control
 transfer fixture are committed under `tests/fixtures/uprev_usb/`. The PCAPNG
@@ -233,11 +237,20 @@ inj pulse B1 02 00 ac 81 02 12 06
 inj pulse B2 02 00 ac 81 02 12 07
 ```
 
-The A/F WB Bank 2 and ignition-timing captures start after logging was already
-active. They contain valid sample replies and polls but not the preceding
-definition, so the definition cannot be recovered from those PCAPNG files.
-This is an evidence limitation, not a parser failure. Start USBPcap before
-clicking UpRev's logging start control when the exact descriptor is required.
+The later combined capture proves that RAM and DID descriptors may coexist and
+that descriptor order is reply-value order across descriptor types:
+
+```text
+02 00 ac 81
+83 ff ff 26 be  83 ff ff 26 bf
+02 12 07  02 12 25  02 12 26  02 12 08  02 12 06
+```
+
+This is Target AFR's two RAM bytes first, followed by DIDs `0x1207`, `0x1225`,
+`0x1226`, `0x1208`, and `0x1206`. The individual A/F WB Bank 2 and ignition
+captures started after logging was already active, so their definitions are
+absent from those files. The combined capture now resolves Bank 2 as `0x1226`;
+ignition was not included and remains unresolved.
 
 Definitions can also contain absolute-memory byte descriptors. Target AFR used
 two consecutive descriptors, each encoded as `83` followed by a 32-bit
@@ -281,8 +294,8 @@ universal shared-code assumptions:
 | `0x1201` | 2, big-endian | engine speed | `raw * 12.5` rpm |
 | `0x1208` | 2, big-endian | BFS | approximately `raw / 2040..2048` ms; exact divisor unresolved |
 | `0x1225` | 2, big-endian | A/F WB Bank 1 | `raw * 0.005` V (existing independently pinned scale) |
-| `0x1206` | 2, big-endian | injector pulse Bank 1 | likely `raw * 0.01` ms; scale still provisional |
-| `0x1207` | 2, big-endian | injector pulse Bank 2 | likely `raw * 0.01` ms; scale still provisional |
+| `0x1206` | 2, big-endian | injector pulse Bank 1 | `raw * 0.01` ms (directly pinned against UpRev display export) |
+| `0x1207` | 2, big-endian | injector pulse Bank 2 | `raw * 0.01` ms (directly pinned against UpRev display export) |
 | `0x1125` | 1 | unknown | raw 95–99 in this capture |
 
 The coolant conversion is pinned to the UpRev display, not inferred from a
@@ -355,6 +368,12 @@ when the final target is zero. A straight-line `compare_channels` fit is
 unresolved (`r2=0.078`) precisely because the measured transform is piecewise
 and clamped; the raw per-reply equality above is the applicable result.
 
+The Windows combined capture independently reproduced this result over 387
+same-reply observations: the RAM word covered zero plus 21 nonzero states from
+`0x4000` through `0x4a00` (phi 1.000000–1.156250). All 131 zero-target samples
+put both injector registers at raw 45–49 while both A/F sensors reached the
+5.065 V lean rail, directly identifying fuel cut.
+
 The addresses are ROM/calibration-specific vehicle-profile facts. Do not put
 them in shared protocol code or assume another ECU exposes the same RAM map.
 
@@ -370,24 +389,28 @@ text.
 |---|---|---:|---:|---:|---:|---|
 | IGN TIMING (BTDC) | missing | 484 | 47.577 Hz | 19.454 ms | 69–112, 1 byte | `110 - raw` gives -2..41 degrees, but identifier and scale remain unproven from this file |
 | A/F WB Bank 1 | DID `0x1225` | 472 | 46.244 Hz | 19.478 ms | 217–749 | existing `raw * 0.005` scale gives 1.085–3.745 V |
-| A/F WB Bank 2 | missing; inferred `0x1226` | 664 | 47.211 Hz | 19.463 ms | 276–696 | existing `raw * 0.005` scale gives 1.380–3.480 V |
-| injector pulse Bank 1 | DID `0x1206` | 621 | 46.796 Hz | 19.505 ms | 156–803 | provisional `raw * 0.01` gives 1.56–8.03 ms |
-| injector pulse Bank 2 | DID `0x1207` | 482 | 46.149 Hz | 19.496 ms | 51–755 | provisional `raw * 0.01` gives 0.51–7.55 ms |
+| A/F WB Bank 2 | missing here; later combined definition proves `0x1226` | 664 | 47.211 Hz | 19.463 ms | 276–696 | existing `raw * 0.005` scale gives 1.380–3.480 V |
+| injector pulse Bank 1 | DID `0x1206` | 621 | 46.796 Hz | 19.505 ms | 156–803 | `raw * 0.01` gives 1.56–8.03 ms |
+| injector pulse Bank 2 | DID `0x1207` | 482 | 46.149 Hz | 19.496 ms | 51–755 | `raw * 0.01` gives 0.51–7.55 ms |
 
 The Bank 1 A/F capture is direct transport-level confirmation that UpRev's
 selected item uses DID `0x1225`; its voltage scale was already independently
-pinned by NT510 and earlier cross-transport comparisons. Bank 2 has the same
-two-byte shape and expected range as the established `0x1226` paired DID, but
-the missing definition means this particular file only corroborates that
-assignment rather than proving it.
+pinned by NT510 and earlier cross-transport comparisons. The later combined
+definition directly confirms Bank 2 as the established paired DID `0x1226`.
 
 The injector captures directly bind UpRev's operator-selected Bank 1 and Bank
 2 items to `0x1206` and `0x1207`, respectively. This is stronger evidence for
 the bank ordering than the prior fuel-behavior work, which had established an
-injected-pulse pair but deliberately left its bank ordering open. The numeric
-ranges are consistent with the existing 0.01 ms/count hypothesis, but a PCAP
-does not contain UpRev's displayed engineering value. Treat the bank mapping
-as direct operator-labelled evidence and the millisecond scale as provisional.
+injected-pulse pair but deliberately left its bank ordering open. UpRev also
+wrote `autosave_2026-09-20 13_48_55Z.csv` during the Bank 2 capture. Its 481
+displayed `INJ PULSE-B2 (ms)` rows align in sequence with 481 PCAP replies;
+every display value equals `raw * 0.01` within the CSV's 0.05 ms precision,
+and 458 equal Python's one-decimal rounding exactly. The sanctioned
+same-instant comparison at a 10 ms tolerance produced 312 pairs,
+`r2=0.995112`, slope `0.0100504 ms/count`, and offset `-0.00325 ms`.
+That independently pins the shared injector scale to `0.01 ms/count`. The
+CSV SHA-256 is
+`d154b64c4db5931e3bdaf7edf82dda63a7309396a52ad6353937d432a3f69b2b`.
 
 The ignition capture begins with a stream reply before its first captured
 poll, proving that capture began mid-stream. Its one-byte raw values produce a
@@ -397,6 +420,41 @@ already documents why steady-state correlation with the one-byte A/F-heater
 block is misleading. Re-capture ignition with USBPcap running before logging
 starts; preferably include a fast throttle transient and record a few exact
 UpRev display/raw pairs.
+
+## Combined fuel/AFR stream
+
+The first combined reply was:
+
+```text
+66 0e 61 81 40 00 00 c0 01 a8 01 ba 14 ec 00 c7 1b
+            -----  ----- ----- ----- ----- -----
+            target 1207  1225  1226  1208  1206
+```
+
+The target occupies two one-byte RAM descriptors; every DID occupies two
+bytes. Across 387 replies at 31.951 Hz, median request/reply latency was
+29.564 ms (24.011–49.497 ms). This compares with about 46–49 Hz and 19.5 ms
+for the single-value streams, quantifying the throughput cost of the larger
+ECU read rather than indicating packet loss.
+
+| Value | Raw range | Unique values | Interpretation |
+|---|---:|---:|---|
+| Target AFR RAM word | 0–18,944 | 22 | zero in fuel cut; otherwise Q14 phi 1.000000–1.156250 |
+| `0x1207` injector B2 | 45–1,128 | 146 | 0.45–11.28 ms at x0.01 ms/count |
+| `0x1225` A/F B1 | 68–1,013 | 205 | 0.340–5.065 V |
+| `0x1226` A/F B2 | 57–1,013 | 197 | 0.285–5.065 V |
+| `0x1208` BFS | 3,355–30,218 | 340 | approximately 1.64–14.81 ms under the unresolved /2040..2048 scale |
+| `0x1206` injector B1 | 45–1,146 | 156 | 0.45–11.46 ms at x0.01 ms/count |
+
+The two injector registers track at Pearson `r=0.999347`; their raw difference
+has median zero. The A/F voltage pair tracks at `r=0.994601`, also with median
+raw difference zero. During the 131 zero-target samples, both injector values
+had median raw 47 and both A/F sensors had median raw 1,013 (5.065 V lean
+rail), directly identifying those intervals as fuel cut. Meanwhile BFS
+remained nonzero at median raw 3,620. This single synchronized stream therefore
+reproduces the repository's prior conclusions that `0x1206/0x1207` are the
+injected pulses while `0x1208` is the air-charge/base-fuel-schedule coordinate
+and does not collapse during fuel cut.
 
 `0x1125` appeared in all three isolated runs, but the earlier stream proves it
 is not inherently required. Its identity remains open.
