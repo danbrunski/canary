@@ -275,6 +275,13 @@ def request_verdict(request: Any) -> Eligibility:
     # still pass); nothing else is guessed.
     kind = str(getattr(request, "kind", None) or "pid")
     channel = str(getattr(request, "channel", ""))
+    # A memory request may be a WINDOW: one read carrying several channels,
+    # named after the window rather than any one of them. Matching the
+    # profile's selection against that name finds nothing, which silently
+    # dropped every windowed read on the vehicle. The members are on the
+    # request, so ask them instead of parsing the name.
+    memory_read = getattr(request, "memory_read", None)
+    names = tuple(c.name for c in memory_read.channels) if memory_read is not None else (channel,)
     with _lock:
         profile = _profile
         paused = _paused
@@ -283,7 +290,7 @@ def request_verdict(request: Any) -> Eligibility:
         kind,
         classify_profile(profile),
         "none",
-        selection=_selection_exclusion(profile, aliases, kind, channel),
+        selection=_selection_exclusion(profile, aliases, kind, channel, names),
         paused=paused,
     )
 
@@ -294,7 +301,12 @@ def classify_profile(profile: CaptureProfile) -> ProfileClass:
         return "continuous_did"
     if profile.name == "default":
         return "default"
-    if profile.mode22 and profile.mode22_enabled:
+    # Memory channels count: a service-0x23 read holds the same 0xC0
+    # session as Mode 22, so a profile selecting only memory channels still
+    # owns the session. Classifying it `focused_mode01` made every one of
+    # its reads ineligible — a profile that cannot run the only requests it
+    # asks for.
+    if (profile.mode22 or profile.memory) and profile.mode22_enabled:
         return "mode22_owning"
     return "focused_mode01"
 
@@ -311,14 +323,22 @@ def selection_exclusion(kind: str, channel: str) -> str | None:
 
 
 def _selection_exclusion(
-    profile: CaptureProfile, aliases: dict[str, str], kind: str, channel: str
+    profile: CaptureProfile,
+    aliases: dict[str, str],
+    kind: str,
+    channel: str,
+    names: tuple[str, ...] = (),
 ) -> str | None:
     if kind == "memory":
         # Same session, so the same enable flag governs both.
         if not profile.mode22_enabled:
             return "mode22_disabled"
-        name = channel.split(":", 1)[-1].upper()
-        if name in {item.upper() for item in profile.memory}:
+        selected = {item.upper() for item in profile.memory}
+        candidates = names or (channel.split(":", 1)[-1],)
+        # One read is issued if ANY member is selected; the collector decodes
+        # only what the catalog names, so an unselected neighbour in the same
+        # window costs nothing and is not emitted.
+        if any(name.split(":", 1)[-1].upper() in selected for name in candidates):
             return None
         return "not_selected"
     if kind == "did":

@@ -409,3 +409,63 @@ def test_a_window_may_not_mix_calibrations() -> None:
                 "memory": [_TARGET_WINDOWED.model_dump(), other.model_dump()],
             }
         )
+
+
+def test_a_windowed_request_is_admitted_by_its_members(monkeypatch) -> None:
+    """A window is named after the window, not any one channel it carries.
+
+    Matching the profile's selection against that name finds nothing, which
+    silently dropped every windowed read on the vehicle — the capture ran,
+    the daemon reported the profile active, and zero `mem:` rows landed.
+    """
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    profile = CaptureProfile(
+        name="research",
+        mode22_enabled=True,
+        memory=("ECM_TARGET_EQUIV_RATIO",),
+        storage_prefix="_capture-research",
+    )
+    tuning_profile.activate(profile)
+    try:
+        read = plan_memory_reads([_TARGET_WINDOWED, _PERIOD])[0]
+        request = _PollRequest(
+            kind="memory",
+            service=0x23,
+            identifier=0,
+            request_id=0x7E0,
+            channel="mem:fuel_target",  # the window, not a channel
+            memory_read=read,
+        )
+        assert tuning_profile.request_verdict(request).eligible is True
+    finally:
+        tuning_profile.set_active(False)
+
+
+def test_a_windowed_request_with_no_selected_member_is_refused(monkeypatch) -> None:
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    profile = CaptureProfile(
+        name="research",
+        mode22_enabled=True,
+        memory=("SOMETHING_ELSE",),
+        storage_prefix="_capture-research",
+    )
+    tuning_profile.activate(profile)
+    try:
+        read = plan_memory_reads([_TARGET_WINDOWED, _PERIOD])[0]
+        request = _PollRequest(
+            kind="memory",
+            service=0x23,
+            identifier=0,
+            request_id=0x7E0,
+            channel="mem:fuel_target",
+            memory_read=read,
+        )
+        verdict = tuning_profile.request_verdict(request)
+        assert verdict.eligible is False
+        assert verdict.reason == "not_selected"
+    finally:
+        tuning_profile.set_active(False)
