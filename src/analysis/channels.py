@@ -19,6 +19,15 @@ least once during the 2026-08 tuning campaign:
   vehicle: the 3.8 % measured-AFR disagreement between UpRev's conversion and
   the ECM's own λ is exactly the kind of thing that must not be blurred by
   filing both under one name.
+* ``mem:`` — service-0x23 (ReadMemoryByAddress) channels, numeric and
+  already in engineering units. Its own namespace rather than ``obd:``
+  because the trust differs: a DID number is a contract the ECU keeps across
+  calibrations, while a RAM address is an artifact of one ROM build, and a
+  reader has to be able to tell which kind of channel it is holding. The
+  companion ``mem:<NAME>_SENTINEL`` channel carries the declared
+  no-measurement states (fuel cut, for the commanded-phi word) as a sparse
+  indicator: a row exists exactly where the ECU reported one, so "commanding
+  nothing" is a value you can pair against rather than a gap in the data.
 * ``gps:`` — the GPS receiver's own fields (``speed``, ``heading``,
   ``altitude``, …), numeric and in engineering units. Also a separate
   instrument, and the only road-speed reference in a Mode 22-only tuning
@@ -55,7 +64,7 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps"]
+SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "mem"]
 
 _RAW_UNIT = "counts"
 
@@ -93,9 +102,9 @@ def parse_spec(text: str) -> ChannelSpec:
     name = name.strip()
     if not name:
         raise ChannelSpecError(f"channel spec {text!r} has no channel name")
-    if source not in ("obd", "did", "decoded", "can", "uprev", "gps"):
+    if source not in ("obd", "did", "decoded", "can", "uprev", "gps", "mem"):
         raise ChannelSpecError(
-            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev/gps"
+            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev/gps/mem"
         )
     return ChannelSpec(source=source, name=name, text=raw)  # type: ignore[arg-type]
 
@@ -402,6 +411,30 @@ def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.D
     return out.dropna(subset=["value"])
 
 
+def _memory_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
+    """``mem:`` — service-0x23 channels, scaled at collection.
+
+    The collector applies the catalog's scale before the reading is stored
+    (unlike ``did:``, whose payload is kept as hex), so this is a select and
+    a coerce. The stored channel keeps its ``mem:`` prefix, which is what
+    distinguishes it from a Mode 01 channel of the same name.
+
+    A ``_SENTINEL`` row has no numeric value — it is a declared *state*, not
+    a measurement, and scaling the fuel-cut word would put a phi of 0.0 into
+    every mean that followed. It is surfaced as a 1.0 indicator with unit
+    ``"flag"`` so the instants stay pairable while remaining impossible to
+    mistake for a reading.
+    """
+    channel = frame["channel"].astype("string")
+    rows = frame[(frame["source"] == "obd") & (channel == f"mem:{spec.name}")]
+    out = rows.loc[:, ["timestamp"]].copy()
+    numeric = pd.to_numeric(rows["value_number"], errors="coerce")
+    text = rows["value_text"].astype("string")
+    out["value"] = numeric.where(numeric.notna(), text.notna().map({True: 1.0, False: None}))
+    out["unit"] = rows["unit"].astype("string").fillna("").where(numeric.notna(), "flag")
+    return out.dropna(subset=["value"])
+
+
 def _did_series(frame: pd.DataFrame, spec: ChannelSpec, catalogs: _Catalogs) -> pd.DataFrame:
     entry = catalogs.did(spec.name)
     channel = f"DID_{entry.did:04X}"
@@ -539,6 +572,7 @@ def read_channels(
         "obd": lambda s: _numeric_series(frame, s, "obd"),
         "uprev": lambda s: _numeric_series(frame, s, "uprev"),
         "gps": lambda s: _numeric_series(frame, s, "gps"),
+        "mem": lambda s: _memory_series(frame, s),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),
         "can": lambda s: _can_series(frame, s, catalogs),

@@ -44,19 +44,25 @@ providers:
   - {role: cam_command, spec: 'did:ECM_INTAKE_CAM_ANGLE_COMMANDED'}
   - {role: cam_measured, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED'}
   - {role: cam_measured_b, spec: 'did:ECM_INTAKE_CAM_ANGLE_MEASURED_B'}
-  # Commanded AFR has NO Mode 22 provider, and that is the single biggest gap
-  # in the all-DID workflow. It is declared here pointing at the Mode 01 PID so
-  # the capability report *names* it as unavailable on a tuning capture. Left
-  # out, build_tuning_frame reported nine roles all available on the 2026-08-06
-  # capture — a clean all-green summary of a session that could not answer the
-  # fuel question at all, because delivery error needs a commanded target and
-  # Mode 01 cannot run alongside Mode 22 on this ECM.
+  # Commanded AFR was the single biggest gap in the all-DID workflow, and it
+  # is closed. It never had a Mode 22 provider because it is not a DID at all:
+  # the ECM's FINAL commanded equivalence ratio is a Q14 word at RAM address
+  # 0xFFFF26BE, read with service 0x23 (data/dids.yaml `memory:`). Mode 01
+  # could not supply it on a tuning capture — Mode 01 and Mode 22 are mutually
+  # exclusive on this ECM — which is why this role sat declared-but-absent.
   #
-  # A missing role must be visible as missing. Promote this to a `did:` spec if
-  # a Mode 22 target-AFR identifier is ever bound; the search signature is a
-  # value that holds at stoich through closed-loop cruise and drops during the
-  # WOT windows.
-  - {role: commanded_afr, spec: 'obd:COMMANDED_AFR'}
+  # Two properties this provider has that PID 0x44 did not:
+  #   * Direction is pinned by its own known-answer chain, so it does not
+  #     consult `commanded_equiv_ratio_convention` (still `unverified`, and
+  #     invisible in closed loop by construction).
+  #   * Fuel cut is a separate `_SENTINEL` channel rather than a number, so
+  #     cut samples cannot dilute a delivery-error mean.
+  #
+  # DID 0x1134 is NOT a substitute: it is the floor-clamped, low-resolution
+  # rich-side view and holds at raw 64 during fuel cut, so it cannot tell cut
+  # from stoich. The channel is withheld automatically on any calibration
+  # other than the one the address was verified against.
+  - {role: commanded_afr, spec: 'mem:ECM_TARGET_EQUIV_RATIO', transform: equiv_ratio_afr}
 
 # How to recognise wide-open throttle from the operator_demand role alone,
 # for captures that carry no Mode 01 load PID and no physical pull tags.

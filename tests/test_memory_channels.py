@@ -8,9 +8,14 @@ located it (data/analyses/2026-09-20-uprev-usb-road.md).
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+from src.analysis.channels import parse_spec, read_channels
+from src.analysis.tuning_frame import Provider, build_tuning_frame
 from src.collection.can_obd_client import ObdResponse
 from src.collection.can_obd_collector import _decode_response
 from src.collection.isotp import build_memory_read_payload
@@ -188,3 +193,91 @@ def test_fuel_cut_is_reported_not_dropped() -> None:
 def test_short_response_decodes_to_nothing() -> None:
     response = _response("40")
     assert _decode_response(_request(), response, timestamp=1.0) == []
+
+
+# --------------------------------------------------------------------------
+# Analysis path: reading `mem:` channels and turning phi into a commanded AFR.
+# --------------------------------------------------------------------------
+
+
+def _session_frame() -> pd.DataFrame:
+    """Rows shaped like a stored session: one reading, one fuel-cut state."""
+    return pd.DataFrame(
+        [
+            {
+                "timestamp": pd.Timestamp("2026-09-20T22:36:28Z"),
+                "source": "obd",
+                "channel": "mem:ECM_TARGET_EQUIV_RATIO",
+                "value_number": 1.1640625,
+                "value_text": None,
+                "unit": "phi",
+                "value_bool": None,
+                "payload": None,
+                "metadata_json": None,
+            },
+            {
+                "timestamp": pd.Timestamp("2026-09-20T22:36:29Z"),
+                "source": "obd",
+                "channel": "mem:ECM_TARGET_EQUIV_RATIO_SENTINEL",
+                "value_number": None,
+                "value_text": "fuel cut / no AFR target",
+                "unit": "",
+                "value_bool": None,
+                "payload": None,
+                "metadata_json": None,
+            },
+        ]
+    )
+
+
+def test_mem_namespace_parses() -> None:
+    assert parse_spec("mem:ECM_TARGET_EQUIV_RATIO").source == "mem"
+
+
+def test_reads_the_scaled_value_from_a_session() -> None:
+    out = read_channels(_session_frame(), ["mem:ECM_TARGET_EQUIV_RATIO"])
+
+    assert len(out) == 1
+    assert out.iloc[0]["value"] == pytest.approx(1.1640625)
+    assert out.iloc[0]["unit"] == "phi"
+
+
+def test_sentinel_reads_as_a_pairable_indicator_not_a_measurement() -> None:
+    """Fuel cut must be an instant you can pair against, in units you cannot
+    mistake for phi."""
+    out = read_channels(_session_frame(), ["mem:ECM_TARGET_EQUIV_RATIO_SENTINEL"])
+
+    assert len(out) == 1
+    assert out.iloc[0]["value"] == 1.0
+    assert out.iloc[0]["unit"] == "flag"
+
+
+def test_commanded_afr_provider_converts_phi_to_afr(tmp_path: Path) -> None:
+    """The role that was declared-but-absent for the whole all-DID campaign."""
+    registry = tmp_path / "providers.yaml"
+    registry.write_text(
+        "schema_version: 1\n"
+        "providers:\n"
+        "  - role: commanded_afr\n"
+        "    spec: 'mem:ECM_TARGET_EQUIV_RATIO'\n"
+        "    transform: equiv_ratio_afr\n"
+    )
+    session = tmp_path / "session"
+    session.mkdir()
+    _session_frame().to_parquet(session / "telemetry-0001.parquet")
+
+    frame = build_tuning_frame(session, providers_path=registry).values
+
+    assert frame["commanded_afr"].dropna().iloc[0] == pytest.approx(12.63, abs=0.01)
+    # The instrument reading survives the conversion, as it does for voltage.
+    assert frame["commanded_afr_equiv_ratio"].dropna().iloc[0] == pytest.approx(1.1640625)
+
+
+def test_equiv_ratio_provider_may_not_claim_a_unit() -> None:
+    with pytest.raises(ValidationError, match="always produces AFR"):
+        Provider(
+            role="commanded_afr",
+            spec="mem:X",
+            transform="equiv_ratio_afr",
+            unit="phi",
+        )

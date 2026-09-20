@@ -53,7 +53,7 @@ class Provider(BaseModel):
 
     role: Role
     spec: str
-    transform: Literal["identity", "voltage_afr", "scale"] = "identity"
+    transform: Literal["identity", "voltage_afr", "scale", "equiv_ratio_afr"] = "identity"
     confidence: Literal["confirmed", "candidate"] = "confirmed"
     #: Multiplier for ``transform: scale`` (engineering = raw * factor).
     factor: float | None = None
@@ -82,7 +82,12 @@ class Provider(BaseModel):
                         f"{' and '.join(missing)} — a candidate factor without its "
                         "envelope and derivation invites being quoted outside them"
                     )
-        elif self.factor is not None:
+        if self.transform == "equiv_ratio_afr" and self.unit:
+            raise ValueError(
+                f"{self.role}: transform 'equiv_ratio_afr' always produces AFR; "
+                "a unit here could only disagree with what it returns"
+            )
+        if self.transform != "scale" and self.factor is not None:
             raise ValueError(
                 f"{self.role}: factor is only meaningful with transform 'scale' "
                 f"(transform is {self.transform!r})"
@@ -152,6 +157,7 @@ def build_tuning_frame(
     providers_path: Path,
     calibration: AfrCalibration | None = None,
     allow_candidates: bool = False,
+    afr_stoich: float = 14.7,
 ) -> TuningFrame:
     """Resolve semantic roles without embedding vehicle DID names in callers.
 
@@ -213,6 +219,22 @@ def build_tuning_frame(
             values[f"{role}_censored"] = values[role].le(transfer.censored_floor_afr) | values[
                 role
             ].ge(transfer.censored_ceiling_afr)
+        elif provider.transform == "equiv_ratio_afr":
+            # phi is fuel/air, so AFR = stoich / phi. No convention flag is
+            # consulted here, unlike Mode 01 PID 0x44: this channel's
+            # direction is pinned by its own known-answer chain (word 0x4A80
+            # -> phi 1.1640625 -> 12.63 AFR, reproducing the PID 0x44 value
+            # observed at DID 0x1134 = 74). See data/dids.yaml.
+            #
+            # Fuel cut does not appear here at all. The ECU commands no
+            # target then, and the collector records that on the companion
+            # `_SENTINEL` channel rather than as a number, so the hand
+            # filtering the 2026-08-04 K-step analysis needed (`TARGET AFR <
+            # 13.5`, to keep closed-loop samples from diluting the result)
+            # is no longer load-bearing for excluding cut samples.
+            phi = pd.to_numeric(values[role], errors="coerce")
+            values[f"{role}_equiv_ratio"] = phi
+            values[role] = afr_stoich / phi.where(phi > 0)
         elif provider.transform == "scale":
             assert provider.factor is not None  # guaranteed by Provider's validator
             values[f"{role}_raw"] = values[role]

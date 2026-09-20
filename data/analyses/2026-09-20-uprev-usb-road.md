@@ -311,3 +311,30 @@ broadcast fields for injector pulse, BFS, A/F voltage, or final target AFR.
 These rejections are part of the result: each looked convincing by r² alone,
 and each would have become a wrong binding without the stability and
 cross-session checks.
+
+### Scheduled memory channel — first live daemon run
+
+The recurring service-0x23 path had never run against the vehicle; only the
+one-shot probe and `tools/can_memory_log.py` had. Validated 2026-09-20 22:36Z,
+engine running at ~2,500 rpm in closed-loop highway cruise, daemon build
+`23685fad`:
+
+- `POST /control/capture` with `fuel-target-research` activated the profile
+  with `memory: ['ECM_TARGET_EQUIV_RATIO']` resolved from the catalog.
+- 75 s produced **83 `mem:ECM_TARGET_EQUIV_RATIO` rows** in
+  `_capture-fuel-target-research-2026-09-20T223628`, unit `phi`, all 1.000000
+  — stoich, which is the correct commanded target for closed-loop cruise and
+  agrees with the four-state RAM observations at `0x4000`.
+- Observed ~1.1 Hz against the profile's 0.5 s DID cycle, i.e. the channel is
+  taking a window slot like any DID rather than running free.
+- No `_SENTINEL` rows: the window held steady throttle, so no decel fuel cut
+  occurred. The sentinel path is therefore still unexercised on the vehicle —
+  it needs a capture containing a trailing-throttle event.
+
+Analysis chain on the pulled session (laptop, not the Pi):
+`read_channels(..., ['mem:ECM_TARGET_EQUIV_RATIO'])` returned the 83 samples
+in engineering units, and `build_tuning_frame` reported
+`commanded_afr: available` for the first time, converting phi 1.0 to 14.7 AFR
+while retaining `commanded_afr_equiv_ratio`. The remaining roles read
+`no samples`, which is correct: this profile polls six DIDs and none of the
+cam or injector channels.
