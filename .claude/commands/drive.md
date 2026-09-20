@@ -20,6 +20,12 @@ Discovery and code changes happen only when they move the outcome or fix a
 defect seen this drive. The plain drive on the `default` profile is what the
 models train on, so it wins ties.
 
+**A drive is a live test bench.** Its scarce resource is a collector under
+real load that you can change and re-verify within minutes. Prefer work only
+that can do — loss under load, recovery paths, a fix checked against its own
+counters — over work that waits on the driver for a precise maneuver. Those
+experiments are driver-limited and came back "unresolved" most often.
+
 ## Talking to the operator
 
 Never ask a question that blocks you. You may post one-line maneuver
@@ -143,6 +149,12 @@ its own criteria frozen before its data.
   depends on the unsettled reference unresolved.
 - A pass needs the span of the measured quantity itself (kPa of baro, not
   metres climbed; enriched seconds, not pulls attempted).
+- **A/B on the road is matched blocks, alternated.** One window per condition
+  is a lead, not a result: driving differs between windows. Run A-B-A-B on
+  comparable road and load, ≥ 10 min each, with counters scoped to the block,
+  and report every side of a trade (a change that halves frame loss and
+  breaks same-instant pairing is not a win). Land a changed default only if
+  the prompt authorises it; otherwise ship it behind a flag that defaults off.
 - Pull only CLOSED sessions, with
   `ssh <pi> 'cd <sessions> && nice -n 19 ionice -c3 tar cf - <dir>' | tar xf -`,
   and analyse on the laptop within minutes of the block closing: known answer
@@ -175,7 +187,8 @@ its own criteria frozen before its data.
   it — never while an isolated capture or a maneuver set is running. Hash
   verified, drive window reopened, unhealthy after 3 min → revert and
   redeploy, two failures → stop deploying. Say what the restart can and
-  cannot prove.
+  cannot prove. A restart costs corpus continuity and the sequence model's
+  window: at most one per 30 min unless verifying a fix, none during a block.
 - **Retire what you disproved.** Stale claims in memory and docs are
   corrected or deleted, not layered over.
 - **Record coverage.** Log which operating modes and barometric pressures
@@ -198,6 +211,9 @@ its own criteria frozen before its data.
   profiles from the road. Catalog candidates at the lowest confidence rung,
   and only where a task says so. Never compare aggregates.
 - Passive mode always with a TTL; disarm it when the block ends.
+- No `/boot/firmware` edit and no Pi reboot from the road unless the prompt
+  names the stop: a Pi that fails to boot loses the drive. Rank boot-config
+  candidates in the driveway, where idle bus traffic is enough.
 - The trip-end digest refuses sessions over its row budget (see
   `DIGEST_PEAK_BYTES_PER_ROW`; ~13.6 min of `default` driving as of
   2026-09-18). Until D03.6 lands: when the operator says they are ~10 min
