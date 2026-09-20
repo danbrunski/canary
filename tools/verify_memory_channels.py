@@ -18,6 +18,16 @@ sufficient -- a moved address lands inside them far too easily.
 Read-only. It sends DiagnosticSessionControl (0x10), ReadMemoryByAddress
 (0x23) and ReadDataByIdentifier (0x22), and nothing else. There is no write
 path and no arbitrary-service escape hatch.
+
+Run it as a module from the repo root -- ``python tools/verify_...py`` puts
+``tools/`` on ``sys.path`` instead of the repo, and the sibling imports below
+then fail::
+
+    # daemon passive first; this tool owns the diagnostic session while it runs
+    curl -X POST -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
+      -H 'Content-Type: application/json' -d '{"enabled":true,"ttl_seconds":120}' \
+      http://localhost:8000/control/passive
+    .venv/bin/python -m tools.verify_memory_channels --config /etc/canary/canary.yaml
 """
 
 from __future__ import annotations

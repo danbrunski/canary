@@ -371,3 +371,24 @@ executes end to end on real driving data, not that fuelling is 2 % lean.
 The `fueling_inactive` gate dropped zero rows, which is the designed
 behaviour rather than a gate that failed to fire: fuel cut produces no row on
 the target channel at all, so cut samples never entered the frame.
+
+### Address re-verification, run live
+
+`tools/verify_memory_channels.py` was run against the ECM on the same drive
+(daemon passive with a 120 s TTL, build `7f4fcb85`):
+
+```text
+PASS  ECM_TARGET_EQUIV_RATIO   10/10 agreed   known-answer relation held on every read
+```
+
+The check is structural, not a plausibility bound: it reads the RAM word and
+DID `0x1134` back to back in the held session and asserts
+`0x1134 raw == max(64, word >> 8)`. A moved address keeps answering and keeps
+decoding inside `plausible_min`/`plausible_max`, so bounds alone would accept
+it; the relation is what a moved word stops satisfying. `--record-revision`
+re-stamps `verified_tune_revision` only when every channel passes, which is
+what makes the post-flash step a command rather than a hand edit someone has
+to remember.
+
+The daemon returned to `engine_running` with 0.02 s OBD freshness after the
+passive window closed.
