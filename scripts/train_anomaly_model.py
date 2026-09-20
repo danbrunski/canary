@@ -62,9 +62,11 @@ from src.preprocessing import (
 )
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
+    FeaturePolicy,
     build_feature_frame,
     build_feature_spec,
     featurize_wide_frame,
+    resolve_feature_policy,
 )
 from src.preprocessing.feature_pipeline import (
     isolation_forest_feature_columns as _if_feature_columns,
@@ -85,8 +87,20 @@ def train(
     feature_cache_dir: Path | None = None,
     rebuild_feature_cache: bool = False,
     calibration_sessions: Sequence[Path] | None = None,
+    calibration_frame: pd.DataFrame | None = None,
+    feature_policy: FeaturePolicy | None = None,
 ) -> TrainedIsolationForest:
-    """Build features, fit the per-mode IF + scaler, write artifact + manifest."""
+    """Build features, fit the per-mode IF + scaler, write artifact + manifest.
+
+    ``calibration_frame`` is the already-built feature frame of the held-out
+    sessions (``scripts/retrain.py`` builds it once for every detector); when
+    omitted it is built here from ``calibration_sessions``.
+    """
+    policy = (
+        feature_policy
+        if feature_policy is not None
+        else resolve_feature_policy(config, bindings_path=bindings_path)
+    )
     features = (
         feature_frame
         if feature_frame is not None
@@ -102,7 +116,7 @@ def train(
     # per-row detector to score on (see MIN_ISOLATION_FOREST_COVERAGE). The
     # sequence trainer deliberately does NOT apply this — GRU-D consumes
     # missingness as signal.
-    feature_columns = _if_feature_columns(features)
+    feature_columns = _if_feature_columns(features, policy=policy)
     if not feature_columns:
         raise ValueError(
             "no trainable feature columns — the sessions produced no numeric "
@@ -114,11 +128,11 @@ def train(
         features,
         config.models.isolation_forest,
         feature_columns=feature_columns,
-        feature_spec=build_feature_spec(features, feature_columns, config=config),
+        feature_spec=build_feature_spec(features, feature_columns, config=config, policy=policy),
         fitted_at=datetime.now(UTC),
         calibration_frame=(
-            None
-            if not calibration_sessions
+            calibration_frame
+            if calibration_frame is not None or not calibration_sessions
             else build_feature_frame(
                 calibration_sessions,
                 config,

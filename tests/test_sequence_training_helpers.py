@@ -133,3 +133,79 @@ def test_error_distribution_quantile_threshold() -> None:
     )
     with pytest.raises(ValueError, match="threshold_quantile"):
         error_distribution(values, threshold_k=3.0, threshold_quantile=1.5)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20: a one-session calibration must say it is one session
+# ---------------------------------------------------------------------------
+
+
+def test_calibration_holdout_report_flags_fewer_than_three_sessions(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from src.models.sequence_autoencoder_training import _calibration_holdout_report
+    from src.models.sequence_registry import LSTM_TRAINING_BACKEND, MIN_CALIBRATION_SESSIONS
+
+    with caplog.at_level(logging.WARNING, logger="src.models.sequence_autoencoder_training"):
+        report = _calibration_holdout_report(
+            LSTM_TRAINING_BACKEND,
+            used=("2026-09-18T134345",),
+            requested=["2026-09-18T134345", "2026-09-18T213818", "2026-08-06T162657"],
+        )
+    assert MIN_CALIBRATION_SESSIONS == 3
+    assert report == {
+        "sessions_requested": ["2026-09-18T134345", "2026-09-18T213818", "2026-08-06T162657"],
+        "sessions_used": ["2026-09-18T134345"],
+        # Asked for and silently absent is its own kind of empty.
+        "sessions_without_windows": ["2026-08-06T162657", "2026-09-18T213818"],
+        "recommended_minimum_sessions": 3,
+        "below_recommended_minimum": True,
+    }
+    assert any("1 held-out session" in record.getMessage() for record in caplog.records)
+
+
+def test_calibration_holdout_report_is_quiet_for_a_full_pooled_set(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    from src.models.sequence_autoencoder_training import _calibration_holdout_report
+    from src.models.sequence_registry import LSTM_TRAINING_BACKEND
+
+    with caplog.at_level(logging.WARNING, logger="src.models.sequence_autoencoder_training"):
+        report = _calibration_holdout_report(
+            LSTM_TRAINING_BACKEND, used=("a", "b", "c"), requested=None
+        )
+    assert report["below_recommended_minimum"] is False
+    assert report["sessions_without_windows"] == []
+    assert not caplog.records
+
+
+def test_sequence_manifest_round_trips_calibration_holdout_and_tolerates_its_absence() -> None:
+    from src.models.sequence_registry import SequenceAutoencoderManifest
+
+    payload = {
+        "artifact_format_version": 1,
+        "model_type": "lstm_autoencoder",
+        "model_version": "v",
+        "created_at": "2026-09-20T00:00:00Z",
+        "training_data_hash": "sha256:x",
+        "training_sessions": ["s"],
+        "input_windows": 1,
+        "train_windows": 1,
+        "validation_windows": 0,
+        "best_epoch": 1,
+        "best_train_loss": 0.1,
+        "stopped_epoch": 1,
+        "early_stopped": False,
+        "architecture": {},
+        "hyperparams": {},
+        "schema": {},
+        "history": [],
+    }
+    assert SequenceAutoencoderManifest.from_dict(payload).calibration_holdout is None
+    holdout = {"sessions_used": ["a"], "below_recommended_minimum": True}
+    manifest = SequenceAutoencoderManifest.from_dict({**payload, "calibration_holdout": holdout})
+    assert manifest.to_dict()["calibration_holdout"] == holdout

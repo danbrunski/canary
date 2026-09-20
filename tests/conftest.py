@@ -7,8 +7,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import pytest
+
+from src.jsonl_store import JsonlStore
+
+#: ``src.models.training_ledger.DEFAULT_TRAINING_LEDGER_PATH``, spelled out:
+#: importing it here would pull ``src.models`` (and torch) into every xdist
+#: worker. ``test_conftest_ledger_guard_matches_the_default_path`` pins the two.
+_REAL_TRAINING_LEDGER = (
+    Path(__file__).resolve().parents[1] / "data" / "control" / "training_runs.jsonl"
+).resolve()
 
 
 @pytest.fixture(autouse=True)
@@ -35,3 +46,32 @@ def _restore_root_logger_state() -> Iterator[None]:
     finally:
         root.setLevel(level)
         root.handlers[:] = handlers
+
+
+@pytest.fixture(autouse=True)
+def _refuse_writes_to_the_real_training_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No test may append to the operator's ``data/control/training_runs.jsonl``.
+
+    ``scripts/retrain.py`` defaults ``--ledger`` to that file and ``--if-out`` /
+    ``--sequence-out`` to the deployed model directories. Tests that ran
+    ``retrain.main`` with stubbed trainers and no ``--ledger`` therefore
+    re-ingested the *deployed* manifests on every run: by 2026-09-20 the ledger
+    held 4,252 lines for 40 real runs (419 MB), 1,174 of them carrying a
+    ``detector_benchmark_report_path`` inside a pytest tmp dir, and — latest
+    line per run wins — each one reset the real run's publish/approval state.
+
+    ``retrain._ingest_ledger`` now refuses a manifest it did not produce. This
+    is the second lock: any future path to the real file fails the test that
+    took it, instead of relying on every test remembering ``--no-ledger``.
+    """
+    real_append = JsonlStore._append_record
+
+    def _guarded(self: Any, record: Any, **kwargs: Any) -> Any:
+        if Path(self.path).resolve() == _REAL_TRAINING_LEDGER:
+            raise AssertionError(
+                f"test attempted to append to the real training ledger "
+                f"{_REAL_TRAINING_LEDGER}; pass --ledger <tmp_path> / --no-ledger"
+            )
+        return real_append(self, record, **kwargs)
+
+    monkeypatch.setattr(JsonlStore, "_append_record", _guarded)

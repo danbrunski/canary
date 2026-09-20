@@ -721,6 +721,49 @@ def load_capture_profiles(path: Path, collection: CollectionConfig) -> CapturePr
     return catalog
 
 
+_SERVING_DID_CACHE: dict[Path, tuple[int, frozenset[str]]] = {}
+
+
+def serving_mode22_dids(
+    path: Path, collection: CollectionConfig | None = None
+) -> frozenset[str] | None:
+    """Upper-cased Mode-22 DID names the *serving* (``default``) profile polls.
+
+    The question a trainer has to ask before accepting a ``did:`` feature: will
+    the daemon ever observe this channel while it is scoring? Only the
+    ``default`` profile runs during ordinary (model-serving) collection; a DID
+    that exists in the corpus solely because a ``_capture-*`` research profile
+    polled it is NaN forever at serve.
+
+    Strictly read-only, unlike :func:`load_capture_profiles` (which seeds and
+    upgrades the file): feature selection must not rewrite operator data. The
+    same precedence though — a saved catalog is authoritative; with no file the
+    ``default`` profile *is* ``collection.obd_dids`` (see :func:`seed_catalog`).
+
+    ``None`` means *unresolvable* — no catalog on disk and no collection config
+    to seed one from — which is a different answer from an empty set ("the
+    serving profile polls no DIDs"). Callers must not conflate them.
+    """
+    try:
+        mtime = path.stat().st_mtime_ns
+    except FileNotFoundError:
+        if collection is None:
+            return None
+        return frozenset(item.strip().upper() for item in collection.obd_dids if item.strip())
+    cached = _SERVING_DID_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    default = catalog.by_name(DEFAULT_PROFILE_NAME)
+    polled = (
+        frozenset(item.upper() for item in default.mode22)
+        if default is not None and default.mode22_enabled
+        else frozenset()
+    )
+    _SERVING_DID_CACHE[path] = (mtime, polled)
+    return polled
+
+
 def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:
     """Can ``profile`` supply ``channel``, following derived inputs?
 

@@ -79,3 +79,18 @@ def test_real_bindings_emit_loads(tmp_path) -> None:  # type: ignore[no-untyped-
     # ECM_RPM (confirmed) must survive the round trip on 0x1F9.
     rpm = reloaded.get_message_by_frame_id(0x1F9)
     assert any(s.name == "ECM_RPM" for s in rpm.signals)
+
+
+def test_model_feature_flag_does_not_change_the_emitted_dbc(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """`model_feature: false` keeps a signal out of the trained feature set and
+    nothing else: the DBC (and so every decoder built from it) is unchanged."""
+    plain = tmp_path / "plain.yaml"
+    flagged = tmp_path / "flagged.yaml"
+    plain.write_text(_BINDINGS)
+    flagged.write_text(
+        _BINDINGS.replace(
+            "    confidence: high\n", "    confidence: high\n    model_feature: false\n"
+        )
+    )
+    assert load_bindings(flagged).signals[1].model_feature is False
+    assert build_database(flagged).as_dbc_string() == build_database(plain).as_dbc_string()

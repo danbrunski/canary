@@ -22,8 +22,9 @@ backbone-bound façades over this module.
 
 from __future__ import annotations
 
+import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -39,6 +40,7 @@ from src.models.manifest import (
 )
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_registry import (
+    MIN_CALIBRATION_SESSIONS,
     SequenceAutoencoderManifest,
     SequenceTrainingBackend,
     sequence_training_backend_for_model_type,
@@ -62,6 +64,8 @@ from src.models.sequence_training import (
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp as _format_timestamp
+
+log = logging.getLogger(__name__)
 
 ARTIFACT_FORMAT_VERSION = 1
 
@@ -116,6 +120,7 @@ def train_sequence_autoencoder(
     feature_spec: Mapping[str, Any] | None = None,
     scaler: ZScoreScaler | None = None,
     allow_in_sample_calibration: bool = False,
+    calibration_sessions_requested: Sequence[str] | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Train ``backend``'s autoencoder on clean sequence windows.
 
@@ -338,13 +343,53 @@ def train_sequence_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
     )
+    used_sessions = training_sessions(calibration_source)
     stamped = replace(
         calibrated.manifest,
         calibration=calibration_provenance,
-        calibration_sessions=training_sessions(calibration_source),
+        calibration_sessions=used_sessions,
         calibration_health=calibration_health,
+        calibration_holdout=(
+            _calibration_holdout_report(
+                backend, used=used_sessions, requested=calibration_sessions_requested
+            )
+            if calibration_dataset is not None
+            else None
+        ),
     )
     return TrainedSequenceAutoencoder(model=calibrated.model, manifest=stamped)
+
+
+def _calibration_holdout_report(
+    backend: SequenceTrainingBackend,
+    *,
+    used: Sequence[str],
+    requested: Sequence[str] | None,
+) -> dict[str, Any]:
+    """How many held-out sessions the thresholds actually rest on — and say so
+    when it is too few, in the manifest and at WARNING, instead of a quiet
+    one-session calibration that reads like any other ``held_out`` artifact."""
+    requested_names = list(used) if requested is None else [str(name) for name in requested]
+    without_windows = sorted(set(requested_names) - set(used))
+    below_minimum = len(used) < MIN_CALIBRATION_SESSIONS
+    if below_minimum or without_windows:
+        log.warning(
+            "%s thresholds calibrated on %d held-out session(s) (%d recommended)%s",
+            backend.model_type,
+            len(used),
+            MIN_CALIBRATION_SESSIONS,
+            f"; requested sessions that produced no windows: {without_windows}"
+            if without_windows
+            else "",
+            extra={"calibration_sessions": list(used), "requested": requested_names},
+        )
+    return {
+        "sessions_requested": requested_names,
+        "sessions_used": list(used),
+        "sessions_without_windows": without_windows,
+        "recommended_minimum_sessions": MIN_CALIBRATION_SESSIONS,
+        "below_recommended_minimum": below_minimum,
+    }
 
 
 def calibrate_sequence_autoencoder_thresholds(

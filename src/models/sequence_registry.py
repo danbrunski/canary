@@ -127,6 +127,15 @@ def resolve_sequence_backend(config: CanaryConfig) -> SequenceBackend | None:
     return backend
 
 
+#: Held-out sessions a threshold calibration should pool. One session is one
+#: drive's weather, altitude, fuel and traffic; thresholds set from it are that
+#: drive's thresholds. On 2026-09-20 the LSTM was calibrated on a single
+#: held-out session — the most extreme of the corpus — while the IF kept three,
+#: and nothing in either artifact said so. Fewer is permitted (a thin corpus is
+#: a fact, not an error) but is stamped into ``calibration_holdout``.
+MIN_CALIBRATION_SESSIONS = 3
+
+
 @dataclass(frozen=True)
 class SequenceAutoencoderManifest:
     """JSON-safe metadata for a trained sequence-autoencoder checkpoint.
@@ -182,6 +191,11 @@ class SequenceAutoencoderManifest:
     calibration: str | None = None
     calibration_sessions: tuple[str, ...] = ()
     calibration_health: Mapping[str, Any] | None = None
+    #: Held-out calibration breadth: sessions requested vs. those that actually
+    #: produced windows, and ``below_recommended_minimum`` when fewer than
+    #: :data:`MIN_CALIBRATION_SESSIONS` backed the thresholds. ``None`` for
+    #: in-sample/uncalibrated artifacts and manifests written before this field.
+    calibration_holdout: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -212,6 +226,9 @@ class SequenceAutoencoderManifest:
             "calibration_sessions": list(self.calibration_sessions),
             "calibration_health": (
                 None if self.calibration_health is None else dict(self.calibration_health)
+            ),
+            "calibration_holdout": (
+                None if self.calibration_holdout is None else dict(self.calibration_holdout)
             ),
         }
 
@@ -245,6 +262,11 @@ class SequenceAutoencoderManifest:
             calibration_sessions=tuple(str(x) for x in data.get("calibration_sessions", [])),
             calibration_health=(
                 None if data.get("calibration_health") is None else dict(data["calibration_health"])
+            ),
+            calibration_holdout=(
+                None
+                if data.get("calibration_holdout") is None
+                else dict(data["calibration_holdout"])
             ),
         )
 

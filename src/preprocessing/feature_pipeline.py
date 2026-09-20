@@ -16,6 +16,7 @@ import os
 from collections.abc import Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,7 @@ import pandas as pd
 from src.analysis.afr import append_afr_channels, load_afr_calibration
 from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
+from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns
 from src.decode.behavior_models import (
@@ -32,9 +34,10 @@ from src.decode.behavior_models import (
     BehaviorModels,
     load_behavior_models,
 )
-from src.decode.bindings import Bindings, load_bindings
+from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.decode.dids import decode_did_rows, load_did_map
+from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
@@ -161,6 +164,15 @@ _NON_TRAINABLE_CATEGORICAL_CHANNELS: frozenset[str] = frozenset(
     }
 )
 
+#: Per-cylinder misfire *counters* (Mode 06-style tallies surfaced as PIDs).
+#: Same defect as the odometers below: a count that only accumulates until the
+#: next DTC clear / key cycle. Its level says how long ago that was, and its
+#: rolling derivatives are zero on every healthy tick — a misfire is caught by
+#: the DTC/monitor path, not by teaching a forest what "0 forever" looks like.
+#: Matched by the registry's channel prefix, not an enumerated cylinder list,
+#: so a V8's CYL7/CYL8 are covered without anyone remembering to add them.
+_NON_TRAINABLE_MISFIRE_COUNTER_PREFIX = f"obd:{MISFIRE_COUNT_CHANNEL_PREFIX}"
+
 NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
     {
         "obd:RUN_TIME",
@@ -172,7 +184,147 @@ NON_TRAINABLE_COUNTER_CHANNELS: frozenset[str] = frozenset(
     | _NON_TRAINABLE_CATEGORICAL_CHANNELS
 )
 
+#: Slow *state* of the vehicle rather than behaviour of the engine. The tank
+#: level drifts over days, not within a drive: a corpus sees a handful of
+#: distinct levels, so every fill-up (or every quarter-tank the corpus happened
+#: not to contain) is "novel" to a detector while saying nothing about engine
+#: health. Kept in the frame (trip/economy code reads it), never trained on —
+#: same mechanism as the counters above.
+NON_TRAINABLE_STATE_CHANNELS: frozenset[str] = frozenset(
+    {
+        "obd:FUEL_LEVEL",
+    }
+)
+
 FEATURE_SPEC_VERSION = 1
+
+#: Repo-root-anchored serving capture-profile catalog, used when no config is
+#: threaded (same anchoring as ``engineering.DEFAULT_BINDINGS_PATH``).
+DEFAULT_CAPTURE_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data/capture_profiles.yaml"
+
+DID_PREFIX = "did:"
+DBC_PREFIX = "dbc:"
+
+
+@dataclass(frozen=True)
+class FeaturePolicy:
+    """Which *sourced* channels may become trained features — resolved facts.
+
+    The static exclusions (GPS position, counters, tank level) are constants in
+    this module. These two depend on data files, so they are resolved once
+    (:func:`resolve_feature_policy`) and carried here:
+
+    ``bindings``
+        The catalog ``decoded:`` columns were produced from. A ``decoded:``
+        channel trains only if its binding passes
+        :func:`src.decode.bindings.is_trainable_binding` — confidence
+        ``confirmed``/``high`` and not opted out with ``model_feature: false``.
+        ``None`` = no catalog could be loaded; then *no* ``decoded:`` channel
+        trains, because an unverifiable byte is not evidence.
+
+    ``serving_dids``
+        Upper-cased DID names the serving (``default``) capture profile polls.
+        A ``did:`` channel trains only if it is in here; one polled solely by a
+        research capture profile is NaN for the model's whole serving life.
+        ``None`` = unresolvable, and then no ``did:`` channel trains.
+    """
+
+    bindings: Bindings | None
+    serving_dids: frozenset[str] | None
+
+    @cached_property
+    def _signals_by_name(self) -> dict[str, Signal]:
+        # reconcile_feature_frame_to_spec consults this per serve tick.
+        return {} if self.bindings is None else {sig.name: sig for sig in self.bindings.signals}
+
+    def exclusion_reason(self, base: str) -> str | None:
+        """Why base channel ``base`` may not train, or ``None`` if it may."""
+        if base.startswith(DECODED_PREFIX) or base.startswith(DBC_PREFIX):
+            signal = self._signals_by_name.get(base.split(":", 1)[1])
+            if signal is None:
+                if base.startswith(DBC_PREFIX):
+                    # A genuinely external DBC signal: no binding to judge it by,
+                    # and none needed — it never came from bindings.yaml.
+                    return None
+                return (
+                    "no bindings catalog loaded"
+                    if self.bindings is None
+                    else "not in the bindings catalog"
+                )
+            if not signal.model_feature:
+                return "binding opted out (model_feature: false)"
+            if not is_trainable_binding(signal):
+                return f"binding confidence {signal.confidence!r} is below 'high'"
+            return None
+        if base.startswith(DID_PREFIX):
+            if self.serving_dids is None:
+                return "serving capture profile unresolvable"
+            if base.removeprefix(DID_PREFIX).upper() not in self.serving_dids:
+                return "not polled by the serving (default) capture profile"
+        return None
+
+
+def resolve_feature_policy(
+    config: CanaryConfig | None = None,
+    *,
+    profile_slug: str | None = None,
+    bindings: Bindings | None = None,
+    bindings_path: Path | None = None,
+) -> FeaturePolicy:
+    """The :class:`FeaturePolicy` for a training/selection run.
+
+    Bindings resolve the way :mod:`src.decode.engineering` does it: an explicit
+    catalog when threaded, else ``bindings_path``, else the repo catalog.
+
+    The serving DID set comes from the ``default`` capture profile — the saved
+    catalog at the (vehicle-scoped, when profiles are enabled) configured path,
+    or what that catalog would be seeded with (``collection.obd_dids``). With no
+    ``config`` it falls back to the repo's ``data/capture_profiles.yaml``.
+    """
+    from src.collection.capture_profiles import serving_mode22_dids
+
+    catalog = bindings
+    if catalog is None:
+        catalog = (
+            repo_bindings(bindings_path.resolve()) if bindings_path is not None else repo_bindings()
+        )
+    if config is None:
+        return FeaturePolicy(
+            bindings=catalog, serving_dids=serving_mode22_dids(DEFAULT_CAPTURE_PROFILES_PATH)
+        )
+    scoped = config
+    if config.profiles.enabled:
+        from src.profiles import resolve_profile_for_tooling, scope_config
+
+        scoped = scope_config(config, resolve_profile_for_tooling(config, profile_slug))
+    return FeaturePolicy(
+        bindings=catalog,
+        serving_dids=serving_mode22_dids(scoped.daemon.capture_profiles, scoped.collection),
+    )
+
+
+def feature_policy_exclusions(
+    features: pd.DataFrame, policy: FeaturePolicy | None = None
+) -> dict[str, str]:
+    """``{base channel: reason}`` for channels :class:`FeaturePolicy` keeps out.
+
+    Recorded in the manifest's feature spec so "why is ``did:X`` not a feature"
+    is answered by the artifact instead of re-derived from the data files as
+    they happen to look later.
+    """
+    resolved = policy if policy is not None else resolve_feature_policy()
+    out: dict[str, str] = {}
+    for raw in features.columns:
+        column = str(raw)
+        if column.endswith(GAP_SUFFIX):
+            continue
+        base = _base_feature_name(column)
+        if base in out:
+            continue
+        reason = resolved.exclusion_reason(base)
+        if reason is not None:
+            out[base] = reason
+    return dict(sorted(out.items()))
 
 
 #: Worker-process state for the parallel feature build. Populated once per
@@ -783,7 +935,9 @@ def segment_or_constant(
     return out, True
 
 
-def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
+def trainable_feature_columns(
+    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
+) -> list[str]:
     """Numeric feature columns with informative variation in the corpus.
 
     Excludes structural columns (``session``, ``timestamp``, the mode column)
@@ -802,7 +956,7 @@ def trainable_feature_columns(features: pd.DataFrame) -> list[str]:
     in the manifest (``dropped_constant_columns``).
     """
     cols: list[str] = []
-    for col in candidate_feature_columns(features):
+    for col in candidate_feature_columns(features, policy=policy):
         health = _column_health(features[col])
         if health["finite_count"] == 0:
             continue
@@ -837,6 +991,7 @@ def isolation_forest_feature_columns(
     features: pd.DataFrame,
     *,
     min_coverage: float = MIN_ISOLATION_FOREST_COVERAGE,
+    policy: FeaturePolicy | None = None,
 ) -> list[str]:
     """Trainable columns restricted to those the IF can actually score on.
 
@@ -844,7 +999,7 @@ def isolation_forest_feature_columns(
     :data:`MIN_ISOLATION_FOREST_COVERAGE` for why the IF needs one and the
     sequence detector does not. ``min_coverage=0`` recovers the old behaviour.
     """
-    columns = trainable_feature_columns(features)
+    columns = trainable_feature_columns(features, policy=policy)
     if min_coverage <= 0 or features.empty:
         return columns
     rows = len(features)
@@ -911,8 +1066,17 @@ def restrict_isolation_forest_expansion(
     return [c for c in columns if not any(c.endswith(suffix) for suffix in drop_suffixes)]
 
 
-def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
-    """Numeric, non-structural feature candidates before all-NaN filtering."""
+def candidate_feature_columns(
+    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
+) -> list[str]:
+    """Numeric, non-structural feature candidates before all-NaN filtering.
+
+    The one place trainability policy lives; every selector
+    (:func:`trainable_feature_columns`, the IF and sequence variants,
+    :func:`build_feature_spec`) goes through it. ``policy=None`` resolves the
+    repo defaults — the gates cannot be skipped by not passing an argument.
+    """
+    resolved_policy = policy if policy is not None else resolve_feature_policy()
     skip_exact = {"session", "timestamp", MODE_COLUMN}
     non_trainable_committees = non_trainable_committee_outputs()
     # ``dbc:*`` signals that also exist as ``decoded:*`` are the same wire
@@ -942,7 +1106,17 @@ def candidate_feature_columns(features: pd.DataFrame) -> list[str]:
             continue
         # Monotonic counters / odometers / run-clocks — see
         # NON_TRAINABLE_COUNTER_CHANNELS (kept in frame for behavior axes).
-        if _base_feature_name(col) in NON_TRAINABLE_COUNTER_CHANNELS:
+        base = _base_feature_name(col)
+        if base in NON_TRAINABLE_COUNTER_CHANNELS or base.startswith(
+            _NON_TRAINABLE_MISFIRE_COUNTER_PREFIX
+        ):
+            continue
+        # Slow vehicle state (tank level) — see NON_TRAINABLE_STATE_CHANNELS.
+        if base in NON_TRAINABLE_STATE_CHANNELS:
+            continue
+        # Data-file gates: binding confidence / model_feature opt-out for
+        # ``decoded:``, servability for ``did:`` — see FeaturePolicy.
+        if resolved_policy.exclusion_reason(base) is not None:
             continue
         # Committee divergence residuals marked non-trainable: computed and
         # logged, but kept out of the trained set — see analysis.committees.
@@ -963,7 +1137,9 @@ def _signal_present(frame: pd.DataFrame, value: str | tuple[str, ...]) -> bool:
 DEVIATION_PREFIX = "deviation:"
 
 
-def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
+def sequence_feature_columns(
+    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
+) -> list[str]:
     """GRU-D LSTM-autoencoder feature columns: all trainable sensor channels.
 
     Differs from :func:`trainable_feature_columns` (which the Isolation Forest
@@ -981,7 +1157,9 @@ def sequence_feature_columns(features: pd.DataFrame) -> list[str]:
     :func:`trainable_feature_columns`.
     """
     return [
-        col for col in trainable_feature_columns(features) if not col.startswith(DEVIATION_PREFIX)
+        col
+        for col in trainable_feature_columns(features, policy=policy)
+        if not col.startswith(DEVIATION_PREFIX)
     ]
 
 
@@ -1055,6 +1233,7 @@ def build_feature_spec(
     config: CanaryConfig | None = None,
     sequence_length: int | None = None,
     sequence_stride: int | None = None,
+    policy: FeaturePolicy | None = None,
 ) -> dict[str, Any]:
     """Return the versioned feature contract persisted in model manifests.
 
@@ -1064,7 +1243,8 @@ def build_feature_spec(
     compare this spec against the live source before scoring.
     """
     columns = [str(col) for col in feature_columns]
-    candidate_columns = candidate_feature_columns(features)
+    resolved_policy = policy if policy is not None else resolve_feature_policy()
+    candidate_columns = candidate_feature_columns(features, policy=resolved_policy)
     spec: dict[str, Any] = {
         "feature_spec_version": FEATURE_SPEC_VERSION,
         "feature_columns": columns,
@@ -1078,6 +1258,10 @@ def build_feature_spec(
             columns,
             candidate_columns=candidate_columns,
         ),
+        # Channels present in the corpus that policy kept out, with the reason
+        # as it stood at training time (binding confidence / opt-out, DID not
+        # served). Empty when nothing was gated.
+        "feature_policy_exclusions": feature_policy_exclusions(features, resolved_policy),
     }
     if config is not None:
         spec["preprocessing"] = {

@@ -19,6 +19,7 @@ from scripts.train_lstm import (
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.lstm_training import load_lstm_autoencoder_model
+from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -231,3 +232,57 @@ def test_resolve_training_sessions_excludes_calibration_sessions(tmp_path: Path)
 
     assert resolved is not None
     assert [Path(p).name for p in resolved] == ["a"]
+
+
+def test_train_calibrates_on_the_pooled_multi_session_holdout_frame(tmp_path: Path) -> None:
+    """The sequence detector calibrates on the SAME pooled holdout frame the IF
+    gets (scripts/retrain.py builds it once) — every held-out session, not one."""
+    _torch()
+    config = _config(tmp_path)
+    no_bindings = _no_bindings(tmp_path)
+    training = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    holdouts = [
+        _write_obd_session(tmp_path, f"held-{i}", rows=40, start_epoch=1_778_600_000.0 + 1000 * i)
+        for i in range(3)
+    ]
+    pooled = build_feature_frame(holdouts, config, bindings_path=no_bindings)
+
+    trained = train(
+        [training],
+        config,
+        tmp_path / "models" / "lstm",
+        bindings_path=no_bindings,
+        calibration_sessions=holdouts,
+        calibration_frame=pooled,
+    )
+
+    manifest = trained.manifest
+    assert manifest.calibration == "held_out"
+    assert set(manifest.calibration_sessions) == {"held-0", "held-1", "held-2"}
+    assert manifest.calibration_holdout is not None
+    assert manifest.calibration_holdout["below_recommended_minimum"] is False
+    assert manifest.calibration_holdout["sessions_without_windows"] == []
+    assert "train" not in manifest.calibration_sessions
+
+
+def test_train_on_a_single_holdout_says_so_in_the_manifest(tmp_path: Path) -> None:
+    _torch()
+    config = _config(tmp_path)
+    no_bindings = _no_bindings(tmp_path)
+    training = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held = _write_obd_session(tmp_path, "held", rows=40, start_epoch=1_778_600_000.0)
+
+    trained = train(
+        [training],
+        config,
+        tmp_path / "models" / "lstm",
+        bindings_path=no_bindings,
+        calibration_sessions=[held],
+    )
+
+    report = trained.manifest.calibration_holdout
+    assert report is not None
+    assert report["sessions_used"] == ["held"]
+    assert report["below_recommended_minimum"] is True
+    payload = json.loads((tmp_path / "models" / "lstm" / "model.manifest.json").read_text())
+    assert payload["calibration_holdout"]["below_recommended_minimum"] is True

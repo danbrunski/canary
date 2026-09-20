@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import logging
 import sys
@@ -68,6 +69,7 @@ from src.analysis.training_disposition import (  # noqa: E402
 )
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
+from src.control.sessions import session_started_at  # noqa: E402
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
@@ -78,6 +80,7 @@ from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
 )
+from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS  # noqa: E402
 from src.models.sequence_training import (  # noqa: E402
     configure_torch_threads,
     default_training_device,
@@ -91,6 +94,7 @@ from src.preprocessing.feature_pipeline import (  # noqa: E402
     DEFAULT_FEATURE_CACHE_DIR,
     build_feature_frame,
     candidate_feature_columns,
+    resolve_feature_policy,
 )
 from src.preprocessing.quality_gate import apply_quarantine_gate  # noqa: E402
 
@@ -156,43 +160,59 @@ def _session_holdout_health(session: Path) -> tuple[str, int] | None:
     )
 
 
+#: Both detectors calibrate on the same pooled holdout set; the floor is the
+#: sequence registry's (one definition — the manifest stamps a shortfall).
+MIN_CALIBRATION_HOLDOUT_SESSIONS = MIN_CALIBRATION_SESSIONS
+
+
+def _started_at_key(session: Path) -> datetime:
+    """Sort key by *parsed* start time (never by directory name — capture
+    prefixes sort first). Unparseable names keep their given order, oldest."""
+    return session_started_at(session) or datetime.min.replace(tzinfo=UTC)
+
+
 def _pick_calibration_holdouts(
     sessions: Sequence[Path],
     *,
-    max_holdouts: int = 3,
+    max_holdouts: int = MIN_CALIBRATION_HOLDOUT_SESSIONS,
 ) -> list[Path]:
-    """Most-recent substantial sessions, chosen for operating-mode coverage.
+    """Healthy substantial sessions: mode coverage first, then spread in time.
 
     The historical single auto-holdout had a blind spot: if the freshest
     drive was an idle session, highway/city earned no per-mode band AND the
     global fallback threshold was calibrated from an idle-dominated error
     distribution — too tight or too loose for the first real drive.
 
-    Walk newest→oldest: the freshest substantial session anchors the holdout
-    (the legacy rule, so unclassified corpora behave exactly as before);
-    further sessions are added only when their classifier sidecar covers a
+    Pass 1 walks newest→oldest: the freshest substantial session anchors the
+    holdout (the legacy rule, so unclassified corpora behave exactly as
+    before); further sessions are added when their classifier sidecar covers a
     mode not yet held out, until every mode seen in the classified corpus is
     covered or ``max_holdouts`` is reached.
+
+    Pass 2 tops the set up to ``max_holdouts``. Pass 1 alone stops at ONE
+    session whenever the freshest drive happens to touch every mode, and a
+    single drive is a single day's conditions. The extra sessions are the
+    healthy ones *farthest in time* from those already held out, so the
+    calibration set spans the corpus rather than clustering on its last day.
+    The same list goes to every detector (see ``main``).
     """
+    ordered = sorted(sessions, key=_started_at_key)
     corpus_modes: set[str] = set()
     classified_widths = [
         health[1]
-        for session in sessions
+        for session in ordered
         if (health := _session_holdout_health(session)) is not None
         and health[0] == "ready"
         and health[1] > 0
     ]
     minimum_compatible_width = 0.9 * max(classified_widths, default=0)
-    for session in sessions:
+    for session in ordered:
         modes = _session_mode_coverage(session)
         if modes:
             corpus_modes |= modes
 
-    selected: list[Path] = []
-    covered: set[str] = set()
-    for session in reversed(sessions):
-        if len(selected) >= max_holdouts:
-            break
+    healthy: list[Path] = []
+    for session in reversed(ordered):
         if _session_parquet_bytes(session) < _MIN_CALIBRATION_HOLDOUT_BYTES:
             continue
         health = _session_holdout_health(session)
@@ -207,6 +227,13 @@ def _pick_calibration_holdouts(
                 },
             )
             continue
+        healthy.append(session)
+
+    selected: list[Path] = []
+    covered: set[str] = set()
+    for session in healthy:
+        if len(selected) >= max_holdouts:
+            break
         modes = _session_mode_coverage(session)
         if not selected:
             selected.append(session)
@@ -216,6 +243,20 @@ def _pick_calibration_holdouts(
             covered |= modes
         if corpus_modes and covered >= corpus_modes:
             break
+
+    while selected and len(selected) < max_holdouts:
+        remaining = [session for session in healthy if session not in selected]
+        if not remaining:
+            break
+        selected.append(
+            max(
+                remaining,
+                key=lambda candidate: min(
+                    abs((_started_at_key(candidate) - _started_at_key(held)).total_seconds())
+                    for held in selected
+                ),
+            )
+        )
     return selected
 
 
@@ -630,6 +671,44 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_report(sessions, results, args)
             return 1
 
+    # One calibration frame for every detector, built HERE — before either
+    # trainer holds its matrices. Each trainer used to rebuild it privately
+    # (uncached), so the sequence trainer decoded the holdout sessions a second
+    # time with the full window dataset resident; on 2026-09-20 that second
+    # build died silently twice and the LSTM was re-run on ONE holdout while
+    # the IF kept three. Sharing the frame makes "same holdout set, pooled"
+    # true by construction rather than by two code paths agreeing.
+    calibration_kwargs: dict[str, Any] = {}
+    if calibration_sessions and any_trainer_requested:
+        try:
+            calibration_kwargs["calibration_frame"] = build_feature_frame(
+                calibration_sessions,
+                config,
+                bindings_path=args.bindings,
+                cache_dir=args.feature_cache,
+                force_rebuild=args.rebuild_feature_cache,
+            )
+        except Exception as exc:  # noqa: BLE001 - shared by both trainers
+            log.exception("calibration feature frame build failed", extra={"error": str(exc)})
+            _mark_requested_failures(results, args, f"failed: calibration preprocessing: {exc}")
+            _print_report(sessions, results, args)
+            return 1
+    if calibration_sessions and len(calibration_sessions) < MIN_CALIBRATION_HOLDOUT_SESSIONS:
+        log.warning(
+            "calibrating on %d held-out session(s); %d are needed for thresholds that "
+            "reflect more than one drive's conditions (recorded in the manifests)",
+            len(calibration_sessions),
+            MIN_CALIBRATION_HOLDOUT_SESSIONS,
+            extra={"calibration_sessions": [s.name for s in calibration_sessions]},
+        )
+
+    # Trainability policy (binding confidence / model_feature opt-outs, DIDs the
+    # serving profile actually polls) resolved once against the SAME vehicle
+    # profile the artifacts are written for.
+    feature_policy = resolve_feature_policy(
+        config, profile_slug=args.profile, bindings_path=args.bindings
+    )
+
     quarantine_excluded: dict[str, int] | None = None
     if shared_feature_frame is not None and not args.skip_quarantine_exclusion:
         shared_feature_frame, quarantine_excluded = _apply_quarantine_exclusion(
@@ -685,6 +764,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     # ingestion is deferred until after the benchmark gate (below) so each
     # record can link the report the gate produced against that artifact.
     ledger_pending: list[Path] = []
+    # What sat in each out_dir BEFORE this run. `_ingest_ledger` refuses a
+    # manifest that is byte-for-byte the one already there: see its docstring.
+    manifests_before = {
+        out_dir: _manifest_fingerprint(out_dir) for out_dir in (args.if_out, args.sequence_out)
+    }
 
     if not args.skip_if:
         try:
@@ -694,6 +778,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.if_out,
                 bindings_path=args.bindings,
                 calibration_sessions=calibration_sessions or None,
+                feature_policy=feature_policy,
+                **calibration_kwargs,
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
@@ -716,6 +802,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bindings_path=args.bindings,
                 device=args.device,
                 calibration_sessions=calibration_sessions or None,
+                feature_policy=feature_policy,
+                **calibration_kwargs,
                 **feature_kwargs,
             )
             results[seq_model_type] = "ok"
@@ -742,6 +830,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             detector_benchmark_report_path=benchmark_report_path,
             dispositions=disposition_summary,
             compute_target=args.compute_target,
+            manifest_before=manifests_before.get(out_dir),
         )
 
     _print_report(
@@ -889,6 +978,14 @@ def _compute_disposition_summary(
         return None
 
 
+def _manifest_fingerprint(out_dir: Path) -> str | None:
+    """Content hash of ``out_dir``'s manifest, ``None`` when there is none."""
+    try:
+        return hashlib.sha256((out_dir / "model.manifest.json").read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
 def _ingest_ledger(
     ledger: TrainingLedger | None,
     out_dir: Path,
@@ -899,18 +996,35 @@ def _ingest_ledger(
     detector_benchmark_report_path: Path | None = None,
     dispositions: dict[str, Any] | None = None,
     compute_target: str | None = None,
+    manifest_before: str | None = None,
 ) -> None:
     """Best-effort: record the trainer's manifest in the training ledger.
 
     Never fails the retrain — a missing/unreadable manifest (e.g. a stubbed
     trainer in tests, or a trainer that crashed after reporting ok) is logged
     and skipped. The ledger is an index, not a gate.
+
+    ``manifest_before`` is the out_dir manifest's fingerprint from *before* the
+    trainer ran. If the manifest is unchanged, this run did not produce it, and
+    it is refused: a trainer that returns without writing (stubbed in a test,
+    or short-circuited) used to get the PREVIOUS run's manifest re-ingested as
+    a fresh ``succeeded`` record. That is how the deployed 2026-09-20 models
+    acquired ledger rows whose ``detector_benchmark_report_path`` pointed into
+    a pytest tmp dir — and since the latest line per ``run_id`` wins, each such
+    row also reset the real run's ``publish_status``/``approved`` to defaults.
     """
     if ledger is None:
         return
     manifest_path = out_dir / "model.manifest.json"
     if not manifest_path.exists():
         log.debug("no manifest at %s; skipping ledger ingest", manifest_path)
+        return
+    if manifest_before is not None and _manifest_fingerprint(out_dir) == manifest_before:
+        log.warning(
+            "ledger ingest refused: %s was not written by this run (the trainer "
+            "reported ok without producing a manifest); not re-recording a previous run",
+            manifest_path,
+        )
         return
     try:
         record = build_run_record_from_manifest(

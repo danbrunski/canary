@@ -265,17 +265,20 @@ def test_trainable_columns_excludes_structural_gap_and_allnan():
             "session": ["s1"] * 3,
             "timestamp": pd.date_range("2026-05-11T12:00:00Z", periods=3, freq="1s"),
             MODE_COLUMN: ["all"] * 3,
-            "decoded:GOOD": [1.0, 2.0, 3.0],
-            "decoded:GOOD__gap": [False, True, False],
-            "decoded:ALLNAN": [np.nan, np.nan, np.nan],
-            "decoded:STRINGY": ["a", "b", "c"],
+            # obd: rather than decoded: — a decoded: column is only a candidate
+            # when its binding is confirmed/high in the catalog, which is not
+            # what this test is about (see test_feature_pipeline for that gate).
+            "obd:GOOD": [1.0, 2.0, 3.0],
+            "obd:GOOD__gap": [False, True, False],
+            "obd:ALLNAN": [np.nan, np.nan, np.nan],
+            "obd:STRINGY": ["a", "b", "c"],
         }
     )
     cols = _trainable_feature_columns(df)
-    assert "decoded:GOOD" in cols
-    assert "decoded:GOOD__gap" not in cols
-    assert "decoded:ALLNAN" not in cols  # all-NaN dropped
-    assert "decoded:STRINGY" not in cols  # non-numeric dropped
+    assert "obd:GOOD" in cols
+    assert "obd:GOOD__gap" not in cols
+    assert "obd:ALLNAN" not in cols  # all-NaN dropped
+    assert "obd:STRINGY" not in cols  # non-numeric dropped
     assert "session" not in cols
     assert MODE_COLUMN not in cols
 
@@ -362,6 +365,8 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
                 },
             },
         },
+        # No decoded:/did: channel in this fixture, so policy gated nothing.
+        "feature_policy_exclusions": {},
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,

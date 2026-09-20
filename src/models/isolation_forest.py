@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -35,8 +36,10 @@ from src.models.sequence_training import coerce_timestamp
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN, UNKNOWN_MODE
 from src.timefmt import format_timestamp as _format_timestamp
+
+log = logging.getLogger(__name__)
 
 ARTIFACT_FORMAT_VERSION = 1
 MODEL_TYPE = "isolation_forest"
@@ -88,6 +91,57 @@ _MIN_CALIBRATION_SAMPLES = 10
 _MIN_MODE_FEATURE_COVERAGE = 0.5
 
 
+SKIP_TOO_FEW_FIT_ROWS = "too_few_fit_rows"
+
+#: ``unknown`` is not an operating regime, it is the segmenter saying it could
+#: not tell — stale inputs, a mode boundary, rows no rule matched. A forest fit
+#: on that bucket models "whatever was left over": its population changes with
+#: every segmenter fix, its holdout has produced degenerate thresholds before,
+#: and the rows are withheld at serve anyway. So no model is fit for it;
+#: ``score()`` already withholds rows whose mode has no model. The one
+#: exception is a corpus that is *entirely* ``unknown`` with
+#: ``allow_unknown_only=true`` — the operator's explicit "I have no
+#: segmentation, fit one global model" opt-in, which routes every row through
+#: that single model.
+SKIP_UNCLASSIFIED_MODE = "unclassified_operating_mode"
+
+#: Held-out exceedances a calibrated quantile must rest on. The threshold is
+#: the ``1 - rate`` quantile of ``n`` holdout scores, i.e. it is set by the top
+#: ``rate * n`` rows. With fewer than ~10 of them the quantile is decided by
+#: one or two rows: at ``n = 154`` a "0.1 %" target is 0.15 of a row, the
+#: threshold is simply the holdout maximum, and the achieved rate can only be
+#: 0 or 1/154 = 0.65 %. The 2026-09-20 manifest claimed ``target_flag_rate:
+#: 0.001`` on holdouts of 91-328 rows. Below this count the target is not
+#: estimable; calibration coarsens it (:func:`calibration_flag_rate`) and the
+#: manifest records requested vs. used.
+MIN_CALIBRATION_EXCEEDANCES = 10
+
+#: Ceiling on how far resolvability may *raise* the calibrated rate. ``10 / n``
+#: is unbounded as ``n`` shrinks — a 16-row holdout "resolves" 62 %, and a
+#: threshold at the nominal median is not a detector. Past a 5 % per-tick
+#: nominal flag rate the persistence gate downstream is carrying the whole
+#: decision, so a holdout that cannot resolve even this is not rescued by
+#: coarsening further: calibration proceeds at ``max(requested, this)`` and the
+#: manifest says the rate used is itself below what the holdout resolves
+#: (``resolvable_flag_rate`` > ``target_flag_rate``). An operator-requested
+#: rate above the ceiling is honoured as asked.
+MAX_RESOLVABILITY_FLAG_RATE = 0.05
+
+
+def resolvable_flag_rate(holdout_rows: int) -> float:
+    """Finest flag rate ``holdout_rows`` can estimate: ``10 / n`` (at most 1)."""
+    if holdout_rows <= 0:
+        return 1.0
+    return min(1.0, MIN_CALIBRATION_EXCEEDANCES / holdout_rows)
+
+
+def calibration_flag_rate(requested: float, holdout_rows: int) -> float:
+    """The rate a threshold is calibrated at: ``requested``, coarsened to what
+    ``holdout_rows`` can resolve, but never coarsened past
+    :data:`MAX_RESOLVABILITY_FLAG_RATE`."""
+    return max(requested, min(resolvable_flag_rate(holdout_rows), MAX_RESOLVABILITY_FLAG_RATE))
+
+
 class IsolationForestConfigLike(Protocol):
     """Subset of ``src.config.IsolationForestConfig`` needed by the trainer."""
 
@@ -125,8 +179,23 @@ class ModeTrainingSummary:
     #: decision-function threshold is a poor scale; see ``alerts.fusion``).
     score_scale: float | None = None
     holdout_samples: int = 0
+    #: The flag rate the threshold was *actually* calibrated at — equal to
+    #: ``requested_flag_rate`` only when the holdout could resolve it (see
+    #: :func:`resolvable_flag_rate`). Name kept so pre-existing manifests and
+    #: readers keep their meaning: "the rate this threshold stands for".
     target_flag_rate: float | None = None
     achieved_flag_rate: float | None = None
+    #: What config asked for (``isolation_forest.target_flag_rate``).
+    requested_flag_rate: float | None = None
+    #: ``True`` when ``holdout_samples`` could not resolve the requested rate,
+    #: so ``target_flag_rate`` is a coarser one. ``None`` on manifests written
+    #: before this was recorded / uncalibrated modes.
+    target_unresolvable: bool | None = None
+    #: ``10 / holdout_samples`` — the finest rate this holdout can estimate.
+    #: When it exceeds ``target_flag_rate`` the holdout was too small to
+    #: resolve even the rate used (see :data:`MAX_RESOLVABILITY_FLAG_RATE`):
+    #: that mode's threshold rests on fewer than 10 held-out exceedances.
+    resolvable_flag_rate: float | None = None
 
     @property
     def calibrated(self) -> bool:
@@ -145,6 +214,9 @@ class ModeTrainingSummary:
             "holdout_samples": self.holdout_samples,
             "target_flag_rate": self.target_flag_rate,
             "achieved_flag_rate": self.achieved_flag_rate,
+            "requested_flag_rate": self.requested_flag_rate,
+            "target_unresolvable": self.target_unresolvable,
+            "resolvable_flag_rate": self.resolvable_flag_rate,
         }
 
     @classmethod
@@ -153,6 +225,9 @@ class ModeTrainingSummary:
         scale = data.get("score_scale")
         target = data.get("target_flag_rate")
         achieved = data.get("achieved_flag_rate")
+        requested = data.get("requested_flag_rate")
+        unresolvable = data.get("target_unresolvable")
+        resolvable = data.get("resolvable_flag_rate")
         return cls(
             mode=str(data["mode"]),
             n_samples=int(data["n_samples"]),
@@ -165,6 +240,9 @@ class ModeTrainingSummary:
             holdout_samples=int(data.get("holdout_samples", 0)),
             target_flag_rate=None if target is None else float(target),
             achieved_flag_rate=None if achieved is None else float(achieved),
+            requested_flag_rate=None if requested is None else float(requested),
+            target_unresolvable=None if unresolvable is None else bool(unresolvable),
+            resolvable_flag_rate=None if resolvable is None else float(resolvable),
         )
 
 
@@ -178,12 +256,18 @@ class SkippedModeSummary:
     mode: str
     fit_rows: int
     min_samples_required: int
+    #: Why no model was fit. ``too_few_fit_rows`` (Task 2.2, and the meaning of
+    #: every manifest written before this field) or
+    #: ``unclassified_operating_mode`` — see :data:`SKIP_UNCLASSIFIED_MODE`;
+    #: for that one ``fit_rows`` is the rows the bucket held, not a shortfall.
+    reason: str = SKIP_TOO_FEW_FIT_ROWS
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "mode": self.mode,
             "fit_rows": self.fit_rows,
             "min_samples_required": self.min_samples_required,
+            "reason": self.reason,
         }
 
     @classmethod
@@ -192,6 +276,7 @@ class SkippedModeSummary:
             mode=str(data["mode"]),
             fit_rows=int(data["fit_rows"]),
             min_samples_required=int(data["min_samples_required"]),
+            reason=str(data.get("reason", SKIP_TOO_FEW_FIT_ROWS)),
         )
 
 
@@ -606,9 +691,32 @@ def fit_isolation_forest(
     mode_plans: dict[str, _ModeFitPlan] = {}
     skipped_modes: list[SkippedModeSummary] = []
     minimum_complete_fraction = 1.0 - float(getattr(config, "max_dropped_row_fraction", 1.0))
+    present_modes = {str(value) for value in frame[mode_column].unique()}
+    unknown_is_the_whole_corpus = (
+        # ``is not False``: config-likes predating the knob keep their old
+        # behaviour; the real config defaults it to False.
+        present_modes == {UNKNOWN_MODE} and getattr(config, "allow_unknown_only", None) is not False
+    )
     for raw_mode, group in frame.groupby(mode_column, sort=True, dropna=False):
         mode = str(raw_mode)
         if len(group) == 0:
+            continue
+        if mode == UNKNOWN_MODE and not unknown_is_the_whole_corpus:
+            # See SKIP_UNCLASSIFIED_MODE: never a regime, never a model.
+            skipped_modes.append(
+                SkippedModeSummary(
+                    mode=mode,
+                    fit_rows=len(group),
+                    min_samples_required=min_samples_per_mode,
+                    reason=SKIP_UNCLASSIFIED_MODE,
+                )
+            )
+            log.info(
+                "not fitting an IsolationForest for operating_mode=%r (%d rows): "
+                "unclassified rows are not a regime",
+                mode,
+                len(group),
+            )
             continue
         # Per-mode feature set: only the columns densely populated in this
         # mode. A deviation surface gated to a *different* operating_mode is
@@ -677,13 +785,13 @@ def fit_isolation_forest(
             calibrate=calibrate,
         )
 
-    if not mode_plans:
-        raise ValueError("no per-mode IsolationForest models were trained")
-    if set(mode_plans) == {"unknown"} and getattr(config, "allow_unknown_only", None) is False:
+    if not mode_plans and present_modes == {UNKNOWN_MODE}:
         raise ValueError(
             "IsolationForest would train only operating_mode='unknown'; fix segmentation "
             "coverage or explicitly set allow_unknown_only=true"
         )
+    if not mode_plans:
+        raise ValueError("no per-mode IsolationForest models were trained")
 
     # 2.4: fit the scaler on exactly the rows the forests below train on —
     # every kept mode's fit rows, none of their calibration-holdout rows, and
@@ -756,6 +864,36 @@ def fit_isolation_forest(
                 f"{mode!r}; need at least {_MIN_CALIBRATION_SAMPLES}"
             )
         calibration_rows = external_holdout if use_external else None
+        calibration_count = (
+            len(calibration_rows) if calibration_rows is not None else plan.n_holdout
+        )
+        calibrating = use_external or plan.calibrate
+        # Calibrate at a rate this holdout can actually estimate; a 0.001
+        # target on a few hundred rows is a threshold set by one row.
+        resolvable = resolvable_flag_rate(calibration_count)
+        used_flag_rate = calibration_flag_rate(target_flag_rate, calibration_count)
+        target_unresolvable = target_flag_rate < resolvable
+        if calibrating and target_unresolvable:
+            log.warning(
+                "IsolationForest mode %r: target_flag_rate %.4g is not resolvable on %d "
+                "held-out rows (finest estimable ~%.4g = %d/n); calibrating at %.4g%s",
+                mode,
+                target_flag_rate,
+                calibration_count,
+                resolvable,
+                MIN_CALIBRATION_EXCEEDANCES,
+                used_flag_rate,
+                " — still below what this holdout resolves; it needs more held-out rows"
+                if used_flag_rate < resolvable
+                else "",
+                extra={
+                    "mode": mode,
+                    "holdout_samples": calibration_count,
+                    "requested_flag_rate": target_flag_rate,
+                    "used_flag_rate": used_flag_rate,
+                    "resolvable_flag_rate": resolvable,
+                },
+            )
         score_threshold, score_scale, achieved_flag_rate = (
             _calibrate_holdout_threshold(
                 model,
@@ -772,13 +910,10 @@ def fit_isolation_forest(
                     ),
                     columns=plan.feats,
                 ),
-                target_flag_rate=target_flag_rate,
+                target_flag_rate=used_flag_rate,
             )
-            if use_external or plan.calibrate
+            if calibrating
             else (None, None, None)
-        )
-        calibration_count = (
-            len(calibration_rows) if calibration_rows is not None else plan.n_holdout
         )
 
         modes.append(
@@ -791,8 +926,11 @@ def fit_isolation_forest(
                 score_threshold=score_threshold,
                 score_scale=score_scale,
                 holdout_samples=calibration_count,
-                target_flag_rate=target_flag_rate if use_external or plan.calibrate else None,
+                target_flag_rate=used_flag_rate if calibrating else None,
                 achieved_flag_rate=achieved_flag_rate,
+                requested_flag_rate=target_flag_rate if calibrating else None,
+                target_unresolvable=target_unresolvable if calibrating else None,
+                resolvable_flag_rate=resolvable if calibrating else None,
             )
         )
 
@@ -1076,6 +1214,9 @@ def _mode_summary(
     holdout_samples: int = 0,
     target_flag_rate: float | None = None,
     achieved_flag_rate: float | None = None,
+    requested_flag_rate: float | None = None,
+    target_unresolvable: bool | None = None,
+    resolvable_flag_rate: float | None = None,
 ) -> ModeTrainingSummary:
     return ModeTrainingSummary(
         mode=mode,
@@ -1089,6 +1230,9 @@ def _mode_summary(
         holdout_samples=holdout_samples,
         target_flag_rate=target_flag_rate,
         achieved_flag_rate=achieved_flag_rate,
+        requested_flag_rate=requested_flag_rate,
+        target_unresolvable=target_unresolvable,
+        resolvable_flag_rate=resolvable_flag_rate,
     )
 
 

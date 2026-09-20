@@ -71,18 +71,18 @@ def test_sequence_feature_columns_keeps_sparse_channels() -> None:
             "timestamp": pd.date_range("2026-05-24T19:00:00Z", periods=n, freq="1s"),
             MODE_COLUMN: ["city"] * n,
             "dbc:ECM_RPM": [float(800 + i) for i in range(n)],
-            # Varies slightly (a real fuel level drains) — corpus-constant
-            # channels are now dropped as zero-variance, which is not what
-            # this test is about (sparse ≠ constant).
-            "obd:FUEL_LEVEL": [50.0 - 0.1 * i for i in range(n)],
+            # Varies slightly — corpus-constant channels are now dropped as
+            # zero-variance, which is not what this test is about (sparse ≠
+            # constant). (Was obd:FUEL_LEVEL until that became non-trainable.)
+            "obd:INTAKE_TEMP": [50.0 - 0.1 * i for i in range(n)],
             f"dbc:ECM_RPM{GAP_SUFFIX}": [False] * n,
-            f"obd:FUEL_LEVEL{GAP_SUFFIX}": [i % 5 != 0 for i in range(n)],  # stale 80%
+            f"obd:INTAKE_TEMP{GAP_SUFFIX}": [i % 5 != 0 for i in range(n)],  # stale 80%
         }
     )
     cols = sequence_feature_columns(frame)
     bases = {c.split("__")[0] for c in cols}
     assert "dbc:ECM_RPM" in bases  # dense channel kept
-    assert "obd:FUEL_LEVEL" in bases  # sparse round-robin channel now also kept
+    assert "obd:INTAKE_TEMP" in bases  # sparse round-robin channel now also kept
 
 
 def test_sequence_feature_columns_drops_all_nan_and_deviations() -> None:

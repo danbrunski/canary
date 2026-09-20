@@ -73,6 +73,22 @@ class Signal(_Strict):
     #: only when something *live* (segmenter, dashboard, status) needs the
     #: value without a payload decode.
     persist: bool = False
+    #: May this signal be a *trained model feature* (IF / sequence detector)?
+    #:
+    #: Orthogonal to ``confidence`` the same way ``persist`` is. Confidence
+    #: answers *is this byte what we say it is*; this answers *is it engine
+    #: behaviour*. A `high` brake-pressure byte is a perfectly good binding and
+    #: a useless anomaly feature: the detectors model how the powertrain
+    #: behaves, and brake, steering, HVAC-blower, TPMS and body channels only
+    #: teach them what the driver did. The 2026-09-20 retrain carried all of
+    #: them: 173-255 IF features on a few hundred rows per mode, in a model
+    #: whose fault-injection recall came out at 4-16 %.
+    #:
+    #: A vehicle fact, so it lives here in the data file — shared code only
+    #: reads the flag (:func:`is_trainable_binding`). It does NOT affect
+    #: decoding, persistence, the DBC emit, the dashboard, or analysis: the
+    #: channel stays in every frame, it is just not handed to a model.
+    model_feature: bool = True
     # Optional sanity bounds for the *decoded* value. When set, the decoder
     # flags samples that fall outside this range — typical use is to catch
     # binding bugs (e.g. coolant decoding to -40degC because the scale/offset
@@ -97,6 +113,25 @@ class Bindings(_Strict):
     # distinguishable from "we looked with a well-powered sweep and it is not
     # there". Not consumed by the decoder.
     absent_signals: list[dict[str, Any]] | None = None
+
+
+#: Binding confidences a model may train on. `medium` and below are working
+#: hypotheses about a byte — evidence for the reverse-engineering notebook,
+#: not for a detector. Six features were corrected out of bindings.yaml after
+#: the 2026-07 IF trained on them and the model went blind at serve
+#: (`project_if_blind_at_serve_2026-09`): a binding that can still be retracted
+#: must not be able to become a trained feature in the first place.
+TRAINABLE_CONFIDENCES: frozenset[str] = frozenset({"confirmed", "high"})
+
+
+def is_trainable_binding(signal: Signal) -> bool:
+    """``True`` when ``signal`` may be a trained model feature.
+
+    Both gates: the binding is trustworthy (:data:`TRAINABLE_CONFIDENCES`) AND
+    the data file has not opted it out as non-engine behaviour
+    (``model_feature: false``).
+    """
+    return signal.confidence in TRAINABLE_CONFIDENCES and signal.model_feature
 
 
 def load_bindings(path: Path) -> Bindings:

@@ -68,10 +68,12 @@ from src.models.sequence_training import configure_torch_threads, default_traini
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
+    FeaturePolicy,
     align_features_to_schema,
     build_feature_frame,
     build_feature_spec,
     expand_suppress_channels,
+    resolve_feature_policy,
     sequence_feature_columns,
 )
 from src.preprocessing.normalization import ZScoreScaler
@@ -189,6 +191,8 @@ def train(
     device: str = "cpu",
     model_version: str | None = None,
     calibration_sessions: Sequence[Path] | None = None,
+    calibration_frame: pd.DataFrame | None = None,
+    feature_policy: FeaturePolicy | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Build windows, train + calibrate ``backend``'s autoencoder, write artifact + manifest.
 
@@ -198,7 +202,17 @@ def train(
     underestimates real cross-session error and floods alerts on unseen drives;
     a held-out calibration set produces thresholds that actually reflect what
     fresh drives look like. Falls back to in-sample when omitted.
+
+    ``calibration_frame`` is the already-built feature frame of those held-out
+    sessions — ``scripts/retrain.py`` builds it once and hands the *same* frame
+    to the IF and to this trainer, so both detectors calibrate on one pooled
+    multi-session holdout. When omitted it is built here.
     """
+    policy = (
+        feature_policy
+        if feature_policy is not None
+        else resolve_feature_policy(config, bindings_path=bindings_path)
+    )
     # Build the raw feature frame once so the scaler and the dataset see
     # exactly the same source rows. The scaler is fit on the trainable
     # numeric columns; the dataset then z-scores via that scaler before
@@ -215,7 +229,7 @@ def train(
             force_rebuild=rebuild_feature_cache,
         )
     )
-    columns = sequence_feature_columns(features)
+    columns = sequence_feature_columns(features, policy=policy)
     if not columns:
         raise ValueError(
             "no trainable feature columns — the sessions produced no numeric "
@@ -275,12 +289,13 @@ def train(
             f"({len(dataset.feature_columns)} feature columns considered)"
         )
     calibration_ds: SequenceWindowDataset | None = None
-    if calibration_sessions:
+    if calibration_sessions or calibration_frame is not None:
         calibration_ds = build_dataset(
             backend,
-            calibration_sessions,
+            calibration_sessions or (),
             config,
             bindings_path=bindings_path,
+            feature_frame=calibration_frame,
             feature_cache_dir=feature_cache_dir,
             rebuild_feature_cache=rebuild_feature_cache,
             sequence_length=sequence_length,
@@ -313,8 +328,14 @@ def train(
             config=config,
             sequence_length=dataset.sequence_length,
             sequence_stride=dataset.stride,
+            policy=policy,
         ),
         scaler=scaler,
+        calibration_sessions_requested=(
+            [Path(session).name for session in calibration_sessions]
+            if calibration_sessions
+            else None
+        ),
         # This CLI's documented fallback (see the --calibration-sessions
         # help text): omitting the flag is a deliberate dev/manual-run path,
         # not the accidental-bypass 3.1 targets at the library level.

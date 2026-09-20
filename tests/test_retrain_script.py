@@ -899,3 +899,280 @@ def test_retrain_no_calibration_holdout_keeps_full_training_set(
     assert rc == 0
     assert seen["calibration_sessions"] is None
     assert seen["sessions"] == sessions  # nothing held out
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20: one pooled multi-session holdout for BOTH detectors
+# ---------------------------------------------------------------------------
+
+
+def _healthy_corpus(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, names: list[str]
+) -> list[Path]:
+    sessions = [tmp_path / "sessions" / name for name in names]
+    for session in sessions:
+        session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    return sessions
+
+
+def test_holdout_picker_tops_up_to_three_even_when_the_newest_covers_every_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Mode coverage alone stopped at ONE session whenever the freshest drive
+    touched every mode — one day's weather, altitude and traffic."""
+    sessions = _healthy_corpus(
+        tmp_path,
+        monkeypatch,
+        [
+            "2026-08-05T120000",
+            "2026-08-06T120000",
+            "2026-08-20T120000",
+            "2026-09-18T120000",
+            "2026-09-18T180000",
+            "2026-09-19T120000",
+        ],
+    )
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city", "highway", "idle"})
+    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+
+    picked = retrain._pick_calibration_holdouts(sessions)
+
+    assert len(picked) == retrain.MIN_CALIBRATION_HOLDOUT_SESSIONS == 3
+    assert picked[0].name == "2026-09-19T120000"  # newest still anchors
+    # The top-ups are spread across the corpus, not the next two newest.
+    assert {p.name for p in picked} == {
+        "2026-09-19T120000",
+        "2026-08-05T120000",
+        "2026-08-20T120000",
+    }
+
+
+def test_holdout_picker_orders_by_parsed_time_not_directory_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A prefixed directory sorts first by name however late it was recorded."""
+    sessions = _healthy_corpus(
+        tmp_path,
+        monkeypatch,
+        ["_tuning-2026-09-19T120000", "2026-08-05T120000", "2026-08-06T120000"],
+    )
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: None)
+    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: None)
+
+    (anchor,) = retrain._pick_calibration_holdouts(sorted(sessions), max_holdouts=1)
+    assert anchor.name == "_tuning-2026-09-19T120000"
+
+
+def test_holdout_picker_never_tops_up_with_an_unhealthy_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sessions = _healthy_corpus(
+        tmp_path,
+        monkeypatch,
+        ["2026-08-05T120000", "2026-08-06T120000", "2026-09-18T120000", "2026-09-19T120000"],
+    )
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    health = {
+        "2026-08-05T120000": ("quarantine", 100),
+        "2026-08-06T120000": ("ready", 100),
+        "2026-09-18T120000": ("ready", 40),  # narrow schema
+        "2026-09-19T120000": ("ready", 100),
+    }
+    monkeypatch.setattr(retrain, "_session_holdout_health", lambda p: health[p.name])
+
+    picked = retrain._pick_calibration_holdouts(sessions)
+    assert [p.name for p in picked] == ["2026-09-19T120000", "2026-08-06T120000"]
+
+
+def test_retrain_gives_both_detectors_the_same_pooled_holdout_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The IF got three held-out sessions and the LSTM one, because each
+    trainer rebuilt the holdout frame privately and the second build died.
+    One frame, built once, handed to both."""
+    names = [f"2026-09-{day:02d}T120000" for day in range(1, 8)]
+    sessions = _healthy_corpus(tmp_path, monkeypatch, names)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+
+    built: list[list[Path]] = []
+
+    def _build(positional: list[Path], *_a: object, **_k: object) -> object:
+        built.append(list(positional))
+        return {"frame_for": tuple(p.name for p in positional)}
+
+    monkeypatch.setattr(retrain, "build_feature_frame", _build)
+    seen: dict[str, dict[str, object]] = {}
+    monkeypatch.setattr(
+        retrain.if_trainer, "train", lambda *a, **k: seen.__setitem__("if", dict(k, train=a[0]))
+    )
+    monkeypatch.setattr(
+        retrain.lstm_trainer, "train", lambda *a, **k: seen.__setitem__("seq", dict(k, train=a[0]))
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--no-ledger",
+            "--skip-benchmark",
+        ]
+    )
+    assert rc == 0
+    held = seen["if"]["calibration_sessions"]
+    assert isinstance(held, list) and len(held) == 3
+    assert seen["seq"]["calibration_sessions"] == held
+    # The SAME object: built once (training frame + holdout frame = 2 builds).
+    assert seen["seq"]["calibration_frame"] is seen["if"]["calibration_frame"]
+    assert seen["if"]["calibration_frame"] == {"frame_for": tuple(p.name for p in held)}
+    assert len(built) == 2 and built[1] == held
+    # Held-out sessions train neither detector.
+    assert not set(held) & set(seen["if"]["train"])  # type: ignore[call-overload]
+    assert seen["seq"]["train"] == seen["if"]["train"]
+    # Both select features under one policy resolved for this vehicle profile.
+    assert seen["seq"]["feature_policy"] is seen["if"]["feature_policy"]
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20: a manifest this run did not write must never reach the ledger
+# ---------------------------------------------------------------------------
+
+
+def _write_manifest(out_dir: Path, version: str) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "model.manifest.json").write_text(
+        json.dumps(
+            {
+                "artifact_format_version": 1,
+                "model_type": "isolation_forest",
+                "model_version": version,
+                "created_at": "2026-09-20T05:47:03Z",
+                "training_data_hash": "sha256:abc",
+                "training_sessions": ["2026-09-18T134345"],
+                "input_rows": 10,
+                "hyperparams": {},
+                "schema": {"feature_columns": ["obd:RPM"]},
+            }
+        )
+    )
+
+
+def test_stubbed_trainer_does_not_re_ingest_the_previous_runs_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """How pytest tmp paths reached real ledger rows: a trainer that returns
+    without writing left the PREVIOUS run's manifest in out_dir, and it was
+    ingested again as a fresh `succeeded` run (with this run's benchmark path).
+    """
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)  # writes nothing
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    report_path = tmp_path / "analyses" / "benchmark-20260920-000000.json"
+    monkeypatch.setattr(
+        retrain,
+        "_run_benchmark_gate",
+        lambda *a, **k: (report_path, {"regressed": False, "tolerance": 0.15, "cells": []}),
+    )
+    _write_manifest(tmp_path / "if", "isolation_forest_DEPLOYED")  # the "deployed" model
+    ledger_path = tmp_path / "training_runs.jsonl"
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--ledger",
+            str(ledger_path),
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    assert not ledger_path.exists() or ledger_path.read_text() == ""
+
+
+def test_a_manifest_written_by_this_run_is_ingested_with_its_benchmark_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    _write_manifest(tmp_path / "if", "isolation_forest_PREVIOUS")
+    monkeypatch.setattr(
+        retrain.if_trainer,
+        "train",
+        lambda *a, **k: _write_manifest(tmp_path / "if", "isolation_forest_NEW"),
+    )
+    report_path = tmp_path / "analyses" / "benchmark-20260920-000000.json"
+    monkeypatch.setattr(
+        retrain,
+        "_run_benchmark_gate",
+        lambda *a, **k: (report_path, {"regressed": False, "tolerance": 0.15, "cells": []}),
+    )
+    ledger_path = tmp_path / "training_runs.jsonl"
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--skip-sequence",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--ledger",
+            str(ledger_path),
+            "--no-feedback-policy",
+        ]
+    )
+    assert rc == 0
+    (row,) = [json.loads(line) for line in ledger_path.read_text().splitlines()]
+    assert row["run_id"] == "isolation_forest_NEW"
+    assert row["detector_benchmark_report_path"] == str(report_path)
+
+
+def test_default_cli_paths_cannot_append_to_the_real_training_ledger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conftest guard: even a trainer that DOES write a fresh manifest
+    cannot land a test row in data/control/training_runs.jsonl."""
+    from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH
+    from tests.conftest import _REAL_TRAINING_LEDGER
+
+    # The guard spells the path out to keep torch out of conftest; pin it.
+    repo_root = Path(__file__).resolve().parents[1]
+    assert (repo_root / DEFAULT_TRAINING_LEDGER_PATH).resolve() == _REAL_TRAINING_LEDGER
+    assert retrain.parse_args([]).ledger == DEFAULT_TRAINING_LEDGER_PATH
+
+    _write_manifest(tmp_path / "if", "isolation_forest_NEW")
+    before = _REAL_TRAINING_LEDGER.stat().st_size if _REAL_TRAINING_LEDGER.exists() else None
+    monkeypatch.chdir(repo_root)
+    with pytest.raises(AssertionError, match="real training ledger"):
+        retrain._ingest_ledger(
+            retrain.TrainingLedger(DEFAULT_TRAINING_LEDGER_PATH),
+            tmp_path / "if",
+            "succeeded",
+            None,
+        )
+    after = _REAL_TRAINING_LEDGER.stat().st_size if _REAL_TRAINING_LEDGER.exists() else None
+    assert before == after

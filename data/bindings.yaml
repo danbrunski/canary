@@ -12,6 +12,14 @@
 #   low           — pattern is suggestive but ambiguous
 #   hypothesized  — best-guess interpretation; could be wrong
 #
+# Model features: only `confirmed` and `high` signals may become trained
+# IF/LSTM features — a byte that can still be retracted must not be able to
+# blind a model when it is. `model_feature: false` additionally opts a signal
+# out however well it is bound, because it is not ENGINE behaviour: steering,
+# brake, cabin blower, TPMS, body power state, motion candidates, and redundant
+# road-speed copies. Decoding, persistence, DBC export and the dashboard ignore
+# the flag; it only keeps the channel out of the trained feature set.
+#
 # This file is hand-edited as findings sharpen. Tools may CONSUME it
 # (DBC export, daemon decoder) but should not auto-rewrite it.
 
@@ -584,6 +592,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -604,6 +613,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -620,6 +630,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -638,6 +649,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -654,6 +666,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -675,6 +688,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # redundant road speed — WHEEL_SPEED_6F7_C is the modelled copy
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -705,6 +719,7 @@ signals:
     offset: null
     unit: unknown
     confidence: hypothesized
+    model_feature: false  # redundant road speed — WHEEL_SPEED_6F7_C is the modelled copy
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -723,6 +738,7 @@ signals:
     offset: null
     unit: unknown        # LSB of a 16-bit steering value (see STEERING_ANGLE_002)
     confidence: low
+    model_feature: false  # steering — driver input, not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -762,6 +778,7 @@ signals:
     offset: null
     unit: unknown        # high byte of a ~16-bit steering angle (with 0x002:0 = low byte)
     confidence: low      # demoted from high — the "clean motion enum" reading is superseded
+    model_feature: false  # steering — driver input, not engine behaviour
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
@@ -848,6 +865,7 @@ signals:
     offset: null
     unit: unknown  # likely enum
     confidence: medium
+    model_feature: false  # body power state — not engine behaviour
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
@@ -886,6 +904,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
+    model_feature: false  # tyre pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -920,6 +939,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
+    model_feature: false  # tyre pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -941,6 +961,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
+    model_feature: false  # tyre pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -962,6 +983,7 @@ signals:
     offset: 0.0
     unit: psi
     confidence: hypothesized
+    model_feature: false  # tyre pressure — not engine behaviour
     plausible_min: 0.0
     plausible_max: 80.0
     evidence:
@@ -983,6 +1005,7 @@ signals:
     offset: null
     unit: unknown        # steering rate / velocity (nonzero only while turning)
     confidence: low
+    model_feature: false  # steering — driver input, not engine behaviour
     evidence:
       - session: 2026-05-11T154648
         method: inventory_comparison
@@ -1014,6 +1037,7 @@ signals:
     offset: null
     unit: unknown
     confidence: high  # promoted — A/C-load spike pins it as engine-load-correlated
+    model_feature: false  # body/motion — not engine behaviour
     evidence:
       - session: 2026-05-11T211240
         method: byte_vs_tag_differential
@@ -1052,6 +1076,7 @@ signals:
     offset: null
     unit: unknown        # brake-line pressure or pedal position
     confidence: high
+    model_feature: false  # brake — driver input, not engine behaviour
     evidence:
       - session: 2026-05-13T011123
         method: byte_vs_tag_differential
@@ -1089,6 +1114,7 @@ signals:
     offset: null
     unit: unknown        # brake-dominant driver-demand activity (composite)
     confidence: high
+    model_feature: false  # brake — driver input, not engine behaviour
     evidence:
       - session: 2026-05-13T011123
         method: byte_vs_tag_differential
@@ -1135,6 +1161,7 @@ signals:
     offset: null
     unit: unknown        # bit-packed status, not a scalar
     confidence: medium
+    model_feature: false  # cabin blower/lighting — not an engine load worth modelling
     evidence:
       - session: 2026-05-16T202800
         method: byte_vs_tag_differential
@@ -1268,6 +1295,7 @@ signals:
     offset: 0.0
     unit: "km/h"
     confidence: high
+    model_feature: false  # redundant road speed — WHEEL_SPEED_6F7_C is the modelled copy
     plausible_min: 0.0
     plausible_max: 250.0
     evidence: &wheel_speed_6f7_evidence
@@ -1459,6 +1487,7 @@ signals:
     offset: 0.0
     unit: "km/h"
     confidence: high
+    model_feature: false  # redundant road speed — WHEEL_SPEED_6F7_C is the modelled copy
     plausible_min: 0.0
     plausible_max: 250.0
     evidence: *wheel_speed_6f7_evidence

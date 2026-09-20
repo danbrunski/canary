@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,14 +18,18 @@ from src.models.isolation_forest import (  # noqa: E402
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
     LABEL_COLUMN,
+    MAX_RESOLVABILITY_FLAG_RATE,
     MISSING_FEATURE_FRACTION_COLUMN,
     MISSING_FEATURES_COLUMN,
     MODEL_MODE_COLUMN,
     SCORE_COLUMN,
     ModeTrainingSummary,
+    SkippedModeSummary,
+    calibration_flag_rate,
     default_manifest_path,
     fit_isolation_forest,
     load_isolation_forest_model,
+    resolvable_flag_rate,
 )
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
@@ -473,6 +478,12 @@ def test_calibration_records_threshold_and_scale_in_manifest() -> None:
         assert mode.score_threshold is not None
         assert mode.score_scale is not None and mode.score_scale > 0.0
         assert mode.holdout_samples == 12  # floor(60 * 0.2)
+        # 12 held-out rows cannot resolve a 0.1 flag rate (10 exceedances would
+        # need 100 rows) and the manifest says so. The rate is not coarsened
+        # here: 0.1 is already past MAX_RESOLVABILITY_FLAG_RATE.
+        assert mode.requested_flag_rate == 0.1
+        assert mode.target_unresolvable is True
+        assert mode.resolvable_flag_rate == pytest.approx(10 / 12)
         assert mode.target_flag_rate == 0.1
         assert mode.achieved_flag_rate is not None
         assert 0.0 <= mode.achieved_flag_rate <= 0.5
@@ -614,7 +625,14 @@ def test_sparse_mode_is_skipped_and_listed_in_manifest() -> None:
     assert skipped["wot"].min_samples_required == 30
 
     manifest = trained.manifest.to_dict()
-    assert manifest["skipped_modes"] == [{"mode": "wot", "fit_rows": 5, "min_samples_required": 30}]
+    assert manifest["skipped_modes"] == [
+        {
+            "mode": "wot",
+            "fit_rows": 5,
+            "min_samples_required": 30,
+            "reason": "too_few_fit_rows",
+        }
+    ]
 
 
 def test_min_samples_per_mode_floor_defaults_to_disabled_for_legacy_configs() -> None:
@@ -808,3 +826,170 @@ def test_missing_feature_fraction_recorded_for_complete_rows_too() -> None:
     )
     scored = trained.score(frame.iloc[[5]])  # keeps index 5, so read positionally
     assert scored.iloc[0][MISSING_FEATURE_FRACTION_COLUMN] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-20: `unknown` is never a regime; calibration rates must be resolvable
+# ---------------------------------------------------------------------------
+
+
+def _frame_with_modes(rows_per_mode: dict[str, int], *, seed: int = 7) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    total = sum(rows_per_mode.values())
+    modes = [mode for mode, rows in rows_per_mode.items() for _ in range(rows)]
+    return pd.DataFrame(
+        {
+            SESSION_COLUMN: ["session-a"] * total,
+            TIMESTAMP_COLUMN: pd.date_range("2026-09-20T00:00:00Z", periods=total, freq="1s"),
+            MODE_COLUMN: modes,
+            "obd:RPM": rng.normal(loc=1500.0, scale=60.0, size=total),
+            "obd:SPEED": rng.normal(loc=30.0, scale=3.0, size=total),
+            "obd:LOAD": rng.normal(loc=35.0, scale=4.0, size=total),
+        }
+    )
+
+
+def test_unknown_mode_is_never_fit_and_is_listed_as_skipped_with_a_reason() -> None:
+    frame = _frame_with_modes({"city": 120, "unknown": 120})
+    trained = fit_isolation_forest(
+        frame,
+        _MinSamplesIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-09-20T01:02:03Z",
+    )
+
+    # 120 rows clears min_samples_per_mode=30: it is skipped for WHAT it is.
+    assert set(trained.models) == {"city"}
+    assert [mode.mode for mode in trained.manifest.modes] == ["city"]
+    (skipped,) = trained.manifest.skipped_modes
+    assert skipped.mode == "unknown"
+    assert skipped.reason == "unclassified_operating_mode"
+    assert skipped.fit_rows == 120
+    assert trained.manifest.to_dict()["skipped_modes"][0]["reason"] == (
+        "unclassified_operating_mode"
+    )
+    # ...and none of its rows leaked into the scaler / training accounting.
+    assert trained.manifest.complete_rows == 120
+
+
+def test_unknown_rows_are_withheld_at_serve_not_scored_by_another_modes_model() -> None:
+    frame = _frame_with_modes({"city": 120, "idle": 120, "unknown": 60})
+    trained = fit_isolation_forest(
+        frame,
+        _MinSamplesIFConfig(),
+        feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+        fitted_at="2026-09-20T01:02:03Z",
+    )
+    scored = trained.score(frame)
+    unknown_rows = scored[scored[MODE_COLUMN] == "unknown"]
+    assert unknown_rows[SCORE_COLUMN].isna().all() or np.isinf(unknown_rows[SCORE_COLUMN]).all()
+    assert unknown_rows[MISSING_FEATURES_COLUMN].all()
+
+
+def test_skipped_mode_reason_is_back_compat_for_older_manifests() -> None:
+    legacy = SkippedModeSummary.from_dict(
+        {"mode": "wot", "fit_rows": 5, "min_samples_required": 30}
+    )
+    assert legacy.reason == "too_few_fit_rows"
+
+
+def test_unknown_only_corpus_keeps_the_explicit_opt_in_and_the_default_refusal() -> None:
+    frame = _frame_with_modes({"unknown": 120})
+
+    @dataclass(frozen=True)
+    class _Refusing(_MinSamplesIFConfig):
+        allow_unknown_only: bool = False
+
+    @dataclass(frozen=True)
+    class _OptedIn(_MinSamplesIFConfig):
+        allow_unknown_only: bool = True
+
+    with pytest.raises(ValueError, match="only operating_mode='unknown'"):
+        fit_isolation_forest(frame, _Refusing(), feature_columns=["obd:RPM", "obd:SPEED"])
+    trained = fit_isolation_forest(frame, _OptedIn(), feature_columns=["obd:RPM", "obd:SPEED"])
+    assert set(trained.models) == {"unknown"}
+
+
+def test_resolvable_flag_rate_is_ten_exceedances_over_n() -> None:
+    assert resolvable_flag_rate(10_000) == pytest.approx(0.001)
+    assert resolvable_flag_rate(154) == pytest.approx(10 / 154)
+    assert resolvable_flag_rate(4) == 1.0
+    # Coarsened to what the holdout resolves...
+    assert calibration_flag_rate(0.001, 1148) == pytest.approx(10 / 1148)
+    # ...never past the ceiling (a 16-row holdout must not yield a median threshold)...
+    assert calibration_flag_rate(0.001, 16) == MAX_RESOLVABILITY_FLAG_RATE
+    # ...untouched when already resolvable, and an operator's coarser ask is honoured.
+    assert calibration_flag_rate(0.001, 50_000) == 0.001
+    assert calibration_flag_rate(0.15, 16) == 0.15
+
+
+@dataclass(frozen=True)
+class _TightTargetIFConfig(_IFConfig):
+    calibration_holdout_fraction: float = 0.2
+    target_flag_rate: float = 0.001
+
+
+def test_small_holdout_calibrates_at_a_resolvable_rate_and_says_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The 2026-09-20 manifest claimed target_flag_rate 0.001 on 91-328 row
+    holdouts, where one flagged row is 0.3-1.1 %."""
+    frame = _frame_with_modes({"city": 2000})  # 20 % holdout -> 400 rows
+    with caplog.at_level(logging.WARNING, logger="src.models.isolation_forest"):
+        trained = fit_isolation_forest(
+            frame,
+            _TightTargetIFConfig(),
+            feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"],
+            fitted_at="2026-09-20T01:02:03Z",
+        )
+    (mode,) = trained.manifest.modes
+    assert mode.holdout_samples == 400
+    assert mode.requested_flag_rate == 0.001
+    assert mode.target_unresolvable is True
+    assert mode.resolvable_flag_rate == pytest.approx(10 / 400)
+    # The rate actually used is the resolvable one, not the claimed 0.001 ...
+    assert mode.target_flag_rate == pytest.approx(10 / 400)
+    assert mode.target_flag_rate > mode.requested_flag_rate
+    # ... and it was APPLIED: ~10 of the 400 held-out rows sit at/over the threshold.
+    assert mode.achieved_flag_rate == pytest.approx(10 / 400, abs=1 / 400)
+    assert trained.manifest.hyperparams["target_flag_rate"] == 0.001  # the request, unchanged
+    (record,) = [r for r in caplog.records if "not resolvable" in r.getMessage()]
+    assert record.levelno == logging.WARNING
+    assert "'city'" in record.getMessage()
+
+    round_tripped = ModeTrainingSummary.from_dict(mode.to_dict())
+    assert round_tripped == mode
+
+
+def test_large_holdout_keeps_the_requested_rate_and_is_marked_resolvable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    @dataclass(frozen=True)
+    class _Resolvable(_IFConfig):
+        calibration_holdout_fraction: float = 0.5
+        target_flag_rate: float = 0.02
+
+    frame = _frame_with_modes({"city": 2000})  # 1000 held-out rows resolve 0.01
+    with caplog.at_level(logging.WARNING, logger="src.models.isolation_forest"):
+        trained = fit_isolation_forest(
+            frame, _Resolvable(), feature_columns=["obd:RPM", "obd:SPEED", "obd:LOAD"]
+        )
+    (mode,) = trained.manifest.modes
+    assert mode.target_unresolvable is False
+    assert mode.target_flag_rate == mode.requested_flag_rate == 0.02
+    assert not [r for r in caplog.records if "not resolvable" in r.getMessage()]
+
+
+def test_mode_summary_without_resolvability_fields_still_loads() -> None:
+    legacy = ModeTrainingSummary.from_dict(
+        {
+            "mode": "idle",
+            "n_samples": 10,
+            "contamination": 0.01,
+            "sessions": ["s"],
+            "target_flag_rate": 0.001,
+        }
+    )
+    assert legacy.requested_flag_rate is None
+    assert legacy.target_unresolvable is None
+    assert legacy.resolvable_flag_rate is None
