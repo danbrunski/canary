@@ -33,6 +33,10 @@ Role = Literal[
     #: map (``TargetAfrMap.load_axis_name``). See tuning_providers.yaml for the
     #: provider and the envelope it holds in.
     "base_fuel_schedule",
+    #: Whether the ECU is commanding fuel at all, as a boolean. Deliberately
+    #: separate from the mixture target so fuel cut is not inferred from a
+    #: magic AFR value (Mode 01's overloaded ``FUEL_STATUS == 4``).
+    "fueling_active",
 ]
 
 
@@ -53,7 +57,9 @@ class Provider(BaseModel):
 
     role: Role
     spec: str
-    transform: Literal["identity", "voltage_afr", "scale", "equiv_ratio_afr"] = "identity"
+    transform: Literal["identity", "voltage_afr", "scale", "equiv_ratio_afr", "target_present"] = (
+        "identity"
+    )
     confidence: Literal["confirmed", "candidate"] = "confirmed"
     #: Multiplier for ``transform: scale`` (engineering = raw * factor).
     factor: float | None = None
@@ -235,6 +241,16 @@ def build_tuning_frame(
             phi = pd.to_numeric(values[role], errors="coerce")
             values[f"{role}_equiv_ratio"] = phi
             values[role] = afr_stoich / phi.where(phi > 0)
+        elif provider.transform == "target_present":
+            # True wherever a target was commanded at all. This is not a
+            # threshold on the value: fuel cut produces no row on this
+            # channel at all (it is recorded as a `_SENTINEL` state), so cut
+            # samples are excluded by construction and a gate built on this
+            # column reports zero drops because there was nothing to drop.
+            # That is the honest reading, and it is why a separate
+            # fueling-active role can be sourced from the target channel
+            # without circularity.
+            values[role] = values[role].notna()
         elif provider.transform == "scale":
             assert provider.factor is not None  # guaranteed by Provider's validator
             values[f"{role}_raw"] = values[role]

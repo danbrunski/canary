@@ -281,3 +281,28 @@ def test_equiv_ratio_provider_may_not_claim_a_unit() -> None:
             transform="equiv_ratio_afr",
             unit="phi",
         )
+
+
+def test_fueling_active_is_true_wherever_a_target_exists(tmp_path: Path) -> None:
+    """Fuel cut is excluded by construction, not by a gate.
+
+    The sentinel lives on a different channel, so a cut instant contributes
+    no row here at all. The delivery gate built on this column therefore
+    reports zero drops, and that is the honest reading rather than a gate
+    that silently never fires.
+    """
+    registry = tmp_path / "providers.yaml"
+    registry.write_text(
+        "schema_version: 1\n"
+        "providers:\n"
+        "  - role: fueling_active\n"
+        "    spec: 'mem:ECM_TARGET_EQUIV_RATIO'\n"
+        "    transform: target_present\n"
+    )
+    session = tmp_path / "session"
+    session.mkdir()
+    _session_frame().to_parquet(session / "telemetry-0001.parquet")
+
+    frame = build_tuning_frame(session, providers_path=registry).values
+
+    assert frame["fueling_active"].tolist() == [True]

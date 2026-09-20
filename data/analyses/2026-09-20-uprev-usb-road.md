@@ -338,3 +338,36 @@ in engineering units, and `build_tuning_frame` reported
 while retaining `commanded_afr_equiv_ratio`. The remaining roles read
 `no samples`, which is correct: this profile polls six DIDs and none of the
 cam or injector channels.
+
+### Sentinel and full enrichment range, and the first semantic delivery run
+
+A second live capture, `_capture-fuel-target-research-2026-09-20T224503`
+(5 min, engine running, 2,440-3,371 rpm, throttle 0.77-4.065 V against a
+4.12 V stop) exercised what the first one could not:
+
+- **314 target samples spanning the whole commanded range**: phi 1.000000 to
+  1.1640625, i.e. 14.70 down to 12.63 AFR, in eight distinct states. The rich
+  end reproduces the documented `0x4A80` value exactly.
+- **11 `_SENTINEL` rows** — the fuel-cut path, previously unexercised on the
+  vehicle. Four of them pair within 300 ms with throttle 0.815-0.820 V at
+  3,181-3,237 rpm. The capture's own closed-throttle floor (p1) is 0.78 V, so
+  these are closed throttle at elevated rpm: decel fuel cut, confirmed from a
+  channel that took no part in identifying the word. The other seven fall in
+  the first 40 s, before this capture's throttle DID produced its first
+  reading, so there is nothing to pair them against.
+
+`delivery_error_from_semantic_frame` then ran on the all-DID roles for the
+first time: 257 grid cells where rpm, measured AFR, commanded AFR and
+fuelling-active were each independently observed in the same second; 234
+dropped as `not_enrichment`; 23 remaining in the 3,000-3,500 rpm band at
+commanded 13.26 / measured 13.53 AFR.
+
+**That +2.0 % is not a finding and must not be quoted as one.** The measured
+per-cell floor for this quantity is sd 1.49 % with a +/-2.4 % range (8-04
+AM->PM null run), so a single-band result from 23 samples of one short
+capture sits inside the noise. What the run demonstrates is that the chain
+executes end to end on real driving data, not that fuelling is 2 % lean.
+
+The `fueling_inactive` gate dropped zero rows, which is the designed
+behaviour rather than a gate that failed to fire: fuel cut produces no row on
+the target channel at all, so cut samples never entered the frame.

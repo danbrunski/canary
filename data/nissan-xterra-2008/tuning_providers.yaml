@@ -63,6 +63,17 @@ providers:
   # from stoich. The channel is withheld automatically on any calibration
   # other than the one the address was verified against.
   - {role: commanded_afr, spec: 'mem:ECM_TARGET_EQUIV_RATIO', transform: equiv_ratio_afr}
+  # Fuelling-active, from the same word. `delivery_error_from_semantic_frame`
+  # requires this as a boolean and its own comment anticipated exactly this
+  # provider: "a future DID decoder can identify fuel cut without carrying
+  # Mode-01's overloaded FUEL_STATUS == 4 convention". Mode 01 cannot supply
+  # it on an all-DID capture anyway.
+  #
+  # There is no circularity in sourcing it from the target channel. Fuel cut
+  # produces no row here at all — it is recorded on the companion _SENTINEL
+  # channel — so this is "a target was commanded", and the delivery gate
+  # built on it correctly reports zero drops: cut samples never entered.
+  - {role: fueling_active, spec: 'mem:ECM_TARGET_EQUIV_RATIO', transform: target_present}
 
 # How to recognise wide-open throttle from the operator_demand role alone,
 # for captures that carry no Mode 01 load PID and no physical pull tags.
