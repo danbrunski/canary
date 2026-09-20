@@ -326,12 +326,31 @@ def test_resolve_feature_policy_threads_an_explicit_catalog() -> None:
     assert resolve_feature_policy(bindings=explicit).bindings is explicit
 
 
-def test_repo_default_profile_does_not_serve_the_injector_pulse_dids() -> None:
-    """The two channels the 2026-09-20 LSTM trained on and could never observe."""
+def test_repo_default_profile_serves_the_injector_pulse_dids() -> None:
+    """The 2026-09-20 LSTM trained on these two and could not observe them.
+
+    That was fixed from the *collection* side rather than by excluding them:
+    the UpRev cable identified 0x1206/0x1207 as the Bank 1/2 injected pulse
+    and pinned both scales at ``raw * 0.01 ms``, so seed revision 4 added
+    them to the default profile and they became legitimately observable at
+    serve time.
+
+    This test therefore asserts the opposite of what it did before, on
+    purpose. The invariant it guards is unchanged and still enforced
+    generally by
+    ``test_did_not_polled_by_the_serving_profile_is_excluded_and_a_polled_one_kept``:
+    a model may only train on what the serving profile actually polls. What
+    changed is which side of that line these two channels sit on.
+    """
     policy = resolve_feature_policy()
     assert policy.serving_dids is not None
+    assert {"ECM_INJECTOR_PULSE_1", "ECM_INJECTOR_PULSE_2"} <= policy.serving_dids
     frame = _frame("did:ECM_INJECTOR_PULSE_1", "did:ECM_INJECTOR_PULSE_2", "did:ECM_RPM")
-    assert set(candidate_feature_columns(frame, policy=policy)) == _family("did:ECM_RPM")
+    assert set(candidate_feature_columns(frame, policy=policy)) == (
+        _family("did:ECM_INJECTOR_PULSE_1")
+        | _family("did:ECM_INJECTOR_PULSE_2")
+        | _family("did:ECM_RPM")
+    )
 
 
 # ---------------------------------------------------------------------------
