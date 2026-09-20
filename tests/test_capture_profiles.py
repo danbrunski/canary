@@ -60,12 +60,16 @@ def test_strict_schema_and_seed_mirrors_collection(tmp_path: Path) -> None:
 
     default = catalog.by_name("default")
     fuel_map = catalog.by_name("fuel-map")
+    tuning_did = catalog.by_name("tuning-did")
     assert default is not None and set(default.mode01) == {
         channel.upper() for channel in config.collection.obd_pids
     }
     assert default.mode22 == config.collection.obd_dids
     assert fuel_map is not None and fuel_map.storage_prefix == "_capture-fuel-map"
     assert "RPM" in fuel_map.mode01
+    assert tuning_did is not None
+    assert {"ECM_INJECTOR_PULSE_1", "ECM_INJECTOR_PULSE_2"} <= set(tuning_did.mode22)
+    assert tuning_did.expected_total_demand_hz == pytest.approx(181.0)
 
     with pytest.raises(ValidationError, match="Extra inputs"):
         CaptureProfile.model_validate(

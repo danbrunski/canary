@@ -41,7 +41,10 @@ FUEL_MAP_PROFILE_NAME = "fuel-map"
 #:     ``ECM_AIR_CHARGE`` and its recipe ``air_charge_vs_rpm_throttle_did``,
 #:     with no alias. Operator-modified copies are migrated by
 #:     ``tools/migrate_channel_names.py`` rather than by this upgrade.
-BUILTIN_REVISION = 3
+#: 4 — 2026-09-20 UpRev USB evidence directly pinned 0x1206/0x1207 as
+#:     injector pulse Bank 1/2 at 0.01 ms/count; collect both in the all-DID
+#:     tuning profile instead of leaving confirmed fuel observability out.
+BUILTIN_REVISION = 4
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -139,6 +142,8 @@ TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_AF_SENSOR_V_B1",
     "ECM_AF_SENSOR_V_B2",
     "ECM_AIR_CHARGE",
+    "ECM_INJECTOR_PULSE_1",
+    "ECM_INJECTOR_PULSE_2",
     "ECM_INTAKE_CAM_ANGLE_MEASURED",
     "ECM_INTAKE_CAM_ANGLE_COMMANDED",
     "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
@@ -191,6 +196,13 @@ class CaptureProfile(_Strict):
     #: rate. In a windowed profile it controls which cycle windows the member
     #: is due in; it never changes the window cadence itself.
     mode22_rate_weights: dict[str, float] = Field(default_factory=dict)
+    #: Service-0x23 memory channels this profile polls, by catalog name.
+    #: Separate from ``mode22`` because they are a different kind of claim:
+    #: a DID name is stable across calibrations, a RAM address is not, and
+    #: the collector withholds one whose ``verified_tune_revision`` does not
+    #: match the running tune. Gated by ``mode22_enabled`` -- they need the
+    #: same diagnostic session.
+    memory: tuple[str, ...] = ()
     #: Whether each service is polled at all. Disabling keeps the selection
     #: intact so re-enabling doesn't mean rebuilding it — "off for this
     #: capture" and "not of interest" are different statements.
@@ -657,16 +669,17 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 mode22_rate_weights={"ECM_COOLANT_TEMP": 1.0 / 15.0},
                 did_continuous=True,
                 target_rate_hz=15.0,
-                bus_budget_override=180.0,
-                # 10 DIDs x 15 Hz + coolant x 1 Hz = 151 reads/s.
-                expected_total_demand_hz=151.0,
+                bus_budget_override=184.0,
+                # 12 DIDs x 15 Hz + coolant x 1 Hz = 181 reads/s.
+                expected_total_demand_hz=181.0,
                 capacity_evidence=(
-                    "2026-08-04 bench: 658 DID reads/s. 10 DIDs x 15 Hz + "
-                    "ECM_COOLANT_TEMP x 1 Hz = 151 reads/s. The 2026-09-10 H8 drive "
+                    "2026-08-04 bench: 658 DID reads/s. 12 DIDs x 15 Hz + "
+                    "ECM_COOLANT_TEMP x 1 Hz = 181 reads/s. The 2026-09-10 H8 drive "
                     "sustained 116.8 req/s with 11 DIDs at 10.4 Hz each, 41 timeouts "
                     "in 167,885 requests and 0 bus errors, so the ECM is not the "
                     "binding constraint; coolant's 15 Hz share was simply wasted "
-                    "(0.2 % of its samples changed while it took 1/11 of the budget)."
+                    "(0.2 % of its samples changed while it took 1/11 of the budget). "
+                    "The 184 req/s budget leaves three slots/s for session refresh and jitter."
                 ),
                 broadcast_decode=True,
                 corpus_eligible=False,

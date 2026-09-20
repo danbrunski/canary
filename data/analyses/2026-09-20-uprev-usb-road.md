@@ -190,11 +190,18 @@ the Pi's ISO-TP CAN client. The KWP24 and UDS-ALFID request forms returned NRC
 `0x12`. Evidence is preserved on the Pi at
 `/data/canary/_uprev-usb/2026-09-20/can-target-afr-memory-probe.json`.
 
-Thus the remaining gap is software integration, not ECU or transport access:
-CANary schedules and persists PIDs and DIDs, but does not yet model a recurring
-ReadMemoryByAddress channel. Until that is added, `0x1134` supplies only the
-confirmed low-resolution, rich-side/clamped target view; it cannot distinguish
-fuel cut from stoich and must not be presented as the final target.
+The remaining gap was software integration, not ECU or transport access, and
+it is now closed: CANary models a recurring ReadMemoryByAddress channel
+(`memory:` in `data/dids.yaml`, `mem:<NAME>` telemetry, selected per capture
+profile). It is scheduled inside the Mode-22 session window, because service
+0x23 is gated by the same session on this ECM, and it is withheld unless the
+running calibration matches the one the address was verified against -- a RAM
+address is an artifact of one ROM build, not a contract like a DID number.
+The fuel-cut word decodes to no measurement rather than to phi 0.
+
+`0x1134` therefore reverts to what it is: the low-resolution, rich-side
+clamped view that cannot distinguish fuel cut from stoich. Use it only when
+the memory channel is withheld, and never present it as the final target.
 
 No equivalent passive-broadcast fields are claimed. These observations use the
 ECM's active diagnostic endpoint. A simultaneous transport trial also showed
@@ -202,6 +209,18 @@ that an active K-line stream starves active CAN diagnostics (Mode 01 produced
 only the opening seconds, then no samples for about 132 seconds), although
 passive CAN frames remain available. Collection must choose one active diagnostic
 transport at a time.
+
+The new read-only `tools/can_memory_log.py` then exercised the recurring CAN
+path. A 32-byte read at `0xFFFF26B0` completed 100/100 responses in 5.8 s. An
+interleaved run added DIDs `0x1206`, `0x1207`, `0x1208`, `0x1225`, and `0x1226`;
+the long capture completed 1,000/1,000 memory reads and 5,000/5,000 DID reads
+in 35.2 s. The memory contains two similar 14-byte bank records, including
+copies of the `0x4000` target-like word. Their changing fields remain unknown:
+all `compare_channels` scale verdicts were `drifting` or `unresolved`. The
+best short-window injector relation (r2 0.80) collapsed to r2 0.26 over the
+longer run; the best long-window A/F relation reached r2 0.73 but was
+unresolvable. These are candidates for a tagged transient, not telemetry
+bindings.
 
 ## Rejected or still-open readings
 

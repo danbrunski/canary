@@ -1019,3 +1019,82 @@ dids:
       of Q14 phi, but its rich-side table role remains deliberately named as a
       candidate. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
       ECM's CAN diagnostic path.
+
+# ---------------------------------------------------------------------------
+# Service 0x23 (ReadMemoryByAddress) channels.
+#
+# These are RAM addresses, not identifiers. A DID number is a contract the
+# ECU keeps across calibrations; an address is an artifact of one ROM build's
+# memory layout, so every entry must name the calibration it was verified
+# against and the collector withholds it on any other. The request form is
+# vehicle-verified too: on this ECM only the KWP32 body (32-bit address +
+# 16-bit length) is accepted -- the KWP24 and UDS-ALFID forms both answer
+# NRC 0x12 (2026-09-20).
+#
+# Reads only. Service 0x3D (WriteMemoryByAddress) is not implemented here and
+# must not be: the no-reflash line in AGENTS.md is about the ECU's
+# non-volatile memory, and a memory write is the shortest path across it.
+# ---------------------------------------------------------------------------
+memory:
+  - name: ECM_TARGET_EQUIV_RATIO
+    address: 0xFFFF26BE
+    length: 2
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 6.103515625e-05   # Q14: raw / 16384
+    offset: 0.0
+    unit: phi
+    confidence: high
+    plausible_min: 0.9
+    plausible_max: 1.4
+    verified_tune_revision: ZS44A-k106
+    sentinel_raw: 0
+    sentinel_meaning: >
+      Fuel cut -- no AFR target commanded. NOT a phi of zero: scaling it
+      would decode to 0.0 and then divide into a target AFR of infinity.
+    evidence:
+      - session: _uprev-usb-2026-09-20-target-afr
+        method: uprev_operator_selected_memory_descriptor
+        finding: >
+          UpRev's Target AFR item does not use a DID. Its captured stream
+          definition reads two absolute-RAM bytes, `83 ff ff 26 be` and
+          `83 ff ff 26 bf`, which is why 138 answering DIDs and a full
+          broadcast sweep never located this quantity.
+      - session: _uprev-usb-2026-09-20-target-afr
+        method: same_reply_piecewise_identity_vs_did_0x1134
+        finding: >
+          Across 5,000/5,000 same-reply observations, with no exceptions,
+          `0x1134 raw = max(64, floor(word / 256))`, over words 0x0000,
+          0x4000, 0x4080, 0x4100, 0x4150, 0x4180, 0x4380 and 0x4A80.
+          0x4A80 / 16384 = 1.1640625 maps to 0x1134 raw 74, reproducing the
+          independently observed Mode 01 PID 0x44 commanded-phi value at
+          0x1134=74. A straight-line fit is unresolved (r2=0.078) because
+          the relation is piecewise and clamped -- the per-reply equality is
+          the applicable result, not the regression.
+      - session: _uprev-usb-2026-09-20-target-afr
+        method: fuel_cut_coincidence
+        finding: >
+          All 98 zero-word replies coincided with injector pulse 0x1206 raw
+          54-57 (the established DFCO floor) at 2,687-2,950 rpm with closed
+          throttle. A Windows combined capture reproduced it on both banks:
+          131 zero-word samples with both injectors at raw 45-49 and both
+          A/F sensors at the 5.065 V lean rail.
+      - session: can-target-afr-memory-probe
+        method: can_transport_parity
+        finding: >
+          Not cable-only. Through the Pi's ordinary ISO-TP CAN client, after
+          entering session 0xC0, a service 0x23 request with KWP32 body
+          `FF FF 26 BE 00 02` returned positive payload `4000`. The KWP24
+          and UDS-ALFID request forms both returned NRC 0x12.
+    notes: |
+      The ECU's FINAL commanded equivalence ratio, after every enrichment
+      and cut. target_AFR = stoich_AFR / phi for a non-sentinel word.
+
+      DID 0x1134 is the low-resolution, floor-clamped rich-side view of this
+      same quantity and holds at raw 64 during fuel cut, so it cannot tell
+      fuel cut from stoich. Use 0x1134 only when this channel is withheld,
+      and never present it as the final target.
+
+      The address is specific to this ROM/calibration. Do not copy it into
+      shared code or assume another ECU exposes the same map.

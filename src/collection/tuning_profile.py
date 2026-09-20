@@ -313,6 +313,14 @@ def selection_exclusion(kind: str, channel: str) -> str | None:
 def _selection_exclusion(
     profile: CaptureProfile, aliases: dict[str, str], kind: str, channel: str
 ) -> str | None:
+    if kind == "memory":
+        # Same session, so the same enable flag governs both.
+        if not profile.mode22_enabled:
+            return "mode22_disabled"
+        name = channel.split(":", 1)[-1].upper()
+        if name in {item.upper() for item in profile.memory}:
+            return None
+        return "not_selected"
     if kind == "did":
         if not profile.mode22_enabled:
             return "mode22_disabled"
@@ -353,6 +361,10 @@ def profile_channel_for(channel: str) -> str | None:
         for item in _profile.mode22:
             resolved = _did_channels.get(item.upper(), item.upper())
             if upper in {resolved, item.upper()} or stripped in {resolved, item.upper()}:
+                return item
+        memory_name = channel.split(":", 1)[-1].upper()
+        for item in _profile.memory:
+            if item.upper() == memory_name:
                 return item
     return None
 

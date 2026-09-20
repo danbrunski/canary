@@ -16,9 +16,12 @@ its own ``run_collection`` and existing callers.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Coroutine
+from datetime import UTC, datetime
 from typing import Any
 
+from src.analysis.tune_revisions import load_tune_revisions
 from src.collection import tuning_profile
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
@@ -38,13 +41,17 @@ from src.collection.obd_scheduler import (
     FreezeFrameTrigger,
     did_response_widths,
     known_did_names,
+    memory_channels,
     parse_did_token,
 )
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
+from src.decode.dids import memory_channels_for_revision
 from src.telemetry import TelemetryRecord
+
+log = logging.getLogger(__name__)
 
 CollectorStarter = Callable[
     ["asyncio.Queue[TelemetryRecord]", asyncio.Event], Coroutine[Any, Any, None]
@@ -131,6 +138,27 @@ def default_collectors(
                 ]
             )
         )
+        # A RAM address is only valid for the ROM build it was found in, so
+        # the running calibration decides which memory channels may be polled
+        # at all. Withheld ones are named in the log rather than dropped --
+        # "the tune moved" and "none configured" demand opposite responses.
+        selected_memory = tuple(
+            dict.fromkeys(name for profile in capture_catalog.profiles for name in profile.memory)
+        )
+        catalog_memory = [c for c in memory_channels() if c.name in selected_memory]
+        registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+        current = None if registry is None else registry.at(datetime.now(UTC))
+        usable_memory, withheld_memory = memory_channels_for_revision(
+            catalog_memory, None if current is None else current.revision
+        )
+        if withheld_memory:
+            log.warning(
+                "memory channels withheld: verified on another calibration",
+                extra={
+                    "running_tune_revision": None if current is None else current.revision,
+                    "withheld": {c.name: c.verified_tune_revision for c in withheld_memory},
+                },
+            )
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
             poll_rate_hz=config.collection.obd_poll_rate_hz,
@@ -154,6 +182,7 @@ def default_collectors(
             freeze_frame_trigger=freeze_frame_trigger,
             force_poll_trigger=force_poll_trigger,
             custom_pids=tuple(custom_pids),
+            memory=tuple(usable_memory),
             priority_channels=config.collection.obd_priority_channels,
             discovery_budget_requests_per_second=(
                 config.collection.obd_discovery_budget_requests_per_second

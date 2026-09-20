@@ -23,20 +23,25 @@ from src.collection.hybrid_cycle import (
     ServiceKind,
     next_wake_at,
 )
-from src.collection.isotp import PERMANENT_REFUSAL_NRCS, nrc_name
+from src.collection.isotp import MEMORY_READ_SERVICE, PERMANENT_REFUSAL_NRCS, nrc_name
 from src.collection.obd_registry import PollTier, lookup
 from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
+from src.decode.dids import MEMORY_SOURCE
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
     from src.collection.discovery import SupportProbe
-    from src.decode.dids import DidAccess, DidMap
+    from src.decode.dids import DidAccess, DidMap, MemoryChannel
 
 log = logging.getLogger(__name__)
 
 AUTO_PIDS = "auto"
+#: Request kinds the ECM answers only inside the Mode-22 session window.
+#: One name for the set so the window controller, the request plan and
+#: the eligibility matrix cannot disagree about who is in it.
+SESSION_WINDOW_KINDS: frozenset[str] = frozenset({"did", "memory"})
 DEFAULT_DID_REQUEST_ID = 0x7E0
 AUTO_MISS_BACKOFF_SECONDS = 30.0
 #: Consecutive *permanent* refusals before the Mode-22 fast exit is disabled.
@@ -258,6 +263,19 @@ def did_access() -> DidAccess | None:
     return None if did_map is None else did_map.access
 
 
+def memory_channels() -> tuple[MemoryChannel, ...]:
+    """Every service-0x23 channel in the catalog, unfiltered.
+
+    Filtering to the running calibration is the caller's job
+    (:func:`src.decode.dids.memory_channels_for_revision`) precisely because
+    it needs the answer to be *reportable*: a channel withheld because the
+    tune moved and a channel that was never configured look identical once
+    one of them has been silently dropped.
+    """
+    did_map = _load_did_map()
+    return () if did_map is None else tuple(did_map.memory)
+
+
 def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:
     """Provenance-backed full Mode-22 payload widths, keyed by DID."""
     did_map = _load_did_map()
@@ -468,6 +486,10 @@ class CanObdSpec:
     #: scheduler never re-reads the YAML itself. Empty by default (no
     #: ``data/custom_pids.yaml`` is the common case).
     custom_pids: tuple[CustomPid, ...] = ()
+    #: Service-0x23 channels, already filtered to the running calibration
+    #: by the caller (``memory_channels_for_revision``). Threaded through
+    #: like ``custom_pids``; the scheduler never reads the catalog itself.
+    memory: tuple[MemoryChannel, ...] = ()
     #: Channels that win a contended request slot while due, so they hold
     #: their tier rate instead of degrading with the rest of the plan. See
     #: ``DEFAULT_PRIORITY_CHANNELS``; empty disables the priority lane.
@@ -789,7 +811,7 @@ class CanObdLoopStats:
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did", "session", "dtc", "custom", "service", "freeze_frame"]
+    kind: Literal["pid", "did", "memory", "session", "dtc", "custom", "service", "freeze_frame"]
     service: int
     identifier: int
     request_id: int
@@ -803,6 +825,11 @@ class _PollRequest:
     #: decodes the response through (formula, unit). ``None`` for every other
     #: kind, which all decode via the static PID_DECODERS/DTC tables instead.
     custom_pid: CustomPid | None = None
+    #: Set only for ``kind="memory"`` — carries the address, the read
+    #: length and the decode. ``identifier`` is unused for these: a
+    #: service-0x23 request has no identifier byte and its response
+    #: echoes none, so there is nothing for the assembler to match.
+    memory_channel: MemoryChannel | None = None
 
 
 @dataclass
@@ -1464,7 +1491,7 @@ class DidWindowController:
         from src.collection import tuning_profile
 
         verdict = evaluate(request.kind, tuning_profile.profile_class(), self.phase)
-        if verdict.eligible and request.kind == "did" and index not in self._pending:
+        if verdict.eligible and request.kind in SESSION_WINDOW_KINDS and index not in self._pending:
             return Eligibility("deferred", "attempted_this_window")
         return verdict
 
@@ -1853,6 +1880,23 @@ def build_poll_requests(client: _PidDiscoveryClient | None, spec: CanObdSpec) ->
                 priority=custom.name.strip().upper() in priority_channels,
             )
         )
+    for memory_channel in spec.memory:
+        requests.append(
+            _PollRequest(
+                kind="memory",
+                service=MEMORY_READ_SERVICE,
+                # No identifier on the wire: `_query_with_tap` builds the
+                # address/length body from `memory_channel` instead, and the
+                # assembler is given None because 0x23 echoes nothing.
+                identifier=0,
+                # Same endpoint and same gating session as Mode 22.
+                request_id=spec.did_request_id,
+                channel=f"{MEMORY_SOURCE}:{memory_channel.name}",
+                poll_tier="medium",
+                memory_channel=memory_channel,
+                priority=memory_channel.name.strip().upper() in priority_channels,
+            )
+        )
     if spec.dtc_poll_interval_seconds > 0:
         # Task 1.3: stored/pending/permanent DTCs on their own very-slow
         # cadence. No vehicle_state gating here — the round-robin scheduler
@@ -2065,7 +2109,7 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         return 0.0 if interval <= 0 else 1.0 / interval
     base = max(float(spec.poll_rate_hz), 0.001)
     rate = base * TIER_RATE_FACTORS.get(request.poll_tier, TIER_RATE_FACTORS["medium"])
-    if request.kind == "did":
+    if request.kind in ("did", "memory"):
         # An all-DID capture needs its rate sayable too. Outside a capture
         # this returns None and DID cadence stays the window controller's
         # business, as before.

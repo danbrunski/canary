@@ -18,6 +18,10 @@ needs):
   silent on them while a Mode-22 window is held and during the lapse.
 * Mode 22 DIDs on such an ECM need the window; bare (ungated) DIDs need no
   phase at all.
+* Service 0x23 memory reads are gated by the same session as Mode 22 on
+  this ECM, so ``memory`` shares the DID row rather than the Mode 01-side
+  one. Putting it on the Mode 01-side row would have issued every read in
+  the one phase where the ECM is silent about it.
 * A deliberately continuous DID capture holds the session for the whole
   capture. Nothing here invents permission to exit it: Mode 01-side work is
   *ineligible* under it, never deferred-then-forced.
@@ -29,7 +33,15 @@ from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
 RequestKind = Literal[
-    "pid", "custom", "did", "dtc", "service", "freeze_frame", "forced_poll", "discovery"
+    "pid",
+    "custom",
+    "did",
+    "memory",
+    "dtc",
+    "service",
+    "freeze_frame",
+    "forced_poll",
+    "discovery",
 ]
 ProfileClass = Literal["default", "focused_mode01", "mode22_owning", "continuous_did"]
 SessionPhase = Literal["none", "mode01", "window", "lapse"]
@@ -46,7 +58,7 @@ MODE01_SIDE_KINDS: frozenset[str] = frozenset(
 #: Kinds whose channel must be in the profile's selection; ``service`` only
 #: outside ``default`` (a focused capture polls Mode 06 only when it names
 #: ``MONITOR_RESULTS`` or ``AUTO``; the default profile mirrors config).
-SELECTION_KINDS: frozenset[str] = frozenset({"pid", "custom", "did"})
+SELECTION_KINDS: frozenset[str] = frozenset({"pid", "custom", "did", "memory"})
 
 
 @dataclass(frozen=True)
@@ -88,12 +100,17 @@ _ALL_CONTINUOUS = _phase_row(
 )
 _ALL_NO_MODE22 = _phase_row(none=_NO_MODE22, mode01=_NO_MODE22, window=_NO_MODE22, lapse=_NO_MODE22)
 
+#: Kinds the ECM answers only inside the Mode-22 diagnostic session.
+#: ``memory`` (service 0x23) is here because it is gated by the same
+#: session, verified on the vehicle 2026-09-20.
+_SESSION_GATED_KINDS: frozenset[str] = frozenset({"did", "memory"})
+
 
 def _build_matrix() -> dict[tuple[str, str], dict[SessionPhase, Eligibility]]:
     matrix: dict[tuple[str, str], dict[SessionPhase, Eligibility]] = {}
     for kind in REQUEST_KINDS:
         for profile_class in PROFILE_CLASSES:
-            if kind == "did":
+            if kind in _SESSION_GATED_KINDS:
                 row = _ALL_NO_MODE22 if profile_class == "focused_mode01" else _DID_ROW
             elif profile_class == "continuous_did":
                 row = _ALL_CONTINUOUS
@@ -140,7 +157,7 @@ def evaluate(
     table_kind = kind
     if forced:
         selection = None
-        table_kind = "did" if kind == "did" else "forced_poll"
+        table_kind = kind if kind in _SESSION_GATED_KINDS else "forced_poll"
     row = MATRIX.get((table_kind, profile_class))
     if row is None:
         return Eligibility("ineligible", "unknown_kind")

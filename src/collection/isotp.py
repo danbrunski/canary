@@ -68,6 +68,42 @@ def build_request_payload(service: int, identifier: int | None) -> bytes:
     return body + bytes(8 - len(body))
 
 
+#: ReadMemoryByAddress. A read: it cannot alter the ECU. Its write
+#: counterpart (0x3D, WriteMemoryByAddress) is deliberately absent from this
+#: module -- the no-reflash line is about non-volatile memory, and a memory
+#: write is the shortest path across it.
+MEMORY_READ_SERVICE = 0x23
+
+
+def build_memory_read_payload(address: int, length: int) -> bytes:
+    """Single-frame service-0x23 request for `length` bytes at `address`.
+
+    Emits the KWP32 body -- a 32-bit address followed by a 16-bit length:
+
+    ``06 23 <addr:4 big-endian> <len:2 big-endian>``
+
+    This is the *only* form verified to work on the 2008 Nissan ECM. The
+    KWP24 (24-bit address / 8-bit length) and UDS addressAndLengthFormat-
+    Identifier forms were both tried against the live vehicle on 2026-09-20
+    and both answered NRC 0x12 (sub-function not supported). That is a
+    measured vehicle fact rather than a standards preference, so this
+    function builds one shape instead of taking a format argument that
+    would let a caller re-derive the same two failures.
+
+    The body is exactly 8 bytes, which is the whole frame -- no padding is
+    needed here, unlike the short PID/DID requests this ECM ignores when
+    they arrive under-length.
+    """
+    if not 0 <= address <= 0xFFFFFFFF:
+        raise ValueError(f"memory address out of 32-bit range: 0x{address:X}")
+    if not 1 <= length <= 0xFFFF:
+        raise ValueError(f"memory read length out of range: {length}")
+    body = (
+        bytes([0x06, MEMORY_READ_SERVICE]) + address.to_bytes(4, "big") + length.to_bytes(2, "big")
+    )
+    return body + bytes(8 - len(body))
+
+
 #: SAE J1979 allows several PIDs in one Mode 01 request. Six is the ceiling
 #: that still fits a single CAN frame: 1 PCI byte + 1 service byte + 6 PID
 #: bytes = 8. Measured on the Xterra ECM 2026-07-26 at 2, 4 and 6 PIDs.

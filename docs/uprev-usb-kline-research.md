@@ -397,9 +397,11 @@ returned payload `4000`; the KWP24 and UDS-ALFID forms both returned NRC `0x12`.
 The result is preserved as
 `/data/canary/_uprev-usb/2026-09-20/can-target-afr-memory-probe.json` on the Pi.
 This proves transport parity for the exact target word; it is not yet a
-first-class recurring CANary channel because the scheduler currently records
-Mode 01 PIDs and Mode 22 DIDs, while arbitrary `0x23` bodies remain a probe
-operation.
+first-class recurring CANary channel: `data/dids.yaml` carries a `memory:`
+catalog, the scheduler issues service-0x23 reads inside the Mode-22 session
+window, and values land as `mem:<NAME>` telemetry. Only catalogued addresses
+are polled -- arbitrary `0x23` bodies remain a probe operation, and service
+0x3D (WriteMemoryByAddress) is not implemented at all.
 
 These are **active diagnostic CAN reads**, not passive broadcast bindings. No
 passive frame has been proven to contain the same injector, BFS, A/F-voltage,
@@ -413,6 +415,17 @@ Mode 01 collection went silent for roughly 132 seconds; passive broadcast CAN
 continued normally. A production capture should therefore use either UpRev
 K-line diagnostics or CAN diagnostics for the active ECM session, while the
 passive broadcast collector may run beside either.
+
+`tools/can_memory_log.py` now provides the recurring read path needed for
+research. It emits only session control and the proven KWP32 service-`0x23`
+form, requires the daemon to remain passive, timestamps every response, and
+can interleave named Mode 22 DIDs after each memory read. A 32-byte window at
+`0xFFFF26B0` completed 1,000/1,000 memory reads plus 5,000/5,000 DID reads in
+35.2 seconds on the road. The window exposes two similar 14-byte bank records,
+but the sanctioned same-instant comparisons did not identify their changing
+fields: a short-window injector fit at r2 0.80 fell to r2 0.26 over the longer
+run, and every candidate scale was `drifting` or `unresolved`. Nothing in that
+block besides the already-proven Target AFR word is promoted.
 
 ## Additional single-channel captures (2026-09-20)
 

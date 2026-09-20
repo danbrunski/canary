@@ -66,6 +66,7 @@ from src.collection.isotp import (
     ObdResponse,
     build_batched_did_request_payload,
     build_batched_request_payload,
+    build_memory_read_payload,
     build_request_payload,
     split_batched_did_response,
     walk_batched_response,
@@ -85,6 +86,7 @@ from src.collection.obd_scheduler import (
     AUTO_MISS_BACKOFF_SECONDS,
     AUTO_PIDS,
     DEFAULT_DID_REQUEST_ID,
+    SESSION_WINDOW_KINDS,
     CanObdLoopStats,
     CanObdSpec,
     DidSessionSpec,
@@ -136,6 +138,11 @@ from src.collection.reconnect import (
 )
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import CanBusConfig, VehicleConfig
+from src.decode.dids import (
+    apply_memory_scaling,
+    decode_memory_raw,
+    is_memory_sentinel,
+)
 from src.session import SessionPaths
 from src.telemetry import TelemetryRecord
 
@@ -312,7 +319,13 @@ def run_can_obd_loop(
     forced: set[int] = set()
     profile_gated = spec.capture_profiles_enabled or tuning_profile.is_active()
     budget_rps = _bus_budget_requests_per_second(spec)
-    did_indices = [index for index, request in enumerate(requests) if request.kind == "did"]
+    # Everything the Mode-22 window serves, not only Mode 22 itself:
+    # service-0x23 memory reads are gated by the same session on this ECM,
+    # so leaving them out would schedule every one of them in the phase
+    # where the ECM is silent about them.
+    did_indices = [
+        index for index, request in enumerate(requests) if request.kind in SESSION_WINDOW_KINDS
+    ]
     freeze_frame_indices = [
         index for index, request in enumerate(requests) if request.kind == "freeze_frame"
     ]
@@ -329,6 +342,7 @@ def run_can_obd_loop(
                 "service_channels": [r.channel for r in requests if r.kind == "service"],
                 "freeze_frame_channels": [r.channel for r in requests if r.kind == "freeze_frame"],
                 "custom_pid_channels": [r.channel for r in requests if r.kind == "custom"],
+                "memory_channels": [r.channel for r in requests if r.kind == "memory"],
                 "poll_tiers": {r.channel: r.poll_tier for r in requests},
                 "bus_budget_requests_per_second": budget_rps,
                 "auto_miss_backoff_seconds": AUTO_MISS_BACKOFF_SECONDS,
@@ -1766,6 +1780,39 @@ def _decode_response(
         value, unit = decoded
         return [ObdReading(timestamp, request.channel, value, unit, payload=response.payload)]
 
+    if request.kind == "memory":
+        assert request.memory_channel is not None
+        memory_channel = request.memory_channel
+        raw = decode_memory_raw(memory_channel, response.payload)
+        if raw is None:
+            return []
+        if is_memory_sentinel(memory_channel, raw):
+            # "Polled, and the ECU is commanding nothing" is an answer about
+            # the engine; emitting no row at all would be indistinguishable
+            # from "not polled", and scaling the sentinel would put a
+            # fabricated value into every mean that follows.
+            return [
+                ObdReading(
+                    timestamp,
+                    f"{request.channel}_SENTINEL",
+                    memory_channel.sentinel_meaning or "sentinel",
+                    "",
+                    payload=response.payload,
+                )
+            ]
+        scaled = apply_memory_scaling(memory_channel, raw)
+        if scaled is None:
+            return []
+        return [
+            ObdReading(
+                timestamp,
+                request.channel,
+                scaled,
+                memory_channel.unit,
+                payload=response.payload,
+            )
+        ]
+
     if request.kind == "custom":
         # Task 2.6 — decode through the definition's sandboxed formula
         # instead of a PID_DECODERS lookup. `build_poll_requests` only ever
@@ -2238,10 +2285,22 @@ def _query_with_tap(
     # query. Dropping ``service`` identifiers here turned ``06 00`` into a
     # bare ``06`` that this ECM silently ignores, and the assembler then also
     # waited for the wrong response shape.
-    identifier = None if request.kind == "dtc" else request.identifier
+    # A service-0x23 read carries an address and a length instead of an
+    # identifier, and its positive response echoes neither -- so `identifier`
+    # must be None for the assembler too, or it would look for an echo that
+    # is never sent and drop every reply.
+    if request.kind == "memory":
+        assert request.memory_channel is not None
+        identifier = None
+        request_data = build_memory_read_payload(
+            request.memory_channel.address, request.memory_channel.length
+        )
+    else:
+        identifier = None if request.kind == "dtc" else request.identifier
+        request_data = build_request_payload(request.service, identifier)
     message = can.Message(
         arbitration_id=request.request_id,
-        data=build_request_payload(request.service, identifier),
+        data=request_data,
         is_extended_id=False,
     )
     if not tx_gate.send(bus, message, what=f"poll {request.channel}"):

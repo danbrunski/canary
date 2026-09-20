@@ -17,7 +17,7 @@ Strict pydantic schema so typos in the YAML fail loudly, not silently.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -34,6 +34,13 @@ log = logging.getLogger(__name__)
 #: only exists as a column prefix (``did:<NAME>``) after decoding, so it
 #: never collides with the raw ``obd:DID_<hex>`` poll rows it's derived from.
 DID_SOURCE = "did"
+
+#: Column prefix for service-0x23 channels (``mem:<NAME>``). Distinct from
+#: ``did:`` on purpose: the two answer different questions about trust.
+#: A DID number is stable across calibrations; a RAM address is only
+#: valid for the ROM build it was found in, and a reader has to be able
+#: to tell which kind of channel it is holding.
+MEMORY_SOURCE = "mem"
 
 #: Channel prefix the OBD scheduler / ELM327 path use for raw Mode-22 DID
 #: poll responses (``DID_1208`` etc.), value carried as the hex payload
@@ -171,6 +178,126 @@ class DidEntry(_Strict):
         return self
 
 
+class MemoryChannel(_Strict):
+    """A recurring ReadMemoryByAddress (service ``0x23``) channel.
+
+    A DID is a *stable* identifier: the ECU promises 0x1201 means engine
+    speed for as long as the ECU exists. A RAM address promises nothing of
+    the sort — it is an artifact of one ROM build's memory layout, and a
+    reflash may move it. That difference is the whole reason this is a
+    separate model rather than a ``DidEntry`` with an ``address`` field:
+
+    * ``verified_tune_revision`` is REQUIRED, so an address can never be
+      recorded without saying which calibration it was observed under.
+      :func:`memory_channels_for_revision` refuses the ones that do not
+      match the running tune instead of quietly reading a moved address
+      and decoding whatever now lives there.
+    * ``sentinel_raw`` names a raw word that is a *state*, not a
+      measurement. The Target AFR word is the case that forced it: zero
+      means fuel cut, and scaling it as phi yields 0.0, which then divides
+      into a target AFR of infinity. A sentinel decodes to ``None`` and is
+      reported through ``sentinel_meaning``.
+
+    ``byte_start``/``byte_length`` index into the service-0x23 response
+    payload — the bytes after the ``63`` positive-response byte, which is
+    what the assembler returns. Service 0x23 echoes no address, so the
+    payload is exactly ``length`` bytes.
+    """
+
+    name: str
+    #: Absolute address of the first byte read.
+    address: int = Field(ge=0, le=0xFFFFFFFF)
+    #: How many bytes to request. The ECM answers this exactly.
+    length: int = Field(ge=1, le=64)
+    byte_start: int = Field(default=0, ge=0, le=63)
+    byte_length: int = Field(ge=1, le=8)
+    byte_order: Literal["big", "little"] = "big"
+    scale: float | None = None
+    offset: float | None = None
+    unit: str = "unknown"
+    confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
+    plausible_min: float | None = None
+    plausible_max: float | None = None
+    #: The calibration this address was verified against. Required: see the
+    #: class docstring. ``"any"`` is deliberately NOT accepted — an address
+    #: that survives a reflash has to be demonstrated, not assumed.
+    verified_tune_revision: str = Field(min_length=1)
+    #: Raw value that means "no measurement", with what it means.
+    sentinel_raw: int | None = None
+    sentinel_meaning: str | None = None
+    aliases: list[str] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    evidence_against: list[Evidence] = Field(default_factory=list)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> MemoryChannel:
+        if self.byte_start + self.byte_length > self.length:
+            raise ValueError(
+                f"{self.name}: decoded slice "
+                f"[{self.byte_start}:{self.byte_start + self.byte_length}] "
+                f"does not fit in the {self.length}-byte read"
+            )
+        if (self.sentinel_raw is None) != (self.sentinel_meaning is None):
+            raise ValueError(
+                f"{self.name}: sentinel_raw and sentinel_meaning must be set together "
+                "-- a sentinel without a stated meaning decodes as a measurement"
+            )
+        return self
+
+
+def decode_memory_raw(channel: MemoryChannel, payload: bytes) -> int | None:
+    """Raw integer for `channel` from a service-0x23 response payload.
+
+    ``None`` when the payload is too short for the declared slice.
+    """
+    end = channel.byte_start + channel.byte_length
+    if len(payload) < end:
+        return None
+    return int.from_bytes(payload[channel.byte_start : end], byteorder=channel.byte_order)
+
+
+def apply_memory_scaling(channel: MemoryChannel, raw: int) -> float | None:
+    """Apply `scale`/`offset`, or `None` for a sentinel or unpinned scale.
+
+    A sentinel is not a small value — it is the absence of one. Returning
+    ``None`` keeps it out of every mean, comparison and model input rather
+    than contributing a zero.
+    """
+    if channel.sentinel_raw is not None and raw == channel.sentinel_raw:
+        return None
+    if channel.scale is None:
+        return None
+    offset = channel.offset if channel.offset is not None else 0.0
+    return raw * channel.scale + offset
+
+
+def is_memory_sentinel(channel: MemoryChannel, raw: int) -> bool:
+    """Whether `raw` is the channel's declared no-measurement state."""
+    return channel.sentinel_raw is not None and raw == channel.sentinel_raw
+
+
+def memory_channels_for_revision(
+    channels: Sequence[MemoryChannel], tune_revision: str | None
+) -> tuple[list[MemoryChannel], list[MemoryChannel]]:
+    """Split `channels` into (usable, withheld) for the running calibration.
+
+    A RAM address is only as good as the ROM build it was found in, so an
+    unknown or mismatched revision withholds the channel rather than
+    reading a moved address. Withheld channels are returned, not dropped,
+    so the caller can say *which* ones and why instead of reporting an
+    empty selection that looks like "nothing configured".
+    """
+    usable: list[MemoryChannel] = []
+    withheld: list[MemoryChannel] = []
+    for channel in channels:
+        if tune_revision is not None and channel.verified_tune_revision == tune_revision:
+            usable.append(channel)
+        else:
+            withheld.append(channel)
+    return usable, withheld
+
+
 class DidMap(_Strict):
     """Top-level dids.yaml document."""
 
@@ -178,6 +305,33 @@ class DidMap(_Strict):
     vehicle: dict[str, Any] = Field(default_factory=dict)
     access: DidAccess
     dids: list[DidEntry]
+    #: Service-0x23 channels. They live in this file, not their own, because
+    #: they are gated by the same ``access`` session and keep-alive as Mode
+    #: 22 — splitting them would duplicate that and let the two drift.
+    memory: list[MemoryChannel] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_channel_names(self) -> DidMap:
+        """One namespace: a memory channel may not shadow a DID.
+
+        Capture profiles and analysis specs reference channels by name, so
+        two catalog entries sharing one name would resolve by whichever list
+        was searched first.
+        """
+        seen: dict[str, str] = {}
+        for entry in self.dids:
+            for name in (entry.name, *entry.aliases):
+                seen[name] = "did"
+        clashes = [
+            c.name
+            for c in self.memory
+            if c.name in seen or c.name in {m.name for m in self.memory if m is not c}
+        ]
+        if clashes:
+            raise ValueError(
+                f"memory channel names collide with existing channels: {sorted(set(clashes))}"
+            )
+        return self
 
 
 def load_did_map(path: Path) -> DidMap:
