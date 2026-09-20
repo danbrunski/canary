@@ -1053,6 +1053,18 @@ memory:
     sentinel_meaning: >
       Fuel cut -- no AFR target commanded. NOT a phi of zero: scaling it
       would decode to 0.0 and then divide into a target AFR of infinity.
+    # Proves the address still holds this quantity after a reflash. DID
+    # 0x1134 is the floored high byte of this word, which held across
+    # 5,000/5,000 same-reply observations with no exceptions. A moved
+    # address will not keep satisfying that, where a plausibility bound
+    # alone would happily accept whatever now lives here.
+    known_answer:
+      did: 0x1134
+      relation: clamped_high_byte
+      floor: 64
+      notes: >
+        The floor is why 0x1134 cannot distinguish fuel cut from stoich:
+        word 0 and word 0x4000 both map to raw 64.
     evidence:
       - session: _uprev-usb-2026-09-20-target-afr
         method: uprev_operator_selected_memory_descriptor

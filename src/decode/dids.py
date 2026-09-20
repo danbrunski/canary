@@ -178,6 +178,34 @@ class DidEntry(_Strict):
         return self
 
 
+class MemoryKnownAnswer(_Strict):
+    """A cross-check that proves a RAM address still holds what it claims.
+
+    An address survives a reflash only by luck, and the failure is silent:
+    the read still succeeds, the value is still in range, and the decode
+    still produces a plausible number that is now measuring something else.
+    A plausibility bound cannot catch that. A *structural* relation to a
+    stable identifier can, because a moved address will not keep satisfying
+    it — so the check is recorded here rather than left to whoever
+    remembers, and :mod:`tools.verify_memory_channels` refuses to re-stamp a
+    calibration without it passing.
+
+    ``relation`` is an enumeration, not an expression: the arithmetic lives
+    in code where it can be tested, and the catalog only selects which
+    vehicle fact is being asserted.
+
+    * ``clamped_high_byte`` — ``did_raw == max(floor, word >> 8)``. The 2008
+      Nissan ECM exposes DID 0x1134 as exactly this view of the commanded
+      equivalence-ratio word: the high byte, floored so it cannot represent
+      the fuel-cut state.
+    """
+
+    did: int = Field(ge=0, le=0xFFFF)
+    relation: Literal["clamped_high_byte"]
+    floor: int = Field(default=0, ge=0, le=0xFFFF)
+    notes: str | None = None
+
+
 class MemoryChannel(_Strict):
     """A recurring ReadMemoryByAddress (service ``0x23``) channel.
 
@@ -225,6 +253,8 @@ class MemoryChannel(_Strict):
     #: Raw value that means "no measurement", with what it means.
     sentinel_raw: int | None = None
     sentinel_meaning: str | None = None
+    #: How to prove this address still holds this quantity after a reflash.
+    known_answer: MemoryKnownAnswer | None = None
     aliases: list[str] = Field(default_factory=list)
     evidence: list[Evidence] = Field(default_factory=list)
     evidence_against: list[Evidence] = Field(default_factory=list)
@@ -275,6 +305,20 @@ def apply_memory_scaling(channel: MemoryChannel, raw: int) -> float | None:
 def is_memory_sentinel(channel: MemoryChannel, raw: int) -> bool:
     """Whether `raw` is the channel's declared no-measurement state."""
     return channel.sentinel_raw is not None and raw == channel.sentinel_raw
+
+
+def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
+    """Whether `did_raw` is what `channel`'s declared relation predicts.
+
+    ``word`` is the memory channel's raw value and ``did_raw`` the raw value
+    of the cross-check DID, both read at the same instant.
+    """
+    known = channel.known_answer
+    if known is None:
+        raise ValueError(f"{channel.name} declares no known-answer check")
+    if known.relation == "clamped_high_byte":
+        return did_raw == max(known.floor, word >> 8)
+    raise ValueError(f"unhandled known-answer relation {known.relation!r}")
 
 
 def memory_channels_for_revision(
