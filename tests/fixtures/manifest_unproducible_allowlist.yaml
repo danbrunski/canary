@@ -7,28 +7,4 @@
 #   - any listed column that is producible again, no longer in the manifest,
 #     or whose model_version changed (retrained) — "stale allowlist entry".
 # So this list can only shrink unless someone deliberately reviews a new line.
-entries:
-  - manifest: models/nissan-xterra-2008/isolation_forest/model.manifest.json
-    model_version: isolation_forest_2026-07-27T045036.161167Z
-    reason: retracted after the 2026-07-27 artifact; retrain owed (D02.5)
-    columns:
-      - decoded:ECM_AIRFLOW_PROXY_23D
-      - decoded:ECM_AIRFLOW_PROXY_23D__mean
-      - decoded:ECM_AIRFLOW_PROXY_23D__std
-      - decoded:ECM_AIRFLOW_PROXY_23D__roc
-      - decoded:ECM_CALC_LOAD_B
-      - decoded:ECM_CALC_LOAD_B__mean
-  # Same two retracted bindings, same artifact date; the sequence model kept
-  # all four rolling derivatives of both (IF dropped two low-coverage ones).
-  - manifest: models/nissan-xterra-2008/lstm_autoencoder/model.manifest.json
-    model_version: lstm_autoencoder_2026-07-27T045351.620955Z
-    reason: retracted after the 2026-07-27 artifact; retrain owed (D02.5)
-    columns:
-      - decoded:ECM_AIRFLOW_PROXY_23D
-      - decoded:ECM_AIRFLOW_PROXY_23D__mean
-      - decoded:ECM_AIRFLOW_PROXY_23D__std
-      - decoded:ECM_AIRFLOW_PROXY_23D__roc
-      - decoded:ECM_CALC_LOAD_B
-      - decoded:ECM_CALC_LOAD_B__mean
-      - decoded:ECM_CALC_LOAD_B__std
-      - decoded:ECM_CALC_LOAD_B__roc
+entries: []

@@ -181,6 +181,26 @@ def required_tuple() -> frozenset[str]:
         return frozenset(name.upper() for name in _profile.required_tuple)
 
 
+def mode01_batch_compatible(first: str, second: str) -> bool:
+    """Whether two Mode-01 channels may share the active profile's batch.
+
+    With no explicit partitions every pair remains compatible. Once a profile
+    declares groups, two channels may batch only when both appear in the same
+    group. Listed-vs-unlisted and different-group pairs stay in separate ECU
+    responses, which gives timing experiments distinct acquisition instants.
+    """
+    with _lock:
+        groups = _profile.mode01_batch_groups
+    if not groups:
+        return True
+    a, b = first.upper(), second.upper()
+    for group in groups:
+        normalized = {name.upper() for name in group}
+        if a in normalized and b in normalized:
+            return True
+    return False
+
+
 def did_interval_override() -> float | None:
     """Profile's Mode-22 window cadence, or ``None`` to use the config default."""
     with _lock:
@@ -476,6 +496,7 @@ __all__ = [
     "is_configured",
     "is_paused",
     "mode22",
+    "mode01_batch_compatible",
     "absolute_rate_hz",
     "classify_profile",
     "profile_class",

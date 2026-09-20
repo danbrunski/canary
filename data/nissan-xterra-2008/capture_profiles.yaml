@@ -480,3 +480,50 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-injector-deadtime-idle
+# D04.3 transport-delay capture. PID 0x44 commanded phi and PID 0x24 measured
+# lambda must come from different ECU responses: a same-response timestamp
+# collapses the very transport delay this profile exists to measure.
+- name: afr-delay-research
+  description: 'Research (D04.3): commanded phi to measured-lambda transport delay with
+    explicit Mode 01 batch partitions preserving independent acquisition instants.'
+  experimental: true
+  mode01:
+    RPM: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    ENGINE_LOAD: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    MAF: 1.0
+    THROTTLE_POS: 1.0
+  mode01_batch_groups:
+  - - RPM
+    - COMMANDED_EQUIV_RATIO
+    - ENGINE_LOAD
+  - - O2_WR_LAMBDA_S1
+    - MAF
+    - THROTTLE_POS
+  mode22: []
+  mode01_enabled: true
+  mode22_enabled: false
+  did_interval_seconds: null
+  round_timestamps: false
+  target_rate_hz: 20.0
+  did_continuous: false
+  bus_budget_override: 90.0
+  priority_channels: null
+  expected_total_demand_hz: 120.0
+  capacity_evidence: '6 Mode 01 channels x 20 Hz = 120 channel reads/s. Explicit
+    partitions plus the existing poll-tier guard produce at most 3 requests per round
+    (60 req/s): PID 0x44 remains a medium-tier single request, while the fast context
+    channels batch within their partition. This stays below the 90 req/s capture budget.'
+  required_tuple:
+  - COMMANDED_EQUIV_RATIO
+  - O2_WR_LAMBDA_S1
+  min_achieved_rate_hz: 15.0
+  max_tuple_skew_s: 0.05
+  requires_tune_revision: false
+  builtin_revision: 0
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-afr-delay-research

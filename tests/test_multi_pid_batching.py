@@ -328,6 +328,56 @@ def test_companion_selection_is_a_noop_when_batching_disabled() -> None:
     ) == [0]
 
 
+def test_active_profile_batch_groups_partition_companions() -> None:
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    channels = ("RPM", "COMMANDED_EQUIV_RATIO", "ENGINE_LOAD", "O2_WR_LAMBDA_S1", "MAF")
+    spec = _spec(pids=channels)
+    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    states = _initial_request_states(requests, spec, 0.0)
+    for state in states:
+        state.next_due_at = 0.0
+    index = {request.channel: i for i, request in enumerate(requests)}
+    tuning_profile.activate(
+        CaptureProfile(
+            name="split",
+            mode01=dict.fromkeys(channels, 1.0),
+            mode01_batch_groups=(
+                ("RPM", "COMMANDED_EQUIV_RATIO", "ENGINE_LOAD"),
+                ("O2_WR_LAMBDA_S1", "MAF"),
+            ),
+            corpus_eligible=False,
+            storage_prefix="_capture-split",
+        ),
+        source="test",
+    )
+    try:
+        command_batch = select_batch_companions(
+            requests,
+            states,
+            1.0,
+            leader_index=index["COMMANDED_EQUIV_RATIO"],
+            max_pids=6,
+            widths=None,
+        )
+        lambda_batch = select_batch_companions(
+            requests,
+            states,
+            1.0,
+            leader_index=index["O2_WR_LAMBDA_S1"],
+            max_pids=6,
+            widths=None,
+        )
+    finally:
+        tuning_profile.set_active(False, source="test")
+
+    # 0x44 is medium-tier, so the ordinary tier guard keeps it single even
+    # though its explicit partition also contains fast context PIDs.
+    assert {requests[i].channel for i in command_batch} == {"COMMANDED_EQUIV_RATIO"}
+    assert {requests[i].channel for i in lambda_batch} == {"O2_WR_LAMBDA_S1", "MAF"}
+
+
 def test_only_plain_mode01_pids_are_batchable() -> None:
     spec = _spec(pids=("RPM",), dids=("1225",))
     requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]

@@ -108,6 +108,37 @@ def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
     )
 
 
+def test_vehicle_afr_delay_profile_separates_command_and_lambda_batches() -> None:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    catalog = load_capture_profiles(
+        REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
+        config.collection,
+    )
+    profile = catalog.by_name("afr-delay-research")
+    assert profile is not None
+    assert profile.mode22_enabled is False
+    assert profile.target_rate_hz == 20.0
+    groups = [set(group) for group in profile.mode01_batch_groups]
+    command = next(group for group in groups if "COMMANDED_EQUIV_RATIO" in group)
+    measured = next(group for group in groups if "O2_WR_LAMBDA_S1" in group)
+    assert command.isdisjoint(measured)
+
+
+def test_mode01_batch_groups_refuse_duplicates_and_unselected_channels() -> None:
+    with pytest.raises(ValidationError, match="repeats channels"):
+        CaptureProfile(
+            name="bad-groups",
+            mode01={"RPM": 1.0, "MAF": 1.0},
+            mode01_batch_groups=(("RPM",), ("RPM", "MAF")),
+        )
+    with pytest.raises(ValidationError, match="outside mode01"):
+        CaptureProfile(
+            name="bad-groups",
+            mode01={"RPM": 1.0},
+            mode01_batch_groups=(("RPM", "MAF"),),
+        )
+
+
 def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = _store(tmp_path, config)

@@ -162,6 +162,13 @@ class CaptureProfile(_Strict):
     #: "experimental" out of a description would lose the warning on rename.
     experimental: bool = False
     mode01: dict[str, float] = Field(default_factory=dict)
+    #: Explicit Mode-01 batch partitions. Members in different groups can
+    #: never share one multi-PID request; a listed member also cannot batch
+    #: with an unlisted member. This preserves batching throughput while
+    #: giving timing experiments independent acquisition instants (for
+    #: example commanded phi in one response and measured lambda in another).
+    #: Empty keeps the historical unrestricted batching policy.
+    mode01_batch_groups: tuple[tuple[str, ...], ...] = ()
     mode22: tuple[str, ...] = ()
     #: Relative cadence for selected Mode-22 members. Missing entries are 1.0,
     #: preserving every pre-C09 profile byte-for-byte at load. In a continuous
@@ -417,6 +424,37 @@ class CaptureProfile(_Strict):
             raise ValueError(
                 f"max_tuple_skew_s ({self.max_tuple_skew_s}s) exceeds the round period "
                 f"({period:.4g}s at {self.target_rate_hz} Hz)"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _mode01_batch_groups_are_a_disjoint_subset(self) -> CaptureProfile:
+        """Batch partitions must name selected PIDs exactly once."""
+        if not self.mode01_batch_groups:
+            return self
+        selected = {name.upper() for name in self.mode01}
+        if "AUTO" in selected:
+            raise ValueError("mode01_batch_groups requires explicit mode01 channels, not AUTO")
+        seen: set[str] = set()
+        duplicates: set[str] = set()
+        unknown: set[str] = set()
+        for group in self.mode01_batch_groups:
+            if not group:
+                raise ValueError("mode01_batch_groups cannot contain an empty group")
+            for name in group:
+                upper = name.upper()
+                if upper in seen:
+                    duplicates.add(upper)
+                seen.add(upper)
+                if upper not in selected:
+                    unknown.add(upper)
+        if duplicates:
+            raise ValueError(
+                "mode01_batch_groups repeats channels: " + ", ".join(sorted(duplicates))
+            )
+        if unknown:
+            raise ValueError(
+                "mode01_batch_groups names channels outside mode01: " + ", ".join(sorted(unknown))
             )
         return self
 

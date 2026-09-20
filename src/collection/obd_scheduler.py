@@ -2288,6 +2288,10 @@ def select_batch_companions(  # noqa: PLR0913
             break
         if index == leader_index or not is_batchable(request, widths):
             continue
+        from src.collection import tuning_profile
+
+        if not tuning_profile.mode01_batch_compatible(leader.channel, request.channel):
+            continue
         if members is not None and index not in members:
             continue
         if not ignore_tier and request.poll_tier != leader.poll_tier:
