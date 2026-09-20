@@ -176,6 +176,31 @@ estimated signal; they cannot establish how UpRev calculates its display.
   a comfort item rather than a deadline one.
   _From D01._
 
+- [ ] **D03.22 Mode labels used raw broadcast counts (2026-08-06 → 2026-09-19).
+  Fixed `f8b7d38`; recompute owed.** The segmenter's `decoded:` fallback compared
+  raw counts (ECM_RPM 8×, ECM_COOLANT_TEMP +40, WHEEL_SPEED_6F7_C 16×) against
+  engineering thresholds whenever Mode 01 was stale, so warm idle labelled from
+  broadcast came out `unknown`, cold read warm, and 60 km/h read `highway`. Live
+  trip/idle had it too. `src/decode/engineering.py` is now the one reader of a
+  `decoded:` channel as a physical quantity, and an unscalable candidate is
+  refused at `SegmenterConfig` construction. Ground truth with Mode 01 blanked:
+  agreement 0.379 → 0.986.
+  **Blast radius tracks Mode 01 staleness, not the calendar:** ≤ 0.1 % of labels
+  on 2026-09-18 high-rate drives, **~16 % on a 2026-08-06 session** (500
+  highway→city, 91 unknown→idle_transient); that session had zero `idle` rows
+  pre-fix.
+  **Owed, laptop-side, in order:** (1) `label_sessions.py` sidecars regenerate
+  (mode/event/disposition); (2) IF + sequence retrain and out-of-sample (LOO)
+  threshold recalibration, since per-mode row membership moves; (3)
+  `refit_behavior_models.py` after (1); (4) trip sidecars recompute (idle
+  seconds were over-counted on stale-OBD rows); (5) `data/cache/feature_frames`
+  can be deleted — the cache version bump already ignores stale entries.
+  **Deploy:** code only, needs a Pi pull + restart, and the retrain should land
+  before or with it, or correctly-labelled rows get scored by models fitted on
+  mislabelled ones.
+  _Found while checking a false "coolant decode" alarm during the 2026-09-18
+  evening drive._
+
 - [~] **D02.5 Trace why the Isolation Forest was blind — retrain still owed.**
   Root cause found and the alarm shipped: six of the artifact's 88 features
   were **corrected out of `data/bindings.yaml` after it was trained**
