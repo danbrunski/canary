@@ -1,0 +1,8 @@
+{"kind":"device_descriptor","usb_version":"2.0","vid":"0403","pid":"ccb8","device_class":"00","configurations":1}
+{"kind":"interface_descriptor","configuration":1,"interface":0,"alternate":0,"class":"ff","endpoints":2}
+{"kind":"endpoint_descriptor","address":"81","direction":"in","transfer":"bulk","max_packet_size":64}
+{"kind":"endpoint_descriptor","address":"02","direction":"out","transfer":"bulk","max_packet_size":64}
+{"kind":"control_summary","bmRequestType":"40","request":0,"value":0,"index":0,"length":0,"count":1,"meaning":"ftdi_reset"}
+{"kind":"control_summary","bmRequestType":"c0","request":5,"value":0,"index":0,"length":2,"count":1,"meaning":"ftdi_modem_status"}
+{"kind":"control_summary","bmRequestType":"40","request":9,"value":2,"index":0,"length":0,"count":1,"meaning":"ftdi_latency_timer_2_ms"}
+{"kind":"control_summary","bmRequestType":"40","request":0,"value":1,"index":0,"length":0,"count":10014,"meaning":"ftdi_purge_rx"}

@@ -275,7 +275,7 @@ signals:
     byte_length: 1
     byte_order: big
     scale: null       # correlation is strong but the map is NOT stable — see below
-    offset: null
+    offset: 0.0
     unit: unknown     # tracks MAF g/s, but non-linearly or with a drifting term
     confidence: medium
     evidence:
@@ -600,8 +600,38 @@ signals:
           1 unique value when parked (rev session) → 256 unique values when
           driving. Cleanest "motion only" signature in the data.
     notes: |
-      Strong motion-correlated candidate. Likely vehicle speed (8-bit) OR
-      a wheel-speed byte.
+      Legacy one-byte extraction retained because trained model manifests name
+      it. It is superseded for new analysis by VEHICLE_SPEED_2D1 below; do not
+      promote or newly consume this compatibility channel.
+
+  - name: VEHICLE_SPEED_2D1
+    module: unknown      # 9.7ms cadence ID; ECM or ABS
+    can_id: 0x2D1
+    byte_start: 1
+    byte_length: 2
+    byte_order: little
+    scale: 0.1
+    offset: 0.0
+    unit: km/h
+    confidence: high
+    model_feature: false  # redundant road speed
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence:
+      - session: _uprev-usb-2026-09-20-road
+        method: broadcast_vs_kline_did_same_instant
+        finding: >
+          Bytes 1-2 little endian map almost 1:1 to K-line DID 0x121A raw:
+          r2=0.9991, DID raw = CAN raw x0.999258 -0.162, n=14,975 pairs
+          within 20 ms, slope drift 0.79% (stable). The DID is independently
+          pinned at 0.1 km/h/count against confirmed 0x6F7 speed, so this field
+          has the same scale. This known-answer chain fixes the old one-byte
+          extraction and identifies the quantity without relying on a motion
+          inventory or per-window means.
+    notes: |
+      Aggregate vehicle speed, not an individual wheel. Like the other ECU/ABS
+      speed copies, it inherits the vehicle's approximately 8% under-read
+      versus GPS.
 
   - name: MOTION_SIGNAL_280_5
     module: unknown

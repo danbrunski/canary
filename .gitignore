@@ -54,6 +54,8 @@ canary.train.yaml
 # CANary telemetry artifacts (not committed; can be large)
 *.parquet
 *.jsonl
+# Small sanitized protocol transcripts are regression fixtures, not telemetry.
+!tests/fixtures/uprev_usb/*.jsonl
 *.log
 logs/
 data/sessions/

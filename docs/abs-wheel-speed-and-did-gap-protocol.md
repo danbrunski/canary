@@ -526,7 +526,7 @@ Treat `target_rate_hz: 4.0` as aspirational, and do not use this profile for
 transient comparison, until both the startup schedule and steady-state rate
 shortfall are fixed and re-measured.
 
-## Phase 5 — the seven unpinned DID scales
+## Phase 5 — the remaining six unpinned DID scales
 
 Separate goal, same drive. These decode to raw counts today because
 `scale`/`offset` are `null`, which is correct behaviour — an unpinned scale
@@ -541,7 +541,11 @@ engineering value.
 | `0x1139` | `..._DUTY_CANDIDATE_B2` | Same, plus agreement with 0x1110 on a bank-symmetric manoeuvre. |
 | `0x1206` | `ECM_INJECTOR_PULSE_1` | Injected pulse (matched-air-charge test PASS 2026-09-18; this engine has no MAP sensor). Pin the bank mapping and the ms scale, plus injector dead time from an idle electrical-load step with module voltage. |
 | `0x1207` | `ECM_INJECTOR_PULSE_2` | As above; its twin register (bank unverified). |
-| `0x1201` | `ECM_RPM_LOAD_CORRELATED_1201` | Against `obd:ENGINE_LOAD`, but **not** by gridding on load — it is BFS-derived. Grid on `rpm x MAF`. |
+
+`0x1201` left this list on 2026-09-20. Capturing the UpRev logger's own RPM
+definition proved that it is `ECM_RPM_COARSE`, exactly `raw * 12.5` rpm; the
+older raw 60/193 observations reproduce 750/2412.5 rpm and were never a
+load/BFS signal. See `data/dids.yaml` and `docs/uprev-usb-kline-research.md`.
 
 The `tuning-hybrid-research` capture profile is useful for the steady-state
 cross-calibrations above because it alternates Mode 01 and Mode 22 through the

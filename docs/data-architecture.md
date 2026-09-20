@@ -190,7 +190,7 @@ hands-busy-in-vehicle tag generation.
 
 **Role:** RE only. Never in production.
 
-### 5. UpRev Osiris datalogger over K-line — *external tool; not reachable from CANary*
+### 5. UpRev Osiris datalogger over K-line — *direct USB research path live*
 
 The UpRev tuning cable is the operator's tuning toolchain. Two of its
 functions use **different transports**, and conflating them wastes time:
@@ -211,7 +211,12 @@ functions use **different transports**, and conflating them wastes time:
   broadcast.** The logger is on the K-line.
 
 **Consequence:** CANary cannot observe or sniff UpRev's datalogging over
-CAN — there is no protocol on our wire to copy.
+CAN — there is no protocol on that wire to copy. The cable's separate USB
+protocol is decoded and the Linux/PyUSB path can now bootstrap a live ECM
+session, discover supported DIDs, and construct/read dynamic streams: see
+`docs/uprev-usb-kline-research.md`, `src/collection/uprev_usb.py`, and
+`src/collection/uprev_session.py`. It remains a research CLI rather than a
+daemon collector; the important transport/session blockers are closed.
 
 It *can*, however, match and exceed the rate. An earlier revision of this
 section claimed otherwise; that was wrong, and the correction matters
@@ -258,9 +263,11 @@ voltage-range check against a 532–588 kΩ spec). Because "the MIL will not lig
 up for these diagnoses" (EC-211), a knock-sensor failure is silent — **periodic
 DTC polling is the knock-health monitor.**
 
-**Role:** external operator tool. CANary's job is to cover what CAN can
-reach (see the gap analysis in `docs/roadmap/engine-tuning-support.md`)
-and to treat UpRev logs as an importable reference, not a live source.
+**Current role:** direct research instrument and external operator tool. The
+daemon still covers what CAN can reach (see the gap analysis in
+`docs/roadmap/engine-tuning-support.md`); direct cable captures are kept out of
+the training corpus and compared against simultaneous CANary data through the
+same acquisition-time pairing contract used by every other signal study.
 `tools/import_uprev_log.py` does the importing: normalizes an exported CSV
 into the same long-format telemetry schema every other source uses (unit
 normalization included — UpRev's temperature columns carry no unit suffix

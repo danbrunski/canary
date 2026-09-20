@@ -227,6 +227,17 @@ dids:
     unit: unknown        # air charge x K counts — not injector ms, not fuel mass; BFS ms scale lives in tuning_providers.yaml
     confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-bfs
+        method: operator_selected_uprev_dynamic_stream
+        finding: >
+          Direct USB evidence: selecting Base Fuel Schedule in UpRev emitted
+          stream definition `02 00 ac 81 02 12 08`, binding the item to this
+          2-byte big-endian DID. One capture held raw 27,980 for 507 valid
+          replies while the display was approximately 13.6 ms. A second,
+          varied capture contained 399 valid replies spanning 3,265-25,657.
+          The PCAP does not contain exact GUI text per sample, so it cannot
+          distinguish the existing approximately 2,040 counts/ms estimate
+          from the binary 2,048 counts/ms candidate.
       - session: >-
           UpRev K-line logs 2026-07-26..08-08 (stock, K 1.07, K 1.06 eras) vs
           0x1208 warm-idle rows from the same eras (desk, 2026-09-18);
@@ -472,6 +483,13 @@ dids:
     unit: V
     confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-afr-wb-bank1
+        method: operator_selected_uprev_dynamic_stream
+        finding: >
+          Direct USB evidence: selecting UpRev's A/F WB Bank 1 item emitted
+          stream definition `02 00 ac 81 02 12 25`. All 472 request/reply
+          pairs were checksum-valid; raw 217-749 maps to 1.085-3.745 V under
+          the independently pinned x0.005 scale.
       - session: 2026-05-16T223328
         method: four_state_plus_nt510_name
         finding: x0.005 ≈ 2.15 V, stable; NT510 "A/F sen1 b1" = 2.15. Bank pair with 0x1226.
@@ -553,12 +571,23 @@ dids:
     name: ECM_INJECTOR_PULSE_1
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev USB dynamic stream selected as injector pulse Bank 1; 621 checksum-valid replies on 2026-09-20, all exactly 2 bytes.'
     byte_order: big
     scale: null          # 0.01 ms/count is a hypothesis (~260-290 cc/min); not pinned
     offset: null
     unit: unknown
-    confidence: medium   # identity: injected pulse (pre-registered PASS 2026-09-18 eve); bank mapping and scale unverified
+    confidence: medium   # identity and Bank 1 mapping confirmed; ms scale remains unverified
     evidence:
+      - session: _uprev-usb-2026-09-20-inj-pulse-b1
+        method: operator_selected_uprev_dynamic_stream
+        finding: >
+          Direct USB evidence: the operator-selected UpRev injector-pulse
+          Bank 1 item emitted definition `02 00 ac 81 02 12 06`. All 621
+          request/reply pairs were checksum-valid and raw values spanned
+          156-803. The range is consistent with the 0.01 ms/count hypothesis
+          (1.56-8.03 ms), but the PCAP does not contain displayed values and
+          therefore does not pin that scale.
       - session: _capture-fuel-pw-research-2026-09-18T200809
         method: matched_air_charge_enrichment_prediction
         finding: >
@@ -584,20 +613,33 @@ dids:
           data/analyses/2026-09-18-injected-fuel-did-screen.md.
     notes: >
       Injected pulse, renamed 2026-09-18 from ECM_INTAKE_PRESSURE_1206 (that
-      reading was wrong; this engine has no MAP sensor). "_1" is register
-      order, not a bank: which bank each of 0x1206/0x1207 serves is
-      unverified, as are the ms scale and injector dead time.
+      reading was wrong; this engine has no MAP sensor). UpRev's directly
+      captured operator-selected definition now confirms this is Bank 1.
+      The compatibility name still uses "_1" because trained artifacts and
+      stored telemetry already depend on it. The ms scale and injector dead
+      time remain unverified.
 
   - did: 0x1207
     name: ECM_INJECTOR_PULSE_2
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev USB dynamic stream selected as injector pulse Bank 2; 482 checksum-valid replies on 2026-09-20, all exactly 2 bytes.'
     byte_order: big
     scale: null
     offset: null
     unit: unknown
-    confidence: medium   # identity: injected pulse (pre-registered PASS 2026-09-18 eve); bank mapping and scale unverified
+    confidence: medium   # identity and Bank 2 mapping confirmed; ms scale remains unverified
     evidence:
+      - session: _uprev-usb-2026-09-20-inj-pulse-b2
+        method: operator_selected_uprev_dynamic_stream
+        finding: >
+          Direct USB evidence: the operator-selected UpRev injector-pulse
+          Bank 2 item emitted definition `02 00 ac 81 02 12 07`. All 482
+          request/reply pairs were checksum-valid and raw values spanned
+          51-755. The range is consistent with the 0.01 ms/count hypothesis
+          (0.51-7.55 ms), but the PCAP does not contain displayed values and
+          therefore does not pin that scale.
       - session: _capture-fuel-pw-research-2026-09-18T200809
         method: matched_air_charge_enrichment_prediction
         finding: >
@@ -612,23 +654,132 @@ dids:
           residuals within ~1 % of 0x1206's.
     notes: >
       Injected pulse, renamed 2026-09-18 from ECM_INTAKE_PRESSURE_1207 (that
-      reading was wrong). "_2" is register order, not a bank; see 0x1206.
+      reading was wrong). UpRev's directly captured operator-selected
+      definition confirms this is Bank 2. The compatibility name remains
+      "_2"; scale and dead time remain open. See 0x1206.
 
   - did: 0x1201
-    name: ECM_RPM_LOAD_CORRELATED_1201
+    name: ECM_RPM_COARSE
     byte_start: 0
     byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev USB dynamic-stream definition selected as ENGINE RPM; 6,000 same-session samples on 2026-09-20, all exactly 2 bytes.'
     byte_order: big
-    scale: null
-    offset: null
-    unit: unknown
-    confidence: medium
+    scale: 12.5
+    offset: 0.0
+    unit: rpm
+    confidence: high
     evidence:
+      - session: _uprev-usb-2026-09-20-road
+        method: uprev_dynamic_stream_vs_broadcast_rpm
+        finding: >
+          The UpRev logger's captured ENGINE RPM selection defines DID 0x1201
+          as a 2-byte value and converts it with exactly raw x 12.5. Direct
+          Linux USB replay reproduced that stream against the live ECM. In a
+          1,000-pair road window, raw 207-232 tracked independently decoded
+          broadcast ECM_RPM at r2=0.99336; the free fit was x12.3978+25.58.
+          A separate 4,999-pair focused window gave r2=0.98482 and
+          x12.3863+26.31. Both free fits had sub-window scale drift (13.86%
+          and 4.20%), so they corroborate identity but are not the source of
+          the exact scale. Median acquisition separation was 2.50 ms and
+          3.11 ms respectively under a 50 ms one-to-one pairing policy.
       - session: 2026-05-16T214006
         method: four_state_classification
         finding: >
-          0 at KOEO; warm 60 -> 193 at rev (ratio ≈ 3.2, tracks RPM).
-          Small magnitude; load/torque or ignition-dwell candidate, unnamed.
+          Previously left unnamed: 0 at KOEO, raw 60 warm and raw 193 at the
+          rev hold. The now-known x12.5 conversion gives 750 and 2412.5 rpm,
+          independently reproducing the parallel Mode 01 readings of about
+          756 and 2418 rpm from this older session.
+    notes: >
+      A coarse duplicate of ECM_RPM at DID 0x1219. The 0x1201 raw count is
+      rpm / 12.5; do not confuse it with a load or torque quantity merely
+      because its smaller numeric range co-varies with load during a drive.
+
+  - did: 0x121A
+    name: ECM_VEHICLE_SPEED
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev USB dynamic stream, 19,200 responses across two road windows plus a live-idle window on 2026-09-20; every payload exactly 2 bytes.'
+    byte_order: big
+    scale: 0.1
+    offset: 0.0
+    unit: km/h
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 250.0
+    evidence:
+      - session: _uprev-usb-2026-09-20-road
+        method: did_vs_broadcast_speed_same_instant
+        finding: >
+          A 15,000-sample dynamic stream paired this DID with raw broadcast
+          CAN at <=20 ms. The previously hypothetical 0x2D1 bytes 1-2 little
+          endian field maps to the DID almost 1:1: r2=0.9991, DID raw = CAN
+          raw x0.999258 -0.162, n=14,975, slope drift 0.79% (stable). Against
+          confirmed 0x6F7 bytes 4-5 (1/16 km/h/count), DID raw = CAN raw
+          x0.630124 -0.097, r2=0.9989, drift 0.90%; chaining the independent
+          scale gives 0.09919 km/h per DID count, pinning the intended 0.1.
+          After catalog scaling, compare_channels gives the required 1:1
+          check against VEHICLE_SPEED_2D1: slope=0.999823, offset=0.0969 km/h,
+          difference +0.081 +/-0.241 km/h, r2=0.99908, drift 0.92% (stable),
+          n=14,975. The capture spans raw 667-1017 while GPS and every
+          established broadcast speed copy move with it.
+      - session: data/analyses/did-drive-sweeps-20260805
+        method: stopped_and_road_snapshot_reproduction
+        finding: >
+          Reads exactly zero in both stopped timed snapshots and spans 369-1029
+          over eleven road/rev snapshots (36.9-102.9 km/h). Those older values
+          independently reproduce the decode and rule out the short-window RPM
+          interpretation first suggested by the 2026-09-20 highway segment.
+          A new 200-reply live-idle stream on 2026-09-20 then reproduced raw
+          zero in every reply while the simultaneous coarse-RPM DID reported
+          raw 58-61 (725-762.5 rpm).
+    notes: >
+      Same raw representation as broadcast VEHICLE_SPEED_2D1. This is ECU
+      indicated speed and inherits the vehicle's documented approximately 8%
+      under-read versus GPS; do not substitute it for ground speed.
+
+  - did: 0x122A
+    name: ECM_VEHICLE_SPEED_MIN_30
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev USB dynamic stream, 21,200 responses across three road windows plus a live-idle window on 2026-09-20; every payload exactly 2 bytes.'
+    byte_order: big
+    scale: 0.05625
+    offset: 0.0
+    unit: km/h
+    confidence: high
+    plausible_min: 30.0
+    plausible_max: 250.0
+    evidence:
+      - session: _uprev-usb-2026-09-20-road
+        method: same_reply_transform_vs_vehicle_speed
+        finding: >
+          Over 15,000 same-reply pairs, raw 0x122A = raw 0x121A x1.777300
+          +1.462 (r2=0.99990, slope drift 0.26%, stable). Both independently
+          match the established broadcast speed family: 0x122A against 0x6F7
+          bytes 4-5 gives r2=0.9993, raw mapping x1.12018+0.932, drift 0.66%,
+          n=14,975. Combining 0x121A's 0.1 km/h/count with the observed 16/9
+          register ratio gives exactly 0.05625 km/h/count here. In engineering
+          units, compare_channels against WHEEL_SPEED_6F7_C gives slope
+          0.991213, offset 0.0090 km/h, difference -0.763 +/-0.219 km/h,
+          r2=0.99930 and stable 0.72% drift over the same 14,975 pairs.
+      - session: data/analyses/did-drive-sweeps-20260805
+        method: stopped_floor_and_cross_session_transform
+        finding: >
+          In eleven independent moving snapshots, 0x122A is within 0-2 counts
+          of round(0x121A x16/9). In two stopped snapshots and the KOEO
+          baseline, 0x121A=0 while 0x122A=533; 533 x0.05625 = 29.98125 km/h.
+          Thus this is the same speed with an intentional approximately 30
+          km/h minimum, not an AFR, load, or transient-demand channel. A final
+          200-reply live-idle stream reproduced 0x121A=0 and 0x122A=533 in
+          every reply with the engine running at 725-762.5 rpm.
+    notes: >
+      A floor-clamped internal vehicle-speed coordinate. It is useful for
+      identifying tables/logic whose speed axis bottoms at 30 km/h, but must
+      never be used as actual low-speed telemetry because it reports about 30
+      km/h at rest.
 
   # --- Intake cam phasing family (2026-08-05 drive sweeps) ---------------
   # Scale/offset come from the ROM Cam Phasing decode (advance = (N-128)/2,
@@ -769,6 +920,22 @@ dids:
     unit: phi
     confidence: hypothesized
     evidence:
+      - session: _uprev-usb-2026-09-20-target-vs-1134-long
+        method: same_reply_piecewise_transform_vs_final_ram_target
+        finding: >
+          A 5,000-sample mixed UpRev definition read this DID and the final
+          Target AFR RAM word at 0xFFFF26BE-BF in every reply. The exact
+          per-sample relation was raw1134 = max(64, floor(ram_word / 256)):
+          5,000/5,000 matches with zero exceptions across RAM states 0x0000,
+          0x4000, 0x4080, 0x4100, 0x4150, 0x4180, 0x4380 and 0x4A80. Thus the
+          DID is a floor/clamped, low-resolution rich-side view of the Q14
+          final commanded-phi target: it deliberately remains 64 during fuel
+          cut while the final target is zero. The 0x4A80 -> 74 state gives
+          phi=1.1640625, independently reproducing the prior PID 0x44 value
+          observed with raw1134=74. The ordinary linear comparison is
+          unresolved (r2=0.078) because this measured relationship is
+          piecewise and intentionally clamped, not because the paired data
+          are weak.
       - session: _capture-fuel-pw-research-2026-09-18T200809 (evening, 14 enrichment holds)
         method: same_capture_pairing_vs_pid_0x44
         finding: >
@@ -814,7 +981,8 @@ dids:
     notes: >
       Renamed 2026-09-18 from ECM_TARGET_EQUIV_RATIO_CANDIDATE. A rich-side
       (power-enrichment) target in phi = raw / 64, not the final commanded
-      equivalence ratio — use Mode 01 PID 0x44 for that. The decode is
-      hypothesized: two enriched levels agree with floor(0x44 × 64), which
-      does not pin a scale. Single-DID transport (`obd_did_batch_max_dids: 1`)
-      on this ECM.
+      equivalence ratio — use Mode 01 PID 0x44 or the UpRev RAM target for
+      that. Its scale is now pinned directly as the low byte-resolution view
+      of Q14 phi, but its rich-side table role remains deliberately named as a
+      candidate. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
+      ECM's CAN diagnostic path.

@@ -1,0 +1,10 @@
+{"capture":"uprev-kline-rpm-coolant.pcapng","phase":"combined","time_s":157.834844,"direction":"out","kind":"stream_definition","payload":"0200ac81021101021201","dids":["1101","1201"]}
+{"capture":"uprev-kline-rpm-coolant.pcapng","phase":"combined","direction":"in","kind":"stream_definition_ack","payload":"6602ec816f"}
+{"capture":"uprev-kline-rpm-coolant.pcapng","phase":"combined","direction":"out","kind":"stream_poll","payload":"020021810401"}
+{"capture":"uprev-kline-rpm-coolant.pcapng","phase":"combined","direction":"in","kind":"stream_response","payload":"660561814e006095","dids":["1101","1201"],"values":{"0x1101":"4e","0x1201":"0060"}}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"coolant","time_s":23.103672,"direction":"out","kind":"stream_definition","payload":"0200ac81021101021125","dids":["1101","1125"]}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"coolant","direction":"in","kind":"stream_response","payload":"660461818e5fd3","dids":["1101","1125"],"values":{"0x1101":"8e","0x1125":"5f"}}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"rpm","time_s":39.692897,"direction":"out","kind":"stream_definition","payload":"0200ac81021201021125","dids":["1201","1125"]}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"rpm","direction":"in","kind":"stream_response","payload":"66056181003d5f83","dids":["1201","1125"],"values":{"0x1201":"003d","0x1125":"5f"}}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"both","time_s":60.446217,"direction":"out","kind":"stream_definition","payload":"0200ac81021201021101021125","dids":["1201","1101","1125"]}
+{"capture":"uprev-kline-stream-layout.pcapng","phase":"both","direction":"in","kind":"stream_response","payload":"66066181003d8e5f12","dids":["1201","1101","1125"],"values":{"0x1201":"003d","0x1101":"8e","0x1125":"5f"}}

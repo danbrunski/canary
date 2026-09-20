@@ -72,6 +72,12 @@ emulator = [
     # Tests skip cleanly when the package isn't present.
     "ELM327-emulator>=3.0.5",
 ]
+uprev-usb = [
+    # Optional because the UpRev/Cipher cable is research hardware, not part
+    # of the normal laptop or Pi deployment.  The transport imports PyUSB
+    # lazily, so capture-backed protocol tests do not need this extra.
+    "pyusb>=1.2.1",
+]
 
 [project.scripts]
 # MCP server entry point — installed onto $PATH so the systemd unit and
@@ -125,6 +131,8 @@ module = [
     "duckdb.*",
     "serial",
     "serial.*",
+    "usb",
+    "usb.*",
 ]
 ignore_missing_imports = true
 

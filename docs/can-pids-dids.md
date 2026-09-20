@@ -64,7 +64,9 @@ Nissan Mode 22 DID rows
 0x1110 - Intake VVT-solenoid duty - percentage scale not pinned - medium confidence
 0x1206 - Intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
 0x1207 - Second intake/manifold-pressure candidate - raw 16-bit value, scale unknown - medium confidence
-0x1201 - RPM/load-correlated engine quantity - raw 16-bit value, identity unknown - medium confidence
+0x1201 - Coarse duplicate engine speed - raw times 12.5 rpm - high confidence
+0x121A - ECM-indicated vehicle speed - raw times 0.1 km/h - high confidence
+0x122A - Internal vehicle speed with an approximately 30 km/h floor - raw times 0.05625 km/h - high confidence
 0x1139 - Candidate bank-2 intake VVT-solenoid duty - scale and identity unconfirmed - low confidence
 0x123F - Static or unrelated register previously called intake-air temperature - binding disproved, do not use
 
@@ -91,7 +93,7 @@ Byte positions are zero-based. A range such as bytes 2-3 includes both endpoints
 0x231 byte 0 - ECM_ENGINE_STATE_A - engine-state-related enum or bit field - raw value - high confidence
 0x231 byte 3 - ECM_ENGINE_STATE_B - duplicate engine-state-related enum or bit field - raw value - high confidence
 0x29E byte 0 - ECM_ENGINE_STATE_C - duplicate engine-state-related enum or bit field - raw value - high confidence
-0x2D1 byte 1 - MOTION_SIGNAL_2D1_1 - motion-correlated value, possibly vehicle speed - scale and identity unknown - hypothesized
+0x2D1 bytes 1-2 little-endian - VEHICLE_SPEED_2D1 - aggregate vehicle speed - raw times 0.1 km/h - high confidence
 0x280 bytes 4-5 - cluster-speed candidate - Leaf and 2011 Xterra DBCs agree on the field and 0.01 km/h/count but disagree on endianness; the 2008 byte-5 motion result is consistent but not a scale validation - hypothesized
 0x590 byte 2 - MOTION_SIGNAL_590_2 - slow body-bus motion or accumulated-value candidate - scale and identity unknown - hypothesized
 0x590 byte 5 - MOTION_SIGNAL_590_5 - second slow body-bus motion or accumulated-value candidate - scale and identity unknown - hypothesized
