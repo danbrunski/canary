@@ -392,3 +392,75 @@ to remember.
 
 The daemon returned to `engine_running` with 0.02 s OBD freshness after the
 passive window closed.
+
+### RAM sweep of four unexplored windows — no new bindings
+
+Four 63-byte windows adjacent to the previously covered block were swept on
+the same drive (engine running, rpm 2,212-2,962, air charge spanning ~9x,
+throttle and A/F voltage both spanning >55% of range), 1,000 memory reads and
+4,000 interleaved DID reads each, references `0x1201`/`0x1208`/`0x120F`/`0x1225`:
+
+```text
+0xFFFF2621  0xFFFF2660  0xFFFF279C  0xFFFF27DB
+```
+
+3,998 of 4,000 memory reads and 16,000 of 16,000 DID reads answered.
+**No new identified telemetry.** What the windows contain:
+
+- `0xFFFF27E4` and `0xFFFF27E6` are the same word (bit-identical on all 1,000
+  samples — another mirrored pair, like the injector registers). It fits air
+  charge `0x1208` at r2=0.99664 with a `[stable]` slope verdict, but that
+  verdict is misleading and the per-sample ratio is the reason: `0x1208/27E4`
+  has median 28.03 with p5 23.01 and p95 31.10, a ±14 % drift that the fit
+  absorbed into its -1113.9 offset. It is not a rescaled copy.
+- A structural hypothesis was pre-registered and **refuted**: if `27E4` were an
+  airflow *rate* while `0x1208` is a *per-event* quantity, their ratio would
+  track rpm. It does not — `corr(ratio, rpm) = -0.017`, and dividing the ratio
+  by rpm makes the spread worse (40.4 % vs 28.9 %).
+- `0xFFFF27E2` is a distinct word, not `27E4/2` (0/1000 exact, 0/1000 within 1).
+- Every candidate in the other three windows came back `[drifting]`.
+
+`27E2` and `27E4`/`27E6` therefore stay unidentified load-correlated
+candidates, the same status as the `0xFFFF2742` BFS candidate the earlier
+sweep rejected. They are not catalogued.
+
+**Methodological finding, worth more than the candidates.** The analyzer's
+`scale_verdict` is computed from slope drift across sub-windows and does not
+see ratio drift that a large fitted offset can absorb. `27E4` passed as
+`[stable]` at r2=0.9966 while its per-sample ratio moved ±14 %. Anything
+promoted on that verdict alone would repeat the class of error this project
+keeps retracting; a per-sample ratio spread should be reported alongside it.
+
+### Multi-field windows, validated on the vehicle
+
+`ECM_ENGINE_PERIOD` (`0xFFFF26AE`) and `ECM_TARGET_EQUIV_RATIO`
+(`0xFFFF26BE`) now share the `fuel_target` window: one 18-byte service-0x23
+read returns both from a single ECU operation. This ECM refuses batched Mode
+22, so until now nothing in CANary could sample two quantities at one instant.
+
+An 80 s capture (2026-09-20T233720, engine running, 2,443-3,403 rpm) produced
+**85 target samples and 85 period samples, 85 of which share an identical
+timestamp** — every one, by construction rather than by pairing tolerance.
+
+Known-answer check against the independent fine-rpm DID, paired at 250 ms:
+
+```text
+n=83, rpm 2,446-3,403
+rpm_did x period: median 6,245,775, p5 6,231,076, p95 6,265,901  (0.56% spread)
+rpm(memory) - rpm(DID): mean +1.6, sd 7.1, max |err| 38.3 rpm
+```
+
+The reciprocal relation and the ~6.25e6 constant hold across the range. Some
+of that sd is the 250 ms pairing window, not decode error.
+
+**Two scheduling defects only the vehicle found.** A windowed read is named
+after its window, and two separate selection gates matched that name against
+the profile's *channel* list, so the read was never issued. The first capture
+looked like a success — profile active, both channels resolved, zero `mem:`
+rows. The second exposed the cost: the unsent request stayed pending, the
+Mode-22 window was held open its full 10 s, and every DID in the capture fell
+from 2 Hz to one sample per 10.5 s. Capture quality flagged it as
+`rate_shortfall` with `cadence_hz: 0.095`. The ECM was never involved — the
+same 18-byte read answered `0949...4000` (2,629 rpm, phi 1.0) on the first
+manual probe. Fixed by giving `selection_exclusion` the request instead of a
+channel string, so the unsafe call cannot be written.
