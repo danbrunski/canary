@@ -119,7 +119,20 @@ def decode_raw(signal: Signal, data: bytes) -> int | None:
     return int.from_bytes(chunk, byteorder=signal.byte_order)
 
 
-def apply_scaling(signal: Signal, raw: int) -> float | None:
+def scaling_factors(signal: Signal) -> tuple[float, float] | None:
+    """``(scale, offset)`` for `signal`, or `None` when `scale` is unpinned.
+
+    The one place the binding's linear map is read; :func:`apply_scaling` and
+    the vectorized :mod:`src.decode.engineering` accessor both go through it,
+    so a raw column and a raw scalar can never be scaled two different ways.
+    An unset `offset` means zero.
+    """
+    if signal.scale is None:
+        return None
+    return signal.scale, (signal.offset if signal.offset is not None else 0.0)
+
+
+def apply_scaling(signal: Signal, raw: float) -> float | None:
     """Apply `scale` and `offset` to a raw value.
 
     Returns `None` when `scale` is unset — the binding's scaling hasn't been
@@ -127,10 +140,11 @@ def apply_scaling(signal: Signal, raw: int) -> float | None:
     raw extraction is still useful for variability tracking, just not for
     "this signal reads 23.5 °C".
     """
-    if signal.scale is None:
+    factors = scaling_factors(signal)
+    if factors is None:
         return None
-    offset = signal.offset if signal.offset is not None else 0.0
-    return raw * signal.scale + offset
+    scale, offset = factors
+    return raw * scale + offset
 
 
 def is_plausible(signal: Signal, decoded: float) -> bool | None:

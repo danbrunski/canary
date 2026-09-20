@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import pandas as pd
 
 from src.config import OperatingModeSpec
+from src.decode.bindings import Bindings
+from src.decode.engineering import assert_scalable, physical_series, physical_value
 from src.preprocessing.resampler import gap_column
 
 MODE_COLUMN = "operating_mode"
@@ -54,6 +56,16 @@ DEFAULT_RECENT_MOTION_WINDOW_SECONDS = 180.0
 # 15464 of 21784 complete rows with a degenerate -0.0 threshold, flagging
 # 100% of what landed in it. A broadcast signal that never goes stale is the
 # fix, and it costs no bus time at all — the frames are already being read.
+#
+# A `decoded:` column holds RAW binding counts (the feature contract), while
+# every mode threshold is in engineering units. The segmenter therefore never
+# reads a candidate's column directly: `_coalesced_series` / `_row_value` send
+# each one through `src.decode.engineering.physical_series`, which scales
+# `decoded:` via bindings.yaml and refuses one with no pinned scale. That is
+# what makes the 2026-08-06..09-18 bug unwritable — raw ECM_RPM (8x rpm),
+# ECM_COOLANT_TEMP (degC + 40) and WHEEL_SPEED_6F7_C (16x km/h) were compared
+# to rpm 900 / 70 degC / 80 km/h as they stood, so broadcast-labelled warm idle
+# came out `unknown`, cold read as warm, and 60 km/h read as `highway`.
 #
 # Verified same-instant on 2026-08-06T162657 before being added here:
 # obd:RPM vs decoded:ECM_RPM r2 = 0.9944 over 2557 paired seconds, and
@@ -124,6 +136,42 @@ class SegmenterConfig:
     #: ``AlertsConfig.min_consecutive_ticks`` (also "N consecutive before it
     #: counts"), applied to mode labels instead of alert firing.
     mode_dwell_ticks: int = 1
+    #: Catalog used to scale ``decoded:`` candidates to engineering units before
+    #: the thresholds see them. ``None`` = the repo's ``data/bindings.yaml``
+    #: (the file every production decode path loads). Not optional in effect:
+    #: a ``decoded:`` candidate that cannot be scaled raises
+    #: :class:`~src.decode.engineering.UnscaledDecodedChannelError`.
+    bindings: Bindings | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a candidate table the repo catalog cannot convert to
+        engineering units — at construction, not on the row that first needs it.
+
+        Every threshold in ``operating_modes`` is an engineering value, so a
+        ``decoded:`` candidate is only usable if the catalog pins its scale.
+        Checking the *declared* table means a name no binding produces
+        (``decoded:VEHICLE_SPEED``, which sat in three candidate lists for a
+        year doing nothing) fails on the first segment call of any session,
+        rather than only on the sessions where the primary PID went stale — the
+        2026-08-06 regression was invisible for six weeks because fresh Mode 01
+        masked it.
+
+        Only against the repo catalog (``bindings is None``). An explicitly
+        supplied catalog is a *scoping* choice — ``--bindings`` also decides
+        which ``decoded:`` columns get produced at all, so a candidate it
+        doesn't define is simply an absent column, not a declaration error.
+        Those are caught at read time instead: ``_coalesced_series`` scales
+        every candidate column *present in the frame*, so a stored ``decoded:``
+        column this catalog cannot explain still refuses rather than being read
+        as counts.
+        """
+        if self.bindings is not None:
+            return
+        assert_scalable(
+            column
+            for candidates in self.signal_columns.values()
+            for column in ((candidates,) if isinstance(candidates, str) else candidates)
+        )
 
 
 def default_segmenter_config(frame: pd.DataFrame) -> SegmenterConfig:
@@ -186,6 +234,7 @@ def segment_operating_modes(
             result,
             _candidates(seg_config, signal),
             gap_masked=signal in _STALE_GATED_SIGNALS,
+            bindings=seg_config.bindings,
         )
         if series is not None:
             coalesced[signal] = series
@@ -236,7 +285,7 @@ def mode_for_row(
         values: dict[str, float] = {}
         complete = True
         for signal in required_signals:
-            value = _row_value(row, _candidates(config, signal))
+            value = _row_value(row, _candidates(config, signal), bindings=config.bindings)
             if value is None:
                 complete = False
                 break
@@ -286,8 +335,10 @@ def _coalesced_series(
     candidates: tuple[str, ...],
     *,
     gap_masked: bool = False,
+    bindings: Bindings | None = None,
 ) -> pd.Series | None:
-    """Row-wise first-non-NaN over the candidate columns present in ``frame``.
+    """Row-wise first-non-NaN over the candidate columns present in ``frame``,
+    in engineering units (``decoded:`` candidates scaled via ``bindings``).
 
     Returns ``None`` when none of the candidates is a column in the frame, so
     callers can treat the signal as missing.
@@ -304,7 +355,7 @@ def _coalesced_series(
         return None
 
     def _values(column: str) -> pd.Series:
-        values = pd.to_numeric(frame[column], errors="coerce")
+        values = physical_series(frame[column], column, bindings)
         if gap_masked:
             gap_col = gap_column(column)
             if gap_col in frame.columns:
@@ -318,14 +369,18 @@ def _coalesced_series(
     return series
 
 
-def _row_value(row: pd.Series, candidates: tuple[str, ...]) -> float | None:
-    """First present, non-NaN candidate value in ``row`` (priority order)."""
+def _row_value(
+    row: pd.Series, candidates: tuple[str, ...], *, bindings: Bindings | None = None
+) -> float | None:
+    """First present, non-NaN candidate value in ``row`` (priority order), in
+    engineering units."""
     for column in candidates:
         if column in row.index and pd.notna(row[column]):
             try:
-                return float(row[column])
+                raw = float(row[column])
             except (TypeError, ValueError):
                 return None
+            return physical_value(raw, column, bindings)
     return None
 
 

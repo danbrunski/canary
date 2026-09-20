@@ -33,7 +33,13 @@ DEFAULT_DIDS_PATH = Path("data/dids.yaml")
 #:     ``__gap`` flag was set on 82.5% of rows under the fast 2 s ceiling, which
 #:     vetoed every cold-start warmup recipe. Cached frames carry the old flags,
 #:     so reusing them would silently keep the veto in place.
-FEATURE_FRAME_CACHE_VERSION = 3
+#: 4 — operating-mode segmenter scales its ``decoded:`` fallbacks (raw binding
+#:     counts) into engineering units before the thresholds see them. Cached
+#:     frames carry the 2026-08-06..09-18 labels, where broadcast-labelled rows
+#:     read 8x rpm / 16x km/h / degC + 40: on 2026-08-06T162657 (21% of rows on
+#:     the rpm fallback, 23% on speed) 15.9% of labels change — 500 rows move
+#:     highway -> city and 91 unknown -> idle_transient.
+FEATURE_FRAME_CACHE_VERSION = 4
 
 
 def build_feature_frame_cache_key(

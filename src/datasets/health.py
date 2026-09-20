@@ -26,6 +26,7 @@ import pandas as pd
 
 from src.config import CanaryConfig
 from src.control.sessions import read_session_metadata
+from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.preprocessing.feature_pipeline import segment_or_constant
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
@@ -47,8 +48,10 @@ __all__ = [
 KEY_CHANNELS: tuple[str, ...] = ("obd:RPM", "obd:SPEED")
 
 #: Range channels worth reporting min/max for (operating-envelope coverage).
+#: Reported in engineering units: a ``decoded:`` fallback is raw binding counts
+#: and is scaled via ``src.decode.engineering.physical_series`` below.
 _RANGE_CHANNELS = {
-    "speed": ("obd:SPEED", "decoded:VEHICLE_SPEED"),
+    "speed": ("obd:SPEED", "decoded:WHEEL_SPEED_6F7_C"),
     "engine_load": ("obd:ENGINE_LOAD", "obd:ABSOLUTE_LOAD"),
     "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
     "rpm": ("obd:RPM", "decoded:ECM_RPM"),
@@ -108,10 +111,25 @@ class CorpusHealth:
         }
 
 
-def _first_present(wide: pd.DataFrame, names: tuple[str, ...]) -> str | None:
+def _first_physical(wide: pd.DataFrame, names: tuple[str, ...]) -> pd.Series | None:
+    """First candidate column carrying data, already in engineering units.
+
+    Returns the *values*, never the column name: a caller holding the name
+    would re-read the raw column, and a ``decoded:`` column holds binding
+    counts (reporting those as a value range is the same defect the mode
+    segmenter carried from 2026-08-06 to 2026-09-18). A ``decoded:`` candidate
+    whose binding has no pinned scale has no engineering value at all, so it is
+    skipped exactly like an absent column instead of being reported as counts.
+    """
     for n in names:
         if n in wide.columns and wide[n].notna().any():
-            return n
+            try:
+                return physical_series(wide[n], n)
+            except UnscaledDecodedChannelError:
+                log.warning(
+                    "skipping unscaled decoded channel in value ranges",
+                    extra={"channel": n},
+                )
     return None
 
 
@@ -185,11 +203,11 @@ def analyze_session(session_dir: Path, config: CanaryConfig) -> SessionHealth:
     mode_coverage = {str(k): int(v) for k, v in segmented[MODE_COLUMN].value_counts().items()}
     value_ranges: dict[str, dict[str, float] | None] = {}
     for name, candidates in _RANGE_CHANNELS.items():
-        col = _first_present(wide, candidates)
-        if col is None:
+        resolved = _first_physical(wide, candidates)
+        if resolved is None:
             value_ranges[name] = None
         else:
-            series = pd.to_numeric(wide[col], errors="coerce").dropna()
+            series = resolved.dropna()
             value_ranges[name] = (
                 {"min": round(float(series.min()), 3), "max": round(float(series.max()), 3)}
                 if not series.empty

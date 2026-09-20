@@ -433,12 +433,13 @@ def _decoded_series(frame: pd.DataFrame, spec: ChannelSpec, catalogs: _Catalogs)
     rows = frame[(frame["source"] == "decoded") & (frame["channel"] == signal.name)]
     out = rows.loc[:, ["timestamp"]].copy()
     raw = pd.to_numeric(rows["value_number"], errors="coerce")
-    if signal.scale is None:
+    factors = bindings_decode.scaling_factors(signal)
+    if factors is None:
         out["value"] = raw
         out["unit"] = _RAW_UNIT
     else:
-        offset = signal.offset if signal.offset is not None else 0.0
-        out["value"] = raw * signal.scale + offset
+        scale, offset = factors
+        out["value"] = raw * scale + offset
         out["unit"] = signal.unit
     return out.dropna(subset=["value"])
 
@@ -691,11 +692,7 @@ def rescale_channel_rows(
             except ChannelSpecError:
                 factors[key] = None
             else:
-                factors[key] = (
-                    None
-                    if signal.scale is None
-                    else (signal.scale, signal.offset if signal.offset is not None else 0.0)
-                )
+                factors[key] = bindings_decode.scaling_factors(signal)
         factor = factors[key]
         if factor is None:
             continue

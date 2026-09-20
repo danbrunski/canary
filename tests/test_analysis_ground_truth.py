@@ -217,3 +217,55 @@ def test_the_sweep_does_not_manufacture_bindings_from_noise(frame: pd.DataFrame)
     fits = sweep_session(polluted, ["obd:SPEED"], can_ids=[0x1F9], policy=POLICY, min_pairs=100)
 
     assert credible_fits(fits, min_r_squared=0.90) == []
+
+
+def test_segmenter_fallback_reproduces_mode01_labels() -> None:
+    """Broadcast-only mode labels must match the Mode 01 labels they stand in for.
+
+    The segmenter's ``decoded:`` fallback (rpm / wheel speed / coolant) is what
+    labels every row where Mode 01 is stale. Those columns hold raw binding
+    counts, so this runs the real training chain — parquet -> binding decode ->
+    resample -> ``segment_or_constant`` — once as recorded and once with the
+    Mode 01 inputs blanked, and requires the two to agree where the PIDs were
+    fresh. The pre-fix fallback (counts read as engineering units) scored 0.38.
+    """
+    from src.config import CanaryConfig
+    from src.preprocessing.feature_pipeline import (
+        _decode_session_to_resampled,
+        segment_or_constant,
+    )
+    from src.preprocessing.resampler import ResampleConfig
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    case = EXPECTATIONS["segmenter_fallback"]
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    resampled = _decode_session_to_resampled(
+        SESSION,
+        load_bindings(BINDINGS_PATH),
+        None,
+        None,
+        ResampleConfig(
+            hz=config.preprocessing.resample_hz,
+            max_gap_factor=config.preprocessing.max_gap_factor,
+            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        ),
+    )
+    blanked = list(case["blanked"])
+    reference, _ = segment_or_constant(resampled, config)
+    broadcast_only = resampled.copy()
+    broadcast_only[blanked] = np.nan
+    fallback, fell_back = segment_or_constant(broadcast_only, config)
+
+    assert not fell_back
+    fresh = resampled[blanked].notna().all(axis=1)
+    assert fresh.sum() >= case["min_fresh_rows"], "fixture no longer covers Mode 01"
+    ref_labels = reference.loc[fresh, MODE_COLUMN]
+    missing = set(case["required_reference_modes"]) - set(ref_labels)
+    assert not missing, f"slice no longer exercises modes {sorted(missing)}"
+
+    agreement = float((ref_labels == fallback.loc[fresh, MODE_COLUMN]).mean())
+    assert agreement >= case["min_agreement"], (
+        f"broadcast-only labels agree with Mode 01 on {agreement:.3f} of "
+        f"{int(fresh.sum())} rows:\n"
+        f"{pd.crosstab(ref_labels, fallback.loc[fresh, MODE_COLUMN])}"
+    )

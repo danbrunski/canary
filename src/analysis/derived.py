@@ -23,6 +23,7 @@ field is ``None``, never a fake zero.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -30,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import VehicleParameters
+from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 
 if TYPE_CHECKING:
@@ -37,6 +39,8 @@ if TYPE_CHECKING:
     # runtime import would be circular. Only the annotation is needed; the
     # code below reads one attribute and never constructs one.
     from src.analysis.afr import AfrCalibration
+
+log = logging.getLogger(__name__)
 
 __all__ = [
     "FUEL_PROPERTIES",
@@ -180,17 +184,28 @@ def fuel_properties(vehicle: VehicleParameters) -> FuelProperties:
 
 
 def _series(wide: pd.DataFrame, *names: str) -> pd.Series | None:
-    """First present column among ``names`` as a float Series, else ``None``.
+    """First present column among ``names`` as a float Series in engineering
+    units, else ``None``.
 
     Lets a calculation prefer an OBD PID but fall back to the decoded-CAN
     equivalent (``obd:RPM`` → ``decoded:ECM_RPM``) without each caller
-    re-implementing the lookup.
+    re-implementing the lookup. A ``decoded:`` column holds raw binding counts
+    (8 per rpm for ECM_RPM), so it goes through
+    :func:`src.decode.engineering.physical_series`; one whose binding has no
+    pinned scale is skipped as if absent — a calculation never sees counts.
     """
     for name in names:
         if name in wide.columns:
-            col = pd.to_numeric(wide[name], errors="coerce")
+            try:
+                col = physical_series(wide[name], name)
+            except UnscaledDecodedChannelError:
+                log.warning(
+                    "skipping unscaled decoded channel as a physical input",
+                    extra={"channel": name},
+                )
+                continue
             if col.notna().any():
-                return col.astype(float)
+                return col
     return None
 
 
@@ -453,7 +468,9 @@ def compute_instantaneous_channels(
     out = wide.copy()
     fuel = fuel_properties(vehicle)
 
-    speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
+    # No broadcast fallback for speed: the `decoded:VEHICLE_SPEED` that used to
+    # sit here names no binding, so it never resolved (removed 2026-09-18).
+    speed = _series(out, "obd:SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
     fuel_g_s = _instant_fuel_g_s(out, vehicle, fuel, calibration)
 
@@ -521,7 +538,7 @@ def compute_derived_channels(
         return wide.copy()
     out = compute_instantaneous_channels(wide, vehicle, calibration=calibration)
 
-    speed = _series(out, "obd:SPEED", "decoded:VEHICLE_SPEED")
+    speed = _series(out, "obd:SPEED")
     rpm = _series(out, "obd:RPM", "decoded:ECM_RPM")
 
     if "derived:FUEL_RATE_LPH" in out.columns:
@@ -978,7 +995,7 @@ def summarize_trip(
     if fuel_used_l is not None and fuel_used_l > 0 and distance_km is not None and distance_km > 0:
         avg_l100 = fuel_used_l / distance_km * 100.0
         avg_mpg = (distance_km * _MI_PER_KM) / (fuel_used_l * _GAL_PER_L)
-    speed = _series(enriched, "obd:SPEED", "decoded:VEHICLE_SPEED")
+    speed = _series(enriched, "obd:SPEED")
     max_speed = float(speed.max()) if speed is not None and speed.notna().any() else None
     avg_speed = (
         distance_km / (duration_s / 3600.0) if distance_km is not None and duration_s > 0 else None

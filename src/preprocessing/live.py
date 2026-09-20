@@ -65,6 +65,7 @@ from src.decode.dids import (
     DidMap,
     decode_raw_did_reading,
 )
+from src.decode.engineering import physical_value
 from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
@@ -570,13 +571,18 @@ class LiveFeatureSource:
             dt = min(max((now_utc - seen_at).total_seconds(), 0.0), MAX_INTEGRATION_DT_S)
             return (value + seen_value) / 2.0 * dt, (now_utc, value)
 
-        speed = _first_finite(
-            point, channel_key(OBD_SOURCE, "SPEED"), channel_key(DECODED_SOURCE, "VEHICLE_SPEED")
-        )
+        # Same candidates as ``compute_derived_channels`` (``derived._series``).
+        # ``_first_finite`` scales a ``decoded:`` fallback to engineering units
+        # — the broadcast rpm is 8 counts/rpm, and before 2026-09-18 its raw
+        # count went straight into the 200 rpm idle gate.
+        speed = _first_finite(point, channel_key(OBD_SOURCE, "SPEED"), bindings=self.bindings)
         rpm = _first_finite(
-            point, channel_key(OBD_SOURCE, "RPM"), channel_key(DECODED_SOURCE, "ECM_RPM")
+            point,
+            channel_key(OBD_SOURCE, "RPM"),
+            channel_key(DECODED_SOURCE, "ECM_RPM"),
+            bindings=self.bindings,
         )
-        fuel_lph = _first_finite(point, "derived:FUEL_RATE_LPH")
+        fuel_lph = _first_finite(point, "derived:FUEL_RATE_LPH", bindings=self.bindings)
 
         if fuel_lph is not None:
             increment, self._fuel_marker = _accrue(self._fuel_marker, fuel_lph / 3600.0)
@@ -670,7 +676,12 @@ class LiveFeatureSource:
         )
         return {
             "rpm": self._current_values.get(channel_key(OBD_SOURCE, "RPM")),
-            "decoded_rpm": self._current_values.get(channel_key(DECODED_SOURCE, "ECM_RPM")),
+            # Broadcast rpm in rpm (the stored ``decoded:`` value is raw counts).
+            "broadcast_rpm": physical_value(
+                self._current_values.get(channel_key(DECODED_SOURCE, "ECM_RPM")),
+                channel_key(DECODED_SOURCE, "ECM_RPM"),
+                self.bindings,
+            ),
             "coolant_temp": self._current_values.get(channel_key(OBD_SOURCE, "COOLANT_TEMP")),
             "run_time": self._current_values.get(channel_key(OBD_SOURCE, "RUN_TIME")),
             "obd_freshness_seconds": _freshest_age(f"{OBD_SOURCE}{SOURCE_SEP}"),
@@ -752,19 +763,24 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def _first_finite(point: dict[str, Any], *keys: str) -> float | None:
-    """First present, non-NaN value among ``keys`` in a tick's operating row.
+def _first_finite(
+    point: dict[str, Any], *keys: str, bindings: Bindings | None = None
+) -> float | None:
+    """First present, non-NaN value among ``keys`` in a tick's operating row,
+    in engineering units.
 
     Mirrors ``derived._series``'s "prefer OBD, fall back to decoded" lookup,
     but over a single-row dict (``LiveFeatureSource.latest_operating_point``)
-    rather than a DataFrame column.
+    rather than a DataFrame column. A ``decoded:`` key holds raw binding
+    counts, so it is scaled through :func:`src.decode.engineering.
+    physical_value` (``bindings`` or the repo catalog) — never returned as-is.
     """
     for key in keys:
         if key not in point:
             continue
         value = _to_float(point[key])
         if value is not None and not math.isnan(value):
-            return value
+            return physical_value(value, key, bindings)
     return None
 
 

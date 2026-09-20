@@ -552,10 +552,13 @@ def test_segment_coalesces_obd_rpm_over_decoded_can_per_row() -> None:
     """
     frame = pd.DataFrame(
         [
+            # `decoded:` columns hold RAW binding counts (ECM_RPM: 8 per rpm).
+            # These fixtures used to carry rpm here, which is how the
+            # segmenter's missing scale went unnoticed until 2026-09-18.
             # OBD present and disagreeing with a decoded value → OBD still wins.
-            {"obd:RPM": 800.0, "decoded:ECM_RPM": 3000.0, "obd:SPEED": 0.0},
+            {"obd:RPM": 800.0, "decoded:ECM_RPM": 3000.0 * 8, "obd:SPEED": 0.0},
             # OBD rpm stale this row → coalesce takes the broadcast value.
-            {"obd:RPM": float("nan"), "decoded:ECM_RPM": 2500.0, "obd:SPEED": 0.0},
+            {"obd:RPM": float("nan"), "decoded:ECM_RPM": 2500.0 * 8, "obd:SPEED": 0.0},
         ]
     )
     modes = {
@@ -580,13 +583,33 @@ def test_segment_coalesces_coolant_temp_onto_broadcast() -> None:
                 "obd:RPM": 1200.0,
                 "obd:SPEED": 0.0,
                 "obd:COOLANT_TEMP": float("nan"),
-                "decoded:ECM_COOLANT_TEMP": 40.0,
+                # Raw count: ECM_COOLANT_TEMP is degC + 40, so 80 = 40 degC.
+                "decoded:ECM_COOLANT_TEMP": 80.0,
             },
         ]
     )
     modes = {"warmup": OperatingModeSpec(rpm_min=400, speed_max=0, coolant_temp_max=70)}
     segmented = segment_operating_modes(frame, modes)
     assert list(segmented[MODE_COLUMN]) == ["warmup", "warmup"]
+
+
+def test_broadcast_coolant_is_scaled_before_the_warmup_threshold() -> None:
+    """130 raw is 90 degC: warm. Read as-is it would still be warm, but 100 raw
+    (60 degC, cold) read as-is is 100 "degC" — the offset is what flips it."""
+    frame = pd.DataFrame(
+        [
+            {
+                "obd:RPM": 1200.0,
+                "obd:SPEED": 0.0,
+                "obd:COOLANT_TEMP": float("nan"),
+                "decoded:ECM_COOLANT_TEMP": raw,
+            }
+            for raw in (100.0, 130.0)
+        ]
+    )
+    modes = {"warmup": OperatingModeSpec(rpm_min=400, speed_max=0, coolant_temp_max=70)}
+    segmented = segment_operating_modes(frame, modes)
+    assert list(segmented[MODE_COLUMN]) == ["warmup", UNKNOWN_MODE]
 
 
 def test_default_segmenter_config_ranks_obd_ahead_of_broadcast() -> None:

@@ -237,3 +237,24 @@ byte_relationships:
       The two offset conventions, exactly 10 counts apart (sd 0.000). This is
       the relationship that exposed data/dids.yaml 0x1101 as contested; if it
       ever stops holding, that investigation has to be reopened.
+
+# Operating-mode labels from broadcast CAN alone must reproduce the Mode 01
+# labels. The segmenter falls back to `decoded:` rpm / wheel speed / coolant
+# when Mode 01 is stale, and those columns hold RAW binding counts; a fallback
+# that skipped the binding scale compared 8x rpm, 16x km/h and degC + 40 to
+# engineering thresholds. The known answer is the segmenter's own output with
+# Mode 01 present: blank the listed Mode 01 columns, re-segment, and compare on
+# the rows where all three PIDs were fresh (the only rows whose reference label
+# did not itself come from the fallback).
+#
+# Measured 2026-09-18 on this fixture: 0.986 agreement over 282 fresh rows
+# (the misses are single rows at mode edges, where the ~1 Hz PID and the
+# broadcast value straddle a threshold). The pre-fix raw-count fallback scored
+# 0.379 — city rows became highway, every idle became unknown.
+segmenter_fallback:
+  blanked: ["obd:RPM", "obd:SPEED", "obd:COOLANT_TEMP"]
+  min_fresh_rows: 250
+  min_agreement: 0.95
+  # The comparison is only meaningful if the slice exercises every threshold
+  # the fallback feeds: rpm (idle bands), speed (city/highway at 80 km/h).
+  required_reference_modes: ["city", "highway", "idle", "idle_transient"]

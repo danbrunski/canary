@@ -48,7 +48,7 @@ def test_status_uses_live_state_without_reading_parquet(monkeypatch: Any) -> Non
         def vehicle_state_inputs(self, _now: Any) -> dict[str, float | None]:
             return {
                 "rpm": 750.0,
-                "decoded_rpm": None,
+                "broadcast_rpm": None,
                 "coolant_temp": 88.0,
                 "run_time": 120.0,
                 "obd_freshness_seconds": 0.1,

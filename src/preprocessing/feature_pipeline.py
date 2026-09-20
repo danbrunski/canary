@@ -32,7 +32,7 @@ from src.decode.behavior_models import (
     BehaviorModels,
     load_behavior_models,
 )
-from src.decode.bindings import load_bindings
+from src.decode.bindings import Bindings, load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.decode.dids import decode_did_rows, load_did_map
 from src.preprocessing.decode import decode_can_rows
@@ -600,7 +600,9 @@ def build_feature_frame(
     resampled = pd.concat(resampled_parts, ignore_index=True)
     resampled = _drop_fully_stale_rows(resampled)
 
-    features = featurize_wide_frame(resampled, config, behavior_models=behavior_models).features
+    features = featurize_wide_frame(
+        resampled, config, behavior_models=behavior_models, bindings=bindings
+    ).features
     if cache_path is not None and cache_metadata is not None:
         _write_feature_frame_cache(cache_path, features, cache_metadata)
     return features
@@ -662,6 +664,7 @@ def featurize_wide_frame(
     *,
     behavior_models: BehaviorModels | None = None,
     feature_config: FeatureConfig | None = None,
+    bindings: Bindings | None = None,
 ) -> FeaturizedFrame:
     """The single wide → model-ready feature transform (7.1 keystone).
 
@@ -681,8 +684,15 @@ def featurize_wide_frame(
     ``FeatureConfig`` instead of reconstructing it each tick; when omitted it
     is derived from ``config.preprocessing.rolling_window_seconds`` exactly as
     the batch path always did — the two are value-identical.
+
+    ``bindings`` is forwarded to ``segment_or_constant`` so the ``decoded:``
+    mode candidates are scaled with the catalog that decoded them; omitted, the
+    accessor uses the repo ``data/bindings.yaml`` (identical to the daemon's
+    ``dashboard.paths.DEFAULT_BINDINGS_PATH`` — asserted in
+    tests/test_decoded_mode_signals.py, which is why the per-tick live path
+    does not have to ship a catalog across the scoring-process boundary).
     """
-    framed, segmenter_fell_back = segment_or_constant(wide, config)
+    framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
     # Derived anomaly signals (air mass per cycle, VE, bank-balance
     # asymmetries, total trim, catalyst efficiency, AFR/TPS cross-checks)
     # appended BEFORE behavior deviations + feature extraction so recipes can
@@ -728,7 +738,9 @@ def featurize_wide_frame(
     )
 
 
-def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> tuple[pd.DataFrame, bool]:
+def segment_or_constant(
+    resampled: pd.DataFrame, config: CanaryConfig, *, bindings: Bindings | None = None
+) -> tuple[pd.DataFrame, bool]:
     """Apply the operating-mode segmenter when its inputs exist, else add a
     constant ``operating_mode = "all"`` column so a single model is fit.
 
@@ -738,6 +750,12 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> tuple[
     intentional choice rather than a diagnostic-worthy degradation. Callers
     that care about the constant-mode outcome but not *why* can ignore the
     second element.
+
+    ``bindings`` is the catalog the ``decoded:`` candidates in
+    ``_SEGMENTER_SIGNAL_COLUMNS`` are scaled with — pass the same one the
+    frame was *decoded* with (``build_feature_frame`` does, so ``--bindings``
+    reaches the mode rules too). Omitted, the shared accessor uses the repo's
+    ``data/bindings.yaml``, which is what every production decode path loads.
     """
     if config.preprocessing.single_operating_mode:
         out = resampled.copy()
@@ -747,6 +765,7 @@ def segment_or_constant(resampled: pd.DataFrame, config: CanaryConfig) -> tuple[
         signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS),
         recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
         mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
+        bindings=bindings,
     )
     # A signal is available when *any* of its candidate columns is present, so
     # the speed gate is satisfied by gps:speed or obd:SPEED.

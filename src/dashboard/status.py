@@ -18,6 +18,7 @@ from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
+from src.decode.engineering import physical_value
 from src.models.feature_spec_health import structural_blindness_snapshot
 from src.models.health import HealthMonitor
 from src.timefmt import parse_iso_utc
@@ -345,12 +346,6 @@ def _capture_snapshot(storage_writer: Any = None) -> dict[str, Any]:
     return snapshot
 
 
-#: `decoded:ECM_RPM` is stored raw (8 counts/rpm) so training's scaler stays
-#: comparable across sessions; see src/decode/frame_decoder.py. Taking it at
-#: face value reads as a factor-of-8 bug.
-_ECM_RPM_SCALE = 0.125
-
-
 def _derive_vehicle_state(
     storage_path: Path,
     *,
@@ -446,8 +441,9 @@ def _derive_vehicle_state(
         # reported 781 rpm at 96 Hz. The state read `engine_off` — "plugged in,
         # key out" — with the engine idling.
         #
-        # `decoded:` rows carry raw counts by design; ECM_RPM is 8 per rpm.
-        rpm = decoded_rpm * _ECM_RPM_SCALE
+        # `decoded:` rows carry raw counts by design; the shared accessor
+        # scales them with the binding (never a local constant).
+        rpm = physical_value(decoded_rpm, "decoded:ECM_RPM")
         rpm_from_broadcast = True
 
     # `derived_at` is stamped here, not in the pure classifier: it is a fact
@@ -484,15 +480,16 @@ def _derive_vehicle_state_live(
     rpm = inputs.get("rpm")
     obd_freshness = inputs.get("obd_freshness_seconds")
     can_freshness = inputs.get("can_freshness_seconds")
-    decoded_rpm = inputs.get("decoded_rpm")
+    # Already in rpm: `vehicle_state_inputs` scales the raw broadcast counts.
+    broadcast_rpm = inputs.get("broadcast_rpm")
     rpm_from_broadcast = False
     if (
         (rpm is None or obd_freshness is None or obd_freshness > _FRESHNESS_THRESHOLD_SECONDS)
-        and decoded_rpm is not None
+        and broadcast_rpm is not None
         and can_freshness is not None
         and can_freshness <= _FRESHNESS_THRESHOLD_SECONDS
     ):
-        rpm = decoded_rpm * _ECM_RPM_SCALE
+        rpm = broadcast_rpm
         rpm_from_broadcast = True
     return replace(
         classify_vehicle_state(
