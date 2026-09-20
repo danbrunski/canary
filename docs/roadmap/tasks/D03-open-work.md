@@ -942,6 +942,10 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   takes no miss backoff. **Verified live** on an unplanned key-off at ~15:25Z:
   `failures_while_ecu_silent 32`, `size_narrowings 0`, still 6 PIDs per batch.
   [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+  **Key-off BOOT verified 2026-09-20 15:24Z** (the last unverified path): the Pi
+  booted with the engine off; 3 min in, 0 "batching disabled" lines, `max_pids`
+  6, `size_narrowings` 0, and 10 of 10 batch failures counted as
+  `failures_while_ecu_silent`. Pre-fix this collapsed 6→4→2→off in 6 s.
 
 - [ ] **D03.20 Detectors fire out-of-distribution at altitude.** At 63–73 kPa
   (2,870–3,880 m) the anomaly rate rose ~4×. The LSTM's top feature was

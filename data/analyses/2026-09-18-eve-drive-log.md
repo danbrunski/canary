@@ -268,3 +268,12 @@ Same definitions as the PM log. A stall is ≥ 2.0 s with no sample on any captu
   - **Load-axis columns in raw 0x1208 counts (×343.8):** 0x34 17,876 · 0x44 23,377 · 0x5D 31,971 · 0x64 34,378 · 0x6C 37,128 · 0x6E 37,815 · 0x7F 43,660 · 0x80 44,003. 343.8 is not a power of two, so 0x1208 is not the byte-shifted register the table indexes; it's a differently scaled copy.
   - **Occupancy, 20,938 samples from 09-17/18:** 65 % below the first column, max 36,386 (17.8 ms, axis 105.8). **Nothing ever reached 0x6C or beyond.** At this altitude WOT air charge tops out between 0x64 and 0x6C, so columns 0x6C–0x80 are reached only through the pedal switch into the last column — consistent with last night's enrichment finding.
   - **Decisive UpRev-free test:** a K-only reflash. It predicts 0x1208 per g air moves by exactly the K ratio; at today's precision (0.3 % per bin in one drive) a 2–3 % K change is unambiguous, and a 1 % change resolvable.
+
+## 2026-09-20 desk
+- **15:24Z D03.19 key-off boot VERIFIED** (Pi booted with the engine off): 0 "batching disabled", max_pids 6, 0 narrowings, 10/10 failures counted as ECU-silent.
+- **15:27–15:28Z Pi deployed to `a4a58a4f`** (operator asked; engine off). Included with the pull: the mode-label fix `f8b7d38`, split-batch profiles `7ad695c`, the feature policy, and the candidate BFS provider.
+  - **The tracked manifests moved to the 2026-09-20 models, so the matching binaries went with them** (scp; sha256 `af1720e7…` / `c77165ad…` verified on the Pi). This avoids the June half-deploy. Previous models are backed up on the Pi at `/tmp/models-pre-a4a58a4/`.
+  - `sudo -n` no longer worked after the reboot (Friday's cached credential was gone), so my first "stop" silently didn't happen and the code changed under a running daemon; caught it, then did a real stop/start with the operator-supplied password.
+  - **Owed job done:** the 22 of 25 `capture_profile.json` snapshots still on old channel names were migrated (101 names, 0 failures, daemon stopped).
+  - After start: http 200, `model_versions` = the two 2026-09-20 artifacts, no version mismatches, no structural blindness entries, batching 6/0, no width mismatches, 0 drops, 0 errors. `engine_off`, so detector behaviour is unobserved until the engine runs.
+  - These are the OTHER agent's 2026-09-20 models (false alarms fixed, IF recall 4–16 %). The policy-trimmed retrain is still running on the laptop and is NOT deployed.
