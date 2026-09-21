@@ -1,5 +1,9 @@
 # Roadmap — detector evaluation, longitudinal memory, DTC reader
 
+> **Archived 2026-09-21.** 42 tasks landed. 3.6 (ledger backfill) needs the
+> operator's own history and continues as **D03.26**. The remaining unticked
+> boxes in the closing section are standing acceptance criteria, not tasks.
+
 Status: **planned** (2026-07-18). Straight to `main`, no feature branches.
 
 ## Why this exists
@@ -320,7 +324,7 @@ training corpora can be segmented at intervention boundaries. Pattern:
   `refit_behavior_models.py` and `retrain.py`; `analyze_corpus`'s
   bisection warning only fires when the session set is genuinely split
   (some older, some on/after) — not vacuously present/absent.
-- [~] **3.6 — Backfill.** One-time entries for known history (mods
+- [~] **3.6 — Backfill.** → **carried to D03.26** (2026-09-21). One-time entries for known history (mods
   analyzed in the 2026-07 drive comparisons, profile migration, etc.) so
   the ledger is useful on day one. blocked-overnight (per
   OVERNIGHT-QUEUE.md Q9): real backfill needs the operator's own

@@ -330,7 +330,7 @@ against the 2026-07-27 overlap pair with its known offsets.
   this serves; 3.3/3.5 hold the measured gates and floors
 - [`capture-profiles.md`](../capture-profiles.md) — profile/capture
   mechanics this orchestrates
-- [`multi-pid-polling.md`](../multi-pid-polling.md) — rate/batching
+- [`multi-pid-polling.md`](multi-pid-polling.md) — rate/batching
   substrate; its 4.x validation tasks pair with 3.1 here
 - `data/analyses/did-sweep-20260804-koeo-baseline.md` — session
   exclusivity, DID identifications, the λ/φ finding

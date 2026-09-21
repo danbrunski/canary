@@ -151,7 +151,7 @@ for (2026-07-31):
 
 The first real profile, closing the UpRev-replacement gaps identified
 2026-07-31. Cross-links: `engine-tuning-support.md` Phases 2–3,
-`multi-pid-polling.md` 3.3, `data/dids.yaml`.
+`archive/multi-pid-polling.md` 3.3, `data/dids.yaml`.
 
 - [~] **4.1 — Identify `A/F ALPHA-B1/B2` and `B/FUEL SCHDL` among the
   138 responder DIDs.** Signature matching via the physical-action
@@ -285,7 +285,7 @@ shared timestamp on. Three ways to get one, in ascending cost:
   over is well inside the resample grid — but it does mean the primary
   timestamp is a scheduling artifact rather than a measurement.
   **Done.** `CaptureProfile.round_timestamps` (on for `fuel-map`, off for
-  `default` until multi-pid-polling.md 4.3 validates the arrival pattern
+  `default` until archive/multi-pid-polling.md 4.3 validates the arrival pattern
   the resampler sees). The true instant rides along as `acquired_at` in
   reading metadata, so scheduler drift stays diagnosable. Poll *tiers* are
   suspended in round mode for the same reason weights were demoted: they

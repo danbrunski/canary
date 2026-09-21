@@ -85,7 +85,7 @@ scripts/canaryctl.py sessions export <session_id> --out drive.zip
 
 Pin keeps a good drive from being aged out by retention; export pulls it
 to the laptop for training. Map the drive backlog (cold-start, city,
-highway, load-sweep …) onto `docs/roadmap/data-collection-plan.md`.
+highway, load-sweep …) onto `docs/roadmap/archive/data-collection-plan.md`.
 
 ## If something looks wrong
 

@@ -961,6 +961,62 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   (child + RLIMIT_AS + row budget) are the only protection. Also verify with
   `/sys/fs/cgroup/.../memory.max`, not `systemctl show`. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
 
+## Carried from archived roadmaps — 2026-09-21
+
+Four roadmap documents were one small remainder from finished. Those remainders
+live here now, so the documents could be archived
+(`../archive/README.md`). Each item names where its history is.
+
+- [ ] **D03.23 MCP tool registration table.** *From `../archive/refactoring.md`
+  2.2.* `src/mcp_server/server.py` hand-writes an `@mcp.tool()` closure per
+  tool; most only delegate, with the docstring copied from the `tools/` or
+  `write_tools/` function. Replace the pure delegations with a registration
+  table `(delegate, needs_audit, gate)` using `functools.wraps`, so FastMCP
+  infers schema and docstring from the delegate and the module docstring is the
+  single source. Keep the conditionally-registered and real-logic wrappers
+  hand-written. **The numbers in the original are stale:** it counted 34
+  delegations of 48 tools; the file now has 70 tools in 1,254 lines, so
+  re-count first. The original blocker — another session editing `server.py`
+  — has cleared (last change 2026-09-17). **Do this first:** a test that
+  snapshots every tool's name and input schema, run before and after, because
+  the failure mode is a silently changed schema or a dropped registration.
+  2.3 used the same adversarial check.
+- [ ] **D03.24 Multi-PID batching: what was never verified.** *From
+  `../archive/multi-pid-polling.md` 3.4, 4.2, 4.3, 4.4.* Batching has been in
+  daily use since 2026-07-26 and these were never run:
+  (a) **batched vs single cross-check** — poll the same channels both ways in
+  alternating windows and confirm decoded values agree; cheap insurance
+  against an offset-walk bug that only shows on real data.
+  (b) **timing parity** — batched readings share one timestamp where single
+  reads each had their own; confirm the feature pipeline's gap handling and
+  the `__roc` derivatives behave when six channels land at once.
+  (c) **`tools/can_obd_probe.py` cannot send a batched read**, so the next ECU
+  still needs a throwaway script to characterise.
+  (d) **`docs/data-architecture.md` §2 still quotes dedicated-bus probe
+  figures.** Two measured in-vehicle numbers now exist and belong there, as
+  different things: 116.8 req/s sustained by the *daemon* (H8, 2026-09-10) and
+  649 req/s back-to-back single-DID reads answered by the *ECM* (2026-09-21).
+  Not carried: 3.1 and 3.2, low-value by that document's own assessment.
+- [~] **D03.25 Retrain and verify after the Phase-1 distribution change.**
+  *From `../archive/ml-correctness-hardening.md` 1.6.* The laptop half landed
+  (smoke retrain, LSTM replay diff —
+  `data/analyses/ml-hardening-1.6-retrain-replay-diff-2026-07-19.md`). Owed:
+  the IF-side replay diff and the Pi deploy. **This is one debt with three
+  names** — D02.5 (the IF went blind after a binding retraction) and D03.22
+  (mode labels used raw counts) both end in the same retrain, and a fourth
+  reason arrived on 2026-09-21: seed revision 4 added the injector-pulse DIDs
+  to the default profile, which changes the feature spec again. Do them as one
+  retrain, not four.
+- [~] **D03.26 Backfill the vehicle ledger.** *From
+  `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
+  entry; real entries need the operator's history and go in through
+  `scripts/vehicle_log.py add`. Much of that history is already written down
+  and only needs transcribing: the flash history in
+  `data/nissan-xterra-2008/tune_revisions.yaml` (five revisions, with times
+  and K), the 2026-06-28 header/spacer work and its battery disconnect
+  (`engine-tuning-support.md` G.2), the LTFT relearn between 2026-09-10 and
+  2026-09-18, and the 2026-07-18 profile migration.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi
@@ -995,6 +1051,13 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   _From D01._
 
 ---
+
+- **DAMP matrix-profile spike** *(from `../archive/ml-correctness-hardening.md`
+  9.2, optional).* Prototype left-discords (DAMP, KDD'22) offline over a few
+  sessions as a model-free third opinion, and adopt it only if it finds
+  detections the current stack misses. Deferred, not blocked: it shares no
+  failure modes with the reconstruction and isolation detectors and is
+  trivial at 1 Hz, but nothing is waiting on it.
 
 ## Suggested order for the next drive (written 2026-09-18)
 

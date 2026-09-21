@@ -321,8 +321,8 @@ it killed.
 
 Planned work lives in `docs/roadmap/` as checklist docs, with detailed
 implementation checklists in `docs/roadmap/tasks/` (`D03-open-work.md` for
-collection and diagnostics; `W00`–`W07` for the workbench regroup and the
-Engine Tuning pages). Finished plans move to `docs/roadmap/archive/`, whose
+collection and diagnostics, including items carried out of archived
+roadmaps; `W00`–`W07` for the workbench regroup and the Engine Tuning pages). Finished plans move to `docs/roadmap/archive/`, whose
 README also says which fully-ticked documents deliberately did *not* move.
 **Task-level truth is each doc's own checkboxes** (`[x]` done, `[~]` partial/blocked
 with a note). `docs/roadmap/OVERNIGHT-QUEUE.md` orders the work and

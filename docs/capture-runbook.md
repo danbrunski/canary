@@ -2,7 +2,7 @@
 
 The exact, ordered procedure for the drive backlog. Doing these ~5 sessions
 (~2 h total) unlocks Phase 2 (Isolation Forest) and the first behavior-surface
-fit. The *why* and the full backlog are in `docs/roadmap/data-collection-plan.md`;
+fit. The *why* and the full backlog are in `docs/roadmap/archive/data-collection-plan.md`;
 this is the operational checklist.
 
 **The one rule that matters:** capture with Mode 01 logging
@@ -96,4 +96,4 @@ Run 1–5; 6–7 are opportunistic. From `data-collection-plan.md` §2.
 
 After session 5 you have enough for Phase 2 + a first behavior surface;
 retrain with `scripts/train_anomaly_model.py` / `scripts/refit_behavior_models.py`
-(see `docs/roadmap/data-collection-plan.md` §3).
+(see `docs/roadmap/archive/data-collection-plan.md` §3).

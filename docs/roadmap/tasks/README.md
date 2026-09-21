@@ -1,5 +1,12 @@
 # Collection and diagnostics improvement tasks
 
+**Status 2026-09-21 — D03 gained four items carried out of archived roadmaps.**
+D03.23–D03.26 are the live remainders of `refactoring`, `multi-pid-polling`,
+`ml-correctness-hardening` and `eval-longitudinal-and-dtc`, which moved to
+[`../archive/`](../archive/README.md) once those remainders had a home here.
+D03.25 is worth reading before any retrain: it is the same debt as D02.5 and
+D03.22, and a fourth reason for it arrived this week.
+
 **Status 2026-09-21 — a second live set: the workbench checklists.**
 [`W00-workbench-README.md`](W00-workbench-README.md) indexes seven files
 (W01–W07) covering the dashboard regroup and the Engine Tuning pages planned in
@@ -217,7 +224,7 @@ independent of each other and each names its own procedure.
 
 ## Related existing work
 
-- [Multi-PID polling roadmap](../multi-pid-polling.md)
+- [Multi-PID polling roadmap](../archive/multi-pid-polling.md)
 - [Capture profiles roadmap](../capture-profiles.md)
 - [All-DID tuning hardening](../all-did-tuning-hardening.md)
 - [Tuning analysis toolkit](../archive/tuning-analysis-toolkit.md)

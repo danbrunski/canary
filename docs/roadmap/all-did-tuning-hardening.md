@@ -9,7 +9,7 @@ Cross-links:
 - `archive/tuning-analysis-toolkit.md` — the completed toolkit this hardens
 - `capture-profiles.md` — capture lifecycle and the `tuning-did` profile
 - `engine-tuning-support.md` — the tuning campaign and its measurement gates
-- `multi-pid-polling.md` — scheduler/rate substrate
+- `archive/multi-pid-polling.md` — scheduler/rate substrate
 - `data/dids.yaml` — identified Mode-22 channels and access rules
 - `data/analyses/did-sweep-20260804-koeo-baseline.md` — measured session
   exclusivity, 658 reads/s capacity, and the 2026-08-05 drive-sweep findings

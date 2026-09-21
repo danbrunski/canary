@@ -149,7 +149,7 @@ This doc covers the daemon's *runtime* assembly. Out of scope:
 
 * **The RE workflow** — how you go from "a CAN ID and 8 mystery bytes" to a typed entry in `data/bindings.yaml`. See `docs/can-re-workflow.md`.
 * **The behavior-model rationale** — why we infer surfaces from runtime data rather than reading factory calibration tables. See `docs/behavior-model-inference.md`.
-* **The data-collection plan** — what drives we still need before the ML side has enough coverage. See `docs/roadmap/data-collection-plan.md`.
+* **The data-collection plan** — what drives we still need before the ML side has enough coverage. See `docs/roadmap/archive/data-collection-plan.md`.
 * **Deployment** — systemd units (`canary`, `canary-mcp`, `ups-shutdown`, `can0`), `scripts/install_pi.sh`, Pi setup. Shipped and live in-vehicle; see `docs/pi-setup.md`.
 
 ## Performance touchpoints (NFR-01 budget)

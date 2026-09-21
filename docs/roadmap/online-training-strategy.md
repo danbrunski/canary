@@ -311,7 +311,7 @@ as separate stages; a row must pass both.
 ## Validity check vs the 2026-07 ML-hardening review (2026-07-19)
 
 This doc predates the five-subsystem ML review
-(`ml-correctness-hardening.md`) and the vehicle-profiles migration. The
+(`archive/ml-correctness-hardening.md`) and the vehicle-profiles migration. The
 core design — three normals, the disposition table, directional
 provenanced overrides, train-on-recentered-data — survives both intact;
 the literature check even reinforces it (the review's verdict was
@@ -339,7 +339,7 @@ and the checklist below encodes them:
    "Challenger agrees with golden on a holdout" is necessary but weak
    against the central danger (a model that quietly learned the fault
    still agrees on clean data). The Q3 benchmark
-   (`eval-longitudinal-and-dtc.md` Phase 2) measures recall on injected
+   (`archive/eval-longitudinal-and-dtc.md` Phase 2) measures recall on injected
    faults directly — the challenger must show **recall non-regression
    vs golden on the injected-fault suite** plus held-out FP/hr within
    budget, not just score agreement.

@@ -21,7 +21,7 @@ hand and the artifact linked.
 | 0x120D/0x120E pedal pair, 0x1246 voltage | D03.12 (note its units caveat: ×0.005 is volts, Mode 01 pedal is percent, so a linear fit with `scale_verdict`, not a 1:1 demand) |
 | `0x21` local-identifier blocks | D03.16 — run `tools/batch_probe.py` |
 | `0x23` memory read under `10 FB` | D03.17 — `batch_probe` now sends the `23 <addr32> <len16>` form; `--session FB --address 0x00080000 --length 16`. Read its verdicts strictly: `works` is a payload, `answered` is "exists, refused the argument", and only `works` makes a same-instant candidate |
-| `0x2A` periodic | **closed** in `multi-pid-polling.md` ("not available on this ECM"); `batch_probe` still sends the one request and records the NRC, which is fine, but it is not an experiment |
+| `0x2A` periodic | **closed** in `../archive/multi-pid-polling.md` ("not available on this ECM"); `batch_probe` still sends the one request and records the NRC, which is fine, but it is not an experiment |
 | receive loss at warm idle, overflow vs burstiness | D01.5, D02.2 |
 | VVT duty external scale reference | D03.10/D03.12, needs UpRev — but see D04.7 for what CAN alone can bound |
 | coolant DID 0x1101 offset | settled in `data/dids.yaml` (offset −50, high confidence, with the reasoning); no experiment needed |

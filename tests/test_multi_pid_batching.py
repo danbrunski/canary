@@ -1,4 +1,4 @@
-"""Multi-PID Mode 01 batching — roadmap/multi-pid-polling.md Phase 1.
+"""Multi-PID Mode 01 batching — roadmap/archive/multi-pid-polling.md Phase 1.
 
 The behaviours worth pinning are the ones that make a batch *safe* to trust.
 A batched read that silently misattributes values is far worse than no

@@ -1,5 +1,12 @@
 # Roadmap — multi-PID Mode 01 polling
 
+> **Archived 2026-09-21.** Phases 1 and 2 landed and are in daily use. Of the
+> open boxes: 4.1 was answered on the truck (the 2026-09-10 H8 drive sustained
+> 116.8 req/s, 41 timeouts in 167,885 requests; receive loss continues as
+> D01.5/D02.2), 3.1 and 3.2 are low-value by this document's own assessment and
+> are not carried, and 3.4, 4.2, 4.3 and 4.4 continue as **D03.24** in
+> `../tasks/D03-open-work.md`.
+
 Status: **Phases 1 and 2 landed** (commit `78abf88`, 2026-07-26). Phase 3
 partly re-scoped after an audit — see 3.1 and 3.5. Phase 4 needs a drive.
 Straight to `main`, no feature branches.
@@ -45,7 +52,7 @@ Two independent levers, and they multiply:
 2. **The budget.** `BUS_BUDGET_MULTIPLIER` (8.0) × `poll_rate_hz` (1) =
    8 req/s is a heuristic with no measured basis. The ECU answered 85/s.
 
-Full evidence: [`docs/data-architecture.md`](../data-architecture.md) §2,
+Full evidence: [`docs/data-architecture.md`](../../data-architecture.md) §2,
 "How fast Mode 01 can actually go".
 
 ### A concrete cost of not having this
@@ -162,7 +169,7 @@ Mode 22 DIDs therefore stay one-at-a-time regardless of what happens here.
   rotation to 15 Mode 01 channels; batched that is 3 requests instead of
   15. Combined with a raised budget for the bounded capture window, this
   is what makes ~30 Hz per channel real rather than theoretical.
-- [ ] **3.4 — `tools/can_obd_probe.py`.** The probe CLI should be able to
+- [ ] **3.4 — `tools/can_obd_probe.py`.** → **carried to D03.24** (2026-09-21). The probe CLI should be able to
   exercise batched reads, so the next ECU can be characterised without
   writing a throwaway script (as was done on 2026-07-26).
 - [x] **3.5 — Audit for missed sites.** Done 2026-07-26. **The poll
@@ -176,28 +183,28 @@ Mode 22 DIDs therefore stay one-at-a-time regardless of what happens here.
 
 ## Phase 4 — Validation
 
-- [ ] **4.1 — Sustained-rate test.** Everything measured so far was a
+- [x] **4.1 — Sustained-rate test.** *Answered 2026-09-10 (H8 drive: 116.8 req/s sustained, 41 timeouts in 167,885 requests, 0 bus errors); overflow measurement continues as D01.5/D02.2.* Everything measured so far was a
   ~1.2 s burst on a dedicated bus. Run a full drive at the raised rate and
   watch `can0` `rx_over_errors` / `rx_dropped` against the pre-run
   baseline. The MCP2515 has two RX buffers and an SPI drain; this is where
   it will complain if it is going to.
-- [ ] **4.2 — Cross-check batched vs single.** Poll the same channels both
+- [ ] **4.2 — Cross-check batched vs single.** → **carried to D03.24** (2026-09-21). Poll the same channels both
   ways in alternating windows and confirm the decoded values agree. Cheap
   insurance against an offset-walk bug that only shows on real data.
-- [ ] **4.3 — Timing-parity check.** Batched readings share one timestamp
+- [ ] **4.3 — Timing-parity check.** → **carried to D03.24** (2026-09-21). Batched readings share one timestamp
   where single-PID readings each had their own. Confirm the feature
   pipeline's gap handling and the `__roc` derivatives behave sensibly when
   six channels land simultaneously — this changes the arrival pattern the
   resampler sees.
-- [ ] **4.4 — Re-measure and record.** Update the table in
+- [ ] **4.4 — Re-measure and record.** → **carried to D03.24** (2026-09-21). Update the table in
   `data-architecture.md` §2 with achieved in-daemon rates, as distinct
   from the dedicated-bus probe figures.
 
 ## Cross-links
 
-- [`docs/data-architecture.md`](../data-architecture.md) §2 — measured
+- [`docs/data-architecture.md`](../../data-architecture.md) §2 — measured
   rates, the DLC=8 gotcha, unsupported services
-- [`docs/roadmap/engine-tuning-support.md`](./engine-tuning-support.md)
+- [`docs/roadmap/engine-tuning-support.md`](../engine-tuning-support.md)
   Phase 1.1 — the focused tuning profile this multiplies
 - `src/collection/tuning_profile.py` — the runtime channel-set gate
 - `src/collection/obd_scheduler.py` — `build_poll_requests`,

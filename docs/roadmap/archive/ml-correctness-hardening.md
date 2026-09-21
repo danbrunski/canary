@@ -1,5 +1,11 @@
 # Roadmap — ML correctness hardening
 
+> **Archived 2026-09-21.** 39 tasks landed. 1.6 (retrain + verify) is the same
+> debt as D02.5 and D03.22 and continues as **D03.25**; 9.2 (DAMP spike) is
+> optional and is recorded under D03's *Deferred by decision*. The remaining
+> unticked boxes in the closing section are standing acceptance criteria for
+> every phase, not tasks — they were never meant to be ticked once.
+
 Status: **planned** (2026-07-18). Straight to `main`, no feature branches.
 
 ## Why this exists
@@ -104,7 +110,7 @@ drops, and inference never consults vehicle state.
   `EmitterCounters.skipped_vehicle_state` surfaced at `/status` (commit
   `41127f1`). No koeo model exists yet, so `ignition_only` stays gated
   out with the rest.
-- [~] **1.6 — Retrain + verify.** Phase 1 changes the training
+- [~] **1.6 — Retrain + verify.** → **carried to D03.25** (2026-09-21). Phase 1 changes the training
   distribution (rows that used to be ffilled/kept are now NaN/dropped).
   Retrain IF + sequence detector, replay a known-good session
   end-to-end, and compare event diff (`replay_window` `_diff_events`)

@@ -152,7 +152,7 @@ So the cost is the round trip rather than the byte count — but the binding
 constraint today is the request budget, and batching is a ~2x multiplier on
 top of whatever that is set to, not a substitute for raising it.
 Implementation is tracked in
-[`docs/roadmap/multi-pid-polling.md`](./roadmap/multi-pid-polling.md).
+[`docs/roadmap/archive/multi-pid-polling.md`](./roadmap/archive/multi-pid-polling.md).
 
 ### 3. Mode 22 DIDs (Canable-native selected polling; broad sweep pending) — *manufacturer-extension diagnostic data*
 

@@ -99,7 +99,7 @@ Goal: dual-channel telemetry into Parquet, validated against the emulator.
   the 18-min drive 2026-05-11T222447, and the three 2026-05-13 ELM327
   rig-bring-up sessions: KOEO baseline, rev-with-OBD, NT510-active). Each
   documented under `data/analyses/<session>.md`; `data/sessions.md` is the
-  consolidated index now. `docs/roadmap/data-collection-plan.md` lays out the
+  consolidated index now. `docs/roadmap/archive/data-collection-plan.md` lays out the
   remaining captures (cold-start / idle baseline / city / highway /
   load-sweep / off-road / A/C / Mode-22 DIDs) and how much is enough to
   start the ML + behavior-model work. Parallel OBD (`record.py --obd-port`)
@@ -401,7 +401,7 @@ training/model-health visualization, and Torque Pro parity.
   pid)`; Mode 06 parsing is `parse_mode06_response`; VIN/cal/CVN decoders are
   in the 6.1 registry. The live Mode 03/07/0A reads + scheduler/endpoint/
   dashboard flow that used to be this task's "remaining piece" landed via
-  `docs/roadmap/eval-longitudinal-and-dtc.md` Phase 1 (commits `f578cc0`,
+  `docs/roadmap/archive/eval-longitudinal-and-dtc.md` Phase 1 (commits `f578cc0`,
   `df87965`): periodic Mode 03/07/0A poll on a configurable very-slow
   interval, Mode 01 PID 0x01 MIL/count in the default poll set, a cached
   `DtcReport` in daemon state, the public `GET /obd/dtc` route, new-code

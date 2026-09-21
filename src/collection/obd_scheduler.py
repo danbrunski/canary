@@ -465,7 +465,7 @@ class CanObdSpec:
     #: no per-tick check, no behavior change for callers that construct a
     #: spec directly without one.
     force_poll_trigger: ForcePollTrigger | None = None
-    #: Max Mode 01 PIDs to pack into one request (roadmap/multi-pid-polling.md).
+    #: Max Mode 01 PIDs to pack into one request (roadmap/archive/multi-pid-polling.md).
     #: SAE J1979 permits up to 6; on this ECM that was measured at 67.7
     #: requests/sec returning 6 channels each — 33.85 Hz per channel against
     #: 0.06-0.5 Hz today, because the cost here is the round trip, not the
@@ -1680,7 +1680,7 @@ class ObdSchedulerMetrics:
     capture_max_gap_seconds: dict[str, float] = field(default_factory=dict)
     #: Mode-22 session-window state, ``None`` when no session gates DIDs.
     did_profile: dict[str, Any] | None = None
-    #: Multi-PID batching (roadmap/multi-pid-polling.md). ``None`` when
+    #: Multi-PID batching (roadmap/archive/multi-pid-polling.md). ``None`` when
     #: batching is off. ``mean_pids_per_batch`` is the round-trip saving, and
     #: ``achieved_hz`` is what an operator actually needs to know before
     #: trusting a tuning capture — a per-cell verdict is only as good as the

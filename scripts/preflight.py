@@ -49,7 +49,7 @@ from src.config import CanaryConfig, CanBusConfig
 from src.log import configure_logging
 from src.storage.monitor import free_space_mb
 
-# The drive backlog (docs/roadmap/data-collection-plan.md §1) needs these decoded.
+# The drive backlog (docs/roadmap/archive/data-collection-plan.md §1) needs these decoded.
 # Missing any of them is a warning, not a hard fail — but Mode 01 returning
 # *nothing* is fatal (almost always the 0xC0-session trap).
 CORE_DRIVE_PIDS = ("RPM", "SPEED", "COOLANT_TEMP", "THROTTLE_POS", "ENGINE_LOAD")

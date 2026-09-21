@@ -89,7 +89,7 @@ engine-driven, so steering tests need the engine running.)
 
 For Phase 2/3 ML and Phase 4.E behavior surfaces, you need the *engine under
 load* — on-road drives, not just no-load revs in neutral. See
-`docs/roadmap/data-collection-plan.md` for the capture menu and "how much is enough."
+`docs/roadmap/archive/data-collection-plan.md` for the capture menu and "how much is enough."
 
 ## Analysis pipeline
 

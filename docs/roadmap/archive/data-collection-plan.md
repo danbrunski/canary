@@ -1,5 +1,9 @@
 # Data-collection plan — what we need before ML, anomaly detection, and behavior-model fitting
 
+> **Archived 2026-09-21.** All 13 items complete. This was the acquisition plan
+> that took the project from "the rig works" to a trainable corpus; live capture
+> work is now tracked in `../tasks/` and `../capture-profiles.md`.
+
 This is the acquisition roadmap that gets us from "the rig works" to "we can
 train the Phase 2/3 detectors and fit the Phase 4.E behavior surfaces (fuel /
 ignition / VE / warmup)." It complements task **1.16** (diverse drives) and the

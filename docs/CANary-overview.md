@@ -263,7 +263,7 @@ in-vehicle. `docs/implementation-tasks.md` is the maintained task index;
 - [x] Install and verify `python-can` + SocketCAN adapter on Pi 5
 - [x] Implement dual-channel async data collection with Parquet logging
 - [x] Log 10+ drive sessions — diversity gaps (cold start, load sweep,
-  off-road) still open; see `docs/roadmap/data-collection-plan.md`
+  off-road) still open; see `docs/roadmap/archive/data-collection-plan.md`
 - [x] Validate offline using `ELM327-emulator`
 
 ### Phase 2 — Preprocessing & Baseline Model

@@ -36,11 +36,11 @@ the analysis UX.
 
 ## Cross-links
 
-- `eval-longitudinal-and-dtc.md` — its Phase 5 digest is **fed by**
+- `archive/eval-longitudinal-and-dtc.md` — its Phase 5 digest is **fed by**
   Phase 1 here (`TripSummary` is the digest's engine content); its
   Phase 1 DTC scheduler work (service-request polling) is the same
   mechanism Phase 3 here reuses for Mode 06.
-- `ml-correctness-hardening.md` — its Phase 1 (stale-data visibility)
+- `archive/ml-correctness-hardening.md` — its Phase 1 (stale-data visibility)
   changes ffill semantics that derived integrals consume; land its 1.1
   before trusting long-session trip integrals across dropouts.
 - `imu-gps-integration.md` — grade channel makes Phase-4 power runs
@@ -111,7 +111,7 @@ the analysis UX.
 
 - [x] **1.4 — `summarize_trip` at session close.** Call
   `summarize_trip` (`derived.py:379-517`) when a session ends (the
-  trip-end hook being added in `eval-longitudinal-and-dtc.md` Phase
+  trip-end hook being added in `archive/eval-longitudinal-and-dtc.md` Phase
   5.4; until that lands, compute on demand from the stored session).
   Persist `trip_summary.json` into the session dir (atomic, like
   `control.json`). — landed: `get_or_compute_trip_summary`
@@ -233,7 +233,7 @@ the analysis UX.
 
 ## Phase 3 — Mode 06 / 02 / 09 (rides the DTC reader mechanism)
 
-Depends on `eval-longitudinal-and-dtc.md` Phase 1.3's service-request
+Depends on `archive/eval-longitudinal-and-dtc.md` Phase 1.3's service-request
 scheduling (`kind="dtc"` poll requests generalize to `kind="service"`).
 
 - [x] **3.1 — Wire Mode 06.** Landed: new `kind="service"` scheduler
@@ -278,7 +278,7 @@ scheduling (`kind="dtc"` poll requests generalize to `kind="service"`).
 
 New channels go in `compute_derived_channels` (performance) or
 `compute_anomaly_signals` (residuals); new maps are `refit.py` recipes
-(gated per `ml-correctness-hardening.md` Phase 4 publish gates).
+(gated per `archive/ml-correctness-hardening.md` Phase 4 publish gates).
 
 - [x] **4.1 — True VE table.** Landed: `derived:VE_PERCENT` = measured
   air mass/cycle ÷ theoretical 100%-VE fill (MAP-or-baro/IAT/
@@ -388,7 +388,7 @@ New channels go in `compute_derived_channels` (performance) or
   (Charts/CustomDashboard) and the relevant coverage/health panel; no
   backend-only features (the review found a pattern of built-but-
   invisible capability — this rule is the guard against repeating it).
-- [ ] New maps go through the `ml-correctness-hardening.md` Phase-4
+- [ ] New maps go through the `archive/ml-correctness-hardening.md` Phase-4
   publish gates (R²/coverage, σ-floor) once those land.
 - [ ] Bus-impact check after Phase 2/3 changes: verify Mode 01
   freshness (`obd_freshness_seconds`) hasn't degraded from added

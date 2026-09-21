@@ -1,5 +1,9 @@
 # Roadmap — refactoring: dedup, structure, dead code
 
+> **Archived 2026-09-21.** 24 of 25 tasks landed. The one remainder, 2.2 (MCP
+> tool registration table), was skipped for a file-coordination conflict that has
+> since cleared; it continues as **D03.23** in `../tasks/D03-open-work.md`.
+
 Status: **planned** (2026-07-18). Straight to `main`, no feature branches.
 
 ## Why this exists
@@ -146,7 +150,7 @@ style issues, and go first.
   NOT leak to TCN (a TCN load with a missing key still fails strict).
   Both shims' full pre-refactor public API confirmed preserved
   end-to-end; `retrain.py`/`sequence_bakeoff.py` needed zero changes.
-- [~] **2.2 — MCP tool registration table.** blocked-overnight:
+- [~] **2.2 — MCP tool registration table.** → **carried to D03.23** (2026-09-21). blocked-overnight:
   coordination — active work in `server.py` from another session; not
   attempted. 34 of 48
   `@mcp.tool()` closures are pure delegation with docstrings

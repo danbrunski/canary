@@ -750,7 +750,7 @@ architecture is what creates it.
 
 Once `idle_shutdown.py` (§11) plus the load switch put the Pi genuinely off when
 parked, key-on → first recorded frame is the full boot time (§13.1 measurement
-12). That window holds the data `docs/roadmap/data-collection-plan.md` ranks
+12). That window holds the data `docs/roadmap/archive/data-collection-plan.md` ranks
 first and calls unfakeable — capture 1, the cold-start session: "warmup curve,
 cold-enrichment fueling, open→closed-loop transition… **Can't be faked; needs an
 actually-cold engine.**" There is one per day, and rev 3.0 is otherwise about to
@@ -778,7 +778,7 @@ instrument, measuring quantities the ECU does not publish at all:
 
 These need no reverse engineering and carry no binding risk — rare in this
 project — and they degrade slowly and monotonically, the exact shape
-`docs/roadmap/eval-longitudinal-and-dtc.md` Phase 4 exists to detect.
+`docs/roadmap/archive/eval-longitudinal-and-dtc.md` Phase 4 exists to detect.
 
 **(c) One hardware time base.** Today CAN frames, OBD responses, IMU samples and
 GPS fixes are each stamped in a different place with different latency, all

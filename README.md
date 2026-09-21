@@ -275,7 +275,7 @@ summary, are authoritative for current completion state.
 See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the historical
 task breakdown, [`docs/roadmap/tasks/`](docs/roadmap/tasks/README.md) for the live
 implementation checklists, and
-[`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)
+[`docs/roadmap/archive/data-collection-plan.md`](docs/roadmap/archive/data-collection-plan.md)
 for the original (now complete) capture plan.
 
 ---

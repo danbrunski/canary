@@ -39,29 +39,29 @@ operator history (ledger backfill facts)
 
 ## Queue
 
-- [x] **Q1 — refactoring.md Phase 1.3 + 1.4** (drifted dups:
+- [x] **Q1 — archive/refactoring.md Phase 1.3 + 1.4** (drifted dups:
   `_numeric_value_columns` + shared resample/segment prefix; shared
   reconnect loop with GPS fail-fast). Do these before feature work
   touches the same files. *(1.1 and 1.2 come later — see Q10, Q13.)*
-- [x] **Q2 — ml-correctness-hardening.md Phase 1** (stale-data
+- [x] **Q2 — archive/ml-correctness-hardening.md Phase 1** (stale-data
   visibility, live parity, vehicle-state gating). Task 1.6: laptop
   retrain + offline replay diff only; the Pi deploy half is
   blocked-overnight. — 1.1-1.5 landed; 1.6 laptop half landed
   (blocked-overnight: IF-side replay diff + Pi deploy).
-- [x] **Q3 — ml-correctness-hardening.md Phase 8 + eval-longitudinal
+- [x] **Q3 — archive/ml-correctness-hardening.md Phase 8 + eval-longitudinal
   Phase 2** (eval realism + the fault-injection benchmark, built on
   Q2's corrected pipeline). Includes the 2.1/2.2 parity pre-flight
   fixes. Archive a baseline benchmark report to `data/analyses/`. —
   Phase 8 (8.1-8.4) + eval-longitudinal Phase 2 (2.1-2.7) all landed;
   baseline archived (commit `c5c9558`).
-- [x] **Q4 — ml-correctness-hardening.md Phases 2 + 3** (IF hardening;
+- [x] **Q4 — archive/ml-correctness-hardening.md Phases 2 + 3** (IF hardening;
   calibration enforcement). Use the Q3 benchmark to decide 2.5
   (feature-redundancy trial) and 2.6 (ECOD — adopt only if it wins). —
   2.1-2.6 + 3.1-3.3 all landed (commits `3eda014`, `5a4a0c5`,
   `29e25e3`); 2.5/2.6 trialed on a fixed-seed synthetic corpus (real
   multi-session corpus retrial noted as future work) — both keep
   current defaults.
-- [x] **Q5 — ml-correctness-hardening.md Phase 5** (mode taxonomy:
+- [x] **Q5 — archive/ml-correctness-hardening.md Phase 5** (mode taxonomy:
   close fall-throughs + dead zone, hysteresis). Then laptop-side
   `label_sessions.py --rebuild` + retrain + before/after mode-second
   comparison logged to the overnight log. Pi config/deploy half
@@ -76,32 +76,32 @@ operator history (ledger backfill facts)
   `suburban` mode is removed from all configs + `fingerprint.py` cruise
   set; the deployed IF/LSTM never had a suburban surface, so folding also
   restores scoring to the 50-80 band that would otherwise go dark.
-- [x] **Q6 — ml-correctness-hardening.md Phase 4** (surface publish
+- [x] **Q6 — archive/ml-correctness-hardening.md Phase 4** (surface publish
   gates, schema sigma-floor + recipe migration, frozen 2D edges,
   bilinear serve, version-on-change, warmup per pre-made decision,
   segmenter-fallback diagnostic). Refit locally against stored
   sessions to validate the gates. — 4.1-4.7 landed (commit `5b68b9f`);
   `--dry-run` refit against real sessions confirms the publish gate
   refuses 4 genuinely-poor-fit recipes (`fcc2afb`).
-- [x] **Q7 — ml-correctness-hardening.md Phases 6 + 7 + 9** (M-of-N
+- [x] **Q7 — archive/ml-correctness-hardening.md Phases 6 + 7 + 9** (M-of-N
   persistence per doc; fusion per pre-made decision; benchmark rerun
   6.5 with intermittent-fault cases; replay in-memory isolation with
   the refuse-while-driving rule; portfolio tasks 9.1/9.3/9.4 per
   pre-made decisions; 9.2 DAMP spike only if time allows). This
-  completes ml-correctness-hardening.md except Pi-deploy verifies. —
+  completes archive/ml-correctness-hardening.md except Pi-deploy verifies. —
   6.1-6.5, 7.1-7.3, 9.1/9.3/9.4 all landed (commits `eb6f3f8`,
   `ac11f39`, `de126c4`, `c1efc75`); 9.2 skipped (optional, time). A real
   bug (7.1's unmatched-`exit_replay_mode()` silently wiping live
   dedupe state) caught by review and fixed before landing.
-  `ml-correctness-hardening.md` is now fully checked off except
+  `archive/ml-correctness-hardening.md` is now fully checked off except
   Pi-deploy verifies (blocked-overnight throughout).
-- [x] **Q8 — eval-longitudinal-and-dtc.md Phase 1** (DTC reader:
+- [x] **Q8 — archive/eval-longitudinal-and-dtc.md Phase 1** (DTC reader:
   transport, scheduler, endpoint, events, sidecar, MCP tool, DtcPanel).
   1.10 live verify blocked-overnight. — 1.1-1.9 landed (commits
   `f578cc0`, `df87965`); caught + fixed two real bugs in core OBD
   polling infra (DID-gating starvation, identifier=0 wire corruption).
   1.10 blocked-overnight, needs the Pi/truck.
-- [x] **Q9 — eval-longitudinal-and-dtc.md Phases 3 + 4** (vehicle
+- [x] **Q9 — archive/eval-longitudinal-and-dtc.md Phases 3 + 4** (vehicle
   ledger — 3.6 backfill blocked-overnight, scaffold the file with a
   template entry instead; fingerprints + frozen reference epoch —
   freeze from all currently-`ready` classified sessions — trends,
@@ -128,7 +128,7 @@ operator history (ledger backfill facts)
   and 2.4's live verification blocked-overnight. — 2.1/2.3/2.6/2.8 all
   landed (commits `dfe24b4`, `aa0127d`, `bac96e4`). 2.2/2.4/2.5/2.7
   remain blocked-overnight, need the truck/real captures.
-- [x] **Q12 — eval-longitudinal-and-dtc.md Phases 5 + 6** (notifier +
+- [x] **Q12 — archive/eval-longitudinal-and-dtc.md Phases 5 + 6** (notifier +
   digest, shipped disabled-by-default — enabling/ntfy topic is a
   morning task; trip-end edge; session catalog + consumers incl. the
   `parquet_query` underscore-dir fix; provenance surfacing + load-time
@@ -137,13 +137,13 @@ operator history (ledger backfill facts)
   landed (commits `5b513a6`, `5ef6212`, `5d93473`). Two real bugs
   caught by review: a digest-endpoint auth-consistency leak (Phase 5)
   and a digest-route catalog-wiring gap (Phase 6).
-- [x] **Q13 — refactoring.md Phase 2 (minus 2.2) + Phase 1.2** — landed
+- [x] **Q13 — archive/refactoring.md Phase 2 (minus 2.2) + Phase 1.2** — landed
   (commits `0d7498d`, `aaa696e`, plus 2.3/2.4/2.5 this task). 1.2
   (companion↔control dedup) and 2.1 (LSTM/TCN trainer unification)
   landed earlier; 2.3 (`audited_post` + write-tool pure-read move),
   2.4 (`scripts/_cli.py`), 2.5 (`control.py` `_require` helper) landed
   now. 2.2 (MCP server registration table) annotated `[~]
-  blocked-overnight` in refactoring.md — still blocked on the other
+  blocked-overnight` in archive/refactoring.md — still blocked on the other
   session's `server.py` work; correctly not attempted.
 - [x] **Q14 — engine-analysis-and-mapping.md Phase 3 code-only** —
   landed (3.1-3.5 all done): Mode 06 wiring on Q8's scheduler
@@ -168,7 +168,7 @@ operator history (ledger backfill facts)
   ergonomics (one real bug caught by review: the shared-Y-axis logic
   shipped without a reachable UI toggle — fixed same task), GPX/KML +
   export UI.
-- [x] **Q16 — refactoring.md Phases 3 + 4** — landed (commit
+- [x] **Q16 — archive/refactoring.md Phases 3 + 4** — landed (commit
   `e9bb206`, plus earlier `1d55739`/`85ecf40` for the FE-only slice):
   3.1 Detector protocol (replay-verified; one real bug caught by
   review — `SequenceDetector.model_version` not resetting on a gated
@@ -177,7 +177,7 @@ operator history (ledger backfill facts)
   deliberately skipped, ~30 callers, artifact-IO duplication itself
   resolved), 4.1-4.4/4.7 quick sweeps. FE-only slice (3.2, 3.3, 4.5,
   4.6) landed earlier from the `canary-fe` worktree. This closes out
-  refactoring.md entirely except 2.2, which stays
+  archive/refactoring.md entirely except 2.2, which stays
   open for the main worktree.
 
 ## Morning-review backlog this queue generates
@@ -197,7 +197,7 @@ has an "Implementation checklist" section — task truth lives there),
 `dashboard-ux.md` (2026-07-19 UX review — surface built-but-invisible
 backend features), plus the unchecked tail of
 `docs/implementation-tasks.md` Phase 6/8 and the one open box in
-`data-collection-plan.md` §4.
+`archive/data-collection-plan.md` §4.
 
 ## Round-2 pre-made decisions (operator-approved defaults)
 
@@ -313,7 +313,7 @@ backend features), plus the unchecked tail of
   untouched by anything landed tonight. `docs/CANary-overview.md`
   checked, no stale claims found.
 
-- [x] **Q26 — multi-pid-polling.md Phases 1 + 2** (batched Mode 01 in the
+- [x] **Q26 — archive/multi-pid-polling.md Phases 1 + 2** (batched Mode 01 in the
   request/response core, then wired into the scheduler). Pure software,
   no vehicle needed. The capability is already measured on the truck —
   67.7 batched requests/sec returning 6 PIDs each, 33.85 Hz per channel

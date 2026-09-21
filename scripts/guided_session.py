@@ -141,7 +141,7 @@ PROTOCOL_NT510: list[Step] = [
 ]
 
 # Drive protocol: a full operating-envelope capture for ML training + behavior-
-# model fitting (see docs/roadmap/data-collection-plan.md). It's meant to be walked
+# model fitting (see docs/roadmap/archive/data-collection-plan.md). It's meant to be walked
 # loosely — the route decides which steps fire; type `s` + Enter to skip any
 # that don't apply, and just re-hit a step's label by narrating if a phase
 # recurs (e.g. several stops at lights). Hit Enter at the *transition* into each

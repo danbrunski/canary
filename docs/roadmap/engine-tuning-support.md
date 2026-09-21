@@ -132,11 +132,11 @@ volumetrically.
   build 5.1's DuckDB binning core here and let 5.1 reuse it. Its
   Phase-4 total-trim map is the substrate for 2.2; 5.4 A/B session
   comparison covers the before/after halves of 3.5/4.3.
-- `eval-longitudinal-and-dtc.md` 6.4 (Q12) — the `parquet_query`
+- `archive/eval-longitudinal-and-dtc.md` 6.4 (Q12) — the `parquet_query`
   underscore-dir filter **must keep an explicit-name escape hatch**
   (noted in that task's text): Phase 2 here queries `_tuning-*`
   sessions by name through that layer.
-- `data-collection-plan.md` — capture-session conventions; tuning
+- `archive/data-collection-plan.md` — capture-session conventions; tuning
   drives follow the physical-action tagging convention.
 - Memory `project_ltft_zero_ecu_side` — background on G.2.
 
@@ -534,7 +534,7 @@ carrying the source sample age they are indistinguishable from measurements.
 - **This is the strongest argument for multi-PID batching.** At the current
   0.06–0.5 Hz per channel, most joins are stale by construction, and every
   additional channel in a filter compounds the loss. Batched channels share a
-  timestamp, so the whole problem disappears. See `multi-pid-polling.md`.
+  timestamp, so the whole problem disappears. See `archive/multi-pid-polling.md`.
 - **Verify that a control variable actually controls what you think.** Binning
   on `ENGINE_LOAD` to "hold operating point constant" failed twice on
   2026-07-27, because calculated load reads ~20 % at idle *and* at light
@@ -740,7 +740,7 @@ Order is safety → model-truth → setpoints, per UpRev's guide.
 
   **Rate is why this needed UpRev.** Over the same 40-minute drive CANary in
   tuning mode caught **23** throttle ≥ 70 % samples at ~0.33 Hz; UpRev caught
-  **537**. Until the budget rises (multi-pid-polling.md), WOT work belongs on
+  **537**. Until the budget rises (archive/multi-pid-polling.md), WOT work belongs on
   the synchronously-sampled log.
 
   **3.2a — WOT flushes the IAT sensor, and later heat-soaked pulls did not
