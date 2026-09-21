@@ -38,14 +38,30 @@ requirement (NFR-06) was written to mean "don't brick the ECU" and got
 read literally as "never transmit," which blocked routine work; it has
 been removed.
 
-**The line that actually matters: `canary` must never write the ECU's
-non-volatile memory.** No reflash, no calibration/ROM write, nothing
-whose failure mode is an unrecoverable module. That is the damage the
-old requirement existed to prevent, and it is the only part worth
-keeping. Reads of any depth are fine; so are volatile, reversible writes
-(clear DTC, actuation tests, session control). Reflashing belongs to
-**`canary-rw`** — a separate tool, bench ECUs only, never the vehicle
-(`docs/skunkworks/ecu-rw-bench-research.md`).
+**The line that actually matters: nothing writes the ECU's non-volatile
+memory without the operator's explicit permission, and never while the
+vehicle is moving or the engine is running.** A reflash or calibration write
+is the one operation here whose failure mode is an unrecoverable module, so
+it gets two conditions and both always hold:
+
+- **Explicit permission, per operation.** The operator asks for that write,
+  in those words, at that time. An agent never starts one on its own
+  initiative, never infers permission from a broader instruction ("tune it",
+  "fix the fuelling", "deploy"), and never carries permission from one write
+  to the next. If it is not clear that a non-volatile write was requested,
+  it was not.
+- **Key on, engine off, vehicle stationary.** Read `vehicle_state` first: a
+  write proceeds only from `ignition_only`. `engine_running` refuses, and so
+  does anything that cannot be classified. An interrupted flash on a parked
+  truck is a recovery job; on a moving one it is an engine shutting off in
+  traffic.
+
+Reflashing is a direction this project is moving in, not something it
+forbids (operator decision 2026-09-21, replacing the earlier blanket rule
+that `canary` never writes non-volatile memory). Reads of any depth remain
+fine, and so do volatile, reversible writes (clear DTC, actuation tests,
+session control) — those need neither condition. Bench-ECU groundwork is in
+`docs/skunkworks/ecu-rw-bench-research.md`.
 
 Two narrower cases, neither of them the policy above: the broadcast
 capture path (`can_collector`) is a pure sniffer with no send path at
@@ -53,8 +69,8 @@ all, and the **legacy ELM327 path** (`obd_collector.py`) still refuses
 Mode 04/0x2E/0x2F via `WRITE_COMMAND_MODES` / `assert_read_only_command`.
 That legacy guard is now *stricter than NFR-06 requires* — none of those
 three touch non-volatile memory — and survives only because nothing
-needed it lifted yet. Lift it when the ELM327 path needs them; it is not
-defending the no-reflash line.
+needed it lifted yet. Lift it when the ELM327 path needs them; it has nothing
+to do with the non-volatile-write conditions above.
 
 **Implications for how to work:**
 

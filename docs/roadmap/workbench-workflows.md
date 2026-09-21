@@ -127,16 +127,30 @@ them, shown as *planned* rather than hidden:
   start of this.
 - **Flash** — program a ROM into the ECU.
 
-**Flash is not a UI task; it is a policy decision that has not been made.**
-AGENTS.md draws exactly one hard line for this codebase: `canary` must never
-write the ECU's non-volatile memory, and reflashing belongs to `canary-rw`, a
-separate tool for bench ECUs, never the vehicle. A Flash page in this
-dashboard crosses that line by construction. The slot is reserved so the
-information architecture does not need reworking later, but nothing under it
-should be built until the operator deliberately revisits that rule — and if it
-is revisited, the natural shape is this page *driving* `canary-rw` rather than
-the capability moving into the daemon. The ROM Editor is on the safe side of
-the line as long as its output is a file.
+**The policy for Flash is settled (operator decision 2026-09-21), and the page
+is where it becomes impossible to get wrong rather than merely documented.**
+AGENTS.md sets two conditions on any write to the ECU's non-volatile memory,
+and the Flash page enforces both itself instead of relying on whoever is
+driving it:
+
+- **Explicit permission, per operation.** A flash is started by a deliberate
+  operator action on this page that names the ROM file and its hash. There is
+  no API shortcut that skips the confirmation, no "flash on save" from the ROM
+  Editor, and no agent-initiated path: an agent may prepare a ROM and stop.
+- **Key on, engine off, stationary.** The control is disabled unless
+  `vehicle_state == ignition_only`, and says why when it is not. The check is
+  repeated server-side at the moment of the write, because the state that
+  matters is the state when the first block is sent, not when the page
+  loaded. `engine_running` refuses; so does any state that cannot be
+  classified.
+
+Around those: refuse on low supply voltage and on a UPS that could not carry
+the Pi through the whole operation (28 % SOC on 2026-09-21 would have
+refused); verify the image hash before starting; read back and compare
+afterwards; record the result in `tune_revisions.yaml` so the running
+calibration and the memory-channel stamps follow automatically. The ROM
+Editor's output stays a file — producing a ROM and flashing one are separate
+acts on separate pages.
 
 ## Principles
 
@@ -175,8 +189,13 @@ the line as long as its output is a file.
   for the live capture or the selected log.
 - [ ] **W9 — Calibration page.** Flash history, running revision, per-channel
   verified / carried / withheld state, and the re-verify action.
-- [ ] **W10 — Reserve ROM Editor and Flash** as planned entries. No behaviour.
-  Flash stays unbuilt pending the policy decision described above.
+- [ ] **W10 — Reserve ROM Editor and Flash** as planned entries.
+- [ ] **W11 — Flash interlocks before any flash capability.** The two AGENTS.md
+  conditions as code, server-side: a per-operation confirmation that names the
+  image hash, and a `vehicle_state == ignition_only` check at the moment of
+  the write. Plus supply-voltage and UPS-SOC floors. These land, with tests,
+  *before* anything that can program a module, so the capability never exists
+  without them.
 
 Backend facts these need that do not exist yet: the calibration id read
 (`0x21 10`) surfaced in `/status` (W2, W9); the last capture's end reason (W4);

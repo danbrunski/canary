@@ -82,7 +82,8 @@ CANary does not modify the calibration: it logs every drive, aggregates AFR
 error and fuel trims into binned correction surfaces, and guards against
 post-flash regressions. Diagnostic requests, session control, security access,
 memory reads, and volatile control actions remain normal CANary operations;
-only ECU non-volatile-memory writes and reflashing belong outside this daemon.
+ECU non-volatile-memory writes and reflashing are gated by AGENTS.md's two
+conditions: explicit operator permission, and key on / engine off / stationary.
 
 **Vehicle mod state** (profile-level facts for the dev vehicle — keep
 out of shared code paths):
@@ -130,9 +131,12 @@ volumetrically.
 - Whole-repo gate before every commit: `ruff check . && ruff format
   --check . && mypy src && pytest` (+ `pnpm test` / `pnpm typecheck`
   for FE work).
-- **No ECU non-volatile-memory writes from CANary (NFR-06), permanently.**
-  Diagnostic reads, session control, security access, and volatile control
-  actions are in scope. UpRev remains the calibration/reflash tool.
+- **ECU non-volatile-memory writes only with explicit operator permission,
+  and never with the vehicle moving or the engine running (NFR-06, revised
+  2026-09-21).** Diagnostic reads, session control, security access, and
+  volatile control actions need neither condition. UpRev is the
+  calibration/reflash tool today; reflashing from this project is a direction
+  of travel, not yet a capability.
 - Nothing Xterra-specific in shared code: capture profiles, PID sets,
   and bin axes are config/profile data, not constants.
 - **Tuning drives are not "normal" telemetry.** Flat-AFR-target test

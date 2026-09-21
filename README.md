@@ -60,8 +60,10 @@ detecting subtle signs of trouble before they become failures.
   security access, memory reads, and ad-hoc diagnostic/control requests all
   transmit on the bus. The request path accepts any service byte, including
   state-changing and actuation commands. CANary's hard boundary is narrower:
-  it never writes ECU non-volatile memory or reflashes a module. Broadcast CAN
-  capture itself remains sniff-only.
+  it writes ECU non-volatile memory (a reflash or calibration write) only with
+  the operator's explicit permission for that operation, and never while the
+  vehicle is moving or the engine is running. Broadcast CAN capture itself
+  remains sniff-only.
 
 See [`docs/CANary-overview.md`](docs/CANary-overview.md) for the full architecture,
 requirements, and development phases.

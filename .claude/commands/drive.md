@@ -203,7 +203,10 @@ its own criteria frozen before its data.
 
 ## Hard rules
 
-- Never write non-volatile ECU memory: no 0x2E, 0x3B, 0x31, 0x34–0x37.
+- Never write non-volatile ECU memory during a drive: no 0x2E, 0x3B, 0x31,
+  0x34–0x37. A drive is by definition engine running and vehicle moving,
+  which is the one condition under which AGENTS.md forbids such a write
+  outright — no permission given earlier extends into a drive.
   Don't clear DTCs. 0x27 requestSeed only.
 - No analysis on the Pi while it collects. No replays on the Pi while the
   truck is collecting. No bus-budget raises.

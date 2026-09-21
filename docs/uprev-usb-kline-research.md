@@ -12,9 +12,11 @@ cable was captured and decoded. A standalone Python probe then opened the
 cable and completed its local handshake without ROM Editor.
 
 Do not conflate this with UpRev reflashing, which uses CAN. Everything here is
-diagnostic streaming. CANary's normal policy still applies: never write ECU
-non-volatile memory. Captured reflashing traffic must not enter this collector
-or its fixtures; that belongs to `canary-rw` on a bench ECU.
+diagnostic streaming, and this collector stays a read path. AGENTS.md's policy
+on non-volatile writes applies unchanged: explicit operator permission per
+operation, and never with the vehicle moving or the engine running. Captured
+reflashing traffic does not belong in this collector or its fixtures; the
+flash research lives in `docs/skunkworks/`.
 
 ## Hardware and ownership
 

@@ -166,11 +166,17 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - The system MAY send any diagnostic service required to read vehicle data —
   telemetry polling, session control, security access, and memory reads are all
   in scope. Transmitting on the bus is inherent to diagnostics, not an exception
-- The system SHALL NOT write the ECU's non-volatile memory: no reflash, no
-  calibration/ROM write, nothing whose failure mode is an unrecoverable module.
-  Reflashing is `canary-rw`'s scope, against bench ECUs only
-  (`docs/skunkworks/ecu-rw-bench-research.md`), and SHALL NOT be linked into
-  the `canary` daemon
+- The system SHALL NOT write the ECU's non-volatile memory (reflash,
+  calibration/ROM write) without the operator's explicit permission for that
+  operation. Permission SHALL NOT be inferred from a broader instruction or
+  carried from one write to the next
+- The system SHALL refuse a non-volatile write unless the vehicle is
+  stationary with the engine off (`vehicle_state == ignition_only`). It SHALL
+  refuse under `engine_running` and under any state it cannot classify
+- Reads of any depth and volatile, reversible writes (clear DTC, actuation
+  tests, session control) need neither condition. Replaces the earlier
+  blanket prohibition (operator decision 2026-09-21); bench groundwork is in
+  `docs/skunkworks/ecu-rw-bench-research.md`
 - The dashboard SHALL be accessible on localhost / LAN only; no external internet exposure by default
 
 ---
