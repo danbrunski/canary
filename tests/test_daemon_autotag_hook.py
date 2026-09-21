@@ -45,6 +45,7 @@ preprocessing:
       rpm_max: 900
       speed_max: 0
 models:
+  out_of_process_feature_build: false
   isolation_forest:
     enabled: false
     n_estimators: 100
