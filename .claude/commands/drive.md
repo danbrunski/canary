@@ -210,8 +210,8 @@ its own criteria frozen before its data.
   Don't clear DTCs. 0x27 requestSeed only.
 - No analysis on the Pi while it collects. No replays on the Pi while the
   truck is collecting. No bus-budget raises.
-- Never edit `bindings.yaml`, a feature spec, or the `default` / `fuel-map`
-  profiles from the road. Catalog candidates at the lowest confidence rung,
+- Never edit `bindings.yaml`, a feature spec, or a saved capture profile
+  (`default`, `tuning`) from the road. Catalog candidates at the lowest confidence rung,
   and only where a task says so. Never compare aggregates.
 - Passive mode always with a TTL; disarm it when the block ends.
 - No `/boot/firmware` edit and no Pi reboot from the road unless the prompt

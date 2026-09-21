@@ -12,8 +12,10 @@ show the cell the ECM says it is reading.
 **Channels** (`data/dids.yaml`, `memory:`): `ECM_FUEL_TARGET_MAP_X_TRACE`
 (`0xFFFF103E`), `ECM_ENGINE_SPEED_RAM` (`0xFFFF11D8`, the fuel-target Y),
 `ECM_CAM_MAP_RPM_TRACE` (`0xFFFF11CA`), `ECM_THROTTLE_MAP_X_TRACE` /
-`_Y_TRACE` (`0xFFFF1C2C` / `0xFFFF1902`). The `rom-trace` profile polls all of
-them at 8 Hz.
+`_Y_TRACE` (`0xFFFF1C2C` / `0xFFFF1902`). The `rom-trace` profile polled all
+of them at 8 Hz until it was retired on 2026-09-21 (its continuous session
+stalled with zero requests sent); they rejoin the Xterra's `tuning` profile
+once that stall is found.
 
 ## Trace
 
@@ -66,7 +68,7 @@ them at 8 Hz.
 
 ## Done when
 
-With `rom-trace` recording, the trace follows the ECM's coordinates and shows
+With a profile carrying the trace channels recording, the trace follows the ECM's coordinates and shows
 any disagreement with the inferred cell; with nothing polling them, it greys
 out and names the fix; the overlay shows which cells a selected log visited.
 *Truck check:* one drive watching the fuel-target trace cross at least three

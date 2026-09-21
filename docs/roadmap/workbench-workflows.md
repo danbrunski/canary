@@ -55,7 +55,7 @@ What holds the pages together is **shared context, not sequence**.
 One strip across the top of every Engine Tuning page:
 
 ```text
-2008 Xterra · running ZS44A-20260920 · capture: rom-trace 00:12:41 · log: <selected> · ROM: <loaded>
+2008 Xterra · running ZS44A-20260920 · capture: tuning 00:12:41 · log: <selected> · ROM: <loaded>
 ```
 
 - **Running calibration** comes from the ECU, not from the operator: service
@@ -159,7 +159,7 @@ acts on separate pages.
 - **Pages stand alone.** No page assumes another was visited first.
 - **Context is shared, not sequenced.** Selections persist across a group.
 - **An empty state names its cause and offers its fix.** "Traces are not being
-  polled — start a capture with `rom-trace`" beats a blank panel.
+  polled — start a capture with a profile that carries them" beats a blank panel.
 - **Readiness is status, never a gate.** The operator may always proceed.
 - **One word, one meaning.** *Tuning* is the engine. Detectors have
   *thresholds*.

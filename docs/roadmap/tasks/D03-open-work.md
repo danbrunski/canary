@@ -408,6 +408,11 @@ estimated signal; they cannot establish how UpRev calculates its display.
   1.90–1.97 Hz DIDs, so `rate_shortfall` is gone. `tuning-hybrid-research` itself
   is untouched. Remaining: its own request, plus a new stall (D03.18) that now
   fails every long research capture on `acquisition_gap`.
+  **2026-09-21:** `tuning-hybrid-research` is retired (archived in
+  `data/nissan-xterra-2008/capture_profiles.archive.yaml`). The Xterra's one
+  tuning capture, `tuning`, carries the honest 0.5 s / weight-0.5 request
+  inherited from `fuel-target-research`, so the infeasible-cycle request no
+  longer exists. What remains open here is D03.18's stall.
 
 - [~] **D03.6 Trip-end digest isolation and memory-order fix landed; large-session
   measurement and shutdown behavior remain.** The original synchronous digest, not the replay, took the daemon
@@ -1074,7 +1079,8 @@ In short:
    a 3 Hz minimal pull profile if it resolves feasible at 90 req/s.
 2. **Boot check:** 0 "batching disabled" lines on a key-off boot (D03.19's last
    unverified path).
-3. **One capture on `fuel-pw-research`, warm, paved:**
+3. **One capture on `tuning`, warm, paved** (it supersedes `fuel-pw-research`,
+   retired 2026-09-21, and carries the same fuel channels):
    - closed-loop plateaus;
    - ≥30 s of held enrichment across ≥3 independent pulls (D03.8, D03.9);
    - tip-ins/lifts held ≥5 s (D04.3);

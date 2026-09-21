@@ -894,7 +894,8 @@ def compute_tuning_digest(
 
     role_capabilities = capabilities.get("roles", {})
     rpm_provider = role_capabilities.get("rpm", {}).get("provider")
-    did_continuous = profile == "tuning-did"
+    manifest = read_capture_manifest(session_dir)
+    did_continuous = manifest is not None and manifest.did_continuous
     demand_provider = role_capabilities.get("operator_demand", {}).get("provider")
     afr_providers = [
         str(role_capabilities.get(name, {}).get("provider"))

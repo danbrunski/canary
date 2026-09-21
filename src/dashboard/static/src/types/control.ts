@@ -135,10 +135,6 @@ export interface CaptureProfile {
   min_achieved_rate_hz: number | null;
   /** Refuse to arm without a named calibration. */
   requires_tune_revision: boolean;
-  /** Seed revision a built-in shipped from; 0 marks an operator-authored one. */
-  builtin_revision: number;
-  /** Set once saved over, which freezes a built-in against seed upgrades. */
-  operator_modified: boolean;
   broadcast_decode: boolean;
   corpus_eligible: boolean;
   /** Exact behavior-surface recipes this isolated capture may train. */

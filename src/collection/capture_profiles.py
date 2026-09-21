@@ -29,22 +29,16 @@ log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
-FUEL_MAP_PROFILE_NAME = "fuel-map"
-#: Bump the seed's ``builtin_revision`` whenever a built-in profile's shipped
-#: definition changes meaningfully. ``load_capture_profiles`` then upgrades
-#: saved copies that are older *and* untouched by the operator. Without this a
-#: catalog written once pinned the built-in forever: the 2026-08-10 fuel-map
-#: capture ran at 0.28-0.78 Hz because a saved copy predating ``target_rate_hz``
-#: shadowed a source-level correction, and nothing in the system could say so.
-#:
-#: 3 — 2026-09-18 fuel relabel: ``ECM_INJECTOR_PW_B1`` became
-#:     ``ECM_AIR_CHARGE`` and its recipe ``air_charge_vs_rpm_throttle_did``,
-#:     with no alias. Operator-modified copies are migrated by
-#:     ``tools/migrate_channel_names.py`` rather than by this upgrade.
-#: 4 — 2026-09-20 UpRev USB evidence directly pinned 0x1206/0x1207 as
-#:     injector pulse Bank 1/2 at 0.01 ms/count; collect both in the all-DID
-#:     tuning profile instead of leaving confirmed fuel observability out.
-BUILTIN_REVISION = 5
+#: The catalog a vehicle starts from when it has none. Only ``default`` is
+#: built in code, because it mirrors the running collection config; every other
+#: profile is data. A new vehicle's catalog copies this file's non-default
+#: profiles once and is its own from then on -- nothing re-seeds or upgrades a
+#: saved catalog, so an operator's deletion or edit is final.
+STARTER_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "capture_profiles.yaml"
+#: Keys older catalogs carry from the retired built-in upgrade machinery
+#: (``builtin_revision`` / ``operator_modified``, removed 2026-09-21). Dropped
+#: on load so those files still validate under ``extra="forbid"``.
+_RETIRED_PROFILE_KEYS = ("builtin_revision", "operator_modified")
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -78,39 +72,6 @@ FUEL_DELIVERY_TUPLE: tuple[str, ...] = (
     "O2_WR_LAMBDA_S1",
 )
 
-#: Fueling channels that resolve a WOT transient and therefore want the
-#: profile's full rate. A 5 s pull is the unit of work; anything slower than a
-#: few Hz here samples the pull two or three times.
-FUEL_MAP_FAST_CHANNELS: tuple[str, ...] = (
-    "RPM",
-    "ENGINE_LOAD",
-    "MAF",
-    "TIMING_ADVANCE",
-    "THROTTLE_POS",
-    "O2_WR_LAMBDA_S1",
-    "O2_WR_LAMBDA_S2",
-    "COMMANDED_EQUIV_RATIO",
-    "FUEL_STATUS",
-)
-
-#: Context channels: closed-loop adaptation and thermal state, which move on
-#: the order of seconds to minutes. Held at a quarter of the fast rate so they
-#: stay present for gating without diluting the transient channels — the whole
-#: point of the weight being honoured under ``target_rate_hz``.
-FUEL_MAP_CONTEXT_CHANNELS: tuple[str, ...] = (
-    "BAROMETRIC_PRESSURE",
-    "INTAKE_TEMP",
-    "SPEED",
-    "COOLANT_TEMP",
-    "SHORT_FUEL_TRIM_1",
-    "SHORT_FUEL_TRIM_2",
-    "LONG_FUEL_TRIM_1",
-    "LONG_FUEL_TRIM_2",
-    "EVAPORATIVE_PURGE",
-)
-
-FUEL_MAP_CONTEXT_WEIGHT = 0.25
-
 #: Air-density and thermal context every tuning capture must carry: ambient
 #: pressure, intake-air temperature and coolant temperature.
 #:
@@ -130,56 +91,19 @@ FUEL_MAP_CONTEXT_WEIGHT = 0.25
 #: adjacent default session.
 CAPTURE_CONTEXT_MODE01: tuple[str, ...] = ("BAROMETRIC_PRESSURE", "INTAKE_TEMP", "COOLANT_TEMP")
 
-FUEL_MAP_CHANNELS: tuple[str, ...] = (*FUEL_MAP_FAST_CHANNELS, *FUEL_MAP_CONTEXT_CHANNELS)
-
-FUEL_MAP_WEIGHTS: dict[str, float] = {
-    **{name: 1.0 for name in FUEL_MAP_FAST_CHANNELS},
-    **{name: FUEL_MAP_CONTEXT_WEIGHT for name in FUEL_MAP_CONTEXT_CHANNELS},
-}
-
-
-TUNING_DID_PROFILE_NAME = "tuning-did"
-
-#: The all-DID tuning set. Every entry is identified in data/dids.yaml.
-#:
-#: Chosen for what Mode 01 *cannot* give: intake cam angle (commanded and
-#: measured) exists only as a DID, and the A/F sensor VOLTAGE is the input to
-#: the validated voltage→AFR table — the other half of the measured-AFR
-#: disagreement found 2026-08-05, where the ECM's own λ (PID 0x24) and the
-#: voltage path differ by 3.8 % at WOT. Capturing voltage at rate is what
-#: lets that be settled from Pi data alone.
-#:
-#: RPM and coolant are included despite being free on broadcast CAN: they cost
-#: ~1.5 ms each and give same-instant anchors inside the DID round, which is
-#: what makes the set self-aligning rather than needing a cross-source join.
-#:
-#: Both measured cam channels are polled because they are two banks, not one
-#: register mirrored — settled by the first capture using this profile, which
-#: read them in the same rotation for 12 minutes and found a +0.51 deg offset
-#: with the cam static (p=2.3e-29). Dropping either would lose a bank.
-TUNING_DID_CHANNELS: tuple[str, ...] = (
-    "ECM_RPM",
-    "ECM_AF_SENSOR_V_B1",
-    "ECM_AF_SENSOR_V_B2",
-    "ECM_AIR_CHARGE",
-    "ECM_INJECTOR_PULSE_1",
-    "ECM_INJECTOR_PULSE_2",
-    "ECM_INTAKE_CAM_ANGLE_MEASURED",
-    "ECM_INTAKE_CAM_ANGLE_COMMANDED",
-    "ECM_INTAKE_CAM_ANGLE_MEASURED_B",
-    "ECM_INTAKE_VVT_SOLENOID_DUTY",
-    "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
-    "ECM_THROTTLE_POS_SENSOR_1",
-    "ECM_COOLANT_TEMP",
-    "ECM_INTAKE_AIR_TEMP_1106",
-)
-
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
 class CaptureProfile(_Strict):
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_retired_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and any(key in data for key in _RETIRED_PROFILE_KEYS):
+            data = {k: v for k, v in data.items() if k not in _RETIRED_PROFILE_KEYS}
+        return data
+
     name: str
     description: str = ""
     #: Why this profile is the way it is — the reasoning a future editor needs
@@ -187,15 +111,10 @@ class CaptureProfile(_Strict):
     #: this is the rationale.
     #:
     #: It is a *field* rather than a YAML comment because the catalog is
-    #: written back through ``yaml.safe_dump`` whenever a built-in is upgraded
-    #: or appended, and that drops comments silently. It did: a seed upgrade
-    #: deleted 64 comment blocks across the two shipped catalogs, including
-    #: why PID 0x25 must stay out of this ECM's profile and why three profiles
-    #: are seed-protected. Restoring them by hand only bought time until the
-    #: next ``BUILTIN_REVISION`` bump.
-    #:
-    #: Built-ins carry their notes in :func:`seed_catalog`, so an upgrade
-    #: rewrites the rationale along with the values instead of erasing it.
+    #: written back through ``yaml.safe_dump`` on every save, which drops
+    #: comments silently. It did: a rewrite once deleted 64 comment blocks
+    #: across the two shipped catalogs, including why PID 0x25 must stay out
+    #: of this ECM's profile.
     notes: str = ""
     #: Research profiles are intentionally operator-visible but have not yet
     #: earned the same trust as routine captures.  Keep that status in the
@@ -313,12 +232,6 @@ class CaptureProfile(_Strict):
     #: reports the source as ``unknown``, so a comparison across a flash can
     #: tell the calibration was unrecorded. Do not restore the refusal.
     requires_tune_revision: bool = False
-    #: Seed revision this profile's shipped definition came from. ``0`` marks a
-    #: profile the operator authored, which is never upgraded.
-    builtin_revision: int = Field(default=0, ge=0)
-    #: Set once the operator saves over a built-in. Freezes it against seed
-    #: upgrades: their edit is a decision, not a stale copy.
-    operator_modified: bool = False
     broadcast_decode: bool = True
     corpus_eligible: bool = False
     #: Narrow exception to corpus isolation: these captures may be evidence
@@ -610,119 +523,50 @@ class CaptureProfileCatalog(_Strict):
         return next((profile for profile in self.profiles if profile.name == normalized), None)
 
 
-def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
-    """Create built-ins; ``default`` mirrors the active config exactly."""
+def default_profile(collection: CollectionConfig) -> CaptureProfile:
+    """The reserved ``default`` profile; it mirrors the active config exactly."""
     default_channels = {name: 1.0 for name in collection.obd_pids}
-    return CaptureProfileCatalog(
-        profiles=[
-            CaptureProfile(
-                name=DEFAULT_PROFILE_NAME,
-                description="Normal telemetry and anomaly-detection collection",
-                notes=(
-                    "ECM_COOLANT_TEMP is present so an ordinary drive settles the "
-                    "contested DID 0x1101 offset, which no capture on hand can: the "
-                    "two recorded offsets differ by exactly 10 degC, and separating "
-                    "them needs this DID and Mode 01 PID 0x05 in ONE session. Only "
-                    "the default profile can do that \u2014 the tuning profile "
-                    "disables Mode 01. Verified 2026-08-06 that 0x1101 was in the "
-                    "scheduler plan but never requested, because the DID window "
-                    "polls this list, not the plan: four consecutive windows sent 0 "
-                    "requests for it while ECM_RPM got one each."
-                ),
-                mode01=default_channels,
-                mode22=tuple(collection.obd_dids),
-                broadcast_decode=bool(collection.persist_decoded_confidence),
-                corpus_eligible=True,
-            ),
-            CaptureProfile(
-                name=FUEL_MAP_PROFILE_NAME,
-                description="High-rate fueling and timing capture",
-                mode01=dict(FUEL_MAP_WEIGHTS),
-                mode22=(),
-                # Both knobs, because either alone does nothing. Demand was
-                # capped at `poll_rate_hz x tier x weight` = 1 Hz x tier, and
-                # throughput at the default 8 req/s budget; the 2026-08-10
-                # capture hit both at once and landed at 0.28-0.78 Hz while
-                # calling itself "high-rate".
-                target_rate_hz=4.0,
-                # 9 fast x 4 Hz + 9 context x 1 Hz = 45 channel-reads/s.
-                expected_total_demand_hz=45.0,
-                bus_budget_override=20.0,
-                capacity_evidence=(
-                    "45 channel-reads/s against 478/s measured batched on this ECM "
-                    "(2026-08-04). Budget held at 20 req/s, under the 24 req/s storage-sink "
-                    "line: batching packs 6 PIDs per request, so 45 reads/s needs ~8 req/s "
-                    "batched and 45 unbatched. If batching is off the contract reports a "
-                    "shortfall rather than silently exceeding the sink's known-safe rate."
-                ),
-                required_tuple=FUEL_DELIVERY_TUPLE,
-                min_achieved_rate_hz=3.0,
-                requires_tune_revision=True,
-                broadcast_decode=True,
-                corpus_eligible=False,
-                round_timestamps=True,
-                storage_prefix="_capture-fuel-map",
-                builtin_revision=BUILTIN_REVISION,
-            ),
-            CaptureProfile(
-                name=TUNING_DID_PROFILE_NAME,
-                description="All-DID tuning capture (session held open)",
-                # Mode 01 off by construction: holding session 0xC0 blocks it.
-                # What that buys is the channels Mode 01 cannot reach at all —
-                # cam angle and A/F sensor voltage — sampled synchronously
-                # rather than in windows, at 658 reads/s of measured headroom.
-                mode01={},
-                mode01_enabled=False,
-                mode22=TUNING_DID_CHANNELS,
-                # Coolant is context, not dynamics, and it was taking a full
-                # eleventh of the budget to say so. Measured over 38 sessions
-                # and 10,488 adjacent-sample pairs (gaps <= 15 s, so a restart
-                # or a collection hole cannot fake a slope): coolant changes at
-                # **0.441 degC/s at p99.9**, 0.332 at p99, and the channel
-                # quantises at 1 degC. 1 Hz therefore moves at most 0.44 degC
-                # between samples and cannot miss a step, with 2.3x margin over
-                # the 0.44 Hz the measurement strictly requires.
-                #
-                # Do NOT read the H8 drive's "0.2 % of samples changed" as a
-                # licence to go slower than this: that drive was warm
-                # throughout (72 -> 94 degC over 25 min). Cold-start warmup is
-                # roughly twenty times faster, and 0.1 Hz would alias it.
-                mode22_rate_weights={
-                    "ECM_COOLANT_TEMP": 1.0 / 15.0,
-                    # Intake air is context too (CAPTURE_CONTEXT_MODE01); it
-                    # tracks airflow over seconds, so 1 Hz is ample.
-                    "ECM_INTAKE_AIR_TEMP_1106": 1.0 / 15.0,
-                },
-                did_continuous=True,
-                target_rate_hz=15.0,
-                bus_budget_override=184.0,
-                # 12 DIDs x 15 Hz + coolant and IAT x 1 Hz = 182 reads/s.
-                expected_total_demand_hz=182.0,
-                capacity_evidence=(
-                    "2026-08-04 bench: 658 DID reads/s. 12 DIDs x 15 Hz + "
-                    "ECM_COOLANT_TEMP and ECM_INTAKE_AIR_TEMP_1106 x 1 Hz = 182 reads/s. "
-                    "The 2026-09-10 H8 drive "
-                    "sustained 116.8 req/s with 11 DIDs at 10.4 Hz each, 41 timeouts "
-                    "in 167,885 requests and 0 bus errors, so the ECM is not the "
-                    "binding constraint; coolant's 15 Hz share was simply wasted "
-                    "(0.2 % of its samples changed while it took 1/11 of the budget). "
-                    "The 184 req/s budget leaves two slots/s for session refresh and jitter."
-                ),
-                broadcast_decode=True,
-                corpus_eligible=False,
-                behavior_model_recipes=(
-                    "air_charge_vs_rpm_throttle_did",
-                    "cam_primary_vs_command_rpm_did",
-                    "cam_secondary_vs_command_rpm_did",
-                ),
-                min_achieved_rate_hz=12.0,
-                requires_tune_revision=True,
-                round_timestamps=True,
-                storage_prefix="_capture-tuning-did",
-                builtin_revision=BUILTIN_REVISION,
-            ),
-        ]
+    return CaptureProfile(
+        name=DEFAULT_PROFILE_NAME,
+        description="Normal telemetry and anomaly-detection collection",
+        notes=(
+            "ECM_COOLANT_TEMP is present so an ordinary drive settles the "
+            "contested DID 0x1101 offset, which no capture on hand can: the "
+            "two recorded offsets differ by exactly 10 degC, and separating "
+            "them needs this DID and Mode 01 PID 0x05 in ONE session. Only "
+            "the default profile can do that \u2014 the tuning profile "
+            "disables Mode 01. Verified 2026-08-06 that 0x1101 was in the "
+            "scheduler plan but never requested, because the DID window "
+            "polls this list, not the plan: four consecutive windows sent 0 "
+            "requests for it while ECM_RPM got one each."
+        ),
+        mode01=default_channels,
+        mode22=tuple(collection.obd_dids),
+        broadcast_decode=bool(collection.persist_decoded_confidence),
+        corpus_eligible=True,
     )
+
+
+def seed_catalog(
+    collection: CollectionConfig, starter_path: Path = STARTER_CATALOG_PATH
+) -> CaptureProfileCatalog:
+    """A new vehicle's catalog: ``default`` from config plus the starter profiles.
+
+    The starters are data (``STARTER_CATALOG_PATH``), not code. A missing or
+    unreadable starter file yields ``default`` alone rather than failing: a
+    catalog with only the serving profile is complete, just unfurnished.
+    """
+    profiles = [default_profile(collection)]
+    if starter_path.exists():
+        try:
+            starter = CaptureProfileCatalog.model_validate(yaml.safe_load(starter_path.read_text()))
+        except (OSError, ValueError, yaml.YAMLError):
+            log.exception(
+                "starter capture catalog %s is unreadable; seeding default only", starter_path
+            )
+        else:
+            profiles.extend(p for p in starter.profiles if p.name != DEFAULT_PROFILE_NAME)
+    return CaptureProfileCatalog(profiles=profiles)
 
 
 def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
@@ -731,60 +575,19 @@ def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
 
 
 def load_capture_profiles(path: Path, collection: CollectionConfig) -> CaptureProfileCatalog:
-    """Load the catalog, back-filling and upgrading built-in profiles.
+    """Load a vehicle's catalog, creating it from the seed the first time.
 
-    A saved catalog is authoritative for the profiles the *operator* wrote or
-    edited. Built-ins are different: a file written before a built-in existed
-    would hide it forever (404 from ``POST /control/capture`` on the vehicle,
-    which is exactly where nobody wants to be editing YAML), and — the failure
-    this exists for — a file written before a built-in was *corrected* pins the
-    stale definition just as permanently.
-
-    So three cases, deliberately distinct:
-
-    * a built-in the file never named is appended;
-    * a built-in the file names at an older ``builtin_revision``, never saved
-      over by the operator, is replaced by the seed;
-    * anything with ``operator_modified`` set, or authored by the operator, is
-      left exactly alone. Their edit is a decision, not a stale copy.
+    A saved catalog is authoritative and is never rewritten on load: no
+    profile is appended, upgraded or restored behind the operator's back. The
+    built-in upgrade machinery that used to do that (``builtin_revision``)
+    kept re-adding profiles the operator had deleted, and it rewrote a tracked
+    file on the Pi, which then blocked ``git pull``.
     """
     if not path.exists():
         catalog = seed_catalog(collection)
         save_capture_profiles(path, catalog)
         return catalog
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
-    seeds = {profile.name: profile for profile in seed_catalog(collection).profiles}
-    resolved: list[CaptureProfile] = []
-    changed = False
-    for saved in catalog.profiles:
-        seed = seeds.pop(saved.name, None)
-        if (
-            seed is not None
-            and not saved.operator_modified
-            and saved.builtin_revision < seed.builtin_revision
-        ):
-            resolved.append(seed)
-            changed = True
-            log.warning(
-                "upgraded built-in capture profile %s from revision %d to %d",
-                saved.name,
-                saved.builtin_revision,
-                seed.builtin_revision,
-                extra={
-                    "capture_profile": saved.name,
-                    "from_revision": saved.builtin_revision,
-                    "to_revision": seed.builtin_revision,
-                },
-            )
-            continue
-        resolved.append(saved)
-    if seeds:
-        resolved.extend(seeds.values())
-        changed = True
-    if changed:
-        catalog = catalog.model_copy(update={"profiles": resolved})
-        save_capture_profiles(path, catalog)
-    return catalog
+    return CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
 
 
 _SERVING_DID_CACHE: dict[Path, tuple[int, frozenset[str]]] = {}
@@ -1060,11 +863,7 @@ class CaptureProfileStore:
             raise ValueError("the default profile cannot be renamed")
         if any(item.name == profile.name for item in profiles):
             raise ValueError(f"capture profile already exists: {profile.name}")
-        # An operator save freezes a built-in against future seed upgrades.
-        # Marked here rather than trusted from the request body: the flag is
-        # provenance, and a client that omitted it would silently re-open the
-        # profile to being overwritten by the next seed bump.
-        profiles.append(profile.model_copy(update={"operator_modified": True}))
+        profiles.append(profile)
         profiles.sort(key=lambda item: (item.name != DEFAULT_PROFILE_NAME, item.name))
         save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
         return model_input_warnings(profile, self.behavior_models_path)
@@ -1082,16 +881,14 @@ class CaptureProfileStore:
 
 __all__ = [
     "CAPTURE_CONTEXT_MODE01",
-    "BUILTIN_REVISION",
+    "DEFAULT_PROFILE_NAME",
+    "STARTER_CATALOG_PATH",
     "STORAGE_SAFE_REQUESTS_PER_SECOND",
     "CaptureProfile",
     "CaptureProfileCatalog",
     "CaptureProfileStore",
     "FUEL_DELIVERY_TUPLE",
-    "FUEL_MAP_CHANNELS",
-    "FUEL_MAP_CONTEXT_CHANNELS",
-    "FUEL_MAP_FAST_CHANNELS",
-    "FUEL_MAP_WEIGHTS",
+    "default_profile",
     "load_capture_profiles",
     "model_input_warnings",
     "seed_catalog",

@@ -14,11 +14,35 @@ from datetime import UTC, datetime
 from typing import Any
 
 from src.collection import capture_generation, capture_lifetime
-from src.collection.capture_profiles import FUEL_MAP_CHANNELS, CaptureProfile
+from src.collection.capture_profiles import CaptureProfile
 from src.collection.request_eligibility import Eligibility, ProfileClass, evaluate
 
 log = logging.getLogger(__name__)
-DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(FUEL_MAP_CHANNELS)
+#: Mode 01 channels the legacy boolean ``POST /control/tuning-mode`` polls when
+#: the caller names none. An API default for that endpoint only; capture
+#: profiles proper are data (``data/capture_profiles.yaml``), not code.
+DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(
+    {
+        "RPM",
+        "ENGINE_LOAD",
+        "MAF",
+        "TIMING_ADVANCE",
+        "THROTTLE_POS",
+        "O2_WR_LAMBDA_S1",
+        "O2_WR_LAMBDA_S2",
+        "COMMANDED_EQUIV_RATIO",
+        "FUEL_STATUS",
+        "BAROMETRIC_PRESSURE",
+        "INTAKE_TEMP",
+        "SPEED",
+        "COOLANT_TEMP",
+        "SHORT_FUEL_TRIM_1",
+        "SHORT_FUEL_TRIM_2",
+        "LONG_FUEL_TRIM_1",
+        "LONG_FUEL_TRIM_2",
+        "EVAPORATIVE_PURGE",
+    }
+)
 
 _lock = threading.Lock()
 _profile = CaptureProfile(

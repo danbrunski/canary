@@ -87,8 +87,6 @@ const blankProfile = (): CaptureProfile => {
     required_tuple: [],
     min_achieved_rate_hz: null,
     requires_tune_revision: false,
-    builtin_revision: 0,
-    operator_modified: false,
     broadcast_decode: true,
     corpus_eligible: false,
     behavior_model_recipes: [],

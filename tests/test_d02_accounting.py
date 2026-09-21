@@ -671,14 +671,15 @@ def test_coolant_rate_still_resolves_a_one_degree_step() -> None:
 
 
 def test_every_other_tuning_did_channel_keeps_full_rate() -> None:
-    """Only coolant is context. The air-fuel sensors move on 84.6 % of samples
-    and are undersampled even at the full rate, so nothing else may be traded
-    away without its own measurement."""
+    """Only the thermal context (coolant, and intake-air temperature since
+    2026-09-21, CAPTURE_CONTEXT_MODE01) is down-weighted. The air-fuel sensors
+    move on 84.6 % of samples and are undersampled even at the full rate, so
+    nothing else may be traded away without its own measurement."""
     p = _tuning_did_profile()
 
     down_weighted = {c for c in p.mode22 if _effective_hz(p, c) < p.target_rate_hz}
 
-    assert down_weighted == {"ECM_COOLANT_TEMP"}
+    assert down_weighted == {"ECM_COOLANT_TEMP", "ECM_INTAKE_AIR_TEMP_1106"}
 
 
 def test_declared_demand_matches_the_weighted_sum() -> None:

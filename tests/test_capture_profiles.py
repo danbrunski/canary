@@ -14,8 +14,8 @@ from pydantic import ValidationError
 
 from src.collection import bus_budget, capture_lifetime, tuning_profile
 from src.collection.capture_profiles import (
-    BUILTIN_REVISION,
     CAPTURE_CONTEXT_MODE01,
+    STARTER_CATALOG_PATH,
     STORAGE_SAFE_REQUESTS_PER_SECOND,
     CaptureProfile,
     CaptureProfileCatalog,
@@ -95,12 +95,9 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
         REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
         config.collection,
     )
-    assert [profile.name for profile in catalog.profiles] == [
-        "default",
-        "fuel-map",
-        "tuning-did",
-        "tuning",
-    ]
+    # Only `default` is built in code, and nothing re-seeds a saved catalog, so
+    # the truck's catalog is exactly what the file holds.
+    assert [profile.name for profile in catalog.profiles] == ["default", "tuning"]
     tuning = catalog.by_name("tuning")
     assert tuning is not None
     assert tuning.target_rate_hz == 4.0
@@ -142,11 +139,7 @@ def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) 
     )
     assert store.save(profile) == []
     saved = store.load().by_name("diagnostic")
-    # Saving stamps operator provenance, which is what freezes a profile
-    # against future seed upgrades. Everything else round-trips unchanged.
-    assert saved is not None
-    assert saved.operator_modified is True
-    assert saved == profile.model_copy(update={"operator_modified": True})
+    assert saved == profile
     store.delete("diagnostic")
     assert store.load().by_name("diagnostic") is None
     with pytest.raises(ValueError, match="cannot be deleted"):
@@ -807,48 +800,46 @@ def test_required_tuple_must_name_channels_the_profile_polls() -> None:
         )
 
 
-def test_builtin_profiles_upgrade_but_operator_edits_are_frozen(tmp_path: Path) -> None:
-    """A saved built-in must not pin a superseded definition forever.
+def test_only_default_is_built_in_and_starters_are_data(tmp_path: Path) -> None:
+    """A new vehicle's catalog is default (from config) plus the starter file."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    starter = CaptureProfileCatalog.model_validate(yaml.safe_load(STARTER_CATALOG_PATH.read_text()))
+    seeded = seed_catalog(config.collection)
+    assert [p.name for p in seeded.profiles] == [p.name for p in starter.profiles]
+    assert seeded.profiles[1:] == starter.profiles[1:]
 
-    This is the defect that produced the 0.28 Hz fuel-map capture: the source
-    seed had been corrected, and a catalog written before the correction
-    shadowed it with nothing reporting the divergence.
+    # No starter file: default alone is still a complete catalog.
+    bare = seed_catalog(config.collection, starter_path=tmp_path / "absent.yaml")
+    assert [p.name for p in bare.profiles] == ["default"]
+
+
+def test_a_saved_catalog_is_never_rewritten_on_load(tmp_path: Path) -> None:
+    """Deleting a starter is final, and loading does not touch the file.
+
+    The retired built-in machinery re-appended deleted profiles on every load
+    and rewrote a tracked file on the Pi, which then blocked `git pull`.
     """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    path = tmp_path / "vehicle" / "capture_profiles.yaml"
-    seeded = seed_catalog(config.collection)
-    stale = [
-        profile.model_copy(update={"target_rate_hz": None, "builtin_revision": 0})
-        if profile.name == "fuel-map"
-        else profile
-        for profile in seeded.profiles
-    ]
-    save_capture_profiles(path, CaptureProfileCatalog(profiles=stale))
+    store = _store(tmp_path, config)
+    store.load()
+    store.delete("tuning-did")
+    before = store.path.read_text()
+    loaded = store.load()
+    assert loaded.by_name("tuning-did") is None
+    assert store.path.read_text() == before
 
-    upgraded = load_capture_profiles(path, config.collection).by_name("fuel-map")
-    assert upgraded is not None
-    assert upgraded.target_rate_hz is not None
-    assert upgraded.builtin_revision == BUILTIN_REVISION
 
-    # An operator edit is a decision, not a stale copy: it survives.
-    edited = [
-        profile.model_copy(
-            update={
-                # Distinct from the shipped 4 Hz while still satisfying this
-                # profile's existing 3 Hz required-tuple floor.
-                "target_rate_hz": 3.5,
-                "builtin_revision": 0,
-                "operator_modified": True,
-            }
-        )
-        if profile.name == "fuel-map"
-        else profile
-        for profile in seeded.profiles
-    ]
-    save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
-    kept = load_capture_profiles(path, config.collection).by_name("fuel-map")
-    assert kept is not None
-    assert kept.target_rate_hz == 3.5
+def test_retired_builtin_keys_are_accepted_and_dropped(tmp_path: Path) -> None:
+    """Catalogs written before 2026-09-21 carry builtin_revision/operator_modified."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    path = tmp_path / "capture_profiles.yaml"
+    payload = seed_catalog(config.collection).model_dump(mode="json")
+    for profile in payload["profiles"]:
+        profile["builtin_revision"] = 5
+        profile["operator_modified"] = True
+    path.write_text(yaml.safe_dump(payload, sort_keys=False))
+    loaded = load_capture_profiles(path, config.collection)
+    assert "builtin_revision" not in loaded.model_dump(mode="json")["profiles"][0]
 
 
 def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Path) -> None:
@@ -1169,60 +1160,19 @@ def test_status_reports_rows_recorded_for_the_active_session(tmp_path: Path) -> 
     assert writer.rows_written == 0
 
 
-def test_load_backfills_builtin_profiles_added_after_the_file_was_written(
-    tmp_path: Path,
-) -> None:
-    """A catalog saved before a built-in existed must not hide it forever.
-
-    Otherwise the first symptom is a 404 from POST /control/captures, in the
-    vehicle, where hand-editing YAML is the worst possible remedy. Operator
-    edits to profiles the file already names are still authoritative.
-    """
-    from src.collection.capture_profiles import (
-        TUNING_DID_PROFILE_NAME,
-        CaptureProfileCatalog,
-        load_capture_profiles,
-        save_capture_profiles,
-        seed_catalog,
-    )
-
-    collection = CanaryConfig.from_yaml(EXAMPLE_YAML).collection
-    seeded = seed_catalog(collection)
-    stale = CaptureProfileCatalog(
-        profiles=[p for p in seeded.profiles if p.name != TUNING_DID_PROFILE_NAME]
-    )
-    # Prove the fixture is actually missing the profile under test.
-    assert TUNING_DID_PROFILE_NAME not in {p.name for p in stale.profiles}
-    path = tmp_path / "capture_profiles.yaml"
-    save_capture_profiles(path, stale)
-
-    loaded = load_capture_profiles(path, collection)
-    assert loaded.by_name(TUNING_DID_PROFILE_NAME) is not None
-    # Persisted, so the back-fill happens once rather than on every load.
-    assert TUNING_DID_PROFILE_NAME in path.read_text()
-
-
 def test_load_does_not_overwrite_an_operator_edited_profile(tmp_path: Path) -> None:
-    """Back-filling must add only what is absent, never reset what is present."""
-    from src.collection.capture_profiles import (
-        FUEL_MAP_PROFILE_NAME,
-        CaptureProfileCatalog,
-        load_capture_profiles,
-        save_capture_profiles,
-        seed_catalog,
-    )
-
+    """A saved catalog is authoritative: an edited starter keeps its edit."""
     collection = CanaryConfig.from_yaml(EXAMPLE_YAML).collection
     seeded = seed_catalog(collection)
     edited = [
-        p.model_copy(update={"target_rate_hz": 33.0}) if p.name == FUEL_MAP_PROFILE_NAME else p
+        p.model_copy(update={"target_rate_hz": 33.0}) if p.name == "fuel-map" else p
         for p in seeded.profiles
     ]
     path = tmp_path / "capture_profiles.yaml"
     save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
 
     loaded = load_capture_profiles(path, collection)
-    fuel = loaded.by_name(FUEL_MAP_PROFILE_NAME)
+    fuel = loaded.by_name("fuel-map")
     assert fuel is not None and fuel.target_rate_hz == 33.0
 
 
@@ -1232,18 +1182,16 @@ def test_capture_start_accepts_a_per_capture_rate_override(tmp_path: Path) -> No
     The saved catalog entry stays untouched; only this capture runs at the
     overridden rate.
     """
-    from src.collection.capture_profiles import TUNING_DID_PROFILE_NAME
-
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = _store(tmp_path, config)
-    before = store.load().by_name(TUNING_DID_PROFILE_NAME)
+    before = store.load().by_name("tuning-did")
     assert before is not None
     assert before.target_rate_hz == 15.0
 
     overridden = before.model_copy(update={"target_rate_hz": 25.0})
     assert overridden.target_rate_hz == 25.0
     # The catalog is unchanged by the copy — that is the property under test.
-    after = store.load().by_name(TUNING_DID_PROFILE_NAME)
+    after = store.load().by_name("tuning-did")
     assert after is not None and after.target_rate_hz == 15.0
 
 

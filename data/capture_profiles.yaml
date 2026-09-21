@@ -40,15 +40,35 @@ profiles:
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
   requires_tune_revision: false
-  builtin_revision: 0
-  operator_modified: false
   broadcast_decode: true
   corpus_eligible: true
   behavior_model_recipes: []
   storage_prefix: ''
 - name: fuel-map
   description: High-rate fueling and timing capture
-  notes: ''
+  notes: 'Starter profile (data, not code, since 2026-09-21): Mode 01 fuelling and
+    spark at WOT-resolving rate.
+
+
+    Fast channels (rpm, load, MAF, timing, throttle, both wideband lambdas, commanded
+    phi, fuel status) run at the full 4 Hz, because a 5 s pull is the unit of work
+    and anything slower samples it two or three times. Context channels run at weight
+    0.25 (1 Hz): baro, IAT, speed, coolant, trims and purge. They move over seconds
+    to minutes and are there for gating.
+
+
+    target_rate_hz and bus_budget_override are both set, because either alone does
+    nothing. The 2026-08-10 capture ran without them at the 1 Hz x tier cap and the
+    8 req/s default budget, and landed at 0.28-0.78 Hz while calling itself high-rate.
+
+
+    required_tuple is the five channels a delivery-error sample needs co-observed.
+    The scarcest of them sets the real yield: the 2026-08-10 capture polled all five
+    and still produced two usable instants in 24 minutes.
+
+
+    Drop any PID the vehicle''s ECM does not answer. The Xterra refuses O2_WR_LAMBDA_S2
+    (PID 0x25).'
   experimental: false
   mode01:
     RPM: 1.0
@@ -97,15 +117,36 @@ profiles:
   min_achieved_rate_hz: 3.0
   max_tuple_skew_s: null
   requires_tune_revision: true
-  builtin_revision: 5
-  operator_modified: false
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-fuel-map
 - name: tuning-did
   description: All-DID tuning capture (session held open)
-  notes: ''
+  notes: 'Starter profile (data, not code, since 2026-09-21): all-DID tuning capture
+    that holds the Mode-22 session open, so Mode 01 is off by construction. What that
+    buys is what Mode 01 cannot reach at all, sampled synchronously: intake cam angle
+    (commanded and measured) and A/F sensor voltage, the input to the validated voltage-to-AFR
+    table. The DID names are the Xterra''s (data/dids.yaml); another vehicle needs
+    its own list.
+
+
+    RPM and coolant are included despite being on broadcast CAN. They cost ~1.5 ms
+    each and give same-instant anchors inside the DID round.
+
+
+    Both measured cam channels are polled because they are two banks: the first capture
+    using this profile found a +0.51 deg offset with the cam static (p=2.3e-29).
+
+
+    Coolant and IAT run at weight 1/15 (1 Hz), because they are context. Coolant changes
+    at 0.441 degC/s at p99.9 (38 sessions, 10,488 adjacent pairs) and quantises at
+    1 degC, so 1 Hz cannot miss a step. Do not go slower: cold-start warm-up is ~20x
+    faster than the warm drive where 0.2 % of samples changed.
+
+
+    Delivery error is impossible here: commanded AFR needs Mode 01, which this profile
+    disables.'
   experimental: false
   mode01: {}
   mode01_batch_groups: []
@@ -148,8 +189,6 @@ profiles:
   min_achieved_rate_hz: 12.0
   max_tuple_skew_s: null
   requires_tune_revision: true
-  builtin_revision: 5
-  operator_modified: false
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:

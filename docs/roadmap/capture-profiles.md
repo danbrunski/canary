@@ -101,6 +101,11 @@ for (2026-07-31):
   vehicle profile's scope dir (survives redeploys, travels with the
   vehicle). Seed with two built-ins: `default` (mirrors today's
   rotation exactly) and `fuel-map` (Phase 4).
+  *Superseded 2026-09-21:* only `default` is built in code. The starters
+  (`fuel-map`, `tuning-did`) are data in `data/capture_profiles.yaml`, copied
+  once into a new vehicle's catalog; the built-in upgrade machinery
+  (`builtin_revision` / `operator_modified`) is gone, and a saved catalog is
+  never rewritten on load.
 - [x] **1.3 — Default-profile indirection.** The collector reads its
   rotation from the `default` capture profile instead of hard-coded
   channel lists; behavior is byte-identical when the seeded default is

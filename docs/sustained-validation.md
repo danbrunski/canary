@@ -459,8 +459,9 @@ Not attempted here. On the Pi with the daemon on this commit:
    `rx_dropped`, `rx_over_errors`), `detectors.inference`,
    `telemetry_sinks`, `obd_scheduler.discovery`. Repeat per phase (KOEO,
    running, engine off) and keep the phase beside each number.
-2. For each supported profile (`fuel-map`, `tuning-did`,
-   `fuel-did-research`, `tuning-hybrid-research`), arm through
+2. For each supported profile shape (a Mode 01 fuel profile, a continuous
+   all-DID profile, a hybrid — on the Xterra since 2026-09-21 that is the
+   `fuel-map` / `tuning-did` starters and `tuning`), arm through
    `POST /control/capture/start`, drive 20–30 minutes with varied
    operation (idle, cruise, pulls) covering several flush intervals, DID
    keep-alives and — for the hybrid profile — hundreds of cycles. Stop

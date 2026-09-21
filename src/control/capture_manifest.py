@@ -58,6 +58,16 @@ class CaptureManifest(BaseModel):
         return tuple(sorted(str(name).upper() for name in raw if str(name).strip()))
 
     @property
+    def did_continuous(self) -> bool:
+        """Whether the capture held the Mode-22 session open (Mode 01 off).
+
+        Read from the snapshot, never inferred from the profile's name: names
+        are the operator's to choose, and the digest once keyed this on
+        ``profile == "tuning-did"``.
+        """
+        return bool(self.profile_snapshot.get("did_continuous", False))
+
+    @property
     def required_tuple(self) -> tuple[str, ...]:
         raw = self.profile_snapshot.get("required_tuple") or ()
         if not isinstance(raw, list | tuple):

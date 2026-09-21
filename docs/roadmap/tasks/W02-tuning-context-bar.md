@@ -4,7 +4,7 @@ Roadmap task W2. Depends on W01. One short KOEO probe on the truck (W02.1);
 everything else is desk work.
 
 ```text
-2008 Xterra · running ZS44A-20260920 · capture: rom-trace 00:12:41 · log: <selected> · ROM: <loaded>
+2008 Xterra · running ZS44A-20260920 · capture: tuning 00:12:41 · log: <selected> · ROM: <loaded>
 ```
 
 This strip is what lets the Engine Tuning pages be visited in any order: they

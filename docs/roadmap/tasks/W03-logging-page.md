@@ -64,7 +64,7 @@ could not be repeated that day.
 - [ ] **W03.10 — Announce an ended capture.** When `last_capture.end_reason` is
   anything other than `operator_stop` and the operator has not acknowledged it,
   show a persistent banner on this page **and** in `StatusStrip.tsx`:
-  "`rom-trace` ended after 4 min: daemon restarted". Acknowledgement is per
+  "`tuning` ended after 4 min: daemon restarted". Acknowledgement is per
   capture, stored with `useLocalStorage`.
 
 ## Empty states

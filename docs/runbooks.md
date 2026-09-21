@@ -70,9 +70,12 @@ confirmation step, and no automatic rescan. Task 6.5 is what adds those.
   `tools/scan_constant_dids.py --session C0` sweeps the `10 C0` DID space;
   `data/dids.yaml` + `src/decode/dids.py` decode known DIDs.
 - **First-class live DID telemetry profiles + dashboard switching:** available
-  in the Capture Profiles panel. `tuning-did` runs continuous Mode 22;
-  `tuning-hybrid-research` uses the confirmed `10 81` fast exit to alternate
-  nominally 4 Hz Mode 01 requests with Mode 22. `10 C0` remains mutually
+  in the Capture Profiles panel. Profiles are data: `data/capture_profiles.yaml`
+  holds the starters a new vehicle is seeded with (`fuel-map`, `tuning-did`),
+  and each vehicle's own catalog is authoritative from then on. The Xterra runs
+  `tuning`, a hybrid that uses the confirmed `10 81` fast exit to alternate
+  4 Hz Mode 01 requests with 2 Hz Mode 22 and memory windows. A continuous
+  all-DID profile (the `tuning-did` starter) holds Mode 22 open instead. `10 C0` remains mutually
   exclusive with Mode 01 while the session itself is open; the delivered rate
   is substantially lower, as recorded below.
 - **The hybrid profile alternates; it does not sample concurrently.** Mode 01

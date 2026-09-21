@@ -328,11 +328,11 @@ commit:
    growth beyond one round per timed-out probe. Record `discovery_frames_seen`
    (frames received *during* probes — before this change those were the
    frames raw capture lost).
-4. Arm `tuning-hybrid-research`, reset discovery again, and confirm no
+4. Arm a hybrid profile (the Xterra's `tuning`), reset discovery again, and confirm no
    `06 xx` request appears inside a held session: `session_control.sent`
    grows, `discovery.deferred_reason` reads `session_window` / `session_lapse`
    during windows and `discovery` completes only in the Mode 01 phase.
-5. Arm `tuning-did` (continuous) with a pending walk: `deferred_reason` must
+5. Arm a continuous all-DID profile (the `tuning-did` starter) with a pending walk: `deferred_reason` must
    read `continuous_did_capture` for the whole capture and
    `discovery.requests_spent` must not move.
 6. Pull the adapter and reconnect: the reconnect attempt must not re-probe

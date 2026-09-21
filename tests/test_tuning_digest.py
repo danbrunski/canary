@@ -113,7 +113,7 @@ def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: Cana
             {
                 "profile": "tuning-did",
                 "started_at": T0.isoformat(),
-                "profile_snapshot": {"corpus_eligible": False},
+                "profile_snapshot": {"corpus_eligible": False, "did_continuous": True},
             }
         )
     )
@@ -151,7 +151,7 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
             {
                 "profile": "tuning-did",
                 "started_at": T0.isoformat(),
-                "profile_snapshot": {"corpus_eligible": False},
+                "profile_snapshot": {"corpus_eligible": False, "did_continuous": True},
             }
         )
     )
@@ -280,7 +280,7 @@ def _did_capture(root: Path, name: str, tps_volts: list[float], rpm: list[float]
             {
                 "profile": "tuning-did",
                 "started_at": T0.isoformat(),
-                "profile_snapshot": {"corpus_eligible": False},
+                "profile_snapshot": {"corpus_eligible": False, "did_continuous": True},
             }
         )
     )

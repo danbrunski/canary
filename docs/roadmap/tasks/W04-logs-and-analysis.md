@@ -19,7 +19,7 @@ Backend already present: `GET /control/sessions`,
 
 Every endpoint below reads a whole session. Route each through the bounded
 single-flight child the digest uses, and **refuse with a named reason while a
-capture is active** — "analysis is deferred while `rom-trace` is recording" —
+capture is active** — "analysis is deferred while `tuning` is recording" —
 rather than compete with the collector. Offer the laptop path in the message:
 pull the session with a tar stream and analyse it there.
 
