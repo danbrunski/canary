@@ -166,194 +166,43 @@ profiles:
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did
-- name: fuel-did-research
-  description: 'All-DID fuelling capture: derive Base Fuel Schedule from airflow and
-    validate injector PW as the fuel-edit instrument'
-  notes: "Purpose rewritten 2026-08-10. The original \u2014 \"identify raw 0x1209\
-    \ as the Base Fuel Schedule candidate\" \u2014 was retracted on 2026-08-08 when\
-    \ 0x1209 was identified as MAF against simultaneous UpRev rungs. BFS has now survived\
-    \ a full passive-CAN sweep and an all-DID sweep, so the question is no longer\
-    \ which field *is* BFS but whether it can be computed, and whether injector PW\
-    \ can do BFS's job without reproducing its value.\n\nBFS is a per-injection fuel\
-    \ time, so testing whether it can be derived needs airflow and rpm co-observed\
-    \ (air mass per intake event = MAF x 20 / rpm on a V6), IAT for the density correction\
-    \ that the g/s-only fit was missing, and injector PW as the candidate substitute.\
-    \ Any one of them absent and the capture cannot answer either question \u2014\
-    \ which is what this tuple enforces.\n\n20 Hz requested; a floor of 15 leaves\
-    \ room for scheduling jitter while still refusing the failure this exists to catch.\
-    \ Rungs are held ~10 s, so 15 Hz is 150 samples per rung \u2014 far more than\
-    \ the fit needs. Range, not rate, is the binding constraint on this experiment.\n\
-    \nInjector PW and BFS both move with a fuel edit, so a capture whose calibration\
-    \ is unrecorded cannot be compared with any other.\n\nVehicle-specific research\
-    \ profile naming this ECM's DIDs; the generic seed must never overwrite it.\n\n\
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)\
-    \ as of 2026-09-21: ECM_COOLANT_TEMP, ECM_INTAKE_AIR_TEMP_1106 added at ~1 Hz.\
-    \ The 2026-09-21 drive on this catalog had none of them, and its VE rested on\
-    \ a GPS-altitude baro estimate and an assumed intake temperature."
-  experimental: true
-  mode01: {}
-  mode01_batch_groups: []
-  mode22:
-  - ECM_RPM
-  - ECM_AF_SENSOR_V_B1
-  - ECM_AF_SENSOR_V_B2
-  - ECM_AIR_CHARGE
-  - ECM_THROTTLE_POS_SENSOR_1
-  - ECM_INTAKE_AIR_TEMP
-  - ECM_MAF_GPS
-  - ECM_COOLANT_TEMP
-  - ECM_INTAKE_AIR_TEMP_1106
-  mode22_rate_weights:
-    ECM_COOLANT_TEMP: 0.05
-    ECM_INTAKE_AIR_TEMP_1106: 0.05
-  memory: []
-  mode01_enabled: false
-  mode22_enabled: true
-  did_interval_seconds: null
-  did_cycle_seconds: null
-  round_timestamps: true
-  target_rate_hz: 20.0
-  did_continuous: true
-  bus_budget_override: 160.0
-  priority_channels: null
-  expected_total_demand_hz: 142.0
-  capacity_evidence: 'Active transport is single-DID (`obd_did_batch_max_dids: 1`):
-    7 DIDs x 20 Hz = 140 diagnostic requests/s fallback demand. Best-case three-DID
-    batching would be 47 requests/s, but is not active or sustained-verified. 2026-08-04
-    KOEO bench: a four-DID single-request rotation ran 8 s at 658 reads/s, zero failures,
-    p50 1.09 ms. The old 2026-07-29 storage-loss incident (2491 dropped records at
-    25 requests/s) is retained as history, not treated as a universal ceiling; C10
-    must reconcile persisted rows before this profile earns a non-experimental rate
-    claim.'
-  required_tuple:
-  - ECM_RPM
-  - ECM_MAF_GPS
-  - ECM_INTAKE_AIR_TEMP
-  - ECM_AIR_CHARGE
-  min_achieved_rate_hz: 15.0
-  max_tuple_skew_s: null
-  requires_tune_revision: true
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes:
-  - air_charge_vs_rpm_throttle_did
-  storage_prefix: _capture-fuel-did-research
-- name: tuning-hybrid-research
-  description: Experimental 4 Hz Mode 01 plus Mode 22 capture using the confirmed
-    fast session exit
-  notes: 'C04.3: the 4 Hz intent as a start-to-start cycle. did_interval_seconds is
-    an end-to-start gap and measured as a ~0.95 s cycle on the fake bus; it is kept
-    unchanged for readers of older sidecars and ignored while this is set.
+- name: tuning
+  description: 'Engine tuning: fuelling (commanded vs measured, trims, injected pulse),
+    spark, airflow and air-density context'
+  notes: 'The one engine-tuning capture for this truck (2026-09-21). It replaces eight
+    research profiles, each built to answer one question, whose answers are now in:
+    fuel-target-research, fuel-pw-research, fuel-pw-research-2, injector-deadtime-idle,
+    afr-delay-research, tuning-hybrid-research, fuel-did-research and rom-trace. Their
+    definitions are kept verbatim in capture_profiles.archive.yaml, which nothing
+    loads. Every capture also keeps its profile snapshot in its own manifest.
 
 
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: BAROMETRIC_PRESSURE, COOLANT_TEMP added at ~1 Hz. The 2026-09-21
-    drive on this catalog had none of them, and its VE rested on a GPS-altitude baro
-    estimate and an assumed intake temperature.'
-  experimental: true
-  mode01:
-    RPM: 1.0
-    ENGINE_LOAD: 1.0
-    MAF: 1.0
-    TIMING_ADVANCE: 1.0
-    INTAKE_TEMP: 1.0
-    COMMANDED_EQUIV_RATIO: 1.0
-    FUEL_STATUS: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    BAROMETRIC_PRESSURE: 0.25
-    COOLANT_TEMP: 0.25
-  mode01_batch_groups: []
-  mode22:
-  - ECM_RPM
-  - ECM_AF_SENSOR_V_B1
-  - ECM_AF_SENSOR_V_B2
-  - ECM_AIR_CHARGE
-  - ECM_INTAKE_CAM_ANGLE_MEASURED
-  - ECM_INTAKE_CAM_ANGLE_COMMANDED
-  - ECM_INTAKE_CAM_ANGLE_MEASURED_B
-  - ECM_THROTTLE_POS_SENSOR_1
-  - ECM_MAF_GPS
-  mode22_rate_weights: {}
-  memory: []
-  mode01_enabled: true
-  mode22_enabled: true
-  did_interval_seconds: 0.25
-  did_cycle_seconds: 0.25
-  round_timestamps: true
-  target_rate_hz: 4.0
-  did_continuous: false
-  bus_budget_override: 90.0
-  priority_channels: null
-  expected_total_demand_hz: 70.0
-  capacity_evidence: '2026-08-07 drive (25 min, _capture-tuning-hybrid-research-2026-08-07T170918):
-    the fast exit works and Mode 01 survives a full drive, but delivered rate is far
-    below target - Mode 01 1.46 Hz, DIDs 0.90 Hz, 18.25 aggregate channel reads/s
-    against the 68 expected from 17 selected channels x 4 Hz. Treat target_rate_hz
-    as aspirational and check achieved_hz_capture before trusting any rate-dependent
-    conclusion. Mode 01 and Mode 22 alternate rather than sample together (0.341 s
-    median separation), so restrict to steady state for cross-mode pairings.'
-  required_tuple: []
-  min_achieved_rate_hz: null
-  max_tuple_skew_s: null
-  requires_tune_revision: false
-  builtin_revision: 0
-  operator_modified: false
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes:
-  - air_charge_vs_rpm_throttle_did
-  - cam_primary_vs_command_rpm_did
-  - cam_secondary_vs_command_rpm_did
-  storage_prefix: _capture-tuning-hybrid-research
-- name: fuel-target-research
-  description: 'Research: target-AFR candidate DID 0x1134 held in one capture with
-    Mode 01 PID 0x44 commanded phi and PID 0x24 measured lambda (D03.8)'
-  notes: 'D03.8 + D03.4, prepared 2026-09-18. tuning-hybrid-research narrowed to the
-    fuel-target question (D03.8/D03.9/D04.3/D04.4) plus the target-AFR candidate 0x1134.
-    Cam angles, bank-2 A/F voltage and INTAKE_TEMP are dropped to buy cycle headroom;
-    the parent profile is left untouched.
+    Base: fuel-target-research, the configuration that ran cleanly on the 2026-09-21
+    drive (data/analyses/2026-09-21-drive-fuel-target-research.md). Changes from it:
+
+    - Adds STFT and LTFT for both banks at 2 Hz. Their absence on that drive left
+    closed-loop health unassessable.
+
+    - Adds bank-2 A/F voltage and injected pulse 0x1206/0x1207. 0x1206 passed as the
+    injected-pulse instrument on 2026-09-18.
+
+    - Drops DID 0x1134. It is not commanded phi, and the commanded target is now read
+    directly from RAM (mem:ECM_TARGET_EQUIV_RATIO).
 
 
-    D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most once
-    per cycle. A 0.5 s cycle with every DID at weight 0.5 asks for exactly what the
-    cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler, the resolved
-    plan and the capture contract alike.
+    Memory windows: fuel_target (commanded phi and engine period) and spark (ignition
+    timing and engine speed). Each window is a single service-0x23 read, so the two
+    values in it come from the same instant.
 
 
-    Vehicle-specific research profile naming this ECM''s DIDs; the generic seed must
-    never overwrite it.
+    Not included: rom-trace''s map-cell trace channels. That profile''s continuous
+    session stalled on 2026-09-21 with zero requests sent, and the cause is not known
+    yet. The trace channels come back once it is found.
 
 
-    Polls the final commanded equivalence ratio over service 0x23 (mem:ECM_TARGET_EQUIV_RATIO).
-    That quantity is the reason this profile exists and it is not a DID: it lives
-    at a RAM address, so DID 0x1134 -- the floor-clamped rich-side view that cannot
-    tell fuel cut from stoich -- was the closest this capture could previously get.
-    The channel is withheld automatically if the running calibration is not the one
-    the address was verified against.
-
-
-    Both memory channels name the `fuel_target` window, so one service-0x23 read returns
-    the commanded target and the engine-period counter from a single ECU operation.
-    That is the only same-instant multi-channel sample available on this ECM: it refuses
-    batched Mode 22, so any two DIDs are two requests milliseconds apart. Engine period
-    is not the collection route for rpm -- DID 0x1201 is, and is calibration-independent
-    -- it is here so a target can be paired with engine speed at zero skew.
-
-
-    Two memory windows now: `fuel_target` (commanded phi + engine period) and `spark`
-    (ignition timing + engine speed). Each is one service-0x23 read, so the pair inside
-    each window shares an ECU operation. Spark analysis is a timing-vs-rpm-vs-load
-    question and the skew between two separate Mode 22 reads is the noise floor of
-    any such comparison, which is the whole reason the windows exist.
-
-
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: BAROMETRIC_PRESSURE, INTAKE_TEMP, COOLANT_TEMP added at ~1 Hz.
-    The 2026-09-21 drive on this catalog had none of them, and its VE rested on a
-    GPS-altitude baro estimate and an assumed intake temperature.'
-  experimental: true
+    Mode 01 and Mode 22 alternate on this ECM, so each DID is read once per 0.5 s
+    cycle, which gives 2 Hz.'
+  experimental: false
   mode01:
     RPM: 1.0
     MAF: 1.0
@@ -365,20 +214,28 @@ profiles:
     BAROMETRIC_PRESSURE: 0.25
     INTAKE_TEMP: 0.25
     COOLANT_TEMP: 0.25
+    SHORT_FUEL_TRIM_1: 0.5
+    SHORT_FUEL_TRIM_2: 0.5
+    LONG_FUEL_TRIM_1: 0.5
+    LONG_FUEL_TRIM_2: 0.5
   mode01_batch_groups: []
   mode22:
-  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
   - ECM_RPM
   - ECM_AF_SENSOR_V_B1
+  - ECM_AF_SENSOR_V_B2
   - ECM_AIR_CHARGE
   - ECM_MAF_GPS
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
   - ECM_THROTTLE_POS_SENSOR_1
   mode22_rate_weights:
-    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
     ECM_RPM: 0.5
     ECM_AF_SENSOR_V_B1: 0.5
+    ECM_AF_SENSOR_V_B2: 0.5
     ECM_AIR_CHARGE: 0.5
     ECM_MAF_GPS: 0.5
+    ECM_INJECTOR_PULSE_1: 0.5
+    ECM_INJECTOR_PULSE_2: 0.5
     ECM_THROTTLE_POS_SENSOR_1: 0.5
   memory:
   - ECM_TARGET_EQUIV_RATIO
@@ -394,17 +251,14 @@ profiles:
   did_continuous: false
   bus_budget_override: 90.0
   priority_channels: null
-  expected_total_demand_hz: 43.0
-  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 6 DIDs x 2 Hz = 40 channel reads/s,
-    plus 2 session requests per 0.5 s cycle (~44 req/s unbatched) against the 90 req/s
-    budget. Parent evidence, not yet this revision: tuning-hybrid-research on 2026-09-17
-    delivered 3.98 Hz Mode 01 / 2.01 Hz per DID at 47 req/s for 20 min with zero drops
-    and DID-DID skew 0.094 s, while requesting an infeasible 0.25 s cycle. The DID
-    rate is structural (one read per cycle; Mode 01 and Mode 22 alternate), which
-    is why this profile requests 2 Hz rather than 4. Cycle plan at 90 req/s, batching
-    off (worst case): (10 Mode 01-side + 6 DID + 2 session) / 90 + 0.05 s grace =
-    0.25 s of a 0.5 s cycle. Replace this text with the first 20-minute capture of
-    this exact revision (per-channel cadence, pairing skew, loss deltas, quality verdict).'
+  expected_total_demand_hz: 59.0
+  capacity_evidence: 'Demand: 7 Mode 01 PIDs x 4 Hz + 4 trims x 2 Hz + 3 context PIDs
+    x 1 Hz + 8 DIDs x 2 Hz = 55 channel reads/s, plus 2 session requests per 0.5 s
+    cycle, about 59 req/s unbatched, against the 90 req/s budget. Worst-case cycle
+    with batching off: (14 Mode 01 + 8 DID + 2 session) / 90 + 0.05 s grace = 0.32
+    s of a 0.5 s cycle. Parent evidence: fuel-target-research on 2026-09-21 ran 20
+    min at 4 Hz Mode 01 / 2 Hz per DID with memory windows. No capture of this exact
+    revision exists yet; replace this text with the first one.'
   required_tuple: []
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
@@ -414,361 +268,4 @@ profiles:
   broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes: []
-  storage_prefix: _capture-fuel-target-research
-- name: fuel-pw-research
-  description: 'Research: target-AFR candidate 0x1134 beside PID 0x44 (D03.8) plus
-    injected-fuel candidates 0x1206/0x1207 beside PID 0x24 and Mode 01 MAF (D03.9)'
-  notes: 'D03.8 + D03.9, saved live on the Pi 2026-09-18 14:08Z from the road and
-    mirrored here. fuel-target-research plus the injected-fuel candidates 0x1206/0x1207
-    (desk screen 2026-09-18-injected-fuel-did-screen.md), so one capture tests both
-    0x1134 vs PID 0x44 and fuel-from-0x1206 vs MAF x phi. ECM_MAF_GPS dropped: D04.4
-    found it 1:1 with Mode 01 MAF.
-
-
-    D03.4: Mode 01 and Mode 22 alternate on this ECM, so a DID is read at most once
-    per cycle. A 0.5 s cycle with every DID at weight 0.5 asks for exactly what the
-    cycle can give (4.0 x 0.5 = 2.0 Hz = 1 / 0.5 s), in the scheduler, the resolved
-    plan and the capture contract alike.
-
-
-    Vehicle-specific research profile naming this ECM''s DIDs; the generic seed must
-    never overwrite it.
-
-
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: BAROMETRIC_PRESSURE, INTAKE_TEMP, COOLANT_TEMP added at ~1 Hz.
-    The 2026-09-21 drive on this catalog had none of them, and its VE rested on a
-    GPS-altitude baro estimate and an assumed intake temperature.'
-  experimental: true
-  mode01:
-    RPM: 1.0
-    MAF: 1.0
-    COMMANDED_EQUIV_RATIO: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    FUEL_STATUS: 1.0
-    ENGINE_LOAD: 1.0
-    TIMING_ADVANCE: 1.0
-    BAROMETRIC_PRESSURE: 0.25
-    INTAKE_TEMP: 0.25
-    COOLANT_TEMP: 0.25
-  mode01_batch_groups: []
-  mode22:
-  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
-  - ECM_RPM
-  - ECM_AF_SENSOR_V_B1
-  - ECM_AIR_CHARGE
-  - ECM_INJECTOR_PULSE_1
-  - ECM_INJECTOR_PULSE_2
-  - ECM_THROTTLE_POS_SENSOR_1
-  mode22_rate_weights:
-    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
-    ECM_RPM: 0.5
-    ECM_AF_SENSOR_V_B1: 0.5
-    ECM_AIR_CHARGE: 0.5
-    ECM_INJECTOR_PULSE_1: 0.5
-    ECM_INJECTOR_PULSE_2: 0.5
-    ECM_THROTTLE_POS_SENSOR_1: 0.5
-  memory: []
-  mode01_enabled: true
-  mode22_enabled: true
-  did_interval_seconds: null
-  did_cycle_seconds: 0.5
-  round_timestamps: true
-  target_rate_hz: 4.0
-  did_continuous: false
-  bus_budget_override: 90.0
-  priority_channels: null
-  expected_total_demand_hz: 45.0
-  capacity_evidence: 'Derived from fuel-target-research (2026-09-18, 39 req/s achieved,
-    0 drops): 7 Mode 01 PIDs x 4 Hz + 7 DIDs x 2 Hz = 42 channel reads/s; cycle 0.5
-    s needs ~0.26 s at 90 req/s. ECM_MAF_GPS dropped (D04.4: 1:1 with Mode 01 MAF).
-    Replace with this revision''s own 20-min evidence.'
-  required_tuple: []
-  min_achieved_rate_hz: null
-  max_tuple_skew_s: null
-  requires_tune_revision: true
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes: []
-  storage_prefix: _capture-fuel-pw-research
-- name: fuel-pw-research-2
-  description: 'Research (2026-09-18 eve): fuel-pw-research plus module voltage (0x42,
-    4 Hz, idle dead-time step), IAT/baro/LTFT (1 Hz) and STFT (2 Hz) for the 0x1206
-    matched-air-charge test (D03.9) beside 0x1134 vs 0x44 (D03.8)'
-  notes: 'D03.8 + D03.9 matched-air-charge test and injector dead time, saved live
-    on the Pi 2026-09-18 20:05Z from the road and mirrored here (field-for-field the
-    PUT body). fuel-pw-research plus module voltage (4 Hz) for the idle electrical-load
-    step and IAT/baro/fuel trims for the 0x1206 curvature question (2026-09-18-pm-next-drive-deploy-plan.md).
-
-
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: COOLANT_TEMP added at ~1 Hz. The 2026-09-21 drive on this catalog
-    had none of them, and its VE rested on a GPS-altitude baro estimate and an assumed
-    intake temperature.'
-  experimental: true
-  mode01:
-    RPM: 1.0
-    MAF: 1.0
-    COMMANDED_EQUIV_RATIO: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    FUEL_STATUS: 1.0
-    ENGINE_LOAD: 1.0
-    TIMING_ADVANCE: 1.0
-    CONTROL_MODULE_VOLTAGE: 1.0
-    INTAKE_TEMP: 0.25
-    BAROMETRIC_PRESSURE: 0.25
-    SHORT_FUEL_TRIM_1: 0.5
-    LONG_FUEL_TRIM_1: 0.25
-    COOLANT_TEMP: 0.25
-  mode01_batch_groups: []
-  mode22:
-  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
-  - ECM_RPM
-  - ECM_AF_SENSOR_V_B1
-  - ECM_AIR_CHARGE
-  - ECM_INJECTOR_PULSE_1
-  - ECM_INJECTOR_PULSE_2
-  - ECM_THROTTLE_POS_SENSOR_1
-  mode22_rate_weights:
-    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.5
-    ECM_RPM: 0.5
-    ECM_AF_SENSOR_V_B1: 0.5
-    ECM_AIR_CHARGE: 0.5
-    ECM_INJECTOR_PULSE_1: 0.5
-    ECM_INJECTOR_PULSE_2: 0.5
-    ECM_THROTTLE_POS_SENSOR_1: 0.5
-  memory: []
-  mode01_enabled: true
-  mode22_enabled: true
-  did_interval_seconds: null
-  did_cycle_seconds: 0.5
-  round_timestamps: true
-  target_rate_hz: 4.0
-  did_continuous: false
-  bus_budget_override: 90.0
-  priority_channels: null
-  expected_total_demand_hz: 52.0
-  capacity_evidence: 'Derived from fuel-pw-research (2026-09-18 PM, 18.8 min, 0 drops):
-    8 Mode 01 PIDs x 4 Hz + 4 slow PIDs (5 Hz total) + 7 DIDs x 2 Hz = 51 channel
-    reads/s at unchanged 90 req/s budget. Replace with this revision own evidence.'
-  required_tuple: []
-  min_achieved_rate_hz: null
-  max_tuple_skew_s: null
-  requires_tune_revision: true
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes: []
-  storage_prefix: _capture-fuel-pw-research-2
-- name: injector-deadtime-idle
-  description: 'Research (2026-09-18 eve): injector dead time at idle. Module voltage
-    (0x42) beside 0x1206/0x1207 (injected-pulse) and 0x1208 (air charge) while electrical
-    loads are stepped at constant air charge. No PID 0x44 (it desyncs in mixed batches:
-    fuel-pw-research-2).'
-  notes: 'D03.9 injector dead time, saved live on the Pi 2026-09-18 ~20:40Z and mirrored
-    here field-for-field. Module voltage beside 0x1206/0x1207/0x1208 at idle while
-    electrical loads are stepped. Deliberately WITHOUT PID 0x44: adding 0x42/0x33
-    to fuel-pw-research made 0x44 time out (fuel-pw-research-2, same day).
-
-
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: BAROMETRIC_PRESSURE, INTAKE_TEMP, COOLANT_TEMP added at ~1 Hz.
-    The 2026-09-21 drive on this catalog had none of them, and its VE rested on a
-    GPS-altitude baro estimate and an assumed intake temperature.'
-  experimental: true
-  mode01:
-    RPM: 1.0
-    MAF: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    FUEL_STATUS: 1.0
-    CONTROL_MODULE_VOLTAGE: 1.0
-    BAROMETRIC_PRESSURE: 0.25
-    INTAKE_TEMP: 0.25
-    COOLANT_TEMP: 0.25
-  mode01_batch_groups: []
-  mode22:
-  - ECM_RPM
-  - ECM_AIR_CHARGE
-  - ECM_INJECTOR_PULSE_1
-  - ECM_INJECTOR_PULSE_2
-  mode22_rate_weights:
-    ECM_RPM: 0.5
-    ECM_AIR_CHARGE: 0.5
-    ECM_INJECTOR_PULSE_1: 0.5
-    ECM_INJECTOR_PULSE_2: 0.5
-  memory: []
-  mode01_enabled: true
-  mode22_enabled: true
-  did_interval_seconds: null
-  did_cycle_seconds: 0.5
-  round_timestamps: true
-  target_rate_hz: 4.0
-  did_continuous: false
-  bus_budget_override: 90.0
-  priority_channels: null
-  expected_total_demand_hz: 31.0
-  capacity_evidence: 5 Mode 01 PIDs x 4 Hz + 4 DIDs x 2 Hz = 28 channel reads/s, a
-    subset of fuel-pw-research (42/s, clean 2026-09-18) with 0x42 added. Replace with
-    this revision own evidence.
-  required_tuple: []
-  min_achieved_rate_hz: null
-  max_tuple_skew_s: null
-  requires_tune_revision: true
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes: []
-  storage_prefix: _capture-injector-deadtime-idle
-- name: afr-delay-research
-  description: 'Research (D04.3): commanded phi to measured-lambda transport delay
-    with explicit Mode 01 batch partitions preserving independent acquisition instants.'
-  notes: 'D04.3 transport-delay capture. PID 0x44 commanded phi and PID 0x24 measured
-    lambda must come from different ECU responses: a same-response timestamp collapses
-    the very transport delay this profile exists to measure.
-
-
-    Carries air-density and thermal context (CAPTURE_CONTEXT_MODE01 in src/collection/capture_profiles.py)
-    as of 2026-09-21: BAROMETRIC_PRESSURE, INTAKE_TEMP, COOLANT_TEMP added at ~1 Hz.
-    The 2026-09-21 drive on this catalog had none of them, and its VE rested on a
-    GPS-altitude baro estimate and an assumed intake temperature.'
-  experimental: true
-  mode01:
-    RPM: 1.0
-    COMMANDED_EQUIV_RATIO: 1.0
-    ENGINE_LOAD: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    MAF: 1.0
-    THROTTLE_POS: 1.0
-    BAROMETRIC_PRESSURE: 0.05
-    INTAKE_TEMP: 0.05
-    COOLANT_TEMP: 0.05
-  mode01_batch_groups:
-  - - RPM
-    - COMMANDED_EQUIV_RATIO
-    - ENGINE_LOAD
-  - - O2_WR_LAMBDA_S1
-    - MAF
-    - THROTTLE_POS
-  mode22: []
-  mode22_rate_weights: {}
-  memory: []
-  mode01_enabled: true
-  mode22_enabled: false
-  did_interval_seconds: null
-  did_cycle_seconds: null
-  round_timestamps: false
-  target_rate_hz: 20.0
-  did_continuous: false
-  bus_budget_override: 90.0
-  priority_channels: null
-  expected_total_demand_hz: 123.0
-  capacity_evidence: '6 Mode 01 channels x 20 Hz = 120 channel reads/s. Explicit partitions
-    plus the existing poll-tier guard produce at most 3 requests per round (60 req/s):
-    PID 0x44 remains a medium-tier single request, while the fast context channels
-    batch within their partition. This stays below the 90 req/s capture budget.'
-  required_tuple:
-  - COMMANDED_EQUIV_RATIO
-  - O2_WR_LAMBDA_S1
-  min_achieved_rate_hz: 15.0
-  max_tuple_skew_s: 0.05
-  requires_tune_revision: false
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes: []
-  storage_prefix: _capture-afr-delay-research
-- name: rom-trace
-  description: All-DID tuning drive with ROM map-cell traces (session held open)
-  notes: 'First profile to combine the 2026-09-20/21 finds: final ignition timing
-    (0x110A), long fuel trims, pedal, and five service-0x23 windows -- commanded phi
-    + engine period, timing + rpm + cam-map rpm trace, the fuel-target map X trace,
-    and the throttle-map X/Y traces. The traces say which ROM cell the ECM is reading,
-    so cell residency and per-cell fuel/spark behaviour can be tabulated without re-deriving
-    axis math. The three ECM_AIR_CHARGE_SLOT_* channels ride in the fuel_axis window
-    only to settle, at steady cruise, which slot mirrors DID 0x1208; they are not
-    telemetry. All-DID and continuous, so no Mode 01: short-term trim is not available
-    here, and closed-loop fuelling is read from the A/F sensors against the commanded
-    target plus the learned long-term cells.
-
-
-    DIDs 0x1134 and 0x1201 ride along at 1 Hz for one reason: they are the cross-check
-    side of the memory channels'' known-answer relations, so a capture carries the
-    evidence needed to re-verify its own RAM addresses after the fact. The 2026-09-21
-    drive needed exactly that -- the truck had been reflashed the night before and
-    there was no time to run the verifier first.'
-  experimental: true
-  mode01: {}
-  mode01_batch_groups: []
-  mode22:
-  - ECM_RPM
-  - ECM_IGNITION_TIMING
-  - ECM_AF_SENSOR_V_B1
-  - ECM_AF_SENSOR_V_B2
-  - ECM_INJECTOR_PULSE_1
-  - ECM_INJECTOR_PULSE_2
-  - ECM_AIR_CHARGE
-  - ECM_MAF_GPS
-  - ECM_THROTTLE_POS_SENSOR_1
-  - ECM_ACCEL_PEDAL_POS_1
-  - ECM_INTAKE_CAM_ANGLE_MEASURED
-  - ECM_INTAKE_CAM_ANGLE_MEASURED_B
-  - ECM_LONG_FUEL_TRIM_B1
-  - ECM_LONG_FUEL_TRIM_B2
-  - ECM_INTAKE_AIR_TEMP_1106
-  - ECM_COOLANT_TEMP
-  - ECM_VEHICLE_SPEED
-  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
-  - ECM_RPM_COARSE
-  mode22_rate_weights:
-    ECM_LONG_FUEL_TRIM_B1: 0.125
-    ECM_LONG_FUEL_TRIM_B2: 0.125
-    ECM_INTAKE_AIR_TEMP_1106: 0.125
-    ECM_COOLANT_TEMP: 0.125
-    ECM_VEHICLE_SPEED: 0.125
-    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.125
-    ECM_RPM_COARSE: 0.125
-  memory:
-  - ECM_TARGET_EQUIV_RATIO
-  - ECM_ENGINE_PERIOD
-  - ECM_IGNITION_TIMING_RAM
-  - ECM_ENGINE_SPEED_RAM
-  - ECM_CAM_MAP_RPM_TRACE
-  - ECM_FUEL_TARGET_MAP_X_TRACE
-  - ECM_AIR_CHARGE_SLOT_1038
-  - ECM_AIR_CHARGE_SLOT_103A
-  - ECM_AIR_CHARGE_SLOT_103C
-  - ECM_THROTTLE_MAP_X_TRACE
-  - ECM_THROTTLE_MAP_Y_TRACE
-  mode01_enabled: false
-  mode22_enabled: true
-  did_interval_seconds: null
-  did_cycle_seconds: null
-  round_timestamps: true
-  target_rate_hz: 8.0
-  did_continuous: true
-  bus_budget_override: 184.0
-  priority_channels: null
-  expected_total_demand_hz: 143.0
-  capacity_evidence: 12 fast DIDs x 8 Hz + 5 slow x 1 Hz + 5 memory windows x 8 Hz
-    = 141 req/s. The H8 drive sustained 116.8 req/s with the daemon doing Mode 01
-    as well; back-to-back DID reads measured 649 req/s on 2026-09-21. Memory reads
-    are multi-frame and slower (~176 req/s alone), so this figure is an estimate until
-    the first capture reports achieved rates.
-  required_tuple: []
-  min_achieved_rate_hz: 5.0
-  max_tuple_skew_s: null
-  requires_tune_revision: true
-  builtin_revision: 0
-  operator_modified: true
-  broadcast_decode: true
-  corpus_eligible: false
-  behavior_model_recipes:
-  - air_charge_vs_rpm_throttle_did
-  - cam_primary_vs_command_rpm_did
-  - cam_secondary_vs_command_rpm_did
-  storage_prefix: _capture-rom-trace
+  storage_prefix: _capture-tuning

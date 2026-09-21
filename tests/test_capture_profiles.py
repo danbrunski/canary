@@ -84,50 +84,35 @@ def test_strict_schema_and_seed_mirrors_collection(tmp_path: Path) -> None:
         )
 
 
-def test_vehicle_hybrid_profile_keeps_its_experimental_fast_exit_plan() -> None:
-    """The one-click UI profile must carry the exact plan tested on the ECM."""
-    from src.collection.capture_profiles import load_capture_profiles
+def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
+    """The consolidated tuning capture keeps the plan that ran on the truck.
 
+    Eight single-question research profiles were retired into
+    capture_profiles.archive.yaml on 2026-09-21; nothing may load that file.
+    """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     catalog = load_capture_profiles(
         REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
         config.collection,
     )
-    hybrid = catalog.by_name("tuning-hybrid-research")
-    assert hybrid is not None
-    assert hybrid.experimental is True
-    assert hybrid.target_rate_hz == 4.0
-    assert hybrid.did_interval_seconds == 0.25
-    # C04.3: the 4 Hz intent is a start-to-start cycle; the end-to-start
-    # interval is retained with its old meaning, not reinterpreted.
-    assert hybrid.did_cycle_seconds == 0.25
-    assert hybrid.did_continuous is False
-    assert hybrid.bus_budget_override == 90.0
-    assert "COMMANDED_EQUIV_RATIO" in hybrid.mode01
-    assert (
-        "ECM_MAF_GPS" in hybrid.mode22
-    )  # renamed 2026-08-08 from ECM_BASE_FUEL_SCHEDULE_CANDIDATE
-    assert hybrid.behavior_model_recipes == (
-        "air_charge_vs_rpm_throttle_did",
-        "cam_primary_vs_command_rpm_did",
-        "cam_secondary_vs_command_rpm_did",
-    )
-
-
-def test_vehicle_afr_delay_profile_separates_command_and_lambda_batches() -> None:
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    catalog = load_capture_profiles(
-        REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
-        config.collection,
-    )
-    profile = catalog.by_name("afr-delay-research")
-    assert profile is not None
-    assert profile.mode22_enabled is False
-    assert profile.target_rate_hz == 20.0
-    groups = [set(group) for group in profile.mode01_batch_groups]
-    command = next(group for group in groups if "COMMANDED_EQUIV_RATIO" in group)
-    measured = next(group for group in groups if "O2_WR_LAMBDA_S1" in group)
-    assert command.isdisjoint(measured)
+    assert [profile.name for profile in catalog.profiles] == [
+        "default",
+        "fuel-map",
+        "tuning-did",
+        "tuning",
+    ]
+    tuning = catalog.by_name("tuning")
+    assert tuning is not None
+    assert tuning.target_rate_hz == 4.0
+    assert tuning.did_cycle_seconds == 0.5
+    assert tuning.did_continuous is False
+    assert tuning.bus_budget_override == 90.0
+    for pid in ("COMMANDED_EQUIV_RATIO", "O2_WR_LAMBDA_S1", "TIMING_ADVANCE", "LONG_FUEL_TRIM_2"):
+        assert pid in tuning.mode01
+    # 0x1134 is not commanded phi; the RAM target replaced it.
+    assert "ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE" not in tuning.mode22
+    assert "ECM_TARGET_EQUIV_RATIO" in tuning.memory
+    assert "ECM_IGNITION_TIMING_RAM" in tuning.memory
 
 
 def test_mode01_batch_groups_refuse_duplicates_and_unselected_channels() -> None:
