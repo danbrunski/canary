@@ -2119,7 +2119,7 @@ def _request_rate_hz(request: _PollRequest, spec: CanObdSpec) -> float:
         # business, as before.
         from src.collection import tuning_profile
 
-        absolute = tuning_profile.absolute_rate_hz(request.channel)
+        absolute = tuning_profile.request_absolute_rate_hz(request)
         weight = tuning_profile.did_rate_weight(request.channel)
         if spec.did_session is not None and not tuning_profile.did_continuous_enabled():
             # A window is the only opportunity to sample this DID. Weight 1

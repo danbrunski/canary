@@ -1422,3 +1422,106 @@ memory:
       Present to give ECM_IGNITION_TIMING_RAM a same-instant rpm partner
       inside the `spark` window. Use DID 0x1201, or the finer 0x1219, for
       rpm on its own -- both are calibration-independent.
+
+  # --- ROM table-axis traces: which cell of each map the ECM is reading ---
+  # From UpRev's own stream definition; conversions pinned against its CSV
+  # display on 2026-09-20 (405 rows). These are coordinates into the ROM
+  # tables, so they are the most calibration-specific channels in this file.
+  - name: ECM_CAM_MAP_RPM_TRACE
+    address: 0xFFFF11CA
+    length: 1
+    byte_length: 1
+    scale: 50.0
+    offset: 0.0
+    unit: rpm
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 8000.0
+    verified_tune_revision: ZS44A-k106
+    window: spark
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          UpRev `Intake Cam VQ Y Trace` = raw x 50 exactly, zero residual on
+          405 rows. The rpm coordinate the ECM is using into the cam-phasing
+          map.
+
+  - name: ECM_FUEL_TARGET_MAP_X_TRACE
+    address: 0xFFFF103E
+    length: 1
+    byte_length: 1
+    scale: 0.250859
+    offset: 0.0
+    unit: axis
+    confidence: high
+    verified_tune_revision: ZS44A-k106
+    window: fuel_axis
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          UpRev `Fuel Target X Trace` = raw x 0.250859, r2 = 1.00000, max
+          residual 0.006 on 405 rows. The load (BFS-axis) coordinate the ECM
+          is using into the fuel-target map; its Y coordinate is rpm, which
+          UpRev reads from 0xFFFF11D8 (ECM_ENGINE_SPEED_RAM).
+
+  - name: ECM_THROTTLE_MAP_X_TRACE
+    address: 0xFFFF1C2C
+    length: 1
+    byte_length: 1
+    scale: 0.390711
+    offset: 0.173
+    unit: axis
+    confidence: medium
+    verified_tune_revision: ZS44A-k106
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          UpRev `Throttle X Trace` = raw x 0.390711 + 0.173, r2 = 0.99973 with
+          a 0.66 max residual -- looser than the other traces, hence medium.
+
+  - name: ECM_THROTTLE_MAP_Y_TRACE
+    address: 0xFFFF1902
+    length: 2
+    byte_length: 2
+    scale: 3.124834
+    offset: 0.0
+    unit: rpm
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 8000.0
+    verified_tune_revision: ZS44A-k106
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          UpRev `Throttle Y Trace` = raw x 3.124834 (i.e. 3.125), r2 = 1.00000.
+
+  # --- UNRESOLVED: air charge lives in 0xFFFF1038-103D, slot unknown ------
+  # Logged raw, in the same window as the fuel-target X trace, for one
+  # purpose: a steady-cruise capture where air charge holds still long
+  # enough to tell the three slots apart against DID 0x1208. Idle could not
+  # (it dithers on 1,648 of 1,998 steps). Do not consume these as telemetry.
+  - name: ECM_AIR_CHARGE_SLOT_1038
+    address: 0xFFFF1038
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-k106
+    window: fuel_axis
+  - name: ECM_AIR_CHARGE_SLOT_103A
+    address: 0xFFFF103A
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-k106
+    window: fuel_axis
+  - name: ECM_AIR_CHARGE_SLOT_103C
+    address: 0xFFFF103C
+    length: 2
+    byte_length: 2
+    confidence: hypothesized
+    verified_tune_revision: ZS44A-k106
+    window: fuel_axis

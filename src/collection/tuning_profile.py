@@ -493,6 +493,27 @@ def absolute_rate_hz(channel: str) -> float | None:
         return None
 
 
+def request_absolute_rate_hz(request: Any) -> float | None:
+    """:func:`absolute_rate_hz` for a request rather than a channel string.
+
+    A memory window is named after the window, so looking its own name up in
+    the profile finds nothing and the read silently falls back to the ~1 Hz
+    tier rate inside a capture that asked for 10. Same shape as the selection
+    gate bug: the membership lives on the request, so ask the request.
+    """
+    if str(getattr(request, "kind", "")) == "memory":
+        with _lock:
+            target = _profile.target_rate_hz
+            if target is None:
+                return None
+            selected = {name.upper() for name in _profile.memory}
+        names = request_channel_names(request)
+        if any(name.split(":", 1)[-1].upper() in selected for name in names):
+            return target
+        return None
+    return absolute_rate_hz(str(getattr(request, "channel", "")))
+
+
 def rate_policy(channel: str) -> tuple[float, bool]:
     """``(rate_weight, uniform_cadence)`` for one channel, under one lock.
 

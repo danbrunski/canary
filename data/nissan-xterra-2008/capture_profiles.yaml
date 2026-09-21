@@ -614,3 +614,82 @@ profiles:
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-afr-delay-research
+- name: rom-trace
+  description: All-DID tuning drive with ROM map-cell traces (session held open)
+  notes: 'First profile to combine the 2026-09-20/21 finds: final ignition timing
+    (0x110A), long fuel trims, pedal, and five service-0x23 windows -- commanded phi
+    + engine period, timing + rpm + cam-map rpm trace, the fuel-target map X trace,
+    and the throttle-map X/Y traces. The traces say which ROM cell the ECM is reading,
+    so cell residency and per-cell fuel/spark behaviour can be tabulated without re-deriving
+    axis math. The three ECM_AIR_CHARGE_SLOT_* channels ride in the fuel_axis window
+    only to settle, at steady cruise, which slot mirrors DID 0x1208; they are not
+    telemetry. All-DID and continuous, so no Mode 01: short-term trim is not available
+    here, and closed-loop fuelling is read from the A/F sensors against the commanded
+    target plus the learned long-term cells.'
+  experimental: true
+  mode01: {}
+  mode01_batch_groups: []
+  mode22:
+  - ECM_RPM
+  - ECM_IGNITION_TIMING
+  - ECM_AF_SENSOR_V_B1
+  - ECM_AF_SENSOR_V_B2
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
+  - ECM_AIR_CHARGE
+  - ECM_MAF_GPS
+  - ECM_THROTTLE_POS_SENSOR_1
+  - ECM_ACCEL_PEDAL_POS_1
+  - ECM_INTAKE_CAM_ANGLE_MEASURED
+  - ECM_INTAKE_CAM_ANGLE_MEASURED_B
+  - ECM_LONG_FUEL_TRIM_B1
+  - ECM_LONG_FUEL_TRIM_B2
+  - ECM_INTAKE_AIR_TEMP_1106
+  - ECM_COOLANT_TEMP
+  - ECM_VEHICLE_SPEED
+  mode22_rate_weights:
+    ECM_LONG_FUEL_TRIM_B1: 0.125
+    ECM_LONG_FUEL_TRIM_B2: 0.125
+    ECM_INTAKE_AIR_TEMP_1106: 0.125
+    ECM_COOLANT_TEMP: 0.125
+    ECM_VEHICLE_SPEED: 0.125
+  memory:
+  - ECM_TARGET_EQUIV_RATIO
+  - ECM_ENGINE_PERIOD
+  - ECM_IGNITION_TIMING_RAM
+  - ECM_ENGINE_SPEED_RAM
+  - ECM_CAM_MAP_RPM_TRACE
+  - ECM_FUEL_TARGET_MAP_X_TRACE
+  - ECM_AIR_CHARGE_SLOT_1038
+  - ECM_AIR_CHARGE_SLOT_103A
+  - ECM_AIR_CHARGE_SLOT_103C
+  - ECM_THROTTLE_MAP_X_TRACE
+  - ECM_THROTTLE_MAP_Y_TRACE
+  mode01_enabled: false
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: null
+  round_timestamps: true
+  target_rate_hz: 8.0
+  did_continuous: true
+  bus_budget_override: 184.0
+  priority_channels: null
+  expected_total_demand_hz: 141.0
+  capacity_evidence: 12 fast DIDs x 8 Hz + 5 slow x 1 Hz + 5 memory windows x 8 Hz
+    = 141 req/s. The H8 drive sustained 116.8 req/s with the daemon doing Mode 01
+    as well; back-to-back DID reads measured 649 req/s on 2026-09-21. Memory reads
+    are multi-frame and slower (~176 req/s alone), so this figure is an estimate until
+    the first capture reports achieved rates.
+  required_tuple: []
+  min_achieved_rate_hz: 5.0
+  max_tuple_skew_s: null
+  requires_tune_revision: true
+  builtin_revision: 0
+  operator_modified: true
+  broadcast_decode: true
+  corpus_eligible: false
+  behavior_model_recipes:
+  - air_charge_vs_rpm_throttle_did
+  - cam_primary_vs_command_rpm_did
+  - cam_secondary_vs_command_rpm_did
+  storage_prefix: _capture-rom-trace
