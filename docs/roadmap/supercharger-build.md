@@ -74,35 +74,35 @@ The name of the game: a baseline complete enough that every post-build number
 has an NA number to be compared against, on the same instruments. Every capture
 uses the `tuning` profile, so the baseline and the new engine share a schema.
 
-- [ ] **B1 — Steady WOT gear pulls.** 3rd gear, 2,500 rpm → limiter, at least
+- [ ] **NA1 — Steady WOT gear pulls.** 3rd gear, 2,500 rpm → limiter, at least
   three on the same stretch of road, tagged at start and end. The 2026-09-21
   drives produced only 2–6 s tip-ins; a steady pull is what makes a fuelling,
   timing and airflow curve rather than a scatter. Also the only way to reach the
   5,200 rpm / BFS 18.20 cell edited in the 2026-09-20 flash.
-- [ ] **B2 — Fuel pressure through a pull.** A gauge (or an added sensor) on
-  the rail, logged through B1. Settles the 2026-09-21 question — steady pressure
+- [ ] **NA2 — Fuel pressure through a pull.** A gauge (or an added sensor) on
+  the rail, logged through NA1. Settles the 2026-09-21 question — steady pressure
   says MAF curve, falling pressure says delivery — and gives the stock pump's
   figure to compare the Aeromotive against. The single most useful baseline
   number the ECM cannot give.
-- [ ] **B3 — Closed-loop trim map.** Warm, rpm × MAF, both banks, across idle,
+- [ ] **NA3 — Closed-loop trim map.** Warm, rpm × MAF, both banks, across idle,
   cruise at several speeds, and light load. **Wait for LTFT to relearn first**:
   it read exactly 0.00 % after the 2026-09-20 flash, so today's map is STFT
   alone.
-- [ ] **B4 — Idle baseline.** Warm idle MAF, throttle position, STFT, idle rpm
+- [ ] **NA4 — Idle baseline.** Warm idle MAF, throttle position, STFT, idle rpm
   stability; with electrical loads stepped (headlights, blower, A/C) — the
   stock-injector dead-time reference (`injector-deadtime-idle`, archived, has
   the protocol). The throttle body and injectors both change idle.
-- [ ] **B5 — Whole-vehicle performance.** 40→80 mph (or 2,500 rpm → limiter) in
+- [ ] **NA5 — Whole-vehicle performance.** 40→80 mph (or 2,500 rpm → limiter) in
   a fixed gear on flat road, GPS speed, both directions to cancel grade and
   wind. A before/after acceleration number is the result the build is for, and
   it does not depend on any ECU channel meaning the same thing afterwards.
-- [ ] **B6 — Heat.** IAT and coolant through a long climb or repeated pulls.
+- [ ] **NA6 — Heat.** IAT and coolant through a long climb or repeated pulls.
   The NA intake is the reference for the intercooler's job.
-- [ ] **B7 — Snapshots.** A full DID sweep and Mode 06 at key-on, engine-running
+- [ ] **NA7 — Snapshots.** A full DID sweep and Mode 06 at key-on, engine-running
   and warm idle; readiness; the exact ROM file and hash that is running
   (`ZS44A-20260920`). The static configuration DIDs are the easiest place to see
   what the new tune changed.
-- [ ] **B8 — Write the baseline down.** One document with the NA curves (λ error,
+- [ ] **NA8 — Write the baseline down.** One document with the NA curves (λ error,
   timing, VE, g/cyl by rpm band; trim map; idle; acceleration) and the sessions
   they came from — the thing every post-build comparison cites.
 
@@ -154,8 +154,8 @@ First-start monitoring, in order, each step gated on the one before:
 - [ ] **F2 — Idle.** λ at stoich, STFT near 0 on both banks (a large STFT at idle
   says K or dead time is off — stop and correct before driving), stable idle,
   no leaks, IAT sane.
-- [ ] **F3 — Light load.** Closed-loop trims across rpm × MAF; compare with B3.
+- [ ] **F3 — Light load.** Closed-loop trims across rpm × MAF; compare with NA3.
 - [ ] **F4 — Progressive load.** Part-throttle, then short WOT, then pulls; λ
   against target and timing each step, fuel pressure (P2) holding.
-- [ ] **F5 — Compare with the baseline.** B8's curves against the new engine;
-  acceleration (B5) before and after.
+- [ ] **F5 — Compare with the baseline.** NA8's curves against the new engine;
+  acceleration (NA5) before and after.
