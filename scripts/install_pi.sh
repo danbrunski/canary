@@ -103,6 +103,10 @@ install -m 0644 "${CANARY_HOME}/systemd/tmpfiles-canary.conf" \
   /etc/tmpfiles.d/canary.conf
 systemd-tmpfiles --create /etc/tmpfiles.d/canary.conf
 
+# Stable operator command. It discovers the active checkout through
+# /etc/canary/canary.env, so callers do not need to cd into the repository.
+install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" /usr/local/sbin/canary-update
+
 # Let the canary user restart the services without a password, so model/code
 # deploys (and the MCP control plane) can roll the daemon without an interactive
 # sudo. Scoped to exactly the restart/try-restart verbs for these two units —
@@ -311,4 +315,5 @@ Next:
   7. MCP server: http://<pi-hostname-or-ip>:8001/mcp (see docs/mcp-server.md)
   8. GPS/time: verify with 'gpspipe -w -n 5' and 'chronyc sources' — the GPS
      refclock should appear. See docs/time-sync.md
+  9. Future updates: sudo canary-update
 EOF

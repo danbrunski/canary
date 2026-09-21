@@ -187,11 +187,28 @@ If mDNS is not available, use the Pi's IP address instead of `canary.local`.
 ## Useful Operations
 
 ```bash
-sudo systemctl restart canary
+sudo canary-update
 sudo systemctl stop canary
 sudo journalctl -u canary --since "10 minutes ago"
-sudo -u canary git -C /opt/canary pull --ff-only
 ```
+
+`canary-update` is installed into `/usr/local/sbin` by `install_pi.sh`. It
+refuses to update during an active capture, fast-forwards the checkout, rebuilds
+the dashboard, applies dependency and system configuration changes, restarts
+both CANary services, and waits for the daemon health endpoint. It uses the
+checkout's configured Git remote, so private-repository installs still need a
+working deploy key or SSH credential for now.
+
+Pass `--force` only when intentionally ending an active capture. To test a
+specific remote ref without changing the updater, set `CANARY_UPDATE_REF`:
+
+```bash
+sudo CANARY_UPDATE_REF=main canary-update
+```
+
+The planned public distribution replaces the Git fetch with a signed or
+checksummed release bundle. The rest of this update path remains the same, and
+the Pi will no longer need repository credentials.
 
 For laptop frontend development against the Pi backend, see
 `docs/headless-api.md`.

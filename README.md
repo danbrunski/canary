@@ -142,6 +142,16 @@ sudo nano /etc/canary/canary.yaml
 sudo systemctl start canary
 ```
 
+After the first install, update and redeploy the complete Pi application with:
+
+```bash
+sudo canary-update
+```
+
+The command stops before changing anything when a capture is active, then
+updates the source, rebuilds the dashboard, reapplies Pi configuration and
+dependencies, restarts both services, and checks that the daemon comes back.
+
 The daemon serves the browser dashboard, public observation endpoints, and an
 authenticated control API on the configured LAN address, defaulting to
 `http://<pi-hostname-or-ip>:8000/`. A companion
