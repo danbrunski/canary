@@ -574,3 +574,64 @@ wanted quantities cluster in RAM, not on a define mechanism. Rough budget at
 the measured 116.8 req/s ceiling: 21 DIDs polled serially gives 5.6 Hz per
 channel, while three or four 63-byte windows at 14 Hz costs ~56 req/s and is
 internally same-instant.
+
+### Ignition timing located in RAM; the spark window
+
+With DID `0x110A` confirmed as ignition timing, the RAM hunt became a
+known-answer search rather than a correlation hunt: sweep, interleave the
+DID, and look for the byte that equals it. Fourteen 63-byte windows were swept
+around every RAM address UpRev's own scheme reads (engine idling, operator
+blipping the throttle, 1,200 samples each, all 1,200/1,200 answered).
+
+**`0xFFFF11C7` is the ignition-timing register.**
+
+| capture | timing range | exact | + adjacent read | unexplained |
+|---|---|---|---|---|
+| `ram-0xFFFF11A0` | 12-32 degBTDC | 1,132/1,200 (94.3%) | 56 | 12 (1.0%) |
+| `ram-timing-repro` | steady idle | 2,996/3,000 (99.9%) | 4 | 0 |
+
+The mismatches cluster on the 58 steps where timing actually changed, which is
+the signature of two requests 1.5 ms apart rather than of a different
+quantity. It is also the only offset in the window that mirrors timing —
+unlike the injector registers, this value is not duplicated.
+
+One other candidate was rejected outright: `0xFFFF11FF` matched 1,200/1,200,
+but that window was captured while timing sat constant at 17 degBTDC. A
+constant matching a constant is not evidence.
+
+`0xFFFF11D8` carries engine speed (equals DID `0x1201` on 2,825/3,000; it is
+also the address UpRev reads as `Fuel Target Y Trace`, pinned at raw x 12.4995
+by the 2026-09-20 CSV). It is mirrored at `0xFFFF11D4`.
+
+The two sit 17 bytes apart, so a 19-byte `spark` window returns **ignition
+timing and engine speed from one ECU operation**. Live validation, engine
+running, daemon build `3292cf75`:
+
+```text
+verify_memory_channels          40/40 on all three checkable channels
+capture 2026-09-21T013326       spark: 80 of 80 timing+rpm rows share a timestamp
+                                fuel_target: 81 of 81 phi+period rows share a timestamp
+```
+
+`MemoryKnownAnswer` gained `equals_did` and `min_agreement` for this.
+Exactness and acquisition skew are different things, and demanding 100% would
+have failed a correct binding for a reason that has nothing to do with the
+address.
+
+### Correction: the ECM is not the request-rate limit
+
+An earlier note in this file reasoned that 21 DIDs at UpRev's 14 Hz would need
+294 req/s against "the measured 116.8 req/s ceiling". That comparison was
+wrong. 116.8 req/s is what the *daemon* achieved on a drive while also running
+Mode 01, storage and inference; it is not what the ECM can answer.
+
+Measured directly, 2026-09-21, engine idling: back-to-back single-DID reads
+ran **9,734 requests in 15.0 s = 649 req/s**, which matches the ~1.5 ms per
+request already recorded in this file's `access` notes. 294 req/s is 45% of
+that.
+
+So serial Mode 22 polling at UpRev's rate is not obviously out of reach, and
+the honest statement of the parity gap is about daemon throughput and
+same-instant sampling, not about the ECM refusing the traffic. Note that the
+63-byte memory reads are multi-frame and slower — the sweeps ran at ~176 req/s
+— so windows buy simultaneity, not raw rate.
