@@ -477,6 +477,37 @@ def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
     assert as_lambda["value"].iloc[0] == pytest.approx(14.7 * 1.242, rel=1e-6)
 
 
+def test_a_session_opening_on_fuel_cut_still_converts(tmp_path: Path) -> None:
+    """Commanded phi 0.0 is decel fuel cut, not a malformed value.
+
+    The convention probe used to take the session's FIRST value, so a session
+    that opened on a closed-throttle decel raised "equivalence ratio must be
+    positive" and was lost whole — four sessions of the 2026-09-21 corpus run.
+    The cut sample is dropped; the rest convert.
+    """
+    session = _session(
+        tmp_path,
+        [
+            TelemetryRecord(timestamp=T0, source="obd", channel="COMMANDED_EQUIV_RATIO", value=0.0),
+            TelemetryRecord(
+                timestamp=T0 + timedelta(seconds=1),
+                source="obd",
+                channel="COMMANDED_EQUIV_RATIO",
+                value=1.242,
+            ),
+        ],
+    )
+    out = read_channels(
+        session,
+        ["obd:COMMANDED_AFR"],
+        calibration=_calibration("phi"),
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+    )
+    assert len(out) == 1
+    assert out["value"].iloc[0] == pytest.approx(14.7 / 1.242, rel=1e-6)
+
+
 def test_unverified_convention_refuses_rather_than_guessing(tmp_path: Path) -> None:
     """A vehicle nobody checked at WOT must not get a silently-wrong AFR."""
     session = _session(

@@ -526,8 +526,12 @@ def _commanded_afr_series(
     out = rows.loc[:, ["timestamp"]].copy()
     ratio = pd.to_numeric(rows["value_number"], errors="coerce")
     # Raises for an unverified convention — deliberately loud, and once per
-    # call rather than per row.
-    probe = float(ratio.dropna().iloc[0]) if not ratio.dropna().empty else 1.0
+    # call rather than per row. Probe with a POSITIVE value: 0.0 is decel fuel
+    # cut (no target at all), which the per-row conversion below drops, and a
+    # session that happened to open on a fuel cut used to raise "equivalence
+    # ratio must be positive" and lose the whole session.
+    positive = ratio[ratio > 0].dropna()
+    probe = float(positive.iloc[0]) if not positive.empty else 1.0
     calibration.commanded_afr(probe, afr_stoich=afr_stoich)
     if calibration.commanded_equiv_ratio_convention == "phi":
         values = afr_stoich / ratio.where(ratio > 0)

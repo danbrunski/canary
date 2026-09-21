@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from src.collection import bus_budget, capture_lifetime, tuning_profile
 from src.collection.capture_profiles import (
     BUILTIN_REVISION,
+    CAPTURE_CONTEXT_MODE01,
     STORAGE_SAFE_REQUESTS_PER_SECOND,
     CaptureProfile,
     CaptureProfileCatalog,
@@ -69,7 +70,7 @@ def test_strict_schema_and_seed_mirrors_collection(tmp_path: Path) -> None:
     assert "RPM" in fuel_map.mode01
     assert tuning_did is not None
     assert {"ECM_INJECTOR_PULSE_1", "ECM_INJECTOR_PULSE_2"} <= set(tuning_did.mode22)
-    assert tuning_did.expected_total_demand_hz == pytest.approx(181.0)
+    assert tuning_did.expected_total_demand_hz == pytest.approx(182.0)  # + IAT context at 1 Hz
 
     with pytest.raises(ValidationError, match="Extra inputs"):
         CaptureProfile.model_validate(
@@ -698,9 +699,11 @@ def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     listed = client.get("/control/capture/profiles", headers=headers)
     assert listed.status_code == 200
     fuel_plan = listed.json()["resolved_plans"]["fuel-map"]
-    assert fuel_plan["channel_reads_per_second"] == 44.0
+    assert (
+        fuel_plan["channel_reads_per_second"] == 45.0
+    )  # 9 fast x 4 Hz + 9 context x 1 Hz (baro added 2026-09-21)
     assert fuel_plan["diagnostic_requests_per_second"]["best_case_batched"] < 20.0
-    assert fuel_plan["diagnostic_requests_per_second"]["single_request_fallback"] == 44.0
+    assert fuel_plan["diagnostic_requests_per_second"]["single_request_fallback"] == 45.0
     assert fuel_plan["fallback_feasible"] is False
     profile = {
         "name": "idle-map",
@@ -1314,3 +1317,41 @@ def test_shipped_catalog_rationale_survives_a_write_back(path: Path, tmp_path: P
     reloaded = CaptureProfileCatalog.model_validate(yaml.safe_load(round_tripped.read_text()))
 
     assert {p.name: p.notes for p in reloaded.profiles if p.notes} == documented
+
+
+_IAT_DIDS = {"ECM_INTAKE_AIR_TEMP_1106", "ECM_INTAKE_AIR_TEMP"}
+
+
+@pytest.mark.parametrize("path", _SHIPPED_CATALOGS, ids=lambda p: p.parent.name)
+def test_every_capture_profile_carries_air_density_and_thermal_context(path: Path) -> None:
+    """Baro, intake-air temperature and coolant, in every shipped profile.
+
+    A capture without them cannot be normalised: VE and load only compare
+    across days against measured baro (this vehicle lives at ~80 kPa and
+    drives to 63 kPa), and warm-up gating needs coolant. The 2026-09-21
+    `fuel-target-research` drive polled none of the three, and every non-default
+    profile on the Xterra was missing at least one.
+
+    A profile that holds the Mode-22 session continuously cannot poll Mode 01,
+    so it carries the IAT and coolant DIDs instead. Baro has no known DID on
+    this ECM; those captures take it from the adjacent default session, and
+    this test says so rather than pretending otherwise.
+    """
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    missing: dict[str, list[str]] = {}
+    for profile in catalog.profiles:
+        mode01 = {name.upper() for name in profile.mode01} if profile.mode01_enabled else set()
+        mode22 = {name.upper() for name in profile.mode22} if profile.mode22_enabled else set()
+        if "AUTO" in mode01:
+            continue
+        if profile.mode01_enabled:
+            gaps = [pid for pid in CAPTURE_CONTEXT_MODE01 if pid not in mode01]
+        else:
+            gaps = []
+            if "ECM_COOLANT_TEMP" not in mode22:
+                gaps.append("ECM_COOLANT_TEMP")
+            if not mode22 & _IAT_DIDS:
+                gaps.append("ECM_INTAKE_AIR_TEMP_1106")
+        if gaps:
+            missing[profile.name] = gaps
+    assert not missing, f"capture profiles without density/thermal context: {missing}"

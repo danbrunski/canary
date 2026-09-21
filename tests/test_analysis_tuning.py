@@ -454,3 +454,23 @@ def test_the_shipped_floor_records_its_regime() -> None:
     for entry in floor.channels.values():
         assert "WOT" in entry.conditions
         assert entry.conditions != "unspecified"
+
+
+def test_delivery_error_refuses_a_voltage_channel_as_the_measurement() -> None:
+    """2026-09-21: ~1.5 V was compared against a 12.6 AFR target and the
+    function returned a confident -87 % instead of refusing."""
+    from pathlib import Path
+
+    import pandas as pd
+
+    from src.analysis.afr import AfrCalibration
+    from src.analysis.tuning import GateError, delivery_error
+
+    with pytest.raises(GateError, match="sensor voltage"):
+        delivery_error(
+            pd.DataFrame(),
+            calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
+            measured_spec="did:ECM_AF_SENSOR_V_B1",
+            measured_is_lambda=False,
+            dids_path=Path("data/dids.yaml"),
+        )

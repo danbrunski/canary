@@ -44,7 +44,7 @@ FUEL_MAP_PROFILE_NAME = "fuel-map"
 #: 4 — 2026-09-20 UpRev USB evidence directly pinned 0x1206/0x1207 as
 #:     injector pulse Bank 1/2 at 0.01 ms/count; collect both in the all-DID
 #:     tuning profile instead of leaving confirmed fuel observability out.
-BUILTIN_REVISION = 4
+BUILTIN_REVISION = 5
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -98,6 +98,7 @@ FUEL_MAP_FAST_CHANNELS: tuple[str, ...] = (
 #: stay present for gating without diluting the transient channels — the whole
 #: point of the weight being honoured under ``target_rate_hz``.
 FUEL_MAP_CONTEXT_CHANNELS: tuple[str, ...] = (
+    "BAROMETRIC_PRESSURE",
     "INTAKE_TEMP",
     "SPEED",
     "COOLANT_TEMP",
@@ -109,6 +110,25 @@ FUEL_MAP_CONTEXT_CHANNELS: tuple[str, ...] = (
 )
 
 FUEL_MAP_CONTEXT_WEIGHT = 0.25
+
+#: Air-density and thermal context every tuning capture must carry: ambient
+#: pressure, intake-air temperature and coolant temperature.
+#:
+#: Without them a capture cannot be normalised. Airflow, load and VE only
+#: compare across days as VE or ``MAP / measured baro`` -- this vehicle lives
+#: at ~80 kPa and drives to 63 kPa, and a sea-level or even a fixed 80 kPa
+#: assumption fakes a restriction -- and warm-up gating needs coolant. The
+#: 2026-09-21 `fuel-target-research` drive polled none of the three, so its VE
+#: had to be computed from a GPS-altitude baro estimate and an assumed 25 C
+#: intake: an answer with two guesses in it. Every non-default Xterra profile
+#: missed at least one.
+#:
+#: Tests hold every shipped capture profile to this, via Mode 01 where the
+#: profile runs Mode 01. A profile that holds the Mode-22 session continuously
+#: cannot poll Mode 01 at all; it must carry the IAT and coolant DIDs instead,
+#: and baro has no known DID on this ECM, so those captures take it from the
+#: adjacent default session.
+CAPTURE_CONTEXT_MODE01: tuple[str, ...] = ("BAROMETRIC_PRESSURE", "INTAKE_TEMP", "COOLANT_TEMP")
 
 FUEL_MAP_CHANNELS: tuple[str, ...] = (*FUEL_MAP_FAST_CHANNELS, *FUEL_MAP_CONTEXT_CHANNELS)
 
@@ -151,6 +171,7 @@ TUNING_DID_CHANNELS: tuple[str, ...] = (
     "ECM_INTAKE_VVT_SOLENOID_DUTY_CANDIDATE_B2",
     "ECM_THROTTLE_POS_SENSOR_1",
     "ECM_COOLANT_TEMP",
+    "ECM_INTAKE_AIR_TEMP_1106",
 )
 
 
@@ -624,14 +645,14 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 # capture hit both at once and landed at 0.28-0.78 Hz while
                 # calling itself "high-rate".
                 target_rate_hz=4.0,
-                # 9 fast x 4 Hz + 8 context x 1 Hz = 44 channel-reads/s.
-                expected_total_demand_hz=44.0,
+                # 9 fast x 4 Hz + 9 context x 1 Hz = 45 channel-reads/s.
+                expected_total_demand_hz=45.0,
                 bus_budget_override=20.0,
                 capacity_evidence=(
-                    "44 channel-reads/s against 478/s measured batched on this ECM "
+                    "45 channel-reads/s against 478/s measured batched on this ECM "
                     "(2026-08-04). Budget held at 20 req/s, under the 24 req/s storage-sink "
-                    "line: batching packs 6 PIDs per request, so 44 reads/s needs ~8 req/s "
-                    "batched and 44 unbatched. If batching is off the contract reports a "
+                    "line: batching packs 6 PIDs per request, so 45 reads/s needs ~8 req/s "
+                    "batched and 45 unbatched. If batching is off the contract reports a "
                     "shortfall rather than silently exceeding the sink's known-safe rate."
                 ),
                 required_tuple=FUEL_DELIVERY_TUPLE,
@@ -666,20 +687,26 @@ def seed_catalog(collection: CollectionConfig) -> CaptureProfileCatalog:
                 # licence to go slower than this: that drive was warm
                 # throughout (72 -> 94 degC over 25 min). Cold-start warmup is
                 # roughly twenty times faster, and 0.1 Hz would alias it.
-                mode22_rate_weights={"ECM_COOLANT_TEMP": 1.0 / 15.0},
+                mode22_rate_weights={
+                    "ECM_COOLANT_TEMP": 1.0 / 15.0,
+                    # Intake air is context too (CAPTURE_CONTEXT_MODE01); it
+                    # tracks airflow over seconds, so 1 Hz is ample.
+                    "ECM_INTAKE_AIR_TEMP_1106": 1.0 / 15.0,
+                },
                 did_continuous=True,
                 target_rate_hz=15.0,
                 bus_budget_override=184.0,
-                # 12 DIDs x 15 Hz + coolant x 1 Hz = 181 reads/s.
-                expected_total_demand_hz=181.0,
+                # 12 DIDs x 15 Hz + coolant and IAT x 1 Hz = 182 reads/s.
+                expected_total_demand_hz=182.0,
                 capacity_evidence=(
                     "2026-08-04 bench: 658 DID reads/s. 12 DIDs x 15 Hz + "
-                    "ECM_COOLANT_TEMP x 1 Hz = 181 reads/s. The 2026-09-10 H8 drive "
+                    "ECM_COOLANT_TEMP and ECM_INTAKE_AIR_TEMP_1106 x 1 Hz = 182 reads/s. "
+                    "The 2026-09-10 H8 drive "
                     "sustained 116.8 req/s with 11 DIDs at 10.4 Hz each, 41 timeouts "
                     "in 167,885 requests and 0 bus errors, so the ECM is not the "
                     "binding constraint; coolant's 15 Hz share was simply wasted "
                     "(0.2 % of its samples changed while it took 1/11 of the budget). "
-                    "The 184 req/s budget leaves three slots/s for session refresh and jitter."
+                    "The 184 req/s budget leaves two slots/s for session refresh and jitter."
                 ),
                 broadcast_decode=True,
                 corpus_eligible=False,
@@ -1054,6 +1081,7 @@ class CaptureProfileStore:
 
 
 __all__ = [
+    "CAPTURE_CONTEXT_MODE01",
     "BUILTIN_REVISION",
     "STORAGE_SAFE_REQUESTS_PER_SECOND",
     "CaptureProfile",

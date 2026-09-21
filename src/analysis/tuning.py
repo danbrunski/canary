@@ -204,6 +204,37 @@ def _refuse_missing_inputs(
     )
 
 
+def _refuse_non_mixture_measurement(
+    session: Path | pd.DataFrame, measured_spec: str, *, dids_path: Path
+) -> None:
+    """Refuse a measured channel that is not a mixture reading.
+
+    This function compares the measured channel against a commanded AFR
+    as-is, so it must BE lambda or AFR. The A/F sensor's raw voltage is not:
+    on 2026-09-21 `did:ECM_AF_SENSOR_V_B1` was passed here and ~1.5 V was
+    compared against a 12.6 AFR target, returning a confident -87 % instead
+    of an error. Voltage needs the calibrated transfer, which is what the
+    semantic path does (`build_tuning_frame` with a `voltage_afr` provider,
+    then :func:`delivery_error_from_semantic_frame`).
+    """
+    from src.analysis.channels import parse_spec
+
+    spec = parse_spec(measured_spec)
+    if spec.source != "did":
+        return
+    from src.decode import dids as dids_decode
+
+    entries = {e.name: e for e in dids_decode.load_did_map(dids_path).dids}
+    entry = entries.get(spec.name)
+    if entry is not None and entry.unit in ("V", "mV"):
+        raise GateError(
+            f"{measured_spec} is a sensor voltage ({entry.unit}), not a mixture reading; "
+            "delivery_error compares it against commanded AFR as-is. Use the semantic "
+            "path, which applies the calibrated voltage-to-AFR transfer: build_tuning_frame "
+            "with a voltage_afr provider, then delivery_error_from_semantic_frame."
+        )
+
+
 def delivery_error(
     session: Path | pd.DataFrame,
     *,
@@ -235,6 +266,7 @@ def delivery_error(
     4. band-averaged over rpm, so band composition cannot masquerade as an effect
     """
     specs = ["obd:RPM", "obd:FUEL_STATUS", "obd:COMMANDED_AFR", measured_spec]
+    _refuse_non_mixture_measurement(session, measured_spec, dids_path=dids_path)
     if min_load is not None:
         specs.append("obd:ENGINE_LOAD")
 
