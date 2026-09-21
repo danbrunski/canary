@@ -1327,3 +1327,98 @@ memory:
       reciprocal and `MemoryKnownAnswer` currently models only the clamped
       high-byte form; verify_memory_channels therefore reports this channel
       as unverifiable rather than passed, which is the honest state.
+
+  - name: ECM_IGNITION_TIMING_RAM
+    address: 0xFFFF11C7
+    length: 1
+    byte_start: 0
+    byte_length: 1
+    byte_order: big
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
+    confidence: high
+    plausible_min: -20.0
+    plausible_max: 60.0
+    verified_tune_revision: ZS44A-k106
+    window: spark
+    known_answer:
+      did: 0x110A
+      relation: equals_did
+      min_agreement: 0.90
+      notes: >
+        0.90 rather than 1.00 because the memory read and the DID read are
+        two requests ~1.5 ms apart and timing moves between them. Measured
+        94.3% exact over a 12-32 degBTDC swing and 99.9% at steady idle;
+        both reached ~100% once the adjacent read is allowed.
+    evidence:
+      - session: ram-0xFFFF11A0 (2026-09-21, engine idling with throttle blips)
+        method: ram_sweep_against_confirmed_did
+        finding: >
+          Swept 14 x 63-byte windows around every RAM address UpRev's own
+          scheme reads, interleaving the confirmed timing DID 0x110A. This
+          was the only offset that tracked it: 1132/1200 reads equal, over a
+          real 12-32 degBTDC range. 56 of the 68 mismatches equal the timing
+          read immediately before or after, leaving 12 of 1200 (1.0%)
+          unexplained, and the mismatches cluster on the 58 steps where
+          timing actually changed -- the signature of acquisition skew, not
+          of a different quantity.
+      - session: ram-timing-repro (2026-09-21, steady idle)
+        method: independent_reproduction
+        finding: >
+          2,996/3,000 exact (99.9%), the remaining 4 equal to an adjacent
+          read, so 100% accounted for. It is also the ONLY offset in the
+          window that mirrors timing -- unlike the injector registers, this
+          value is not duplicated.
+    notes: |
+      The same register DID 0x110A returns, reachable by service 0x23. The
+      DID is the better collection route on its own: it is
+      calibration-independent where this address is not.
+
+      This exists for the `spark` window. One 19-byte read returns ignition
+      timing and engine speed from a single ECU operation, and this ECM
+      refuses batched Mode 22, so that pairing is otherwise unobtainable.
+      Spark analysis is inherently a timing-vs-rpm-vs-load question, and the
+      skew between two separate DID reads is the noise floor of any such
+      comparison.
+
+  - name: ECM_ENGINE_SPEED_RAM
+    address: 0xFFFF11D8
+    length: 2
+    byte_start: 0
+    byte_length: 2
+    byte_order: big
+    scale: 12.5
+    offset: 0.0
+    unit: rpm
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 7000.0
+    verified_tune_revision: ZS44A-k106
+    window: spark
+    known_answer:
+      did: 0x1201
+      relation: equals_did
+      min_agreement: 0.85
+      notes: >
+        Lower than the spark channel's because rpm moves faster than timing,
+        so more samples fall on a change between the two reads. Measured
+        2,825/3,000 (94.2%).
+    evidence:
+      - session: ram-timing-repro (2026-09-21)
+        method: ram_sweep_against_confirmed_did
+        finding: >
+          Equals coarse-RPM DID 0x1201 raw on 2,825/3,000 same-reply reads.
+          UpRev reads this same address as its `Fuel Target Y Trace`, which
+          the 2026-09-20 CSV pinned at raw x 12.4995 -- i.e. the rpm axis
+          coordinate of the fuel-target map, which is rpm itself.
+      - session: ram-0xFFFF11A0 (2026-09-21)
+        method: duplicate_register_survey
+        finding: >
+          0xFFFF11D4 carries the same value at the same rate (2,825/3,000),
+          so this register is mirrored; 0xFFFF11D8 is used because UpRev's
+          own definition names it.
+    notes: |
+      Present to give ECM_IGNITION_TIMING_RAM a same-instant rpm partner
+      inside the `spark` window. Use DID 0x1201, or the finer 0x1219, for
+      rpm on its own -- both are calibration-independent.

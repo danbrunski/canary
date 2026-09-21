@@ -205,11 +205,26 @@ class MemoryKnownAnswer(_Strict):
       Nissan ECM exposes DID 0x1134 as exactly this view of the commanded
       equivalence-ratio word: the high byte, floored so it cannot represent
       the fuel-cut state.
+    * ``equals_did`` — the RAM word and the DID are the same register. This
+      is the relation for an address found by sweeping against a DID that
+      already carries the quantity.
+
+    ``min_agreement`` exists because exactness and acquisition skew are
+    different things. The memory read and the cross-check DID are two
+    requests about 1.5 ms apart, so a fast-moving quantity legitimately
+    disagrees on the samples where it changed in between — ignition timing
+    reproduces at 94-99.9% depending on how hard the engine is being
+    revved. Demanding 100% would fail a correct binding for a reason that
+    has nothing to do with the address.
     """
 
     did: int = Field(ge=0, le=0xFFFF)
-    relation: Literal["clamped_high_byte"]
+    relation: Literal["clamped_high_byte", "equals_did"]
     floor: int = Field(default=0, ge=0, le=0xFFFF)
+    #: Fraction of reads that must satisfy the relation. Below 1.0 only
+    #: where acquisition skew makes exactness unreachable; see the class
+    #: docstring.
+    min_agreement: float = Field(default=1.0, gt=0.0, le=1.0)
     notes: str | None = None
 
 
@@ -399,6 +414,8 @@ def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
         raise ValueError(f"{channel.name} declares no known-answer check")
     if known.relation == "clamped_high_byte":
         return did_raw == max(known.floor, word >> 8)
+    if known.relation == "equals_did":
+        return did_raw == word
     raise ValueError(f"unhandled known-answer relation {known.relation!r}")
 
 

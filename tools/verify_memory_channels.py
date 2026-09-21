@@ -151,18 +151,24 @@ def verify_channel(
 
     if observed == 0:
         return ChannelVerdict(channel.name, "fail", "no usable replies")
-    if agreements != observed:
+    if agreements < observed * known.min_agreement:
         return ChannelVerdict(
             channel.name,
             "fail",
-            f"known-answer check failed on {observed - agreements} of {observed} "
-            f"reads ({known.relation} vs DID 0x{known.did:04X}); the address has "
+            f"known-answer check failed: {agreements}/{observed} reads satisfied "
+            f"{known.relation} vs DID 0x{known.did:04X}, below the "
+            f"{known.min_agreement:.0%} this channel requires; the address has "
             "probably moved",
             observed,
             agreements,
             sentinels,
         )
-    reason = "known-answer relation held on every read"
+    reason = (
+        "known-answer relation held on every read"
+        if agreements == observed
+        else f"known-answer relation held on {agreements}/{observed} reads "
+        f"(requires {known.min_agreement:.0%}; the rest is acquisition skew)"
+    )
     if out_of_range:
         reason += f"; WARNING {len(out_of_range)} value(s) outside plausible bounds"
     return ChannelVerdict(channel.name, "pass", reason, observed, agreements, sentinels)

@@ -314,7 +314,14 @@ profiles:
     That is the only same-instant multi-channel sample available on this ECM: it refuses
     batched Mode 22, so any two DIDs are two requests milliseconds apart. Engine period
     is not the collection route for rpm -- DID 0x1201 is, and is calibration-independent
-    -- it is here so a target can be paired with engine speed at zero skew.'
+    -- it is here so a target can be paired with engine speed at zero skew.
+
+
+    Two memory windows now: `fuel_target` (commanded phi + engine period) and `spark`
+    (ignition timing + engine speed). Each is one service-0x23 read, so the pair inside
+    each window shares an ECU operation. Spark analysis is a timing-vs-rpm-vs-load
+    question and the skew between two separate Mode 22 reads is the noise floor of
+    any such comparison, which is the whole reason the windows exist.'
   experimental: true
   mode01:
     RPM: 1.0
@@ -342,6 +349,8 @@ profiles:
   memory:
   - ECM_TARGET_EQUIV_RATIO
   - ECM_ENGINE_PERIOD
+  - ECM_IGNITION_TIMING_RAM
+  - ECM_ENGINE_SPEED_RAM
   mode01_enabled: true
   mode22_enabled: true
   did_interval_seconds: null
