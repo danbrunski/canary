@@ -67,8 +67,9 @@ async def arm_tuning_capture(
     per-channel demand was capped at 1 Hz). Set both.
 
     After ``verify_seconds`` the capture is scored against its profile's
-    contract and the response carries a ``verdict``: ``pass``, ``fail``, or
-    ``unverified``. **Read the verdict before driving.** A ``fail`` names the
+    contract and the response carries a ``verdict``: ``pass``, ``degraded``
+    (gaps only, every channel >= 90 % covered), ``fail``, or ``unverified``.
+    **Read the verdict before driving.** A ``fail`` names the
     clause and the fix in ``rate_verification.failures``; re-arm with the
     correction rather than starting the drive, because none of these problems
     are recoverable afterwards.

@@ -79,8 +79,9 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   drives produced only 2–6 s tip-ins; a steady pull is what makes a fuelling,
   timing and airflow curve rather than a scatter. Also the only way to reach the
   5,200 rpm / BFS 18.20 cell edited in the 2026-09-20 flash.
-- [ ] **NA2 — Fuel pressure through a pull.** A gauge (or an added sensor) on
-  the rail, logged through NA1. Settles the 2026-09-21 question — steady pressure
+- [ ] **NA2 — Fuel pressure through a pull.** The AEM CAN gauge (P2) on the
+  stock system, logged through NA1 — which means P2's fuel-pressure half must
+  land *before* teardown, not after. Settles the 2026-09-21 question — steady pressure
   says MAF curve, falling pressure says delivery — and gives the stock pump's
   figure to compare the Aeromotive against. The single most useful baseline
   number the ECM cannot give.
@@ -115,11 +116,24 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   inventing a second mechanism. Models will need retraining on the new corpus;
   per AGENTS.md, fix the model rather than adding kill-switches for the
   interim.
-- [ ] **P2 — Boost and fuel pressure sensors.** Decide how CANary gets them: the
-  ECM cannot supply either. Options to evaluate — an analog pressure sender
-  into an ADC on the Pi, a CAN-output sensor module on the bus, or whatever the
-  UpRev logger can record. Whichever it is, it must share a clock with the
-  capture (same-instant pairing), or boosted fuelling analysis stays blind.
+- [ ] **P2 — Boost and fuel pressure sensors.** The ECM supplies neither.
+  **Decided (operator, 2026-09-21):**
+  - *Fuel pressure* — an **AEM fuel-pressure gauge with CAN output**, on a
+    **second CAN channel** on the Pi (not the vehicle bus). CANary work: bring
+    up the second interface (bitrate per the gauge; it is a separate bus, so the
+    vehicle bus's MCP2515 limits and budget do not apply), decode AEM's CAN
+    frame for pressure into a channel with its own source prefix, record it into
+    the same session, and make it a selectable capture channel so it lands in
+    `tuning` captures and same-instant pairing.
+  - *Boost* — the **supercharger kit's MAP sensor**, read through an **ADC on the
+    Pi**. CANary work: an ADC collector (sample rate, the sensor's
+    voltage→kPa transfer from its datasheet, and a sanity check that it reads
+    baro with the engine off — the NA-era check that MAP must equal baro at
+    KOEO), recorded as a first-class channel.
+  - Both must share the capture clock (monotonic receive time, like the OBD
+    path), or boosted fuelling analysis stays blind to the quantities that
+    define it. Keep transports symmetric: a second CAN channel is a CAN source
+    like `can0`, not a special case.
 - [ ] **P3 — Vehicle data.** New injector K and dead times into
   `afr_calibration.yaml` once known; update the vehicle skill's physical facts
   (injectors, pump, throttle body, intake, boost, and that absolute load

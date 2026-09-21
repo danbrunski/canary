@@ -234,7 +234,11 @@ stop — never waited on.
 * `pass` — interval ≥ 5 s, every capture-selected channel `ok`, the tuple
   completes at the profile's floor without gaps, every recording counter
   verified at zero delta, a clean flush.
-* `fail` — any hard constraint below.
+* `degraded` — the only hard constraint is `acquisition_gap`, and every
+  gapped channel still covered ≥ 90 % (`DEGRADED_MIN_COVERAGE`) of the
+  interval. Usable data with named gaps: both 2026-09-21 tuning drives were
+  called `fail` for a 76 s start-up backoff or two 3 s stalls in 17–25 minutes.
+* `fail` — any other hard constraint below.
 * `unverified` — too short, nothing selected, tuple yield unverifiable
   (`no_round_evidence`), or unknown / reset loss counters. Never a pass.
 
@@ -248,10 +252,10 @@ incident is not proof of the current limiting resource.
 |---|---|---|
 | `unanswered_input` | a selected channel has zero observations over the interval | `{channel: {observations: 0}}`; a missing tuple member is reported here once, not again as a tuple failure |
 | `rate_shortfall` | cadence below 0.9 × requested, or below `min_achieved_rate_hz` for a channel asked for at least that; or the complete-tuple cadence below the floor (`channels: ["__tuple__"]`) | requested / floor, `cadence_hz`, median and p95 interarrival |
-| `acquisition_gap` | a pause-adjusted gap (initial, internal or final) exceeds the threshold; or the complete-tuple series has one | `max_gap_s`, threshold, `missing_initial_s`, `missing_final_s`, `long_gaps` as `[start, end, uncovered]`, `coverage_fraction` |
+| `acquisition_gap` | a pause-adjusted gap (initial, internal or final) exceeds the threshold; or the complete-tuple series has one. Engine-off time is not excluded unless it was an explicit pause: an all-channel silence cannot be told apart from CANary not polling (the C03 case), so a capture stopped long after key-off reads as a gap — usually `degraded`, not `fail` | `max_gap_s`, threshold, `missing_initial_s`, `missing_final_s`, `long_gaps` as `[start, end, uncovered]`, `coverage_fraction` |
 | `tuple_incomplete` | rounds were attempted but none completed (members answered in different rounds) | attempted / complete / `member_misses` |
 | `tuple_skew` | rounds with every member present but spread beyond `max_tuple_skew_s` dominate | `skew_rejected`, `skew.p95_s` / `max_s`, the declared bound |
-| `persistence_loss` | a recording counter's verified delta > 0; a flush error; a drain timeout; `rows_on_disk < rows_written` | the counters' start / stop / delta, or the flush error |
+| `persistence_loss` | a recording counter's verified delta > 0 (`can0.rx_over_errors`, the controller's hardware overflow, is scope `controller`: reported in `losses` and the notes, never a failure — its cost to any channel is already in that channel's cadence and coverage); a flush error; a drain timeout; `rows_on_disk < rows_written` | the counters' start / stop / delta, or the flush error |
 | `unknown_loss_counters` | any recording counter `unknown` or `reset` (soft: verdict `unverified`) | the counters and their status |
 
 Per-channel `status` is `ok` / `missing` / `shortfall` / `gap`.

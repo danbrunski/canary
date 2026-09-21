@@ -265,7 +265,7 @@ export interface CaptureLossScope {
  * stop call, `GET /control/capture/quality`, and persisted beside the data
  * as `capture_quality.json`.
  *
- * `verdict` is `pass` | `fail` | `unverified`. `scope` says what interval
+ * `verdict` is `pass` | `degraded` | `fail` | `unverified`. `scope` says what interval
  * it covers: `live` (arm to now), `stop` (the whole capture, after drain and
  * flush), `recompute` (from the rows), or `trailing_snapshot` (a v1 sidecar:
  * 60 s at stop, not the capture). Absent (`null`) means no sidecar was

@@ -846,3 +846,52 @@ def test_did_context_weight_changes_only_its_own_rate_promise() -> None:
     assert by_name["ECM_AIR_CHARGE"].requested_hz == pytest.approx(20.0)
     rate_failure = next(f for f in quality.failures if f["clause"] == RATE_SHORTFALL)
     assert "ECM_MAF_GPS" not in rate_failure["channels"]
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-21: two usable tuning drives were called "fail"
+# ---------------------------------------------------------------------------
+
+
+def test_short_gaps_in_an_otherwise_complete_capture_are_degraded_not_failed() -> None:
+    """A 20 s stall in a 300 s capture leaves every channel >= 90 % covered."""
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_lifetime(
+            {n: [(0.0, 140.0, 0.25), (160.0, 300.0, 0.25)] for n in CHANNELS}, elapsed=300.0
+        ),
+        tuples=_tuples(1100),
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+    assert ACQUISITION_GAP in _clauses(quality)
+    assert quality.verdict == "degraded"
+    assert any(note.startswith("degraded, not failed") for note in quality.notes)
+
+
+def test_controller_overflow_is_reported_but_does_not_fail_the_capture() -> None:
+    start = {**CLEAN, "can0.rx_over_errors": 113}
+    stop = {**CLEAN, "can0.rx_over_errors": 221}
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(start, stop),
+    )
+    assert PERSISTENCE_LOSS not in _clauses(quality)
+    assert quality.losses["controller"]["lost"] == 108
+    assert any("overflowed 108 frames" in note for note in quality.notes)
+
+
+def test_socket_drops_still_fail_the_capture() -> None:
+    """rx_dropped is CANary not keeping up — a recording loss, unlike controller overflow."""
+    quality = evaluate_capture_quality(
+        profile=_profile(),
+        scheduler=_scheduler(CHANNELS),
+        lifetime=_healthy(),
+        tuples=_tuples(1200),
+        losses=_verified_losses(CLEAN, {**CLEAN, "can0.rx_dropped": 5}),
+    )
+    assert quality.verdict == "fail"
+    assert PERSISTENCE_LOSS in _clauses(quality)

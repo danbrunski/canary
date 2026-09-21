@@ -49,7 +49,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
-from src.collection.capture_losses import RECORDING, RESET, UNKNOWN, VERIFIED, unknown_losses
+from src.collection.capture_losses import (
+    CONTROLLER,
+    RECORDING,
+    RESET,
+    UNKNOWN,
+    VERIFIED,
+    unknown_losses,
+)
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -82,6 +89,14 @@ EXCLUDED_TIERS = frozenset({"dtc", "on_demand"})
 #: different claims.
 MIN_VERIFY_SECONDS = 5.0
 
+#: Coverage a gapped channel must keep for its gaps to make the capture
+#: ``degraded`` rather than ``fail``. Above it the channel delivered nearly the
+#: whole drive and the gaps are named, not disqualifying: both 2026-09-21 tuning
+#: drives "failed" on a 76 s start-up backoff or two 3 s stalls in 17-25 min of
+#: otherwise complete data, which the operator rightly read as usable. Below it
+#: the missing share is large enough to bias any analysis of that channel.
+DEGRADED_MIN_COVERAGE = 0.9
+
 #: Default acquisition skew a complete tuple may span when the profile does
 #: not declare ``max_tuple_skew_s`` and has no target rate to derive it from.
 DEFAULT_MAX_TUPLE_SKEW_S = 0.25
@@ -104,7 +119,9 @@ TUPLE_SKEW = "tuple_skew"
 PERSISTENCE_LOSS = "persistence_loss"
 UNKNOWN_LOSS_COUNTERS = "unknown_loss_counters"
 
-#: Clauses that make the verdict ``fail``; the rest make it ``unverified``.
+#: Clauses that make the verdict ``fail`` (or ``degraded``, for gaps that
+#: leave every channel above ``DEGRADED_MIN_COVERAGE``); the rest make it
+#: ``unverified``.
 HARD_CLAUSES = frozenset(
     {
         UNANSWERED_INPUT,
@@ -915,7 +932,23 @@ def _verdict(
     if not channels:
         notes.append("no capture-selected requests were reported, so nothing could be checked.")
         return "unverified"
-    if any(f["clause"] in HARD_CLAUSES for f in failures):
+    hard = [f for f in failures if f["clause"] in HARD_CLAUSES]
+    if hard:
+        gaps_only = all(f["clause"] == ACQUISITION_GAP for f in hard)
+        by_name = {row.channel: row for row in channels}
+        covered = all(
+            (by_name[c].coverage.get("fraction") or 0.0) >= DEGRADED_MIN_COVERAGE
+            for f in hard
+            for c in f["channels"]
+            if c in by_name
+        )
+        if gaps_only and covered:
+            notes.append(
+                "degraded, not failed: every gapped channel still covered at least "
+                f"{DEGRADED_MIN_COVERAGE:.0%} of the interval; the gaps are named "
+                "in the acquisition_gap evidence."
+            )
+            return "degraded"
         return "fail"
     if failures or any(note.startswith("tuple yield unverified") for note in notes):
         return "unverified"
@@ -1035,6 +1068,13 @@ def evaluate_capture_quality(  # noqa: PLR0913
         notes.append(
             f"dashboard-only sinks dropped {dashboard['lost']} records during the capture; "
             "the freshest state wins there by design and nothing on disk is affected."
+        )
+    controller = loss_summary.get(CONTROLLER) or {}
+    if controller.get("lost"):
+        notes.append(
+            f"the CAN controller overflowed {controller['lost']} frames during the capture "
+            "(can0.rx_over_errors). Reported, not failed: any capture channel it cost shows up "
+            "in that channel's cadence and coverage above."
         )
     if interval.get("paused_s"):
         notes.append(

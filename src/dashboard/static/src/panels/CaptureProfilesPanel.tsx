@@ -401,7 +401,7 @@ export function CaptureProfilesPanel({
           className={`rounded border p-3 text-sm ${
             lastVerdict.verdict === "pass"
               ? "border-ok/50 text-ok"
-              : lastVerdict.verdict === "fail"
+              : lastVerdict.verdict === "fail" || lastVerdict.verdict === "degraded"
                 ? "border-warn/60 text-warn"
                 : "border-border text-fg-dim"
           }`}

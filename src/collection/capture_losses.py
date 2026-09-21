@@ -51,6 +51,13 @@ SINK_SCOPES: dict[str, str] = {
 RECORDING = "recording"
 DASHBOARD = "dashboard"
 DERIVED = "derived"
+#: CAN controller hardware overflow (MCP2515 FIFO): frames lost before the
+#: kernel saw them. Tracks bus burstiness, not CANary's own throughput, and is
+#: separate from socket loss (``can0.rx_dropped``, still ``recording``). Its
+#: effect on a capture's channels is measured directly by their cadence and
+#: coverage, so the verdict reports it rather than failing on it.
+CONTROLLER = "controller"
+_CONTROLLER_COUNTERS = frozenset({"can0.rx_over_errors"})
 
 VERIFIED = "verified"
 RESET = "reset"
@@ -63,6 +70,8 @@ CAN0_LOSS_FIELDS: tuple[str, ...] = ("rx_dropped", "rx_over_errors")
 
 
 def scope_for(counter: str) -> str:
+    if counter in _CONTROLLER_COUNTERS:
+        return CONTROLLER
     sink = counter.split(".", 1)[0]
     return SINK_SCOPES.get(sink, RECORDING)
 
@@ -173,6 +182,7 @@ def unknown_losses() -> dict[str, Any]:
 
 __all__ = [
     "CAN0_LOSS_FIELDS",
+    "CONTROLLER",
     "DASHBOARD",
     "DERIVED",
     "LOSS_FIELDS",
