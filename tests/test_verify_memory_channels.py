@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import yaml
-
-from src.decode.dids import MemoryChannel, MemoryKnownAnswer
-from tools.verify_memory_channels import restamp, verify_channel
+from src.decode.dids import MemoryChannel, MemoryKnownAnswer, load_did_map
+from tools.verify_memory_channels import (
+    ChannelVerdict,
+    plan_restamp,
+    restamp,
+    verify_channel,
+)
 
 
 class _Reply:
@@ -121,35 +124,89 @@ def test_refused_session_fails_rather_than_reporting_agreement() -> None:
     assert "refused" in verdict.reason
 
 
-def test_restamp_touches_only_the_named_channel_and_field(tmp_path: Path) -> None:
-    path = tmp_path / "dids.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {
-                "schema_version": 1,
-                "memory": [
-                    {"name": "A", "verified_tune_revision": "old", "notes": "keep me"},
-                    {"name": "B", "verified_tune_revision": "old"},
-                ],
-            },
-            sort_keys=False,
-        )
+_CATALOG = Path("data/dids.yaml")
+
+
+def _verdict(name: str, outcome: str) -> ChannelVerdict:
+    return ChannelVerdict(name, outcome, "test")  # type: ignore[arg-type]
+
+
+def test_a_window_is_stamped_whole_or_not_at_all() -> None:
+    """The first version stamped only members that passed, which wrote a
+    mixed-calibration window the loader rejects — a catalog the daemon could
+    not load, produced by the tool meant to keep the catalog honest."""
+    channels = load_did_map(_CATALOG).memory
+    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
+
+    stamps, notes = plan_restamp(channels, verdicts, carry_reason=None)
+
+    # fuel_axis holds ECM_FUEL_TARGET_MAP_X_TRACE, which declares no check.
+    assert "ECM_AIR_CHARGE_SLOT_103A" not in stamps
+    assert "ECM_FUEL_TARGET_MAP_X_TRACE" not in stamps
+    assert any("fuel_axis" in note and "cannot mix calibrations" in note for note in notes)
+    # spark and fuel_target are fully checkable, so they go through whole.
+    assert {"ECM_IGNITION_TIMING_RAM", "ECM_ENGINE_SPEED_RAM", "ECM_CAM_MAP_RPM_TRACE"} <= set(
+        stamps
     )
-
-    assert restamp(path, ["A"], "NEW") == 1
-
-    after = yaml.safe_load(path.read_text())
-    assert after["memory"][0]["verified_tune_revision"] == "NEW"
-    assert after["memory"][0]["notes"] == "keep me"
-    assert after["memory"][1]["verified_tune_revision"] == "old"
+    assert all(reason is None for reason in stamps.values())
 
 
-def test_restamp_is_a_noop_when_already_current(tmp_path: Path) -> None:
-    path = tmp_path / "dids.yaml"
-    path.write_text(
-        yaml.safe_dump(
-            {"memory": [{"name": "A", "verified_tune_revision": "NEW"}]}, sort_keys=False
-        )
-    )
+def test_carrying_an_unverifiable_channel_is_recorded_as_such() -> None:
+    channels = load_did_map(_CATALOG).memory
+    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
 
-    assert restamp(path, ["A"], "NEW") == 0
+    stamps, _notes = plan_restamp(channels, verdicts, carry_reason="table-byte-only flash")
+
+    assert stamps["ECM_FUEL_TARGET_MAP_X_TRACE"] == "table-byte-only flash"
+    assert stamps["ECM_AIR_CHARGE_SLOT_103A"] is None  # it was actually verified
+
+
+def test_a_failed_member_blocks_its_whole_window() -> None:
+    channels = load_did_map(_CATALOG).memory
+    verdicts = [
+        _verdict(c.name, "fail" if c.name == "ECM_ENGINE_SPEED_RAM" else "pass")
+        for c in channels
+        if c.known_answer
+    ] + [_verdict(c.name, "unverifiable") for c in channels if not c.known_answer]
+
+    stamps, notes = plan_restamp(channels, verdicts, carry_reason="x")
+
+    assert "ECM_IGNITION_TIMING_RAM" not in stamps  # same window as the failure
+    assert "ECM_TARGET_EQUIV_RATIO" in stamps  # a different window is unaffected
+    assert any("spark" in note and "failed" in note for note in notes)
+
+
+def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
+    tmp_path: Path,
+) -> None:
+    """Rehearsal of the post-flash step on a copy of the shipped file.
+
+    A yaml.safe_dump round-trip here would delete the reasoning this file
+    carries in comments — the same loss the capture-profile catalogs took.
+    """
+    copy = tmp_path / "dids.yaml"
+    copy.write_text(_CATALOG.read_text())
+    comments_before = sum(1 for line in copy.read_text().splitlines() if "#" in line)
+    channels = load_did_map(copy).memory
+    verdicts = [_verdict(c.name, "pass" if c.known_answer else "unverifiable") for c in channels]
+    stamps, _notes = plan_restamp(channels, verdicts, carry_reason="table-byte-only flash")
+
+    changed = restamp(copy, stamps, "ZS44A-20260920")
+
+    assert changed == len(channels)
+    after = load_did_map(copy)  # must still load: no mixed windows
+    assert {c.verified_tune_revision for c in after.memory} == {"ZS44A-20260920"}
+    carried = {c.name for c in after.memory if c.revision_carried_reason}
+    assert carried == {"ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_THROTTLE_MAP_X_TRACE"}
+    assert sum(1 for line in copy.read_text().splitlines() if "#" in line) == comments_before
+    # and only the memory section moved: every DID entry is byte-identical
+    assert copy.read_text().split("\nmemory:")[0] == _CATALOG.read_text().split("\nmemory:")[0]
+
+
+def test_restamp_is_idempotent(tmp_path: Path) -> None:
+    copy = tmp_path / "dids.yaml"
+    copy.write_text(_CATALOG.read_text())
+    stamps = {c.name: None for c in load_did_map(copy).memory}
+
+    assert restamp(copy, stamps, "ZS44A-20260920") == len(stamps)
+    assert restamp(copy, stamps, "ZS44A-20260920") == 0

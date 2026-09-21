@@ -1299,6 +1299,17 @@ memory:
     plausible_max: 20000
     verified_tune_revision: ZS44A-k106
     window: fuel_target
+    known_answer:
+      did: 0x1201
+      relation: reciprocal_did
+      constant: 500000
+      tolerance: 3
+      min_agreement: 0.85
+      notes: >
+        500000 / word is coarse rpm in DID counts (12.5 rpm each): the
+        2026-09-20 highway sweep fit it at slope 0.999007 over 2,499 pairs.
+        3 counts = 37.5 rpm, which covers the DID's own quantization plus the
+        ~1.5 ms between the two reads.
     evidence:
       - session: can-memory-ffff26a0-63-fuel-dids-highway
         method: same_reply_transform_vs_did_1201
@@ -1439,6 +1450,19 @@ memory:
     plausible_max: 8000.0
     verified_tune_revision: ZS44A-k106
     window: spark
+    known_answer:
+      did: 0x1201
+      relation: linear_did
+      word_scale: 50.0
+      did_scale: 12.5
+      tolerance: 75.0
+      min_agreement: 0.85
+      notes: >
+        Inside the map's axis range the trace is rpm in 50-rpm steps. Held on
+        1,200/1,200 reads over 750-1,537 rpm and 3,000/3,000 at idle, while
+        the same relation applied to the other 62 bytes of the window had a
+        median pass rate of 0% -- so it can actually fail. It will
+        legitimately disagree above the axis ceiling, where the trace clamps.
     evidence:
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
@@ -1493,6 +1517,17 @@ memory:
     plausible_min: 0.0
     plausible_max: 8000.0
     verified_tune_revision: ZS44A-k106
+    known_answer:
+      did: 0x1201
+      relation: linear_did
+      word_scale: 3.124834
+      did_scale: 12.5
+      tolerance: 40.0
+      min_agreement: 0.85
+      notes: >
+        WEAKER than the cam-trace check: validated 1,200/1,200 but only at
+        idle (reference 750-775 rpm), so it shows the address still holds an
+        rpm-like value, not that the scale is right across the range.
     evidence:
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
@@ -1511,6 +1546,17 @@ memory:
     confidence: hypothesized
     verified_tune_revision: ZS44A-k106
     window: fuel_axis
+    known_answer:
+      did: 0x1208
+      relation: linear_did
+      word_scale: 1.0
+      did_scale: 1.0
+      relative_tolerance: 0.01
+      min_agreement: 0.90
+      notes: >
+        Within 1% of air charge on 994/998 reads while revving and 1,999/1,999
+        at idle. That establishes the REGION holds air charge; it does not
+        say which of the three slots is the register.
   - name: ECM_AIR_CHARGE_SLOT_103A
     address: 0xFFFF103A
     length: 2
@@ -1518,6 +1564,17 @@ memory:
     confidence: hypothesized
     verified_tune_revision: ZS44A-k106
     window: fuel_axis
+    known_answer:
+      did: 0x1208
+      relation: linear_did
+      word_scale: 1.0
+      did_scale: 1.0
+      relative_tolerance: 0.01
+      min_agreement: 0.90
+      notes: >
+        Within 1% of air charge on 994/998 reads while revving and 1,999/1,999
+        at idle. That establishes the REGION holds air charge; it does not
+        say which of the three slots is the register.
   - name: ECM_AIR_CHARGE_SLOT_103C
     address: 0xFFFF103C
     length: 2
@@ -1525,3 +1582,14 @@ memory:
     confidence: hypothesized
     verified_tune_revision: ZS44A-k106
     window: fuel_axis
+    known_answer:
+      did: 0x1208
+      relation: linear_did
+      word_scale: 1.0
+      did_scale: 1.0
+      relative_tolerance: 0.01
+      min_agreement: 0.90
+      notes: >
+        Within 1% of air charge on 994/998 reads while revving and 1,999/1,999
+        at idle. That establishes the REGION holds air charge; it does not
+        say which of the three slots is the register.

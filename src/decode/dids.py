@@ -208,6 +208,13 @@ class MemoryKnownAnswer(_Strict):
     * ``equals_did`` — the RAM word and the DID are the same register. This
       is the relation for an address found by sweeping against a DID that
       already carries the quantity.
+    * ``linear_did`` — ``word * word_scale`` and ``did_raw * did_scale`` are
+      the same quantity in engineering units, within ``tolerance`` (absolute)
+      or ``relative_tolerance``. For a RAM value that is a differently-scaled
+      or quantized view of a DID — a map-axis rpm trace in 50-rpm steps
+      against a 12.5-rpm DID.
+    * ``reciprocal_did`` — ``constant / word`` equals ``did_raw`` within
+      ``tolerance`` counts. For a period counter checked against a speed.
 
     ``min_agreement`` exists because exactness and acquisition skew are
     different things. The memory read and the cross-check DID are two
@@ -219,13 +226,35 @@ class MemoryKnownAnswer(_Strict):
     """
 
     did: int = Field(ge=0, le=0xFFFF)
-    relation: Literal["clamped_high_byte", "equals_did"]
+    relation: Literal["clamped_high_byte", "equals_did", "linear_did", "reciprocal_did"]
     floor: int = Field(default=0, ge=0, le=0xFFFF)
+    #: ``linear_did``: engineering units per RAM count / per DID count.
+    word_scale: float | None = None
+    did_scale: float | None = None
+    #: ``reciprocal_did``: the numerator, in DID counts x RAM counts.
+    constant: float | None = None
+    #: Allowed disagreement — absolute (engineering units for ``linear_did``,
+    #: DID counts for ``reciprocal_did``) and/or a fraction of the DID value.
+    tolerance: float | None = Field(default=None, ge=0)
+    relative_tolerance: float | None = Field(default=None, ge=0, le=1)
     #: Fraction of reads that must satisfy the relation. Below 1.0 only
     #: where acquisition skew makes exactness unreachable; see the class
     #: docstring.
     min_agreement: float = Field(default=1.0, gt=0.0, le=1.0)
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _relation_has_its_parameters(self) -> MemoryKnownAnswer:
+        """A relation missing its numbers would silently accept anything."""
+        if self.relation == "linear_did":
+            if self.word_scale is None or self.did_scale is None:
+                raise ValueError("linear_did requires word_scale and did_scale")
+            if self.tolerance is None and self.relative_tolerance is None:
+                raise ValueError("linear_did requires tolerance or relative_tolerance")
+        if self.relation == "reciprocal_did":
+            if self.constant is None or self.tolerance is None:
+                raise ValueError("reciprocal_did requires constant and tolerance")
+        return self
 
 
 class MemoryChannel(_Strict):
@@ -277,6 +306,12 @@ class MemoryChannel(_Strict):
     sentinel_meaning: str | None = None
     #: How to prove this address still holds this quantity after a reflash.
     known_answer: MemoryKnownAnswer | None = None
+    #: Set when ``verified_tune_revision`` was stamped WITHOUT a known-answer
+    #: check, with the operator's reason. "Verified" and "carried across a
+    #: flash on an argument" are different facts, and a stamp that hides the
+    #: difference turns the second into the first the next time someone reads
+    #: the catalog.
+    revision_carried_reason: str | None = None
     #: Read this channel in one request with every other channel naming the
     #: same window.
     #:
@@ -416,6 +451,14 @@ def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
         return did_raw == max(known.floor, word >> 8)
     if known.relation == "equals_did":
         return did_raw == word
+    if known.relation == "linear_did":
+        assert known.word_scale is not None and known.did_scale is not None
+        reference = did_raw * known.did_scale
+        allowed = max(known.tolerance or 0.0, (known.relative_tolerance or 0.0) * abs(reference))
+        return abs(word * known.word_scale - reference) <= allowed
+    if known.relation == "reciprocal_did":
+        assert known.constant is not None and known.tolerance is not None
+        return word > 0 and abs(known.constant / word - did_raw) <= known.tolerance
     raise ValueError(f"unhandled known-answer relation {known.relation!r}")
 
 

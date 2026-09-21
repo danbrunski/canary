@@ -469,3 +469,32 @@ def test_a_windowed_request_with_no_selected_member_is_refused(monkeypatch) -> N
         assert verdict.reason == "not_selected"
     finally:
         tuning_profile.set_active(False)
+
+
+def test_a_capture_payload_names_the_memory_channels_it_will_not_get() -> None:
+    """A withheld channel used to be one log line at boot.
+
+    After a reflash every memory channel is withheld until re-verified, and a
+    capture that silently lost all of them looks exactly like a healthy one.
+    """
+    from src.collection import tuning_profile
+    from src.collection.capture_profiles import CaptureProfile
+
+    tuning_profile.configure_memory_state(
+        {"ECM_TARGET_EQUIV_RATIO": "ZS44A-k106"}, "ZS44A-20260920"
+    )
+    tuning_profile.activate(
+        CaptureProfile(
+            name="research",
+            memory=("ECM_TARGET_EQUIV_RATIO", "ECM_ENGINE_PERIOD"),
+            storage_prefix="_capture-research",
+        )
+    )
+    try:
+        payload = tuning_profile.snapshot()
+        assert payload["running_tune_revision"] == "ZS44A-20260920"
+        assert [w["channel"] for w in payload["memory_withheld"]] == ["ECM_TARGET_EQUIV_RATIO"]
+        assert payload["memory_withheld"][0]["verified_on"] == "ZS44A-k106"
+    finally:
+        tuning_profile.set_active(False)
+        tuning_profile.configure_memory_state({}, None)

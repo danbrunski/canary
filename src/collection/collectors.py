@@ -151,6 +151,10 @@ def default_collectors(
         usable_memory, withheld_memory = memory_channels_for_revision(
             catalog_memory, None if current is None else current.revision
         )
+        tuning_profile.configure_memory_state(
+            {c.name: c.verified_tune_revision for c in withheld_memory},
+            None if current is None else current.revision,
+        )
         if withheld_memory:
             log.warning(
                 "memory channels withheld: verified on another calibration",

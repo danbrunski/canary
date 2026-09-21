@@ -625,7 +625,14 @@ profiles:
     only to settle, at steady cruise, which slot mirrors DID 0x1208; they are not
     telemetry. All-DID and continuous, so no Mode 01: short-term trim is not available
     here, and closed-loop fuelling is read from the A/F sensors against the commanded
-    target plus the learned long-term cells.'
+    target plus the learned long-term cells.
+
+
+    DIDs 0x1134 and 0x1201 ride along at 1 Hz for one reason: they are the cross-check
+    side of the memory channels'' known-answer relations, so a capture carries the
+    evidence needed to re-verify its own RAM addresses after the fact. The 2026-09-21
+    drive needed exactly that -- the truck had been reflashed the night before and
+    there was no time to run the verifier first.'
   experimental: true
   mode01: {}
   mode01_batch_groups: []
@@ -647,12 +654,16 @@ profiles:
   - ECM_INTAKE_AIR_TEMP_1106
   - ECM_COOLANT_TEMP
   - ECM_VEHICLE_SPEED
+  - ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE
+  - ECM_RPM_COARSE
   mode22_rate_weights:
     ECM_LONG_FUEL_TRIM_B1: 0.125
     ECM_LONG_FUEL_TRIM_B2: 0.125
     ECM_INTAKE_AIR_TEMP_1106: 0.125
     ECM_COOLANT_TEMP: 0.125
     ECM_VEHICLE_SPEED: 0.125
+    ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE: 0.125
+    ECM_RPM_COARSE: 0.125
   memory:
   - ECM_TARGET_EQUIV_RATIO
   - ECM_ENGINE_PERIOD
@@ -674,7 +685,7 @@ profiles:
   did_continuous: true
   bus_budget_override: 184.0
   priority_channels: null
-  expected_total_demand_hz: 141.0
+  expected_total_demand_hz: 143.0
   capacity_evidence: 12 fast DIDs x 8 Hz + 5 slow x 1 Hz + 5 memory windows x 8 Hz
     = 141 req/s. The H8 drive sustained 116.8 req/s with the daemon doing Mode 01
     as well; back-to-back DID reads measured 649 req/s on 2026-09-21. Memory reads

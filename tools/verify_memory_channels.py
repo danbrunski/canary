@@ -33,6 +33,8 @@ then fail::
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -47,6 +49,7 @@ from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.config import CanaryConfig
 from src.decode.dids import (
+    DidMap,
     MemoryChannel,
     apply_memory_scaling,
     check_known_answer,
@@ -174,20 +177,106 @@ def verify_channel(
     return ChannelVerdict(channel.name, "pass", reason, observed, agreements, sentinels)
 
 
-def restamp(dids_path: Path, passed: Sequence[str], revision: str) -> int:
-    """Rewrite `verified_tune_revision` for the channels that passed.
+class RestampRefusedError(ValueError):
+    """The requested stamp would leave the catalog invalid or dishonest."""
 
-    Edits only that one field, and only on named channels, so a hand-written
-    catalog keeps everything else it says.
+
+def _channel_block(text: str, name: str) -> tuple[int, int]:
+    """Span of one ``memory:`` entry in the catalog text, by channel name."""
+    match = re.search(rf"^  - name: {re.escape(name)}[ \t]*$", text, flags=re.MULTILINE)
+    if match is None:
+        raise RestampRefusedError(f"no memory channel named {name} in the catalog text")
+    following = re.search(r"^  - name: ", text[match.end() :], flags=re.MULTILINE)
+    end = match.end() + following.start() if following else len(text)
+    return match.start(), end
+
+
+def plan_restamp(
+    channels: Sequence[MemoryChannel],
+    verdicts: Sequence[ChannelVerdict],
+    *,
+    carry_reason: str | None,
+) -> tuple[dict[str, str | None], list[str]]:
+    """Decide what may be stamped: ``{channel: carried_reason_or_None}``, notes.
+
+    Stamping is per WINDOW, because a window is one read and the loader
+    refuses one that mixes calibrations. Stamping only the members that
+    passed would therefore write a catalog the daemon cannot load — which is
+    what the first version of this tool did.
+
+    A window is stamped when every member that declares a check passed. Its
+    members with no check are stamped only under an explicit
+    ``carry_reason``, and that reason is recorded on them: "verified" and
+    "carried across a flash on an argument" are different facts.
     """
-    document = yaml.safe_load(dids_path.read_text())
+    by_name = {v.channel: v for v in verdicts}
+    groups: dict[str, list[MemoryChannel]] = {}
+    for channel in channels:
+        groups.setdefault(channel.window or f"\x00{channel.name}", []).append(channel)
+
+    stamps: dict[str, str | None] = {}
+    notes: list[str] = []
+    for key, members in groups.items():
+        label = key if not key.startswith("\x00") else members[0].name
+        outcomes = {m.name: by_name[m.name].outcome for m in members if m.name in by_name}
+        if len(outcomes) != len(members):
+            notes.append(f"{label}: not every member was checked this run; left unstamped")
+            continue
+        if any(o == "fail" for o in outcomes.values()):
+            notes.append(f"{label}: a member failed its check; left unstamped")
+            continue
+        unverifiable = [n for n, o in outcomes.items() if o == "unverifiable"]
+        if unverifiable and carry_reason is None:
+            notes.append(
+                f"{label}: {', '.join(unverifiable)} declare no check, and a window "
+                "cannot mix calibrations; left unstamped (pass --carry-unverifiable "
+                "with a reason to stamp them on an argument instead of a measurement)"
+            )
+            continue
+        for member in members:
+            stamps[member.name] = carry_reason if member.name in unverifiable else None
+    return stamps, notes
+
+
+def restamp(dids_path: Path, stamps: dict[str, str | None], revision: str) -> int:
+    """Stamp ``revision`` onto the named channels by editing the catalog TEXT.
+
+    Text, not ``yaml.safe_dump``: this file carries the project's reasoning
+    in comments, and a dump round-trip deletes all of it (the capture-profile
+    catalogs lost 64 comment blocks that way). The edited text is parsed and
+    validated before anything is written, so a stamp can never produce a
+    catalog the daemon refuses to load.
+    """
+    text = dids_path.read_text()
     changed = 0
-    for entry in document.get("memory") or []:
-        if entry.get("name") in passed and entry.get("verified_tune_revision") != revision:
-            entry["verified_tune_revision"] = revision
+    for name, carried in stamps.items():
+        begin, end = _channel_block(text, name)
+        block = text[begin:end]
+        updated = re.sub(
+            r"^(    verified_tune_revision:)[ \t]*.*$",
+            rf"\g<1> {revision}",
+            block,
+            count=1,
+            flags=re.MULTILINE,
+        )
+        updated = re.sub(
+            r"^    revision_carried_reason:.*\n", "", updated, count=1, flags=re.MULTILINE
+        )
+        if carried is not None:
+            line = f"    revision_carried_reason: {json.dumps(carried)}\n"
+            head, sep, tail = updated.partition("    verified_tune_revision:")
+            stamp_line, newline, rest = tail.partition("\n")
+            updated = head + sep + stamp_line + newline + line + rest
+        if updated != block:
+            text = text[:begin] + updated + text[end:]
             changed += 1
-    if changed:
-        atomic_write_text(dids_path, yaml.safe_dump(document, sort_keys=False))
+    if not changed:
+        return 0
+    try:
+        DidMap.model_validate(yaml.safe_load(text))
+    except Exception as exc:  # pydantic/YAML: either way the stamp must not land
+        raise RestampRefusedError(f"the stamped catalog would not load: {exc}") from exc
+    atomic_write_text(dids_path, text)
     return changed
 
 
@@ -233,6 +322,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=(
             "On success, stamp this tune revision onto every channel that passed. "
             "Omit for a read-only check."
+        ),
+    )
+    parser.add_argument(
+        "--carry-unverifiable",
+        default=None,
+        metavar="REASON",
+        help=(
+            "Also stamp window members that declare no known-answer check, recording "
+            "REASON on them. For a flash known to change only table bytes."
         ),
     )
     parser.add_argument("--daemon-url", default="http://localhost:8000")
@@ -296,9 +394,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for verdict in verdicts:
         print(verdict.render())
 
-    passed = [v.channel for v in verdicts if v.outcome == "pass"]
     failed = [v.channel for v in verdicts if v.outcome == "fail"]
-    skipped = [v.channel for v in verdicts if v.outcome == "unverifiable"]
     if args.record_revision:
         if failed:
             print(
@@ -309,13 +405,18 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
         else:
-            changed = restamp(args.dids, passed, args.record_revision)
+            stamps, notes = plan_restamp(channels, verdicts, carry_reason=args.carry_unverifiable)
+            try:
+                changed = restamp(args.dids, stamps, args.record_revision)
+            except RestampRefusedError as exc:
+                print(f"not recording: {exc}", file=sys.stderr)
+                return 1
             print(f"stamped {changed} channel(s) as verified on {args.record_revision}")
-            if skipped:
-                print(
-                    "left unstamped (no declared check): " + ", ".join(skipped),
-                    file=sys.stderr,
-                )
+            carried = sorted(name for name, reason in stamps.items() if reason is not None)
+            if carried:
+                print("  carried without a check: " + ", ".join(carried))
+            for note in notes:
+                print(f"  {note}", file=sys.stderr)
 
     return 1 if failed else 0
 

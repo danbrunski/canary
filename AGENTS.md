@@ -244,6 +244,16 @@ reported `started: 0` for a 25-minute all-DID capture with 18k samples per
 channel — the `tuning-did` profile disables Mode 01, so commanded AFR was
 absent by construction. It now refuses and names the cause.
 
+## Restarting the daemon on the Pi
+
+Use `scripts/restart_canary.sh`, never a bare `systemctl restart canary`. It
+refuses while a capture is active. Capture state is deliberately ephemeral, so
+a restart silently drops the daemon back to `default` and the rest of the drive
+is recorded without the capture — on 2026-09-21 one agent's deploy ended
+another agent's tuning capture four minutes into a drive, and nothing reported
+it. `--force` exists for when ending the capture is the intent; it names what
+it killed.
+
 ## Roadmap docs & task truth
 
 Planned work lives in `docs/roadmap/` as checklist docs; **task-level
