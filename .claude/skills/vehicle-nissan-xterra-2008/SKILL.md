@@ -25,6 +25,15 @@ different ECU.** Generic method belongs in `ecu-reverse-engineering` /
 `engine-management`; if you learn something here that is true of ECUs in
 general, put it there instead.
 
+## Planned: supercharger build (from late 2026-09)
+
+The engine is about to change: Z1 Level 2 supercharger (Harrop HTV1900),
+Aeromotive 340 pump assembly, Bosch 700 cc injectors, 75 mm throttle body, and a cone
+intake. **Check which side of that boundary a session is on before comparing
+anything.** NA baselines, open questions, and the first-start plan are in
+`docs/roadmap/supercharger-build.md`. Boost and fuel pressure are not readable
+from this ECM (PIDs 0x0B, 0x0A, 0x22, 0x23, 0x59, 0x43 all unsupported).
+
 ## Canonical homes — check these before trusting anything below
 
 Values drift; data files are the truth. This file exists for facts that have no
