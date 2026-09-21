@@ -48,7 +48,6 @@ from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig
-from src.decode.dids import memory_channels_for_revision
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -138,31 +137,19 @@ def default_collectors(
                 ]
             )
         )
-        # A RAM address is only valid for the ROM build it was found in, so
-        # the running calibration decides which memory channels may be polled
-        # at all. Withheld ones are named in the log rather than dropped --
-        # "the tune moved" and "none configured" demand opposite responses.
+        # RAM addresses belong to the ECU's program code, which the flashes
+        # made on this vehicle do not change (operator, 2026-09-21: a
+        # 2026-09-20 table-edit flash left every address in place, confirmed
+        # by tools.verify_memory_channels). So channels are not gated on the
+        # running tune revision; the known-answer verify is the evidence check
+        # for a moved address, run on demand.
         selected_memory = tuple(
             dict.fromkeys(name for profile in capture_catalog.profiles for name in profile.memory)
         )
-        catalog_memory = [c for c in memory_channels() if c.name in selected_memory]
+        usable_memory = [c for c in memory_channels() if c.name in selected_memory]
         registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
         current = None if registry is None else registry.at(datetime.now(UTC))
-        usable_memory, withheld_memory = memory_channels_for_revision(
-            catalog_memory, None if current is None else current.revision
-        )
-        tuning_profile.configure_memory_state(
-            {c.name: c.verified_tune_revision for c in withheld_memory},
-            None if current is None else current.revision,
-        )
-        if withheld_memory:
-            log.warning(
-                "memory channels withheld: verified on another calibration",
-                extra={
-                    "running_tune_revision": None if current is None else current.revision,
-                    "withheld": {c.name: c.verified_tune_revision for c in withheld_memory},
-                },
-            )
+        tuning_profile.configure_memory_state({}, None if current is None else current.revision)
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
             poll_rate_hz=config.collection.obd_poll_rate_hz,
