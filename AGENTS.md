@@ -278,22 +278,29 @@ reported `started: 0` for a 25-minute all-DID capture with 18k samples per
 channel — the `tuning-did` profile disables Mode 01, so commanded AFR was
 absent by construction. It now refuses and names the cause.
 
-## RAM channels are calibration-specific
+## RAM (memory) channels
 
 `data/dids.yaml` has a `memory:` catalog beside `dids:` — service-0x23
 (ReadMemoryByAddress) channels, stored as `mem:<NAME>`. They exist because
 some quantities are not DIDs at all: the ECM's final commanded equivalence
 ratio lives at a RAM address, which is why 138 answering DIDs never found it.
 
-- **A DID number is a contract; a RAM address is an artifact of one ROM
-  build.** Every memory channel carries `verified_tune_revision`, and the
-  daemon *withholds* any channel verified on a different calibration than the
-  one running — reading a moved address silently decodes whatever now lives
-  there. After a flash, run `python -m tools.verify_memory_channels
-  --record-revision <rev>`; it re-checks each address against its declared
-  `known_answer` relation and restamps window by window. A capture's payload
-  lists `memory_withheld`, so check it before trusting that a capture has its
-  memory channels.
+- **Addresses belong to the ECU's program, not its calibration.** The
+  flashes made on this vehicle rewrite calibration tables; they do not move
+  RAM, so a reflash does not invalidate a memory channel (operator,
+  2026-09-21). The daemon used to withhold every channel whose
+  `verified_tune_revision` differed from the running calibration, and that
+  blinded a whole tuning drive the morning after a flash. It no longer
+  does (`6ef51b4`). `verified_tune_revision` is now provenance only: which
+  calibration the address was *checked* on. A different *program* (another
+  ECU, or an OS/software-number change) is a different memory map. Re-verify
+  before trusting the channels there.
+- **Verify against known answers, not by stamp.** `python -m
+  tools.verify_memory_channels` re-reads each address and checks it against
+  its declared `known_answer` relation (`clamped_high_byte`, `equals_did`,
+  `linear_did`, `reciprocal_did`). `--record-revision <rev>` restamps the
+  provenance, window by window. Run it when a channel looks wrong, not as a
+  ritual after every flash.
 - **Windows are the only same-instant multi-channel read on this ECM.** It
   refuses batched Mode 22 and every dynamic-identifier service on CAN (0xAC,
   0x2A, 0x2C — all tested 2026-09-20), so two DIDs are always two requests

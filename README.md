@@ -57,8 +57,8 @@ detecting subtle signs of trouble before they become failures.
   same-instant multi-field windows for quantities that are not DIDs (the ECM's
   commanded target AFR, ROM map-cell traces), delivery-error and fuel-trim
   surface analysis with explicit gates and noise floors, a tune-revision
-  registry, and a ROM table viewer. RAM addresses are stamped with the
-  calibration they were verified on and withheld on any other.
+  registry, and a ROM table viewer. Each RAM address records the calibration
+  it was checked on, and a known-answer relation re-verifies it on demand.
 - **Local dashboard** — FastAPI + WebSocket, accessible only over the vehicle's LAN.
 - **MCP server** — the daemon's read/control surface exposed to MCP-speaking
   agents (Claude Code and others), including ad-hoc SQL over the Parquet

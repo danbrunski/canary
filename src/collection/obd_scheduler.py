@@ -266,11 +266,7 @@ def did_access() -> DidAccess | None:
 def memory_channels() -> tuple[MemoryChannel, ...]:
     """Every service-0x23 channel in the catalog, unfiltered.
 
-    Filtering to the running calibration is the caller's job
-    (:func:`src.decode.dids.memory_channels_for_revision`) precisely because
-    it needs the answer to be *reportable*: a channel withheld because the
-    tune moved and a channel that was never configured look identical once
-    one of them has been silently dropped.
+    Selecting the ones a capture profile names is the caller's job.
     """
     did_map = _load_did_map()
     return () if did_map is None else tuple(did_map.memory)
@@ -486,8 +482,8 @@ class CanObdSpec:
     #: scheduler never re-reads the YAML itself. Empty by default (no
     #: ``data/custom_pids.yaml`` is the common case).
     custom_pids: tuple[CustomPid, ...] = ()
-    #: Service-0x23 channels, already filtered to the running calibration
-    #: by the caller (``memory_channels_for_revision``). Threaded through
+    #: Service-0x23 channels, already filtered to those a capture profile
+    #: names by the caller. Threaded through
     #: like ``custom_pids``; the scheduler never reads the catalog itself.
     memory: tuple[MemoryChannel, ...] = ()
     #: Channels that win a contended request slot while due, so they hold

@@ -1190,17 +1190,21 @@ dids:
 # ---------------------------------------------------------------------------
 # Service 0x23 (ReadMemoryByAddress) channels.
 #
-# These are RAM addresses, not identifiers. A DID number is a contract the
-# ECU keeps across calibrations; an address is an artifact of one ROM build's
-# memory layout, so every entry must name the calibration it was verified
-# against and the collector withholds it on any other. The request form is
+# These are RAM addresses, not identifiers. An address belongs to the ECU's
+# program, not its calibration: the flashes made on this vehicle change
+# tables, not the RAM layout, so a channel stays live across a reflash
+# (operator, 2026-09-21). `verified_tune_revision` records which calibration
+# the address was checked on, as provenance only. The collector does not gate
+# on it. `known_answer` is what re-verifies an address
+# (tools.verify_memory_channels). A different ECU program is a different
+# memory map; verify there before trusting any of these. The request form is
 # vehicle-verified too: on this ECM only the KWP32 body (32-bit address +
 # 16-bit length) is accepted -- the KWP24 and UDS-ALFID forms both answer
 # NRC 0x12 (2026-09-20).
 #
 # Reads only. Service 0x3D (WriteMemoryByAddress) is not implemented here and
-# must not be: the no-reflash line in AGENTS.md is about the ECU's
-# non-volatile memory, and a memory write is the shortest path across it.
+# must not be: AGENTS.md puts conditions on any write to the ECU's
+# non-volatile memory, and a memory write is the shortest path across them.
 # ---------------------------------------------------------------------------
 memory:
   - name: ECM_TARGET_EQUIV_RATIO
@@ -1273,8 +1277,8 @@ memory:
 
       DID 0x1134 is the low-resolution, floor-clamped rich-side view of this
       same quantity and holds at raw 64 during fuel cut, so it cannot tell
-      fuel cut from stoich. Use 0x1134 only when this channel is withheld,
-      and never present it as the final target.
+      fuel cut from stoich. Use 0x1134 only when this channel was not
+      polled, and never present it as the final target.
 
       The address is specific to this ROM/calibration. Do not copy it into
       shared code or assume another ECU exposes the same map.
@@ -1437,7 +1441,8 @@ memory:
   # --- ROM table-axis traces: which cell of each map the ECM is reading ---
   # From UpRev's own stream definition; conversions pinned against its CSV
   # display on 2026-09-20 (405 rows). These are coordinates into the ROM
-  # tables, so they are the most calibration-specific channels in this file.
+  # tables: the address is program RAM, but what the value means depends on
+  # the loaded ROM's axis breakpoints, so read them against the ROM that ran.
   - name: ECM_CAM_MAP_RPM_TRACE
     address: 0xFFFF11CA
     length: 1

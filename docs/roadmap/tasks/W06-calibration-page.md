@@ -2,16 +2,18 @@
 
 Roadmap task W9. Depends on W01, W02.
 
-Which ROM is running, the flash history, and whether each RAM address is still
-trusted on it. On 2026-09-21 the truck had been reflashed the night before;
-once that revision reached the Pi's registry every memory channel would have
-been withheld, silently, and the only way to know was to read a YAML file. This
-page is that fact as one red row.
+Which ROM is running, the flash history, and the evidence behind each RAM
+address. Addresses are program RAM and survive calibration flashes (operator,
+2026-09-21), so the daemon no longer withholds channels on a revision change
+(`6ef51b4`); `verified_tune_revision` is provenance. What this page adds is the
+evidence check: re-run each channel's known-answer relation and show the result,
+so a wrong or moved address (a different ECU program, or a bad find in the
+first place) is one red row rather than a plausible-looking number.
 
 **Files:** new `panels/tuning/CalibrationPage.tsx`. Backend:
 `src/analysis/tune_revisions.py` (`TuneRevisionRegistry`, `load_tune_revisions`,
 `.at()`), `data/<profile>/tune_revisions.yaml`, `src/decode/dids.py`
-(`MemoryChannel`, `memory_channels_for_revision`, `plan_memory_reads`),
+(`MemoryChannel`, `plan_memory_reads`),
 `tools/verify_memory_channels.py` (`verify_channel`, `plan_restamp`, `restamp`).
 
 ## Backend
@@ -23,11 +25,11 @@ page is that fact as one red row.
 - [ ] **W06.2 — `GET /control/memory-channels`.** Per catalogued channel: name,
   address, window, `verified_tune_revision`, `revision_carried_reason`, the
   declared `known_answer` relation (or none), and a computed `state`:
-  `verified` (stamped on the running revision by a passed check), `carried`
-  (stamped on it with a recorded reason and no check), `withheld` (stamped on
-  another revision), or `unverifiable` (declares no check, so it can only ever
-  be carried). These are four different facts and the page must not merge any
-  two of them.
+  `verified` (last checked on the running revision and passed), `checked
+  earlier` (passed on another revision — expected after a calibration flash,
+  informational, still polled), `carried` (stamped with a recorded reason and
+  no check), or `unverifiable` (declares no check). None of these gates
+  polling; they are evidence, and the page must not merge any two of them.
 - [ ] **W06.3 — Move the verifier's core out of `tools/`.** `verify_channel`,
   `plan_restamp` and `restamp` become a module under `src/` that both the CLI
   and the daemon import; the CLI keeps its interface. The daemon must not shell
@@ -79,7 +81,8 @@ page is that fact as one red row.
 
 ## Done when
 
-After a flash is recorded, every memory channel shows `withheld`; one re-verify
-and one record action return the checkable ones to `verified`; the carried ones
+After a flash is recorded, every memory channel shows `checked earlier` and
+keeps polling; one re-verify and one record action return the checkable ones to
+`verified`, a failing one says its address has probably moved; the carried ones
 display their reason; and none of it needed a shell. *Truck check:* run it
 against a real flash boundary — `ZS44A-20260920` is waiting.

@@ -33,12 +33,9 @@ _session_dir: str | None = None
 _source = "default"
 _did_channels: dict[str, str] = {}
 _configured = False
-#: Memory channels the daemon refused to poll, ``{name: verified_on}``, and the
-#: calibration it resolved as running. Set once at collector start-up. Kept
-#: here so the capture payload can say so: a withheld channel is otherwise one
-#: log line at boot, and a capture that silently lost every memory window
-#: looks exactly like a healthy one.
-_memory_withheld: dict[str, str] = {}
+#: The calibration the tune-revision registry resolved as running at collector
+#: start-up, reported in the capture payload. Provenance only: memory channels
+#: are not gated on it (RAM addresses survive reflashes on this program).
 _running_tune_revision: str | None = None
 #: Polling suspended while a capture stays open. Process state, like the
 #: active profile: a restart resumes collecting rather than coming back up
@@ -67,11 +64,10 @@ def is_configured() -> bool:
         return _configured
 
 
-def configure_memory_state(withheld: dict[str, str], running_tune_revision: str | None) -> None:
-    """Record which memory channels were withheld, and against which tune."""
-    global _memory_withheld, _running_tune_revision
+def configure_running_tune_revision(running_tune_revision: str | None) -> None:
+    """Record which calibration the registry says is running."""
+    global _running_tune_revision
     with _lock:
-        _memory_withheld = dict(withheld)
         _running_tune_revision = running_tune_revision
 
 
@@ -560,21 +556,7 @@ def snapshot(achieved_hz: dict[str, float] | None = None) -> dict[str, Any]:
             # Kept alongside `mode01` for consumers that only want the names.
             "channels": sorted(_profile.mode01),
             "paused": _paused,
-            # An empty result must say which kind of empty it is: these are
-            # channels this profile ASKED for and will not get, with why.
             "running_tune_revision": _running_tune_revision,
-            "memory_withheld": [
-                {
-                    "channel": name,
-                    "verified_on": _memory_withheld[name],
-                    "reason": (
-                        "address verified on another calibration; run "
-                        "tools.verify_memory_channels --record-revision"
-                    ),
-                }
-                for name in _profile.memory
-                if name in _memory_withheld
-            ],
         }
     if achieved_hz is not None:
         payload["achieved_hz"] = achieved_hz
@@ -593,7 +575,7 @@ __all__ = [
     "did_rate_weight",
     "configure_default",
     "configure_did_aliases",
-    "configure_memory_state",
+    "configure_running_tune_revision",
     "is_active",
     "is_configured",
     "is_paused",

@@ -33,9 +33,7 @@ vehicle-scoped tuning providers, not hardcoded frontend guesses. Fuel
 Compensation must not use throttle, calculated load, or BFS in place of its
 unresolved Volumetric Flow Ratio input.
 
-The upload route has no writer or flash integration. Deploying the UI does
-not itself enable the RAM channels withheld by the revision guard described
-below.
+The upload route has no writer or flash integration.
 
 This tool exports or edits **Map 1 Fuel Targets only** for the independently
 verified ROM hashes recorded in the vehicle's AFR calibration file. It has
@@ -123,10 +121,11 @@ Sessions starting earlier retain the previous inferred revision; a session
 spanning the flash must be split before comparison. Explicit capture
 manifest revisions still take precedence and conflicts remain visible.
 
-These changes were deployed to the Pi on 2026-09-21 (see below). After deployment,
-existing memory channels verified only for `ZS44A-k106` will be withheld
-by the existing revision guard until verified for the new revision. This
-tool does not bypass that guard or silently relabel RAM-address evidence.
+These changes were deployed to the Pi on 2026-09-21 (see below). The revision
+guard this paragraph used to describe — memory channels withheld until
+re-verified on the new revision — was removed the same day (`6ef51b4`): RAM
+addresses survive calibration flashes, and `verified_tune_revision` is now
+provenance only. This tool still does not relabel RAM-address evidence.
 The saved capture/daemon session also needs the correct revision when live
 collection resumes; updating historical manifests is not part of this work.
 

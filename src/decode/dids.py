@@ -260,17 +260,16 @@ class MemoryKnownAnswer(_Strict):
 class MemoryChannel(_Strict):
     """A recurring ReadMemoryByAddress (service ``0x23``) channel.
 
-    A DID is a *stable* identifier: the ECU promises 0x1201 means engine
-    speed for as long as the ECU exists. A RAM address promises nothing of
-    the sort — it is an artifact of one ROM build's memory layout, and a
-    reflash may move it. That difference is the whole reason this is a
-    separate model rather than a ``DidEntry`` with an ``address`` field:
+    A DID is an identifier the ECU defines; a RAM address is a location in
+    the ECU program's memory map. Calibration flashes on the same program
+    leave it in place (operator, 2026-09-21), but another program is another
+    map. That difference is why this is a separate model rather than a
+    ``DidEntry`` with an ``address`` field:
 
-    * ``verified_tune_revision`` is REQUIRED, so an address can never be
-      recorded without saying which calibration it was observed under.
-      :func:`memory_channels_for_revision` refuses the ones that do not
-      match the running tune instead of quietly reading a moved address
-      and decoding whatever now lives there.
+    * ``verified_tune_revision`` is REQUIRED, so an address is never
+      recorded without saying which calibration it was checked under. It is
+      provenance, not a gate: the collector polls the channel whatever is
+      running, and ``known_answer`` is what re-verifies the address.
     * ``sentinel_raw`` names a raw word that is a *state*, not a
       measurement. The Target AFR word is the case that forced it: zero
       means fuel cut, and scaling it as phi yields 0.0, which then divides
@@ -460,27 +459,6 @@ def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
         assert known.constant is not None and known.tolerance is not None
         return word > 0 and abs(known.constant / word - did_raw) <= known.tolerance
     raise ValueError(f"unhandled known-answer relation {known.relation!r}")
-
-
-def memory_channels_for_revision(
-    channels: Sequence[MemoryChannel], tune_revision: str | None
-) -> tuple[list[MemoryChannel], list[MemoryChannel]]:
-    """Split `channels` into (usable, withheld) for the running calibration.
-
-    A RAM address is only as good as the ROM build it was found in, so an
-    unknown or mismatched revision withholds the channel rather than
-    reading a moved address. Withheld channels are returned, not dropped,
-    so the caller can say *which* ones and why instead of reporting an
-    empty selection that looks like "nothing configured".
-    """
-    usable: list[MemoryChannel] = []
-    withheld: list[MemoryChannel] = []
-    for channel in channels:
-        if tune_revision is not None and channel.verified_tune_revision == tune_revision:
-            usable.append(channel)
-        else:
-            withheld.append(channel)
-    return usable, withheld
 
 
 class DidMap(_Strict):

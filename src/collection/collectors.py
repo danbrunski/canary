@@ -149,7 +149,9 @@ def default_collectors(
         usable_memory = [c for c in memory_channels() if c.name in selected_memory]
         registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
         current = None if registry is None else registry.at(datetime.now(UTC))
-        tuning_profile.configure_memory_state({}, None if current is None else current.revision)
+        tuning_profile.configure_running_tune_revision(
+            None if current is None else current.revision
+        )
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
             poll_rate_hz=config.collection.obd_poll_rate_hz,

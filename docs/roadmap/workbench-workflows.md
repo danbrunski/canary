@@ -21,7 +21,8 @@ Two specific confusions are worth naming:
   means to anyone who owns the vehicle — has no home.
 - **Nothing reports readiness.** Every hazard on the 2026-09-21 drive was
   knowable beforehand: the UPS sat at 28 % SOC, the truck had been reflashed
-  the night before (so every RAM address needed re-verifying), and the capture
+  the night before (and the daemon then withheld every RAM channel on the
+  revision change — a gate since removed), and the capture
   profile's continuous-with-memory path had never run. None of it was visible
   anywhere an operator looks.
 
@@ -63,14 +64,14 @@ One strip across the top of every Engine Tuning page:
 - **Selected log** and **loaded ROM** persist across the group's pages, so
   Logs → Analysis → ROM Maps keeps the same subject without re-picking it.
 - **Readiness lives here as status, not as a gate**: UPS SOC, storage
-  headroom, memory channels verified / withheld, capture-profile rates
+  headroom, memory-channel verify results, capture-profile rates
   achieved. Red items say what fixes them. Nothing blocks navigation.
 
 ### Pages
 
 **Logging** — start and stop a capture. Profile picker with each profile's
 channel list and requested rates; once running, per-channel achieved rate,
-timeouts, NRCs, and `memory_withheld` (the capture payload already carries it).
+timeouts and NRCs.
 Tap-to-tag for physical actions (pull start/end, steady hold). Arming the UPS
 keepalive is a control on this page rather than a trip to Power / UPS.
 A capture ending for any reason other than the operator stopping it — a daemon
@@ -113,10 +114,10 @@ A coverage overlay — which cells this log visited, and how many samples each
 holds — belongs here too, against either the live capture or the selected log.
 
 **Calibration** — the flash history (`tune_revisions.yaml`), which revision is
-running, and the state of every memory channel: verified on the running
-revision, carried across a flash on a stated argument, or withheld. Hosts the
-re-verify action (`tools.verify_memory_channels --record-revision`). This is
-the page that would have turned 2026-09-21's reflash into one visible red row.
+running, and the evidence behind every memory channel: its last known-answer
+verify and the revision it ran on. Channels are not gated on the revision (RAM
+survives calibration flashes); this is where a wrong address shows up. Hosts
+the re-verify action (`tools.verify_memory_channels --record-revision`).
 
 ### Reserved: ROM Editor and Flash
 
@@ -178,7 +179,7 @@ the index.
   registry's newest revision; selected log and loaded ROM held in group state;
   readiness chips (UPS SOC, storage, memory channels, achieved rates).
 - [ ] **[W3](tasks/W03-logging-page.md) — Logging page.** Profile picker, start/stop, keepalive, per-channel
-  achieved rate / timeouts / NRC, `memory_withheld`, tap-to-tag.
+  achieved rate / timeouts / NRC, tap-to-tag.
 - [ ] **[W4](tasks/W03-logging-page.md) — Announce an ended capture.** Detect "a capture was active and now
   is not, and the operator did not stop it" (daemon restart included) and say
   so on Logging and in the status strip. Needs a small backend fact: the last
@@ -195,7 +196,7 @@ the index.
 - [ ] **[W8](tasks/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
   for the live capture or the selected log.
 - [ ] **[W9](tasks/W06-calibration-page.md) — Calibration page.** Flash history, running revision, per-channel
-  verified / carried / withheld state, and the re-verify action.
+  known-answer verify state, and the re-verify action.
 - [ ] **W10 — Reserve ROM Editor and Flash** as planned entries.
 - [ ] **[W11](tasks/W07-flash-interlocks.md) — Flash interlocks before any flash capability.** The two AGENTS.md
   conditions as code, server-side: a per-operation confirmation that names the

@@ -28,7 +28,6 @@ from src.decode.dids import (
     apply_memory_scaling,
     decode_memory_raw,
     is_memory_sentinel,
-    memory_channels_for_revision,
     plan_memory_reads,
 )
 
@@ -113,16 +112,6 @@ def test_address_cannot_be_recorded_without_a_calibration() -> None:
     """The whole difference between a DID and an address."""
     with pytest.raises(ValidationError):
         MemoryChannel(name="X", address=0x1000, length=2, byte_length=2, confidence="low")
-
-
-@pytest.mark.parametrize(
-    ("running", "usable"),
-    [("ZS44A-k106", True), ("ZS44A-k105", False), (None, False)],
-)
-def test_channel_is_withheld_on_another_calibration(running: str | None, usable: bool) -> None:
-    ok, withheld = memory_channels_for_revision([_TARGET], running)
-    assert bool(ok) is usable
-    assert bool(withheld) is not usable
 
 
 @pytest.mark.parametrize("phase", SESSION_PHASES)
@@ -471,18 +460,12 @@ def test_a_windowed_request_with_no_selected_member_is_refused(monkeypatch) -> N
         tuning_profile.set_active(False)
 
 
-def test_a_capture_payload_names_the_memory_channels_it_will_not_get() -> None:
-    """A withheld channel used to be one log line at boot.
-
-    After a reflash every memory channel is withheld until re-verified, and a
-    capture that silently lost all of them looks exactly like a healthy one.
-    """
+def test_a_capture_payload_reports_the_running_revision_without_gating() -> None:
+    """The running calibration is provenance; memory channels are not withheld on it."""
     from src.collection import tuning_profile
     from src.collection.capture_profiles import CaptureProfile
 
-    tuning_profile.configure_memory_state(
-        {"ECM_TARGET_EQUIV_RATIO": "ZS44A-k106"}, "ZS44A-20260920"
-    )
+    tuning_profile.configure_running_tune_revision("ZS44A-20260920")
     tuning_profile.activate(
         CaptureProfile(
             name="research",
@@ -493,8 +476,8 @@ def test_a_capture_payload_names_the_memory_channels_it_will_not_get() -> None:
     try:
         payload = tuning_profile.snapshot()
         assert payload["running_tune_revision"] == "ZS44A-20260920"
-        assert [w["channel"] for w in payload["memory_withheld"]] == ["ECM_TARGET_EQUIV_RATIO"]
-        assert payload["memory_withheld"][0]["verified_on"] == "ZS44A-k106"
+        assert "memory_withheld" not in payload
+        assert payload["memory"] == ["ECM_TARGET_EQUIV_RATIO", "ECM_ENGINE_PERIOD"]
     finally:
         tuning_profile.set_active(False)
-        tuning_profile.configure_memory_state({}, None)
+        tuning_profile.configure_running_tune_revision(None)

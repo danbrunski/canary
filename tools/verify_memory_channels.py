@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Re-verify catalogued RAM addresses against the running calibration.
 
-A DID number is a contract the ECU keeps; a RAM address is an artifact of one
-ROM build. After a reflash an address may still answer, still be in range, and
-still decode to a plausible number that is now measuring something else --
-silently. ``MemoryChannel.verified_tune_revision`` exists so the collector
-withholds a channel in that situation, but re-stamping it by hand after every
-flash is exactly the "fix every caller must remember" this project keeps
-paying for.
+A RAM address is a location in the ECU program's memory map. Calibration
+flashes on the same program leave it in place (operator, 2026-09-21), but a
+different program -- or a wrong address found in the first place -- can still
+answer, stay in range, and decode to a plausible number that measures
+something else. This tool is the evidence check for that case.
+``MemoryChannel.verified_tune_revision`` records which calibration it last
+passed on; that is provenance, and the collector does not gate on it.
 
-So this tool does the re-stamping, and refuses to do it on anything weaker
+It re-stamps the provenance, and refuses to do it on anything weaker
 than the channel's own declared known-answer check: it reads the memory word
 and the cross-check DID in the same session and asserts the catalog's stated
 relation between them. Plausibility bounds are reported but are never

@@ -59,8 +59,8 @@ providers:
   #
   # DID 0x1134 is NOT a substitute: it is the floor-clamped, low-resolution
   # rich-side view and holds at raw 64 during fuel cut, so it cannot tell cut
-  # from stoich. The channel is withheld automatically on any calibration
-  # other than the one the address was verified against.
+  # from stoich. The RAM address survives reflashes (program RAM, not
+  # calibration); verify it with tools.verify_memory_channels if in doubt.
   - {role: commanded_afr, spec: 'mem:ECM_TARGET_EQUIV_RATIO', transform: equiv_ratio_afr}
   # Fuelling-active, from the same word. `delivery_error_from_semantic_frame`
   # requires this as a boolean and its own comment anticipated exactly this

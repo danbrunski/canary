@@ -52,9 +52,11 @@ could not be repeated that day.
   last state is exactly how the windowed-memory bug presented on 2026-09-20
   (`capture_selected: true, requests_sent: 0`), and it took a manual `/status`
   dump to see.
-- [ ] **W03.8 — Withheld channels, in the open.** Render
-  `capture_profile.memory_withheld` as a red block naming each channel, the
-  revision it was verified on, and the fix. Link to Calibration.
+- [x] **W03.8 — Withheld channels, in the open.** *Obsolete 2026-09-21:*
+  memory channels are no longer withheld on a tune-revision change (`6ef51b4`,
+  operator: the RAM layout survives calibration flashes), and the
+  `memory_withheld` payload field is gone. A channel that is not delivering
+  shows up in W03.7's per-channel `requests_sent`/achieved rate like any other.
 - [ ] **W03.9 — Tap-to-tag.** Buttons for the physical actions the project
   tags: pull start / pull end, steady hold start / end, decel, idle. Through
   `useTagQueue` so a tap during a connectivity gap is queued, not lost. Tag the

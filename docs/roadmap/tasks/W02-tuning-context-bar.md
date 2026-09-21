@@ -14,7 +14,7 @@ share a subject without sharing a sequence.
 `hooks/useTuningContext.ts`; `panels/Workbench.tsx` (render the bar above any
 `tuning-*` item); backend `src/dashboard/status.py` (`build_status`),
 `src/collection/tuning_profile.py` (`snapshot()` already carries
-`running_tune_revision` and `memory_withheld`).
+`running_tune_revision`).
 
 ## Measure before designing
 
@@ -44,7 +44,7 @@ share a subject without sharing a sequence.
 - [ ] **W02.4 — Readiness block in `/status`.** One object, `tuning_readiness`,
   each entry `{ok: bool | null, value, detail, fix}`: `ups_soc` (from
   `/control/power`; floor configurable, default 40 %), `storage_free_mb`,
-  `memory_channels` (count verified vs withheld, from `memory_withheld`),
+  `memory_channels` (count whose last known-answer verify passed / failed / never ran, from W06.2),
   `calibration` (W02.2), `vehicle_state`. `fix` is the sentence the UI shows.
   Status only — nothing reads this to refuse an action except W07.
 

@@ -33,9 +33,12 @@ them at 8 Hz.
   not model — and the point of keeping both is to see it.
 - [ ] **W05.4 — The trace is only as live as its channels.** If no trace
   channel has updated in 3 s, the trace greys out and the page says why: not
-  polled by the active profile (offer `rom-trace` on Logging), withheld for the
-  running calibration (link Calibration), or no ECM data at all. Never a frozen
-  marker that looks live.
+  polled by the active profile (name a profile that carries the trace
+  channels and offer it on Logging), polled but not answering (per-channel
+  `requests_sent`/timeouts), or no ECM data at all. Never a frozen marker that
+  looks live. No shipped profile carries the trace channels on 2026-09-21: the
+  `rom-trace` profile was retired after its continuous session stalled, and
+  they return to `tuning` once that stall is found.
 - [ ] **W05.5 — Keep the slot assertion.** The existing requirement that the
   operator confirm the selected ROM *and slot* are active in the ECU stays.
   With W02.2 the page can additionally refuse to call a trace "active" when the

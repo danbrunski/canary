@@ -219,9 +219,9 @@ class CaptureProfile(_Strict):
     mode22_rate_weights: dict[str, float] = Field(default_factory=dict)
     #: Service-0x23 memory channels this profile polls, by catalog name.
     #: Separate from ``mode22`` because they are a different kind of claim:
-    #: a DID name is stable across calibrations, a RAM address is not, and
-    #: the collector withholds one whose ``verified_tune_revision`` does not
-    #: match the running tune. Gated by ``mode22_enabled`` -- they need the
+    #: a DID is an ECU-defined identifier, a RAM address is a location in the
+    #: program's memory map (stable across calibration flashes, verified by
+    #: its ``known_answer``). Gated by ``mode22_enabled`` -- they need the
     #: same diagnostic session.
     memory: tuple[str, ...] = ()
     #: Whether each service is polled at all. Disabling keeps the selection
