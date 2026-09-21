@@ -1,5 +1,13 @@
 # Collection and diagnostics improvement tasks
 
+**Status 2026-09-21 — a second live set: the workbench checklists.**
+[`W00-workbench-README.md`](W00-workbench-README.md) indexes seven files
+(W01–W07) covering the dashboard regroup and the Engine Tuning pages planned in
+[`../workbench-workflows.md`](../workbench-workflows.md). They are independent
+of D03, which remains the live checklist for collection and diagnostics. W07
+(flash interlocks) has no dependency on the rest and must land before anything
+that can program a module exists.
+
 **Status 2026-09-18 — performance fixes and tomorrow's drive are queued.**
 [`D03-open-work.md`](D03-open-work.md) remains the only live checklist. Its
 [September 18 drive order](D03-open-work.md#suggested-order-for-the-2026-09-18-drive)

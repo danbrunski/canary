@@ -164,33 +164,39 @@ acts on separate pages.
 
 ## Tasks
 
-- [ ] **W1 — Regroup the navigation.** Five groups as tabled above; rename
+Each task below has a detailed implementation checklist under
+[`tasks/`](tasks/W00-workbench-README.md) — files, symbols, tests, empty states
+and acceptance. The checkboxes *there* are task-level truth; the list here is
+the index.
+
+
+- [ ] **[W1](tasks/W01-navigation-regroup.md) — Regroup the navigation.** Five groups as tabled above; rename
   `models-tuning` → Alert Thresholds; move `live-rom-maps` into Engine Tuning.
   Keep the old route ids resolving (redirect) so bookmarks and docs survive.
-- [ ] **W2 — Context bar.** Running calibration from `0x21 10` beside the
+- [ ] **[W2](tasks/W02-tuning-context-bar.md) — Context bar.** Running calibration from `0x21 10` beside the
   registry's newest revision; selected log and loaded ROM held in group state;
   readiness chips (UPS SOC, storage, memory channels, achieved rates).
-- [ ] **W3 — Logging page.** Profile picker, start/stop, keepalive, per-channel
+- [ ] **[W3](tasks/W03-logging-page.md) — Logging page.** Profile picker, start/stop, keepalive, per-channel
   achieved rate / timeouts / NRC, `memory_withheld`, tap-to-tag.
-- [ ] **W4 — Announce an ended capture.** Detect "a capture was active and now
+- [ ] **[W4](tasks/W03-logging-page.md) — Announce an ended capture.** Detect "a capture was active and now
   is not, and the operator did not stop it" (daemon restart included) and say
   so on Logging and in the status strip. Needs a small backend fact: the last
   capture's end reason.
-- [ ] **W5 — Logs page.** Capture browser; table and visual presentations of
+- [ ] **[W5](tasks/W04-logs-and-analysis.md) — Logs page.** Capture browser; table and visual presentations of
   one log; regime filter; tune-revision boundary marker.
-- [ ] **W6 — Analysis page.** Delivery error, trim surface, timing per cell,
+- [ ] **[W6](tasks/W04-logs-and-analysis.md) — Analysis page.** Delivery error, trim surface, timing per cell,
   pull comparison — each with sample counts, gate report, and a named reason
   when unavailable. Backed by the existing `src/analysis` functions, which
   already take a session directory.
-- [ ] **W7 — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
+- [ ] **[W7](tasks/W05-rom-maps-trace-coverage.md) — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
   memory channels; keep the inferred lookup as a displayed cross-check; name
   the fix when the channels are not being polled.
-- [ ] **W8 — ROM Maps: coverage overlay.** Cells visited and samples per cell,
+- [ ] **[W8](tasks/W05-rom-maps-trace-coverage.md) — ROM Maps: coverage overlay.** Cells visited and samples per cell,
   for the live capture or the selected log.
-- [ ] **W9 — Calibration page.** Flash history, running revision, per-channel
+- [ ] **[W9](tasks/W06-calibration-page.md) — Calibration page.** Flash history, running revision, per-channel
   verified / carried / withheld state, and the re-verify action.
 - [ ] **W10 — Reserve ROM Editor and Flash** as planned entries.
-- [ ] **W11 — Flash interlocks before any flash capability.** The two AGENTS.md
+- [ ] **[W11](tasks/W07-flash-interlocks.md) — Flash interlocks before any flash capability.** The two AGENTS.md
   conditions as code, server-side: a per-operation confirmation that names the
   image hash, and a `vehicle_state == ignition_only` check at the moment of
   the write. Plus supply-voltage and UPS-SOC floors. These land, with tests,
