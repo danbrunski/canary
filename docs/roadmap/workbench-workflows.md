@@ -1,0 +1,183 @@
+# Roadmap — workbench navigation by what the operator is doing
+
+Status: **planned** (2026-09-21). Straight to `main`, no feature branches.
+Supersedes the grouping in `dashboard-ux.md`; the tasks there still stand.
+
+## Why this exists
+
+The workbench has 28 pages in five groups — Live, Diagnostics, Models, Data,
+Control — and every group is a *kind of thing*. The operator's work cuts across
+them. One tuning drive on 2026-09-21 touched Control › Capture Profiles (pick a
+profile), Control › Power/UPS (arm the keepalive), Control › Control Plane
+(start it), Live › ROM Maps (watch), Data › Sessions (find it afterwards), and
+then had nowhere to go for analysis, because engine analysis has no page at
+all.
+
+Two specific confusions are worth naming:
+
+- **`Models › Tuning` is not engine tuning.** It tunes anomaly-detector
+  thresholds and suppression (Task 6.25). Engine tuning — the thing the word
+  means to anyone who owns the vehicle — has no home.
+- **Nothing reports readiness.** Every hazard on the 2026-09-21 drive was
+  knowable beforehand: the UPS sat at 28 % SOC, the truck had been reflashed
+  the night before (so every RAM address needed re-verifying), and the capture
+  profile's continuous-with-memory path had never run. None of it was visible
+  anywhere an operator looks.
+
+## The five groups
+
+| Group | The question it answers | Pages |
+|---|---|---|
+| **Observe** | What is the truck doing right now? | Charts, Trip, Alarms, Builder |
+| **Engine Tuning** | How is it fuelled and sparked, and what should change? | Logging, Logs, Analysis, ROM Maps, Calibration — see below |
+| **Diagnose** | Is something wrong? | Anomalies, Trouble Codes, Monitors, Drift Trends, TPMS, LLM Assist |
+| **Model** | How are the detectors doing? | Overview, Behavior, Training, **Alert Thresholds**, Drift / Health, Dataset Health |
+| **System** | Plumbing | Data Sources, Sessions, Export, Custom PIDs, Vehicle Profiles, Power / UPS, Control Plane, System |
+
+`Models › Tuning` is renamed **Alert Thresholds** so the word *tuning* means
+one thing in this product.
+
+## Engine Tuning: pages, not steps
+
+**These are independent pages, reachable in any order, and none requires having
+visited another.** An earlier draft of this document laid them out as a
+Prepare → Drive → Review sequence. That was wrong: an operator may only want
+to log this drive, only want to look at last week's log, or only want to watch
+cell traces against a ROM with no capture running at all. A wizard makes each
+of those awkward in order to make one path tidy.
+
+What holds the pages together is **shared context, not sequence**.
+
+### The context bar
+
+One strip across the top of every Engine Tuning page:
+
+```text
+2008 Xterra · running ZS44A-20260920 · capture: rom-trace 00:12:41 · log: <selected> · ROM: <loaded>
+```
+
+- **Running calibration** comes from the ECU, not from the operator: service
+  `0x21 10` returns the calibration id as ASCII (`1ZS44A00000`). Shown beside
+  the registry's newest flash, with a mismatch called out.
+- **Selected log** and **loaded ROM** persist across the group's pages, so
+  Logs → Analysis → ROM Maps keeps the same subject without re-picking it.
+- **Readiness lives here as status, not as a gate**: UPS SOC, storage
+  headroom, memory channels verified / withheld, capture-profile rates
+  achieved. Red items say what fixes them. Nothing blocks navigation.
+
+### Pages
+
+**Logging** — start and stop a capture. Profile picker with each profile's
+channel list and requested rates; once running, per-channel achieved rate,
+timeouts, NRCs, and `memory_withheld` (the capture payload already carries it).
+Tap-to-tag for physical actions (pull start/end, steady hold). Arming the UPS
+keepalive is a control on this page rather than a trip to Power / UPS.
+A capture ending for any reason other than the operator stopping it — a daemon
+restart, above all — is announced here, since it currently is not announced
+anywhere.
+
+**Logs** — browse captures and open one. Two presentations of the same data,
+toggled, never two pages:
+
+- *Table* — channels as columns on one clock, sortable, filterable by regime
+  (closed loop / enrichment / fuel cut / idle).
+- *Visual* — time-series strips, and scatter or heat map of any channel
+  against any two axes.
+
+Each log shows its tune revision and says when a revision boundary falls inside
+it.
+
+**Analysis** — derived results, which unlike a log view may pool many sessions.
+Delivery error by rpm band with its noise floor drawn in, the closed-loop trim
+surface (STFT × LTFT) by rpm × airflow, final timing per cell, and pull-vs-pull
+comparison across tune revisions. Every figure carries its sample count and its
+gate report, and an unavailable result says *which kind* of unavailable — "the
+gates removed everything" and "the channel was never captured" are different
+answers.
+
+**ROM Maps** — load a ROM, view its tables, and watch the live cell trace. This
+page exists today under Live › ROM Maps and moves here. Two changes:
+
+- The trace is currently an *inferred geometric lookup* from RPM and BFS. The
+  ECM's own coordinates are now readable — `ECM_FUEL_TARGET_MAP_X_TRACE`,
+  `ECM_CAM_MAP_RPM_TRACE`, `ECM_THROTTLE_MAP_X/Y_TRACE`, and rpm from
+  `ECM_ENGINE_SPEED_RAM` — so the trace should show the cell the ECM says it
+  is reading, with the inferred lookup kept as a cross-check and the
+  disagreement displayed when they differ.
+- Tracing needs those channels polled. When they are not, the page says so and
+  offers the one action that fixes it (start a capture that includes them)
+  instead of showing a trace that silently is not moving.
+
+A coverage overlay — which cells this log visited, and how many samples each
+holds — belongs here too, against either the live capture or the selected log.
+
+**Calibration** — the flash history (`tune_revisions.yaml`), which revision is
+running, and the state of every memory channel: verified on the running
+revision, carried across a flash on a stated argument, or withheld. Hosts the
+re-verify action (`tools.verify_memory_channels --record-revision`). This is
+the page that would have turned 2026-09-21's reflash into one visible red row.
+
+### Reserved: ROM Editor and Flash
+
+Two further pages are anticipated and the navigation should leave room for
+them, shown as *planned* rather than hidden:
+
+- **ROM Editor** — edit table cells in the loaded ROM and export a modified
+  file. The offline Fuel Targets tooling (`docs/offline-rom-targets.md`) is the
+  start of this.
+- **Flash** — program a ROM into the ECU.
+
+**Flash is not a UI task; it is a policy decision that has not been made.**
+AGENTS.md draws exactly one hard line for this codebase: `canary` must never
+write the ECU's non-volatile memory, and reflashing belongs to `canary-rw`, a
+separate tool for bench ECUs, never the vehicle. A Flash page in this
+dashboard crosses that line by construction. The slot is reserved so the
+information architecture does not need reworking later, but nothing under it
+should be built until the operator deliberately revisits that rule — and if it
+is revisited, the natural shape is this page *driving* `canary-rw` rather than
+the capability moving into the daemon. The ROM Editor is on the safe side of
+the line as long as its output is a file.
+
+## Principles
+
+- **Pages stand alone.** No page assumes another was visited first.
+- **Context is shared, not sequenced.** Selections persist across a group.
+- **An empty state names its cause and offers its fix.** "Traces are not being
+  polled — start a capture with `rom-trace`" beats a blank panel.
+- **Readiness is status, never a gate.** The operator may always proceed.
+- **One word, one meaning.** *Tuning* is the engine. Detectors have
+  *thresholds*.
+
+## Tasks
+
+- [ ] **W1 — Regroup the navigation.** Five groups as tabled above; rename
+  `models-tuning` → Alert Thresholds; move `live-rom-maps` into Engine Tuning.
+  Keep the old route ids resolving (redirect) so bookmarks and docs survive.
+- [ ] **W2 — Context bar.** Running calibration from `0x21 10` beside the
+  registry's newest revision; selected log and loaded ROM held in group state;
+  readiness chips (UPS SOC, storage, memory channels, achieved rates).
+- [ ] **W3 — Logging page.** Profile picker, start/stop, keepalive, per-channel
+  achieved rate / timeouts / NRC, `memory_withheld`, tap-to-tag.
+- [ ] **W4 — Announce an ended capture.** Detect "a capture was active and now
+  is not, and the operator did not stop it" (daemon restart included) and say
+  so on Logging and in the status strip. Needs a small backend fact: the last
+  capture's end reason.
+- [ ] **W5 — Logs page.** Capture browser; table and visual presentations of
+  one log; regime filter; tune-revision boundary marker.
+- [ ] **W6 — Analysis page.** Delivery error, trim surface, timing per cell,
+  pull comparison — each with sample counts, gate report, and a named reason
+  when unavailable. Backed by the existing `src/analysis` functions, which
+  already take a session directory.
+- [ ] **W7 — ROM Maps: trace from the ECM's own coordinates.** Use the map-trace
+  memory channels; keep the inferred lookup as a displayed cross-check; name
+  the fix when the channels are not being polled.
+- [ ] **W8 — ROM Maps: coverage overlay.** Cells visited and samples per cell,
+  for the live capture or the selected log.
+- [ ] **W9 — Calibration page.** Flash history, running revision, per-channel
+  verified / carried / withheld state, and the re-verify action.
+- [ ] **W10 — Reserve ROM Editor and Flash** as planned entries. No behaviour.
+  Flash stays unbuilt pending the policy decision described above.
+
+Backend facts these need that do not exist yet: the calibration id read
+(`0x21 10`) surfaced in `/status` (W2, W9); the last capture's end reason (W4);
+per-cell residency from a log (W8). Everything else is already served.
