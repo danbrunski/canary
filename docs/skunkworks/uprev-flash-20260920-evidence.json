@@ -1,0 +1,474 @@
+{
+  "capture_sha256": "99fbd62b7e07938e8ce0fdb87400352bd3756bee8fe1c3b063dc17b80ff06e56",
+  "source_rom_sha256": "03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2",
+  "decoded_rom_sha256": "a46baa248f16db8d5ed9854913e614dd7d77b7579bb6c36bddb792741531be50",
+  "previous_decoded_sha256": "e01cc0cb45d5beb879f82931be3054c79b7be3955220b3d93045deaabd23f18e",
+  "differences": [
+    {
+      "offset": "0x9598",
+      "old": 12,
+      "new": 13
+    },
+    {
+      "offset": "0x95a0",
+      "old": 244,
+      "new": 245
+    },
+    {
+      "offset": "0xe025c",
+      "old": 162,
+      "new": 163
+    }
+  ],
+  "programmed_pages": [
+    {
+      "usb_frame": 37537,
+      "time": 33.458836,
+      "program_frame": 37949,
+      "address": "0x8000",
+      "length": 8192,
+      "crc32": "2096afff",
+      "sha256": "f8ee3d5607a63504cb1faa3262496216ee5bce4245c7158fd3a36846fce983d5",
+      "matches_new_rom": true,
+      "matches_old_rom": false
+    },
+    {
+      "usb_frame": 38047,
+      "time": 33.899966,
+      "program_frame": 38459,
+      "address": "0xa000",
+      "length": 8192,
+      "crc32": "6bf20083",
+      "sha256": "48af827b6ce27bb5fead25c75b01be6fd22ab874af1bfe119323d1dcf8c01ded",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    },
+    {
+      "usb_frame": 38557,
+      "time": 34.341124,
+      "program_frame": 38973,
+      "address": "0xc000",
+      "length": 8192,
+      "crc32": "8f933b10",
+      "sha256": "31e2cccdca353d8ff122d067430821d939675e215e93bd32d1181750a54d5a57",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    },
+    {
+      "usb_frame": 39083,
+      "time": 34.798436,
+      "program_frame": 39501,
+      "address": "0xe000",
+      "length": 8192,
+      "crc32": "4ed0893d",
+      "sha256": "626ee676b27fac7c72996f888abb2b7315e9aedf44d6e89af83e2d29724cfdf5",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    },
+    {
+      "usb_frame": 39603,
+      "time": 35.249722,
+      "program_frame": 40021,
+      "address": "0x10000",
+      "length": 8192,
+      "crc32": "3d200413",
+      "sha256": "82e17a680bd6e052448164c1dec750e0388d24c81bb71f05ef5e9519379df1f7",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    },
+    {
+      "usb_frame": 40111,
+      "time": 35.688797,
+      "program_frame": 40515,
+      "address": "0xe0000",
+      "length": 8192,
+      "crc32": "9531f15a",
+      "sha256": "40629b0fbb45140ffbd57d766d96bab219a58f51c8f2a10f9cb1223079310fbd",
+      "matches_new_rom": true,
+      "matches_old_rom": false
+    },
+    {
+      "usb_frame": 40607,
+      "time": 36.115915,
+      "program_frame": 41027,
+      "address": "0xe2000",
+      "length": 8192,
+      "crc32": "3a17bcdd",
+      "sha256": "3a621bafbb578681b07f2dbf84d0b3cfac3c629592f4828f54d511bb2bb1779f",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    },
+    {
+      "usb_frame": 41099,
+      "time": 36.539002,
+      "program_frame": 41523,
+      "address": "0xfe000",
+      "length": 8192,
+      "crc32": "43386275",
+      "sha256": "7dcdd4d0c297ac334ae38015cdc1b2e59ca3b7cfe462d7ffe2541fabb1c037be",
+      "matches_new_rom": true,
+      "matches_old_rom": true
+    }
+  ],
+  "range_crcs": [
+    {
+      "frame": 35539,
+      "reply_frame": 35547,
+      "phase": "before",
+      "start": "0x0",
+      "length": 4096,
+      "crc32": "ec587026",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35563,
+      "reply_frame": 35571,
+      "phase": "before",
+      "start": "0x1000",
+      "length": 4096,
+      "crc32": "3f659dec",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35587,
+      "reply_frame": 35597,
+      "phase": "before",
+      "start": "0x2000",
+      "length": 4096,
+      "crc32": "cfa54273",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35611,
+      "reply_frame": 35621,
+      "phase": "before",
+      "start": "0x3000",
+      "length": 4096,
+      "crc32": "2ccf27c7",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35635,
+      "reply_frame": 35645,
+      "phase": "before",
+      "start": "0x4000",
+      "length": 4096,
+      "crc32": "270eaa29",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35659,
+      "reply_frame": 35669,
+      "phase": "before",
+      "start": "0x5000",
+      "length": 4096,
+      "crc32": "f26dd641",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35683,
+      "reply_frame": 35693,
+      "phase": "before",
+      "start": "0x6000",
+      "length": 4096,
+      "crc32": "a19bc85d",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35707,
+      "reply_frame": 35717,
+      "phase": "before",
+      "start": "0x7000",
+      "length": 4096,
+      "crc32": "f154670a",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35731,
+      "reply_frame": 35781,
+      "phase": "before",
+      "start": "0x8000",
+      "length": 98304,
+      "crc32": "9771656f",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35795,
+      "reply_frame": 35859,
+      "phase": "before",
+      "start": "0x20000",
+      "length": 131072,
+      "crc32": "ae7c7958",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35873,
+      "reply_frame": 35937,
+      "phase": "before",
+      "start": "0x40000",
+      "length": 131072,
+      "crc32": "39253a5e",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 35951,
+      "reply_frame": 36015,
+      "phase": "before",
+      "start": "0x60000",
+      "length": 131072,
+      "crc32": "dbd529dc",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 36029,
+      "reply_frame": 36093,
+      "phase": "before",
+      "start": "0x80000",
+      "length": 131072,
+      "crc32": "c47771b2",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 36107,
+      "reply_frame": 36171,
+      "phase": "before",
+      "start": "0xa0000",
+      "length": 131072,
+      "crc32": "9b5897f7",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 36185,
+      "reply_frame": 36249,
+      "phase": "before",
+      "start": "0xc0000",
+      "length": 131072,
+      "crc32": "29b0bf79",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 36263,
+      "reply_frame": 36327,
+      "phase": "before",
+      "start": "0xe0000",
+      "length": 131072,
+      "crc32": "cfc53d89",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41567,
+      "reply_frame": 41575,
+      "phase": "after",
+      "start": "0x0",
+      "length": 4096,
+      "crc32": "ec587026",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41589,
+      "reply_frame": 41597,
+      "phase": "after",
+      "start": "0x1000",
+      "length": 4096,
+      "crc32": "3f659dec",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41613,
+      "reply_frame": 41623,
+      "phase": "after",
+      "start": "0x2000",
+      "length": 4096,
+      "crc32": "cfa54273",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41637,
+      "reply_frame": 41645,
+      "phase": "after",
+      "start": "0x3000",
+      "length": 4096,
+      "crc32": "2ccf27c7",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41661,
+      "reply_frame": 41671,
+      "phase": "after",
+      "start": "0x4000",
+      "length": 4096,
+      "crc32": "270eaa29",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41685,
+      "reply_frame": 41693,
+      "phase": "after",
+      "start": "0x5000",
+      "length": 4096,
+      "crc32": "f26dd641",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41709,
+      "reply_frame": 41719,
+      "phase": "after",
+      "start": "0x6000",
+      "length": 4096,
+      "crc32": "a19bc85d",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41733,
+      "reply_frame": 41743,
+      "phase": "after",
+      "start": "0x7000",
+      "length": 4096,
+      "crc32": "f154670a",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41757,
+      "reply_frame": 41807,
+      "phase": "after",
+      "start": "0x8000",
+      "length": 98304,
+      "crc32": "44ac71ec",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41821,
+      "reply_frame": 41885,
+      "phase": "after",
+      "start": "0x20000",
+      "length": 131072,
+      "crc32": "ae7c7958",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41899,
+      "reply_frame": 41963,
+      "phase": "after",
+      "start": "0x40000",
+      "length": 131072,
+      "crc32": "39253a5e",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 41977,
+      "reply_frame": 42041,
+      "phase": "after",
+      "start": "0x60000",
+      "length": 131072,
+      "crc32": "dbd529dc",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 42055,
+      "reply_frame": 42119,
+      "phase": "after",
+      "start": "0x80000",
+      "length": 131072,
+      "crc32": "c47771b2",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 42133,
+      "reply_frame": 42197,
+      "phase": "after",
+      "start": "0xa0000",
+      "length": 131072,
+      "crc32": "9b5897f7",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 42211,
+      "reply_frame": 42275,
+      "phase": "after",
+      "start": "0xc0000",
+      "length": 131072,
+      "crc32": "29b0bf79",
+      "matches_expected_rom": true
+    },
+    {
+      "frame": 42289,
+      "reply_frame": 42353,
+      "phase": "after",
+      "start": "0xe0000",
+      "length": 131072,
+      "crc32": "4690eb8b",
+      "matches_expected_rom": true
+    }
+  ],
+  "memory_reads": [
+    {
+      "frame": 22229,
+      "reply_frame": 22241,
+      "address": "0x80000",
+      "length": 16,
+      "positive": true,
+      "matches_old_rom": true
+    },
+    {
+      "frame": 22355,
+      "reply_frame": 22365,
+      "address": "0xc0000",
+      "length": 16,
+      "positive": true,
+      "matches_old_rom": true
+    },
+    {
+      "frame": 22481,
+      "reply_frame": 22487,
+      "address": "0x100000",
+      "length": 16,
+      "positive": false,
+      "matches_old_rom": null
+    },
+    {
+      "frame": 23169,
+      "reply_frame": 23179,
+      "address": "0x20004",
+      "length": 16,
+      "positive": true,
+      "matches_old_rom": true
+    }
+  ],
+  "erase_events": [
+    {
+      "frame": 36355,
+      "time": 32.321748,
+      "sector": 15,
+      "reply_frame": 36769,
+      "reply": "065000000000000000"
+    },
+    {
+      "frame": 36783,
+      "time": 32.736614,
+      "sector": 8,
+      "reply_frame": 37487,
+      "reply": "065000000000000000"
+    }
+  ],
+  "erase_upload_reconstruction_exact": true,
+  "blank_pages_skipped": 20,
+  "uploaded_rom_bytes": 65536,
+  "stub": {
+    "blocks": 132,
+    "block_size": 32,
+    "bytes": 4224,
+    "consecutive_sequence": true,
+    "sha256": "ca8f06a0545f2596405c3c968c86f88f313165a483da86d51a9de0dcf959406c"
+  },
+  "whole_rom_crc32": "95b993c5",
+  "checksums": {
+    "old": {
+      "sum": "f438fcaa",
+      "xor": "0c3bbac0"
+    },
+    "new": {
+      "sum": "f538fcaa",
+      "xor": "0d3bbac0"
+    }
+  }
+}

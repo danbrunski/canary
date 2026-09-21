@@ -178,6 +178,7 @@ Control endpoints:
 | `GET /control/capture/profiles` | list strict, vehicle-scoped capture profiles; `mode22_rate_weights` maps selected DID names to relative cadence (missing members default to 1) |
 | `PUT /control/capture/profiles` / `DELETE /control/capture/profiles/{name}` | save or delete a capture profile (`default` cannot be deleted); DID weights must be finite, positive, and name selected `mode22` members |
 | `POST /control/capture` / `DELETE /control/capture` | start a named isolated capture / return to default collection; start returns capture session path and budget state, stop returns `ended_capture_dir` and restores the exact pre-capture budget. Retrying an identical active start or immediately repeated stop returns the existing result with `idempotent: true`; that stop-response cache does not survive a daemon restart. |
+| `POST /control/rom/inspect` | authenticated, read-only ROM inspection: raw `application/octet-stream`, maximum 2 MiB. Decodes in memory, validates source hash/CRCs/table evidence, returns maps, axes, verified live-channel providers and explicit TBD entries. Does not persist the file, change the active tune, or communicate with the ECU. |
 
 `GET /control/sessions?captures=true` lists only `_capture-*` sessions and
 tags each from its `capture_profile.json` sidecar; the default listing remains
