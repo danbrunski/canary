@@ -13,6 +13,7 @@ export type WorkbenchItem =
   | "live-alarms"
   | "live-builder"
   | "live-trip"
+  | "live-rom-maps"
   | "diag-anomalies"
   | "diag-data"
   | "diag-dtc"

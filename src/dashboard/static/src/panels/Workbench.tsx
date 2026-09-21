@@ -50,6 +50,7 @@ import { TrendsPanel } from "./TrendsPanel";
 import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
+import { RomMapsPanel } from "./RomMapsPanel";
 
 export interface DashboardData {
   mode: AppMode;
@@ -121,6 +122,8 @@ function renderItem(
   onNavigate: (item: WorkbenchItem) => void,
 ) {
   switch (item) {
+    case "live-rom-maps":
+      return <RomMapsPanel token={d.token} channels={d.channels} status={d.status} />;
     case "diag-data":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":

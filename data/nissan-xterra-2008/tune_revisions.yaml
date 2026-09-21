@@ -46,3 +46,18 @@ revisions:
       not measurable: the K change walks the BFS axis, which moves every
       BFS-indexed lookup including the timing table. Exact flash time not
       recorded; operator confirmed the August 3 date on 2026-08-05.
+  - revision: ZS44A-20260920
+    flashed_at: 2026-09-21T03:08:45.954035Z
+    k: 1.06
+    rom_file: ZS44A-Tuned-20260920.OsirisROM
+    rom_sha256: 03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2
+    notes: >
+      Single Fuel Targets Map 1 edit at 5200 RPM / BFS 18.20:
+      raw A2 -> A3, AFR 11.6148148 -> 11.5435583. K and all other
+      calibration bytes unchanged. Boundary is capture frame 42353,
+      final successful post-program range CRC response; ECU identification
+      resumes at 03:09:12.604378Z. Capture SHA256
+      99fbd62b7e07938e8ce0fdb87400352bd3756bee8fe1c3b063dc17b80ff06e56.
+      Sessions spanning the flash require splitting before tune comparison;
+      the session resolver assigns by session start, not per-sample time.
+      See docs/skunkworks/uprev-flash-20260920.md.

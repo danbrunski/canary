@@ -1,0 +1,18 @@
+schema_version: 1
+table: fuel_targets
+map_slot: 1
+image_size: 1048576
+table_offset: 0xE0220
+rpm_axis_offset: 0xCAA5
+load_axis_offset: 0xC894
+afr_numerator: 1881.6
+calibration_file: afr_calibration.yaml
+checksums:
+  algorithm: be32_sum_xor
+  start: 0x8204
+  excluded: [0x20000, 0x9598, 0x95A0]
+  sum_offset: 0x95A0
+  xor_offset: 0x9598
+  markers:
+    0x20008: 0xFFFF7FFC
+    0x20010: 0xFFFF7FFC

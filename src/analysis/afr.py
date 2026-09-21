@@ -49,7 +49,7 @@ class VoltageAfrTransfer(_Strict):
 
 
 class TargetMapProvenance(_Strict):
-    method: Literal["uprev_rom_editor_transcription"]
+    method: Literal["uprev_rom_editor_transcription", "verified_rom_decode"]
     rom_file: str
     rom_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     rom_modified_at: datetime

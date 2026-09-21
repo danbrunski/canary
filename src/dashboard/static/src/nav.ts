@@ -14,6 +14,7 @@ export const NAV: NavGroupDef[] = [
       { id: "live-alarms", label: "Alarms", group: "live" },
       { id: "live-builder", label: "Builder", group: "live" },
       { id: "live-trip", label: "Trip", group: "live" },
+      { id: "live-rom-maps", label: "ROM Maps", group: "live" },
     ],
   },
   {

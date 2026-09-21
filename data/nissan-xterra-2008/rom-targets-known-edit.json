@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "source_sha256": "c5325776b08c3084edd49d8f68587dad4668e02b0e77c7686f7548fb6f7c8fa9",
+  "table": "fuel_targets",
+  "map_slot": 1,
+  "changes": [{
+    "row": 7, "column": 4, "rpm": 5200.0, "bfs_ms": 18.20,
+    "old_raw": 162, "new_raw": 163,
+    "rationale": "Reproduce the operator's already-completed UpRev edit for offline validation only."
+  }]
+}

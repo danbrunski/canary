@@ -1,0 +1,23 @@
+schema_version: 1
+map_slots: [1, 2, 3, 4, 5]
+target_definition: rom_targets.yaml
+# Names/axes: UpRev Nissan Tuning Guide Rev 8, pp. 9–10.
+tables:
+  - kind: fuel_targets
+    title: Target AFR
+    x_label: Base Fuel Schedule
+    x_unit: ms
+    y_label: Rotations Per Minute
+    y_unit: rpm
+    unit: AFR
+  - kind: fuel_compensation
+    title: Fuel Compensation
+    x_label: Volumetric Flow Ratio
+    x_unit: '%'
+    y_label: Rotations Per Minute
+    y_unit: rpm
+    unit: '%'
+warnings:
+  - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. Pedal enrichment can override the normal fuel-target column.'
+  - 'Fuel Compensation has one verified cell but not a verified complete layout. Its live Volumetric Flow Ratio channel is also unresolved; throttle, calculated load and BFS are not substitutes.'
+  - 'Map selection is for viewing only. CANary does not read or change the ECU active map slot here.'

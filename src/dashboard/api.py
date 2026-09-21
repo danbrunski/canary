@@ -56,6 +56,7 @@ from src.dashboard.routes import (
     register_public_routes,
     register_stream_routes,
 )
+from src.dashboard.routes.rom_maps import register_rom_routes
 from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import (
     StatusSnapshot,
@@ -229,6 +230,7 @@ def create_app(
         emitter=emitter,
         publish_control_event=publish_control_event,
     )
+    register_rom_routes(app, config=config, resolved_control_token=resolved_control_token)
     register_stream_routes(
         app,
         telemetry_bus=telemetry_bus,
