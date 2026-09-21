@@ -8,7 +8,21 @@ Blocked until both are true (operator confirms):
 - [x] **G.1 — UpRev Tuner cable + license delivered** (Z1 Offroad
   order; license locks to this ECU). Done — first flash 2026-07-26,
   stock `ZS04C` → Osiris `ZS44A`, CAL_ID `1ZS04C` → `1ZS44A`.
-- [~] **G.2 — LTFT was cleared and has not relearned. Gate restated.**
+- [x] **G.2 — LTFT was cleared, stayed at zero for ten weeks, and has now
+  relearned. Gate closed 2026-09-21.**
+  **Resolution.** `LONG_FUEL_TRIM_1/2` read exactly 0.00 in every session from
+  2026-07-18 through 2026-09-10, and is active in every session from
+  2026-09-18 on (84-100 % of samples nonzero, range -9.4..+9.4 %). It resumed
+  learning somewhere in that eight-day window; what re-enabled it is not
+  known. From 2026-09-18, trim analysis uses the total correction
+  `(1+STFT)(1+LTFT)-1`, not STFT alone. DIDs `0x1102`/`0x1125` read the
+  learned table directly (100 = neutral, cell-indexed). At home altitude the
+  closed-loop total is within about ±2.5 % everywhere (2026-09-20, n=1,580);
+  a -4..-5 % hump at 20-45 g/s appeared only on the 2026-09-18 altitude trip
+  and did not reproduce at home. Everything below is the history of the gate
+  while it was open, kept because the reasoning still matters.
+
+  *Original gate text:* LTFT was cleared and has not relearned.
   The battery disconnect for the 2026-06-28 header/spacer work cleared the
   learned trim. LTFT was active before that event: across the May corpus,
   bank 1 averaged **+1.88 %** and bank 2 **+2.98 %**, with the later May 24

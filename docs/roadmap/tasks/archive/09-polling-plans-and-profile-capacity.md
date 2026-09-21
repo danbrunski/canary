@@ -116,20 +116,20 @@ the actual path, not a capability available only in a probe tool.
 
 ## Implementation checklist: profile updates
 
-- **C09.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H7.** For normal monitoring, measure useful critical-channel coverage, probe overhead, and batching before changing the default budget. Reuse validated passive providers explicitly where appropriate; preserve source provenance and the model inputs they actually supply. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C09.12 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H7.** For normal monitoring, measure useful critical-channel coverage, probe overhead, and batching before changing the default budget. Reuse validated passive providers explicitly where appropriate; preserve source provenance and the model inputs they actually supply. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C09.13 For fuel-map, make the required fueling tuple the scheduling and
   acceptance unit. Retain vehicle-specific unsupported-PID exclusions and
   record tuple rate and skew, not just aggregate channel throughput.
   _done through C02/C03 plus the vehicle profile: unsupported PID 0x25 is
   excluded, required tuple members schedule first, and persisted quality
   records tuple completion/rate/skew._
-- **C09.14 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H8.** For continuous DID profiles, identify fast dynamics and slow context from experiment requirements, lower context demand, and measure the resulting fast-channel coverage. Do not prescribe one vehicle's cadence to all vehicles. measure released capacity; the schema/runtime cadence control is complete._ Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C09.14 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H8.** For continuous DID profiles, identify fast dynamics and slow context from experiment requirements, lower context demand, and measure the resulting fast-channel coverage. Do not prescribe one vehicle's cadence to all vehicles. measure released capacity; the schema/runtime cadence control is complete._ Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C09.15 For hybrid profiles, use C04's measured cycle capacity and retain
   cross-mode timing limits. Keep unsupported targets visibly experimental.
   _done: the vehicle profile retains C04's 0.25 s start-to-start cycle,
   measured 0.341 s cross-mode separation and achieved shortfall, and remains
   explicitly experimental._
-- **C09.16 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H9.** Correct capacity notes to state active transport, measured test duration/conditions, and actual request counts. Retain the old storage-loss incident as history, not a universal 24 request/s ceiling. Do not raise deployed rate defaults until C10 supplies sustained evidence. defaults were raised._ bus only** (e.g. `tuning-did` 148 batched + 1093 single Mode 22 in ~10 s against 1613 single before C09; fuel-DID 199 batched + 990 single; hybrid 40 batched), with the ECU-side count agreeing with the scheduler's every time. On that bus the budget was never the constraint, so batching bought request count, not rate. None of it licenses a capacity note about the truck's transport or a raised default — that is C10.10 on the Pi._ Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C09.16 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H9.** Correct capacity notes to state active transport, measured test duration/conditions, and actual request counts. Retain the old storage-loss incident as history, not a universal 24 request/s ceiling. Do not raise deployed rate defaults until C10 supplies sustained evidence. defaults were raised._ bus only** (e.g. `tuning-did` 148 batched + 1093 single Mode 22 in ~10 s against 1613 single before C09; fuel-DID 199 batched + 990 single; hybrid 40 batched), with the ECU-side count agreeing with the scheduler's every time. On that bus the budget was never the constraint, so batching bought request count, not rate. None of it licenses a capacity note about the truck's transport or a raised default — that is C10.10 on the Pi._ Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 
 ## Regression and acceptance checklist
 

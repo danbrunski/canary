@@ -156,7 +156,19 @@ to direct HTTP.
   `canary.local`); install via `sudo bash scripts/install_pi.sh`; data
   lives under `/data/canary/`; control token at
   `/etc/canary/control.token`. Model binaries are gitignored — they
-  travel by `scp`, not `git pull`.
+  travel by `scp`, not `git pull`. `192.168.137.2` is the **Ethernet** link.
+  In the vehicle the Pi often has no DNS, so `git pull` fails there: deploy
+  with a bundle (`git bundle create x.bundle <pi-head>..main`, `scp`, then
+  `git fetch x.bundle main:refs/remotes/bundle/x && git merge --ff-only`).
+  Restart with `scripts/restart_canary.sh` (below).
+- **Pull sessions as a tar stream, never per-file `rsync`.** A session is
+  thousands of tiny parquet files; `rsync -a` spent ten minutes and moved
+  nothing, where `ssh … 'tar -cf - <sessions>' | tar -xf -` moved 350 MB in
+  six seconds.
+- **No analysis on the Pi while it collects.** Pull the session and analyse
+  it on the laptop. A `nice -19` pandas run once cost a 3-minute outage and
+  150k dropped records. Daemon endpoints that read a whole session go through
+  the bounded single-flight child and defer while a capture is recording.
 - **Storage isolation**: directories with a leading `_` (e.g.
   `_archive/`, `_replay-*`) are excluded from training discovery
   (`src/preprocessing/loader.py`), the live-session listing (timestamp
@@ -238,6 +250,12 @@ number and same-instant values yield nothing. `n_pairs` counts *pairs*, never
 either input's length. Ranking by r² is not enough either: over one drive
 nearly every engine signal correlates with rpm, so read `scale_verdict`, which
 separates *unstable* from *unresolvable* rather than condemning slow signals.
+**Then look at the per-sample ratio anyway — the verdict misleads in both
+directions.** It is computed from slope drift, and a fitted offset can absorb
+what it is looking for: on 2026-09-20 a RAM word passed as `[stable]` at
+r²=0.9966 while its ratio to the reference drifted ±14 %, and the next day a
+genuine mirror was reported `[drifting]` (slope 1.0094, offset −52) while its
+ratio sat at 1.0000 with 0.16 % spread.
 
 **Reproduce a known answer before trusting a novel one.** Every retraction
 above looked convincing in isolation and none was checked against a case with
@@ -260,6 +278,35 @@ reported `started: 0` for a 25-minute all-DID capture with 18k samples per
 channel — the `tuning-did` profile disables Mode 01, so commanded AFR was
 absent by construction. It now refuses and names the cause.
 
+## RAM channels are calibration-specific
+
+`data/dids.yaml` has a `memory:` catalog beside `dids:` — service-0x23
+(ReadMemoryByAddress) channels, stored as `mem:<NAME>`. They exist because
+some quantities are not DIDs at all: the ECM's final commanded equivalence
+ratio lives at a RAM address, which is why 138 answering DIDs never found it.
+
+- **A DID number is a contract; a RAM address is an artifact of one ROM
+  build.** Every memory channel carries `verified_tune_revision`, and the
+  daemon *withholds* any channel verified on a different calibration than the
+  one running — reading a moved address silently decodes whatever now lives
+  there. After a flash, run `python -m tools.verify_memory_channels
+  --record-revision <rev>`; it re-checks each address against its declared
+  `known_answer` relation and restamps window by window. A capture's payload
+  lists `memory_withheld`, so check it before trusting that a capture has its
+  memory channels.
+- **Windows are the only same-instant multi-channel read on this ECM.** It
+  refuses batched Mode 22 and every dynamic-identifier service on CAN (0xAC,
+  0x2A, 0x2C — all tested 2026-09-20), so two DIDs are always two requests
+  ~1.5 ms apart. Channels naming the same `window` share one ≤63-byte read.
+- **A sentinel is a state, not a number.** The target word is zero during fuel
+  cut; it decodes to no measurement and is reported on `mem:<NAME>_SENTINEL`.
+- **A fast quantity cannot be identified by exact equality.** Ignition timing
+  (changes on ~5 % of steps) resolved at 99.9 %; air charge (changes on ~82 %
+  even at idle) could not, because it moves faster than the gap between the
+  two reads. Use the per-sample ratio, and a steadier operating point.
+- Verify a relation can *fail* before trusting that it passed: apply it to
+  the neighbouring bytes. A constant matching a constant is not evidence.
+
 ## Restarting the daemon on the Pi
 
 Use `scripts/restart_canary.sh`, never a bare `systemctl restart canary`. It
@@ -272,8 +319,12 @@ it killed.
 
 ## Roadmap docs & task truth
 
-Planned work lives in `docs/roadmap/` as checklist docs; **task-level
-truth is each doc's own checkboxes** (`[x]` done, `[~]` partial/blocked
+Planned work lives in `docs/roadmap/` as checklist docs, with detailed
+implementation checklists in `docs/roadmap/tasks/` (`D03-open-work.md` for
+collection and diagnostics; `W00`–`W07` for the workbench regroup and the
+Engine Tuning pages). Finished plans move to `docs/roadmap/archive/`, whose
+README also says which fully-ticked documents deliberately did *not* move.
+**Task-level truth is each doc's own checkboxes** (`[x]` done, `[~]` partial/blocked
 with a note). `docs/roadmap/OVERNIGHT-QUEUE.md` orders the work and
 records operator-approved "pre-made decisions" — when a task says a
 decision was made, implement that option; never re-open it. `file:line`

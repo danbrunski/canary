@@ -52,6 +52,13 @@ detecting subtle signs of trouble before they become failures.
   charting, session replay through the live pipeline (isolated `_replay-*`
   outputs), and an authenticated control plane for captures, retrains, and
   model publishing.
+- **Engine tuning & calibration analysis** — named capture profiles (Mode 01,
+  Mode 22 and RAM channels at stated rates), ReadMemoryByAddress channels with
+  same-instant multi-field windows for quantities that are not DIDs (the ECM's
+  commanded target AFR, ROM map-cell traces), delivery-error and fuel-trim
+  surface analysis with explicit gates and noise floors, a tune-revision
+  registry, and a ROM table viewer. RAM addresses are stamped with the
+  calibration they were verified on and withheld on any other.
 - **Local dashboard** — FastAPI + WebSocket, accessible only over the vehicle's LAN.
 - **MCP server** — the daemon's read/control surface exposed to MCP-speaking
   agents (Claude Code and others), including ad-hoc SQL over the Parquet
@@ -223,6 +230,8 @@ canary/
 │   ├── headless-api.md       # REST/WebSocket/browser access
 │   ├── implementation-tasks.md
 │   └── roadmap/              # Planned work as checklist docs
+│       ├── tasks/            #   detailed implementation checklists (D03, W00–W07)
+│       └── archive/          #   finished plans, kept for their reasoning
 ├── systemd/
 │   └── canary.service        # Headless daemon unit
 ├── src/
@@ -264,8 +273,10 @@ analysis work is tracked as checkbox-level task truth in
 summary, are authoritative for current completion state.
 
 See [`docs/implementation-tasks.md`](docs/implementation-tasks.md) for the historical
-task breakdown and [`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)
-for the capture backlog.
+task breakdown, [`docs/roadmap/tasks/`](docs/roadmap/tasks/README.md) for the live
+implementation checklists, and
+[`docs/roadmap/data-collection-plan.md`](docs/roadmap/data-collection-plan.md)
+for the original (now complete) capture plan.
 
 ---
 

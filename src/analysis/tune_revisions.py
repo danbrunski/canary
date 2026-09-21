@@ -11,7 +11,7 @@ to the newest revision flashed at or before it started. Sessions before the
 first recorded flash resolve to ``None`` rather than being forced into a
 revision that did not exist yet.
 
-See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 4.3.
+See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 4.3.
 """
 
 from __future__ import annotations

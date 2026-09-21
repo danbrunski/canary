@@ -1,5 +1,8 @@
 # Roadmap — MCP tooling & UPS/power hardening
 
+> **Archived 2026-09-21.** Every task here is complete; kept for the reasoning
+> behind what it built. Not live work.
+
 Status: **implemented and deployed** (2026-07-18/19). All 4 phases landed,
 pushed, and live-verified on the bench Pi. Straight to `main`, no feature
 branches.

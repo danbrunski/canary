@@ -1,7 +1,8 @@
 # Roadmap — workbench navigation by what the operator is doing
 
 Status: **planned** (2026-09-21). Straight to `main`, no feature branches.
-Supersedes the grouping in `dashboard-ux.md`; the tasks there still stand.
+Supersedes the grouping in `archive/dashboard-ux.md`, whose ten tasks all landed
+(2026-07) — this regroups the pages that work produced.
 
 ## Why this exists
 

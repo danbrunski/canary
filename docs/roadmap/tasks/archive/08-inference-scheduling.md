@@ -70,7 +70,7 @@ ownership design.
   gap flags, operating modes, sequence inputs, and emitted results. Read
   `vehicle_state`; do not interpret live engine-off silence as regression.
   _done: slow parity test on `tests/fixtures/ground_truth/drive-slice` — identical feature rows, `__gap` flags, operating modes, value columns and operating point between the synchronous path and the scheduled pipeline._
-- **C08.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H5.** Measure Pi CPU, memory, event-loop delay, processing latency, and capture losses under the same workload before/after. Include 1 Hz and a higher supported test cadence without changing deployed model defaults. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C08.12 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H5.** Measure Pi CPU, memory, event-loop delay, processing latency, and capture losses under the same workload before/after. Include 1 Hz and a higher supported test cadence without changing deployed model defaults. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C08.13 Acceptance: processing time does not accumulate as cadence drift,
   shared state has one owner, and computational overload remains observable
   without corrupting measurement chronology or filling an unbounded queue.

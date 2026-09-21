@@ -1,5 +1,8 @@
 # Roadmap — tuning analysis toolkit: encode the gates, kill the curl
 
+> **Archived 2026-09-21.** Every task here is complete; kept for the reasoning
+> behind what it built. Not live work.
+
 Status: **complete** (2026-08-05) — all 18 tasks across 5 phases. Straight to `main`, no feature branches.
 Not yet queued in `OVERNIGHT-QUEUE.md` — operator decides ordering. Every
 phase here is software-only (no truck needed) unless a task says otherwise.
@@ -323,11 +326,11 @@ against the 2026-07-27 overlap pair with its known offsets.
 
 ## Cross-links
 
-- [`engine-tuning-support.md`](./engine-tuning-support.md) — the campaign
+- [`engine-tuning-support.md`](../engine-tuning-support.md) — the campaign
   this serves; 3.3/3.5 hold the measured gates and floors
-- [`capture-profiles.md`](./capture-profiles.md) — profile/capture
+- [`capture-profiles.md`](../capture-profiles.md) — profile/capture
   mechanics this orchestrates
-- [`multi-pid-polling.md`](./multi-pid-polling.md) — rate/batching
+- [`multi-pid-polling.md`](../multi-pid-polling.md) — rate/batching
   substrate; its 4.x validation tasks pair with 3.1 here
 - `data/analyses/did-sweep-20260804-koeo-baseline.md` — session
   exclusivity, DID identifications, the λ/φ finding

@@ -135,7 +135,7 @@ for (2026-07-31):
 
 - [x] **3.1 — Capture panel.** Mode indicator (always visible when a
   non-default profile is active — same lesson as the invisible-replay
-  problem in dashboard-ux.md), profile dropdown, Start/Stop. Reuses
+  problem in archive/dashboard-ux.md), profile dropdown, Start/Stop. Reuses
   the token-gated panel pattern.
 - [x] **3.2 — Profile editor.** Channel picker sourced from the live
   supported-channel/DID inventory (not a hard-coded list), rate
@@ -163,6 +163,15 @@ The first real profile, closing the UpRev-replacement gaps identified
   has the 138-responder four-state snapshots and a synchronous UpRev log, but
   no time-aligned raw-DID stream from that drive; correlating unrelated
   timestamps would fabricate an identification.
+  **Half closed 2026-09-20 — `B/FUEL SCHDL` yes, `A/F ALPHA` no.** UpRev's own
+  stream definition places B-FUEL SCHDL at DID `0x1208`, and `raw x 0.00049`
+  reproduces its displayed ms on 405/405 rows of the simultaneous CSV
+  (`raw/2048` reproduces 360/405 and is refuted); the provider is promoted to
+  confirmed. The same capture identified `0x1102`/`0x1125` as UpRev's
+  `LT Fuel Trim B1/B2` — but those are **not** alpha: they sit flat at steady
+  idle (one change in 82 rows) and step between learned cells, where alpha by
+  this task's own signature oscillates around 100 %. The short-term correction
+  still has no DID. See `data/analyses/2026-09-20-uprev-usb-road.md`.
 - [x] **4.2 — V→AFR transfer.** Export the A/F sensor transfer table
   from the UpRev ROM editor; decode `ECM_AF_SENSOR_V_B1/B2` (and/or
   Mode-01 λ PIDs 0x24/0x25) to AFR as a derived channel. Note the
@@ -176,7 +185,7 @@ The first real profile, closing the UpRev-replacement gaps identified
   sensor's usable range are censored: the 10.0 rich floor and, above
   `censored_ceiling_afr` (18.0), decel fuel cut, which is no injection at all
   rather than a lean mixture and would otherwise read as a large lean error.
-- [~] **4.3 — Target-AFR reconstruction.** Derived channel from the
+- [x] **4.3 — Target-AFR reconstruction.** Derived channel from the
   ROM's target table (operator-exported grid, stored per vehicle
   profile + tune revision) looked up by logged rpm/load — TARGET AFR
   is not a CONSULT param and is not expected on CAN without
@@ -186,6 +195,17 @@ The first real profile, closing the UpRev-replacement gaps identified
   lookup, and emits `derived:TARGET_AFR` plus per-bank error. The actual ROM
   target grid has not been exported into the scoped calibration file, so no
   target values are invented from the opportunistic log.
+  **Closed 2026-09-21 by a different route than the one written here.** The
+  parenthesis above was right: the target is reachable by ReadMemoryByAddress,
+  and it needed no security access. The ECM's FINAL commanded equivalence
+  ratio is a Q14 word at RAM `0xFFFF26BE`, catalogued as
+  `ECM_TARGET_EQUIV_RATIO` (`data/dids.yaml`, `memory:`) and polled as
+  `mem:ECM_TARGET_EQUIV_RATIO`. Evidence: 314 samples spanning phi
+  1.000-1.1641 (14.70-12.63 AFR) in `_capture-fuel-target-research-
+  2026-09-20T224503`, and `build_tuning_frame` reporting `commanded_afr:
+  available`. That is the commanded target after every enrichment and cut,
+  which a table lookup by logged rpm/load could only approximate. The
+  `TargetAfrMap` grid path stays as a cross-check against the ROM.
 - [~] **4.4 — 0xC0 in-motion A/B** (parked first), then a WOT-pull
   shakedown of the profile: per-band sample counts vs the UpRev
   benchmark (537 samples/40 min), storage queue_depth clean.
@@ -198,6 +218,12 @@ The first real profile, closing the UpRev-replacement gaps identified
   `telemetry_sinks.storage.queue_depth`: 25 req/s dropped 2491 records on
   2026-07-29 and the writer-side root cause was never established (batching
   landed in `312be7b` but is unvalidated live).
+  **2026-09-21 data point, not a closure:** the all-DID `rom-trace` profile
+  (19 DIDs + 5 memory windows, 184 req/s budget) ran in motion with all 22
+  requests at their configured rates — 8 Hz fast, 1 Hz slow, one timeout in
+  ~2,700 requests. It lasted four minutes before another agent's daemon
+  restart ended it, so there is still no WOT-pull shakedown and no per-band
+  sample count. The `fuel-map` profile itself remains unexercised.
 - [~] **4.5 — AFR-error surface from a capture session.** Run the
   engine-tuning-support 2.1 binned surface on a `_capture-fuel-map-*`
   session end-to-end: rpm × load cells, error vs reconstructed
@@ -207,6 +233,12 @@ The first real profile, closing the UpRev-replacement gaps identified
   RPM × load median/IQR/count/sparse cells and excludes censored samples.
   End-to-end execution waits on 4.3's ROM grid and 4.4's first real
   `_capture-fuel-map-*` session.
+  **4.3 no longer blocks this (2026-09-21).** With the commanded target read
+  directly, `delivery_error_from_semantic_frame` ran end to end on an all-DID
+  capture for the first time: 257 grid cells, 234 removed as not-enrichment,
+  23 remaining at +2.0 % — inside the ±2.4 % per-cell floor, so a
+  demonstration that the chain executes, not a finding. The rpm x load
+  *surface* on a real pull capture is still owed, and waits only on 4.4.
 
 ## Phase 6 — Running a capture (operator ergonomics)
 

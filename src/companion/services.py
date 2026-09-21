@@ -587,7 +587,7 @@ _RESULT_SUFFIX_BY_KIND: dict[str, str] = {
 
 
 def job_result_response(jobs: JobController, job_id: str) -> dict[str, Any]:
-    """`GET /control/jobs/{id}/result` (dashboard-ux.md Task 4.1).
+    """`GET /control/jobs/{id}/result` (docs/roadmap/archive/dashboard-ux.md Task 4.1).
 
     Only some job kinds write a structured report (`_RESULT_SUFFIX_BY_KIND`)
     — that's the same `<jobs_dir>/<job_id>.<suffix>.json` path each kind's

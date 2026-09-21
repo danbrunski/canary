@@ -1,6 +1,6 @@
 # Roadmap — dashboard UX: surface what's already built
 
-Status: **planned** (2026-07-19). Straight to `main`, no feature branches.
+Status: **complete — archived 2026-09-21** (all 10 tasks landed 2026-07; planned 2026-07-19). Straight to `main`, no feature branches.
 
 ## Why this exists
 

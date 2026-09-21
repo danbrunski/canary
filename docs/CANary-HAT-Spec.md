@@ -216,7 +216,7 @@ Every net now lands on the pin its label names.
 
 - **GPIO6 is claimed by the X1202 UPS and this board leaves it alone.**
   `scripts/ups_shutdown_watch.py` (`UPS_PLD_GPIO=6`) holds it as the power-loss-
-  detect input, and `docs/roadmap/mcp-and-power-hardening.md` records that two
+  detect input, and `docs/roadmap/archive/mcp-and-power-hardening.md` records that two
   processes claiming that line via `lgpio` collide with EBUSY. The barometer INT
   was drafted onto GPIO6 and was moved to **GPIO17 (pin 11)** on 2026-08-10.
   GPIO17 is a plain GPIO with no alternate function, and it is also the closest

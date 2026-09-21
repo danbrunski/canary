@@ -71,7 +71,7 @@ requests by telemetry channel selection. Audit and make this policy explicit.
 - [x] C06.11 Extend collector/client/trigger-poll/control tests; verify service
   requests retain their identifiers and per-ECU response provenance.
   _done: collector/client/trigger-poll/control tests extended; `ObdReading.responder_id` persisted in metadata for per-ECU provenance._
-- **C06.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H4.** On hardware, compare frame continuity and discovery counters around startup/recovery. Read vehicle state first; no received-byte count alone proves no frames were lost upstream. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C06.12 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H4.** On hardware, compare frame continuity and discovery counters around startup/recovery. Read vehicle state first; no received-byte count alone proves no frames were lost upstream. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C06.13 Acceptance: discovery cannot silently consume raw capture data
   or bypass session/budget policy, and deferred diagnostics are visible.
   _done: single tapped receive site, budget wait reason, and matrix phase gate make silent consumption or policy bypass unrepresentable; deferred diagnostics visible in `/status`._

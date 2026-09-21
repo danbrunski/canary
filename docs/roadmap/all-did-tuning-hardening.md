@@ -6,7 +6,7 @@ Task-level truth is this document's checkboxes.
 
 Cross-links:
 
-- `tuning-analysis-toolkit.md` — the completed toolkit this hardens
+- `archive/tuning-analysis-toolkit.md` — the completed toolkit this hardens
 - `capture-profiles.md` — capture lifecycle and the `tuning-did` profile
 - `engine-tuning-support.md` — the tuning campaign and its measurement gates
 - `multi-pid-polling.md` — scheduler/rate substrate
@@ -439,7 +439,7 @@ implementer to revisit:
   contract rather than an assumption that the previous stop response survives.
 
 - [x] **6.9 — Update stale documentation.** `docs/mcp-server.md`,
-  `docs/headless-api.md`, and `tuning-analysis-toolkit.md` describe the
+  `docs/headless-api.md`, and `archive/tuning-analysis-toolkit.md` describe the
   capture-scoped rate observation, budget restoration, returned capture path,
   and idempotent retry behavior.
 

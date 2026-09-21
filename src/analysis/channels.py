@@ -41,7 +41,7 @@ Scaling always routes through :func:`src.decode.bindings.apply_scaling` and
 arithmetic — an unpinned ``scale: null`` binding must keep yielding raw
 counts with ``unit="counts"``, not a silently invented engineering value.
 
-See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 1.
+See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 1.
 """
 
 from __future__ import annotations

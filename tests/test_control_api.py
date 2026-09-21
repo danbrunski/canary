@@ -483,7 +483,7 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
 
 
 def test_control_job_result_reads_replay_report(tmp_path: Path) -> None:
-    """dashboard-ux.md Task 4.1: `GET /control/jobs/{id}/result` reads the
+    """docs/roadmap/archive/dashboard-ux.md Task 4.1: `GET /control/jobs/{id}/result` reads the
     `<job_id>.replay.json` report a `replay_window` job writes — the same
     file the MCP `replay_window` tool resolves."""
     storage = tmp_path / "storage"

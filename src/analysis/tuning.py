@@ -24,7 +24,7 @@ Every function here refuses the unsafe form rather than trusting the caller to
 remember, and reports which gate dropped how many samples so a diluted result
 is visible instead of silent.
 
-See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 2.
+See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 2.
 """
 
 from __future__ import annotations

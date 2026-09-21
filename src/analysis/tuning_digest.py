@@ -10,7 +10,7 @@ exists for capture sessions, needs an AFR calibration and a tune-revision
 registry the ordinary digest has no use for, and must degrade to ``None``
 rather than failing a normal drive's digest when a channel is missing.
 
-See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 5.
+See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 5.
 """
 
 from __future__ import annotations

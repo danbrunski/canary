@@ -61,7 +61,7 @@ replacement capacity measurement or a Pi estimate.
   configuration and raw summary. Verify the feature transformation executes;
   elapsed duration alone is not sufficient evidence.
   _done: `data/analyses/2026-09-06-benchmark-live-pipeline-baseline.md` (+ smoke/steady JSON); feature rows verified > 0 (60 and 600 rows × 312 columns)._
-- **C05.11 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H2.** Run the same workload on the Pi when available, identifying hardware, power/thermal state, runtime, and model versions. Do not fill the missing Pi result with an extrapolation. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C05.11 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H2.** Run the same workload on the Pi when available, identifying hardware, power/thermal state, runtime, and model versions. Do not fill the missing Pi result with an extrapolation. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C05.12 Acceptance: a reported valid feature benchmark has actual
   feature rows, a warmed buffer, monotonic scenario time, and truthful workload
   counts. The previous zero-row 27,600 Hz result must be impossible to accept.

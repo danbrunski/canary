@@ -67,7 +67,7 @@ run, not a verified result of the current code.
 - [x] C04.11 Run controller/collector and profile tests, including an
   end-to-end fake-bus mixed capture with measured request ordering.
   _done: controller/collector/profile tests plus an end-to-end fake-bus mixed capture asserting per-cycle request order (entry, DIDs, exit, Mode 01) and wake reasons._
-- **C04.12 — moved to [`PENDING-HARDWARE.md`](../PENDING-HARDWARE.md) as H3.** On the Pi, record vehicle state and compare equivalent captures using cadence, gaps, complete tuples, and transition timing. Do not claim 4 Hz until it is achieved and persisted. Keep the profile experimental until its declared contract is met. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
+- **C04.12 — moved to [`PENDING-HARDWARE.md`](PENDING-HARDWARE.md) as H3.** On the Pi, record vehicle state and compare equivalent captures using cadence, gaps, complete tuples, and transition timing. Do not claim 4 Hz until it is achieved and persisted. Keep the profile experimental until its declared contract is met. Not a checkbox here: it is a measurement on the vehicle, and this document's implementation is complete without it.
 - [x] C04.13 Acceptance: the loop wakes at the earliest relevant deadline,
   both service phases progress, and cycle targets and achieved values use the
   same definition.

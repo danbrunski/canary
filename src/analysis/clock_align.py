@@ -14,7 +14,7 @@ threshold is what exposed the 2026-07-29 pair, whose 314 s of nominal overlap
 contained zero simultaneous samples because plugging in the UpRev cable had
 taken the bus away from the Pi.
 
-See ``docs/roadmap/tuning-analysis-toolkit.md`` Phase 4.1.
+See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 4.1.
 """
 
 from __future__ import annotations
