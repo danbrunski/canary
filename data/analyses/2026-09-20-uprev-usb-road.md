@@ -635,3 +635,51 @@ the honest statement of the parity gap is about daemon throughput and
 same-instant sampling, not about the ECM refusing the traffic. Note that the
 63-byte memory reads are multi-frame and slower — the sweeps ran at ~176 req/s
 — so windows buy simultaneity, not raw rate.
+
+### Fuel channels in RAM — located but NOT resolved
+
+Continuing the sweep for RAM mirrors of the fuel-side quantities (air charge
+`0x1208`, A/F sensor volts `0x1225`, MAF `0x1209`), 11 further 63-byte windows
+across `0xFFFF1000`-`0xFFFF135E`, engine idling.
+
+**No mirror of A/F sensor volts or MAF was found.** Candidates existed but all
+carried unstable scales: `0xFFFF100A/100B` fit A/F volts at r2 0.994 but with
+a 247-count offset, so it is a different register; `0xFFFF1044/1054/1056` fit
+MAF at a consistent slope 0.577 but `[drifting]`.
+
+**Air charge is in `0xFFFF1038`-`0xFFFF103D`, but which slot is the register
+is unresolved.** All three 16-bit slots read a per-sample ratio to `0x1208`
+of exactly 1.0000 with a p5-p95 spread of 0.14-0.33%, reproduced at two
+operating points (revving, and steady idle). The region is right — it sits
+4 bytes from `0xFFFF103E`, which UpRev reads as its `Fuel Target X Trace`.
+
+The slots do not resolve against each other and the two available statistics
+disagree:
+
+| address | exact vs DID (idle) | bracketed by neighbouring reads (idle / revving) |
+|---|---|---|
+| `0xFFFF1038` | 344/1999 (17.2%) | 1351/1997 (67.7%) |
+| `0xFFFF103A` | 232/1999 (11.6%) | **1674/1997 (83.8%)** / 85.0% |
+| `0xFFFF103C` | 172/1999 (8.6%) | 978/1997 (49.0%) |
+
+A rolling-history structure would explain it, but the shift test does not
+support one (262-265/1998 for adjacent one-sample shifts).
+
+**Why this cannot be settled the way ignition timing was.** Air charge dithers
+on almost every sample — 1,648 of 1,998 consecutive steps changed even at
+steady idle — so the ~1.5 ms between the memory read and the cross-check DID
+read is longer than the quantity stays still. Exact equality is therefore the
+wrong test, and no amount of extra samples fixes it. Timing was resolvable
+precisely because it changed on only 58 of 1,199 steps.
+
+Settling it needs an operating point where air charge is genuinely steady for
+tens of milliseconds — steady cruise on a drive, not idle. Nothing is
+catalogued from this; the region and the failed tests are recorded so the next
+attempt starts here rather than re-deriving it.
+
+**A caution about the analyzer, in the opposite direction from the earlier
+one.** `0xFFFF103A` was reported `[drifting]` with a fitted slope of 1.0094
+and a -52 offset, while its per-sample ratio is 1.0000 with 0.16% spread. The
+fit traded slope against offset. Earlier in this file `[stable]` masked a ±14%
+ratio drift; here `[drifting]` masked a genuine unit ratio. The verdict is not
+a substitute for looking at the ratio either way.
