@@ -138,7 +138,14 @@ class BatchedMode01Response:
 #: Nissan ECM (``7F 22 12``), so these are the routes left to a same-instant
 #: multi-value read. Every write/reflash service (``0x2E``, ``0x3B``,
 #: ``0x3D``, ``0x31``, ``0x34``–``0x37``) is absent by construction.
-RAW_QUERY_SERVICES: frozenset[int] = frozenset({0x10, 0x21, 0x23, 0x27, 0x2A, 0x3E})
+#: ``0xAC`` (DynamicallyDefineLocalIdentifier) is here because it is the
+#: *setup* half of a read: it tells the ECU which values a later ``0x21``
+#: should return, and touches nothing else. The state it creates is volatile
+#: and ends with the diagnostic session, which puts it on the same side of
+#: the line as session control — not the non-volatile writes that line
+#: exists to prevent. It is what lets one request return many values on an
+#: ECM that refuses batched ``0x22``.
+RAW_QUERY_SERVICES: frozenset[int] = frozenset({0x10, 0x21, 0x23, 0x27, 0x2A, 0x3E, 0xAC})
 
 
 @dataclass(frozen=True)
