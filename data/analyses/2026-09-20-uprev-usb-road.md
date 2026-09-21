@@ -464,3 +464,73 @@ from 2 Hz to one sample per 10.5 s. Capture quality flagged it as
 same 18-byte read answered `0949...4000` (2,629 rpm, phi 1.0) on the first
 manual probe. Fixed by giving `selection_exclusion` the request instead of a
 channel string, so the unsafe call cannot be written.
+
+### UpRev channel harvest — the full detailed scheme decoded
+
+`uprev-detailed_scheme.pcapng` + the simultaneous
+`UpRev_Log9-20-2026_6-53-59_PM.csv` (parked, idle and revs, 29 s, 406 stream
+replies against 405 CSV rows) together identify essentially the whole ROM
+Editor logging scheme.
+
+**UpRev chains dynamic local identifiers.** Three definitions were sent, each
+including the previous one:
+
+```text
+02 00 ac 81  <12 memory-byte descriptors>
+02 00 ac 82  01 81  <5 memory bytes> <11 DID descriptors>
+02 00 ac 83  01 82  <10 DID descriptors>
+```
+
+The log then polls `02 00 21 83 04 01` — service 0x21, ReadDataByLocalIdentifier
+— and gets `66 34 61 83 <50 bytes> KK` back at **13.97 Hz**. The inner checksum
+validated on 406/406 replies, which is what pins the payload at exactly 50
+data bytes and therefore fixes every field width.
+
+Descriptor order is reply order, so the layout is determined. Widths for eight
+previously unmeasured DIDs follow from the 50-byte total. Identities were then
+confirmed by reproducing ROM Editor's own displayed values:
+
+| CSV column | field | conversion | agreement |
+|---|---|---|---|
+| IGN TIMING (BTDC) | DID `0x110A` @33 | `110 - raw` | **405/405 exact** |
+| LT Fuel Trim B1 (%) | DID `0x1102` @45 u16 | raw | 405/405 |
+| LT Fuel Trim B2 (%) | DID `0x1125` @47 | raw | 405/405 |
+| INTAKE AIR TMP | DID `0x1106` @38 | `raw - 50` degC | 405/405 |
+| ACCEL PED POS 1 | DID `0x120D` @21 u16 | `raw x 0.005` V | r2 0.99996 |
+| B-FUEL SCHDL (ms) | DID `0x1208` @27 u16 | `raw x 0.00049` | 405/405 |
+| MAS A/F -B1 (V) | DIDs `0x1126` hi + `0x1204` lo | `raw x 0.005` V | 405/405 |
+| Fuel Target X Trace | RAM `0xFFFF103E` | `x 0.250859` | r2 1.00000 |
+| Fuel Target Y Trace | RAM `0xFFFF11D8` u16 | `x 12.4995` (rpm) | r2 1.00000 |
+| Intake Cam VQ Y Trace | RAM `0xFFFF11CA` | `x 50` exactly | resid 0.0000 |
+| Throttle X Trace | RAM `0xFFFF1C2C` | `x 0.390711` | r2 0.99973 |
+| Throttle Y Trace | RAM `0xFFFF1902` u16 | `x 3.124834` | r2 1.00000 |
+| TARGET AFR | RAM `0xFFFF26BE` u16 | Q14 phi (already catalogued) | constant 14.70 here |
+
+Confirmations of already-catalogued decodes, all exact: `0x1101` coolant
+`raw-50` degC, `0x1135`/`0x1163` cam `raw x 0.5 - 64`, `0x1206`/`0x1207`
+injector `x 0.01` ms, `0x1209` MAF `x 0.01` g/s, `0x120F` throttle and
+`0x1225`/`0x1226` A/F sensors `x 0.005` V, `0x1117` load `~100/255`.
+
+Four findings worth stating separately:
+
+- **Ignition timing is DID `0x110A`, `110 - raw` degrees BTDC, exact on every
+  row.** It was absent from the broadcast bus (best r2 0.28) and unlocated
+  among the 138 answering DIDs. It is the final commanded timing after trim
+  and knock feedback, which is the mapped-vs-logged comparison the tuning work
+  needs and the only knock proxy this ECM offers.
+- **BFS is `0x1208 x 0.00049` ms, and 2048 counts/ms is refuted** (360/405 vs
+  405/405). The earlier "2048 within error" note was an artifact of deriving
+  the scale transitively through per-era ratios. The provider is promoted from
+  candidate to confirmed.
+- **`0x1125` was never unknown — it is bank-2 long fuel trim.** It held raw
+  95-99 in the first K-line captures, which is a trim sitting near its
+  neutral 100.
+- **AFR WB-B1/B2 are NOT streamed.** ROM Editor derives them from the A/F
+  sensor volts through a non-linear transfer (0.695 V -> 11.63, 1.21 V ->
+  12.84). There is no ECM-computed AFR channel to find; our own
+  `voltage_transfer` curve remains the only route, and this CSV's 207 distinct
+  volt/AFR pairs are a ready-made reference for calibrating it.
+
+The knock columns (`KNOCK EVENT` 0, `KNOCK STRENGTH` 1280, `KNOCK THRESHOLD`
+1.95) were constant for the whole log, consistent with the settled finding
+that this ECM does not stream knock.

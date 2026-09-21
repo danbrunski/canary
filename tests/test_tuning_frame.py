@@ -181,16 +181,29 @@ def test_scale_requires_a_unit_and_factor_requires_scale() -> None:
         Provider(role="rpm", spec="did:ECM_RPM", factor=2.0)
 
 
-def test_the_shipped_registry_declares_bfs_as_a_candidate_with_its_envelope() -> None:
+def test_the_shipped_registry_declares_bfs_confirmed_with_its_measured_scale() -> None:
+    """Promoted 2026-09-20 on a same-reply identity, not a transitive ratio.
+
+    UpRev's own stream definition places B-FUEL SCHDL at DID 0x1208, and
+    `raw x 0.00049` reproduces its displayed ms on 405/405 rows of the
+    simultaneous CSV. `raw/2048` reproduces 360/405 and is refuted — the
+    earlier note that 2048 sat "within error" was an artifact of deriving
+    the scale through per-era ratios rather than from paired observations.
+
+    The steady-state condition stays: it is about reading this channel
+    through a transient, which is a separate question from the scale.
+    """
     registry = load_provider_registry(PROVIDERS)
     bfs = next(p for p in registry.providers if p.role == "base_fuel_schedule")
     assert bfs.spec == "did:ECM_AIR_CHARGE"
     assert bfs.transform == "scale"
-    assert bfs.confidence == "candidate"
+    assert bfs.confidence == "confirmed"
     assert bfs.unit == "ms"
-    assert bfs.factor == pytest.approx(1 / 2040, rel=1e-5)
+    assert bfs.factor == pytest.approx(0.00049, rel=1e-6)
+    # 2048 counts/ms would be 0.000488 — the refuted value must not creep back.
+    assert bfs.factor != pytest.approx(1 / 2048, rel=1e-4)
     assert bfs.conditions and "steady state" in bfs.conditions.lower()
-    assert bfs.evidence and "bfs1208.md" in bfs.evidence
+    assert bfs.evidence and "uprev-detailed_scheme" in bfs.evidence
 
 
 def test_the_shipped_registry_uses_confirmed_injector_pulse_providers() -> None:
@@ -223,24 +236,23 @@ def _air_charge_session(tmp_path: Path) -> Path:
     return session
 
 
-def test_bfs_is_raw_air_charge_over_2040_only_when_candidates_are_allowed(
-    tmp_path: Path,
-) -> None:
+def test_bfs_now_resolves_without_opting_into_candidates(tmp_path: Path) -> None:
+    """The inverse of what this test asserted before the scale was pinned.
+
+    While BFS was a candidate, automatic analysis had to refuse it and an
+    operator had to pass allow_candidates to get it at all. It is confirmed
+    now, so the load axis of the fuel-target map resolves by default.
+    """
     session = _air_charge_session(tmp_path)
     calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
 
-    default = build_tuning_frame(session, providers_path=PROVIDERS, calibration=calibration)
-    assert default.capability["base_fuel_schedule"]["available"] is False
-    assert "candidate" in str(default.capability["base_fuel_schedule"]["reason"])
-    assert "base_fuel_schedule" not in default.values.columns
+    frame = build_tuning_frame(session, providers_path=PROVIDERS, calibration=calibration)
 
-    opted = build_tuning_frame(
-        session, providers_path=PROVIDERS, calibration=calibration, allow_candidates=True
-    )
-    cap = opted.capability["base_fuel_schedule"]
+    cap = frame.capability["base_fuel_schedule"]
     assert cap["available"] is True
-    assert cap["confidence"] == "candidate"
-    assert cap["conditions"] and cap["evidence"]
-    got = opted.values.dropna(subset=["base_fuel_schedule"])
+    assert "confidence" not in cap  # confirmed providers carry no caveat block
+    got = frame.values.dropna(subset=["base_fuel_schedule"])
     assert list(got["base_fuel_schedule_raw"]) == [6000, 20400, 40800]
-    assert list(got["base_fuel_schedule"]) == pytest.approx([6000 / 2040, 10.0, 20.0], rel=1e-5)
+    assert list(got["base_fuel_schedule"]) == pytest.approx(
+        [6000 * 0.00049, 20400 * 0.00049, 40800 * 0.00049], rel=1e-6
+    )

@@ -231,6 +231,23 @@ dids:
     unit: unknown        # air charge x K counts — not injector ms, not fuel mass; BFS ms scale lives in tuning_providers.yaml
     confidence: high
     evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        constant: 0.00049
+        constant_unit: ms per count
+        conditions: >-
+          Parked idle and revs, coolant 174-175 degF, one 29 s log at
+          13.97 Hz on calibration ZS44A-k106. Same-reply identity, so it is
+          independent of acquisition skew; it says nothing about how BFS
+          tracks MAF through a transient.
+        finding: >-
+          Settles the 2040-vs-2048 counts/ms question by direct display
+          reproduction rather than transitively through per-era ratios.
+          UpRev's B-FUEL SCHDL (ms) column is byte 27-28 of the same stream
+          reply, and raw x 0.00049 reproduces the displayed value on 405/405
+          rows. raw/2040 gives 401/405; raw/2048 gives only 360/405, so 2048
+          is REFUTED. The earlier note that 2048 sat "within error" was a
+          consequence of the transitive derivation, not of the data.
       - session: _uprev-usb-2026-09-20-bfs
         method: operator_selected_uprev_dynamic_stream
         finding: >
@@ -1023,6 +1040,152 @@ dids:
       of Q14 phi, but its rich-side table role remains deliberately named as a
       candidate. Single-DID transport (`obd_did_batch_max_dids: 1`) on this
       ECM's CAN diagnostic path.
+
+  - did: 0x110A
+    name: ECM_IGNITION_TIMING
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: 1 byte at its descriptor position in a 50-byte reply whose inner checksum validated on 406/406 replies.'
+    byte_order: big
+    scale: -1.0
+    offset: 110.0
+    unit: degBTDC
+    confidence: high
+    plausible_min: -20.0
+    plausible_max: 60.0
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          Final ignition timing. UpRev's chained stream definition (local id
+          0x83 including 0x82 including 0x81) places DID 0x110A at byte 33 of
+          the 50-byte reply, and ROM Editor's own CSV for the same session
+          displays `IGN TIMING (BTDC)` = 110 - raw on 405/405 rows with ZERO
+          residual. Observed raw 68-113, i.e. +42 to -3 deg BTDC across idle
+          and revs. This is an identification from UpRev's definition plus
+          exact reproduction of its displayed value, not a correlation.
+    notes: |
+      The quantity that had no source at all: absent from the broadcast bus
+      (best r2 0.28 over -4..+42 deg, data/bindings.yaml absent_signals) and
+      previously unlocated among the 138 answering DIDs.
+
+      Nissan computes MBT internally and the ROM exposes only a trim, so this
+      is the FINAL commanded timing after trim and any knock feedback -- it is
+      the mapped-vs-logged comparison the tuning work needs, and the only
+      knock proxy this ECM offers (it does not stream knock; see
+      docs/roadmap/engine-tuning-support.md).
+
+  - did: 0x1102
+    name: ECM_LONG_FUEL_TRIM_B1
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: bytes 45-46 of the checksum-validated 50-byte reply.'
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 200.0
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          `LT Fuel Trim B1 (%)` equals the raw 16-bit value 1:1 on 405/405
+          rows. Nissan's convention is multiplicative: 100 means no
+          correction, and this log idled at 99.
+    notes: |
+      Long-term fuel trim is a Mode 01 PID (0x07) that a Mode 22 capture
+      cannot reach, since Mode 01 and session 0xC0 are mutually exclusive on
+      this ECM. This makes it available inside an all-DID capture.
+
+      Do not confuse a flat 0.0 reading here with the Mode 01 LONG_FUEL_TRIM_1
+      sentinel problem: this register is a different encoding (100 = neutral,
+      not 0).
+
+  - did: 0x1125
+    name: ECM_LONG_FUEL_TRIM_B2
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: byte 47 of the checksum-validated 50-byte reply.'
+    byte_order: big
+    scale: 1.0
+    offset: 0.0
+    unit: percent
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 200.0
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          `LT Fuel Trim B2 (%)` equals the raw byte 1:1 on 405/405 rows.
+    notes: |
+      Resolves an identity open since the first K-line captures. 0x1125
+      appeared in all three early isolated runs holding raw 95-99 and
+      docs/uprev-usb-kline-research.md recorded its identity as unknown --
+      those were bank-2 long fuel trim sitting near its neutral 100.
+
+  - did: 0x1106
+    name: ECM_INTAKE_AIR_TEMP_1106
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: byte 38 of the checksum-validated 50-byte reply.'
+    byte_order: big
+    scale: 1.0
+    offset: -50.0
+    unit: degC
+    confidence: high
+    plausible_min: -40.0
+    plausible_max: 130.0
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          `INTAKE AIR TMP` displays 1.8*raw - 58 on 405/405 rows (within the
+          CSV's whole-degree rounding), which is (raw - 50) degC rendered in
+          Fahrenheit -- the SAME -50 offset as coolant 0x1101 on this ECM,
+          not the -40 OBD convention.
+    notes: |
+      CONFLICT, left for the operator to resolve rather than renamed here.
+      0x123F already carries the name ECM_INTAKE_AIR_TEMP at `confidence:
+      low` with offset -40. That entry predates this evidence and uses the
+      generic OBD offset; this one matches the vehicle's own coolant
+      convention and reproduces UpRev's display exactly. Renaming 0x123F
+      would move a name that stored artifacts may reference, so the suffixed
+      name stands until someone runs tools/migrate_channel_names.py.
+
+  - did: 0x120D
+    name: ECM_ACCEL_PEDAL_POS_1
+    byte_start: 0
+    byte_length: 2
+    response_length: 2
+    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: bytes 21-22 of the checksum-validated 50-byte reply.'
+    byte_order: big
+    scale: 0.005
+    offset: 0.0
+    unit: V
+    confidence: high
+    plausible_min: 0.0
+    plausible_max: 5.0
+    evidence:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        finding: >
+          `ACCEL PED POS 1 (V-Accel)` = raw x 0.005 V, r2 = 0.99996 with a
+          4.7 mV maximum residual against a 0.01 V display step.
+    notes: |
+      Settles a candidate the 2026-09-20 road sweep could not: 0x120D/0x120E
+      looked like pedal voltage over a 31 s slice (r2 0.978) but fell to
+      r2 0.24 over 5,000 pairs with an unstable scale, so both were left
+      unidentified. UpRev's own definition names 0x120D directly.
+
+      Pedal is the DRIVER's request; throttle (0x120F) is the plate. On a
+      drive-by-wire engine they diverge, which is the point of having both.
 
 # ---------------------------------------------------------------------------
 # Service 0x23 (ReadMemoryByAddress) channels.

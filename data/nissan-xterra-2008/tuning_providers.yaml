@@ -23,19 +23,18 @@ providers:
   - role: base_fuel_schedule
     spec: 'did:ECM_AIR_CHARGE'
     transform: scale
-    factor: 0.000490196  # 1/2040
+    factor: 0.00049
     unit: ms
-    confidence: candidate
+    confidence: confirmed
     conditions: >-
       Steady state only: BFS trails MAF by ~0.15 s, so transients read -6..-7 %
-      (p5). Steady error +-2..3 % — fine between most fuel-target load
-      breakpoints but ambiguous at adjacent ones (18.20/18.54, 21.40/21.57 ms).
-      Validated to ~17 ms on July K 1.07 logs; the current tune only to
-      13.9 ms. Baro untested away from home altitude (~80 kPa). Not for
-      transient or WOT-edge cell placement.
+      (p5). That caveat is about using this channel through a transient, not
+      about the scale, which is now a same-reply identity.
     evidence: >-
-      data/analyses/2026-09-18-eve-drive-log.md;
-      ~/canary-data/scripts-0918b/out/bfs1208.md
+      uprev-detailed_scheme.pcapng + UpRev_Log9-20-2026_6-53-59_PM.csv
+      (2026-09-20): UpRev's own stream definition puts B-FUEL SCHDL at DID
+      0x1208 and raw x 0.00049 reproduces its displayed ms on 405/405 rows.
+      raw/2048 reproduces only 360/405 and is refuted.
   # The 2026-08-05 all-DID capture confirms a command plus two distinct
   # measured positions. Their exact physical bank mapping remains unknown, and
   # the 2026-08-06 drive weakened the evidence that had suggested one: the
