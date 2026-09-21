@@ -534,3 +534,43 @@ Four findings worth stating separately:
 The knock columns (`KNOCK EVENT` 0, `KNOCK STRENGTH` 1280, `KNOCK THRESHOLD`
 1.95) were constant for the whole log, consistent with the settled finding
 that this ECM does not stream knock.
+
+### Can CANary reproduce UpRev's one-request scheme over CAN? No.
+
+UpRev samples all 38 fields at 13.97 Hz by defining a local identifier and
+polling it once per sample. Tested against the engine ECM at `0x7E0` in
+session `0xC0`, KOEO, 2026-09-20:
+
+| service | meaning | result |
+|---|---|---|
+| `0xAC` | DynamicallyDefineLocalIdentifier (Nissan/KWP) | **NRC 0x11**, serviceNotSupported |
+| `0x2A` | ReadDataByPeriodicIdentifier | **NRC 0x11**, every transmission mode |
+| `0x2C` | DynamicallyDefineDataIdentifier (UDS) | **NRC 0x12** for sub-functions 01/02/03 |
+
+`0x2C` answering 0x12 rather than 0x11 says the service is recognised and no
+sub-function is usable, which is the same outcome. **UpRev's whole-scheme
+sampling is a K-line capability, not a CAN one**, and no amount of chaining
+gets around it: the define itself is refused.
+
+`0x21` does answer, but only for identifiers the ECM already defines. A sweep
+of all 256 found 14, every one a static identification block rather than live
+telemetry:
+
+```text
+0x00-0x05  4 bytes each   0x10  11 bytes "1ZS44A00000"   0x81  19 bytes (zeros)
+0x82  42 bytes (mostly ff/00)   0x83  24 bytes "ZS44A"...
+0xF0/0xFE 24 bytes "12345"+"8X61BJCN41"   0xF1/0xFF 24 bytes
+```
+
+One of those is worth keeping: **`21 10` returns the calibration id as ASCII**
+(`1ZS44A00000` on ZS44A-k106). That is the ECU telling us which ROM it is
+running, which is exactly what `MemoryChannel.verified_tune_revision` needs
+in order to notice a reflash without being told.
+
+**The multi-value route that works on CAN is service 0x23.** One read returns
+up to 63 bytes from a single ECU operation, which is what
+`MemoryChannel.window` already does. Parity therefore depends on how the
+wanted quantities cluster in RAM, not on a define mechanism. Rough budget at
+the measured 116.8 req/s ceiling: 21 DIDs polled serially gives 5.6 Hz per
+channel, while three or four 63-byte windows at 14 Hz costs ~56 req/s and is
+internally same-instant.

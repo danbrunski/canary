@@ -15,9 +15,28 @@ previous one, and the poll returns the whole accumulated list. That is what
 UpRev's 0x83 -> 0x82 -> 0x81 chain does, and it means no multi-frame transmit
 is needed.
 
-Read-only. Sends 0x10 (session), 0xAC (define a read list), 0x21 (read it),
-0x22 and 0x23 (the baselines it checks against). Nothing here writes
-non-volatile memory.
+RESULT, 2026-09-20 KOEO, engine ECM at 0x7E0 in session 0xC0: **the define
+does not exist on the CAN endpoint.** Every one-request-many-values route
+was refused, so this is a settled negative, not an untried idea:
+
+* ``0xAC`` DynamicallyDefineLocalIdentifier -> NRC 0x11 (serviceNotSupported)
+* ``0x2A`` ReadDataByPeriodicIdentifier -> NRC 0x11, every mode tried
+* ``0x2C`` DynamicallyDefineDataIdentifier -> NRC 0x12 for sub-functions
+  0x01/0x02/0x03, i.e. the service is recognised and no sub-function works
+
+``0x21`` itself *does* answer, but only for identifiers the ECM already
+defines, and a sweep of all 256 found 14 -- all static identification
+blocks, not live telemetry. The useful one is ``0x21 10``, which returns the
+calibration id as ASCII (``1ZS44A00000`` on ZS44A-k106).
+
+So UpRev's 14 Hz whole-scheme sampling is a K-line capability, not a CAN one.
+The multi-value route that DOES work on CAN is service 0x23: one read returns
+up to 63 bytes (``access.max_memory_read_length``), which is what
+``MemoryChannel.window`` uses.
+
+Read-only throughout. Sends 0x10 (session), 0xAC/0x2C (define a read list),
+0x21 (read it), 0x22 and 0x23 (the baselines it checks against). Nothing
+here writes non-volatile memory.
 """
 
 from __future__ import annotations
