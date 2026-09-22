@@ -57,6 +57,7 @@ from src.preprocessing.features import (
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
+from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
     SegmenterConfig,
@@ -483,16 +484,6 @@ def resample_long_session(
             extra={"session": session_name, "reject_counts": quality.reject_counts},
         )
     return resample_wide(gated, config=resample_config)
-
-
-def resample_config_for(config: CanaryConfig) -> ResampleConfig:
-    """The batch :class:`ResampleConfig` every offline feature build uses."""
-    return ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        max_gap_factor=config.preprocessing.max_gap_factor,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        session_gap_seconds=config.preprocessing.session_gap_seconds,
-    )
 
 
 def _worker_process_session(
@@ -1324,11 +1315,11 @@ def build_feature_spec(
         }
         # The resampler's max_gap is what flips a channel's ``__gap`` flag to
         # stale at training time. GRU-D serve must mirror it exactly (it has no
-        # resampler), so persist it on the spec. ResampleConfig.max_gap =
-        # (1 / hz) * max_gap_factor (default factor 2.0).
-        spec["max_gap_seconds"] = float(
-            ResampleConfig(hz=config.preprocessing.resample_hz).max_gap.total_seconds()
-        )
+        # resampler), so persist it on the spec: the training recipe's
+        # max_gap, (1 / hz) * config.preprocessing.max_gap_factor. This once
+        # built ResampleConfig(hz=...) and so recorded the default factor 2.0
+        # whatever the config said (D03.27).
+        spec["max_gap_seconds"] = float(resample_config_for(config).max_gap.total_seconds())
         spec["slow_channel_max_gap_seconds"] = float(
             config.preprocessing.slow_channel_max_gap_seconds
         )
@@ -1483,25 +1474,48 @@ def reconcile_feature_frame_to_spec(
     if not feature_columns:
         raise ValueError("feature schema has no feature_columns")
 
-    out = frame.copy()
-    present = {str(column) for column in out.columns}
+    # Every column finished before any frame is built (D01.10). The previous
+    # form copied ``frame`` and then inserted each fill and re-assigned each
+    # coerced column in place: ~650 block-manager writes (``iset`` /
+    # ``_iset_split_block`` / ``blocks.delete``) per one-row tick, which was
+    # the whole cost. Keys follow the order the old insert sequence left them
+    # in — ``frame``'s own columns, then the fills — so the frame the extras
+    # are judged against is the same one.
+    if frame.columns.has_duplicates:
+        duplicated = sorted({str(c) for c in frame.columns[frame.columns.duplicated()]})
+        raise ValueError("feature frame has duplicate columns: " + ", ".join(duplicated))
+    finished: dict[Any, pd.Series] = dict(frame.items())
+    present = {str(column) for column in frame.columns}
     missing = tuple(column for column in feature_columns if column not in present)
+    # One fill column shared by every missing key (the frame build copies it
+    # into place), so a spec that is mostly absent costs one Series, not one
+    # per absent feature.
+    fill = pd.Series(fill_missing, index=frame.index)
     for column in missing:
-        out[column] = fill_missing
+        finished[column] = fill
 
     dtype_spec = schema.get("feature_dtypes", {})
     coerced: list[str] = []
     if coerce_numeric:
+        coerced_fill: pd.Series | None = None
         for column in feature_columns:
-            before = str(out[column].dtype)
-            out[column] = pd.to_numeric(out[column], errors="coerce")
-            after = str(out[column].dtype)
+            series = finished[column]
+            before = str(series.dtype)
+            if series is fill:
+                if coerced_fill is None:
+                    coerced_fill = pd.to_numeric(fill, errors="coerce")
+                series = coerced_fill
+            else:
+                series = pd.to_numeric(series, errors="coerce")
+            finished[column] = series
+            after = str(series.dtype)
             expected_dtype = (
                 str(dtype_spec.get(column, "")) if isinstance(dtype_spec, Mapping) else ""
             )
             if before != after or (expected_dtype and after != expected_dtype):
                 coerced.append(column)
 
+    out = pd.DataFrame(finished, index=frame.index, copy=False)
     extras = tuple(
         column for column in candidate_feature_columns(out) if column not in feature_columns
     )

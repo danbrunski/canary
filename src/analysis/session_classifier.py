@@ -56,7 +56,10 @@ DERIVED_TAGS_FILENAME = "derived_tags.jsonl"
 #: Increment when the classifier semantics change (new detectors, changed
 #: disposition rules, new fields). Stale sidecars are detected via
 #: comparison against this so the corpus can be re-classified in batch.
-CLASSIFIER_VERSION = "0.2.0"
+#: 0.3.0: the segmenter scales ``decoded:`` mode candidates to engineering units
+#: (f8b7d38). 0.2.0 sidecars from 2026-08-06 on labelled broadcast-only rows from
+#: raw counts, so a plain ``label_sessions.py`` run must redo them (D03.22).
+CLASSIFIER_VERSION = "0.3.0"
 
 SCHEMA_VERSION = 1
 

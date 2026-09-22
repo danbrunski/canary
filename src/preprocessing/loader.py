@@ -24,7 +24,7 @@ from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
-    ResampleConfig,
+    resample_config_for,
     resample_long,
     resample_wide,
 )
@@ -327,12 +327,7 @@ def resample_and_segment(
     result means for them (skip, quarantine, raise).
     """
     sessions = [Path(path) for path in session_dirs]
-    resample_config = ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        max_gap_factor=config.preprocessing.max_gap_factor,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        session_gap_seconds=config.preprocessing.session_gap_seconds,
-    )
+    resample_config = resample_config_for(config)
     if value == "value_number":
         # Process one session at a time and concatenate only the reduced grids.
         # The previous chain pivoted millions of mostly-unique raw timestamps

@@ -18,8 +18,16 @@ async def start_job(
 ) -> dict[str, Any]:
     """Submit a job to the daemon's controller.
 
-    Common ``kind`` values: ``corpus_report``, ``retrain_if``, ``retrain_lstm``.
-    See ``src/control/jobs.py`` for the registered set on this build.
+    Common ``kind`` values: ``corpus_report``, ``retrain_if``, ``retrain_lstm``,
+    ``did_sweep``. See ``src/control/jobs.py`` for the registered set on this
+    build.
+
+    ``did_sweep`` sweeps a Mode 22 DID range in one pass: params
+    ``{start, end, label}`` required (``start``/``end`` are DIDs, int or hex
+    string; ``label`` tags the snapshot for ``diff_did_snapshots``), optional
+    ``header``/``session``/``keepalive``/``delay_seconds``/``read_timeout`` —
+    see ``diff_did_snapshots``'s docstring for the before/after workflow this
+    feeds.
     """
     body: dict[str, Any] = {"kind": kind, "params": params or {}}
     return await audited_post(client, audit, tool="start_job", path="/control/jobs", body=body)

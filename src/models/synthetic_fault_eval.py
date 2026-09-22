@@ -70,7 +70,7 @@ from src.models.isolation_forest import (
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
 from src.preprocessing.feature_pipeline import featurize_wide_frame
-from src.preprocessing.resampler import TIMESTAMP_COLUMN, ResampleConfig, is_slow_channel
+from src.preprocessing.resampler import TIMESTAMP_COLUMN, is_slow_channel, resample_config_for
 
 DEFAULT_FAULT_KINDS: tuple[AnomalyKind, ...] = (
     "spike",
@@ -290,10 +290,7 @@ def _max_gap_seconds_for(channel: str, config: CanaryConfig) -> float:
     """The same fast/slow forward-fill ceiling ``resample_wide`` applies to
     ``channel``, so a synthetic dropout (8.1) holds its value for exactly as
     long as production would before the cell goes NaN."""
-    resample_config = ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-    )
+    resample_config = resample_config_for(config)
     if is_slow_channel(channel):
         return resample_config.slow_channel_max_gap_seconds
     return resample_config.max_gap.total_seconds()

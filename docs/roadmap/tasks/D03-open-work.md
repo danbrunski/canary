@@ -162,7 +162,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
   telemetry before starting the drive.
   _From D02._
 
-- [ ] **D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating
+- [x] **D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating
   it.** 54.6 ms per call on a one-row 327-column frame, every tick in the
   serving path. The naive batching is *slower* (62.7 ms) — measured, reverted
   — because the cost is block-manager churn, not conversion: `iset` /
@@ -174,9 +174,32 @@ estimated signal; they cannot establish how UpRev calculates its display.
   on the real chain the way D01.8 was.
   Worth ~25 % of `compute`, which no longer blocks the event loop, so this is
   a comfort item rather than a deadline one.
+  **Done 2026-09-22.** Every column is finished in a dict first (the frame's own
+  columns, then one shared fill Series for every absent feature, then the
+  numeric coercion), and the frame is built once. Extras are still judged
+  against the filled frame, as before. A frame with duplicate column labels is
+  now refused by name instead of half-working.
+  **Parity, the D01.8 way:** an exact old-vs-new comparison on the real chain.
+  It covered 420 live `LiveFeatureSource` rows (332 columns) plus three real
+  sessions through `build_feature_frame` (2026-08-06T034415 2824×723,
+  2026-09-20T205117 1506×729, 2026-09-18T134052 145×103, whole-frame and
+  one-row slices), each against both real manifests (IF 295, LSTM 361
+  features) and three kwarg variants: 2,592 comparisons, all identical. That
+  means column order, dtypes, index, `array_equal(equal_nan=True)`,
+  `assert_frame_equal(check_exact=True)` and the report. The permanent guard is
+  `tests/test_reconcile_feature_frame_parity.py` (25 cases). It keeps the
+  verbatim old function as its reference, the same shape as
+  `test_features_batched_parity.py`.
+  **Timing** (laptop, median of 200, one-row live benchmark frame of 332
+  columns): IF spec **75.1 → 27.7 ms** (2.7×), LSTM spec **98.4 → 29.6 ms**
+  (3.3×). On a real 729-column offline row: 59.1 → 40.8 ms and 72.1 → 43.3 ms.
+  `scripts/benchmark_live_pipeline.py --profile steady` median tick was
+  59.70 → 58.08 ms. That is noise, because the benchmark times only the
+  feature stage and never calls the reconciler. The gain shows up in the
+  scoring child's `compute`.
   _From D01._
 
-- [ ] **D03.22 Mode labels used raw broadcast counts (2026-08-06 → 2026-09-19).
+- [~] **D03.22 Mode labels used raw broadcast counts (2026-08-06 → 2026-09-19).
   Fixed `f8b7d38`; recompute owed.** The segmenter's `decoded:` fallback compared
   raw counts (ECM_RPM 8×, ECM_COOLANT_TEMP +40, WHEEL_SPEED_6F7_C 16×) against
   engineering thresholds whenever Mode 01 was stale, so warm idle labelled from
@@ -198,6 +221,54 @@ estimated signal; they cannot establish how UpRev calculates its display.
   **Deploy:** code only, needs a Pi pull + restart, and the retrain should land
   before or with it, or correctly-labelled rows get scored by models fitted on
   mislabelled ones.
+  **2026-09-22, laptop steps (1), (4), (5) done.**
+  **Known answer first.** Run over the training chain's head (decode →
+  resample → drop fully-stale → `segment_or_constant`, `canary.example.yaml`
+  modes), 2026-08-06T162657 reproduces the figure exactly. At `f8b7d38^` vs
+  `f8b7d38`: **601 of 3,780 rows (15.9 %)** change, 500 highway→city and
+  91 unknown→idle_transient, with 0 idle rows before. `f8b7d38` → HEAD changes
+  0 rows on any of the 106 sessions, so every change below is the fix. That
+  session does not fit in 15 GB through the full decode. The labels came from
+  a decode limited to the three `decoded:` mode candidates, which matched the
+  full chain on 0 of 2,824 and 0 of 1,506 rows (2026-08-06T034415,
+  2026-09-20T205117).
+  **Blast radius over the local corpus** (106 sessions, 142,893 rows: the
+  profile corpus, `sessions-0918`, `sessions-0920` and the 2026-05 dirs):
+  **16,993 rows (11.9 %)** change, in 65 sessions; 41 are unchanged. It is not
+  confined to 2026-08-06 onward. The pre-fix segmenter mislabels any
+  stale-Mode-01 row, so July and May sessions move too, up to 90.8 %
+  (2026-07-22T163011, unknown→idle 476/524). High-rate 2026-09-18 drives
+  change 0.1–0.5 %, but 2026-09-18T134345 moves 28.1 % and 2026-09-21T010459
+  moves 37.6 %. The dominant shapes are highway→city (speed read 16×) and
+  unknown→idle (rpm read 8×). This is the row membership the (2) retrain will
+  see move.
+  **(1) Sidecars regenerated** with `label_sessions.py` on every local root.
+  `CLASSIFIER_VERSION` 0.2.0 → **0.3.0**, so a plain stale-only run redoes
+  every pre-fix sidecar with no `--rebuild` to remember. That covers the Pi
+  too. 116 sidecars (plus fingerprints) are now at 0.3.0: ready 64, review 39,
+  quarantine 13, and 13 empty dirs skipped. 41 of them had already been
+  relabelled 7–11 min after `f8b7d38` landed (2026-09-20 04:07Z), and those
+  came out identical. The 11 2026-05 sidecars, from 2026-05-24 code, moved
+  1.6–84.8 % of seconds, and 4 went ready→review.
+  **Found:** sidecars segment a different frame from training.
+  `classify_session` reads the *persisted* `decoded` rows, and 2026-08-06T162657
+  has none for `WHEEL_SPEED_6F7_C`. So the sidecar chain moved only 2.9 % of
+  that session where the training chain moved 15.9 %, and after the fix the
+  sidecar and training labels still disagree on 94 rows (2.5 %). Not fixed
+  here.
+  **(4) Trip sidecars:** `trip_summary_sidecar.SCHEMA_VERSION` 2 → **3**. v2
+  used raw `ECM_RPM` counts for idle time in any session with no Mode 01 RPM.
+  The bump makes any cached v2 recompute on first read. All 4 local sidecars
+  recomputed: 2 were v1, from before the dt fix, and changed as that fix
+  predicts; the 2 v2 ones came out identical, since they had Mode 01 RPM.
+  **(5) Cache:** checked that all 20 entries in `data/cache/feature_frames` are
+  keyed by the hash of metadata that includes `cache_version`. The 18
+  non-v4 entries can therefore never be hit. Deleted (924 MB).
+  **Remaining:** (2) the IF + sequence retrain with LOO recalibration, and (3)
+  `refit_behavior_models.py`. Both are coordinated with B03 / D03.25 and need
+  the operator's corpus choice. Also the Pi side: pull + restart, then
+  `label_sessions.py` (the version bump makes it relabel) and a trip-sidecar
+  read-through there, landing with or after the retrain.
   _Found while checking a false "coolant decode" alarm during the 2026-09-18
   evening drive._
 
@@ -312,7 +383,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
 
 ## Opened 2026-09-17 on the drive
 
-- [ ] **D03.7 The sustained-validation harness cannot see replay row
+- [x] **D03.7 The sustained-validation harness cannot see replay row
   duplication.** It wires replay through the storage decode
   (`src/validation/harness.py:617-690`), so it is the right instrument — but its
   fixture `tests/fixtures/ground_truth/drive-slice` holds `gps 1682 / can 19122 /
@@ -326,6 +397,24 @@ estimated signal; they cannot establish how UpRev calculates its display.
   filter, but `run_case` still replays `DRIVE_SLICE`; the missing end-to-end
   fixture has not been supplied. Include live-GPS contamination and legacy
   payload absence in the regression coverage. This is desk work.
+  **Done 2026-09-21.** `tests/fixtures/replay/decoded-slice` (28 KiB, cut by
+  `tools/make_replay_fixture.py`) is 20 s of the D02.9 evidence session
+  `2026-09-10T142711`: 784 payload-bearing frames of the four bound ids, exactly
+  the 1,377 stored `decoded` rows they produced (matched on timestamp +
+  `can_id`), 200 `derived`, 304 `gps`, 64 `obd`. `ScenarioSpec` gained
+  `replay_source`/`replay_speed`/`live_gps_hz`, and the report gained
+  `evidence.replay_accounting`: persisted `decoded` == stored rows the emit
+  policy let through + what the storage decoder re-derives from the persisted
+  frames, and every captured source == its source count after a complete,
+  drop-free pass, excess listed as `foreign_rows`.
+  `tests/test_replay_row_accounting.py`: payload-bearing source → decoded
+  ratio **1.000**, 1,577 rows skipped, no foreign rows; legacy copy with
+  payloads stripped → `rederivable: false`, all 1,377 stored decoded and 200
+  derived kept, none re-derived; **negative control** (emit filter disabled
+  while the probe still says re-derivable, i.e. pre-`c15f66a`) → identity
+  fails at exactly **2.000x**; live GPS at 5 Hz → **strict xfail**, the run
+  shows `foreign_rows: {gps: 240}` — that isolation is D02.9's owed item, not
+  this one. The pre-existing `replay-drive-slice` slow test still passes.
 
 - [x] **D03.1 Capture-quality scoring ran on the event loop.** A live
   `GET /control/capture/quality` against a running 20-minute, 127 req/s capture
@@ -972,7 +1061,7 @@ Four roadmap documents were one small remainder from finished. Those remainders
 live here now, so the documents could be archived
 (`../archive/README.md`). Each item names where its history is.
 
-- [ ] **D03.23 MCP tool registration table.** *From `../archive/refactoring.md`
+- [x] **D03.23 MCP tool registration table.** *From `../archive/refactoring.md`
   2.2.* `src/mcp_server/server.py` hand-writes an `@mcp.tool()` closure per
   tool; most only delegate, with the docstring copied from the `tools/` or
   `write_tools/` function. Replace the pure delegations with a registration
@@ -986,7 +1075,26 @@ live here now, so the documents could be archived
   snapshots every tool's name and input schema, run before and after, because
   the failure mode is a silently changed schema or a dropped registration.
   2.3 used the same adversarial check.
-- [ ] **D03.24 Multi-PID batching: what was never verified.** *From
+  **Done 2026-09-21.** Re-counted: 70 tools (all conditionals enabled), of
+  which 55 were pure delegations. `tests/test_mcp_tool_snapshot.py` pins every
+  tool's name, description, input and output schema
+  (`tests/fixtures/mcp_tool_snapshot.json`) and was written and run first.
+  The 55 are now rows of `READ_DELEGATIONS`/`WRITE_DELEGATIONS`
+  (`Delegation(delegate, needs_audit)`); `bind_delegation` uses
+  `functools.wraps` and drops the injected `client`/`audit` from the
+  signature, refusing a delegate whose leading parameters are not exactly
+  those. 15 stay hand-written (validation, branching, config-derived args,
+  conditional registration; `get_binned_analysis` because its delegate takes
+  a `units` input the tool does not expose). No `gate` column: none of the 55
+  is conditionally registered. Before/after: same 70 names, input and output
+  schemas identical; 49 descriptions changed on purpose, since the delegate
+  docstring is now the source. Facts that only the server docstring had were
+  moved into seven delegates first (`list_capture_profiles`, `list_sessions`,
+  `start_job`, `get_replay_status`, `get_capture_quality`,
+  `disarm_tuning_capture`, `arm_tuning_capture`). `server.py` 1,254 → 835
+  lines; the 206 MCP tests pass.
+- [~] **D03.24 Multi-PID batching: what was never verified.** (b), (c), (d)
+  done 2026-09-21; **(a) remains and needs the truck.** *From
   `../archive/multi-pid-polling.md` 3.4, 4.2, 4.3, 4.4.* Batching has been in
   daily use since 2026-07-26 and these were never run:
   (a) **batched vs single cross-check** — poll the same channels both ways in
@@ -1002,6 +1110,26 @@ live here now, so the documents could be archived
   different things: 116.8 req/s sustained by the *daemon* (H8, 2026-09-10) and
   649 req/s back-to-back single-DID reads answered by the *ECM* (2026-09-21).
   Not carried: 3.1 and 3.2, low-value by that document's own assessment.
+  **(b) done:** `tests/test_batched_timing_parity.py` runs six channels as one
+  shared-timestamp batch and as single reads 1.5 ms apart through `to_wide` →
+  `resample_wide` → `compute_features`: value, `__gap`, `__roc`, `__mean`,
+  `__std` columns are identical; a whole-batch outage flips all six `__gap`
+  flags on the same rows and NaNs their `__roc`; `__roc` equals the known
+  slope. The live path (`LiveFeatureSource`) ages the batch as one, identical
+  to staggered reads. One property surfaced, shared by both shapes: a
+  look-back that lands on a cell carried forward inside `max_gap` reads a
+  slightly high slope (1.033 vs 1.000 for 30 s after a 6 s outage).
+  **(c) done:** `tools/can_obd_probe.py --batch 0C,0D,04` (repeatable) and
+  `--batch-supported` send batched Mode 01 through
+  `CanObdClient.query_mode_01_batch` + `split_batched_response` with registry
+  widths, printing per-PID raw/decoded values, omitted PIDs and whether the
+  walk stayed clean (`tests/test_can_obd_probe.py`).
+  **(d) done:** `docs/data-architecture.md` §2 labels the 667/1387 figures as
+  dedicated-bus and adds both in-vehicle numbers as different quantities with
+  sources: 116.8 req/s daemon sustained (H8, 2026-09-10) and 649 req/s ECM
+  answer rate (2026-09-21).
+  **Remaining — (a):** the batched-vs-single alternating-window cross-check on
+  real data.
 - [~] **D03.25 Retrain and verify after the Phase-1 distribution change.**
   *From `../archive/ml-correctness-hardening.md` 1.6.* The laptop half landed
   (smoke retrain, LSTM replay diff —
@@ -1012,6 +1140,11 @@ live here now, so the documents could be archived
   reason arrived on 2026-09-21: seed revision 4 added the injector-pulse DIDs
   to the default profile, which changes the feature spec again. Do them as one
   retrain, not four.
+  **2026-09-22: the retrain is deferred by the operator ("don't retrain yet").**
+  Its prerequisites are now in place: the D03.22 laptop relabel is done,
+  D01.10 and D03.27 made the serving and training resample paths agree, and
+  B03's policy keeps demoted behavior columns out of IF feature selection.
+  The corpus choice stays with the operator.
 - [~] **D03.26 Backfill the vehicle ledger.** *From
   `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
   entry; real entries need the operator's history and go in through
@@ -1021,6 +1154,57 @@ live here now, so the documents could be archived
   and K), the 2026-06-28 header/spacer work and its battery disconnect
   (`engine-tuning-support.md` G.2), the LTFT relearn between 2026-09-10 and
   2026-09-18, and the 2026-07-18 profile migration.
+  **Transcribed 2026-09-21** into `scripts/backfill_vehicle_ledger.sh`: eight
+  `vehicle_log.py add` entries (the header/spacer mod, its battery disconnect,
+  the profile migration, the four post-stock flashes, the LTFT relearn first
+  seen 2026-09-18), each citing its source. Re-running skips titles already
+  present. Applied to the laptop ledger. **Remaining:** (1) the ledger is a
+  gitignored per-host file, so the Pi's, which the daemon reads, needs
+  `scripts/backfill_vehicle_ledger.sh --config /etc/canary/canary.yaml` run on
+  the Pi; (2) what only the operator knows: odometer readings, the cat-back
+  exhaust install date, and which of these events should be
+  `corpus_boundary` (all were entered `false`).
+- [x] **D03.27 Session-deviation analysis resampled differently from
+  training.** *Found during B02.*
+  `src/analysis/session_deviations.py::analyze_session` built its own
+  `ResampleConfig` from `resample_hz` and `slow_channel_max_gap_seconds` only.
+  `max_gap_factor` and `session_gap_seconds` silently took the dataclass
+  defaults, so any config that set either put the analysis on a different grid
+  from the one the behavior surfaces were fitted on. Latent today: both
+  defaults equal the config defaults. **Fixed at source:** it now calls the
+  shared `feature_pipeline.resample_config_for(config)`, the one batch recipe
+  training uses (39139df), and the hand-built config and its import are gone.
+  Regression test:
+  `tests/test_session_deviations.py::test_analyze_session_resamples_with_the_training_recipe`
+  spies the resample config for a config with non-default `max_gap_factor=5`
+  and `session_gap_seconds=45`, and asserts it equals `resample_config_for`.
+  It fails on the old code and passes now.
+  **Swept the rest of the callers, and made the unsafe form unwritable.**
+  `resample_config_for(config, *, hz=None)` now lives beside `ResampleConfig`
+  in `src/preprocessing/resampler.py` (re-exported from `feature_pipeline`, so
+  existing imports hold); `hz=` overrides only the grid rate, gap rules still
+  come from the config. Every caller that means "the training grid" now uses
+  it: `scripts/disposition_report.py` (took hz only), `src/models/synthetic_fault_eval.py`,
+  `src/datasets/health.py`, `scripts/replay.py`, `scripts/detector_benchmark.py`,
+  both constructions in `scripts/train_anomaly_model.py::evaluate` (now one
+  shared object), `src/preprocessing/loader.py::resample_and_segment` and
+  `src/preprocessing/live.py` (already complete; now the same call), and
+  `src/datasets/export.py` at the export's requested rate
+  (`resample_config_for(config, hz=spec.resample_hz)`). The sweep found one
+  more, a real defect: `build_feature_spec` recorded the manifest's
+  `max_gap_seconds` from `ResampleConfig(hz=...)`, i.e. the default factor
+  2.0, while `LiveFeatureSource` applied the configured `max_gap_factor`.
+  Latent (the config default is 2.0), fixed. **Deliberately different, kept:**
+  `src/analysis/binned_analysis.py::rows_to_resampled_frame`, an ad-hoc display
+  grid at a caller-chosen rate for the binned-analysis/session-timeseries tools
+  with no `CanaryConfig` in scope; the reason is stated at the call site.
+  `tests/test_resample_config_construction.py` AST-scans `src/`, `scripts/` and
+  `tools/` and fails on any direct `ResampleConfig(...)` outside a two-entry,
+  reasoned allowlist (`resampler.py`, `binned_analysis.py`), with a check that
+  the allowlist cannot go stale; per-caller spy tests with every gap rule off
+  its default cover health, export, replay, detector benchmark, disposition
+  report, `train_anomaly_model.evaluate`, the synthetic dropout ceiling, the
+  live source and the manifest's `max_gap_seconds`.
 
 ## Deferred by decision, not blocked
 

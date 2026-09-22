@@ -23,7 +23,8 @@ TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 
 
 async def get_replay_status(client: DaemonClient) -> dict[str, Any]:
-    """Return the current live-replay state (pure read, no audit)."""
+    """Return the current live-replay state: idle or running, source session,
+    output paths and emission counters (pure read, no audit)."""
     return await client.get_json("/control/replay")
 
 

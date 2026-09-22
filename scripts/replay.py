@@ -43,7 +43,7 @@ from src.preprocessing.resampler import (
     GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
-    ResampleConfig,
+    resample_config_for,
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -196,10 +196,7 @@ def _resample_numeric(
         )
     return resample_wide(
         wide,
-        config=ResampleConfig(
-            hz=config.preprocessing.resample_hz,
-            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        ),
+        config=resample_config_for(config),
         value_columns=numeric_columns,
     )
 

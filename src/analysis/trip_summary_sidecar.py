@@ -38,7 +38,10 @@ TRIP_SUMMARY_FILENAME = "trip_summary.json"
 #: treats a cached sidecar with a different version as absent and recomputes.
 #: v2: valid-sample trapezoid integration (``_cumulative_time_integral``) —
 #: v1 sidecars undercounted distance/fuel ~2-4× on a contended OBD bus.
-SCHEMA_VERSION = 2
+#: v3: ``decoded:ECM_RPM`` is scaled to rpm before the idle test (f8b7d38). v2
+#: used raw counts (8/rpm) for idle time in any session with no Mode 01 RPM,
+#: e.g. every ``tuning-did`` capture (D03.22).
+SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True)

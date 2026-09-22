@@ -62,7 +62,7 @@ from src.preprocessing.feature_pipeline import (  # noqa: E402
     segment_or_constant,
 )
 from src.preprocessing.quality_gate import apply_quality_gate  # noqa: E402
-from src.preprocessing.resampler import ResampleConfig, resample_wide  # noqa: E402
+from src.preprocessing.resampler import resample_config_for, resample_wide  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -166,7 +166,9 @@ def _scan_sessions(
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
     did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
-    resample_config = ResampleConfig(hz=config.preprocessing.resample_hz)
+    # The training recipe, gap rules included: this report claims to screen
+    # exactly what training would see (D03.27 — it used to take hz only).
+    resample_config = resample_config_for(config)
 
     framed_parts: list[pd.DataFrame] = []
     total_rejects: dict[str, int] = {}

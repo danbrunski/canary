@@ -1,0 +1,2505 @@
+{
+  "arm_tuning_capture": {
+    "description": "Start a capture and optional budget override, then verify the real rate.\n\n    ``rate_hz`` overrides the profile's own target for this capture only \u2014\n    the saved profile is untouched, so a one-off fast pull cannot quietly\n    become the profile's normal.\n\n    ``bus_budget_requests_per_second`` matters because demand and budget are\n    two different knobs: raising the rate without the budget just queues, and\n    raising the budget without the rate does *nothing at all* (measured\n    2026-08-04 \u2014 8 \u2192 30 req/s moved the achieved rate not at all, because\n    per-channel demand was capped at 1 Hz). Set both.\n\n    After ``verify_seconds`` the capture is scored against its profile's\n    contract and the response carries a ``verdict``: ``pass``, ``degraded``\n    (gaps only, every channel >= 90 % covered), ``fail``, or ``unverified``.\n    **Read the verdict before driving.** A ``fail`` names the\n    clause and the fix in ``rate_verification.failures``; re-arm with the\n    correction rather than starting the drive, because none of these problems\n    are recoverable afterwards.\n\n    Per-channel ``status`` separates the ways a capture disappoints, because\n    they have opposite responses: ``shortfall`` means the achieved cadence\n    fell below the requested rate, ``gap`` means the cadence was fine but the\n    channel went quiet for a stretch (Mode 22 window closed, engine off, ECU\n    stopped answering \u2014 see ``coverage.max_gap_s``), and ``missing`` means\n    the ECU never answered at all, which wants the channel removed from the\n    profile. The verdict names the constraint that actually bound\n    (``failing_constraints``: unanswered_input, rate_shortfall,\n    acquisition_gap, tuple_incomplete, tuple_skew, persistence_loss,\n    unknown_loss_counters) with its evidence; it never prescribes a budget\n    or rate change, because an old drop incident is not proof of the\n    current limiting resource.\n\n    ``tuples`` is the block to read for a fuelling capture: ``complete`` is\n    the number of rounds in which every ``required_tuple`` member was\n    persisted within the profile's ``max_tuple_skew_s``, counted from the\n    rows on disk. ``tuple_rate_bound_hz`` is only a bound (the slowest\n    member's cadence). A capture whose channels all read healthy still\n    yields nothing if the tuple never completes.\n\n    The verdict is scoped: ``scope: live`` covers arm to now, on what has\n    been persisted so far, and reports capture-scoped ``achieved_hz`` beside\n    the ``observed_seconds`` it was measured over. A shortfall against\n    ``rate_hz`` means demand exceeded the budget \u2014 throttling working, not a\n    fault. Pass ``verify_seconds=0`` to skip the wait and\n    return immediately \u2014 the verdict is then absent rather than assumed good.\n    ",
+    "inputSchema": {
+      "properties": {
+        "bus_budget_requests_per_second": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bus Budget Requests Per Second"
+        },
+        "profile": {
+          "title": "Profile",
+          "type": "string"
+        },
+        "rate_hz": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rate Hz"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 3600.0,
+          "title": "Ttl Seconds"
+        },
+        "tune_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tune Revision"
+        },
+        "verify_seconds": {
+          "default": 20.0,
+          "title": "Verify Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "profile"
+      ],
+      "title": "arm_tuning_captureArguments",
+      "type": "object"
+    },
+    "name": "arm_tuning_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "arm_tuning_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "can_activity": {
+    "description": "Capture N seconds of raw CAN traffic; per-ID frame rate + which byte\n    positions changed.\n\n    The RE workhorse: call it bracketing a physical action (press the brake,\n    flip a switch \u2014 tag what you *did*, per AGENTS.md's \"tag physical\n    actions, not screen selections\" convention) and `changed_byte_indices`\n    on each id is the answer to \"which ID carries that signal,\" without an\n    offline candump-and-diff round trip. Pure listen \u2014 no CAN frames are\n    transmitted, so this has no interaction with passive mode.\n\n    `ids` restricts the capture to those arbitration ids (useful for a\n    follow-up call once a wide capture has narrowed the candidates); omit\n    for the whole bus. `seconds` is capped at 30 server-side.\n    ",
+    "inputSchema": {
+      "properties": {
+        "ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ids"
+        },
+        "seconds": {
+          "title": "Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "seconds"
+      ],
+      "title": "can_activityArguments",
+      "type": "object"
+    },
+    "name": "can_activity",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "can_activityDictOutput",
+      "type": "object"
+    }
+  },
+  "cancel_job": {
+    "description": "Best-effort cancellation. Already-finished jobs are a no-op.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "cancel_jobArguments",
+      "type": "object"
+    },
+    "name": "cancel_job",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "cancel_jobDictOutput",
+      "type": "object"
+    }
+  },
+  "classify_session": {
+    "description": "Run the classifier on ``session_id`` and persist the sidecar.\n\n    Returns the new classification payload (same shape as\n    :func:`get_session_classification`). Re-running on a session with\n    an existing sidecar overwrites \u2014 the classifier is deterministic\n    given the same inputs, so re-runs are safe and useful when the\n    classifier_version has been bumped.\n    ",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "classify_sessionArguments",
+      "type": "object"
+    },
+    "name": "classify_session",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "classify_sessionDictOutput",
+      "type": "object"
+    }
+  },
+  "compare_tuning_sessions": {
+    "description": "A/B two stored sessions on a matched grid (local). Refuses\n            calculated load as an axis \u2014 it is derived from BFS, so it moves\n            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass\n            ``floor_channel`` to quote each delta against the measured\n            same-tune noise floor, below which nothing is distinguishable.",
+    "inputSchema": {
+      "properties": {
+        "against": {
+          "title": "Against",
+          "type": "string"
+        },
+        "axes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Axes"
+        },
+        "floor_channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Floor Channel"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        },
+        "unsafe_axes": {
+          "default": false,
+          "title": "Unsafe Axes",
+          "type": "boolean"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session",
+        "against",
+        "value"
+      ],
+      "title": "compare_tuning_sessionsArguments",
+      "type": "object"
+    },
+    "name": "compare_tuning_sessions",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "compare_tuning_sessionsDictOutput",
+      "type": "object"
+    }
+  },
+  "diff_did_snapshots": {
+    "description": "Diff two completed ``did_sweep`` job results.\n\n    Reuses ``classify_dids`` (the same classifier ``tools/scan_constant_dids.py``\n    uses across passes at different engine states) on exactly two snapshots:\n    `varying` = DIDs whose value differs between the two runs \u2014 the\n    candidates worth investigating; `constant` = answered in both, same\n    value both times; `intermittent` = answered in one run but not the other\n    (a session/timing flake, or a DID gated on the condition itself). Each\n    entry carries the raw hex from each snapshot it appeared in \u2014 the\n    codebase has no scale/offset for most DIDs yet, so raw bytes are the\n    honest thing to hand back.\n    ",
+    "inputSchema": {
+      "properties": {
+        "job_a": {
+          "title": "Job A",
+          "type": "string"
+        },
+        "job_b": {
+          "title": "Job B",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_a",
+        "job_b"
+      ],
+      "title": "diff_did_snapshotsArguments",
+      "type": "object"
+    },
+    "name": "diff_did_snapshots",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "diff_did_snapshotsDictOutput",
+      "type": "object"
+    }
+  },
+  "disarm_tuning_capture": {
+    "description": "Stop the active capture and put the bus budget back.\n\n    Stopping restores exactly the override that was in force before capture.\n    ``clear_bus_budget`` is an explicit request to discard that restored\n    operator setting. The response includes the ended session directory, so\n    it can be analysed without hunting for it (capture sessions are\n    ``_``-prefixed and deliberately invisible to the normal session listing).\n    ",
+    "inputSchema": {
+      "properties": {
+        "clear_bus_budget": {
+          "default": false,
+          "title": "Clear Bus Budget",
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "title": "disarm_tuning_captureArguments",
+      "type": "object"
+    },
+    "name": "disarm_tuning_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "disarm_tuning_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "estimate_tuning": {
+    "description": "Before/after FP estimate for a proposed config, no state change.\n\n    Audited anyway because seeing what was modeled is useful \u2014 the\n    ``result=\"ok\"`` entry includes the proposed config and the daemon's\n    response.\n    ",
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "By"
+        },
+        "change": {
+          "default": "tuning estimate",
+          "title": "Change",
+          "type": "string"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "title": "estimate_tuningArguments",
+      "type": "object"
+    },
+    "name": "estimate_tuning",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "estimate_tuningDictOutput",
+      "type": "object"
+    }
+  },
+  "get_behavior_deviations": {
+    "description": "Diff a stored session against the learned behavior surfaces (local,\n            no daemon HTTP call) \u2014 did a mod/retrain/change actually move behavior?\n            Pass ``against`` to A/B ``session`` directly against a second session\n            id instead (Task 5.4: before-mod vs. after-mod, session-to-session).",
+    "inputSchema": {
+      "properties": {
+        "against": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Against"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "title": "get_behavior_deviationsArguments",
+      "type": "object"
+    },
+    "name": "get_behavior_deviations",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_behavior_deviationsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_behavior_live": {
+    "description": "Live ``you-are-here`` overlay for the behavior surfaces.\n\n    Returns per-model ``expected`` / ``actual`` / ``deviation`` / ``severity``\n    for the most recent tick. ``include_series=True`` also returns each\n    model's rolling trail (~4 min at 1 Hz) \u2014 the default is ``False`` because\n    with enough registered surfaces the full trail can exceed the MCP\n    tool-result size cap; pass ``True`` only when you actually need the\n    trajectory (e.g. plotting a \u0394 sparkline), not for a one-shot status check.\n    Equivalent to ``GET /models/behavior/live?series=...`` \u2014 see\n    :mod:`src.dashboard.behavior_live` for the schema.\n    ",
+    "inputSchema": {
+      "properties": {
+        "include_series": {
+          "default": false,
+          "title": "Include Series",
+          "type": "boolean"
+        }
+      },
+      "title": "get_behavior_liveArguments",
+      "type": "object"
+    },
+    "name": "get_behavior_live",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_behavior_liveDictOutput",
+      "type": "object"
+    }
+  },
+  "get_behavior_models": {
+    "description": "Static behavior surfaces (the learned \"normal\" maps).\n\n    1D/2D surfaces over operating-mode-segmented data. Use this with\n    ``get_behavior_live`` to compare \"where the engine should be\" with\n    \"where it is right now.\"\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_behavior_modelsArguments",
+      "type": "object"
+    },
+    "name": "get_behavior_models",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_behavior_modelsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_bindings": {
+    "description": "Decoded CAN signal metadata \u2014 ``data/bindings.yaml`` as JSON.\n\n    The daemon re-reads on every request, so an edit during reverse\n    engineering shows up here without restart.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_bindingsArguments",
+      "type": "object"
+    },
+    "name": "get_bindings",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_bindingsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_binned_analysis": {
+    "description": "Bin a value channel by an x (and optional y) channel over a\n        session/date scope \u2014 \"trims by rpm\u00d7load\" without hand-written SQL\n        or a refit (Task 5.1). ``agg``: mean/median/p95/count.",
+    "inputSchema": {
+      "properties": {
+        "agg": {
+          "default": "mean",
+          "title": "Agg",
+          "type": "string"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        },
+        "x": {
+          "title": "X",
+          "type": "string"
+        },
+        "x_bins": {
+          "default": 12,
+          "title": "X Bins",
+          "type": "integer"
+        },
+        "y": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Y"
+        },
+        "y_bins": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Y Bins"
+        }
+      },
+      "required": [
+        "value",
+        "x"
+      ],
+      "title": "get_binned_analysisArguments",
+      "type": "object"
+    },
+    "name": "get_binned_analysis",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_binned_analysisDictOutput",
+      "type": "object"
+    }
+  },
+  "get_capture_quality": {
+    "description": "The capture contract verdict: live for the active capture, or recomputed.\n\n    Without ``session_id`` this is the running capture scored on what has\n    been persisted so far (``scope: live``). With one, the daemon recomputes\n    coverage and tuple yield from that session's rows without rewriting it\n    and returns the stored sidecar beside the recomputation \u2014 a v1 sidecar\n    comes back as ``scope: trailing_snapshot`` with losses unknown, which is\n    what it was. Read ``failures[].clause`` for the constraint that bound\n    (unanswered_input, rate_shortfall, acquisition_gap, tuple_incomplete,\n    tuple_skew, persistence_loss, unknown_loss_counters); ``losses`` is\n    scoped to the capture or marked unknown, never assumed zero.\n    ",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session Id"
+        }
+      },
+      "title": "get_capture_qualityArguments",
+      "type": "object"
+    },
+    "name": "get_capture_quality",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_capture_qualityDictOutput",
+      "type": "object"
+    }
+  },
+  "get_config": {
+    "description": "Echo of the daemon's loaded ``canary.yaml`` as JSON.\n\n    Useful when a tuning or threshold question depends on the configured\n    operating-mode boundaries, sample rate, retention, etc.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_configArguments",
+      "type": "object"
+    },
+    "name": "get_config",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_configDictOutput",
+      "type": "object"
+    }
+  },
+  "get_corpus_mode_summary": {
+    "description": "Aggregate mode-coverage + event counts across every classified session.\n\n    Useful for \"do I have enough warmup data to retrain the\n    coolant_warmup behavior model?\" \u2014 the answer is in\n    ``mode_seconds.warmup`` and ``event_counts.cold_start``.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_corpus_mode_summaryArguments",
+      "type": "object"
+    },
+    "name": "get_corpus_mode_summary",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_corpus_mode_summaryDictOutput",
+      "type": "object"
+    }
+  },
+  "get_current_capture": {
+    "description": "Read the currently active capture window (pure read).\n\n    ``active`` is the field to check: with no window open this answers 200\n    with ``capture: null``, ``active: false`` and a ``detail`` naming the\n    cause (a daemon restart drops the in-memory window while recording\n    continues). Do not read a null ``capture`` as \"the call failed\" or as\n    \"a window is open\" \u2014 it is neither.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_current_captureArguments",
+      "type": "object"
+    },
+    "name": "get_current_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_current_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "get_dataset_health": {
+    "description": "Corpus readiness: per-mode sample counts, gaps, last-seen times.\n\n    Useful when deciding whether retraining now is worthwhile.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_dataset_healthArguments",
+      "type": "object"
+    },
+    "name": "get_dataset_health",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_dataset_healthDictOutput",
+      "type": "object"
+    }
+  },
+  "get_delivery_error": {
+    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Closed-loop samples and decel fuel cut are excluded by\n            construction, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` is\n            explicit because the ECM lambda and A/F-voltage paths disagree by\n            ~3.8% at WOT and neither is established as truth.",
+    "inputSchema": {
+      "properties": {
+        "cell_agg": {
+          "default": "last",
+          "title": "Cell Agg",
+          "type": "string"
+        },
+        "measured_spec": {
+          "default": "obd:O2_WR_LAMBDA_S1",
+          "title": "Measured Spec",
+          "type": "string"
+        },
+        "min_load": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 85.0,
+          "title": "Min Load"
+        },
+        "session": {
+          "title": "Session",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "title": "get_delivery_errorArguments",
+      "type": "object"
+    },
+    "name": "get_delivery_error",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_delivery_errorDictOutput",
+      "type": "object"
+    }
+  },
+  "get_dids": {
+    "description": "Nissan Mode-22 DID catalog (schema_version + per-DID entries).\n\n    Returns an empty doc if the catalog file isn't present.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_didsArguments",
+      "type": "object"
+    },
+    "name": "get_dids",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_didsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_dtc": {
+    "description": "Cached stored/pending/permanent DTC report and MIL state.\n\n    Mirrors ``GET /obd/dtc`` on the dashboard: the periodic Mode 03/07/0A\n    poll's latest snapshot, with `description`/`system` per code, `mil_on`,\n    `captured_at`, and a `stale` flag when the poll hasn't refreshed recently\n    (or no poll has landed yet). Read-only \u2014 there is no clear-codes tool.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_dtcArguments",
+      "type": "object"
+    },
+    "name": "get_dtc",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_dtcDictOutput",
+      "type": "object"
+    }
+  },
+  "get_feedback": {
+    "description": "All recorded operator feedback labels + summary counts.",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_feedbackArguments",
+      "type": "object"
+    },
+    "name": "get_feedback",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_feedbackDictOutput",
+      "type": "object"
+    }
+  },
+  "get_job": {
+    "description": "Status + result payload for a single job.",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "get_jobArguments",
+      "type": "object"
+    },
+    "name": "get_job",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_jobDictOutput",
+      "type": "object"
+    }
+  },
+  "get_job_logs": {
+    "description": "Captured stdout/stderr of a job (full log; the daemon doesn't paginate).",
+    "inputSchema": {
+      "properties": {
+        "job_id": {
+          "title": "Job Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "title": "get_job_logsArguments",
+      "type": "object"
+    },
+    "name": "get_job_logs",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_job_logsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_monitors": {
+    "description": "Cached Mode 06 on-board monitor sweep: per-cylinder misfire counts and\n    raw monitor test results (value/min/max, pass/fail).\n\n    Mirrors ``GET /obd/monitors`` on the dashboard: the periodic Mode 06\n    poll's latest snapshot (Task 3.1), with a `stale` flag when the poll\n    hasn't refreshed recently (or no poll has landed yet). Read-only.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_monitorsArguments",
+      "type": "object"
+    },
+    "name": "get_monitors",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_monitorsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_obd_coverage": {
+    "description": "Honesty surface for OBD coverage.\n\n    Lists which standard PIDs the ECU supports, which CANary decodes, and\n    which are gaps \u2014 useful when debugging \"why don't I see X?\"\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_obd_coverageArguments",
+      "type": "object"
+    },
+    "name": "get_obd_coverage",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_obd_coverageDictOutput",
+      "type": "object"
+    }
+  },
+  "get_power_status": {
+    "description": "UPS (X1202) power state: SoC, cell voltage, watchdog armed/on-battery/\n    seconds-on-battery/grace window, and any active keep-alive hold.\n\n    Mirrors ``GET /control/power``. Use this instead of SSH'ing into the Pi to\n    check the watchdog when the dashboard is unreachable \u2014 a bench Pi shows\n    ``on_battery: false`` (external power confirmed); a real key-off shows\n    ``seconds_lost`` counting up toward ``grace_s``. ``watchdog_running: false``\n    means the ``ups-shutdown`` service isn't up (or its status file is stale \u2014\n    check ``watchdog_stale``), not necessarily a power problem.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_power_statusArguments",
+      "type": "object"
+    },
+    "name": "get_power_status",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_power_statusDictOutput",
+      "type": "object"
+    }
+  },
+  "get_recent_anomalies": {
+    "description": "Anomaly events from the JSONL log.\n\n    Parameters\n    ----------\n    since:\n        ISO-8601 timestamp; the daemon returns events with timestamp >= since.\n        ``None`` returns the daemon default (today, typically).\n    limit:\n        Client-side cap. The daemon doesn't paginate; we slice after fetch.\n    source:\n        ``\"isolation_forest\"`` or ``\"lstm_autoencoder\"`` to filter by detector.\n    mode:\n        Operating mode (``idle``, ``city``, ``highway``, ``wot``, ``off_road``)\n        to filter by \u2014 useful when a problem only appears in one regime.\n    ",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "default": 100,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        }
+      },
+      "title": "get_recent_anomaliesArguments",
+      "type": "object"
+    },
+    "name": "get_recent_anomalies",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_recent_anomaliesDictOutput",
+      "type": "object"
+    }
+  },
+  "get_recent_telemetry": {
+    "description": "The last ``n`` rows from the newest session.\n\n    Returns rows in the daemon's long-format schema: ``timestamp``, ``source``,\n    ``channel``, ``value_number`` / ``value_text`` / ``value_bool``, ``unit``,\n    plus metadata. Set ``per_channel=True`` to get one latest row per channel\n    (a state snapshot) instead of the last ``n`` records globally. ``channel``\n    is a client-side filter applied after fetch.\n    ",
+    "inputSchema": {
+      "properties": {
+        "channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "n": {
+          "default": 100,
+          "title": "N",
+          "type": "integer"
+        },
+        "per_channel": {
+          "default": false,
+          "title": "Per Channel",
+          "type": "boolean"
+        }
+      },
+      "title": "get_recent_telemetryArguments",
+      "type": "object"
+    },
+    "name": "get_recent_telemetry",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_recent_telemetryDictOutput",
+      "type": "object"
+    }
+  },
+  "get_replay_status": {
+    "description": "Return the current live-replay state: idle or running, source session,\n    output paths and emission counters (pure read, no audit).",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_replay_statusArguments",
+      "type": "object"
+    },
+    "name": "get_replay_status",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_replay_statusDictOutput",
+      "type": "object"
+    }
+  },
+  "get_service_health": {
+    "description": "systemctl health (active/restart-count/uptime) for canary, canary-mcp,\n        ups-shutdown \u2014 the crash-loop tell without SSH.",
+    "inputSchema": {
+      "properties": {
+        "units": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Units"
+        }
+      },
+      "title": "get_service_healthArguments",
+      "type": "object"
+    },
+    "name": "get_service_health",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_service_healthDictOutput",
+      "type": "object"
+    }
+  },
+  "get_session": {
+    "description": "Detail for one session: tags, control.json, chunk count, metadata.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "get_sessionArguments",
+      "type": "object"
+    },
+    "name": "get_session",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_sessionDictOutput",
+      "type": "object"
+    }
+  },
+  "get_session_classification": {
+    "description": "Modes + events + disposition sidecar for one session.\n\n    Returns ``404`` (raised as :class:`DaemonError`) when the session has\n    no sidecar yet \u2014 call :func:`classify_session` (write tool) or run\n    ``scripts/label_sessions.py`` to generate it.\n    ",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "get_session_classificationArguments",
+      "type": "object"
+    },
+    "name": "get_session_classification",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_session_classificationDictOutput",
+      "type": "object"
+    }
+  },
+  "get_session_digest": {
+    "description": "End-of-drive digest for one session: duration, mode seconds, gated\n    anomaly counts by source, top behavior-surface deviations, fingerprint\n    deltas vs. the frozen reference epoch, new DTCs, and new vehicle-ledger\n    events.\n\n    Written by the trip-end hook (Task 5.4 \u2014 sustained GPS stop, or daemon\n    shutdown as a fallback); computed on demand and cached if that hook\n    hasn't fired yet for this session. Two distinct failures, both raised as\n    :class:`~src.mcp_server.client.DaemonError` \u2014 read the status, they mean\n    opposite things:\n\n    * **404** \u2014 the session id doesn't resolve, or has no telemetry\n      recorded. Nothing was attempted.\n    * **409** \u2014 the digest was *refused*, and the body's ``digest_skipped``\n      block says why (D03.6): more rows than ``daemon.digest_row_budget``,\n      a directory that is not a session (``_replay-*``), or a child that hit\n      its address-space ceiling. That is a fact about the session, not a\n      missing sidecar \u2014 do not retry it expecting a different answer.\n\n    Authenticated (auth-consistency follow-up to Task 5.6): the digest\n    aggregates the vehicle ledger and per-session fingerprint z-scores,\n    both otherwise only readable via authenticated ``/control/*`` routes\n    (``list_vehicle_events`` / ``get_trends``) \u2014 ``client`` must carry the\n    control token, same as those tools.\n    ",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "get_session_digestArguments",
+      "type": "object"
+    },
+    "name": "get_session_digest",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_session_digestDictOutput",
+      "type": "object"
+    }
+  },
+  "get_session_timeseries": {
+    "description": "Aligned historical channels from a Pi session, without SSH/export.\n\n        Use ``source:CHANNEL`` names such as ``obd:RPM`` and\n        ``obd:ENGINE_LOAD``. One Hz is appropriate for a whole drive; use a\n        higher rate only when resolving a short transient.\n        ",
+    "inputSchema": {
+      "properties": {
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Channels",
+          "type": "array"
+        },
+        "resample_hz": {
+          "default": 1.0,
+          "title": "Resample Hz",
+          "type": "number"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "channels"
+      ],
+      "title": "get_session_timeseriesArguments",
+      "type": "object"
+    },
+    "name": "get_session_timeseries",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_session_timeseriesDictOutput",
+      "type": "object"
+    }
+  },
+  "get_status": {
+    "description": "Snapshot of daemon liveness, loaded models, storage, and emitter counters.\n\n    Mirrors ``GET /status`` on the dashboard. Use this first when debugging\n    \"is the pipeline alive?\" \u2014 it tells you storage path / free MB, the latest\n    session id, model versions loaded, anomaly emitter counters, and (when the\n    daemon has wired one in) the inference-health block (latency, freshness,\n    missing-feature rate, drift).\n\n    ``view=\"compact\"`` returns the pollable projection instead: measured\n    ~4 ms / 1.3 KB against ~42 ms / 26 KB for the full payload on the dev\n    laptop, and the full payload takes 1.3\u20132.6 s on the Pi. It carries\n    ``vehicle_state`` plus the counters a watchdog acts on \u2014 per-sink\n    ``dropped_records`` and queue depth/high-water, ``can0``, the inference\n    tick/miss counters, OBD request/response/timeout totals, ``capture_profile``\n    name + active, ``passive``, ``free_mb`` and ``health.system`` \u2014 each at the\n    same path it occupies in the full payload, and stamped with ``served_at``.\n    Use it for any repeated poll, and for bracketing a counter measurement.\n    Take the full view when you need per-channel rates, the request table,\n    discovery, model provenance or GPS.\n    ",
+    "inputSchema": {
+      "properties": {
+        "view": {
+          "default": "full",
+          "enum": [
+            "full",
+            "compact"
+          ],
+          "title": "View",
+          "type": "string"
+        }
+      },
+      "title": "get_statusArguments",
+      "type": "object"
+    },
+    "name": "get_status",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_statusDictOutput",
+      "type": "object"
+    }
+  },
+  "get_training_runs": {
+    "description": "Training-run history (the latest record per run from the ledger).",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_training_runsArguments",
+      "type": "object"
+    },
+    "name": "get_training_runs",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_training_runsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_trends": {
+    "description": "Per-stat drift trend over the fingerprint history: latest value,\n    reference band, Mann-Kendall trend verdict, CUSUM alarm state.\n\n    ``available: false`` (with a ``reason``) when no reference epoch has\n    been frozen yet (``scripts/fingerprint.py freeze``) \u2014 there's nothing to\n    trend against.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_trendsArguments",
+      "type": "object"
+    },
+    "name": "get_trends",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_trendsDictOutput",
+      "type": "object"
+    }
+  },
+  "get_trip_summary": {
+    "description": "Trip-summary sidecar for one session: duration, distance, fuel used,\n    average economy, CO2, idle time/fraction, max/avg speed, 0-60 and\n    1/4-mile if a clean launch was captured.\n\n    Computed on demand from the stored session (Task 1.4 \u2014 there is no\n    session-close hook yet) and cached to ``trip_summary.json`` after the\n    first request. 404 (raised as :class:`~src.mcp_server.client.DaemonError`)\n    when the session id doesn't resolve or has no telemetry recorded.\n    ",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "get_trip_summaryArguments",
+      "type": "object"
+    },
+    "name": "get_trip_summary",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_trip_summaryDictOutput",
+      "type": "object"
+    }
+  },
+  "get_tuning": {
+    "description": "Currently active alert-tuning config (thresholds, dedupe, etc.).",
+    "inputSchema": {
+      "properties": {},
+      "title": "get_tuningArguments",
+      "type": "object"
+    },
+    "name": "get_tuning",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "get_tuningDictOutput",
+      "type": "object"
+    }
+  },
+  "list_capture_profiles": {
+    "description": "List the active vehicle's saved collection profiles.",
+    "inputSchema": {
+      "properties": {},
+      "title": "list_capture_profilesArguments",
+      "type": "object"
+    },
+    "name": "list_capture_profiles",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_capture_profilesDictOutput",
+      "type": "object"
+    }
+  },
+  "list_events_by_kind": {
+    "description": "Corpus-wide search through every session's ``derived_tags.jsonl``.\n\n    ``kind`` filters to events of one type (``hard_accel``, ``cold_start``,\n    ``cruise``, etc.); ``None`` returns all kinds. Results are newest-first\n    and capped at ``limit``.\n    ",
+    "inputSchema": {
+      "properties": {
+        "kind": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Kind"
+        },
+        "limit": {
+          "default": 200,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "list_events_by_kindArguments",
+      "type": "object"
+    },
+    "name": "list_events_by_kind",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_events_by_kindDictOutput",
+      "type": "object"
+    }
+  },
+  "list_jobs": {
+    "description": "All known jobs (queued, running, completed, failed).",
+    "inputSchema": {
+      "properties": {},
+      "title": "list_jobsArguments",
+      "type": "object"
+    },
+    "name": "list_jobs",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_jobsDictOutput",
+      "type": "object"
+    }
+  },
+  "list_sessions": {
+    "description": "All known sessions on disk, oldest-first.\n\n    ``since`` / ``until`` bound the listing by ISO session start time and\n    ``limit`` keeps only the newest N. Use this for navigation; combine with\n    ``get_session`` to drill into one.\n    ",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Limit"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        }
+      },
+      "title": "list_sessionsArguments",
+      "type": "object"
+    },
+    "name": "list_sessions",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_sessionsDictOutput",
+      "type": "object"
+    }
+  },
+  "list_vehicle_events": {
+    "description": "Every vehicle ledger entry, oldest-first (latest per id \u2014 corrections\n    collapsed, but nothing lost from the on-disk append-only chain).\n\n    Use this to check what's already logged before recording a duplicate, or\n    to correlate an anomaly's timestamp against nearby maintenance/mods.\n    ",
+    "inputSchema": {
+      "properties": {},
+      "title": "list_vehicle_eventsArguments",
+      "type": "object"
+    },
+    "name": "list_vehicle_events",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "list_vehicle_eventsDictOutput",
+      "type": "object"
+    }
+  },
+  "obd_request": {
+    "description": "One-shot OBD/UDS request against the live ECU(s).\n\n    ``service`` takes any service byte \u2014 read, write and actuation alike.\n    Nothing filters it, so a Mode 04 or a UDS 0x2E/0x2F goes out exactly as\n    asked; the caller decides what is appropriate to send. For the ordinary\n    read services this just lets you ask for one specific service/identifier\n    combination immediately instead of waiting for the poll scheduler's\n    cadence (Mode 06 and DTC sit on a 5-minute tier).\n\n    ``identifier`` is the PID/DID/MID/InfoType byte(s) \u2014 omit it for the\n    no-identifier services (Mode 03/07/0A). ``header`` overrides the default\n    functional request id (``0x7DF``) for a physically-addressed request,\n    e.g. ``0x7E0`` for the engine ECM, or another module's tester address \u2014\n    set it to reach a module standard Mode 01 polling never does (ABS,\n    TCM, ...).\n\n    Returns ``responded: false`` (not an error) when nothing answers in\n    time \u2014 a real \"unsupported\" for this ECU is indistinguishable on the\n    wire from a request that simply timed out. When another tool owns a\n    diagnostic session with a module, arm ``set_passive_mode`` first so this\n    request's own transmit can't contend with it.\n    ",
+    "inputSchema": {
+      "properties": {
+        "header": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Header"
+        },
+        "identifier": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identifier"
+        },
+        "service": {
+          "title": "Service",
+          "type": "integer"
+        },
+        "timeout_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout Seconds"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "title": "obd_requestArguments",
+      "type": "object"
+    },
+    "name": "obd_request",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "obd_requestDictOutput",
+      "type": "object"
+    }
+  },
+  "pin_session": {
+    "description": "Pin a session as a training candidate / interesting-to-keep record.\n\n    ``reason`` and optional ``metadata`` end up in the session's record. Pinned\n    sessions survive retention sweeps.\n    ",
+    "inputSchema": {
+      "properties": {
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "pin_sessionArguments",
+      "type": "object"
+    },
+    "name": "pin_session",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "pin_sessionDictOutput",
+      "type": "object"
+    }
+  },
+  "query_telemetry": {
+    "description": "Run a single SELECT/WITH against the telemetry Parquet view.\n\n            View name is `telemetry` with columns timestamp, source, channel,\n            value_number, value_text, value_bool, unit, metadata_json, and a\n            derived `session` column. Non-SELECT statements are rejected.\n            session/since/until scope which sessions' parquet back the view\n            for this call (cheaper than scanning the whole corpus) \u2014 since/\n            until are ISO-8601 or a bare session id, inclusive both ends.\n            ",
+    "inputSchema": {
+      "properties": {
+        "row_limit": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Row Limit"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "sql": {
+          "title": "Sql",
+          "type": "string"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        }
+      },
+      "required": [
+        "sql"
+      ],
+      "title": "query_telemetryArguments",
+      "type": "object"
+    },
+    "name": "query_telemetry",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "query_telemetryDictOutput",
+      "type": "object"
+    }
+  },
+  "record_feedback": {
+    "description": "Record true_positive/false_positive/unknown verdict on an anomaly.\n\n        Pass the whole `event` dict straight through from\n        `get_recent_anomalies` \u2014 the store keys on the event, and these\n        events have no id field.\n        ",
+    "inputSchema": {
+      "properties": {
+        "clarifying_answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarifying Answer"
+        },
+        "clarifying_question": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Clarifying Question"
+        },
+        "driving_context": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Driving Context"
+        },
+        "event": {
+          "additionalProperties": true,
+          "title": "Event",
+          "type": "object"
+        },
+        "hypothesis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hypothesis"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "labeled_by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Labeled By"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "event",
+        "label"
+      ],
+      "title": "record_feedbackArguments",
+      "type": "object"
+    },
+    "name": "record_feedback",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "record_feedbackDictOutput",
+      "type": "object"
+    }
+  },
+  "record_vehicle_event": {
+    "description": "Log a maintenance/mod/repair/observation to the vehicle ledger (3.3).\n\n        ``occurred_at`` is an ISO date (``YYYY-MM-DD``). Set\n        ``corpus_boundary=True`` when the event changes what \"normal\" looks\n        like (a mod or repair) so training can optionally start fresh from\n        it (``--since-boundary``).\n\n        Pass ``event_id`` (from `list_vehicle_events`) to CORRECT an existing\n        entry: the ledger is append-only and reads collapse to the latest\n        line per id, so the correction wins while the original stays on\n        disk. Re-state the whole event, not just the changed field.\n        ",
+    "inputSchema": {
+      "properties": {
+        "affected_channels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Affected Channels"
+        },
+        "corpus_boundary": {
+          "default": false,
+          "title": "Corpus Boundary",
+          "type": "boolean"
+        },
+        "details": {
+          "default": "",
+          "title": "Details",
+          "type": "string"
+        },
+        "event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Event Id"
+        },
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "occurred_at": {
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "odometer_km": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Odometer Km"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "occurred_at",
+        "kind",
+        "title"
+      ],
+      "title": "record_vehicle_eventArguments",
+      "type": "object"
+    },
+    "name": "record_vehicle_event",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "record_vehicle_eventDictOutput",
+      "type": "object"
+    }
+  },
+  "replay_window": {
+    "description": "Submit a ``replay_window`` job; optionally wait + return the report.\n\n    Parameters\n    ----------\n    session_id:\n        Session directory name (e.g. ``\"2026-05-17T120000\"``).\n    start / end:\n        Optional ISO-8601 bounds (inclusive). Omitted bounds replay the\n        whole session.\n    if_model / lstm_model:\n        Optional artifact path overrides; defaults follow ``canary.yaml``.\n    anomalies_dir:\n        Optional override for where to look up historical events.\n    max_rows / max_windows:\n        Caps on the per-row IF score list and per-window LSTM list to keep\n        the JSON response bounded; defaults are 5000 each.\n    wait:\n        Block until the job terminates (default). When ``False``, returns\n        the queued ``JobRecord`` and the caller polls ``get_job`` /\n        ``get_job_logs`` themselves.\n    poll_interval / timeout:\n        Polling cadence and overall wall-clock cap when ``wait=True``.\n\n    Returns\n    -------\n    On success and ``wait=True``: ``{\"ok\": True, \"job\": {...}, \"report\": {...}}``.\n    On ``wait=False``: ``{\"ok\": True, \"job\": {...}, \"report\": None}``.\n    On failure: ``{\"ok\": False, \"job\": {...}, \"error\": \"...\"}``.\n    ",
+    "inputSchema": {
+      "properties": {
+        "anomalies_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anomalies Dir"
+        },
+        "end": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End"
+        },
+        "if_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "If Model"
+        },
+        "lstm_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lstm Model"
+        },
+        "max_rows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Rows"
+        },
+        "max_windows": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Windows"
+        },
+        "poll_interval": {
+          "default": 2.0,
+          "title": "Poll Interval",
+          "type": "number"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "start": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start"
+        },
+        "timeout": {
+          "default": 600.0,
+          "title": "Timeout",
+          "type": "number"
+        },
+        "wait": {
+          "default": true,
+          "title": "Wait",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "replay_windowArguments",
+      "type": "object"
+    },
+    "name": "replay_window",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "replay_windowDictOutput",
+      "type": "object"
+    }
+  },
+  "revert_tuning": {
+    "description": "Revert to an earlier tuning version (from the audit log).\n\n    Reverting is itself a new, audited version \u2014 the audit chain is\n    append-only and never rewinds.\n    ",
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "By"
+        },
+        "version": {
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "title": "revert_tuningArguments",
+      "type": "object"
+    },
+    "name": "revert_tuning",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "revert_tuningDictOutput",
+      "type": "object"
+    }
+  },
+  "search_anomaly_log": {
+    "description": "Search anomaly history (kind='anomalies') or the MCP audit log (kind='audit').\n\n        Anomaly filters: source (isolation_forest|lstm_autoencoder), mode,\n        min_score / max_score, affected_channel, session. Audit filters:\n        action (e.g. 'mcp.start_capture'), result ('ok'|'error'), actor.\n        ``contains`` does a raw-text substring match for fields outside the\n        structured filters. Results are newest-first, capped at ``limit``.\n        ",
+    "inputSchema": {
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Action"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Actor"
+        },
+        "affected_channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Affected Channel"
+        },
+        "contains": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contains"
+        },
+        "kind": {
+          "default": "anomalies",
+          "title": "Kind",
+          "type": "string"
+        },
+        "limit": {
+          "default": 200,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Score"
+        },
+        "min_score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Score"
+        },
+        "mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mode"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Session"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Until"
+        }
+      },
+      "title": "search_anomaly_logArguments",
+      "type": "object"
+    },
+    "name": "search_anomaly_log",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "search_anomaly_logDictOutput",
+      "type": "object"
+    }
+  },
+  "set_bus_budget": {
+    "description": "Raise (or clear) the OBD request-rate budget for a bounded capture.\n\n    The scheduler paces at ``BUS_BUDGET_MULTIPLIER x poll_rate_hz`` \u2014 8\n    requests/second on the dev vehicle \u2014 against a measured capability of\n    **667 single-PID reads/s**. That conservatism is why a WOT pull yields\n    ~23 usable samples where UpRev's K-line logger gets 537, and why AFR and\n    Load Point Scaler work has repeatedly had to borrow that external tool.\n\n    Raise it for the pull, drop it after. Pass ``requests_per_second=None``\n    to clear and return to the configured default.\n\n    Pairs with ``set_tuning_mode``: narrowing the channel set concentrates\n    the budget, raising the budget enlarges it. For WOT work you generally\n    want both \u2014 but note tuning mode also suspends the Mode-22 DID windows,\n    so leave it off if you need DIDs (e.g. ``DID_1208`` injector pulse width)\n    during the same drive.\n\n    ``ttl_seconds`` **defaults to 600** rather than to off, unlike\n    ``set_passive_mode``. A forgotten passive mode is loud \u2014 nothing gets\n    logged. A forgotten rate override is quiet: it just keeps hammering the\n    bus and burning Pi CPU at up to 25x the intended rate indefinitely. Pass\n    ``None`` only if you deliberately want it to persist.\n\n    Ceiling is 200 req/s, well under the measured 667: that figure came from\n    a probe with the bus effectively to itself, whereas in service it also\n    carries ~29 broadcast IDs on 9-18 ms cadences. Raising the budget also\n    stops helping once responses can't keep up \u2014 watch ``response_rate`` in\n    ``get_status``, and if it drops, the extra requests are just bus noise.\n    ``get_status`` reports ``bus_budget`` (override, source, TTL remaining)\n    so an unexpectedly high achieved rate is distinguishable from a fault.\n    ",
+    "inputSchema": {
+      "properties": {
+        "requests_per_second": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Requests Per Second"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 600.0,
+          "title": "Ttl Seconds"
+        }
+      },
+      "required": [
+        "requests_per_second"
+      ],
+      "title": "set_bus_budgetArguments",
+      "type": "object"
+    },
+    "name": "set_bus_budget",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_bus_budgetDictOutput",
+      "type": "object"
+    }
+  },
+  "set_passive_mode": {
+    "description": "Arm (``enabled=true``) or disarm the CAN transmit gate.\n\n    While armed the daemon is receive-only: broadcast CAN logging, telemetry\n    storage, GPS and anomaly scoring all keep running, but no OBD polls and no\n    ISO-TP flow-control frames are transmitted.\n\n    Arm this whenever another tool owns a diagnostic session with a module \u2014\n    ECU reprogramming, a bidirectional actuator test, a scan-tool routine \u2014\n    so CANary's polling cannot contend with it.\n\n    ``ttl_seconds`` (only meaningful when arming, capped at 3600) auto-disarms\n    after that many seconds even if nobody calls this again \u2014 the daemon\n    polls for expiry in the background. Worth setting whenever the window is\n    known in advance (a timed reflash, a fixed-length scan-tool routine): it\n    is one less thing to remember, and a died session or an interrupted\n    conversation can't leave OBD polling suppressed indefinitely. Omit for\n    the old \"stays armed until manually disarmed\" behavior.\n\n    Note that OBD channels go stale while armed, so ``vehicle_state`` will\n    read ``engine_off``/``no_data`` and behavior models will stop scoring. That\n    is expected, not a fault; ``get_status`` reports ``passive.enabled`` (and\n    ``passive.ttl_remaining_seconds`` when a TTL is set) so both are\n    distinguishable from a real fault. Disarm when the other tool is\n    finished, or let the TTL do it.\n\n    For a guarantee no software path can defeat, additionally put the\n    controller in listen-only mode on the Pi (``ip link set can0 type can\n    listen-only on``) \u2014 that requires an interface cycle and cannot be done\n    through this tool.\n    ",
+    "inputSchema": {
+      "properties": {
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ttl Seconds"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "set_passive_modeArguments",
+      "type": "object"
+    },
+    "name": "set_passive_mode",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_passive_modeDictOutput",
+      "type": "object"
+    }
+  },
+  "set_session_metadata": {
+    "description": "Attach / merge metadata onto a session.\n\n    ``merge=True`` (default) shallow-merges with existing metadata; ``False``\n    replaces. The daemon's REST endpoint uses these same semantics.\n    ",
+    "inputSchema": {
+      "properties": {
+        "merge": {
+          "default": true,
+          "title": "Merge",
+          "type": "boolean"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id",
+        "metadata"
+      ],
+      "title": "set_session_metadataArguments",
+      "type": "object"
+    },
+    "name": "set_session_metadata",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_session_metadataDictOutput",
+      "type": "object"
+    }
+  },
+  "set_tuning": {
+    "description": "Replace the alert-tuning config. The daemon auto-bumps ``version``.\n\n    Run ``estimate_tuning`` first to preview the false-positive impact over\n    recent anomalies \u2014 the daemon writes every change to an audit log so\n    everything is revertible.\n    ",
+    "inputSchema": {
+      "properties": {
+        "by": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "By"
+        },
+        "change": {
+          "default": "tuning update",
+          "title": "Change",
+          "type": "string"
+        },
+        "config": {
+          "additionalProperties": true,
+          "title": "Config",
+          "type": "object"
+        }
+      },
+      "required": [
+        "config"
+      ],
+      "title": "set_tuningArguments",
+      "type": "object"
+    },
+    "name": "set_tuning",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_tuningDictOutput",
+      "type": "object"
+    }
+  },
+  "set_tuning_mode": {
+    "description": "Arm/disarm the focused high-rate tuning poll profile.\n\n    While armed the Mode 01 rotation is restricted to a small tuning set\n    (RPM, load, MAF, timing, TPS, IAT, lambda B1/B2, STFT/LTFT B1/B2,\n    commanded equivalence ratio) and the Mode-22 DID windows are suspended,\n    so each channel gets a far larger slice of the same bus budget.\n\n    Use for a tuning capture where you need enough samples in a single\n    rpm x load cell to draw a conclusion. Normal polling lands each channel\n    at 0.06-0.5 Hz, which yields roughly 10 samples per cell over a whole\n    drive -- not enough to say anything.\n\n    Everything outside the tuning set stops updating while armed. That is\n    expected, not a fault; `get_status` reports `tuning_mode.active`.\n    Disarm when the capture is done -- disabling also restores the default\n    channel set, so a narrow one-off cannot persist into the next capture.\n    ",
+    "inputSchema": {
+      "properties": {
+        "channels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "enabled": {
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "set_tuning_modeArguments",
+      "type": "object"
+    },
+    "name": "set_tuning_mode",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_tuning_modeDictOutput",
+      "type": "object"
+    }
+  },
+  "set_ups_keepalive": {
+    "description": "Set (``minutes`` > 0) or cancel (``minutes`` = 0) the UPS keep-alive hold.\n\n    Use before a bench move longer than the watchdog's grace window (default\n    5 min) \u2014 e.g. unplugging to carry the Pi somewhere for an extended\n    session. While the hold is active the watchdog will not power off\n    regardless of input/battery state. It expires on its own; there's no need\n    to explicitly cancel unless you want the grace-window protection back\n    immediately.\n    ",
+    "inputSchema": {
+      "properties": {
+        "minutes": {
+          "title": "Minutes",
+          "type": "number"
+        }
+      },
+      "required": [
+        "minutes"
+      ],
+      "title": "set_ups_keepaliveArguments",
+      "type": "object"
+    },
+    "name": "set_ups_keepalive",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "set_ups_keepaliveDictOutput",
+      "type": "object"
+    }
+  },
+  "signal_lookup": {
+    "description": "Fuzzy-match a tag label against the FSM signal catalog.\n\n            ``can_id`` narrows the search to that module (e.g. 0x7E0 \u2192 ECM)\n            for better precision. Returns top-k name matches with scores.\n            ",
+    "inputSchema": {
+      "properties": {
+        "can_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Can Id"
+        },
+        "tag_label": {
+          "title": "Tag Label",
+          "type": "string"
+        },
+        "top_k": {
+          "default": 3,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tag_label"
+      ],
+      "title": "signal_lookupArguments",
+      "type": "object"
+    },
+    "name": "signal_lookup",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "signal_lookupDictOutput",
+      "type": "object"
+    }
+  },
+  "start_capture": {
+    "description": "Start a named capture profile or a legacy labeled capture window.\n\n        Pass ``profile`` for an isolated collection session. Without it,\n        ``purpose`` starts the existing tag window on the current session.\n        ",
+    "inputSchema": {
+      "properties": {
+        "fields": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        },
+        "protocol": {
+          "default": "drive",
+          "title": "Protocol",
+          "type": "string"
+        },
+        "purpose": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Purpose"
+        },
+        "tune_revision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tune Revision"
+        },
+        "vehicle_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Vehicle State"
+        }
+      },
+      "title": "start_captureArguments",
+      "type": "object"
+    },
+    "name": "start_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "start_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "start_job": {
+    "description": "Submit a job to the daemon's controller.\n\n    Common ``kind`` values: ``corpus_report``, ``retrain_if``, ``retrain_lstm``,\n    ``did_sweep``. See ``src/control/jobs.py`` for the registered set on this\n    build.\n\n    ``did_sweep`` sweeps a Mode 22 DID range in one pass: params\n    ``{start, end, label}`` required (``start``/``end`` are DIDs, int or hex\n    string; ``label`` tags the snapshot for ``diff_did_snapshots``), optional\n    ``header``/``session``/``keepalive``/``delay_seconds``/``read_timeout`` \u2014\n    see ``diff_did_snapshots``'s docstring for the before/after workflow this\n    feeds.\n    ",
+    "inputSchema": {
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Params"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "start_jobArguments",
+      "type": "object"
+    },
+    "name": "start_job",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "start_jobDictOutput",
+      "type": "object"
+    }
+  },
+  "start_replay": {
+    "description": "Replay a stored session into the live capture pipeline.\n\n    Pushes the recorded session's telemetry onto the same queue as a real\n    drive, so IF + LSTM + behavior detectors fire as if the truck were\n    running. Parquet writes land under ``<storage>/_replay-<id>/`` and\n    anomalies under ``<anomalies_dir>/_replay/<id>.jsonl`` \u2014 both\n    excluded from training discovery and feedback loops.\n\n    Parameters\n    ----------\n    session_id:\n        Directory name of an existing live session (e.g.\n        ``\"2026-05-18T033527\"``). Replay-of-replays is rejected.\n    speed:\n        Multiplier on the original recording's pacing. ``1.0`` real-time;\n        ``3.0`` three times faster.\n    loop:\n        Loop the recording until ``stop_replay`` is called. Default\n        ``False`` so the replay halts on its own when the source exhausts.\n    ",
+    "inputSchema": {
+      "properties": {
+        "loop": {
+          "default": false,
+          "title": "Loop",
+          "type": "boolean"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "speed": {
+          "default": 1.0,
+          "title": "Speed",
+          "type": "number"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "start_replayArguments",
+      "type": "object"
+    },
+    "name": "start_replay",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "start_replayDictOutput",
+      "type": "object"
+    }
+  },
+  "stop_capture": {
+    "description": "Stop the active profile capture, otherwise close the tag window.\n\n        Raises when there is no tag window to close (HTTP 409) rather than\n        answering with a null capture \u2014 a restart drops the in-memory window,\n        so \"stopped\" and \"there was nothing to stop\" are genuinely different\n        answers. The refusal names that cause.\n        ",
+    "inputSchema": {
+      "properties": {
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "title": "stop_captureArguments",
+      "type": "object"
+    },
+    "name": "stop_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "stop_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "stop_replay": {
+    "description": "Cancel the in-flight replay and roll the writer/logger back to live.",
+    "inputSchema": {
+      "properties": {},
+      "title": "stop_replayArguments",
+      "type": "object"
+    },
+    "name": "stop_replay",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "stop_replayDictOutput",
+      "type": "object"
+    }
+  },
+  "tag_current_capture": {
+    "description": "Drop a tag onto the active capture mid-drive.\n\n    Tags are append-only events in ``tags.jsonl`` \u2014 used to mark transitions\n    (\"entered city\", \"started towing\") so downstream analysis can slice.\n\n    Raises :class:`~src.mcp_server.client.DaemonError` when no capture window\n    is open (HTTP 409) \u2014 the tag was *not* recorded. The window is in-memory\n    only, so a daemon restart ends it while recording continues; the refusal\n    says so. Never returns a success with a null tag: a lost tag cannot be\n    recovered after the drive, so it has to fail loudly at the call.\n    ",
+    "inputSchema": {
+      "properties": {
+        "fields": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fields"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "title": "tag_current_captureArguments",
+      "type": "object"
+    },
+    "name": "tag_current_capture",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "tag_current_captureDictOutput",
+      "type": "object"
+    }
+  },
+  "tail_daemon_log": {
+    "description": "Recent daemon log lines as parsed JSON records.\n\n        Reads from systemd journal when available; falls back to a flat log\n        file at $CANARY_MCP_LOG_FALLBACK otherwise. ``unit`` overrides the\n        default ($CANARY_MCP_DAEMON_UNIT, \"canary\").\n        ",
+    "inputSchema": {
+      "properties": {
+        "n": {
+          "default": 100,
+          "title": "N",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Since"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        }
+      },
+      "title": "tail_daemon_logArguments",
+      "type": "object"
+    },
+    "name": "tail_daemon_log",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "tail_daemon_logDictOutput",
+      "type": "object"
+    }
+  },
+  "trigger_poll": {
+    "description": "Force specific channels due on the OBD scheduler's next tick.\n\n    Nudges the poll scheduler instead of waiting out a channel's configured\n    cadence \u2014 DTC/Mode 06 sit on a 5-minute tier, so this turns \"wait up to\n    5 minutes\" into \"the answer is ready in a few seconds.\" Channel names\n    match `get_status`'s `obd_scheduler.requests[].channel` (`RPM`,\n    `DTC_STORED`, `MONITOR_RESULTS`, `DID_1101`, ...), matched\n    case-insensitively; an unknown name is silently never matched.\n\n    This only queues the request \u2014 it does not wait for or return the\n    reading. Read the result back a few seconds later with the usual tools\n    (`get_status`, `get_dtc`, `get_recent_telemetry`, `query_telemetry`).\n    ",
+    "inputSchema": {
+      "properties": {
+        "channels": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Channels",
+          "type": "array"
+        }
+      },
+      "required": [
+        "channels"
+      ],
+      "title": "trigger_pollArguments",
+      "type": "object"
+    },
+    "name": "trigger_poll",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "trigger_pollDictOutput",
+      "type": "object"
+    }
+  },
+  "unpin_session": {
+    "description": "Remove the pin from a session \u2014 it's eligible for retention sweeps again.",
+    "inputSchema": {
+      "properties": {
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "session_id"
+      ],
+      "title": "unpin_sessionArguments",
+      "type": "object"
+    },
+    "name": "unpin_session",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "unpin_sessionDictOutput",
+      "type": "object"
+    }
+  },
+  "upload_model_artifact": {
+    "description": "Upload a trained model artifact (path local to the MCP host).\n\n        ``artifact_path`` is read from the MCP server's filesystem,\n        base64-encoded, and POSTed alongside ``manifest`` to\n        ``/control/models/{model_type}/artifact``. Audited with file size +\n        manifest; the base64 body itself is not logged.\n        ",
+    "inputSchema": {
+      "properties": {
+        "artifact_path": {
+          "title": "Artifact Path",
+          "type": "string"
+        },
+        "manifest": {
+          "additionalProperties": true,
+          "title": "Manifest",
+          "type": "object"
+        },
+        "model_type": {
+          "title": "Model Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model_type",
+        "artifact_path",
+        "manifest"
+      ],
+      "title": "upload_model_artifactArguments",
+      "type": "object"
+    },
+    "name": "upload_model_artifact",
+    "outputSchema": {
+      "additionalProperties": true,
+      "title": "upload_model_artifactDictOutput",
+      "type": "object"
+    }
+  }
+}

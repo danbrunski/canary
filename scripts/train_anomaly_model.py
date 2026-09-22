@@ -55,7 +55,6 @@ from src.models.isolation_forest import (
 )
 from src.preprocessing import (
     AnomalyInjector,
-    ResampleConfig,
     decode_can_rows,
     discover_sessions,
     read_session,
@@ -73,7 +72,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.feature_pipeline import (
     isolation_forest_feature_columns as _if_feature_columns,
 )
-from src.preprocessing.resampler import is_slow_channel
+from src.preprocessing.resampler import is_slow_channel, resample_config_for
 from src.telemetry import DECODED_SOURCE, source_of
 
 log = logging.getLogger(__name__)
@@ -196,12 +195,12 @@ def evaluate(
     if bindings is not None:
         long = decode_can_rows(long, bindings)
     wide = to_wide(long, coerce_numeric=True)
+    # One training-recipe config for both the resample and the dropout's
+    # hold ceiling below, so the two cannot disagree (D03.27).
+    resample_config = resample_config_for(config)
     resampled = resample_wide(
         wide,
-        config=ResampleConfig(
-            hz=config.preprocessing.resample_hz,
-            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        ),
+        config=resample_config,
     )
 
     # Choose a numeric channel to perturb — a decoded signal if one's present.
@@ -229,10 +228,6 @@ def evaluate(
         timestamps.iloc[2 * len(timestamps) // 3 + 10],
     )
     spike_value = float(resampled[channel].dropna().max() * 5 + 1000)
-    resample_config = ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-    )
     max_gap_seconds = (
         resample_config.slow_channel_max_gap_seconds
         if is_slow_channel(channel)

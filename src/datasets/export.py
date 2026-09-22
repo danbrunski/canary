@@ -34,7 +34,7 @@ import pandas as pd
 from src.config import CanaryConfig
 from src.control.sessions import write_session_metadata
 from src.preprocessing.loader import read_session, to_wide
-from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.session import MANIFEST_FILENAME, build_windows, load_tags, session_paths
 
 log = logging.getLogger(__name__)
@@ -172,10 +172,8 @@ def build_dataset(
         if spec.resample_hz is not None:
             wide = resample_wide(
                 wide,
-                config=ResampleConfig(
-                    hz=spec.resample_hz,
-                    slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-                ),
+                # The training recipe's gap rules at the requested rate.
+                config=resample_config_for(config, hz=spec.resample_hz),
             )
         if spec.include_tags or spec.exclude_tags:
             mask, labels = _session_window_filter(

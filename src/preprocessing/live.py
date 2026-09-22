@@ -69,7 +69,7 @@ from src.decode.engineering import physical_value
 from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
-from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_channel
+from src.preprocessing.resampler import gap_column, is_slow_channel, resample_config_for
 from src.preprocessing.session_context import (
     EngineStartTracker,
     StartContextSpec,
@@ -184,7 +184,7 @@ class LiveFeatureSource:
     _feature_config: FeatureConfig = field(init=False)
     _max_rows: int = field(init=False)
     #: Resampler ``max_gap`` in seconds — the staleness cutoff that flips a
-    #: channel's mask to 0. Mirrors ``ResampleConfig(hz).max_gap`` so train and
+    #: channel's mask to 0. Mirrors ``resample_config_for(config).max_gap`` so train and
     #: serve agree on what "stale" means for the same observation history.
     _max_gap_seconds: float = field(init=False)
     #: Slow-channel counterpart to ``_max_gap_seconds`` (1.1/1.2) — mirrors
@@ -270,11 +270,7 @@ class LiveFeatureSource:
         # Mirror the resampler's max_gap (interval × max_gap_factor) used at
         # training time, so a channel reads stale at serve exactly when its
         # ``__gap`` flag would have been set offline.
-        resample_config = ResampleConfig(
-            hz=self.config.preprocessing.resample_hz,
-            max_gap_factor=self.config.preprocessing.max_gap_factor,
-            slow_channel_max_gap_seconds=self.config.preprocessing.slow_channel_max_gap_seconds,
-        )
+        resample_config = resample_config_for(self.config)
         self._max_gap_seconds = float(resample_config.max_gap.total_seconds())
         self._slow_max_gap_seconds = float(resample_config.slow_channel_max_gap.total_seconds())
         # Pre-index bindings by CAN ID so decode is O(signals per ID), not

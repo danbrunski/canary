@@ -16,7 +16,9 @@ async def list_sessions(
 ) -> dict[str, Any]:
     """All known sessions on disk, oldest-first.
 
-    Use this for navigation; combine with ``get_session`` to drill into one.
+    ``since`` / ``until`` bound the listing by ISO session start time and
+    ``limit`` keeps only the newest N. Use this for navigation; combine with
+    ``get_session`` to drill into one.
     """
     params: dict[str, Any] = {}
     if since is not None:

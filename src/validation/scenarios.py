@@ -255,6 +255,14 @@ class ScenarioSpec:
     expected_failures_any: tuple[str, ...] = ()
     notes: str = ""
     known_answer: bool = True
+    #: Replay only: the recorded session to re-emit (``None`` = the committed
+    #: ground-truth drive slice) and the requested speed multiplier.
+    replay_source: str | None = None
+    replay_speed: float = 2.0
+    #: Replay only: rate (fix epochs/s) of a simulated *live* GPS receiver
+    #: pushing onto the same queue while the replay runs, the way the Pi's
+    #: receiver kept writing into ``_replay-*`` during D02.9. ``0`` = none.
+    live_gps_hz: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -279,6 +287,9 @@ class ScenarioSpec:
             "expected_failures": list(self.expected_failures),
             "expected_failures_any": list(self.expected_failures_any),
             "notes": self.notes,
+            "replay_source": self.replay_source,
+            "replay_speed": self.replay_speed,
+            "live_gps_hz": self.live_gps_hz,
         }
 
 

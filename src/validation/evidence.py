@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,9 @@ from src.collection.capture_losses import (
     reconcile_losses,
     summarize_losses,
 )
+from src.decode.bindings import load_bindings
+from src.decode.frame_decoder import FrameDecoder
+from src.telemetry import CAPTURED_SOURCES, TelemetryRecord
 from src.validation.harness import RunArtifacts
 from src.validation.synthetic_bus import (
     SYNTH_BROADCAST_ID,
@@ -183,6 +187,109 @@ def decoded_expansion(
                 "identity_holds": expected == int(len(decoded)),
             }
         )
+    return out
+
+
+def _rederived_rows(can_frames: pd.DataFrame, bindings_path: Path) -> int:
+    """How many ``decoded`` rows the storage decoder makes from ``can_frames``.
+
+    The same decoder, bindings and confidence filter the harness wires into
+    the storage sink, so this is the one-to-many expansion the writer is
+    *supposed* to have persisted from the frames it persisted.
+    """
+    decoder = FrameDecoder.from_bindings(
+        load_bindings(bindings_path), confidence_levels=("confirmed",)
+    )
+    now = datetime.now(UTC)
+    total = 0
+    for channel, payload in zip(can_frames["channel"], can_frames["payload"], strict=True):
+        if not isinstance(payload, (bytes, bytearray)):
+            continue
+        total += len(
+            decoder.decode(
+                TelemetryRecord(
+                    timestamp=now, source="can", channel=str(channel), payload=bytes(payload)
+                )
+            )
+        )
+    return total
+
+
+def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str, Any]:
+    """Replay rows persisted, per source, against the source session (D03.7).
+
+    D02.9's doubling (stored ``decoded`` rows re-emitted *and* re-derived from
+    the replayed frames) and its live-GPS contamination (the Pi's receiver
+    writing into ``_replay-*``) are both row-count identities against the
+    source, so they are checked as identities:
+
+    - ``decoded`` persisted == stored ``decoded`` the emit policy let through
+      + what the storage decoder re-derives from the persisted ``can`` frames.
+      Under the re-derivable policy the first term is zero by construction, so
+      this identity holds even for an incomplete pass.
+    - every captured source persisted == its count in the source, once a full
+      pass completed with nothing dropped; any excess is listed as
+      ``foreign_rows`` (rows no recording contained).
+    """
+    stats = artifacts.replay_emission
+    if artifacts.scenario.kind != "replay" or stats is None or artifacts.replay_source is None:
+        return {"status": "not_a_replay"}
+    source = read_rows([artifacts.replay_source])
+    source_by = {str(k): int(v) for k, v in source["source"].value_counts().items()}
+    persisted_by = {str(k): int(v) for k, v in frame["source"].value_counts().items()}
+    persisted_can = frame[frame["source"] == "can"]
+    rederived = _rederived_rows(persisted_can, artifacts.bindings_path)
+    storage_dropped = int(_sink(artifacts, "storage").get("dropped_records") or 0)
+    complete = stats.passes >= 1 and stats.rows_dropped == 0 and storage_dropped == 0
+    out: dict[str, Any] = {
+        "source_rows_by_source": source_by,
+        "persisted_rows_by_source": persisted_by,
+        "rederivable": stats.rederivable,
+        "rederivable_reason": stats.rederivable_reason,
+        "skipped_sources": list(stats.skipped_sources),
+        "pass_complete": complete,
+        "rederived_decoded_rows": rederived,
+    }
+    stored_decoded = 0 if stats.rederivable else source_by.get("decoded", 0)
+    decoded_persisted = persisted_by.get("decoded", 0)
+    if stats.rederivable or complete:
+        expected = stored_decoded + rederived
+        out["decoded"] = {
+            "persisted": decoded_persisted,
+            "expected": expected,
+            "stored_emitted": stored_decoded,
+            "identity_holds": decoded_persisted == expected,
+            "ratio_to_expected": None if expected == 0 else decoded_persisted / expected,
+        }
+    else:
+        out["decoded"] = {
+            "persisted": decoded_persisted,
+            "identity_holds": None,
+            "reason": "legacy policy re-emits stored decoded rows; the pass did not "
+            "complete, so how many were emitted is unknown",
+        }
+    if complete:
+        captured = sorted((set(source_by) | set(persisted_by)) & set(CAPTURED_SOURCES))
+        foreign = {
+            name: persisted_by.get(name, 0) - source_by.get(name, 0)
+            for name in captured
+            if persisted_by.get(name, 0) > source_by.get(name, 0)
+        }
+        missing = {
+            name: source_by.get(name, 0) - persisted_by.get(name, 0)
+            for name in captured
+            if persisted_by.get(name, 0) < source_by.get(name, 0)
+        }
+        out["captured"] = {
+            "identity_holds": not foreign and not missing,
+            "foreign_rows": foreign,
+            "missing_rows": missing,
+        }
+    else:
+        out["captured"] = {
+            "identity_holds": None,
+            "reason": "no complete, drop-free pass over the source",
+        }
     return out
 
 
@@ -790,6 +897,7 @@ def analyse(artifacts: RunArtifacts) -> dict[str, Any]:
         "decoded_expansion": decoded_expansion(
             frame, persisted_signals=artifacts.decoder_signals, synthetic=synthetic
         ),
+        "replay_accounting": replay_accounting(frame, artifacts),
         "losses": losses,
         "transport": {
             "service_accounting": service_accounting(artifacts),
@@ -812,5 +920,6 @@ __all__ = [
     "limiting_stage",
     "loss_accounting",
     "read_rows",
+    "replay_accounting",
     "sequence_reconciliation",
 ]

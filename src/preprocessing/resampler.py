@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
+
+if TYPE_CHECKING:
+    from src.config import CanaryConfig
 
 SESSION_COLUMN = "session"
 TIMESTAMP_COLUMN = "timestamp"
@@ -85,6 +89,33 @@ class ResampleConfig:
     @property
     def slow_channel_max_gap(self) -> pd.Timedelta:
         return pd.Timedelta(seconds=self.slow_channel_max_gap_seconds)
+
+
+def resample_config_for(config: CanaryConfig, *, hz: float | None = None) -> ResampleConfig:
+    """The :class:`ResampleConfig` of the training recipe, built from ``config``.
+
+    Every resample that means "the grid the models were trained on" — batch
+    feature builds, refit, analysis, benchmarks, replay, dataset health, the
+    manifest's ``max_gap_seconds`` and the live source's stale ceilings — goes
+    through here, so no caller can pick up some of
+    ``config.preprocessing``'s gap rules and silently default the rest
+    (D03.27: ``analyze_session`` dropped ``max_gap_factor`` and
+    ``session_gap_seconds``; the manifest's ``max_gap_seconds`` dropped
+    ``max_gap_factor``). ``tests/test_resample_config_construction.py`` fails
+    on a direct ``ResampleConfig(...)`` anywhere outside its allowlist.
+
+    ``hz`` overrides only the grid rate, for a caller that is deliberately on
+    a different rate (dataset export at a requested rate). The gap rules still
+    come from ``config``: ``max_gap_factor`` is in grid intervals, so it scales
+    with the rate; the slow-channel and session-gap ceilings are wall-clock.
+    """
+    preprocessing = config.preprocessing
+    return ResampleConfig(
+        hz=preprocessing.resample_hz if hz is None else hz,
+        max_gap_factor=preprocessing.max_gap_factor,
+        slow_channel_max_gap_seconds=preprocessing.slow_channel_max_gap_seconds,
+        session_gap_seconds=preprocessing.session_gap_seconds,
+    )
 
 
 def resample_wide(

@@ -95,7 +95,10 @@ async def arm_tuning_capture(
     yields nothing if the tuple never completes.
 
     The verdict is scoped: ``scope: live`` covers arm to now, on what has
-    been persisted so far. Pass ``verify_seconds=0`` to skip the wait and
+    been persisted so far, and reports capture-scoped ``achieved_hz`` beside
+    the ``observed_seconds`` it was measured over. A shortfall against
+    ``rate_hz`` means demand exceeded the budget — throttling working, not a
+    fault. Pass ``verify_seconds=0`` to skip the wait and
     return immediately — the verdict is then absent rather than assumed good.
     """
     body: dict[str, Any] = {"profile": profile}
@@ -143,7 +146,10 @@ async def get_capture_quality(
     coverage and tuple yield from that session's rows without rewriting it
     and returns the stored sidecar beside the recomputation — a v1 sidecar
     comes back as ``scope: trailing_snapshot`` with losses unknown, which is
-    what it was. Read ``failures[].clause`` for the constraint that bound.
+    what it was. Read ``failures[].clause`` for the constraint that bound
+    (unanswered_input, rate_shortfall, acquisition_gap, tuple_incomplete,
+    tuple_skew, persistence_loss, unknown_loss_counters); ``losses`` is
+    scoped to the capture or marked unknown, never assumed zero.
     """
     if session_id is None:
         return await client.get_json("/control/capture/quality")
@@ -161,7 +167,9 @@ async def disarm_tuning_capture(
 
     Stopping restores exactly the override that was in force before capture.
     ``clear_bus_budget`` is an explicit request to discard that restored
-    operator setting. The response includes the ended session directory.
+    operator setting. The response includes the ended session directory, so
+    it can be analysed without hunting for it (capture sessions are
+    ``_``-prefixed and deliberately invisible to the normal session listing).
     """
     body: dict[str, Any] = {}
     if reason is not None:

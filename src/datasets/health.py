@@ -29,7 +29,7 @@ from src.control.sessions import read_session_metadata
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.preprocessing.feature_pipeline import segment_or_constant
 from src.preprocessing.loader import read_session, to_wide
-from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
+from src.preprocessing.resampler import GAP_SUFFIX, resample_config_for, resample_wide
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.session import MANIFEST_FILENAME, TAGS_FILENAME, load_tags, session_paths
 
@@ -190,10 +190,7 @@ def analyze_session(session_dir: Path, config: CanaryConfig) -> SessionHealth:
     wide = to_wide(long, coerce_numeric=True)
     resampled = resample_wide(
         wide,
-        config=ResampleConfig(
-            hz=config.preprocessing.resample_hz,
-            slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        ),
+        config=resample_config_for(config),
     )
     segmented, _fell_back = segment_or_constant(resampled, config)
     channels = sorted(

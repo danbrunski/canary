@@ -405,3 +405,43 @@ def test_compare_sessions_to_dict_json_safe(config: CanaryConfig, tmp_path: Path
     comparison = compare_sessions(session_a, session_b, config, models)
     payload = json.loads(json.dumps(comparison.to_dict()))
     assert payload["surfaces"][0]["mean_deviation_delta"] == pytest.approx(3.0, abs=1e-6)
+
+
+def test_analyze_session_resamples_with_the_training_recipe(
+    config: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Parity: the analysis must resample exactly as training does.
+
+    ``analyze_session`` used to build its own ``ResampleConfig`` from ``hz`` and
+    the slow-channel ceiling only, silently taking the dataclass defaults for
+    ``max_gap_factor`` and ``session_gap_seconds``. Any config that set either
+    then analysed a session on a different grid from the one the surfaces were
+    fit on. Non-default values here make that divergence visible.
+    """
+    import src.analysis.session_deviations as session_deviations
+    from src.preprocessing.feature_pipeline import resample_config_for
+
+    tuned = config.model_copy(
+        update={
+            "preprocessing": config.preprocessing.model_copy(
+                update={"max_gap_factor": 5.0, "session_gap_seconds": 45.0}
+            )
+        }
+    )
+    real = session_deviations._decode_session_to_resampled
+    seen = []
+
+    def spy(session_dir, bindings, dbc_database, did_map, resample_config):
+        seen.append(resample_config)
+        return real(session_dir, bindings, dbc_database, did_map, resample_config)
+
+    monkeypatch.setattr(session_deviations, "_decode_session_to_resampled", spy)
+    session = _write_deviation_session(
+        tmp_path, rpm=500.0, load=25.0, run_time_base=100.0, coolant_offset=0.0, timing_offset=0.0
+    )
+
+    analyze_session(session, tuned, BehaviorModels(schema_version=1, models=[_timing_model()]))
+
+    assert seen == [resample_config_for(tuned)]
+    assert seen[0].max_gap_factor == 5.0
+    assert seen[0].session_gap_seconds == 45.0

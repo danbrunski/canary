@@ -44,8 +44,8 @@ from src.preprocessing.feature_pipeline import (
     DEFAULT_DIDS_PATH,
     _decode_session_to_resampled,
     featurize_wide_frame,
+    resample_config_for,
 )
-from src.preprocessing.resampler import ResampleConfig
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
@@ -447,10 +447,10 @@ def analyze_session(
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     dbc_database = load_dbc_dir(dbc_dir)
     did_map = load_did_map(dids_path) if dids_path.exists() else None
-    resample_config = ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-    )
+    # The one batch resample recipe training uses. A hand-built ResampleConfig
+    # here dropped ``max_gap_factor``/``session_gap_seconds``, so a config that
+    # set either resampled this analysis differently from the surfaces' fit.
+    resample_config = resample_config_for(config)
 
     resampled = _decode_session_to_resampled(
         Path(session_dir), bindings, dbc_database, did_map, resample_config

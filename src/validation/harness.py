@@ -48,6 +48,8 @@ from src.collection.can_collector import CanReceiveStats, collect_can_from_confi
 from src.collection.can_obd_collector import collect_can_obd_from_config
 from src.collection.capture_lifetime import InterarrivalReservoir
 from src.collection.capture_profiles import CaptureProfile
+from src.collection.gps_collector import reading_to_records
+from src.collection.gps_nmea import GpsReading
 from src.collection.obd_scheduler import (
     CanObdSpec,
     ObdSchedulerMetrics,
@@ -468,6 +470,9 @@ class RunArtifacts:
     #: harness is the off-vehicle instrument for replay row accounting, so the
     #: counters land in the report beside the source it replayed.
     replay_emission: ReplayEmissionStats | None = None
+    #: Rows a simulated live GPS receiver pushed onto the queue during the
+    #: replay (``ScenarioSpec.live_gps_hz``); 0 when none ran.
+    live_gps_rows_pushed: int = 0
     #: Whether this tree could write the C09 resolved polling plan into the
     #: manifest (the recompute path takes requested rates from it).
     resolved_plan_written: bool = False
@@ -520,6 +525,49 @@ async def _consume(
         except TimeoutError:
             continue
         on_message(message)
+
+
+#: What the simulated live receiver reports: a parked fix at a position no
+#: recorded drive contains, so a contaminating row is identifiable by value.
+LIVE_GPS_SENTINEL = GpsReading(
+    has_fix=True,
+    speed_kmh=0.0,
+    heading_deg=0.0,
+    latitude=0.0,
+    longitude=0.0,
+    altitude_m=0.0,
+    fix_quality=1,
+    num_satellites=9,
+    hdop=0.9,
+)
+
+
+async def _live_gps(
+    queue: asyncio.Queue[TelemetryRecord],
+    stop: asyncio.Event,
+    hz: float,
+    artifacts: RunArtifacts,
+) -> None:
+    """A live GPS receiver sharing the replay's queue (D02.9 item 3).
+
+    On the Pi nothing stops the receiver when a replay starts, so its rows
+    land in whatever session the writer currently points at — the
+    ``_replay-*`` directory. This pushes the same ``reading_to_records`` rows
+    the real collector does, onto the same queue, for as long as the replay
+    runs; the count lands in ``artifacts.live_gps_rows_pushed``.
+    """
+    period = 1.0 / hz
+    while not stop.is_set():
+        for record in reading_to_records(LIVE_GPS_SENTINEL, time.time()):
+            try:
+                queue.put_nowait(record)
+                artifacts.live_gps_rows_pushed += 1
+            except asyncio.QueueFull:
+                pass
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=period)
+        except TimeoutError:
+            pass
 
 
 async def _timeline(
@@ -661,7 +709,11 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
             "derived_channels": live_source is not None,
             "dtc_sink": True,
             "monitor_sink": True,
-            "gps": False,
+            "gps": (
+                f"simulated live receiver at {spec.live_gps_hz:g} Hz on the replay queue"
+                if spec.live_gps_hz > 0
+                else False
+            ),
             "elm327": "not_exercised: needs the ELM327-emulator serial integration tier",
             "hardware_adapter": "synthetic",
             "kernel_counters": "unavailable (no can0 on this host)",
@@ -802,22 +854,30 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
             name="c10-passive",
         )
     else:
-        artifacts.replay_source = DRIVE_SLICE
-        artifacts.replay_speed = 2.0
+        replay_source = Path(spec.replay_source) if spec.replay_source else DRIVE_SLICE
+        artifacts.replay_source = replay_source
+        artifacts.replay_speed = spec.replay_speed
         replay_stats = ReplayEmissionStats()
         artifacts.replay_emission = replay_stats
         await async_writer.enter_replay_mode(f"validation-{label}-{int(time.time())}")
         collector_task = asyncio.create_task(
             replay_session(
                 queue,
-                DRIVE_SLICE,
+                replay_source,
                 collector_stop,
-                speed=2.0,
+                speed=spec.replay_speed,
                 loop=False,
                 stats=replay_stats,
             ),
             name="c10-replay",
         )
+        if spec.live_gps_hz > 0:
+            aux_tasks.append(
+                asyncio.create_task(
+                    _live_gps(queue, collector_stop, spec.live_gps_hz, artifacts),
+                    name="c10-live-gps",
+                )
+            )
 
     await asyncio.sleep(spec.warmup_s)
 
@@ -960,6 +1020,7 @@ def _unsubscribe_all(broadcaster: Broadcaster) -> None:
 
 __all__ = [
     "DRIVE_SLICE",
+    "LIVE_GPS_SENTINEL",
     "REAL_BINDINGS",
     "BoundedSamples",
     "InstrumentedParquetWriter",

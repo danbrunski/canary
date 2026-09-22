@@ -127,6 +127,12 @@ def rows_to_resampled_frame(
         return pd.DataFrame(columns=["session", "timestamp", *channels])
     frame = pd.DataFrame(rows).rename(columns={"channel_key": "source_channel"})
     wide = to_wide(frame, value="value_number")
+    # Deliberately NOT the training recipe (``resample_config_for``): this is
+    # an ad-hoc display grid at a caller-chosen rate for the binned-analysis
+    # and session-timeseries tools, with no CanaryConfig in scope. It answers
+    # "what did these channels read together", not "what did the model see",
+    # so the ResampleConfig defaults for the gap rules are the intent here.
+    # Allowlisted in tests/test_resample_config_construction.py.
     return resample_wide(wide, config=ResampleConfig(hz=resample_hz))
 
 

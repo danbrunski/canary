@@ -107,7 +107,25 @@ service of RE / diagnostics, not the live data path.
 
 Measured 2026-07-27 through `CanObdClient` itself (not a probe harness), KOEO,
 daemon in passive mode, 180 channel-reads each way. Batched values matched
-single-PID values exactly, 0/6 mismatches.
+single-PID values exactly, 0/6 mismatches. **These are dedicated-bus figures:**
+KOEO, the daemon's own polling suspended, nothing else asking the ECM.
+
+**Two in-vehicle numbers now exist, and they measure different things** — do
+not compare one against the other as if they were the same ceiling:
+
+| what | rate | measured | source |
+|---|---:|---|---|
+| **daemon sustained** — requests the running daemon issued and got answered over a whole drive, while also running storage, decode and inference | **116.8 req/s** | 2026-09-10, driving, `tuning-did` profile, 1,515 s, 41 timeouts (0.02 %) | H8, [`2026-09-10-h8-continuous-did.md`](../data/analyses/2026-09-10-h8-continuous-did.md) |
+| **ECM answer rate** — back-to-back single-DID Mode 22 reads with nothing else in the loop | **649 req/s** | 2026-09-21, engine idling, 9,734 requests in 15.0 s (~1.5 ms each) | [`2026-09-20-uprev-usb-road.md`](../data/analyses/2026-09-20-uprev-usb-road.md), "the ECM is not the request-rate limit" |
+
+The first is a property of the daemon — the ECM answered 99.98 % of what it
+was asked at that rate, with zero bus errors; the second is a property of the
+ECM. 649 req/s sits
+close to the 667 req/s dedicated-bus figure above, so the ECM answers about as
+fast on a live, broadcast-carrying bus with the engine running as it did KOEO.
+The gap between 116.8 and 649 is daemon throughput, not ECM capacity. Neither
+number is a batched-read rate: batched Mode 01 is 15-byte multi-frame, and the
+63-byte memory-window reads ran at ~176 req/s in the same session.
 
 **Revised down from an earlier estimate of ~5x.** That figure came from a probe
 loop that blocked ~10 ms in its own drain before every request, which throttled

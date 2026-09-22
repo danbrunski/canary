@@ -3,14 +3,20 @@
 Tools live in :mod:`src.mcp_server.tools` (read) and
 :mod:`src.mcp_server.write_tools` (write). This module is the assembly layer:
 it constructs the shared :class:`DaemonClient`, :class:`TelemetryQuery`, and
-:class:`MCPAuditLogger`, then registers thin closures that delegate to the
-tool functions. Keeping the tools themselves dependency-free makes them
-trivially unit-testable.
+:class:`MCPAuditLogger`, then registers the tools. Pure delegations are rows
+in :data:`READ_DELEGATIONS` / :data:`WRITE_DELEGATIONS` (schema and
+description come from the delegate); wrappers with real logic or conditional
+registration are hand-written closures. Keeping the tools themselves
+dependency-free makes them trivially unit-testable.
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
 import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -154,6 +160,137 @@ from src.storage.catalog import SessionCatalog
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True)
+class Delegation:
+    """One MCP tool that does nothing but forward to its delegate.
+
+    The delegate is a ``tools/`` or ``write_tools/`` function whose name is
+    the tool name, whose leading positional parameters are the injected
+    ``client`` (and ``audit`` when ``needs_audit``), and whose keyword-only
+    parameters are the tool's inputs. FastMCP infers the input schema and the
+    description from the delegate itself, so its docstring is the one source
+    of the tool's text. Wrappers with real logic (validation, branching,
+    config-derived arguments) or conditional registration stay hand-written
+    below.
+    """
+
+    delegate: Callable[..., Awaitable[dict[str, Any]]]
+    needs_audit: bool = False
+
+
+#: Read tools that are pure delegations (no audit).
+READ_DELEGATIONS: tuple[Delegation, ...] = (
+    Delegation(status_tool.get_status),
+    Delegation(status_tool.get_config),
+    Delegation(power_tool.get_power_status),
+    Delegation(anomalies_tool.get_recent_anomalies),
+    Delegation(telemetry_tool.get_recent_telemetry),
+    Delegation(behavior_tool.get_behavior_live),
+    Delegation(behavior_tool.get_behavior_models),
+    Delegation(bindings_tool.get_bindings),
+    Delegation(bindings_tool.get_dids),
+    Delegation(bindings_tool.get_obd_coverage),
+    Delegation(dtc_tool.get_dtc),
+    Delegation(monitors_tool.get_monitors),
+    Delegation(trends_tool.get_trends),
+    Delegation(sessions_tool.list_sessions),
+    Delegation(capture_profiles_tool.list_capture_profiles),
+    Delegation(sessions_tool.get_session),
+    Delegation(sessions_tool.get_dataset_health),
+    Delegation(sessions_tool.get_training_runs),
+    Delegation(vehicle_ledger_tool.list_vehicle_events),
+    Delegation(classification_tool.get_session_classification),
+    Delegation(trip_summary_tool.get_trip_summary),
+    Delegation(digest_tool.get_session_digest),
+    Delegation(classification_tool.get_corpus_mode_summary),
+    Delegation(classification_tool.list_events_by_kind),
+    Delegation(jobs_tool.list_jobs),
+    Delegation(jobs_tool.get_job),
+    Delegation(jobs_tool.get_job_logs),
+    Delegation(did_sweep_tool.diff_did_snapshots),
+    Delegation(tuning_tool.get_tuning),
+    Delegation(tuning_tool.get_feedback),
+)
+
+#: Write-side tools that are pure delegations; ``needs_audit`` injects the audit logger.
+WRITE_DELEGATIONS: tuple[Delegation, ...] = (
+    Delegation(captures_tool.tag_current_capture, needs_audit=True),
+    Delegation(sessions_tool.get_current_capture),
+    Delegation(sessions_write_tool.set_session_metadata, needs_audit=True),
+    Delegation(sessions_write_tool.pin_session, needs_audit=True),
+    Delegation(sessions_write_tool.unpin_session, needs_audit=True),
+    Delegation(jobs_write_tool.start_job, needs_audit=True),
+    Delegation(jobs_write_tool.cancel_job, needs_audit=True),
+    Delegation(tuning_write_tool.set_tuning, needs_audit=True),
+    Delegation(tuning_write_tool.estimate_tuning, needs_audit=True),
+    Delegation(tuning_write_tool.revert_tuning, needs_audit=True),
+    Delegation(power_write_tool.set_ups_keepalive, needs_audit=True),
+    Delegation(can_activity_write_tool.can_activity, needs_audit=True),
+    Delegation(obd_request_write_tool.obd_request, needs_audit=True),
+    Delegation(trigger_poll_write_tool.trigger_poll, needs_audit=True),
+    Delegation(passive_write_tool.set_passive_mode, needs_audit=True),
+    Delegation(bus_budget_write_tool.set_bus_budget, needs_audit=True),
+    Delegation(tuning_mode_write_tool.set_tuning_mode, needs_audit=True),
+    Delegation(tuning_capture_write_tool.arm_tuning_capture, needs_audit=True),
+    Delegation(tuning_capture_write_tool.get_capture_quality),
+    Delegation(tuning_capture_write_tool.disarm_tuning_capture, needs_audit=True),
+    Delegation(replay_tool.replay_window, needs_audit=True),
+    Delegation(classification_write_tool.classify_session, needs_audit=True),
+    Delegation(replay_write_tool.start_replay, needs_audit=True),
+    Delegation(replay_write_tool.stop_replay, needs_audit=True),
+    Delegation(replay_tool.get_replay_status),
+)
+
+
+def bind_delegation(
+    entry: Delegation, client: DaemonClient, audit: MCPAuditLogger | None
+) -> Callable[..., Awaitable[dict[str, Any]]]:
+    """The delegate with ``client``/``audit`` bound, shaped for FastMCP.
+
+    ``functools.wraps`` carries the delegate's name and docstring; the
+    signature (and resolved annotations) drop the injected leading
+    parameters, so they can never surface as tool inputs. A delegate whose
+    leading parameters are not exactly the injected ones is refused at
+    registration rather than bound to the wrong argument.
+    """
+    delegate = entry.delegate
+    injected: tuple[Any, ...] = (client, audit) if entry.needs_audit else (client,)
+    names = ("client", "audit") if entry.needs_audit else ("client",)
+    if entry.needs_audit and audit is None:
+        raise ValueError(f"{delegate.__name__} needs the audit logger")
+    signature = inspect.signature(delegate, eval_str=True)
+    params = list(signature.parameters.values())
+    leading = tuple(param.name for param in params[: len(names)])
+    if leading != names or any(
+        param.kind is not inspect.Parameter.KEYWORD_ONLY for param in params[len(names) :]
+    ):
+        raise TypeError(
+            f"{delegate.__name__}: expected positional {names} then keyword-only "
+            f"inputs, got {signature}"
+        )
+    exposed = params[len(names) :]
+
+    @functools.wraps(delegate)
+    async def tool(**kwargs: Any) -> dict[str, Any]:
+        return await delegate(*injected, **kwargs)
+
+    tool.__signature__ = signature.replace(parameters=exposed)  # type: ignore[attr-defined]
+    tool.__annotations__ = {param.name: param.annotation for param in exposed} | {
+        "return": signature.return_annotation
+    }
+    return tool
+
+
+def _register_delegations(
+    mcp: FastMCP,
+    entries: tuple[Delegation, ...],
+    client: DaemonClient,
+    audit: MCPAuditLogger | None,
+) -> None:
+    for entry in entries:
+        mcp.tool()(bind_delegation(entry, client, audit))
+
+
 def _resolve_storage_path(config: MCPConfig) -> Path | None:
     """Storage path from env, or ``None`` if unset (DuckDB tool stays disabled)."""
     if config.storage_path is not None:
@@ -245,93 +382,7 @@ def _register_read_tools(
     cfg: MCPConfig,
 ) -> None:
     """Register all read tools as MCP tools."""
-
-    @mcp.tool()
-    async def get_status(view: status_tool.StatusView = "full") -> dict[str, Any]:
-        """Daemon liveness, loaded models, storage, anomaly emitter counters.
-
-        `view="compact"` is the cheap projection (~4 ms / 1.3 KB against
-        ~42 ms / 26 KB; the full payload costs 1.3-2.6 s on the Pi):
-        `vehicle_state` plus the loss/queue/tick/OBD counters a watchdog
-        acts on, each at the same path as in the full payload, with a
-        `served_at` stamp for bracketing a measurement. Poll that one.
-        """
-        return await status_tool.get_status(client, view=view)
-
-    @mcp.tool()
-    async def get_config() -> dict[str, Any]:
-        """Echo the daemon's loaded canary.yaml as JSON."""
-        return await status_tool.get_config(client)
-
-    @mcp.tool()
-    async def get_power_status() -> dict[str, Any]:
-        """UPS power state: SoC, watchdog armed/on-battery/grace, keep-alive hold."""
-        return await power_tool.get_power_status(client)
-
-    @mcp.tool()
-    async def get_recent_anomalies(
-        since: str | None = None,
-        limit: int = 100,
-        source: str | None = None,
-        mode: str | None = None,
-    ) -> dict[str, Any]:
-        """Anomaly events since `since` (ISO-8601), optionally filtered by source/mode."""
-        return await anomalies_tool.get_recent_anomalies(
-            client, since=since, limit=limit, source=source, mode=mode
-        )
-
-    @mcp.tool()
-    async def get_recent_telemetry(
-        n: int = 100,
-        channel: str | None = None,
-        per_channel: bool = False,
-    ) -> dict[str, Any]:
-        """Last `n` telemetry rows; `channel` filters; `per_channel` returns latest-per-channel."""
-        return await telemetry_tool.get_recent_telemetry(
-            client, n=n, channel=channel, per_channel=per_channel
-        )
-
-    @mcp.tool()
-    async def get_behavior_live(include_series: bool = False) -> dict[str, Any]:
-        """Live per-model expected/actual/deviation/severity; rolling trail opt-in."""
-        return await behavior_tool.get_behavior_live(client, include_series=include_series)
-
-    @mcp.tool()
-    async def get_behavior_models() -> dict[str, Any]:
-        """Static behavior surfaces (the learned 'normal' maps)."""
-        return await behavior_tool.get_behavior_models(client)
-
-    @mcp.tool()
-    async def get_bindings() -> dict[str, Any]:
-        """Decoded CAN signal metadata from data/bindings.yaml."""
-        return await bindings_tool.get_bindings(client)
-
-    @mcp.tool()
-    async def get_dids() -> dict[str, Any]:
-        """Nissan Mode-22 DID catalog (schema_version + per-DID entries)."""
-        return await bindings_tool.get_dids(client)
-
-    @mcp.tool()
-    async def get_obd_coverage() -> dict[str, Any]:
-        """OBD coverage: which PIDs the ECU supports, which CANary decodes."""
-        return await bindings_tool.get_obd_coverage(client)
-
-    @mcp.tool()
-    async def get_dtc() -> dict[str, Any]:
-        """Cached stored/pending/permanent DTC report, MIL state, staleness."""
-        return await dtc_tool.get_dtc(client)
-
-    @mcp.tool()
-    async def get_monitors() -> dict[str, Any]:
-        """Cached Mode 06 on-board monitor sweep: per-cylinder misfire
-        counts + raw monitor test results (value/min/max, pass/fail)."""
-        return await monitors_tool.get_monitors(client)
-
-    @mcp.tool()
-    async def get_trends() -> dict[str, Any]:
-        """Session-fingerprint drift: per-stat latest value, reference band,
-        Mann-Kendall trend verdict, CUSUM alarm state."""
-        return await trends_tool.get_trends(client)
+    _register_delegations(mcp, READ_DELEGATIONS, client, None)
 
     @mcp.tool()
     async def get_binned_analysis(
@@ -362,25 +413,6 @@ def _register_read_tools(
         )
 
     @mcp.tool()
-    async def list_sessions(
-        since: str | None = None,
-        until: str | None = None,
-        limit: int | None = None,
-    ) -> dict[str, Any]:
-        """Sessions, optionally bounded by ISO start times and newest count."""
-        return await sessions_tool.list_sessions(client, since=since, until=until, limit=limit)
-
-    @mcp.tool()
-    async def list_capture_profiles() -> dict[str, Any]:
-        """List the active vehicle's saved collection profiles."""
-        return await capture_profiles_tool.list_capture_profiles(client)
-
-    @mcp.tool()
-    async def get_session(session_id: str) -> dict[str, Any]:
-        """Detail for one session: tags, control.json, chunk count, metadata."""
-        return await sessions_tool.get_session(client, session_id=session_id)
-
-    @mcp.tool()
     async def get_session_timeseries(
         session_id: str,
         channels: list[str],
@@ -402,116 +434,6 @@ def _register_read_tools(
             channels=channels,
             resample_hz=resample_hz,
         )
-
-    @mcp.tool()
-    async def get_dataset_health() -> dict[str, Any]:
-        """Corpus readiness: per-mode sample counts, gaps, last-seen times."""
-        return await sessions_tool.get_dataset_health(client)
-
-    @mcp.tool()
-    async def get_training_runs() -> dict[str, Any]:
-        """Training-run history (the latest record per run from the ledger)."""
-        return await sessions_tool.get_training_runs(client)
-
-    @mcp.tool()
-    async def list_vehicle_events() -> dict[str, Any]:
-        """Vehicle maintenance/intervention ledger, oldest-first (Task 3.3)."""
-        return await vehicle_ledger_tool.list_vehicle_events(client)
-
-    @mcp.tool()
-    async def get_session_classification(session_id: str) -> dict[str, Any]:
-        """Modes + events + disposition sidecar for one session.
-
-        Returns the post-hoc classifier output: mode_segments (timeline of
-        warmup/idle/city/highway/etc.), event_counts (cold_start,
-        hard_accel, ...), and a disposition (ready/review/quarantine).
-        404 when the sidecar hasn't been generated yet — call
-        ``classify_session`` or run ``scripts/label_sessions.py``.
-        """
-        return await classification_tool.get_session_classification(client, session_id=session_id)
-
-    @mcp.tool()
-    async def get_trip_summary(session_id: str) -> dict[str, Any]:
-        """Trip-summary sidecar for one session: duration, distance, fuel
-        used, average economy, CO2, idle time/fraction, max/avg speed, 0-60
-        and 1/4-mile if a clean launch was captured. Computed on demand from
-        the stored session and cached after the first request.
-        """
-        return await trip_summary_tool.get_trip_summary(client, session_id=session_id)
-
-    @mcp.tool()
-    async def get_session_digest(session_id: str) -> dict[str, Any]:
-        """End-of-drive digest for one session: duration, mode seconds,
-        gated anomaly counts by source, top behavior-surface deviations,
-        fingerprint deltas vs. the frozen reference epoch, new DTCs, and
-        new vehicle-ledger events. Written by the trip-end hook (sustained
-        GPS stop, or daemon shutdown as a fallback); computed on demand and
-        cached if that hook hasn't fired yet for this session.
-        """
-        return await digest_tool.get_session_digest(client, session_id=session_id)
-
-    @mcp.tool()
-    async def get_corpus_mode_summary() -> dict[str, Any]:
-        """Aggregate mode-coverage hours + event counts across all classified sessions.
-
-        Answers "do I have enough warmup data to retrain?" — look at
-        ``mode_seconds.warmup`` and ``event_counts.cold_start``.
-        """
-        return await classification_tool.get_corpus_mode_summary(client)
-
-    @mcp.tool()
-    async def list_events_by_kind(
-        kind: str | None = None,
-        limit: int = 200,
-    ) -> dict[str, Any]:
-        """Corpus-wide event search through ``derived_tags.jsonl`` sidecars.
-
-        ``kind`` filters to events of one type (``hard_accel``,
-        ``cold_start``, ``cruise``, ``hard_brake``, ``idle_period``,
-        ``stop``, ``wot_run``); ``None`` returns all kinds. Newest-first,
-        capped at ``limit``.
-        """
-        return await classification_tool.list_events_by_kind(client, kind=kind, limit=limit)
-
-    @mcp.tool()
-    async def list_jobs() -> dict[str, Any]:
-        """All known jobs (queued, running, completed, failed)."""
-        return await jobs_tool.list_jobs(client)
-
-    @mcp.tool()
-    async def get_job(job_id: str) -> dict[str, Any]:
-        """Status + result payload for a single job."""
-        return await jobs_tool.get_job(client, job_id=job_id)
-
-    @mcp.tool()
-    async def get_job_logs(job_id: str) -> dict[str, Any]:
-        """Captured stdout/stderr of a job."""
-        return await jobs_tool.get_job_logs(client, job_id=job_id)
-
-    @mcp.tool()
-    async def diff_did_snapshots(job_a: str, job_b: str) -> dict[str, Any]:
-        """Diff two completed `did_sweep` job results.
-
-        Run `start_job(kind="did_sweep", params={"start":..., "end":...,
-        "label":...})` twice — once per condition to compare (e.g. idle vs
-        loaded) — wait for both to succeed (`get_job`/`get_job_logs`), then
-        pass their job_ids here. `varying` DIDs (value differs between the
-        two runs) are the candidates worth investigating; `constant`
-        answered identically both times; `intermittent` answered in only
-        one run. Each entry carries the raw hex from each snapshot — no
-        scale/offset decode, most DIDs don't have one yet.
-        """
-        return await did_sweep_tool.diff_did_snapshots(client, job_a=job_a, job_b=job_b)
-
-    @mcp.tool()
-    async def get_tuning() -> dict[str, Any]:
-        """Currently active alert-tuning config (thresholds, dedupe, etc.)."""
-        return await tuning_tool.get_tuning(client)
-
-    @mcp.tool()
-    async def get_feedback() -> dict[str, Any]:
-        """All recorded operator/MCP feedback labels + summary counts."""
-        return await tuning_tool.get_feedback(client)
 
     @mcp.tool()
     def tail_daemon_log(
@@ -706,6 +628,7 @@ def _register_write_tools(
     audit: MCPAuditLogger,
 ) -> None:
     """Register all write tools as MCP tools."""
+    _register_delegations(mcp, WRITE_DELEGATIONS, client, audit)
 
     @mcp.tool()
     async def start_capture(
@@ -737,14 +660,6 @@ def _register_write_tools(
         )
 
     @mcp.tool()
-    async def tag_current_capture(
-        label: str,
-        fields: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Drop a tag onto the active capture mid-drive."""
-        return await captures_tool.tag_current_capture(client, audit, label=label, fields=fields)
-
-    @mcp.tool()
     async def stop_capture(reason: str | None = None) -> dict[str, Any]:
         """Stop the active profile capture, otherwise close the tag window.
 
@@ -759,16 +674,6 @@ def _register_write_tools(
         if (status.get("capture_profile") or {}).get("active"):
             return await capture_profiles_write_tool.stop_capture(client, audit)
         return await captures_tool.stop_capture(client, audit, reason=reason)
-
-    @mcp.tool()
-    async def get_current_capture() -> dict[str, Any]:
-        """Read the currently active capture window.
-
-        Check `active`: a null `capture` with `active: false` means no window
-        is open (a daemon restart drops it while recording continues), and
-        `detail` says so. It is not a failed call.
-        """
-        return await sessions_tool.get_current_capture(client)
 
     @mcp.tool()
     async def record_feedback(
@@ -856,288 +761,6 @@ def _register_write_tools(
         )
 
     @mcp.tool()
-    async def set_session_metadata(
-        session_id: str,
-        metadata: dict[str, Any],
-        merge: bool = True,
-    ) -> dict[str, Any]:
-        """Attach / merge metadata onto a session."""
-        return await sessions_write_tool.set_session_metadata(
-            client, audit, session_id=session_id, metadata=metadata, merge=merge
-        )
-
-    @mcp.tool()
-    async def pin_session(
-        session_id: str,
-        reason: str | None = None,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        """Pin a session as a training candidate; pinned sessions survive sweeps."""
-        return await sessions_write_tool.pin_session(
-            client, audit, session_id=session_id, reason=reason, metadata=metadata
-        )
-
-    @mcp.tool()
-    async def unpin_session(session_id: str) -> dict[str, Any]:
-        """Remove the pin from a session — eligible for retention sweeps again."""
-        return await sessions_write_tool.unpin_session(client, audit, session_id=session_id)
-
-    @mcp.tool()
-    async def start_job(kind: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Submit a job (corpus_report, retrain_if, retrain_lstm, did_sweep, ...).
-
-        `did_sweep` sweeps a Mode 22 DID range in one pass: params
-        `{start, end, label}` required (`start`/`end` are DIDs, int or hex
-        string; `label` tags the snapshot for `diff_did_snapshots`),
-        optional `header`/`session`/`keepalive`/`delay_seconds`/
-        `read_timeout` — see `diff_did_snapshots`'s docstring for the
-        before/after workflow this feeds.
-        """
-        return await jobs_write_tool.start_job(client, audit, kind=kind, params=params)
-
-    @mcp.tool()
-    async def cancel_job(job_id: str) -> dict[str, Any]:
-        """Best-effort cancel a running job."""
-        return await jobs_write_tool.cancel_job(client, audit, job_id=job_id)
-
-    @mcp.tool()
-    async def set_tuning(
-        config: dict[str, Any],
-        change: str = "tuning update",
-        by: str | None = None,
-    ) -> dict[str, Any]:
-        """Replace the alert-tuning config. The daemon auto-bumps version."""
-        return await tuning_write_tool.set_tuning(
-            client, audit, config=config, change=change, by=by
-        )
-
-    @mcp.tool()
-    async def estimate_tuning(
-        config: dict[str, Any],
-        since: str | None = None,
-        change: str = "tuning estimate",
-        by: str | None = None,
-    ) -> dict[str, Any]:
-        """Before/after FP estimate for a proposed tuning over recent anomalies."""
-        return await tuning_write_tool.estimate_tuning(
-            client, audit, config=config, since=since, change=change, by=by
-        )
-
-    @mcp.tool()
-    async def revert_tuning(version: int, by: str | None = None) -> dict[str, Any]:
-        """Revert to a previous tuning version (from the audit log)."""
-        return await tuning_write_tool.revert_tuning(client, audit, version=version, by=by)
-
-    @mcp.tool()
-    async def set_ups_keepalive(minutes: float) -> dict[str, Any]:
-        """Set (minutes>0) or cancel (minutes=0) the UPS watchdog keep-alive hold."""
-        return await power_write_tool.set_ups_keepalive(client, audit, minutes=minutes)
-
-    @mcp.tool()
-    async def can_activity(seconds: float, ids: list[int] | None = None) -> dict[str, Any]:
-        """Capture N seconds of raw CAN traffic; per-ID frame rate + which
-        byte positions changed.
-
-        The RE workhorse: call it bracketing a physical action (press the
-        brake, flip a switch) and `changed_byte_indices` on each id answers
-        "which ID carries that signal," without an offline candump-and-diff
-        round trip. Pure listen — no frames transmitted, no interaction with
-        passive mode. `ids` restricts the capture to those arbitration ids;
-        omit for the whole bus. `seconds` is capped at 30 server-side.
-        """
-        return await can_activity_write_tool.can_activity(client, audit, seconds=seconds, ids=ids)
-
-    @mcp.tool()
-    async def obd_request(
-        service: int,
-        identifier: int | None = None,
-        header: int | None = None,
-        timeout_seconds: float | None = None,
-    ) -> dict[str, Any]:
-        """One-shot OBD/UDS request (any service byte).
-
-        Ask for one specific service/identifier immediately instead of
-        waiting for the poll scheduler's cadence (Mode 06/DTC sit on a
-        5-minute tier). `header` overrides the default functional request id
-        (0x7DF) for a physically-addressed request, e.g. 0x7E0 for the engine
-        ECM or another module's tester address. `responded: false` means no
-        answer in time, not necessarily "unsupported" — arm
-        `set_passive_mode` first if another tool owns a diagnostic session.
-        """
-        return await obd_request_write_tool.obd_request(
-            client,
-            audit,
-            service=service,
-            identifier=identifier,
-            header=header,
-            timeout_seconds=timeout_seconds,
-        )
-
-    @mcp.tool()
-    async def trigger_poll(channels: list[str]) -> dict[str, Any]:
-        """Force specific channels due on the OBD scheduler's next tick.
-
-        Turns "wait up to 5 minutes" (DTC/Mode 06's tier) into "the answer is
-        ready in a few seconds." Channel names match `get_status`'s
-        `obd_scheduler.requests[].channel` (RPM, DTC_STORED,
-        MONITOR_RESULTS, DID_1101, ...), case-insensitive; an unknown name
-        is silently never matched. This only queues the request — read the
-        result back with `get_status`/`get_dtc`/`get_recent_telemetry`/
-        `query_telemetry` a few seconds later.
-        """
-        return await trigger_poll_write_tool.trigger_poll(client, audit, channels=channels)
-
-    @mcp.tool()
-    async def set_passive_mode(enabled: bool, ttl_seconds: float | None = None) -> dict[str, Any]:
-        """Arm/disarm receive-only mode: daemon keeps logging but transmits no CAN.
-
-        Use while another tool owns a diagnostic session (ECU reflash, actuator
-        test). OBD channels go stale while armed — that is expected, and
-        `get_status` reports `passive.enabled` so it is distinguishable from a
-        real fault. `ttl_seconds` (arming only, capped at 3600) auto-disarms
-        after that long even if nobody calls this again — set it whenever the
-        window is known in advance so a forgotten disarm can't suppress OBD
-        polling indefinitely.
-        """
-        return await passive_write_tool.set_passive_mode(
-            client, audit, enabled=enabled, ttl_seconds=ttl_seconds
-        )
-
-    @mcp.tool()
-    async def set_bus_budget(
-        requests_per_second: float | None,
-        ttl_seconds: float | None = 600.0,
-    ) -> dict[str, Any]:
-        """Raise/clear the OBD request-rate budget for a bounded capture.
-
-        Default is 8 req/s against a measured 667 req/s capability — the
-        reason a WOT pull yields ~23 usable samples where UpRev's K-line
-        logger gets 537. Raise it for the pull, drop it after; pass
-        `requests_per_second=None` to clear. Pairs with `set_tuning_mode`
-        (narrow the set *and* enlarge the budget), but tuning mode also
-        suspends Mode-22 DID windows, so leave it off if you need DIDs.
-
-        TTL defaults to 600 s because a forgotten override is silent — it
-        just keeps polling at up to 25x rate. Ceiling is 200 req/s; watch
-        `response_rate` in `get_status`, since past the point responses stop
-        keeping up the extra requests are only bus noise.
-        """
-        return await bus_budget_write_tool.set_bus_budget(
-            client, audit, requests_per_second=requests_per_second, ttl_seconds=ttl_seconds
-        )
-
-    @mcp.tool()
-    async def set_tuning_mode(enabled: bool, channels: list[str] | None = None) -> dict[str, Any]:
-        """Arm/disarm the focused high-rate tuning poll profile.
-
-        Restricts Mode 01 to a small tuning channel set and suspends DID
-        windows so each channel gets far more of the bus budget. Channels
-        outside the set stop updating while armed - expected, not a fault;
-        `get_status` reports `tuning_mode.active`.
-        """
-        return await tuning_mode_write_tool.set_tuning_mode(
-            client, audit, enabled=enabled, channels=channels
-        )
-
-    @mcp.tool()
-    async def arm_tuning_capture(
-        profile: str,
-        rate_hz: float | None = None,
-        bus_budget_requests_per_second: float | None = None,
-        ttl_seconds: float | None = 3600.0,
-        tune_revision: str | None = None,
-        verify_seconds: float = 20.0,
-    ) -> dict[str, Any]:
-        """Start a capture profile, raise the bus budget, and verify the rate.
-
-        Rate and budget are two different knobs and both are needed: raising
-        the budget alone does nothing (measured — 8 to 30 req/s moved the
-        achieved rate not at all, because per-channel demand was capped),
-        and raising demand alone just queues. The response reports
-        capture-scoped `achieved_hz` plus its `observed_seconds` sampled after
-        `verify_seconds`, so a shortfall
-        against `rate_hz` is visible immediately — that means demand exceeded
-        the budget, which is throttling working, not a fault. `rate_hz`
-        overrides the profile's own target for this capture only."""
-        return await tuning_capture_write_tool.arm_tuning_capture(
-            client,
-            audit,
-            profile=profile,
-            rate_hz=rate_hz,
-            bus_budget_requests_per_second=bus_budget_requests_per_second,
-            ttl_seconds=ttl_seconds,
-            tune_revision=tune_revision,
-            verify_seconds=verify_seconds,
-        )
-
-    @mcp.tool()
-    async def get_capture_quality(session_id: str | None = None) -> dict[str, Any]:
-        """Capture contract verdict: live for the active capture, or recomputed.
-
-        Without `session_id`: the running capture scored arm-to-now on what
-        has been persisted so far (`scope: live`). With one: coverage and
-        tuple yield recomputed from that session's rows (never rewritten),
-        with the stored sidecar beside it. `failures[].clause` names the
-        constraint that bound (unanswered_input, rate_shortfall,
-        acquisition_gap, tuple_incomplete, tuple_skew, persistence_loss,
-        unknown_loss_counters); `losses` is scoped to the capture or marked
-        unknown, never assumed zero."""
-        return await tuning_capture_write_tool.get_capture_quality(client, session_id=session_id)
-
-    @mcp.tool()
-    async def disarm_tuning_capture(
-        reason: str | None = None, clear_bus_budget: bool = False
-    ) -> dict[str, Any]:
-        """Stop the active capture profile and restore the bus budget.
-
-        Returns the capture's session directory so it can be analysed without
-        hunting for it (capture sessions are `_`-prefixed and deliberately
-        invisible to the normal session listing)."""
-        return await tuning_capture_write_tool.disarm_tuning_capture(
-            client, audit, reason=reason, clear_bus_budget=clear_bus_budget
-        )
-
-    @mcp.tool()
-    async def replay_window(
-        session_id: str,
-        start: str | None = None,
-        end: str | None = None,
-        if_model: str | None = None,
-        lstm_model: str | None = None,
-        anomalies_dir: str | None = None,
-        max_rows: int | None = None,
-        max_windows: int | None = None,
-        wait: bool = True,
-        poll_interval: float = 2.0,
-        timeout: float = 600.0,
-    ) -> dict[str, Any]:
-        """Replay a session window through IF + LSTM inference and diff vs history.
-
-        Submits a daemon ``replay_window`` job (so heavy imports stay in the
-        daemon process), optionally polls until it terminates, and returns
-        the structured report with per-row IF scores, per-window LSTM
-        scores + channel reconstruction errors, the historical anomaly
-        events for the same window, and a match/replayed-only/historical-
-        only diff. Set ``wait=False`` to submit and return the job id for
-        async polling.
-        """
-        return await replay_tool.replay_window(
-            client,
-            audit,
-            session_id=session_id,
-            start=start,
-            end=end,
-            if_model=if_model,
-            lstm_model=lstm_model,
-            anomalies_dir=anomalies_dir,
-            max_rows=max_rows,
-            max_windows=max_windows,
-            wait=wait,
-            poll_interval=poll_interval,
-            timeout=timeout,
-        )
-
-    @mcp.tool()
     async def upload_model_artifact(
         model_type: str,
         artifact_path: str,
@@ -1159,48 +782,6 @@ def _register_write_tools(
             artifact_path=Path(artifact_path),
             manifest=manifest,
         )
-
-    @mcp.tool()
-    async def classify_session(session_id: str) -> dict[str, Any]:
-        """Run the post-hoc classifier on one session; writes the sidecar.
-
-        Idempotent — re-running overwrites the existing ``classification.json``
-        with the current classifier version's output. Audit-logged.
-        """
-        return await classification_write_tool.classify_session(
-            client, audit, session_id=session_id
-        )
-
-    @mcp.tool()
-    async def start_replay(
-        session_id: str,
-        speed: float = 1.0,
-        loop: bool = False,
-    ) -> dict[str, Any]:
-        """Replay a stored session into the live pipeline (isolated outputs).
-
-        Parquet writes go to ``<storage>/_replay-<id>/`` and anomalies to
-        ``<anomalies_dir>/_replay/<id>.jsonl`` — both excluded from training
-        discovery and feedback. Use to evaluate IF + LSTM end-to-end on the
-        Pi with no truck attached.
-        """
-        return await replay_write_tool.start_replay(
-            client,
-            audit,
-            session_id=session_id,
-            speed=speed,
-            loop=loop,
-        )
-
-    @mcp.tool()
-    async def stop_replay() -> dict[str, Any]:
-        """Cancel the in-flight replay; daemon returns to live capture."""
-        return await replay_write_tool.stop_replay(client, audit)
-
-    @mcp.tool()
-    async def get_replay_status() -> dict[str, Any]:
-        """Snapshot of the current replay (idle, running, source, paths)."""
-        return await replay_tool.get_replay_status(client)
 
 
 def _register_resources(
