@@ -8,6 +8,7 @@ schema_version: 1
 # the 16:31 session (see engine-tuning-support.md 3.5).
 revisions:
   - revision: ZS04C-stock
+    calibration_id: 1ZS04C00000
     flashed_at: 2000-01-01T00:00:00Z
     rom_file: 1ZS04C
     notes: >
@@ -15,6 +16,7 @@ revisions:
       predates any recorded session, which is all this entry needs to do:
       claim everything before the first Osiris flash.
   - revision: ZS44A-osiris-initial
+    calibration_id: 1ZS44A00000
     flashed_at: 2026-07-26T22:31:00Z
     k: 1.07
     rom_file: 1ZS44A
@@ -24,6 +26,7 @@ revisions:
       5000-5750 rpm, so AFR readings from that window are censored, not
       measurements.
   - revision: ZS44A-k105
+    calibration_id: 1ZS44A00000
     flashed_at: 2026-07-31T00:00:00Z
     k: 1.05
     notes: >
@@ -32,6 +35,7 @@ revisions:
       4000-6000 WOT on the 7-31 9AM log. Exact flash time not recorded, so
       this boundary is approximate -- sessions near it may be mislabelled.
   - revision: ZS44A-k106
+    calibration_id: 1ZS44A00000
     # Exact flash time was not recorded. The operator confirmed this was
     # edited and flashed on 2026-08-03; use the ROM file's 12:45:21 MDT mtime
     # as the earliest defensible boundary. The next stored session is hours
@@ -47,6 +51,7 @@ revisions:
       BFS-indexed lookup including the timing table. Exact flash time not
       recorded; operator confirmed the August 3 date on 2026-08-05.
   - revision: ZS44A-20260920
+    calibration_id: 1ZS44A00000
     flashed_at: 2026-09-21T03:08:45.954035Z
     k: 1.06
     rom_file: ZS44A-Tuned-20260920.OsirisROM

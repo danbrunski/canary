@@ -37,6 +37,9 @@ class TuneRevision(_Strict):
     """One flashed calibration."""
 
     revision: str
+    #: Raw identifier reported by the ECU.  Revision names are operator-facing
+    #: labels and are never guessed from this part-number-style value.
+    calibration_id: str | None = None
     #: When it was flashed. Everything recorded from here until the next
     #: revision belongs to this one.
     flashed_at: datetime

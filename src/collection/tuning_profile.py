@@ -61,6 +61,9 @@ _configured = False
 #: start-up, reported in the capture payload. Provenance only: memory channels
 #: are not gated on it (RAM addresses survive reflashes on this program).
 _running_tune_revision: str | None = None
+_ecu_calibration_id: str | None = None
+_ecu_calibration_read_at: str | None = None
+_ecu_calibration_changed = False
 #: Polling suspended while a capture stays open. Process state, like the
 #: active profile: a restart resumes collecting rather than coming back up
 #: silently paused.
@@ -93,6 +96,32 @@ def configure_running_tune_revision(running_tune_revision: str | None) -> None:
     global _running_tune_revision
     with _lock:
         _running_tune_revision = running_tune_revision
+
+
+def record_ecu_calibration_id(calibration_id: str | None) -> None:
+    """Cache one connection's local-identifier read and flag changes loudly."""
+    global _ecu_calibration_id, _ecu_calibration_read_at, _ecu_calibration_changed
+    if not calibration_id:
+        return
+    with _lock:
+        if _ecu_calibration_id is not None and _ecu_calibration_id != calibration_id:
+            _ecu_calibration_changed = True
+            log.warning(
+                "ECU calibration id changed during this daemon lifetime",
+                extra={"previous": _ecu_calibration_id, "current": calibration_id},
+            )
+        _ecu_calibration_id = calibration_id
+        _ecu_calibration_read_at = datetime.now(UTC).isoformat()
+
+
+def calibration_snapshot() -> dict[str, Any]:
+    with _lock:
+        return {
+            "ecu_calibration_id": _ecu_calibration_id,
+            "ecu_calibration_read_at": _ecu_calibration_read_at,
+            "ecu_calibration_changed": _ecu_calibration_changed,
+            "running_tune_revision": _running_tune_revision,
+        }
 
 
 def configure_did_aliases(aliases: dict[str, str]) -> None:
@@ -600,6 +629,8 @@ __all__ = [
     "configure_default",
     "configure_did_aliases",
     "configure_running_tune_revision",
+    "calibration_snapshot",
+    "record_ecu_calibration_id",
     "is_active",
     "is_configured",
     "is_paused",

@@ -52,6 +52,7 @@ import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 import { RomMapsPanel } from "./RomMapsPanel";
 import { LoggingPage } from "./tuning/LoggingPage";
+import { CalibrationPage } from "./tuning/CalibrationPage";
 
 export interface DashboardData {
   mode: AppMode;
@@ -216,7 +217,7 @@ function renderItem(
     case "tuning-analysis":
       return <PlaceholderPanel title="Analysis" task="W04" summary="Delivery-error, trim, and timing analysis will live here." />;
     case "tuning-calibration":
-      return <PlaceholderPanel title="Calibration" task="W06" summary="Flash history and memory-channel verification will live here." />;
+      return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
       return <PlaceholderPanel title="ROM Editor" task="planned" summary="ROM editing is reserved for a later implementation." />;
     case "tuning-flash":
