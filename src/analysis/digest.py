@@ -71,6 +71,11 @@ REASON_CHILD_OUT_OF_MEMORY = "child_out_of_memory"
 REASON_CHILD_TIMED_OUT = "child_timed_out"
 #: The child could not start, or died without answering.
 REASON_CHILD_FAILED = "child_failed"
+#: The daemon was stopping and cancelled the child before it finished
+#: (D03.6). Recorded so the shutdown fallback does not start the same
+#: multi-gigabyte work a second time inside the unit's stop deadline, and so
+#: the next start can tell "interrupted" from "never attempted".
+REASON_INTERRUPTED_AT_SHUTDOWN = "interrupted_at_shutdown"
 
 #: How many entries to keep in the compact "top movers" / "top deviations"
 #: lists — a digest is meant to be skimmed (and pushed through a

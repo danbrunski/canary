@@ -367,6 +367,22 @@ dids:
     aliases:
       - ECM_BASE_FUEL_SCHEDULE_CANDIDATE   # renamed 2026-08-08; saved profiles still use it
     evidence:
+      - session: _capture-tuning-hybrid-research-2026-09-17T184821 + T191712 + T201000 (blocks 6/7/9)
+        method: skew_gated_same_instant_ratio_vs_mode01_maf
+        constant: 0.01
+        constant_unit: g/s per count (Mode 01 MAF as reference)
+        conditions: >
+          3-134 g/s, with |dMAF/dt| <= 5 %/s over the pairing window. Firm at
+          20-90 g/s; thin above 90 g/s (81 pairs). Outside a steady window the
+          DID reads ~115 ms after Mode 01, so rising flow reads high and
+          falling flow reads low - that is acquisition skew, not the sensor,
+          and it is what produced the whole-session slope of 0.934.
+        finding: >
+          D04.4. Reproduced block 6's whole-session slope 0.934 / r2 0.909
+          exactly first, then gated on |dMAF/dt| <= 5 %/s: the median DID /
+          Mode 01 ratio is 1.000 +/- 0.007 in every band from 3 to 134 g/s.
+          No scale error and no nonlinearity; the x0.01 g/s decode holds to
+          +/-2 % over the stated range. data/analyses/2026-09-18-maf-did-and-injector-mass-balance.md.
       - session: 2026-08-08T214218 (rungs idle / 2000 / 3000 / idle+AC)
         method: uprev_kline_steady_state_rungs
         finding: >
@@ -1014,6 +1030,28 @@ dids:
           293 samples while this read 64. Read as a rich-side
           (power-enrichment) target that 0x44 follows when that enrichment is
           the active source. data/analyses/2026-09-18-eve-drive-log.md.
+      - session: 8 captures 2026-09-17/18 (T184821, T191712, T201000, T140241, T140805, T174742, T200809, T212740)
+        method: per_sample_rule_scoring_of_enrichment_onset_and_exit
+        finding: >
+          What switches this register (and PID 0x44) into the rich target,
+          scored per 0x44 sample with every other channel sample-and-held at
+          its own acquisition instant (27,415 rows, 510 enriched, 1,500-3,550
+          rpm). The trigger is the accelerator pedal, not load or time: with
+          the broadcast pedal >= 227 counts (throttle >= 223) 0x44 equals the
+          k106 map's last load column exactly (residual 0.000 % on 439 rows;
+          20 errors of 27,415), while the best time-at-load rule scores 317
+          errors and 76 stoich rows sat >= 5 s (up to 28 s) at maximum air
+          charge. Onset follows the pedal crossing by a median 0.15 s (max
+          0.54 s, inside the 0x44 sampling bracket on 18 of 21 events); every
+          exit (19/19) is a pedal drop; the longest hold was 18.3 s with no
+          decay, so no timer up to 18 s. This register switches within one
+          DID sample of 0x44 with no measurable lead or lag, reads 65-77 on
+          map-driven and high-rpm rich runs where the pedal is as low as 129,
+          and stays 64 through after-start enrichment (FUEL_STATUS 1) - which
+          is what the evening's "0x44 = 1.06 while this read 64" counterexample
+          was. So: the active open-loop rich target (map column or last
+          column), not a pedal flag and not the final command. Desk report:
+          ~/canary-data/scripts-0918b/out/enrich_trigger.md (2026-09-18).
       - session: 2026-09-18 AM + PM fuel-target-research / fuel-pw-research captures
         method: stoich_baseline_and_enriched_pairs
         finding: >

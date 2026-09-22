@@ -82,6 +82,13 @@ class ReplayStatus:
     chunk counts, made because nothing published what was emitted.
     ``rederivable`` says which of the two emit policies this replay is running
     under (see :func:`src.collection.replay.probe_rederivability`).
+
+    ``speed`` is the *requested* sleep multiplier only. Because every recorded
+    gap is clamped at ``_MAX_GAP_SECONDS``, the replay covers recording time
+    faster than that number says — 18.9x on one real session at ``speed: 1.0``
+    (D02.9). ``effective_speed`` is the measured ratio, ``source_time_progress``
+    the fraction of the recording covered, and ``pass_reconciled`` whether a
+    completed pass accounts for every source row as emitted, skipped or dropped.
     """
 
     running: bool
@@ -89,6 +96,12 @@ class ReplayStatus:
     source_session_id: str | None = None
     started_at: str | None = None
     speed: float | None = None
+    effective_speed: float | None = None
+    source_span_s: float | None = None
+    source_time_emitted_s: float | None = None
+    source_time_progress: float | None = None
+    wall_elapsed_s: float | None = None
+    pass_reconciled: bool | None = None
     loop: bool | None = None
     output_session_dir: str | None = None
     output_anomalies_path: str | None = None
@@ -108,6 +121,12 @@ class ReplayStatus:
             "source_session_id": self.source_session_id,
             "started_at": self.started_at,
             "speed": self.speed,
+            "effective_speed": self.effective_speed,
+            "source_span_s": self.source_span_s,
+            "source_time_emitted_s": self.source_time_emitted_s,
+            "source_time_progress": self.source_time_progress,
+            "wall_elapsed_s": self.wall_elapsed_s,
+            "pass_reconciled": self.pass_reconciled,
             "loop": self.loop,
             "output_session_dir": self.output_session_dir,
             "output_anomalies_path": self.output_anomalies_path,
@@ -202,6 +221,12 @@ class ReplayController:
             return status
         return replace(
             status,
+            effective_speed=stats.effective_speed(),
+            source_span_s=stats.source_span_s,
+            source_time_emitted_s=stats.source_time_emitted_s,
+            source_time_progress=stats.source_time_progress(),
+            wall_elapsed_s=stats.wall_elapsed_s(),
+            pass_reconciled=stats.pass_reconciled(),
             source_rows_total=stats.source_rows_total,
             rows_emitted=stats.rows_emitted,
             rows_skipped=stats.rows_skipped,
@@ -380,6 +405,10 @@ class ReplayController:
                     "source_rows": stats.source_rows_total,
                     "passes": stats.passes,
                     "rederivable": stats.rederivable,
+                    "reconciled": stats.pass_reconciled(),
+                    "source_time_s": round(stats.source_time_emitted_s, 3),
+                    "effective_speed": stats.effective_speed(),
+                    "requested_speed": self._status.speed,
                 },
             )
         self._status = self._with_stats(ReplayStatus(running=False))

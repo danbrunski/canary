@@ -84,6 +84,44 @@ def count_session_rows(session_dir: Path) -> int | None:
     return total if seen else None
 
 
+def session_time_span_seconds(session_dir: Path) -> float | None:
+    """Recorded span of a session in seconds, from Parquet footer statistics.
+
+    Reads only the ``timestamp`` column's row-group min/max, so like
+    :func:`count_session_rows` it is cheap enough to run before a replay
+    starts. A "1x" replay clamps every recorded gap to
+    :data:`src.collection.replay._MAX_GAP_SECONDS`, so wall time says nothing
+    about how much of the recording has been replayed; this is the
+    denominator that does (D02.9). ``None`` when no chunk carries statistics.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
+        return None
+    lo: Any = None
+    hi: Any = None
+    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            if chunk.stat().st_size == 0:
+                continue
+            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
+            names = list(meta.schema.names)
+            if "timestamp" not in names:
+                continue
+            col = names.index("timestamp")
+            for group in range(meta.num_row_groups):
+                stats = meta.row_group(group).column(col).statistics
+                if stats is None or not stats.has_min_max:
+                    continue
+                lo = stats.min if lo is None or stats.min < lo else lo
+                hi = stats.max if hi is None or stats.max > hi else hi
+        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
+            continue
+    if lo is None or hi is None:
+        return None
+    return float((pd.Timestamp(hi) - pd.Timestamp(lo)).total_seconds())
+
+
 def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame.
 

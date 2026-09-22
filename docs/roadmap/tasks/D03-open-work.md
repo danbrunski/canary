@@ -127,6 +127,23 @@ estimated signal; they cannot establish how UpRev calculates its display.
     first-three-chunk probe guarantees complete payload coverage in every
     recording. Record the selected policy with each result.
   The memory half is separately tracked in D03.6.
+  **2026-09-22 (desk): the speed/progress half landed.** `ReplayEmissionStats`
+  and `ReplayStatus` (so `GET /control/replay` and `get_replay_status`) now
+  carry `source_span_s` (Parquet footer statistics only,
+  `loader.session_time_span_seconds`), `source_time_emitted_s`,
+  `wall_elapsed_s`, `effective_speed`, `source_time_progress` and
+  `pass_reconciled` (emitted + skipped + dropped == passes × source rows);
+  `speed` is documented as the requested multiplier only, and the pass-complete
+  and replay-finished logs carry the same numbers. A 600 s recorded pause at
+  `speed=1.0` replays in < 3 s wall and reports effective speed > 100× with
+  the pass reconciled
+  (`tests/test_replay.py::test_a_clamped_gap_is_reported_as_effective_speed_not_hidden_behind_speed`,
+  `::test_pass_reconciliation_counts_rows_not_wall_time`,
+  `tests/test_replay_control.py::test_status_reports_effective_speed_and_source_time_progress`).
+  **Still owed:** live-producer isolation at replay boundaries (the collectors
+  and their queue wiring live under `src/daemon/*`, held by another session
+  today), and the Pi comparison over both a payload-bearing and a legacy
+  baseline session, recording the selected policy with each result.
 
   Evidence preserved before the 7-day replay sweep: source `2026-09-10T142711`
   **pinned** on the Pi, and both directories copied to
@@ -160,6 +177,9 @@ estimated signal; they cannot establish how UpRev calculates its display.
   detector, not a successful zero-false-positive baseline (D02.5). Do not run
   replay during live collection; explicitly stop it and confirm fresh live
   telemetry before starting the drive.
+  **Waits on (2026-09-22):** the Pi — the deployed-build check and the replay
+  itself run there against the deployed manifests — and D02.9's live-input
+  isolation, which is under `src/daemon/*`. Nothing here is a laptop step.
   _From D02._
 
 - [x] **D01.10 Rebuild `reconcile_feature_frame_to_spec` instead of mutating
@@ -469,7 +489,7 @@ estimated signal; they cannot establish how UpRev calculates its display.
   per-channel breakdown, with the burst's final line never lost. Counters stay
   exact; nothing widened.
 
-- [~] **D03.4 `tuning-hybrid-research` requests a cycle it cannot meet.** The
+- [x] **D03.4 `tuning-hybrid-research` requests a cycle it cannot meet.** The
   scheduler logs `hybrid cycle of 0.250s is infeasible: 11 Mode 01 + 8-9 DID +
   2 session requests at 90.0 req/s` whenever the profile runs, and every stop
   verdict reads `rate_shortfall` because all DIDs get 2.0 Hz against a
@@ -502,9 +522,17 @@ estimated signal; they cannot establish how UpRev calculates its display.
   tuning capture, `tuning`, carries the honest 0.5 s / weight-0.5 request
   inherited from `fuel-target-research`, so the infeasible-cycle request no
   longer exists. What remains open here is D03.18's stall.
+  **Closed 2026-09-22 (desk).** Re-checked: `tuning-hybrid-research` is in
+  `data/nissan-xterra-2008/capture_profiles.archive.yaml` (line 201) and the
+  live `tuning` profile has `did_cycle_seconds: 0.5` with every DID weighted
+  0.5, so no profile on this vehicle requests the cycle this item was about;
+  the scheduler already refuses to *promise* an infeasible plan
+  (`plan_cycle` reports it, `_infeasible_logged` logs it once). The stall is
+  D03.18's, tracked there.
 
-- [~] **D03.6 Trip-end digest isolation and memory-order fix landed; large-session
-  measurement and shutdown behavior remain.** The original synchronous digest, not the replay, took the daemon
+- [~] **D03.6 Trip-end digest isolation and memory-order fix landed; measured at
+  scale and budget revised 2026-09-22; the `runtime.py` fallback deadline and the
+  Pi stop/restart check remain.** The original synchronous digest, not the replay, took the daemon
   to 7.7 GB and got it OOM-killed on 2026-09-11
   ([evidence](../../../data/analyses/2026-09-17-d029-replay-amplification.md)).
   The old trip-end hook ran `get_or_compute_digest` **synchronously on the
@@ -577,6 +605,36 @@ estimated signal; they cannot establish how UpRev calculates its display.
   is measured and the budget is revised from evidence, an oversized session
   should still produce a named refusal while collection and HTTP continue.
 
+  **2026-09-22 (desk) — both follow-ups, measured and landed**
+  ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)):
+  - **Measured at scale, same session, same laptop, each stage in its own
+    process:** `2026-08-08T214218` (2,622,370 rows) `resample_and_segment`
+    **859 MB** peak against the recorded **5,483 MB** (6.4×), `compute_digest`
+    959 MB, and `compute_digest_under_limit` under the Pi's 4 GiB `RLIMIT_AS`
+    **976 MB, completed** — 390 B/row. `2026-09-18T144215` (5,570,352 rows):
+    1,470 MB / 1,490 MB capped, 280 B/row. The real spawn child wrote
+    `digest.json` for both (10.0 s and 7.9 s) with the budget check off, and
+    the default budget refused both with `over_row_budget`; a small session
+    (`2026-09-18T134052`) went through the default path to `digest.json` in
+    1.3 s. **Budget revised from that evidence:** `DIGEST_PEAK_BYTES_PER_ROW`
+    2,200 → **800** (2× the larger laptop figure, since the Pi's allocator is
+    not the laptop's), so the 4 GiB child now admits **5,368,709 rows ≈ 38 min**
+    of `default` collection instead of 1.95 M ≈ 13.6 min. A wrong revision
+    fails as a caught `MemoryError` plus a named sidecar, never the daemon.
+  - **Shutdown:** a digest child cancelled by `_settle_trip_end_tasks` now
+    writes `digest_skipped.json` with reason **`interrupted_at_shutdown`** and
+    is remembered process-locally (`trip_end._INTERRUPTED`,
+    `digest_interrupted()`), so the fallback's second call for the same
+    session is a no-op instead of a second multi-gigabyte child with the full
+    900 s timeout inside `TimeoutStopSec=30`; the next daemon start may still
+    compute it. `tests/test_trip_end_digest.py::test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted`
+    (hanging executor, cancel, one submission total, sidecar reason, then a
+    fresh process computes normally).
+  - **Still owed:** `run_daemon`'s fallback in `src/daemon/runtime.py` still
+    passes the 900 s digest timeout for a *different* session than the one
+    cancelled (one shutdown deadline needs threading there; that file is held
+    by another session today), and the Pi stop/restart check. `[~]` for those.
+
 - [x] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
   "Please make sure you have the correct access rights" — no deploy key for
   `git@github.com:danbrunski/canary.git`. The first deploy attempt of the day
@@ -596,7 +654,7 @@ Evidence for D03.8–D03.10 and D03.12 is the
 blocks 2, 5, 6 and 9. These are measurements to resolve, not permission to
 promote unverified bindings or to change a tune.
 
-- [~] **D03.8 Pair target-AFR candidate 0x1134 with PID 0x44 in one capture.**
+- [x] **D03.8 Pair target-AFR candidate 0x1134 with PID 0x44 in one capture.**
   This is the highest-value new driving experiment. Yesterday's raw 64 baseline
   and 74–75 under load support candidate **φ = raw / 64**, equivalently
   **AFR = 14.7 × 64 / raw**, but none of the evidence compares the candidate
@@ -650,6 +708,15 @@ promote unverified bindings or to change a tune.
   (20 errors in 27,415 rows; residual 0.000 % on 439 rows). Renamed in
   `b9356bd` to `ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE`; the evidence
   block should gain this finding at the desk.
+  **Closed 2026-09-22 (desk).** The 0x1134 entry in `data/dids.yaml` now
+  carries the trigger finding as an evidence item
+  (`per_sample_rule_scoring_of_enrichment_onset_and_exit`: pedal ≥ 227 counts,
+  20 errors of 27,415, onset median 0.15 s, 19/19 exits on pedal drop, no
+  timer to 18 s, the after-start explanation of the 1.06 counterexample).
+  With the decode pinned by the UpRev RAM word (2026-09-20 evidence) and the
+  register's role settled as the active open-loop rich target, nothing is
+  left to capture for this item; `tests/test_dids.py` and
+  `tests/test_analysis_ground_truth.py` pass on the edited catalog.
 
 - [~] **D03.9 Re-evaluate the injector fuel-mass calibration using today's
   open-loop data; collect only missing coverage tomorrow.** Blocks 6 and 9
@@ -733,6 +800,20 @@ promote unverified bindings or to change a tune.
     - re-point role `injector_pw_b1` to the 0x1206 candidate at `candidate`;
     - sweep built-in and vehicle profiles, the behavior recipe, `refit.py`,
       `scenarios.py` and the tests.
+  **2026-09-22 (desk):** the catalog side of that plan is in: 0x1208 is
+  `ECM_AIR_CHARGE`, 0x1206/0x1207 are `ECM_INJECTOR_PULSE_1/2` at `high`
+  (UpRev USB, 2026-09-20), and `tuning_providers.yaml` role `injector_pw_b1`
+  points at `did:ECM_INJECTOR_PULSE_1`; the old names were migrated with
+  `tools/migrate_channel_names.py` rather than kept as aliases. **Dead time
+  from the 2026-09-19 idle load-step capture is a named empty**: the step
+  moved `CONTROL_MODULE_VOLTAGE` only 14.00 → 14.16 V (the alternator held
+  it), below the pre-registered 0.4 V, so the input the test needs was never
+  produced; the 0x1206/0x1208 ratio moving 37.5 → 34.9 across the step is
+  the known convex air-charge dependence
+  ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)).
+  **Waits on the truck:** a load step that actually drops system voltage by
+  ≥ 0.4 V (or a KOEO/cranking window), and closed-loop holds overlapping WOT
+  air charge in one session.
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted
@@ -892,6 +973,12 @@ not a common sampling instant.
   not BFS in ms. Do not fit the estimator to PID 0x44 and then use that same
   target agreement as independent validation; do not use 0x1134 to validate
   the model intended to judge 0x1134.
+  **Prepare step done 2026-09-22 (desk): the reference is missing.** No
+  Calculated Load table is transcribed in any local artifact (the docs and
+  the 08-08 RE folder only mention it), so any load reference here would be
+  estimated, never a ROM value. The evaluate and capture steps wait on the
+  truck (a hybrid block with ENGINE_LOAD, RPM, MAF, INTAKE_TEMP and repeat
+  plateaus).
 
 - [ ] **D03.15 Search for a BFS-like DID by separating airflow, base schedule
   and actual injection.** **New question:** which remaining registers survive
@@ -920,6 +1007,16 @@ not a common sampling instant.
   independent BFS reference retain “BFS-like candidate”, never a confirmed
   binding or automatic target-map lookup. Preserve a shortlist for a future
   K-line reference rather than forcing a winner tomorrow.
+  **Prepare step done 2026-09-22 (desk), via D04.6:** diffing the no-load
+  survey (block 3b) against the 30-minute road-load survey (block 5) leaves
+  **0x122B and 0x122C** as the only registers that were constant without load
+  and move with it and are not already worked (0x1134) or a single one-count
+  step (0x1234/0x1237/0x1239/0x123A/0x123D/0x1244/0x1245, each changed once
+  in 1,546 passes). 0x122C: 0 for all 364 no-load passes, 0–65,482 under load
+  with modal 63,572 and 90 % off-modal in fuel cut; 0x122B: 0 → four levels
+  to 1,861, only at high load and cruise
+  ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)). The
+  capture and the positive-control comparison wait on the truck.
 
 - [ ] **D03.16 Check known Mode 21 blocks for live data absent from the DID
   search.** **New question:** did Mode 22-only discovery miss an independently
@@ -976,6 +1073,12 @@ not a common sampling instant.
   belongs to this experiment. Let the tested 0xFB session expire as in the
   earlier reproduction and verify normal telemetry returns; do not assume the
   0xC0 exit behavior transfers to it.
+  **Tool preparation done (confirmed 2026-09-22):** `tools/batch_probe.py`
+  sends the measured `23 <addr32> <len16>` form byte for byte and separates
+  `works` (payload) from `answered` (NRC argument refusal) from unsent /
+  timeout (`tests/test_batch_probe_tool.py::test_the_d03_17_memory_read_form_is_sent_byte_for_byte`,
+  `::test_an_argument_refusal_is_not_a_same_instant_candidate`). What
+  remains is the parked KOEO control and the warm-idle repeat — the truck.
 
 **Shared evidence artifact:** append each experiment's setup, raw-log/session
 paths, executed conditions, missing inputs, measured result and next decision

@@ -32,6 +32,7 @@ from src.analysis.digest import (
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
+    REASON_INTERRUPTED_AT_SHUTDOWN,
     REASON_NOT_A_SESSION,
     REASON_OVER_ROW_BUDGET,
     SessionDigest,
@@ -402,6 +403,74 @@ async def test_the_real_child_digest_is_byte_identical_to_the_in_process_one(
 
     assert (child / DIGEST_FILENAME).read_text() == (inline / DIGEST_FILENAME).read_text()
     assert read_digest_skipped(child) is None
+
+
+class _HangingExecutor(Executor):
+    """A child that never answers — a several-GB digest still running when
+    the daemon is told to stop. Counts submissions so a restart is visible."""
+
+    def __init__(self) -> None:
+        self.submissions = 0
+
+    def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
+        self.submissions += 1
+        return Future()
+
+
+async def test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D03.6 — shutdown cancels the in-flight child; the fallback must not
+    start it again inside the unit's stop deadline.
+
+    Before: cancellation removed the in-flight marker and wrote nothing, so
+    ``run_daemon``'s fallback trigger re-entered ``handle_trip_end_off_loop``
+    for the same session and immediately spawned a second child with the
+    full 900 s timeout, under a 30 s ``TimeoutStopSec``. Now the interrupted
+    computation is a sidecar on disk and a process-local fact, so the second
+    call is a no-op — and a later process (the next daemon start) may still
+    compute the digest, because the sidecar is not a permanent refusal.
+    """
+    session = _session(tmp_path)
+    config = _config(tmp_path)
+    pool = _HangingExecutor()
+    trip_end._INTERRUPTED.discard(session)
+    # The closing thread-pool step would otherwise apply the child's
+    # RLIMIT_AS to this very process (a thread is not a child), and with the
+    # heavier test modules collected that ceiling is close enough to bite
+    # the tests that follow. The limit is not what this test is about.
+    monkeypatch.setattr(trip_end, "limit_address_space", lambda n: (n, n))
+
+    task = asyncio.create_task(handle_trip_end_off_loop(session, config, executor=pool))
+    for _ in range(100):
+        if trip_end.digest_in_flight(session):
+            break
+        await asyncio.sleep(0.01)
+    assert trip_end.digest_in_flight(session), "the child should be running"
+    assert pool.submissions == 1
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    skipped = read_digest_skipped(session)
+    assert skipped is not None
+    assert skipped["reason"] == REASON_INTERRUPTED_AT_SHUTDOWN
+    assert skipped["row_count"] == count_session_rows(session)
+    assert not trip_end.digest_in_flight(session)
+    assert trip_end.digest_interrupted(session)
+
+    # The shutdown fallback: same session, same process — no second child.
+    assert await handle_trip_end_off_loop(session, config, executor=pool) is None
+    assert pool.submissions == 1
+    assert read_digest(session) is None
+
+    # A fresh process has no memory of the interruption and computes normally.
+    trip_end._INTERRUPTED.discard(session)
+    with ThreadPoolExecutor(max_workers=1) as fresh:
+        digest = await handle_trip_end_off_loop(session, config, now=SESSION_END, executor=fresh)
+    assert digest is not None
+    assert read_digest_skipped(session) is None, "a landed digest clears the sidecar"
 
 
 async def test_an_earlier_refusal_is_cleared_once_a_digest_lands(tmp_path: Path) -> None:

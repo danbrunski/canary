@@ -264,6 +264,97 @@ def test_replay_skips_rederived_rows_and_counts_them(tmp_path: Path) -> None:
     assert stats.skipped_sources == ("decoded", "derived")
 
 
+def _gapped_session(tmp_path: Path, gap_seconds: float) -> Path:
+    """Three rows with one long recorded pause in the middle."""
+    sdir = tmp_path / "2026-05-11T222447"
+    sdir.mkdir(parents=True)
+    base = datetime(2026, 5, 11, 22, 24, 47, tzinfo=UTC)
+    recs = [
+        TelemetryRecord(timestamp=base, source="obd", channel="RPM", value=800.0, unit="rpm"),
+        TelemetryRecord(
+            timestamp=base + timedelta(seconds=gap_seconds),
+            source="obd",
+            channel="RPM",
+            value=810.0,
+            unit="rpm",
+        ),
+        TelemetryRecord(
+            timestamp=base + timedelta(seconds=gap_seconds + 0.1),
+            source="obd",
+            channel="RPM",
+            value=820.0,
+            unit="rpm",
+        ),
+    ]
+    write_records_to_parquet(recs, sdir)
+    return sdir
+
+
+def test_a_clamped_gap_is_reported_as_effective_speed_not_hidden_behind_speed(
+    tmp_path: Path,
+) -> None:
+    """D02.9 — ``speed`` is the requested multiplier; the recording outruns it.
+
+    ``_MAX_GAP_SECONDS`` clamps every sleep, so a 600 s recorded pause costs
+    at most 0.5 s of wall time at ``speed=1.0``. The stats now carry the
+    source time actually covered, the wall time spent, the ratio, and the
+    fraction of the source span, instead of leaving a poller to divide rows
+    by elapsed clock and land on a wrong premise.
+    """
+    stats = ReplayEmissionStats()
+    sdir = _gapped_session(tmp_path, gap_seconds=600.0)
+
+    async def run() -> list[TelemetryRecord]:
+        queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            replay_session(queue, sdir, stop, speed=1.0, loop=False, stats=stats)
+        )
+        got: list[TelemetryRecord] = []
+        try:
+            for _ in range(3):
+                got.append(await asyncio.wait_for(queue.get(), timeout=5.0))
+            for _ in range(200):
+                if stats.passes == 1:
+                    break
+                await asyncio.sleep(0.01)
+            # Long enough for effective_speed to be a number, not noise.
+            await asyncio.sleep(1.05)
+        finally:
+            stop.set()
+            await asyncio.wait_for(task, timeout=2.0)
+        return got
+
+    got = asyncio.run(run())
+    assert [r.value for r in got] == [800.0, 810.0, 820.0]
+    assert stats.source_span_s == pytest.approx(600.1, abs=0.01)
+    assert stats.source_time_emitted_s == pytest.approx(600.1, abs=0.01)
+    assert stats.source_time_progress() == pytest.approx(1.0)
+    wall = stats.wall_elapsed_s()
+    assert wall is not None and wall < 3.0, "the 600 s pause was clamped, not slept"
+    effective = stats.effective_speed()
+    assert effective is not None and effective > 100.0, (
+        f"effective speed {effective} should dwarf the requested 1.0"
+    )
+    assert stats.passes == 1
+    assert stats.pass_reconciled() is True
+
+
+def test_pass_reconciliation_counts_rows_not_wall_time(tmp_path: Path) -> None:
+    """A completed pass must account for every source row exactly once per
+    pass — emitted, skipped or dropped — with no elapsed-time inference."""
+    stats = ReplayEmissionStats()
+    sdir = _mixed_session(tmp_path, can_payload=b"\x00\x01\x02\x03")
+    assert stats.pass_reconciled() is None, "nothing to reconcile before a pass"
+    asyncio.run(_drain(sdir, expect=3, stats=stats))
+    assert stats.passes == 1
+    assert stats.rows_emitted + stats.rows_skipped + stats.rows_dropped == stats.source_rows_total
+    assert stats.pass_reconciled() is True
+    # A row that went missing would be a real gap, and would say so.
+    stats.rows_emitted -= 1
+    assert stats.pass_reconciled() is False
+
+
 def test_replay_keeps_rederived_rows_when_the_source_has_no_payloads(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

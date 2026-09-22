@@ -63,6 +63,7 @@ from src.analysis.digest import (
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
+    REASON_INTERRUPTED_AT_SHUTDOWN,
     SKIP_SCHEMA_VERSION,
     DigestSkipped,
     SessionDigest,
@@ -135,14 +136,25 @@ def digest_address_space_bytes(config: CanaryConfig) -> int:
     return max(_ADDRESS_SPACE_FLOOR_MB, min(_ADDRESS_SPACE_CEILING_MB, derived_mb)) * _MIB
 
 
-#: Peak resident bytes per session row for the digest chain, measured
-#: 2026-09-17: ``resample_and_segment`` over a 2,622,370-row session peaked at
-#: 5,483 MB (``read_session`` 1,879 MB, ``to_wide`` 3,440 MB) to emit 1,143
-#: rows. 5,483 MiB / 2,622,370 rows = 2,193 bytes/row; rounded up, since
-#: under-estimating turns a clean refusal into a child that dies.
-#: **This is the one number to change when the pivot is moved after the
-#: resample** — the row budget follows from it.
-DIGEST_PEAK_BYTES_PER_ROW = 2_200
+#: Peak resident bytes per session row for the digest chain.
+#:
+#: Measured 2026-09-17 on the raw-timestamp pivot: ``resample_and_segment``
+#: over the 2,622,370-row ``2026-08-08T214218`` peaked at 5,483 MB to emit
+#: 1,143 rows — 2,193 bytes/row, recorded here as 2,200.
+#:
+#: Re-measured 2026-09-22 on the long-form reduction that replaced the pivot
+#: (D03.6, ``data/analyses/2026-09-22-d03-d04-desk-pass.md``), same session,
+#: same laptop, each stage in its own process: ``resample_and_segment``
+#: 859 MB, ``compute_digest`` 959 MB, ``compute_digest_under_limit`` under
+#: the Pi's 4 GiB ``RLIMIT_AS`` 976 MB — **390 bytes/row**. A 5,570,352-row
+#: session (``2026-09-18T144215``) peaked at 1,490 MB, 280 bytes/row. The
+#: figure here is twice the larger measurement, because the Pi's allocator
+#: is not the laptop's and under-estimating turns a clean refusal into a
+#: child that dies (a caught ``MemoryError`` under the ceiling, never the
+#: daemon — but still a session without a digest).
+#: **This is the one number to change when the reduction changes** — the
+#: row budget follows from it.
+DIGEST_PEAK_BYTES_PER_ROW = 800
 
 
 def digest_row_budget(config: CanaryConfig) -> int:
@@ -150,9 +162,11 @@ def digest_row_budget(config: CanaryConfig) -> int:
 
     Derived = the child's address-space ceiling divided by the measured
     per-row peak, so the budget and the ceiling cannot drift apart. On the
-    8 GB Pi that is a 4 GiB child / 2,200 B per row ≈ 1.95 M rows, which is
-    the honest figure: a 4 M budget against the same ceiling let sessions
-    between the two spawn a child that then died of ``MemoryError``.
+    8 GB Pi that is a 4 GiB child / 800 B per row ≈ 5.4 M rows (about 38
+    minutes of ``default`` collection at ~2,355 rows/s). The derivation is
+    the point: a hand-picked 4 M budget once sat against a ceiling that
+    covered only 1.95 M rows, and sessions between the two spawned a child
+    that then died of ``MemoryError``.
 
     ``0`` disables the check (the ceiling still applies, so an over-large
     session fails as a caught ``MemoryError`` rather than taking the daemon
@@ -278,6 +292,21 @@ _discard_pool = child_pool.discard_pool
 #: over the same multi-gigabyte session.
 _IN_FLIGHT: dict[Path, asyncio.Task[dict[str, Any] | None]] = {}
 
+#: Sessions whose digest child this process cancelled at shutdown (D03.6).
+#: ``_settle_trip_end_tasks`` cancels what will not finish inside the unit's
+#: stop deadline, and the fallback trigger then runs
+#: :func:`handle_trip_end_off_loop` again for the active session. Without
+#: this, cancellation cleared ``_IN_FLIGHT`` and the fallback immediately
+#: restarted the same multi-gigabyte child with the full digest timeout —
+#: inside a 30 s ``TimeoutStopSec``. Process-local on purpose: the next
+#: daemon start may legitimately compute the digest; this one may not.
+_INTERRUPTED: set[Path] = set()
+
+
+def digest_interrupted(session_dir: Path) -> bool:
+    """Whether this process already cancelled a digest for ``session_dir``."""
+    return session_dir in _INTERRUPTED
+
 
 def digest_in_flight(session_dir: Path) -> bool:
     """Whether a digest for this session is already being computed."""
@@ -321,6 +350,11 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         emitter.reset_notification_count()
     if read_digest(session_dir) is not None:
         return None
+    if session_dir in _INTERRUPTED:
+        # Cancelled at shutdown earlier in this process; the refusal sidecar
+        # is already on disk. Starting it again here is exactly the duplicate
+        # child the shutdown deadline cannot afford.
+        return None
     current_task = asyncio.current_task()
     existing = _IN_FLIGHT.get(session_dir)
     if existing is not None and existing is not current_task:
@@ -347,6 +381,23 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         # No telemetry parquet — "skip", not "quarantine", same as every
         # other post-hoc sidecar. Nothing to record: there was no session.
         return None
+    except asyncio.CancelledError:
+        # Shutdown cancelled the child. Record the outcome before
+        # re-raising so the interruption is a fact on disk, not a session
+        # that silently has no digest — and remember it so the shutdown
+        # fallback cannot start the same work again in this process.
+        _INTERRUPTED.add(session_dir)
+        write_digest_skipped(
+            session_dir,
+            _child_failure(
+                session_dir,
+                config,
+                REASON_INTERRUPTED_AT_SHUTDOWN,
+                "digest child cancelled before it finished (daemon shutdown)",
+                now=now,
+            ),
+        )
+        raise
     except MemoryError:
         write_digest_skipped(
             session_dir,

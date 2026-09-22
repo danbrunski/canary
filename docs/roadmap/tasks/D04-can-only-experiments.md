@@ -90,6 +90,28 @@ opportunistic on any sustained climb.
   - Broadcast wheel speed reads 8–16 % below GPS, so settle speed first.
   - Table: `~/canary-data/scripts-0918b/out/coasts-_capture-fuel-pw-research-2026-09-18T174742.md`.
   - Still owed: gear assignment, hysteresis per gear, and throttle-to-cut delay.
+  **2026-09-22 (desk, all three 09-18 `fuel-pw-research` captures pooled —
+  [evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md),
+  `~/canary-data/scripts-0922/coasts_d042.py`):** 84 coasts (68 usable). Four
+  relative gear clusters at 28.6 / 36.7 / 49.9 / 71.4 rpm per km/h of
+  broadcast wheel speed (n 24 / 22 / 13 / 9); absolute gear numbers need the
+  gearbox ratio table, which the vehicle profile does not carry.
+  - **Throttle closure → cut: 0.4–1.4 s** (cut-bracket lower bound p10/50/90
+    0.42 / 0.85 / 2.82 s, n 65, from the 100 Hz broadcast throttle).
+  - **Onset rpm is the lift rpm** (1,660–3,600 in every gear); no onset
+    threshold is visible above ~1,650 rpm, and the floor was seen down to
+    1,462 rpm (lowest gear cluster).
+  - **Exit, throttle still closed:** the lowest refuel rpm rises with gear —
+    ~1,290–1,640 rpm at 19–27 km/h (D), ~1,340–1,790 at 44–49 (B),
+    ~1,800–1,950 at 64–68 (A) — so it is **neither purely rpm- nor purely
+    speed-gated**; the shape fits a speed-indexed recovery-rpm table.
+    Hysteresis medians (cut − refuel) 125 / 144 / 131 / 262 rpm, of limited
+    meaning because the cut rpm is the lift rpm.
+  - **Unexplained:** closed-throttle refuels at 2,100–3,500 rpm on long
+    descents (e.g. cut 3,112 → refuel 2,387 after 59 s); clutch, brake or a
+    maximum-duration rule are all possible and none is on the tags.
+  - **Still owed (truck):** tagged protocol coasts, in gear and one in
+    neutral, so ECM refuel is separable from driver action.
 
 ## Analyses over the D03.8 capture — needs only throttle steps and plateaus
 
@@ -126,6 +148,11 @@ opportunistic on any sustained climb.
   **2026-09-18 evening ([September 18 evening drive log](../../../data/analyses/2026-09-18-eve-drive-log.md)):** 13 holds. **No clear minimum in either
   direction** (78/49 pairs at best lag), so the PM "500 ms tip-in" doesn't
   replicate. This is blocked on splitting 0x44 and 0x24 into separate batches.
+  **Waits on (2026-09-22):** a capture in which 0x44 and 0x24 carry
+  independent acquisition times. The profile schema has no per-batch grouping
+  control (only `obd_batch_max_pids`), so that means either a profile variant
+  with `obd_batch_max_pids: 1` for the pull, or a batch-split feature first;
+  no local session can resolve it.
 
 - [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the
@@ -153,10 +180,15 @@ opportunistic on any sustained climb.
   ±2 % over 3–134 g/s: firm at 20–90 g/s, thin above 90 g/s (81 pairs). **Still
   owed:** the `conditions` field on 0x1209 in `data/dids.yaml` (a catalog edit
   left for the desk).
+  **Done 2026-09-22:** 0x1209 now carries an evidence item with
+  `constant: 0.01`, `constant_unit: g/s per count` and the required
+  `conditions` (3–134 g/s, |dMAF/dt| ≤ 5 %/s; firm 20–90, thin above 90) —
+  the schema's own mechanism, which refuses a constant without conditions.
+  `tests/test_dids.py` passes on the edited catalog.
 
 ## Desk work on data that already exists (tomorrow adds coverage)
 
-- [ ] **D04.5 Broadcast inventory under road load.** The vehicle skill's
+- [x] **D04.5 Broadcast inventory under road load.** The vehicle skill's
   `absent_signals` list (ignition timing, wideband AFR, cam timing, injector
   PW, base fuel schedule, load) rests on the **2026-08-08 sweep, which was
   no-load only** — its own caveat says a signal appearing only under road load
@@ -173,8 +205,28 @@ opportunistic on any sustained climb.
   at idle" — which finally *earns* the absent-signals claim — or a shortlist
   with `changed_byte_indices` per candidate. Bindings stay untouched either
   way; a candidate is a candidate.
+  **Done at the desk 2026-09-22**
+  ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md),
+  `~/canary-data/scripts-0922/broadcast_d045.py`). `2026-09-17T205003` is not
+  on the laptop; used `_capture-tuning-hybrid-research-2026-09-17T191712`
+  (2.31 M frames, the pull) and `2026-09-18T180630` (2.12 M frames, the
+  descent). The 2026-08-08 parquet's `can` rows carry all-zero payloads, so
+  the baseline is the sweep's own candump, recovered from
+  `re-2026-08-08-rev-ac/re-window.log.gz` (an `ls -l` line prepended to the
+  gzip stream; 683,373 frames, 27 ids). **Result: nothing with the
+  cardinality or change rate of a continuous engine quantity appears under
+  road load that did not already move at no-load.** Ids only under load are
+  0x004 (≈150 frames, one 3-valued byte), 0x342/0x512 (2 frames) and 0x682
+  (7, constant). Every byte that was constant parked and moves driving is
+  either motion/chassis (0x284/0x285/0x6F7 wheel speeds, 0x2D1/0x280/0x354
+  speed, 0x590, 0x29E brake, 0x002 steering) or a low-cardinality slow byte:
+  `changed_byte_indices` 0x1F9 [6] (23 values, 0.02 % changes), 0x2DE [1, 6,
+  7] (2/3/21), 0x231 [6], 0x358 [0], 0x35D [1, 2, 4], 0x385 [2, 3, 5, 6]
+  (TPMS), 0x60D [0], 0x625 [0], 0x794 [0, 1]. The absent-signals claim is
+  earned for road load to 126 km/h and one WOT pull; the optional
+  `can_activity` drive step is not warranted by this list. Bindings untouched.
 
-- [ ] **D04.6 Which of the 138 DIDs moved only under load?** The two
+- [x] **D04.6 Which of the 138 DIDs moved only under load?** The two
   `did_log` surveys (block 3b, no load; block 5, load to 4.13 V TPS) were each
   screened on their own. Nobody has yet diffed them: DIDs that were constant
   in the 7-minute no-load window and moved in the 30-minute loaded one are the
@@ -183,8 +235,21 @@ opportunistic on any sustained climb.
   **Accept:** the diff, with each newly-moving DID's raw range and the regime
   (cut / high-load / cruise) it moved in. Feeds D03.15's shortlist rather than
   competing with it.
+  **Done 2026-09-22**
+  ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md),
+  `~/canary-data/scripts-0922/didlog_screen.py`, block 3b = `roadload-2`
+  364 passes / TPS ≤ 3.76 V, block 5 = `roadload-3` 1,546 passes / TPS to
+  4.14 V). 138 DIDs in both: 67 constant in both, 57 moving in both, 4 moved
+  only in 3b (0x110D, 0x1146, 0x120B, 0x124A), **10 constant in 3b and moving
+  in 5**: 0x1134 (64 → 64–75, 34 % off-modal at high load, 0 in cut — the
+  known target), **0x122B** (0 → 0–1,861, 4 levels, high 0.32 / cruise 0.25 /
+  cut 0), **0x122C** (0 → 0–65,482, 355 values, modal 63,572, off-modal cut
+  0.90 / high 0.78 / cruise 0.59), and seven one-count steps that each
+  changed exactly once in 1,546 passes (0x1234 33→34, 0x1237 15→16, 0x1239
+  10→11, 0x123A 6→7, 0x123D 15→16, 0x1244 0→1, 0x1245 0→1 — a single
+  increment, not a load response). Shortlist handed to D03.15: 0x122B, 0x122C.
 
-- [ ] **D04.7 Bound the VVT duty scale from saturation, without UpRev.** The
+- [x] **D04.7 Bound the VVT duty scale from saturation, without UpRev.** The
   ×0.5 % and ×100/255 % candidates for 0x1110 (and 0x1139) differ in one
   observable: a percent register on ×0.5 cannot exceed **200**, one on
   ×100/255 cannot exceed **255**. Block 5 already recorded **0x1139 at 227**
@@ -198,6 +263,19 @@ opportunistic on any sustained climb.
   **Accept:** a bound, not a scale — "0x1110 exceeds 200 → not ×0.5" or
   "0x1110 plateaus at 200 → consistent with ×0.5 at 100 %". The exact scale
   still needs D03.10's external reference; this decides what it can *not* be.
+  **Done 2026-09-22 (desk, every `did_log` window on disk: 3a, 3b, 5,
+  paced47 — [evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)).**
+  - **0x1110: max 130 / 149 / 190 / 153 — never ≥ 200, no plateau** (one
+    sample at each window's max). Saturation gives it **no bound**: ×0.5 and
+    ×100/255 both survive.
+  - **0x1139: 221 (3a), 255 (3b, three consecutive samples), 154, 146.** It
+    **exceeds 200 → not ×0.5** if it is a percent register, and a 3-sample
+    plateau at 255 is a byte-limit ceiling (×100/255 at 100 %, or not a
+    percent at all).
+  - **The shared-unit premise fails**, so the 0x1139 bound does not transfer
+    to 0x1110: in block 5's 1,002 passes with both non-zero, 0x1139/0x1110 is
+    0.61 / 0.71 / 1.82 (p10/50/90); at 0x1139's maximum 0x1110 read 0, at
+    0x1110's maximum (190) 0x1139 read 99.
 
 ## Opportunistic
 
@@ -226,6 +304,24 @@ opportunistic on any sustained climb.
   the bar. The session is pulled to `~/canary-data/sessions-0918/`. Run the
   analysis at the desk: it may resolve the slope, but it doesn't meet the
   stated ≥ 10 kPa.
+  **2026-09-22 (desk — [evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md),
+  `~/canary-data/scripts-0922/altitude_d048.py`, `altitude_lag.py`).** Known
+  answer first: `2026-09-18T144215` reproduces the 09-18 figures exactly
+  (n 114, slope 0.910, offset +6.63, r² 0.866, `drifting`, free P0 102.54).
+  Then `2026-09-18T180630`, 3,245 → 2,095 m, baro 79 → 70 kPa: **n_pairs 67,
+  slope 0.825, offset +13.74 kPa, r² 0.939, `drifting`**, b−a +1.08 ± 0.69
+  kPa; free P0 **102.81 kPa** (residual 0.02 ± 0.71), consistent with the AM
+  session's 102.54 — but the free-P0 residual trends **+0.57 → −0.11 →
+  −0.44 kPa** across the span, and a lag scan (baro shifted earlier 0–420 s)
+  only worsens the fit. **The 09-18 "range-limited slope" reading is
+  falsified**: doubling the span from 5 to 9 kPa lowered the slope from 0.91
+  to 0.83. ISA gives 10.6 kPa for this descent; the PID moved 9. A warm
+  atmosphere explains ≤ 8 % (the slope would need ~328 K), the PID is a
+  1 kPa/bit integer, and a delayed estimate is excluded by the lag scan — so
+  one of the two instruments is compressed ~15–20 % over the descent and CAN
+  alone cannot say which. Nothing goes into `expectations.yaml`.
+  **Waits on:** a third instrument (a phone barometer, or surveyed
+  elevations along the descent), not a longer single-session climb.
 
 ## Not included, and why
 

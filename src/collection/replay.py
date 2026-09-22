@@ -53,7 +53,11 @@ import pandas as pd
 
 from src.collection.collectors import CollectorStarter
 from src.config import CanaryConfig
-from src.preprocessing.loader import PARQUET_PATTERN, count_session_rows
+from src.preprocessing.loader import (
+    PARQUET_PATTERN,
+    count_session_rows,
+    session_time_span_seconds,
+)
 from src.telemetry import (
     CAN_SOURCE,
     RE_DERIVED_SOURCES,
@@ -261,6 +265,55 @@ class ReplayEmissionStats:
     rederivable: bool | None = None
     rederivable_reason: str | None = None
     skipped_sources: tuple[str, ...] = field(default_factory=tuple)
+    #: Recorded span of the source, first to last stored timestamp (Parquet
+    #: footers only); ``None`` when unknown. The denominator for progress.
+    source_span_s: float | None = None
+    #: Recording time covered by the current pass so far: the latest emitted
+    #: row's original timestamp minus the pass's first. Resets per pass.
+    source_time_emitted_s: float = 0.0
+    #: ``time.monotonic()`` when the current pass started; ``None`` before the
+    #: first row. Wall elapsed is computed from it at status time.
+    pass_started_monotonic: float | None = None
+
+    def wall_elapsed_s(self, now: float | None = None) -> float | None:
+        """Wall-clock seconds the current pass has been running."""
+        if self.pass_started_monotonic is None:
+            return None
+        return max(0.0, (time.monotonic() if now is None else now) - self.pass_started_monotonic)
+
+    def effective_speed(self, now: float | None = None) -> float | None:
+        """Recording seconds replayed per wall second in the current pass.
+
+        The requested ``speed`` is a multiplier on the *sleeps*, and every
+        sleep is clamped at ``_MAX_GAP_SECONDS``, so a recording with pauses
+        replays faster than requested — 18.9x on one real session, at a
+        reported ``speed: 1.0`` (D02.9). This is the number that was missing.
+        ``None`` until at least a second of wall time has passed, because a
+        ratio over milliseconds is noise dressed as a speed.
+        """
+        elapsed = self.wall_elapsed_s(now)
+        if elapsed is None or elapsed < 1.0:
+            return None
+        return self.source_time_emitted_s / elapsed
+
+    def source_time_progress(self) -> float | None:
+        """Fraction of the source's recorded span covered by the current pass."""
+        if self.source_span_s is None or self.source_span_s <= 0:
+            return None
+        return min(1.0, self.source_time_emitted_s / self.source_span_s)
+
+    def pass_reconciled(self) -> bool | None:
+        """After ≥1 complete pass: does emitted + skipped + dropped equal
+        ``passes × source_rows_total``? ``None`` until a pass has completed or
+        while the source row count is unknown. A ``False`` here is a real
+        accounting gap, not a wall-time-versus-rows inference.
+        """
+        if self.passes < 1 or self.source_rows_total is None:
+            return None
+        return (
+            self.rows_emitted + self.rows_skipped + self.rows_dropped
+            == self.passes * self.source_rows_total
+        )
 
 
 def _iter_rows(
@@ -338,6 +391,7 @@ async def replay_session(
     stats.rederivable_reason = probe.reason
     stats.skipped_sources = tuple(sorted(probe.skip_sources))
     stats.source_rows_total = count_session_rows(session_dir)
+    stats.source_span_s = session_time_span_seconds(session_dir)
     log.info(
         "replay source probed",
         extra={
@@ -346,6 +400,7 @@ async def replay_session(
             "reason": probe.reason,
             "skipped_sources": ",".join(stats.skipped_sources),
             "source_rows": stats.source_rows_total,
+            "source_span_s": stats.source_span_s,
         },
     )
 
@@ -353,6 +408,8 @@ async def replay_session(
         emitted = 0
         first_orig: float | None = None
         wall_start = time.monotonic()
+        stats.pass_started_monotonic = wall_start
+        stats.source_time_emitted_s = 0.0
         for orig_epoch, fields in _iter_rows(
             session_dir, skip_sources=probe.skip_sources, stats=stats
         ):
@@ -360,6 +417,7 @@ async def replay_session(
                 return
             if first_orig is None:
                 first_orig = orig_epoch
+            stats.source_time_emitted_s = max(0.0, orig_epoch - first_orig)
             # Drift-corrected pacing: the i-th row is due at
             # wall_start + (recording-elapsed / speed), clamped per-row so a
             # capture pause can't stall the stream.
@@ -403,6 +461,11 @@ async def replay_session(
                 "dropped": stats.rows_dropped,
                 "source_rows": stats.source_rows_total,
                 "pass": stats.passes,
+                "reconciled": stats.pass_reconciled(),
+                "source_time_s": round(stats.source_time_emitted_s, 3),
+                "wall_s": round(time.monotonic() - wall_start, 3),
+                "effective_speed": stats.effective_speed(),
+                "requested_speed": speed,
             },
         )
         if not loop or emitted == 0:

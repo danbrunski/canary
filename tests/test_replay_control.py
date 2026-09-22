@@ -347,6 +347,71 @@ async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -
     assert final.rows_emitted == 2 and final.rows_skipped == 2
 
 
+async def test_status_reports_effective_speed_and_source_time_progress(tmp_path: Path) -> None:
+    """D02.9 — ``GET /control/replay`` says how fast the recording is really
+    being covered, not only the requested ``speed``.
+
+    A 600 s recorded pause is clamped to 0.5 s of wall time, so at
+    ``speed=1.0`` the effective speed is in the hundreds and the status must
+    say so, alongside the fraction of the source span covered and whether the
+    completed pass reconciles every source row.
+    """
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    controller = ReplayController(
+        queue=queue,
+        writer=ParquetTelemetryWriter(storage_root),
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+    )
+    base = datetime(2026, 5, 18, 12, tzinfo=UTC)
+    write_records_to_parquet(
+        [
+            TelemetryRecord(timestamp=base, source="obd", channel="RPM", value=800.0, unit="rpm"),
+            TelemetryRecord(
+                timestamp=base + timedelta(seconds=600),
+                source="obd",
+                channel="RPM",
+                value=810.0,
+                unit="rpm",
+            ),
+        ],
+        storage_root / "2026-05-18T120000",
+    )
+
+    await controller.start("2026-05-18T120000", speed=1.0, loop=False)
+    for _ in range(300):
+        if controller.status().passes == 1:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(1.05)  # effective_speed is withheld under one wall second
+
+    status = controller.status()
+    assert status.speed == 1.0
+    assert status.source_span_s == pytest.approx(600.0, abs=0.01)
+    assert status.source_time_emitted_s == pytest.approx(600.0, abs=0.01)
+    assert status.source_time_progress == pytest.approx(1.0)
+    assert status.wall_elapsed_s is not None and status.wall_elapsed_s < 3.0
+    assert status.effective_speed is not None and status.effective_speed > 100.0
+    assert status.pass_reconciled is True
+    payload = status.to_dict()
+    for key in (
+        "effective_speed",
+        "source_span_s",
+        "source_time_emitted_s",
+        "source_time_progress",
+        "wall_elapsed_s",
+        "pass_reconciled",
+    ):
+        assert key in payload
+
+    final = await controller.stop()
+    assert final.running is False
+    assert final.pass_reconciled is True
+    assert final.source_time_emitted_s == pytest.approx(600.0, abs=0.01)
+
+
 async def test_stop_without_running_raises(tmp_path: Path) -> None:
     controller, _ = _make_controller(tmp_path)
     with pytest.raises(ReplayNotRunningError):
