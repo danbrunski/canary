@@ -51,10 +51,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import multiprocessing
 import os
 import resource
-from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, Executor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -75,6 +74,7 @@ from src.analysis.digest import (
     write_digest_skipped,
 )
 from src.config import CanaryConfig
+from src.control import child_pool
 from src.preprocessing.loader import count_session_rows
 from src.timefmt import format_timestamp
 
@@ -267,27 +267,8 @@ async def compute_digest_off_loop(
             _discard_pool(pool, terminate=not finished)
 
 
-def _spawn_pool() -> ProcessPoolExecutor:
-    return ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
-
-
-def _discard_pool(pool: Executor, *, terminate: bool) -> None:
-    """Release a single-use pool without waiting on the loop for its child.
-
-    On any path that did not produce a digest the child is terminated: a
-    timed-out or cancelled computation would otherwise keep a core and up to
-    its whole address-space ceiling until it finished on its own.
-    """
-    processes = []
-    if terminate and isinstance(pool, ProcessPoolExecutor):
-        # No public way to reach the workers before 3.14's terminate_workers().
-        processes = list((pool._processes or {}).values())
-    pool.shutdown(wait=False, cancel_futures=True)
-    for proc in processes:
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001 — already gone is the goal
-            log.debug("digest child already exited", exc_info=True)
+_spawn_pool = child_pool.spawn_pool
+_discard_pool = child_pool.discard_pool
 
 
 #: Sessions with a digest computation in flight on this loop. The GPS edge

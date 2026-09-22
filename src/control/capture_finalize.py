@@ -37,12 +37,11 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
-import multiprocessing
 import threading
 import time
 import weakref
 from collections.abc import Mapping
-from concurrent.futures import BrokenExecutor, Executor, ProcessPoolExecutor
+from concurrent.futures import BrokenExecutor, Executor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -60,6 +59,7 @@ from src.collection.capture_quality import (
     CaptureQuality,
     batching_baseline,
 )
+from src.control import child_pool
 from src.control.capture_manifest import (
     read_capture_epoch,
     write_capture_epoch,
@@ -333,27 +333,8 @@ async def _run_recompute(
             _discard_pool(pool, terminate=not finished)
 
 
-def _spawn_pool() -> ProcessPoolExecutor:
-    return ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("spawn"))
-
-
-def _discard_pool(pool: Executor, *, terminate: bool) -> None:
-    """Release a single-use pool without waiting on the loop for its child.
-
-    On any path that did not produce a result the child is terminated: a
-    timed-out or cancelled recompute would otherwise keep a core and its
-    frame until it finished on its own.
-    """
-    processes = []
-    if terminate and isinstance(pool, ProcessPoolExecutor):
-        # No public way to reach the workers before 3.14's terminate_workers().
-        processes = list((pool._processes or {}).values())
-    pool.shutdown(wait=False, cancel_futures=True)
-    for proc in processes:
-        try:
-            proc.terminate()
-        except Exception:  # noqa: BLE001 — already gone is the goal
-            log.debug("recompute child already exited", exc_info=True)
+_spawn_pool = child_pool.spawn_pool
+_discard_pool = child_pool.discard_pool
 
 
 async def live_capture_quality(

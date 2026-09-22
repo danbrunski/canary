@@ -262,9 +262,15 @@ async def test_a_wedged_child_times_out_and_is_terminated(
     watcher.cancel()
     assert processes, "no child was spawned"
     for proc in processes:
-        proc.join(timeout=10)
-        # Killed, not left to finish on its own (a clean worker exit is 0).
-        assert proc.exitcode == -signal.SIGTERM
+        # SIGTERM can land while the child is still importing pandas, and the
+        # reaper escalates to SIGKILL after a grace period; either way it is
+        # killed, not left to finish on its own (a clean worker exit is 0).
+        for _ in range(120):
+            if not proc.is_alive():
+                break
+            await asyncio.sleep(0.25)
+        assert not proc.is_alive()
+        assert proc.exitcode in (-signal.SIGTERM, -signal.SIGKILL)
 
 
 async def test_the_arm_time_batching_baseline_reaches_the_judge(

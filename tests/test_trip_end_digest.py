@@ -361,7 +361,9 @@ async def test_a_wedged_child_times_out_is_terminated_and_recorded(
                 break
             await asyncio.sleep(0.25)
         assert not proc.is_alive()
-        assert proc.exitcode == -signal.SIGTERM, "the child exited on its own, not terminated"
+        assert proc.exitcode in (-signal.SIGTERM, -signal.SIGKILL), (
+            "the child exited on its own, not terminated"
+        )
 
 
 async def test_a_dead_child_is_reported_not_hung(tmp_path: Path) -> None:
