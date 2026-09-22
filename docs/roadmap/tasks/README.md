@@ -1,4 +1,13 @@
-# Collection and diagnostics improvement tasks
+# Implementation task index
+
+**Status 2026-09-21 — behavior-model accuracy and consolidation checklists.**
+[`B00-behavior-models-README.md`](B00-behavior-models-README.md) indexes B01–B07:
+fit/serve correctness, trustworthy validation, model retirement/refitting,
+timing and airflow, trim/cam/TPS relationships, lambda delivery error, and
+warmup models. These implement the
+[behavior-model review](../../../data/analyses/2026-09-21-behavior-model-review.md).
+B00 records dependencies and the overlap with D03's relabel/retrain and
+altitude work. The existing overnight queue is unchanged.
 
 **Status 2026-09-21 — D03 gained four items carried out of archived roadmaps.**
 D03.23–D03.26 are the live remainders of `refactoring`, `multi-pid-polling`,
