@@ -394,6 +394,17 @@ alerts:
   persistence_window_seconds: 8.0
   min_seconds_between_events: 30.0
 
+# Future ECU non-volatile writes must pass this gate. No flash transport ships
+# today; these defaults are already active so one cannot be added without the
+# exact-image permission, KOEO/stationary and supply checks in W07.
+nonvolatile_write:
+  authorization_ttl_seconds: 120.0
+  max_signal_age_seconds: 5.0
+  stationary_speed_max_kph: 0.5
+  min_battery_voltage: 12.0
+  min_ups_soc_percent: 40.0
+  ups_runtime_margin_seconds: 120.0
+
 dashboard:
   host: 0.0.0.0
   port: 8000

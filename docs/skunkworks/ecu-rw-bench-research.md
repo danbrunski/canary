@@ -32,13 +32,14 @@ ourselves" rabbit hole, done properly and safely on isolated hardware.
   CAN bus. If it's plugged into the truck, this project is not running.
 - **`canary-rw` is a SEPARATE tool from `canary`.** `canary` transmits
   freely — telemetry polling, session control, security access, memory
-  reads — but NFR-06 still forbids it writing ECU non-volatile memory,
-  because that is the one failure mode that bricks a module in the
-  operator's own truck. Reflashing therefore lives in a distinct
-  module/package with its own entry point and its own hardware target.
-  No flash-write capability is ever linked into the `canary` daemon. The
-  only shared surface is *offline binary analysis* (see Phase 3),
-  which touches files, not buses.
+  reads. Since the operator decision of 2026-09-21, the main project may also
+  grow a vehicle programming path, but only behind
+  `src.control.nonvolatile_write`: one explicit operator confirmation bound to
+  the exact image hash and ECU, fresh `ignition_only`/stationary state, adequate
+  battery and UPS supply, a short TTL, single use, and a re-check between
+  blocks. The MCP server cannot mint that authorization. `canary-rw` remains a
+  distinct bench tool with its own entry point and hardware target; none of
+  its experimental flashing code is imported into the daemon.
 - **Own hardware, own vehicle.** Legitimate as personal
   reverse-engineering on hardware the operator owns (US DMCA
   §1201 vehicle exemption covers the operator's own vehicle; bench
@@ -143,7 +144,9 @@ hand if desired — never by automation.
 - Anything on the vehicle's bus or a driven tune (that's UpRev + the main
   CANary roadmaps).
 - Distribution of tools, keys, or extracted factory code.
-- Linking write capability into the `canary` monitoring daemon.
+- Reusing or importing the bench flasher inside the monitoring daemon. Any
+  future vehicle-side transport is separate work and must take W07's
+  `Authorization` at its write boundary.
 - Any overnight/automated execution of the above.
 
 ## Pointers
@@ -153,7 +156,7 @@ hand if desired — never by automation.
   roadmap/queue-eligible; this one is not. Keep the entanglement
   one-directional: skunkworks may read roadmap outputs; roadmap never
   depends on skunkworks.
-- `AGENTS.md` / NFR-06 — no ECU non-volatile writes from `canary`. The
-  constraint `canary-rw` must never violate by leaking into `canary`.
-  (NFR-06 formerly prohibited all bus transmission, which was over-broad:
-  ordinary diagnostics transmit. Only the no-reflash boundary survives.)
+- `AGENTS.md` / W07 — non-volatile writes require explicit permission for
+  each exact operation and fresh key-on/engine-off/stationary state. The
+  former blanket no-write interpretation was replaced by this enforceable
+  gate on 2026-09-21; ordinary diagnostics and deep reads remain normal.

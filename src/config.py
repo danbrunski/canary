@@ -892,6 +892,22 @@ class OnlineTrainingConfig(_Strict):
     poll_interval_seconds: float = Field(default=5.0, gt=0.0)
 
 
+class NonvolatileWriteConfig(_Strict):
+    """Interlocks for the future ECU-programming path (W07).
+
+    These defaults intentionally refuse uncertain or marginal supply/state
+    conditions. No programming transport exists yet; the config is consumed
+    by the mandatory authorization gate that must precede one.
+    """
+
+    authorization_ttl_seconds: float = Field(default=120.0, gt=0.0, le=600.0)
+    max_signal_age_seconds: float = Field(default=5.0, gt=0.0, le=10.0)
+    stationary_speed_max_kph: float = Field(default=0.5, ge=0.0, le=2.0)
+    min_battery_voltage: float = Field(default=12.0, gt=0.0)
+    min_ups_soc_percent: float = Field(default=40.0, ge=0.0, le=100.0)
+    ups_runtime_margin_seconds: float = Field(default=120.0, ge=0.0)
+
+
 class ProfilesConfig(_Strict):
     """Multi-vehicle profile resolution (see ``src/profiles.py``).
 
@@ -983,6 +999,7 @@ class CanaryConfig(_Strict):
     trends: TrendsConfig = TrendsConfig()
     notifications: NotificationsConfig = NotificationsConfig()
     online_training: OnlineTrainingConfig = OnlineTrainingConfig()
+    nonvolatile_write: NonvolatileWriteConfig = NonvolatileWriteConfig()
     autotag: AutoTagConfig = AutoTagConfig()
     llm_assist: LLMAssistConfig = LLMAssistConfig()
 

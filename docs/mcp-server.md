@@ -8,6 +8,12 @@ It's a separate process from `src.daemon`. It calls the dashboard HTTP
 control plane on localhost for live state and reads Parquet directly for
 ad-hoc SQL. Adding it doesn't touch the capture / inference hot path.
 
+The MCP surface deliberately cannot mint an ECU non-volatile-write
+`Authorization`. W07 binds that short-lived, single-use capability to an
+exact image hash and ECU through an operator-present confirmation path; an
+agent can inspect state and ordinary diagnostics here, but cannot grant itself
+permission to program a module.
+
 ---
 
 ## What's exposed
