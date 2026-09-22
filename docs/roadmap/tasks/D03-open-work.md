@@ -1041,6 +1041,9 @@ not a common sampling instant.
   candidates remain static, close this experiment with the measured coverage,
   not “BFS is unavailable over CAN”. Exit through the established 0xC0 cleanup
   (`10 81`) and verify normal polling resumes.
+  **Waits on the truck (2026-09-22):** every step here is a live read of the
+  ECM in a held 0xC0 session across engine states; there is no desk half.
+  Reproduce the `21 10` control first (W02.1 asks the same read KOEO).
 
 - [ ] **D03.17 Reproduce the known CAN memory read, then test justified live
   memory candidates.** **New question:** is the missing telemetry reachable
