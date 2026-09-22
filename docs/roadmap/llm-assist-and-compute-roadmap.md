@@ -12,21 +12,32 @@ alert fusion).
 
 ## Status
 
-Not started. Optional add-on. The base product (capture + Isolation Forest
-+ sequence autoencoder + dashboard) must remain fully functional and lean
-with this tier absent. The discipline that makes "leave the hooks" free:
-the analysis/LLM code must be import-isolated and feature-flagged — **no
-`torch`/LLM import on the capture hot path, no RAM reservation, no daemon
-dependency when disabled**, and dashboard cards degrade cleanly when the
-tier is not present.
+Not started. Optional add-on. **Priority lowered 2026-09-22 (operator).**
+The [ECU second brain](ecu-second-brain.md)'s reasoning and learning are
+deterministic and run on the Pi, live during the drive. This tier is an
+optional language interface on top of them, and hosting it on the Pi is
+the last priority (D6).
+
+An LLM on the Pi has limited utility. During collection it would compete
+with the collector for cores and memory bandwidth. After key-off it has
+only the UPS window, at minutes per answer.
+
+The base product (capture + Isolation Forest + sequence autoencoder +
+dashboard + the deterministic second brain) must remain fully functional
+and lean with this tier absent. The discipline that makes "leave the
+hooks" free: the analysis/LLM code must be import-isolated and
+feature-flagged — **no `torch`/LLM import on the capture hot path, no RAM
+reservation, no daemon dependency when disabled**, and dashboard cards
+degrade cleanly when the tier is not present.
 
 ## Deployment assumptions (the constraints that drive every decision)
 
-- Field-deployed in a vehicle; **limited or no internet** (no cloud LLM,
-  models pre-provisioned offline on the Pi image).
-- **No reliable companion**: a laptop is *not* dependably present. The
-  phone/tablet is a **thin client only** — a browser pointed at the Pi's
-  existing PWA dashboard. It does not run models.
+- Field-deployed in a vehicle; **limited or no internet**. Nothing may
+  require a cloud model; on-device models are pre-provisioned offline.
+- **Design target: a Pi and an Android phone, nothing else.** No laptop,
+  no Claude, no fast internet. A laptop is *not* dependably present even
+  for the operator. The phone shows the Pi's existing PWA dashboard, and
+  may host the model when it is capable (D3).
 - Hardware: Raspberry Pi 5, **8 GB** today. A 16 GB board is an optional
   upgrade with a measured trigger (D7). Likely a sealed enclosure
   (thermal-constrained), on accessory power behind the X1202 UPS.
@@ -41,9 +52,10 @@ tier is not present.
 
 ## The optional LLM-assist feature set
 
-All six are **post-drive / review-time / batch** — none on the 1 Hz live
-path. This temporal disjointness from live capture is load-bearing for
-every decision below.
+On the Pi, all six are **post-drive / review-time / batch**. On the phone
+or a sidecar they may run during a drive (D1, D6). None sits on the 1 Hz
+live path or decides anything live; keeping the model off the collector's
+CPU during collection is load-bearing for every decision below.
 
 1. **Session narrative reports** — batch a full Parquet session into a
    structured report (LTFT trends, anomaly counts by operating mode,
@@ -73,24 +85,48 @@ every decision below.
 
 ## Decisions reached (with rationale)
 
-**D1 — The LLM tier is offline/post-drive, temporally disjoint from live
-capture.** All six cases run after the drive or during review. The live
-detector runs *during* the drive. They essentially never contend for CPU.
-This is why concurrent-contention engineering (incl. the Hailo, see D5) is
-*not* the justification it first appears to be.
+**D1 — A language model never runs on the collector's CPU during
+collection.** Revised 2026-09-22; it previously read "the LLM tier is
+offline/post-drive".
+- Reasoning and learning *during* the drive are deterministic streaming
+  updates on the Pi ([ECU second brain](ecu-second-brain.md#reasoning-and-learning-while-driving)),
+  not a language model.
+- On the Pi, all six cases run after the drive or during review.
+- A model may run during a drive only on its own hardware (the phone or a
+  sidecar, D6), and nothing live waits on it.
+- A 16 GB Pi does not change this. It adds memory, not cores or memory
+  bandwidth, and contention with the collector is the constraint.
 
-**D2 — On-Pi only in the real scenario.** With no reliable laptop and
-limited internet, if the tier runs at all it runs on the Pi. The earlier
-"offload heavy LLM to the companion" idea is viable *only* as a footnote
-for the rare case a laptop is present — it is not the field path.
+**D2 — The model host is interchangeable.** Revised 2026-09-22; it
+previously read "on-Pi only in the real scenario".
+- The analysis tools stay on the Pi behind HTTP/MCP, and whichever host is
+  available calls them (D6).
+- Evidence records carry the facts, so the same card validates whichever
+  host wrote it.
+- With no laptop and limited internet, the offline fallback is on-device:
+  the phone when capable, the Pi last.
 
-**D3 — Phone/tablet is a thin client.** LLM outputs surface as
-structured dashboard cards via the existing PWA (service worker / manifest
-already in place). No model runs on the handheld.
+**D3 — The phone is a thin client by default, and may host the model when
+capable.** Revised 2026-09-22; it previously read "no model runs on the
+handheld".
+- LLM outputs surface as structured dashboard cards via the existing PWA
+  (service worker / manifest already in place).
+- A recent mid-to-high-end Android phone has several times the Pi's memory
+  bandwidth and a GPU or NPU for prompt processing, and it is not bound by
+  the Pi's key-off window.
+- The trip digest and evidence records sync to it at trip end, so
+  questions work with the Pi off.
+- Phones vary widely, and a 4–6 GB budget phone cannot run a 4B model, so
+  measure per device.
+- A browser PWA needs a WebGPU runtime; a native app has more options.
+  Phone performance is not yet researched or measured.
 
-**D4 — Model sizing: design the seams around a resident 4B-class Qwen at
-Q4.** Revised 2026-09-22 against published Pi 5 measurements; the detail
-and sources are in [ECU second brain](ecu-second-brain.md#pi-hardware-what-fits-and-what-16-gb-changes).
+**D4 — Model sizing on the Pi: a 4B-class model at Q4.** This applies only
+when the Pi is the host, which is the last choice (D6). Revised 2026-09-22
+against published Pi 5 measurements; the detail and sources are in
+[ECU second brain](ecu-second-brain.md#if-it-is-hosted-on-the-pi), and
+candidate models other than Qwen are in its
+[candidate-models list](ecu-second-brain.md#candidate-models).
 Rationale:
 
 - **Memory on the current 8 GB board.** The daemon normally uses
@@ -162,7 +198,22 @@ Rationale:
   assumed. Adopting it adds an int8-quantization + on-device
   threshold-recalibration workstream (see Risks).
 
-**D6 — On-Pi hosting options (decide later, behind a measurement pass):**
+**D6 — Hosts, in priority order** (revised 2026-09-22). Every host calls the
+same tools on the Pi.
+
+1. **The phone, when capable** (D3).
+2. **A sidecar box beside the Pi**, for example a Jetson. This is the only
+   way a model runs *during* a drive without touching the collector.
+3. **The laptop with Claude Code over MCP**, when present. This is the
+   working reasoning layer today, and its real investigations become the
+   evaluation set.
+4. **A hosted model, when there is any signal.** An evidence packet is a
+   few KB, so weak cellular is enough. Optional, because it needs an
+   account, costs money, and sends data off the vehicle; on-device stays
+   the fallback.
+5. **The Pi, last**: post-drive only, under the options below.
+
+Pi-hosting options (decide later, behind a measurement pass):
 
 - **A. Small resident model (4B-class, D4), always co-resident.** Powers
   the interactive cases (5, 4) at review time with the daemon untouched;
@@ -182,8 +233,9 @@ Rationale:
 - **C. Hailo offload → larger model co-resident.** Per D5; contingency
   only, with the stated trigger.
 
-**D7 — A 16 GB board buys capacity, not speed.** The operator is
-considering one (2026-09-22).
+**D7 — A 16 GB board buys capacity, not speed.** The operator
+considered one (2026-09-22). It applies only to post-drive Pi hosting; it
+does nothing for reasoning during a drive (D1).
 
 - Generation speed is memory bandwidth divided by the bytes read per
   token, so it is the same on the 8 GB and 16 GB boards.
@@ -242,13 +294,18 @@ considering one (2026-09-22).
 
 ## Recommended sequencing
 
+0. **Build the deterministic second brain first** ([ECU second
+   brain](ecu-second-brain.md), checklist Part A). It must give the
+   Pi-and-phone user useful answers with no model at all. Everything
+   below is optional and comes after it.
 1. **Build the seams now, commit to no model hosting yet:** the
    `src/analysis/` module boundary, the case-5 label-capture loop
    (hypothesis + one clarifying question → enriched label → retraining
    ledger — highest value, barely needs model size), and the JSON
    structured-card dashboard contract. All import-isolated and
    feature-flagged per Status.
-2. **One measurement pass before choosing D6-A/B/C:**
+2. **One measurement pass before choosing a host (D6), and D6-A/B/C if
+   the host is the Pi:**
    - actual resident daemon RAM and thermals;
    - prompt-processing time and whether the prompt cache hits between
      turns;
@@ -256,18 +313,23 @@ considering one (2026-09-22).
    - real power draw for a representative report;
    - answer quality on the known-answer investigation cases from
      [ECU second brain](ecu-second-brain.md). Those cases are what any
-     model choice is measured against.
-3. **Default to D6-A (resident 4B-class, D4 candidates).** Treat
+     model choice is measured against;
+   - candidate models on a representative mid-range and budget Android
+     phone.
+3. **Prefer the highest-ranked host that passes (D6).** If the Pi is the
+   host, default to D6-A (resident 4B-class, D4 candidates). Treat
    deep-diagnosis quality as best-effort, not a guarantee.
 4. **D6-B/C and D7 only if step 2 forces them**, with the D5 trigger for
    Hailo and the D7 trigger for a 16 GB board.
 
 ## Non-goals (explicitly not committed)
 
-- Running an LLM on the live 1 Hz path or as a daemon dependency.
+- Running an LLM on the live 1 Hz path, on the collector's CPU during
+  collection, or as a daemon dependency (D1).
 - Running the reasoning model on a Hailo. The 8/8L cannot run decoder
   LLMs, and the 10H is limited to ~2B models at a 2k context (D5).
-- Cloud/API inference (field, limited internet).
+- Cloud/API inference as a requirement. A hosted model is an optional
+  host when there is signal (D6); on-device stays the offline fallback.
 - Removing the LSTM detector (Phase 9 makes the sequence detector
   *selectable*, not LSTM-replaced-and-deleted).
 - Buying/integrating the Hailo before its D5 trigger is met by measurement.
@@ -277,6 +339,8 @@ considering one (2026-09-22).
 - [ECU second brain](ecu-second-brain.md) — exploratory extension connecting
   this reasoning tier to persistent investigation memory, adaptive numerical
   models, and experiment outcomes. It includes:
+  - the live reasoning loop and the models that run on the Pi;
+  - candidate language models and where each can be hosted;
   - Pi 5 measurements and the 16 GB analysis;
   - computed hypothesis ranking and next-measurement selection;
   - calibrated uncertainty and change detection for adaptive models;

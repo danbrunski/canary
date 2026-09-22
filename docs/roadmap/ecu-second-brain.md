@@ -8,6 +8,17 @@ Checkboxes below are future work, not additions to the overnight queue.
 Model choices are candidates pending measurement, not new operator-approved
 defaults.
 
+**Priority (operator, 2026-09-22).** The second brain's reasoning and
+learning are deterministic and run on the Pi, live during the drive
+([Reasoning and learning while driving](#reasoning-and-learning-while-driving)).
+A language model is an optional interface on top of that, and hosting it
+on the Pi is the last priority
+([Optional language interface](#optional-language-interface-lower-priority)).
+
+The design target is someone with only a Pi and an Android phone showing
+the dashboard: no laptop, no Claude, no fast internet. Everything the brain
+concludes must reach that user without a language model.
+
 ## Purpose
 
 Make CANary a supervisory brain that remembers the vehicle's history,
@@ -29,12 +40,11 @@ These capabilities do not yet constitute an autonomous investigation loop.
 
 ## Relationship to existing plans
 
-- [LLM-assist and compute](llm-assist-and-compute-roadmap.md) owns optional
-  on-Pi reasoning, structured reports, retrieval, and the hosting seams.
-  Its D4 already revised the original Qwen MoE target to a 4B-class model,
-  and its D7 records what a 16 GB board would change. Preserve its
-  post-drive/review-time execution boundary; this proposal does not put an
-  LLM on the live inference path.
+- [LLM-assist and compute](llm-assist-and-compute-roadmap.md) owns the
+  optional language interface: where a model is hosted, structured reports,
+  retrieval, and the hosting seams. Its D1 keeps a language model off the
+  collector's CPU during collection, and its D6 ranks the hosts. This
+  proposal does not put a language model on the live inference path.
 - [Online training](online-training-strategy.md) owns training-data
   disposition, accepted baseline differences, batch retraining, and
   promotion. This proposal does not replace those rules with indiscriminate
@@ -189,9 +199,11 @@ An eventual automatic capture selector can use deterministic policies;
 live operation must not depend on an LLM response.
 
 No heavy session analysis runs on the Pi while it collects. Laptop analysis
-remains the development workflow. In the standalone field scenario, where
-the laptop is absent, optional on-Pi reasoning and bounded analysis wait
-until collection is inactive. The phone/tablet remains a thin client.
+remains the development workflow. In the standalone scenario, where the
+laptop is absent, the investigator runs on the Pi as streaming updates
+during the drive (next section). Anything that reads whole sessions waits
+until collection is inactive. The optional language interface runs
+wherever a host exists.
 
 ### 5. A learning loop around repairs and calibration
 
@@ -223,32 +235,68 @@ Refuse `engine_running` and unclassifiable states. This proposal authorizes
 no ECU writes. Reads and ordinary volatile diagnostics retain the existing
 project policy.
 
-## Model architecture and what "self-learning" means
+## Reasoning and learning while driving
 
-Use several small, purpose-specific components rather than asking one
-language model to learn numerical engine dynamics from raw telemetry.
+"Reason and self-improve while driving" is done by deterministic streaming
+methods on the Pi, not by a language model. They cost microseconds per
+update, the same order as work the daemon already does, so they can run
+live without competing with collection. They work at different timescales:
 
-| Responsibility | Starting candidate | Update mechanism |
-|---|---|---|
-| Predict behavior | Existing behavior surfaces and physical residuals | Periodic refits through the existing lifecycle |
-| Bound predictions | Conformal intervals per operating mode or baro band, calibrated one held-out drive at a time | Recalibrated with each promoted reference |
-| Detect change | CUSUM/GLR on decorrelated residuals against the frozen reference | Fixed tests; alarms become evidence |
-| Track slow parameters | Recursive least squares or a Kalman filter over a few physical parameters, such as VE or an injector-scale term | Online, isolated as the adaptive candidate |
-| Represent temporal behavior | Existing sequence model; evaluate a small GRU/TCN only for a demonstrated gap | Batch training on recorded sequences with recalibration |
-| Rank hypotheses, choose tests | Fault signature matrix and expected-information-gain selection | Grows with the model equations and hypothesis catalog |
-| Remember findings | Structured evidence and intervention store | Append evidence, outcomes, and explicit supersession |
-| Translate and explain | Quantized 4B-class Qwen using tools and retrieved evidence | Fixed weights initially; better context and tools over time |
+| Loop | When it runs | Where | What it decides or learns |
+|---|---|---|---|
+| Residuals and change detection | Every tick | Pi, live | Whether behavior departs from the reference, and when it started |
+| Parameter tracking | Every qualifying sample | Pi, live | Slowly varying physical parameters (the adaptive candidate) |
+| Hypothesis tracking | When evidence changes | Pi, live | How likely each open explanation now is |
+| Opportunistic measurement | When the drive enters a useful region | Pi, live | What to capture next, and when |
+| Promotion and memory | After the drive | Pi when parked, or laptop | Which candidates replace references; outcomes recorded |
+| Model structure and calibration | Occasionally | Laptop | Residual generators, fault signature matrix, conformal calibration, refits |
 
-The language model's job is narrower than "reason about the engine". It
-turns an operator question into tool calls, explains computed results,
-and suggests hypotheses outside the catalog, marked unscored until a
-residual can test them. It does not rank hypotheses or choose
-measurements; those are computed.
+**Opportunistic measurement is the live form of capability 4.** The
+investigator keeps two lists: operating regions that would separate its
+open hypotheses, and operating cells where the references lack data. When
+the drive enters one, it raises polling on the channels that matter or
+opens a capture window. The capture profiles and bus-rate limits bound
+what it can ask for, and a capture the operator owns always wins. It does
+not ask the driver to perform actions mid-drive; the driver cannot read or
+announce pulls, so it waits for the drive to produce the condition. This
+is online experiment design applied to the drive the operator is already
+doing.
 
-The reasoning layer that exists today is Claude Code over MCP on the
-laptop. Expose the store and evidence tools through MCP first, so Claude
-can use them now and an on-Pi model can use the same tools later. The real
-investigations that result become the evaluation set.
+Rules for the live loop:
+
+- **Streaming only.** Each update touches the new sample and a small state.
+  Nothing reads a whole session while collecting; a `nice -19` pandas run
+  once cost a 3-minute outage and 150k dropped records.
+- **Measured cost.** Run it inside the existing inference tick or its
+  scoring child (`src/daemon/inference_worker.py`), and check its per-tick
+  cost against the missed-tick budget before enabling it.
+- **Deterministic decisions.** Nothing live waits on a language model.
+- **Learning is isolated.** The adaptive candidate learns live; a reference
+  is replaced only after the drive, through held-out evaluation.
+- **No ECU writes.** Nothing adaptive writes the ECU. Non-volatile writes
+  stay forbidden while moving and always need the operator's explicit
+  permission for that operation.
+
+## Models that run on the Pi
+
+Use several small, purpose-specific models rather than asking one language
+model to learn engine dynamics from raw telemetry. Costs below are expected
+orders of magnitude, to be measured on the Pi before enabling each one.
+
+| Responsibility | Model | Runs | Cost per update | How it improves |
+|---|---|---|---|---|
+| Predict behavior | Existing behavior surfaces and physical residuals | Pi, live | Arithmetic and a surface lookup | Periodic refits through the existing lifecycle |
+| Flag anomalies (existing) | Isolation Forest and the sequence autoencoder | Pi, live (scoring child, 1 Hz) | Existing budget | Batch retraining |
+| Detect change | CUSUM for a known shift size; GLR when size and time are unknown; Bayesian online changepoint detection as an option | Pi, live | CUSUM constant; windowed GLR linear in the window | Fixed tests; alarms become evidence |
+| Bound predictions | Conformal intervals per operating mode or baro band | Calibrated on the laptop; checked live on the Pi | A quantile lookup | Recalibrated with each promoted reference |
+| Track slow parameters | Recursive least squares with forgetting, a Kalman random-walk filter, or a discount dynamic linear model | Pi, live | Quadratic in the few parameters tracked (≤ ~10) | Online, as the isolated adaptive candidate |
+| Track hypotheses | Bayesian update over a discrete hypothesis set, using fault-signature evidence | Pi, live | Hypotheses × residuals | As evidence arrives |
+| Choose the next measurement | Expected information gain divided by cost | Pi, live, when evidence changes | Hypotheses × candidate measurements | As hypothesis probabilities change |
+| Design residuals | Structural analysis and the fault signature matrix (Fault Diagnosis Toolbox) | Laptop | Offline | When the model equations change |
+| Represent temporal behavior | Existing sequence model; a small GRU/TCN only for a demonstrated gap | Pi, live | Existing budget | Batch training with recalibration |
+| Smooth surfaces with uncertainty | Sparse online Gaussian process | Laptop | Too heavy for live use on the Pi | Offline |
+| Remember findings | Structured evidence and intervention store | Pi appends; laptop analyses | An append | Append evidence, outcomes, and explicit supersession |
+| Explain (optional) | A language model ([below](#optional-language-interface-lower-priority)) | Phone, sidecar, laptop, hosted; Pi last | Minutes per answer on the Pi | Fixed weights; improves through memory |
 
 ### Adaptive numerical models
 
@@ -284,16 +332,12 @@ Use instead:
   model (West & Harrison, *Bayesian Forecasting and Dynamic Models*) also
   learns its own observation noise. All of these wind up on idle-heavy
   drives that barely excite the parameters, so gate updates on excitation.
-
-Keep the LLM's weights fixed initially. The system still learns through
-numerical model updates, growing evidence, operator feedback, and remembered
-experiment outcomes. Continual LLM fine-tuning on the Pi is not required for
-these capabilities. An MoE architecture does not itself provide continual
-learning or persistent memory.
-
-Later, evaluate domain distillation as a separate, offline improvement to
-the reasoning layer (below). This does not require continual LLM training
-during operation or replace numerical learning and persistent memory.
+- **Changepoints as evidence.** Bayesian online changepoint detection
+  ([Adams & MacKay 2007](https://arxiv.org/abs/0710.3742)) gives a
+  probability over when a change started, which can feed hypothesis
+  tracking directly. It assumes piecewise-constant behavior, so it suits
+  step changes (a flash, a part swap, a failing sensor) better than slow
+  wear.
 
 ### Preserve a reference while learning
 
@@ -332,12 +376,131 @@ historical references and lineage; reuse the existing disposition and model
 lifecycle mechanisms. Streaming experiments are additive and gated by that
 framework, not an exception to it.
 
-## Pi hardware: what fits, and what 16 GB changes
+## Optional language interface (lower priority)
 
-**The current Pi is 8 GB. A 16 GB Pi 5 is an upgrade under consideration
-(operator, 2026-09-22).** Figures below are community measurements unless
-stated otherwise. Verify them on this installation before treating any of
-them as acceptance numbers.
+A language model adds a language layer to the deterministic brain; it is
+not the brain. Its job is narrow:
+
+- turn a question ("why did that alarm fire?") into calls to the Pi's
+  analysis tools;
+- explain computed results in plain language;
+- suggest hypotheses outside the catalog, marked unscored until a residual
+  can test them.
+
+It does not rank hypotheses, choose measurements, or decide anything live;
+those are computed. Every value it shows comes from an evidence record a
+tool produced.
+
+**It improves through memory, not training.** Its weights stay fixed.
+Each verified outcome becomes a retrievable past case and a short written
+lesson, in the pattern of Reflexion
+([Shinn et al. 2023](https://arxiv.org/abs/2303.11366)) and Voyager
+([Wang et al. 2023](https://arxiv.org/abs/2305.16291)). Lessons get the
+same treatment as the adaptive model: a lesson is a candidate until an
+outcome confirms it, otherwise the system reinforces its own mistakes.
+Continual fine-tuning is not required for any capability here. An MoE
+architecture does not itself provide continual learning or persistent
+memory. Weight updates (distillation, below) stay an occasional, offline
+step.
+
+### Where it runs
+
+The tools stay on the Pi behind HTTP/MCP, and whichever host is available
+calls them. In priority order:
+
+1. **The phone, when it can.** A recent mid-to-high-end Android phone has
+   several times the Pi's memory bandwidth and a GPU or NPU for prompt
+   processing, and it is not bound by the Pi's key-off window. Sync the
+   trip digest and evidence records to it at trip end, so questions work
+   later with the Pi off; the [companion-app plan](../companion-app-plan.md)
+   already has the phone holding downloaded bundles. Phones vary widely:
+   measure per device, and expect a 4–6 GB budget phone to be unable to run
+   a 4B model. A browser PWA needs a WebGPU runtime; a native app has more
+   options. Phone performance has not been researched or measured yet.
+2. **A sidecar box beside the Pi** (for example a Jetson). This is the only
+   way a model runs *during* a drive without touching the collector.
+3. **The laptop with Claude Code over MCP**, when present. This is the
+   reasoning layer that exists today. Expose the store and evidence tools
+   through MCP first, so Claude can use them now and any other host can use
+   the same tools later. The real investigations that result become the
+   evaluation set.
+4. **A hosted model, when there is any signal.** An evidence packet is a
+   few KB, so weak cellular is enough. Offline operation, an account and
+   its cost, and privacy keep this optional; on-device stays the fallback.
+5. **The Pi, last.** Only after the drive, within the parked window, and
+   never on the collector's CPU during collection. The next subsection has
+   the numbers.
+
+### Candidate models
+
+Surveyed 2026-09-22; none has yet been tested on this Pi or on the
+known-answer cases. Vendor tool-calling scores use different scales (one
+vendor reports two different values for the same competitor), so treat
+them as rough. SR = self-reported by the vendor; IND = independent.
+
+| Model | Released | Architecture | Q4 size | License | Why it is on the list | Watch out for |
+|---|---|---|---|---|---|---|
+| **Qwen3-4B-Instruct-2507** (baseline) | 2025-08 | Dense 4B, pure attention | ~2.5 GB | Apache-2.0 | No thinking mode; prompt cache just works. SR BFCL-v3 61.9; IND BFCL v4 overall 35.7 ([BFCL](https://gorilla.cs.berkeley.edu/data_overall.csv)); Qwen3-4B 5.7 % on Vectara's hallucination test | Pi speed of its class: 3.9–5.2 tok/s generation, 11–16 tok/s prompt at Q4_K_M |
+| **LFM2.5-2.6B** | 2026-08 | Dense hybrid: 22 conv + 8 attention layers | 1.59 GB | LFM Open License v1.0 (free under $10M annual revenue) | SR BFCL-v4 56.9 against 50.6 for Qwen3.5-4B ([card](https://huggingface.co/LiquidAI/LFM2.5-2.6B)). IND on the Pi's core type (RK3588 A76): ~30 tok/s prompt, ~14 generation ([Turing Pi](https://turingpi.com/lfm2-5-2-6b-rk3588-llama-cpp-turing-pi-rk1/)). Smallest footprint | Always reasons, with no documented off switch. Generation on the Pi's lower bandwidth should be nearer ~7 tok/s (estimate). Hybrid-cache caveats below |
+| **LFM2.5-8B-A1B** | 2026-05 | MoE: 8.3B total, 1.5B active; 18 conv + 6 attention | 4.84 GB (Q4_0) | LFM Open License v1.0 | Tests "fewer active parameters, faster prompts". SR BFCL-v3 64.8, BFCL-v4 49.7, IFEval 91.8 ([blog](https://www.liquid.ai/blog/lfm2-5-8b-a1b)). Estimated Pi 20–35 tok/s prompt, 8–11 generation | No independent Pi measurement. Always reasons. At the 8 GB board's limit: cannot sit beside the digest, and must stay resident (`--mlock`) |
+| **Granite 4.2-3B** | 2026-08 | Dense 3B, pure attention | 2.24 GB | Apache-2.0 | Thinking can be turned off; prompt cache just works. SR BFCL-v4 52.4, IFBench 74.3 ([card](https://huggingface.co/ibm-granite/granite-4.2-3b)) | No independent evaluations yet |
+| **Qwen3.5-4B**, thinking off | 2026-03 | Hybrid: Gated DeltaNet + attention | 2.74 GB | Apache-2.0 | IND Intelligence Index 27 against 18 for Qwen3-4B-2507 ([Artificial Analysis](https://artificialanalysis.ai/articles/qwen3-5-small-models)). Better quality, not faster | IND 80 % hallucination rate on AA-Omniscience; verbose; llama-server cache and tool-call issues |
+| **Gemma 4 E2B / E4B** | 2026-04 | Dense, edge-optimized | ~3 / 4.98 GB | Apache-2.0 (new with Gemma 4) | IND Pi 5 llama.cpp ([pi5-llm-arena](https://github.com/leemailto2008/pi5-llm-arena)): E2B 45 tok/s prompt, 7.0 generation; E4B 22.5 and 3.7. Built for phones, so a natural candidate for the phone host | Weak tool calling (E4B BFCL-v4 33.9, reported by a competitor); open llama.cpp tool-parser bugs |
+
+Considered and set aside:
+- **Granite-4.0-H-Tiny** (Apache MoE, 7B / 1B active): weaker tool scores and no CPU speed numbers.
+- **Nemotron 3 Nano 4B**: NVIDIA licence, and no speed gain over a 4B.
+- **Phi-4-mini** (MIT): 23.5 % on Vectara's hallucination test.
+- **Ministral 3 3B** (Apache): no published tool-calling scores.
+- **SmolLM3-3B** (Apache, fully open): tool score only on a subset.
+- **Llama 3.2 3B**: IND BFCL v4 22.0.
+- **Gemma 3 4B**: IND BFCL v4 19.3, and Gemma terms.
+- **xLAM-2-3b-fc-r**: the best independent small-model BFCL v4 score (41.2), but CC-BY-NC and function calling only.
+
+What the survey found:
+
+- **Fewer active parameters do speed up prompt reading, but less than
+  proportionally.** One independent x86 CPU run read prompts at about 70 %
+  of a dense model with the same active size. Expect roughly 1.5–2.5× over
+  a dense 4B, not the full ratio. No ~1B-active MoE has an independent Pi 5
+  measurement.
+- **Try Q4_0 first on the Pi's cores.** llama.cpp repacks Q4_0 into
+  dot-product layouts at load time, which may speed up the baseline too.
+- **Hybrid models complicate prompt-cache reuse.** LFM2.5, Granite-H,
+  Nemotron-H and Qwen3.5 cannot roll back their recurrent state, so
+  llama-server relies on context checkpoints.
+  - Reuse inside a running server works.
+  - Slot save/restore loses it
+    ([#25913](https://github.com/ggml-org/llama.cpp/issues/25913)).
+  - Templates that strip earlier thinking force a full re-read.
+  - Verify with `-lv 4`.
+  - Pure-attention models (Qwen3-4B-2507, Granite 4.2-3B) avoid all of
+    this.
+- **Always-reasoning models** spend part of any speed gain on thinking
+  tokens.
+- **No benchmark tests citing only tool-returned values.**
+  - The closest proxy, [Vectara's hallucination test](https://github.com/vectara/hallucination-leaderboard),
+    gives Qwen3-4B 5.7 %. Gemma 3 4B scores 6.4 %, but answers only 67 % of
+    prompts. Phi-4-mini scores 23.5 %.
+  - [AgentProp-Bench](https://arxiv.org/abs/2604.16706) found agents
+    claiming tool results they never obtained.
+  - A comparison of 2–3B models found a plan → execute → verify → recover
+    harness mattered more than the choice of model
+    ([arXiv 2605.12129](https://arxiv.org/abs/2605.12129)).
+
+  Enforce the rule mechanically: a JSON-schema grammar for the output, then
+  a check of every cited value against the evidence records (LLM roadmap
+  S.5). With that in place, model differences on this point matter much
+  less.
+
+### If it is hosted on the Pi
+
+**The current Pi is 8 GB. A 16 GB Pi 5 was considered (operator,
+2026-09-22).** A 16 GB board does nothing for reasoning *during* a drive,
+because it adds memory, not cores or bandwidth; the constraint there is
+contention with the collector. Figures below are community measurements
+unless stated otherwise. Verify them on this installation before treating
+any of them as acceptance numbers.
 
 **Speed is set by memory bandwidth, not RAM size.** Generating a token
 reads roughly the whole model from memory. The Pi 5 measures about
@@ -463,10 +626,14 @@ Remaining measurements:
 Sources above were consulted on 2026-09-22. Package support, model
 artifacts, and device performance need verification at implementation.
 
-## Optional domain distillation for engine management
+## Optional domain distillation for the language interface
 
-Distillation could make a small Qwen better at CANary's specific tasks while
-retaining a Pi-sized inference footprint. This is a hypothesis to evaluate,
+Lowest priority: this only makes sense once the language interface exists,
+a host is chosen, and the unmodified model has been measured on real
+investigations.
+
+Distillation could make a small model better at CANary's specific tasks
+while retaining a small inference footprint. This is a hypothesis to evaluate,
 not a promise that a 4B student will inherit all of a larger teacher's
 capabilities. [DeepSeek-R1](https://arxiv.org/abs/2501.12948) demonstrates
 distillation into smaller Qwen-based models; it does not establish engine
@@ -679,13 +846,8 @@ Add adaptive numerical modeling only where it improves this measured task.
 
 ## Future implementation checklist
 
-- [~] Reconcile target Pi RAM and record measured daemon/resource budgets.
-  *2026-09-22:* the current board is 8 GB. D02.9's OOM kill came at 7.7 GB
-  resident. 16 GB is an optional upgrade with the trigger above. The
-  daemon's normal 150–650 MB and the trip-end child's 4 GiB ceiling are
-  known; the LLM-side budgets are not yet measured.
-- [ ] Resolve D03.21 (memory limits actually enforced) before any
-  co-resident model; run that model as its own capped, preemptible unit.
+### Part A — the deterministic brain (priority)
+
 - [ ] Define required investigation, evidence, prediction, intervention, and
   outcome schemas with per-vehicle scope, valid and record times, and
   explicit applicability. Extend `tune_revisions.yaml` to hardware
@@ -693,7 +855,8 @@ Add adaptive numerical modeling only where it improves this measured task.
 - [ ] Mint evidence records from analysis tools. Replace free-text card
   evidence with evidence ids that must resolve (LLM roadmap S.5).
 - [ ] Connect existing analyses and structured cards to persistent records;
-  distinguish unsupported, missing, and contradictory evidence.
+  distinguish unsupported, missing, and contradictory evidence. Cards must
+  read completely with template text and no language model.
 - [ ] Settle the naturally aspirated WOT-lean investigation before teardown
   (supercharger-build NA2), or record it as superseded by the build.
 - [ ] Record the supercharger build as an intervention, with predictions
@@ -711,14 +874,45 @@ Add adaptive numerical modeling only where it improves this measured task.
   predictions scored before learning and independent-drive promotion
   checks. Start with recursive least squares or a Kalman filter over a few
   physical parameters.
+- [ ] Add hypothesis tracking and next-measurement selection by expected
+  information gain, with timing and capture-ownership constraints; evaluate
+  them over stored sessions and replay first.
+- [ ] Run the live loop on the Pi (residuals, change detection, parameter
+  tracking, hypothesis tracking) inside the inference tick or scoring
+  child. Measure per-tick cost against the missed-tick budget before
+  enabling it on a drive.
+- [ ] Add opportunistic measurement: when the drive enters a region that
+  separates open hypotheses or fills a reference gap, raise polling or
+  open a capture window within the profile's bus budget. Evaluate the
+  selection in replay before enabling it live; an operator-owned capture
+  always wins.
 - [ ] Expose the store and evidence tools over MCP, and use them from Claude
-  Code before any on-Pi model.
-- [ ] Benchmark Qwen3-4B-Instruct-2507 and Qwen3-4B Q4_K_M on those cases
-  and on the actual Pi. Select by evidence fidelity, prompt-processing
-  time, and peak memory as well as generation speed. Re-test Qwen3.5-4B
-  once the llama.cpp hybrid-cache issues close.
+  Code on the laptop.
+- [ ] Demonstrate an end-to-end retained investigation with no language
+  model: recognize recurrence, retrieve prior evidence, identify missing
+  inputs, choose a useful next measurement, and evaluate its result.
+
+### Part B — the optional language interface (lower priority)
+
+- [~] Reconcile target Pi RAM and record measured daemon/resource budgets.
+  *2026-09-22:* the current board is 8 GB. D02.9's OOM kill came at 7.7 GB
+  resident. 16 GB is an optional upgrade with the trigger above, and does
+  not help reasoning during a drive. The daemon's normal 150–650 MB and the
+  trip-end child's 4 GiB ceiling are known; the model-side budgets are not
+  yet measured.
+- [ ] Sync the trip digest and evidence records to the phone at trip end,
+  so the interface can answer with the Pi off.
+- [ ] Measure candidate models on a representative mid-range and budget
+  Android phone before choosing phone hosting.
 - [ ] Add retrieval and constrained analysis-tool use; validate generated
   references and structured outputs against actual tool results.
+- [ ] Record verified outcomes as retrievable cases and lessons, gated as
+  candidates until an outcome confirms them.
+- [ ] For Pi hosting only: resolve D03.21 (memory limits actually enforced)
+  first, and run the model as its own capped, preemptible unit.
+- [ ] Benchmark the shortlisted candidate models on the known-answer cases and
+  on each real host. Select by evidence fidelity, prompt-processing time,
+  and peak memory as well as generation speed.
 - [ ] Measure skill files, retrieved past cases, and constrained tool calls
   against the unmodified model before any fine-tuning.
 - [ ] Build an independently split, verified fuel-investigation distillation
@@ -726,13 +920,8 @@ Add adaptive numerical modeling only where it improves this measured task.
   answers, and synthetic-example lineage, and use an open-weight teacher.
 - [ ] Compare a LoRA-distilled student against the unmodified model with
   identical tools/retrieval; test adjacent-task regressions and repeat the
-  comparison on the final quantized Pi artifact before selecting a release.
-- [ ] Add next-measurement recommendations computed by expected information
-  gain, with timing and capture ownership constraints; evaluate automatic
-  selection separately before enabling it.
-- [ ] Demonstrate an end-to-end retained investigation: recognize recurrence,
-  retrieve prior evidence, identify missing inputs, choose a useful next
-  measurement, and evaluate its result.
+  comparison on the final quantized artifact on its host before selecting a
+  release.
 
 Acceptance is traceable understanding, not convincing prose. A successful
 case can show exactly why its conclusion is supported, where its limits
