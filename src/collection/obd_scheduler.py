@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.collection import bus_budget, capture_lifetime
+from src.collection.calibration_id import CalibrationIdSpec
 from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
 from src.collection.hybrid_cycle import (
     CycleAccounting,
@@ -496,6 +497,10 @@ class CanObdSpec:
     #: and every standalone recorder/test spec — caches nothing, so a walk
     #: restarts with each loop.
     discovery_key: str | None = None
+    #: The ECU calibration-id read (W02.2), resolved from the dids.yaml
+    #: access block. ``None`` — the default, and every standalone spec —
+    #: sends no identification request at all.
+    calibration_id: CalibrationIdSpec | None = None
 
 
 #: Desyncs the batch walk may attribute to one PID whose single-read width
@@ -691,6 +696,9 @@ class CanObdLoopStats:
     #: reads, and count the raw frames tapped *while* a probe was waiting —
     #: the frames the old synchronous path silently consumed.
     discovery_requests_sent: int = 0
+    #: ECU identification reads (the W02.2 calibration id): on the wire, so in
+    #: ``requests_sent``, but not channel reads.
+    identification_requests_sent: int = 0
     discovery_responses: int = 0
     discovery_negative_responses: int = 0
     discovery_timeouts: int = 0
@@ -807,7 +815,17 @@ class CanObdLoopStats:
 
 @dataclass(frozen=True)
 class _PollRequest:
-    kind: Literal["pid", "did", "memory", "session", "dtc", "custom", "service", "freeze_frame"]
+    kind: Literal[
+        "pid",
+        "did",
+        "memory",
+        "session",
+        "dtc",
+        "custom",
+        "service",
+        "freeze_frame",
+        "identification",
+    ]
     service: int
     identifier: int
     request_id: int
@@ -2793,7 +2811,11 @@ def _receive_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
 
 def _session_control_metrics(stats: CanObdLoopStats) -> dict[str, Any]:
     channel_requests = max(
-        0, stats.requests_sent - stats.session_controls_sent - stats.discovery_requests_sent
+        0,
+        stats.requests_sent
+        - stats.session_controls_sent
+        - stats.discovery_requests_sent
+        - stats.identification_requests_sent,
     )
     return {
         "sent": stats.session_controls_sent,

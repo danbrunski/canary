@@ -114,6 +114,21 @@ def session_started_at(session: str | Path) -> datetime | None:
     return _parse(session)
 
 
+def calibration_matches(
+    ecu_calibration_id: str | None, registry_calibration_id: str | None
+) -> bool | None:
+    """Whether the ECU-reported id agrees with the registry's, by exact equality.
+
+    ``None`` when either side is unknown: an unread ECU, or a revision recorded
+    without a ``calibration_id``. Never derived from the revision *name* —
+    ``ZS44A-20260920`` and ``1ZS44A00000`` are different namespaces, and
+    string-matching one against the other would call any ZS44A flash a match.
+    """
+    if not ecu_calibration_id or not registry_calibration_id:
+        return None
+    return ecu_calibration_id == registry_calibration_id
+
+
 def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:
     """Load the registry, or ``None`` when the vehicle has none recorded."""
     if not path.exists():
@@ -122,6 +137,7 @@ def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:
 
 
 __all__ = [
+    "calibration_matches",
     "TuneRevision",
     "TuneRevisionRegistry",
     "load_tune_revisions",

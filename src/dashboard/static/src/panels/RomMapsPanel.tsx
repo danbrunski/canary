@@ -7,17 +7,27 @@ import { liveValue, mapColor, tracePosition, TRACE_MAX_SKEW_MS } from "../lib/ro
 import type { RomInspection, RomTable } from "../lib/romMaps";
 import { buttonClass, inputClass } from "../styles";
 import type { StatusResponse } from "../types";
+import type { LoadedRom } from "../hooks/useTuningContext";
 
 interface Props {
   token: string;
   channels: Map<string, ChannelSnapshot>;
   status: StatusResponse | null;
+  /** Engine Tuning group state (W02.5): when given, the parsed ROM lives
+   *  there and survives navigation between the group's pages. Never
+   *  persisted to storage. Omitted, the panel holds it itself. */
+  loaded?: LoadedRom | null;
+  onLoadedChange?: (rom: LoadedRom | null) => void;
 }
 
-export function RomMapsPanel({ token, channels, status }: Props) {
-  const [rom, setRom] = useState<RomInspection | null>(null);
-  const [filename, setFilename] = useState("");
-  const [slot, setSlot] = useState(1);
+export function RomMapsPanel({ token, channels, status, loaded, onLoadedChange }: Props) {
+  const [ownRom, setOwnRom] = useState<LoadedRom | null>(null);
+  const current = loaded !== undefined ? loaded : ownRom;
+  const setCurrent = onLoadedChange ?? setOwnRom;
+  const rom: RomInspection | null = current?.inspection ?? null;
+  const [pendingName, setPendingName] = useState("");
+  const filename = current?.filename ?? pendingName;
+  const [slot, setSlot] = useState(() => current?.inspection.map_slots[0] ?? 1);
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,7 +43,7 @@ export function RomMapsPanel({ token, channels, status }: Props) {
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
-    setRom(null); setConfirmed(false); setError(""); setFilename(file.name); setLoading(true);
+    setCurrent(null); setConfirmed(false); setError(""); setPendingName(file.name); setLoading(true);
     try {
       if (!file.name.toLowerCase().endsWith(".osirisrom")) throw new Error("Choose an .OsirisROM file.");
       if (!file.size || file.size > 2 * 1024 * 1024) throw new Error("ROM must be nonempty and at most 2 MiB.");
@@ -42,7 +52,7 @@ export function RomMapsPanel({ token, channels, status }: Props) {
         body: file, signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      setRom(data); setSlot(data.map_slots[0]);
+      setCurrent({ filename: file.name, inspection: data }); setSlot(data.map_slots[0]);
     } catch (err) {
       if (!controller.signal.aborted) setError(err instanceof Error ? err.message : "ROM could not be loaded.");
     } finally {
@@ -82,7 +92,7 @@ export function RomMapsPanel({ token, channels, status }: Props) {
             {rom?.map_slots.map((number) => <option key={number} value={number}>Map {number}</option>)}
           </select>
         </label>
-        {rom && <button className={buttonClass} onClick={() => { setRom(null); setConfirmed(false); setFilename(""); }}>Unload ROM</button>}
+        {rom && <button className={buttonClass} onClick={() => { setCurrent(null); setConfirmed(false); setPendingName(""); }}>Unload ROM</button>}
       </div>
       {!token && <p role="status">Enter the dashboard control token to inspect a ROM.</p>}
       {loading && <p role="status">Decoding {filename}…</p>}

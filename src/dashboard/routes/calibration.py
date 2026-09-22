@@ -21,6 +21,7 @@ from src.control.calibration import (
     append_flash,
     calibration_payload,
     memory_channels_payload,
+    record_verify_results,
     seed_operational_memory,
 )
 from src.dashboard.security import _client_is_loopback, _require_control_auth
@@ -122,6 +123,7 @@ def register_calibration_routes(
                 )
         finally:
             bus.shutdown()
+        record_verify_results(config, {verdict.channel: verdict.outcome for verdict in verdicts})
 
         notes: list[str] = []
         changed = 0

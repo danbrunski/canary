@@ -23,6 +23,7 @@ from typing import Any
 
 from src.analysis.tune_revisions import load_tune_revisions
 from src.collection import tuning_profile
+from src.collection.calibration_id import resolve_calibration_id_spec
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
     CanObdSpec,
@@ -39,6 +40,7 @@ from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
+    did_access,
     did_response_widths,
     known_did_names,
     memory_channels,
@@ -49,6 +51,7 @@ from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.config import CanaryConfig
+from src.control.calibration import active_registry_path
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -153,10 +156,13 @@ def default_collectors(
             dict.fromkeys(name for profile in capture_catalog.profiles for name in profile.memory)
         )
         usable_memory = [c for c in memory_channels() if c.name in selected_memory]
-        registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+        # The operational registry (a flash recorded through the daemon, W06.5)
+        # wins over the tracked profile copy, same as /control/calibration.
+        registry = load_tune_revisions(active_registry_path(config))
         current = None if registry is None else registry.at(datetime.now(UTC))
         tuning_profile.configure_running_tune_revision(
-            None if current is None else current.revision
+            None if current is None else current.revision,
+            calibration_id=None if current is None else current.calibration_id,
         )
         can_obd_spec = CanObdSpec(
             can=config.hardware.can,
@@ -193,6 +199,9 @@ def default_collectors(
                 config.vehicle.model,
                 config.vehicle.year,
             ),
+            # W02.2: the ECU's own calibration id, read per the vehicle's
+            # dids.yaml access block (which session it needs is data).
+            calibration_id=resolve_calibration_id_spec(did_access()),
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

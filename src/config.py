@@ -908,6 +908,16 @@ class NonvolatileWriteConfig(_Strict):
     ups_runtime_margin_seconds: float = Field(default=120.0, ge=0.0)
 
 
+class TuningReadinessConfig(_Strict):
+    """Floors for the ``/status.tuning_readiness`` chips (W02.4).
+
+    Status only: nothing refuses an action on these. The flash interlocks
+    keep their own floors in ``nonvolatile_write``.
+    """
+
+    min_ups_soc_percent: float = Field(default=40.0, ge=0.0, le=100.0)
+
+
 class ProfilesConfig(_Strict):
     """Multi-vehicle profile resolution (see ``src/profiles.py``).
 
@@ -1000,6 +1010,7 @@ class CanaryConfig(_Strict):
     notifications: NotificationsConfig = NotificationsConfig()
     online_training: OnlineTrainingConfig = OnlineTrainingConfig()
     nonvolatile_write: NonvolatileWriteConfig = NonvolatileWriteConfig()
+    tuning_readiness: TuningReadinessConfig = TuningReadinessConfig()
     autotag: AutoTagConfig = AutoTagConfig()
     llm_assist: LLMAssistConfig = LLMAssistConfig()
 

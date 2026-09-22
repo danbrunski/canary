@@ -13,6 +13,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+from src.analysis.tune_revisions import calibration_matches
 from src.collection import capture_generation, capture_lifetime
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.request_eligibility import Eligibility, ProfileClass, evaluate
@@ -64,6 +65,10 @@ _running_tune_revision: str | None = None
 _ecu_calibration_id: str | None = None
 _ecu_calibration_read_at: str | None = None
 _ecu_calibration_changed = False
+#: The running revision's recorded ECU id (``TuneRevision.calibration_id``).
+_registry_calibration_id: str | None = None
+#: The (ecu, registry) pair a mismatch WARNING was last logged for.
+_ecu_calibration_mismatch_logged: tuple[str, str | None] | None = None
 #: Polling suspended while a capture stays open. Process state, like the
 #: active profile: a restart resumes collecting rather than coming back up
 #: silently paused.
@@ -91,16 +96,24 @@ def is_configured() -> bool:
         return _configured
 
 
-def configure_running_tune_revision(running_tune_revision: str | None) -> None:
-    """Record which calibration the registry says is running."""
-    global _running_tune_revision
+def configure_running_tune_revision(
+    running_tune_revision: str | None, *, calibration_id: str | None = None
+) -> None:
+    """Record which calibration the registry says is running.
+
+    ``calibration_id`` is that revision's recorded ECU id, the thing an
+    ECU-reported id is compared against (W02.3).
+    """
+    global _running_tune_revision, _registry_calibration_id
     with _lock:
         _running_tune_revision = running_tune_revision
+        _registry_calibration_id = calibration_id
 
 
 def record_ecu_calibration_id(calibration_id: str | None) -> None:
-    """Cache one connection's local-identifier read and flag changes loudly."""
+    """Cache one local-identifier read and flag a change or mismatch loudly (W02.3)."""
     global _ecu_calibration_id, _ecu_calibration_read_at, _ecu_calibration_changed
+    global _ecu_calibration_mismatch_logged
     if not calibration_id:
         return
     with _lock:
@@ -112,6 +125,24 @@ def record_ecu_calibration_id(calibration_id: str | None) -> None:
             )
         _ecu_calibration_id = calibration_id
         _ecu_calibration_read_at = datetime.now(UTC).isoformat()
+        registry_id = _registry_calibration_id
+        revision = _running_tune_revision
+        if calibration_matches(calibration_id, registry_id) is False:
+            # Once per distinct pair: the id is re-read every few minutes,
+            # and a line per read would bury the one that matters.
+            if _ecu_calibration_mismatch_logged != (calibration_id, registry_id):
+                _ecu_calibration_mismatch_logged = (calibration_id, registry_id)
+                log.warning(
+                    "ECU reports a calibration the flash history does not contain; "
+                    "record the flash before trusting any RAM address",
+                    extra={
+                        "ecu_calibration_id": calibration_id,
+                        "registry_calibration_id": registry_id,
+                        "running_tune_revision": revision,
+                    },
+                )
+        else:
+            _ecu_calibration_mismatch_logged = None
 
 
 def calibration_snapshot() -> dict[str, Any]:
@@ -121,7 +152,19 @@ def calibration_snapshot() -> dict[str, Any]:
             "ecu_calibration_read_at": _ecu_calibration_read_at,
             "ecu_calibration_changed": _ecu_calibration_changed,
             "running_tune_revision": _running_tune_revision,
+            "registry_calibration_id": _registry_calibration_id,
         }
+
+
+def reset_ecu_calibration() -> None:
+    """Forget every ECU calibration read — for tests; the daemon never calls it."""
+    global _ecu_calibration_id, _ecu_calibration_read_at, _ecu_calibration_changed
+    global _ecu_calibration_mismatch_logged
+    with _lock:
+        _ecu_calibration_id = None
+        _ecu_calibration_read_at = None
+        _ecu_calibration_changed = False
+        _ecu_calibration_mismatch_logged = None
 
 
 def configure_did_aliases(aliases: dict[str, str]) -> None:
@@ -631,6 +674,7 @@ __all__ = [
     "configure_running_tune_revision",
     "calibration_snapshot",
     "record_ecu_calibration_id",
+    "reset_ecu_calibration",
     "is_active",
     "is_configured",
     "is_paused",

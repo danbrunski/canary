@@ -207,6 +207,7 @@ def create_app(
         sequence_detector_controller=sequence_detector_controller,
         inference_timing=inference_timing,
         live_source=live_source,
+        ups_status_path=ups_status_path,
     )
     register_control_routes(
         app,

@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import type { ScoresBySource } from "../hooks/useScoreStream";
+import { useTuningContext, type TuningContext } from "../hooks/useTuningContext";
 import { DEFAULT_ITEM, NAV, defaultItemForGroup } from "../nav";
 import {
   cn,
@@ -53,6 +54,7 @@ import { TpmsPanel } from "./TpmsPanel";
 import { RomMapsPanel } from "./RomMapsPanel";
 import { LoggingPage } from "./tuning/LoggingPage";
 import { CalibrationPage } from "./tuning/CalibrationPage";
+import { TuningContextBar } from "./tuning/TuningContextBar";
 
 export interface DashboardData {
   mode: AppMode;
@@ -81,6 +83,9 @@ interface WorkbenchProps {
  *  so adding the next panel never reignites the "which tab?" question. */
 export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
   const content = useRef<HTMLDivElement>(null);
+  // Engine Tuning group state (W02.5): owned here, above the pages, so the
+  // selected log and loaded ROM survive navigation between them.
+  const tuning = useTuningContext();
   // The panel column keeps its own scroll offset, so a new panel would open
   // mid-scroll at wherever the previous one was left.
   useEffect(() => {
@@ -116,8 +121,13 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
         ))}
       </nav>
       <div ref={content} className={workbenchContentClass}>
+        {active.startsWith("tuning-") && (
+          <div className="mb-[1.15rem]">
+            <TuningContextBar status={data.status} context={tuning} onNavigate={onNavigate} />
+          </div>
+        )}
         <div className={cn(responsiveGridClass, "grid-cols-1")}>
-          {renderItem(active, data, onNavigate)}
+          {renderItem(active, data, onNavigate, tuning)}
         </div>
       </div>
     </div>
@@ -128,10 +138,19 @@ function renderItem(
   item: WorkbenchItem,
   d: DashboardData,
   onNavigate: (item: WorkbenchItem) => void,
+  tuning: TuningContext,
 ) {
   switch (item) {
     case "tuning-rom-maps":
-      return <RomMapsPanel token={d.token} channels={d.channels} status={d.status} />;
+      return (
+        <RomMapsPanel
+          token={d.token}
+          channels={d.channels}
+          status={d.status}
+          loaded={tuning.loadedRom}
+          onLoadedChange={tuning.setLoadedRom}
+        />
+      );
     case "system-data-sources":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,7 +10,12 @@ from typing import Any
 
 import yaml
 
-from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry, load_tune_revisions
+from src.analysis.tune_revisions import (
+    TuneRevision,
+    TuneRevisionRegistry,
+    calibration_matches,
+    load_tune_revisions,
+)
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
@@ -54,23 +60,46 @@ def active_memory_path(config: CanaryConfig, source: Path) -> Path:
     return override if override.exists() else source
 
 
-def calibration_payload(config: CanaryConfig) -> dict[str, Any]:
+def calibration_status(config: CanaryConfig) -> dict[str, Any]:
+    """The running-calibration facts ``/status`` and ``/control/calibration`` share.
+
+    One function, so the two cannot disagree about whether the ECU matches
+    the flash history. The registry is re-read each call: an appended flash
+    or a pulled registry edit shows up without a restart.
+    """
     registry = load_tune_revisions(active_registry_path(config))
     running = None if registry is None else registry.at(datetime.now(UTC))
     ecu = tuning_profile.calibration_snapshot()
     calibration_id = ecu["ecu_calibration_id"]
-    matches = (
-        None
-        if calibration_id is None or running is None or running.calibration_id is None
-        else calibration_id == running.calibration_id
-    )
+    registry_id = None if running is None else running.calibration_id
+    matches = calibration_matches(calibration_id, registry_id)
+    changed = bool(ecu["ecu_calibration_changed"])
+    reason: str | None = None
+    if matches is False:
+        reason = (
+            f"ECU reports {calibration_id}, flash history's running revision "
+            f"{running.revision if running is not None else '?'} records {registry_id}"
+        )
+    elif changed:
+        reason = "ECU calibration id changed during this daemon lifetime"
     return {
         "running_revision": None if running is None else running.revision,
-        "registry_calibration_id": None if running is None else running.calibration_id,
+        "registry_calibration_id": registry_id,
         "ecu_calibration_id": calibration_id,
         "ecu_calibration_read_at": ecu["ecu_calibration_read_at"],
         "calibration_matches_registry": matches,
-        "calibration_changed": ecu["ecu_calibration_changed"],
+        "calibration_changed": changed,
+        # W02.3: a reflash the registry has not heard about, or one seen
+        # happen underneath the running daemon. Loud by design.
+        "calibration_alert": reason is not None,
+        "calibration_alert_reason": reason,
+    }
+
+
+def calibration_payload(config: CanaryConfig) -> dict[str, Any]:
+    registry = load_tune_revisions(active_registry_path(config))
+    return {
+        **calibration_status(config),
         "history": []
         if registry is None
         else [revision.model_dump(mode="json") for revision in reversed(registry.revisions)],
@@ -127,8 +156,65 @@ def append_flash(config: CanaryConfig, revision: TuneRevision) -> TuneRevisionRe
         yaml.safe_dump(updated.model_dump(mode="json"), sort_keys=False),
         mkdir=True,
     )
-    tuning_profile.configure_running_tune_revision(revision.revision)
+    tuning_profile.configure_running_tune_revision(
+        revision.revision, calibration_id=revision.calibration_id
+    )
     return updated
+
+
+def last_verify_path(config: CanaryConfig) -> Path:
+    return operational_dir(config) / "memory_verify.json"
+
+
+def record_verify_results(config: CanaryConfig, verdicts: dict[str, str]) -> None:
+    """Persist the last known-answer outcome per channel (``pass``/``fail``/...).
+
+    Merged over the previous record, so verifying one window does not turn
+    every other channel back into "never ran".
+    """
+    previous = _read_verify_results(config)
+    stamp = datetime.now(UTC).isoformat()
+    merged = {**previous, **{name: {"outcome": out, "at": stamp} for name, out in verdicts.items()}}
+    atomic_write_text(last_verify_path(config), json.dumps(merged, indent=2), mkdir=True)
+
+
+def _read_verify_results(config: CanaryConfig) -> dict[str, dict[str, str]]:
+    path = last_verify_path(config)
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(name): entry
+        for name, entry in data.items()
+        if isinstance(entry, dict) and isinstance(entry.get("outcome"), str)
+    }
+
+
+def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
+    """Catalogued channels by their last known-answer verify: passed/failed/never ran.
+
+    ``unverifiable`` channels declare no check; they count as neither passed
+    nor failed, and are reported on their own so "never ran" means exactly
+    that.
+    """
+    did_map = load_did_map(active_memory_path(config, source))
+    results = _read_verify_results(config)
+    counts = {"total": 0, "passed": 0, "failed": 0, "unverifiable": 0, "never_ran": 0}
+    for channel in did_map.memory:
+        counts["total"] += 1
+        outcome = results.get(channel.name, {}).get("outcome")
+        if outcome == "pass":
+            counts["passed"] += 1
+        elif outcome == "fail":
+            counts["failed"] += 1
+        elif outcome == "unverifiable" or channel.known_answer is None:
+            counts["unverifiable"] += 1
+        else:
+            counts["never_ran"] += 1
+    return counts
 
 
 def seed_operational_memory(config: CanaryConfig, source: Path) -> Path:
@@ -144,6 +230,10 @@ __all__ = [
     "active_registry_path",
     "append_flash",
     "calibration_payload",
+    "calibration_status",
+    "last_verify_path",
+    "memory_verify_summary",
+    "record_verify_results",
     "memory_channel_state",
     "memory_channels_payload",
     "operational_memory_path",

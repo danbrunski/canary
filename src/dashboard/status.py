@@ -19,6 +19,13 @@ from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
 from src.control.capture_manifest import latest_capture_summary
 from src.control.replay_control import ReplayController
+from src.control.tuning_readiness import build_tuning_readiness
+from src.dashboard.ups import (
+    DEFAULT_UPS_STATUS_PATH,
+    build_power_snapshot,
+    read_keepalive_remaining,
+    read_watchdog_status,
+)
 from src.decode.engineering import physical_value
 from src.models.feature_spec_health import structural_blindness_snapshot
 from src.models.health import HealthMonitor
@@ -246,8 +253,16 @@ class StatusSnapshot:
     capture_profile: dict[str, Any] | None = None
     #: Most recent bounded capture, including why it ended (W03).
     last_capture: dict[str, Any] | None = None
+    #: Running calibration: the ECU's own id beside the flash history (W02.2,
+    #: W02.3) — :func:`src.control.calibration.calibration_status`. Its keys
+    #: are flattened into the payload's top level.
+    calibration: dict[str, Any] | None = None
+    #: Engine Tuning readiness chips (W02.4), ``{name: {ok, value, detail,
+    #: fix}}``. Status only; nothing refuses an action on it.
+    tuning_readiness: dict[str, dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        calibration = self.calibration or {}
         return {
             "storage_path": self.storage_path,
             "free_mb": round(self.free_mb, 1),
@@ -269,6 +284,15 @@ class StatusSnapshot:
             "bus_budget": self.bus_budget,
             "capture_profile": self.capture_profile,
             "last_capture": self.last_capture,
+            "ecu_calibration_id": calibration.get("ecu_calibration_id"),
+            "ecu_calibration_read_at": calibration.get("ecu_calibration_read_at"),
+            "calibration_matches_registry": calibration.get("calibration_matches_registry"),
+            "registry_revision": calibration.get("running_revision"),
+            "registry_calibration_id": calibration.get("registry_calibration_id"),
+            "ecu_calibration_changed": bool(calibration.get("calibration_changed")),
+            "calibration_alert": bool(calibration.get("calibration_alert")),
+            "calibration_alert_reason": calibration.get("calibration_alert_reason"),
+            "tuning_readiness": self.tuning_readiness,
         }
 
 
@@ -801,6 +825,8 @@ def build_status(
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
     sources: StatusSources | None = None,
+    ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
+    dids_path: Path | None = None,
 ) -> StatusSnapshot:
     """Assemble the status snapshot used by ``GET /status``.
 
@@ -866,6 +892,18 @@ def build_status(
         }
     if sources.inference is not None:
         detectors = {**(detectors or {}), "inference": sources.inference}
+    calibration = _calibration_status(config)
+    tuning_readiness = build_tuning_readiness(
+        power=build_power_snapshot(
+            read_watchdog_status(ups_status_path), read_keepalive_remaining()
+        ),
+        ups_floor_percent=config.tuning_readiness.min_ups_soc_percent,
+        free_mb=sources.free_mb,
+        storage_floor_mb=float(config.collection.storage_warning_mb),
+        memory_summary=_memory_verify_summary(config, dids_path),
+        calibration=calibration,
+        vehicle_state=sources.vehicle_state.state,
+    )
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=sources.free_mb,
@@ -887,7 +925,45 @@ def build_status(
         bus_budget=sources.bus_budget,
         capture_profile=sources.capture_profile,
         last_capture=latest_capture_summary(storage),
+        calibration=calibration,
+        tuning_readiness=tuning_readiness,
     )
+
+
+def _calibration_status(config: CanaryConfig) -> dict[str, Any]:
+    """:func:`calibration_status`, degraded rather than raised on a bad registry.
+
+    A typo in ``tune_revisions.yaml`` must not take ``/status`` down with it;
+    the ECU side is still reported, the comparison is unknown, and the alert
+    says why.
+    """
+    from src.control.calibration import calibration_status
+
+    try:
+        return calibration_status(config)
+    except Exception as exc:  # noqa: BLE001 - a status read must not fail on it
+        ecu = tuning_profile.calibration_snapshot()
+        return {
+            "running_revision": None,
+            "registry_calibration_id": None,
+            "ecu_calibration_id": ecu["ecu_calibration_id"],
+            "ecu_calibration_read_at": ecu["ecu_calibration_read_at"],
+            "calibration_matches_registry": None,
+            "calibration_changed": bool(ecu["ecu_calibration_changed"]),
+            "calibration_alert": True,
+            "calibration_alert_reason": f"flash history unreadable: {exc}",
+        }
+
+
+def _memory_verify_summary(config: CanaryConfig, dids_path: Path | None) -> dict[str, int] | None:
+    if dids_path is None:
+        return None
+    from src.control.calibration import memory_verify_summary
+
+    try:
+        return memory_verify_summary(config, dids_path)
+    except Exception:  # noqa: BLE001 - reported as "not readable", never a 500
+        return None
 
 
 __all__ = [

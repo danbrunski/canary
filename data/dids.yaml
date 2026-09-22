@@ -32,6 +32,19 @@ access:
   # answered positively and 64 returned NRC 0x12, while every interleaved DID
   # kept answering. A vehicle/calibration constraint, not a service-0x23 limit.
   max_memory_read_length: 63
+  # Service 0x21 local identifier 0x10 returns the calibration id as ASCII
+  # (`1ZS44A00000` on ZS44A). W02.1: it has only ever been sent inside
+  # session 0xC0 (tools/probe_local_identifier.py, 2026-09-20 KOEO), so
+  # whether it answers in the default session is not known. `unverified`
+  # rides the Mode-22 session window exactly like `extended`; a KOEO probe
+  # outside 0xC0 that answers flips this to `default` (read at connect).
+  calibration_id:
+    local_identifier: 0x10
+    session: unverified
+    evidence: >-
+      Answered 61 10 <ASCII> inside session 0xC0 on 2026-09-20 KOEO
+      (tools/probe_local_identifier.py sweep). Never sent in the default
+      session; the W02.1 probe is still owed.
   notes: |
     The 2008 Nissan ECM refuses service 0x22 in the default session
     (7F 22 80). Sub-functions 0x81/0x85/0xC0 all return positive 50 xx

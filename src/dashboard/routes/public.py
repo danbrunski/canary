@@ -33,6 +33,7 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
+from src.dashboard.ups import DEFAULT_UPS_STATUS_PATH
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.health import HealthMonitor
 
@@ -64,6 +65,7 @@ def register_public_routes(
     storage_writer: Any = None,
     inference_timing: InferenceTimingRecorder | None = None,
     live_source: Any = None,
+    ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
 ) -> None:
     # Owned here rather than passed in, so the vehicle-state derivation is
     # shared by both /status views of every app without any caller having to
@@ -107,6 +109,8 @@ def register_public_routes(
             storage_writer=storage_writer,
             inference_timing=inference_timing,
             sources=sources,
+            ups_status_path=ups_status_path,
+            dids_path=dids_path,
         ).to_dict()
         if replay_controller is not None:
             payload["replay"] = replay_controller.status().to_dict()

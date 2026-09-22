@@ -405,6 +405,11 @@ nonvolatile_write:
   min_ups_soc_percent: 40.0
   ups_runtime_margin_seconds: 120.0
 
+# Engine Tuning context-bar readiness chips (/status.tuning_readiness).
+# Status only -- nothing refuses an action on these.
+tuning_readiness:
+  min_ups_soc_percent: 40.0
+
 dashboard:
   host: 0.0.0.0
   port: 8000

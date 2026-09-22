@@ -127,7 +127,41 @@ export interface StatusResponse {
     end_reason: "operator_stop" | "profile_switch" | "daemon_shutdown" | "interrupted" | null;
     quality_verdict: string | null;
   } | null;
+  /** ECU-reported calibration id from service 0x21 (W02.2); null until read. */
+  ecu_calibration_id?: string | null;
+  ecu_calibration_read_at?: string | null;
+  /** True/false against the flash history's running revision; null when
+   *  either side is unknown. Never derived from the revision name. */
+  calibration_matches_registry?: boolean | null;
+  /** The flash history's running revision name and its recorded id. */
+  registry_revision?: string | null;
+  registry_calibration_id?: string | null;
+  /** The id changed during this daemon lifetime (W02.3). */
+  ecu_calibration_changed?: boolean;
+  /** A reflash the registry has not heard about, or one seen mid-lifetime. */
+  calibration_alert?: boolean;
+  calibration_alert_reason?: string | null;
+  /** Engine Tuning readiness chips (W02.4). Absent on an older daemon. */
+  tuning_readiness?: TuningReadiness | null;
 }
+
+/** One `/status.tuning_readiness` entry. `ok: null` = reported but not
+ *  judged (amber); `value: null` = not reported (grey), never green. */
+export interface ReadinessEntry {
+  ok: boolean | null;
+  value: unknown;
+  detail: string;
+  fix: string | null;
+}
+
+export type ReadinessKey =
+  | "ups_soc"
+  | "storage_free_mb"
+  | "memory_channels"
+  | "calibration"
+  | "vehicle_state";
+
+export type TuningReadiness = Partial<Record<ReadinessKey, ReadinessEntry>>;
 
 /** `/status.vehicle_state` — mirrors
  *  `src.dashboard.status.VehicleState.to_dict()`. */

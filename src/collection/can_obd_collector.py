@@ -34,6 +34,12 @@ import can
 from src.can_ids import parse_standard_can_id
 from src.collection import bus_budget, capture_generation, tuning_profile, tx_gate
 from src.collection import discovery as discovery_registry
+from src.collection.calibration_id import (
+    READ_LOCAL_IDENTIFIER_SERVICE,
+    CalibrationIdSchedule,
+    CalibrationIdSpec,
+    decode_calibration_id,
+)
 from src.collection.can_collector import (
     DEFAULT_RECONNECT_POLICY,
     RecordingResult,
@@ -380,6 +386,12 @@ def run_can_obd_loop(
     ecu_answered_since_did_batch_failure = False
     probe_single_pid = False
     probe_single_did = False
+    # W02.2: every loop start is a (re)connect, so the id is owed again now.
+    calibration_schedule = (
+        CalibrationIdSchedule(spec.calibration_id, now=time.monotonic())
+        if spec.calibration_id is not None
+        else None
+    )
     stats.loop_started_at = time.monotonic()
     while not _should_stop(stop_event, deadline_monotonic):
         now = time.monotonic()
@@ -537,6 +549,34 @@ def run_can_obd_loop(
             # A profile with no DIDs deliberately suspends the session
             # controller, concentrating the budget on its Mode-01 selection.
             eligible = partial(_loop_request_eligible, None, True, forced)
+
+        if (
+            calibration_schedule is not None
+            and calibration_schedule.due(now)
+            and now >= next_budget_at
+            and not tuning_profile.is_paused()
+            and calibration_schedule.phase_allows(
+                controller.phase if controller is not None else "none"
+            )
+        ):
+            # One identification read in this budget slot: inside a held
+            # Mode-22 window when the id needs the session, bare otherwise.
+            calibration_schedule.on_result(
+                _read_calibration_id(
+                    bus,
+                    calibration_schedule.spec,
+                    timeout_seconds=spec.request_timeout_seconds,
+                    on_frame=on_frame,
+                    stop_event=stop_event,
+                    stats=stats,
+                    deadline_monotonic=deadline_monotonic,
+                ),
+                now=time.monotonic(),
+            )
+            next_budget_at = max(
+                next_budget_at + 1.0 / bus_budget.effective(budget_rps), time.monotonic()
+            )
+            continue
 
         # A round ends at its deadline even while more work is due (C02.2);
         # this runs before any selection so no reading is ever stamped with
@@ -1908,6 +1948,53 @@ def _send_session_control(
         stats.request_timeouts += 1
         stats.session_control_timeouts += 1
     return SessionControlResult(ok=False, negative_response_code=result.negative_response_code)
+
+
+def _read_calibration_id(
+    bus: can.BusABC,
+    calibration: CalibrationIdSpec,
+    *,
+    timeout_seconds: float,
+    on_frame: Callable[[can.Message], None],
+    stop_event: threading.Event,
+    stats: CanObdLoopStats,
+    deadline_monotonic: float | None,
+) -> str | None:
+    """Send ``21 <lid>`` once; cache and return the ASCII id, or ``None``.
+
+    A read (ReadDataByLocalIdentifier). The result goes to
+    ``tuning_profile.record_ecu_calibration_id``, which flags a change or a
+    registry mismatch (W02.3).
+    """
+    request = _PollRequest(
+        kind="identification",
+        service=READ_LOCAL_IDENTIFIER_SERVICE,
+        identifier=calibration.local_identifier,
+        request_id=calibration.request_id,
+        channel="ECU_CALIBRATION_ID",
+    )
+    sent_before = stats.requests_sent
+    result = _query_with_tap(
+        bus,
+        request,
+        timeout_seconds=timeout_seconds,
+        on_frame=on_frame,
+        stop_event=stop_event,
+        stats=stats,
+        deadline_monotonic=deadline_monotonic,
+    )
+    stats.identification_requests_sent += stats.requests_sent - sent_before
+    calibration_id = decode_calibration_id(
+        None if result.response is None else bytes(result.response.payload)
+    )
+    if calibration_id is not None:
+        tuning_profile.record_ecu_calibration_id(calibration_id)
+    elif result.negative_response_code is not None:
+        log.debug(
+            "calibration id read refused",
+            extra={"nrc": result.negative_response_code},
+        )
+    return calibration_id
 
 
 @dataclass(frozen=True)

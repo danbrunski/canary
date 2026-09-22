@@ -44,7 +44,7 @@ Endpoint summary:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters |
+| `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02) |
 | `GET /config` | JSON view of the loaded `canary.yaml` |
 | `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk |
 | `GET /anomalies?since=...` | persisted anomaly events from JSONL |

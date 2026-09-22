@@ -96,6 +96,29 @@ class Evidence(_Strict):
         return self
 
 
+class CalibrationIdAccess(_Strict):
+    """How to read the ECU's own calibration id (service ``0x21``).
+
+    ``session`` is a measured vehicle fact, and deliberately has an
+    ``unverified`` value: the id read was only ever sent inside the Mode-22
+    session, so whether it also answers in the default session is unknown
+    until a key-on/engine-off probe says so (W02.1). ``unverified`` and
+    ``extended`` both ride the Mode-22 session window; only ``default``
+    lets the collector read it bare at connect time.
+    """
+
+    local_identifier: int = Field(ge=0, le=0xFF)
+    session: Literal["default", "extended", "unverified"]
+    #: Where the ``session`` value comes from — a probe, a capture, or why it
+    #: is still unverified. Required: an unexplained session fact is exactly
+    #: the kind of thing nobody re-checks.
+    evidence: str = Field(min_length=1)
+
+    @property
+    def needs_session(self) -> bool:
+        return self.session != "default"
+
+
 class DidAccess(_Strict):
     """How to reach Mode 22 on this vehicle's ECU.
 
@@ -125,7 +148,23 @@ class DidAccess(_Strict):
     #: can be declared, because an oversized window fails as a refusal at
     #: drive time rather than at load.
     max_memory_read_length: int | None = Field(default=None, ge=1)
+    #: The calibration-id local-identifier read and the session it needs.
+    #: Absent means this vehicle has no known calibration-id read.
+    calibration_id: CalibrationIdAccess | None = None
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _calibration_id_session(self) -> DidAccess:
+        if (
+            self.calibration_id is not None
+            and self.calibration_id.needs_session
+            and self.session is None
+        ):
+            raise ValueError(
+                "access.calibration_id needs a diagnostic session "
+                f"({self.calibration_id.session!r}) but access.session is not set"
+            )
+        return self
 
 
 class DidEntry(_Strict):
