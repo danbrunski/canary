@@ -6,37 +6,43 @@ export type AppMode = "driving" | "parked";
 /** Workbench navigation model (replaces the old flat `DashboardView`).
  *  One canonical home per panel; new Phase-6 panels register in `nav.tsx`
  *  without ever growing the five top-level groups. */
-export type NavGroupId = "live" | "diagnostics" | "models" | "data" | "control";
+export type NavGroupId = "observe" | "tuning" | "diagnose" | "model" | "system";
 
 export type WorkbenchItem =
-  | "live-charts"
-  | "live-alarms"
-  | "live-builder"
-  | "live-trip"
-  | "live-rom-maps"
+  | "observe-charts"
+  | "observe-alarms"
+  | "observe-builder"
+  | "observe-trip"
+  | "tuning-logging"
+  | "tuning-logs"
+  | "tuning-analysis"
+  | "tuning-rom-maps"
+  | "tuning-calibration"
+  | "tuning-rom-editor"
+  | "tuning-flash"
   | "diag-anomalies"
-  | "diag-data"
   | "diag-dtc"
   | "diag-monitors"
   | "diag-trends"
   | "diag-explore"
-  | "diag-system"
   | "diag-tpms"
   | "diag-llm-assist"
   | "models-overview"
   | "models-behavior"
   | "models-training"
-  | "models-tuning"
+  | "model-thresholds"
   | "models-health"
-  | "data-sessions"
-  | "data-health"
-  | "data-custom-pids"
-  | "data-export"
-  | "control-main"
-  | "control-test"
-  | "control-profiles"
-  | "control-capture"
-  | "control-power";
+  | "model-dataset-health"
+  | "system-data-sources"
+  | "system-sessions"
+  | "system-export"
+  | "system-custom-pids"
+  | "system-profiles"
+  | "system-capture-profiles"
+  | "system-power"
+  | "system-control"
+  | "system-test"
+  | "system-info";
 
 export interface NavItemDef {
   id: WorkbenchItem;
@@ -45,6 +51,8 @@ export interface NavItemDef {
   /** Backend exists; the rich UI is a later Phase-6 task (rendered as a
    *  labeled placeholder for now so the shell can already hold it). */
   placeholder?: boolean;
+  /** Reserved workflow whose implementation intentionally has not landed. */
+  planned?: boolean;
 }
 
 export interface NavGroupDef {

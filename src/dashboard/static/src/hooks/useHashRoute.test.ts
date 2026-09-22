@@ -4,6 +4,37 @@ import { afterEach, describe, expect, it } from "vitest";
 import { useHashRoute } from "./useHashRoute";
 import { useTheme } from "./useTheme";
 
+const OLD_ITEM_ROUTES = {
+  "live-charts": "observe-charts",
+  "live-alarms": "observe-alarms",
+  "live-builder": "observe-builder",
+  "live-trip": "observe-trip",
+  "live-rom-maps": "tuning-rom-maps",
+  "diag-anomalies": "diag-anomalies",
+  "diag-data": "system-data-sources",
+  "diag-dtc": "diag-dtc",
+  "diag-monitors": "diag-monitors",
+  "diag-trends": "diag-trends",
+  "diag-explore": "diag-explore",
+  "diag-system": "system-info",
+  "diag-tpms": "diag-tpms",
+  "diag-llm-assist": "diag-llm-assist",
+  "models-overview": "models-overview",
+  "models-behavior": "models-behavior",
+  "models-training": "models-training",
+  "models-tuning": "model-thresholds",
+  "models-health": "models-health",
+  "data-sessions": "system-sessions",
+  "data-health": "model-dataset-health",
+  "data-custom-pids": "system-custom-pids",
+  "data-export": "system-export",
+  "control-main": "system-control",
+  "control-test": "system-test",
+  "control-profiles": "system-profiles",
+  "control-capture": "system-capture-profiles",
+  "control-power": "system-power",
+} as const;
+
 afterEach(() => {
   window.history.replaceState(null, "", "/");
   delete document.documentElement.dataset.theme;
@@ -40,8 +71,18 @@ describe("useHashRoute", () => {
     window.history.replaceState(null, "", "#wb/not-a-real-view");
     const { result } = renderHook(() => useHashRoute());
     expect(result.current.mode).toBe("parked");
-    expect(result.current.item).toBe("live-charts");
+    expect(result.current.item).toBe("observe-charts");
   });
+
+  it.each(Object.entries(OLD_ITEM_ROUTES))(
+    "keeps the old %s route as an alias",
+    (oldItem, expected) => {
+    window.history.replaceState(null, "", `#wb/${oldItem}`);
+    const { result } = renderHook(() => useHashRoute());
+    expect(result.current.mode).toBe("parked");
+      expect(result.current.item).toBe(expected);
+    },
+  );
 });
 
 describe("useTheme", () => {

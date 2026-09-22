@@ -2,7 +2,7 @@
 
 ## Dashboard viewer
 
-Open **Workbench → Live → ROM Maps** (`#wb/live-rom-maps`), enter the
+Open **Workbench → Engine Tuning → ROM Maps** (`#wb/tuning-rom-maps`), enter the
 dashboard control token, and pick the current `.OsirisROM` file. The file is
 sent to the daemon for bounded in-memory inspection; it is not saved there.
 Only the independently verified source hashes are accepted. The parsed view

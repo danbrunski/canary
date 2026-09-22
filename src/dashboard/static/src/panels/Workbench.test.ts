@@ -34,14 +34,14 @@ function renderAt(active: WorkbenchItem) {
 
 describe("Workbench navigation", () => {
   it("renders all five group labels", () => {
-    renderAt("live-charts");
-    for (const label of ["Live", "Diagnostics", "Models", "Data", "Control"]) {
+    renderAt("observe-charts");
+    for (const label of ["Observe", "Engine Tuning", "Diagnose", "Model", "System"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
   });
 
   it("renders the active item's panel and switches on navigate", () => {
-    let active: WorkbenchItem = "live-charts";
+    let active: WorkbenchItem = "observe-charts";
     const { rerender } = render(
       createElement(Workbench, {
         active,
@@ -51,26 +51,38 @@ describe("Workbench navigation", () => {
         data: DATA,
       }),
     );
-    fireEvent.click(screen.getByRole("button", { name: "System" }));
+    fireEvent.click(screen.getByRole("button", { name: "System Info" }));
     rerender(
       createElement(Workbench, { active, onNavigate: () => {}, data: DATA }),
     );
     expect(screen.getByRole("heading", { name: "System" })).toBeInTheDocument();
   });
 
-  it("data-sessions renders the real Sessions panel (Task 3.1 — no longer a placeholder)", () => {
-    renderAt("data-sessions");
+  it("system-sessions renders the real Sessions panel (Task 3.1 — no longer a placeholder)", () => {
+    renderAt("system-sessions");
     expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Replay" })).toBeInTheDocument();
   });
 
-  it("data-export renders the real Export panel (Task 5.6b)", () => {
-    renderAt("data-export");
+  it("system-export renders the real Export panel (Task 5.6b)", () => {
+    renderAt("system-export");
     expect(screen.getByRole("heading", { name: "Export" })).toBeInTheDocument();
   });
 
   it("no nav item is left marked 'soon' — data-sessions (6.13) was the last placeholder", () => {
-    renderAt("live-charts");
+    renderAt("observe-charts");
     expect(screen.queryByText("soon")).not.toBeInTheDocument();
+  });
+
+  it("distinguishes planned entries from backend placeholders", () => {
+    renderAt("tuning-flash");
+    expect(screen.getAllByText("planned").length).toBeGreaterThan(0);
+    expect(screen.getByText(/waits on the server-side flash interlocks/)).toBeInTheDocument();
+  });
+
+  it("renders the detector page as Alert Thresholds, not Tuning", () => {
+    renderAt("model-thresholds");
+    expect(screen.getByRole("heading", { name: "Alert Thresholds" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Tuning" })).not.toBeInTheDocument();
   });
 });

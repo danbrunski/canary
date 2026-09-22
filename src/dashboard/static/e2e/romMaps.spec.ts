@@ -33,7 +33,7 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
   });
   await page.addInitScript(() => localStorage.setItem("canary.controlToken", "ui-test"));
   await page.setViewportSize({ width: 1440, height: 1200 });
-  await page.goto("/#wb/live-rom-maps");
+  await page.goto("/#wb/tuning-rom-maps");
   await page.getByLabel("ROM file").setInputFiles({ name: "synthetic.OsirisROM", mimeType: "application/octet-stream", buffer: Buffer.from("synthetic ROM") });
   const table = page.getByRole("table", { name: "Map 1 Target AFR values" });
   await expect(table).toBeVisible();

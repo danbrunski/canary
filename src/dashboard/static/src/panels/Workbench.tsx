@@ -94,13 +94,19 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
               <button
                 key={item.id}
                 type="button"
-                className={navItemClass(active === item.id)}
+                className={cn(
+                  navItemClass(active === item.id),
+                  item.planned && "text-fg-faint",
+                )}
                 aria-current={active === item.id ? "page" : undefined}
                 onClick={() => onNavigate(item.id)}
               >
                 {item.label}
                 {item.placeholder && (
                   <span className="ml-1.5 text-[0.6rem] text-fg-faint">soon</span>
+                )}
+                {item.planned && (
+                  <span className="ml-1.5 text-[0.6rem] text-fg-faint">planned</span>
                 )}
               </button>
             ))}
@@ -122,15 +128,15 @@ function renderItem(
   onNavigate: (item: WorkbenchItem) => void,
 ) {
   switch (item) {
-    case "live-rom-maps":
+    case "tuning-rom-maps":
       return <RomMapsPanel token={d.token} channels={d.channels} status={d.status} />;
-    case "diag-data":
+    case "system-data-sources":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":
       return (
         <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />
       );
-    case "diag-system":
+    case "system-info":
       return (
         <SystemPanel
           status={d.status}
@@ -151,23 +157,23 @@ function renderItem(
           live={d.behaviorLive}
         />
       );
-    case "control-main":
+    case "system-control":
       return <ControlPanel token={d.token} companion={d.companion} />;
-    case "control-test":
+    case "system-test":
       return <TestSessionPanel token={d.token} />;
-    case "control-profiles":
+    case "system-profiles":
       return <ProfilesPanel token={d.token} />;
-    case "control-capture":
+    case "system-capture-profiles":
       return <CaptureProfilesPanel token={d.token} status={d.status} channels={d.channels} />;
-    case "control-power":
+    case "system-power":
       return <PowerPanel token={d.token} />;
-    case "live-charts":
+    case "observe-charts":
       return <ChartsPanel channels={d.channels} token={d.token} />;
-    case "live-alarms":
+    case "observe-alarms":
       return <AlarmsPanel channels={d.channels} />;
-    case "live-builder":
+    case "observe-builder":
       return <CustomDashboardPanel channels={d.channels} />;
-    case "live-trip":
+    case "observe-trip":
       return <TripPanel channels={d.channels} status={d.status} token={d.token} />;
     case "diag-dtc":
       return <DtcPanel />;
@@ -181,22 +187,32 @@ function renderItem(
       return <LlmAssistPanel />;
     case "models-training":
       return <TrainingPanel token={d.token} companion={d.companion} />;
-    case "models-tuning":
+    case "model-thresholds":
       return <TuningPanel token={d.token} />;
     case "models-health":
       return (
         <ModelHealthPanel status={d.status} statusError={d.statusError} />
       );
-    case "data-sessions":
+    case "system-sessions":
       return <SessionsPanel token={d.token} companion={d.companion} />;
-    case "data-health":
+    case "model-dataset-health":
       return <DatasetHealthPanel token={d.token} />;
-    case "data-custom-pids":
+    case "system-custom-pids":
       return <CustomPidsPanel token={d.token} />;
-    case "data-export":
+    case "system-export":
       return <ExportPanel token={d.token} />;
-    default:
-      return <PlaceholderPanel title="Not found" task="—" summary="Unknown view." />;
+    case "tuning-logging":
+      return <PlaceholderPanel title="Logging" task="W03" summary="Capture controls and live channel delivery will live here." />;
+    case "tuning-logs":
+      return <PlaceholderPanel title="Logs" task="W04" summary="Recorded tuning-log tables and charts will live here." />;
+    case "tuning-analysis":
+      return <PlaceholderPanel title="Analysis" task="W04" summary="Delivery-error, trim, and timing analysis will live here." />;
+    case "tuning-calibration":
+      return <PlaceholderPanel title="Calibration" task="W06" summary="Flash history and memory-channel verification will live here." />;
+    case "tuning-rom-editor":
+      return <PlaceholderPanel title="ROM Editor" task="planned" summary="ROM editing is reserved for a later implementation." />;
+    case "tuning-flash":
+      return <PlaceholderPanel title="Flash" task="W07" summary="Module programming waits on the server-side flash interlocks." />;
   }
 }
 

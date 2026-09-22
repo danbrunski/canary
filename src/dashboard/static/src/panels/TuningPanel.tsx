@@ -74,7 +74,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
 
   return (
     <Panel
-      title="Tuning"
+      title="Alert Thresholds"
       count={
         cfg &&
         `v${cfg.version} · ${cfg.threshold_overrides.length} ovr · ${cfg.suppression_rules.length} rules · ${cfg.debounce_policies.length} pol`
@@ -97,7 +97,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
               value={draft}
               spellCheck={false}
               onChange={(e) => setDraft(e.target.value)}
-              aria-label="Tuning config JSON"
+              aria-label="Alert threshold config JSON"
             />
 
             <div className="mt-2 flex flex-wrap gap-2">
@@ -160,7 +160,7 @@ export function TuningPanel({ token }: TuningPanelProps) {
                 </div>
                 <p className="mt-1 text-[0.76rem] text-fg-faint">
                   Review this before Apply — tuning must not silently blind the
-                  detector (Risk R11).
+                  alert detector (Risk R11).
                 </p>
               </div>
             )}

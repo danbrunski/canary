@@ -224,7 +224,7 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
                 <button
                   type="button"
                   className="text-accent underline decoration-dotted underline-offset-2 hover:no-underline"
-                  onClick={() => onNavigate("live-trip")}
+                  onClick={() => onNavigate("observe-trip")}
                 >
                   see Trip panel →
                 </button>

@@ -19,7 +19,7 @@ interface SessionsPanelProps {
 /** Sessions panel (Task 3.1): promotes the session operations already
  *  extracted into `SessionsCard` (refactoring 3.2's god-panel split, which
  *  landed before this task) from ControlPanel's grid into their own
- *  top-level `data-sessions` view, and hosts `ReplayCard` (2.2/3.2) beside
+ *  top-level `system-sessions` view, and hosts `ReplayCard` (2.2/3.2) beside
  *  it — replay is a per-session action, prefilled from whichever session is
  *  selected here. Owns the session poll and the shared selection so both
  *  cards read the same list/session without a second fetch. */

@@ -23,34 +23,34 @@ site that needs touching — lean on that rather than on grep.
 
 ## Tasks
 
-- [ ] **W01.1 — Route aliases before anything moves.** Add an `ITEM_ALIASES:
+- [x] **W01.1 — Route aliases before anything moves.** Add an `ITEM_ALIASES:
   Record<string, WorkbenchItem>` map in `nav.ts` and have `parseHash` resolve
   through it, so `#wb/live-rom-maps` and every other old id keeps working.
   `docs/offline-rom-targets.md` and the operator's bookmarks point at old ids.
   *Test:* `useHashRoute.test.ts` — every id in the pre-change `WorkbenchItem`
   union resolves to a valid item; an unknown id still falls back to
   `DEFAULT_ITEM`.
-- [ ] **W01.2 — Change the unions.** `NavGroupId` and `WorkbenchItem` per the
+- [x] **W01.2 — Change the unions.** `NavGroupId` and `WorkbenchItem` per the
   table. Let `tsc` list the breakage; fix `renderItem` and every `onNavigate`
   call site it reports. Do not leave a `default:` arm in `renderItem` — the
   exhaustiveness error is the safety net for the next page added.
-- [ ] **W01.3 — `NAV` per the table**, groups in the order Observe, Engine
+- [x] **W01.3 — `NAV` per the table**, groups in the order Observe, Engine
   Tuning, Diagnose, Model, System. `DEFAULT_ITEM` stays the charts page under
   its new id.
-- [ ] **W01.4 — Rename the detector page.** Label `Alert Thresholds`; the panel
+- [x] **W01.4 — Rename the detector page.** Label `Alert Thresholds`; the panel
   component stays `TuningPanel.tsx` for now (renaming the file is churn with no
   user-visible effect) but its heading and any in-page copy that says "Tuning"
   change. *Test:* no rendered Model-group page contains the bare word "Tuning".
-- [ ] **W01.5 — Planned entries.** Add `planned?: boolean` beside the existing
+- [x] **W01.5 — Planned entries.** Add `planned?: boolean` beside the existing
   `placeholder?` on `NavItemDef`. A planned item renders in the nav, visibly
   muted, and its page is a short statement of what will live there and what it
   is waiting on — for `tuning-flash`, that is W07. It is not a placeholder for
   a finished backend, which is what `placeholder` already means; keep the two
   distinct.
-- [ ] **W01.6 — New pages render a named empty shell** (`tuning-logging`,
+- [x] **W01.6 — New pages render a named empty shell** (`tuning-logging`,
   `tuning-logs`, `tuning-analysis`, `tuning-calibration`) so W02–W06 each land
   as a fill-in rather than a nav change.
-- [ ] **W01.7 — Update every doc that names a route.** `grep -rn "#wb/" docs/`
+- [x] **W01.7 — Update every doc that names a route.** `grep -rn "#wb/" docs/`
   and `docs/offline-rom-targets.md` in particular. Aliases keep old links
   alive; the docs should still say the new ones.
 
@@ -59,3 +59,8 @@ site that needs touching — lean on that rather than on grep.
 `pnpm test` and `pnpm typecheck` pass; every old `#wb/<id>` lands on the right
 page; the five groups render in order; no page is reachable only through
 another page.
+
+Completed 2026-09-21. Evidence: `useHashRoute.test.ts` exercises all 28 old
+routes and the unknown-route fallback; `Workbench.test.ts` covers group order,
+planned entries, named shells, and the Alert Thresholds rename. `pnpm test`
+(278 tests) and `pnpm typecheck` pass.

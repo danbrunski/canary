@@ -47,7 +47,7 @@ describe("TuningPanel", () => {
     // (Estimate is also disabled until the draft is non-empty now, so an
     // early click would silently no-op instead of erroring).
     await waitFor(() =>
-      expect(screen.getByLabelText("Tuning config JSON")).not.toHaveValue(""),
+      expect(screen.getByLabelText("Alert threshold config JSON")).not.toHaveValue(""),
     );
     fireEvent.click(screen.getByRole("button", { name: "Estimate" }));
     expect(await screen.findByText(/Before \/ after estimate/)).toBeInTheDocument();

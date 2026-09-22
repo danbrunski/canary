@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { DEFAULT_ITEM, isWorkbenchItem } from "../nav";
+import { DEFAULT_ITEM, resolveItem } from "../nav";
 import type { AppMode, WorkbenchItem } from "../types";
 
 interface Route {
@@ -18,7 +18,7 @@ function parseHash(hash: string): Route {
   }
   const [head, tail] = raw.split("/", 2);
   if (head === "wb") {
-    const item = tail && isWorkbenchItem(tail) ? tail : DEFAULT_ITEM;
+    const item = (tail && resolveItem(tail)) || DEFAULT_ITEM;
     return { mode: "parked", item };
   }
   return { mode: "driving", item: DEFAULT_ITEM };
