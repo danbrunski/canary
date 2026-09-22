@@ -229,3 +229,59 @@ def test_cli_exit_status(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> 
     assert main([*base, "--manifest", str(ok)]) == 0
     assert main([*base, "--manifest", str(ok), "--manifest", str(stale)]) == 1
     assert "did:ECM_INJECTOR_PW_B1" in capsys.readouterr().out
+
+
+def test_cli_flags_a_refit_behavior_artifact_and_reports_unknown_provenance(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """B03.4: a consumed column pinned to a different artifact fails; no pin is unknown."""
+    from src.decode.behavior_models import artifact_fingerprint, load_behavior_models
+    from tools.check_manifest_producibility import main
+
+    base = ["--config", str(EXAMPLE_YAML), "--profile", "nissan-xterra-2008"]
+    shipped = load_behavior_models(
+        REPO_ROOT / "data" / "nissan-xterra-2008" / "behavior_models.yaml"
+    )
+    # A model that produces its column and permits learned_feature (no B03.2 conflict).
+    model = next(m for m in shipped.models if m.name == "air_charge_vs_rpm_throttle_did")
+    columns = ["obd:RPM", f"deviation:{model.name}"]
+
+    pinned = tmp_path / "pinned.json"
+    pinned.write_text(
+        json.dumps(
+            {
+                "schema": {
+                    "feature_columns": columns,
+                    "behavior_model_fingerprints": {model.name: artifact_fingerprint(model)},
+                }
+            }
+        )
+    )
+    assert main([*base, "--manifest", str(pinned)]) == 0
+    assert f"ok behavior:{model.name}" in capsys.readouterr().out
+
+    refit = tmp_path / "refit.json"
+    refit.write_text(
+        json.dumps(
+            {
+                "schema": {
+                    "feature_columns": columns,
+                    "behavior_model_fingerprints": {model.name: "0000deadbeef0000"},
+                }
+            }
+        )
+    )
+    assert main([*base, "--manifest", str(refit)]) == 1
+    out = capsys.readouterr().out
+    assert "0/2 unproducible" in out and "1 behavior artifact(s) refit since training" in out
+    assert f"FAIL behavior:{model.name}" in out
+
+    legacy = tmp_path / "legacy.json"
+    legacy.write_text(json.dumps({"schema": {"feature_columns": columns}}))
+    assert main([*base, "--manifest", str(legacy)]) == 0
+    out = capsys.readouterr().out
+    assert "OK   " in out and f"UNKNOWN behavior:{model.name}" in out
+
+    assert main([*base, "--manifest", str(refit), "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report[str(refit)]["behavior_fingerprint_provenance"][model.name]["status"] == "mismatch"

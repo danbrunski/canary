@@ -28,10 +28,11 @@ from src.analysis.committees import append_committee_residuals, non_trainable_co
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
-from src.decode.behavior_decoder import append_deviation_columns
+from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     BehaviorModels,
+    artifact_fingerprint,
     load_behavior_models,
 )
 from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
@@ -1278,6 +1279,7 @@ def build_feature_spec(
     sequence_length: int | None = None,
     sequence_stride: int | None = None,
     policy: FeaturePolicy | None = None,
+    behavior_models: BehaviorModels | None = None,
 ) -> dict[str, Any]:
     """Return the versioned feature contract persisted in model manifests.
 
@@ -1285,6 +1287,15 @@ def build_feature_spec(
     ordered feature columns, their dtypes, the preprocessing knobs that shape
     them, source families, and a compact health report. Later 7.1 work can
     compare this spec against the live source before scoring.
+
+    ``behavior_models`` is the artifact set that produced the frame's
+    ``deviation:*`` columns. When given, the spec records the
+    :func:`~src.decode.behavior_models.artifact_fingerprint` of every model a
+    consumed deviation column came from (``behavior_model_fingerprints``), so
+    a later refit that changes that column's meaning is caught by the
+    producibility check instead of being fed to this artifact (B03.4). Left
+    ``None``, the field is absent and the provenance is *unknown* — which the
+    check reports as such, never as a pass.
     """
     columns = [str(col) for col in feature_columns]
     resolved_policy = policy if policy is not None else resolve_feature_policy()
@@ -1307,6 +1318,10 @@ def build_feature_spec(
         # served). Empty when nothing was gated.
         "feature_policy_exclusions": feature_policy_exclusions(features, resolved_policy),
     }
+    if behavior_models is not None:
+        spec["behavior_model_fingerprints"] = consumed_behavior_fingerprints(
+            columns, behavior_models
+        )
     if config is not None:
         spec["preprocessing"] = {
             "resample_hz": config.preprocessing.resample_hz,
@@ -1328,6 +1343,31 @@ def build_feature_spec(
     if sequence_stride is not None:
         spec["sequence_stride"] = sequence_stride
     return spec
+
+
+def consumed_behavior_fingerprints(
+    feature_columns: Sequence[str], behavior_models: BehaviorModels
+) -> dict[str, str]:
+    """``{behavior model name: artifact_fingerprint}`` for every consumed ``deviation:*`` column.
+
+    Refuses a consumed column whose model is not in ``behavior_models``: the
+    frame was then featurized against a different artifact set than the one
+    being recorded (a stale feature cache, or a model retired since), which
+    is exactly the unknown provenance this record exists to prevent — rebuild
+    the feature cache against the current ``behavior_models.yaml`` instead.
+    """
+    by_name = {model.name: model for model in behavior_models.models}
+    consumed = sorted(
+        {name for column in feature_columns if (name := deviation_model_name(column)) is not None}
+    )
+    missing = [name for name in consumed if name not in by_name]
+    if missing:
+        raise ValueError(
+            "feature spec consumes deviation columns of behavior models not in the "
+            f"loaded artifact set: {', '.join(missing)} — the frame was featurized "
+            "against a different behavior_models.yaml (stale feature cache?); rebuild it"
+        )
+    return {name: artifact_fingerprint(by_name[name]) for name in consumed}
 
 
 def summarize_feature_health(

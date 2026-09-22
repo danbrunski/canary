@@ -155,6 +155,104 @@ def load_manifest_feature_columns(path: Path) -> list[str]:
     return manifest_feature_columns(json.loads(Path(path).read_text()))
 
 
+def manifest_behavior_fingerprints(manifest: Mapping[str, Any]) -> dict[str, str] | None:
+    """``schema.behavior_model_fingerprints`` as recorded at training, or ``None``.
+
+    ``None`` means the manifest predates the record (B03.4) — *unknown*
+    provenance, which :func:`behavior_fingerprint_provenance` reports as
+    such. It is never collapsed to "no consumed columns" (``{}``).
+    """
+    schema = manifest.get("schema")
+    recorded = schema.get("behavior_model_fingerprints") if isinstance(schema, Mapping) else None
+    if recorded is None:
+        return None
+    if not isinstance(recorded, Mapping):
+        raise ValueError("manifest schema.behavior_model_fingerprints must be a mapping")
+    return {str(name): str(value) for name, value in recorded.items()}
+
+
+#: Verdicts of :func:`behavior_fingerprint_provenance`, one per consumed model.
+BEHAVIOR_PROVENANCE_MATCH = "match"
+BEHAVIOR_PROVENANCE_MISMATCH = "mismatch"
+BEHAVIOR_PROVENANCE_UNKNOWN = "unknown"
+BEHAVIOR_PROVENANCE_ABSENT = "absent"
+
+
+def behavior_fingerprint_provenance(
+    feature_columns: Iterable[str],
+    recorded: Mapping[str, str] | None,
+    behavior_models: BehaviorModels | None,
+) -> dict[str, dict[str, Any]]:
+    """Per consumed behavior model: does the artifact that produced the column still serve? (B03.4)
+
+    ``recorded`` is the manifest's ``behavior_model_fingerprints`` (see
+    :func:`manifest_behavior_fingerprints`); ``behavior_models`` is the set
+    that would produce the column today. One entry per behavior model a
+    ``deviation:*`` feature column names, keyed by model name:
+
+    * ``match`` — the recorded artifact fingerprint equals the current one.
+    * ``mismatch`` — the model was refit since training: the column's
+      meaning changed under this detector. Flagged, never silently fed.
+    * ``unknown`` — the manifest recorded no fingerprint for it (predates
+      B03.4). Reported as unknown provenance: not a pass, not a failure.
+    * ``absent`` — no current behavior model of that name; the column is
+      also unproducible, which :func:`unproducible_feature_columns` reports.
+
+    Empty when no feature column consumes a behavior model.
+    """
+    from src.decode.behavior_decoder import deviation_model_name
+    from src.decode.behavior_models import artifact_fingerprint
+
+    consumed = sorted(
+        {
+            name
+            for column in feature_columns
+            if (name := deviation_model_name(str(column))) is not None
+        }
+    )
+    current = (
+        {model.name: artifact_fingerprint(model) for model in behavior_models.models}
+        if behavior_models is not None
+        else {}
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for name in consumed:
+        was = recorded.get(name) if recorded is not None else None
+        now = current.get(name)
+        if now is None:
+            status = BEHAVIOR_PROVENANCE_ABSENT
+            reason = f"no behavior model {name!r} is loaded; its deviation column is unproducible"
+        elif was is None:
+            status = BEHAVIOR_PROVENANCE_UNKNOWN
+            reason = (
+                f"manifest records no artifact fingerprint for behavior model {name!r} "
+                "(trained before B03.4): unknown whether the serving artifact is the one "
+                "it was trained against"
+            )
+        elif was == now:
+            status = BEHAVIOR_PROVENANCE_MATCH
+            reason = f"behavior model {name!r} is the artifact this manifest was trained against"
+        else:
+            status = BEHAVIOR_PROVENANCE_MISMATCH
+            reason = (
+                f"behavior model {name!r} was refit since this manifest was trained "
+                f"(recorded {was[:12]}…, serving {now[:12]}…): its deviation column no "
+                "longer means what the detector learned — retrain the detector "
+                "(D02.5/D03.25) or restore the recorded artifact"
+            )
+        out[name] = {"status": status, "recorded": was, "current": now, "reason": reason}
+    return out
+
+
+def behavior_fingerprint_mismatches(provenance: Mapping[str, Mapping[str, Any]]) -> list[str]:
+    """Names of the behavior models whose provenance is ``mismatch``."""
+    return sorted(
+        name
+        for name, entry in provenance.items()
+        if entry.get("status") == BEHAVIOR_PROVENANCE_MISMATCH
+    )
+
+
 def _gps_channels() -> frozenset[str]:
     """Every ``gps:`` channel the collector can emit, from the record builder."""
     from src.collection.gps_collector import reading_to_records

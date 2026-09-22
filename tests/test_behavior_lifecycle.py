@@ -59,7 +59,13 @@ from src.decode.behavior_models import (
     policy_unmatched_entries,
     serving_status,
 )
-from src.models.spec_producibility import behavior_feature_conflicts
+from src.models.spec_producibility import (
+    behavior_feature_conflicts,
+    behavior_fingerprint_mismatches,
+    behavior_fingerprint_provenance,
+    manifest_behavior_fingerprints,
+)
+from src.preprocessing.feature_pipeline import build_feature_spec, consumed_behavior_fingerprints
 from src.preprocessing.live import LiveFeatureSource
 
 REPO = Path(__file__).resolve().parents[1]
@@ -373,6 +379,115 @@ def test_tracked_manifests_consume_no_demoted_behavior_column(config: CanaryConf
     for manifest in manifests:
         assert "error" not in manifest
         assert manifest["behavior_feature_conflicts"] == {}
+
+
+def _deviation_frame(*names: str) -> pd.DataFrame:
+    n = 4
+    return pd.DataFrame(
+        {
+            "session": ["s"] * n,
+            "timestamp": pd.date_range("2026-09-22", periods=n, freq="1s", tz="UTC"),
+            "obd:RPM": [800.0, 900.0, 1000.0, 1100.0],
+            **{f"deviation:{name}": [0.1, 0.2, 0.3, 0.4] for name in names},
+            **{f"deviation:{name}__mean": [0.1, 0.2, 0.3, 0.4] for name in names},
+        }
+    )
+
+
+def test_fresh_spec_records_the_behavior_artifact_that_produced_each_consumed_column() -> None:
+    """B03.4: a manifest names the artifact fingerprint behind every deviation column it uses."""
+    steady = _validated("steady_timing")
+    other = _validated("other_model")
+    models = BehaviorModels(schema_version=2, models=[steady, other])
+    frame = _deviation_frame("steady_timing", "other_model")
+    columns = ["obd:RPM", "deviation:steady_timing", "deviation:steady_timing__mean"]
+
+    spec = build_feature_spec(frame, columns, behavior_models=models)
+    # Only the consumed model is pinned; ``other_model`` produces a column
+    # this spec does not select, so its refit is not this detector's concern.
+    assert spec["behavior_model_fingerprints"] == {"steady_timing": artifact_fingerprint(steady)}
+    assert spec["behavior_model_columns"] == ["deviation:steady_timing"]
+    # No artifact set given → the field is absent (unknown provenance), never
+    # an empty mapping that would read as "consumes nothing".
+    assert "behavior_model_fingerprints" not in build_feature_spec(frame, columns)
+    # No deviation column consumed, artifact set known → recorded as none.
+    assert (
+        build_feature_spec(frame, ["obd:RPM"], behavior_models=models)[
+            "behavior_model_fingerprints"
+        ]
+        == {}
+    )
+    # A consumed column whose producer is not in the recorded set is a stale
+    # feature cache, not a fact to write down.
+    with pytest.raises(ValueError, match="other_model.*stale feature cache"):
+        consumed_behavior_fingerprints(
+            ["deviation:other_model"], BehaviorModels(schema_version=2, models=[steady])
+        )
+
+
+def test_refit_behavior_artifact_is_flagged_against_the_consuming_manifest() -> None:
+    """B03.4: a refit that changes a consumed column's meaning is a mismatch, never a pass."""
+    steady = _validated("steady_timing")
+    models = BehaviorModels(schema_version=2, models=[steady])
+    columns = ["obd:RPM", "deviation:steady_timing", "deviation:steady_timing__roc"]
+    recorded = {"steady_timing": artifact_fingerprint(steady)}
+
+    same = behavior_fingerprint_provenance(columns, recorded, models)
+    assert same["steady_timing"]["status"] == "match"
+    assert behavior_fingerprint_mismatches(same) == []
+
+    # Refit: new coefficients, same name/contract → different artifact.
+    refit = steady.model_copy(
+        update={"fit": steady.fit.model_copy(update={"coefficients": [12.0]})}
+    )
+    assert artifact_fingerprint(refit) != artifact_fingerprint(steady)
+    assert contract_fingerprint(refit) == contract_fingerprint(steady)  # contract alone misses it
+    after = behavior_fingerprint_provenance(
+        columns, recorded, BehaviorModels(schema_version=2, models=[refit])
+    )
+    assert after["steady_timing"]["status"] == "mismatch"
+    assert after["steady_timing"]["recorded"] == recorded["steady_timing"]
+    assert after["steady_timing"]["current"] == artifact_fingerprint(refit)
+    assert "retrain the detector" in after["steady_timing"]["reason"]
+    assert behavior_fingerprint_mismatches(after) == ["steady_timing"]
+
+    # The producing model retired altogether → absent (unproducible elsewhere).
+    gone = behavior_fingerprint_provenance(columns, recorded, None)
+    assert gone["steady_timing"]["status"] == "absent"
+    # A manifest consuming no deviation column has nothing to say.
+    assert behavior_fingerprint_provenance(["obd:RPM"], recorded, models) == {}
+
+
+def test_manifest_without_fingerprints_is_unknown_provenance_not_a_pass() -> None:
+    """B03.4: today's tracked manifests predate the record — say so, don't judge."""
+    steady = _validated("steady_timing")
+    models = BehaviorModels(schema_version=2, models=[steady])
+    columns = ["deviation:steady_timing"]
+
+    legacy = {"schema": {"feature_columns": columns}}
+    assert manifest_behavior_fingerprints(legacy) is None
+    provenance = behavior_fingerprint_provenance(columns, None, models)
+    assert provenance["steady_timing"]["status"] == "unknown"
+    assert provenance["steady_timing"]["recorded"] is None
+    assert provenance["steady_timing"]["current"] == artifact_fingerprint(steady)
+    assert behavior_fingerprint_mismatches(provenance) == []  # unknown never fails
+    # ``{}`` (recorded, consumes none) and ``None`` (no record) stay distinct.
+    assert (
+        manifest_behavior_fingerprints(
+            {"schema": {"feature_columns": columns, "behavior_model_fingerprints": {}}}
+        )
+        == {}
+    )
+    # Recorded for one model but not another → unknown only for the other.
+    mixed = behavior_fingerprint_provenance(
+        ["deviation:steady_timing", "deviation:other_model"],
+        {"steady_timing": artifact_fingerprint(steady)},
+        BehaviorModels(schema_version=2, models=[steady, _validated("other_model")]),
+    )
+    assert {name: entry["status"] for name, entry in mixed.items()} == {
+        "steady_timing": "match",
+        "other_model": "unknown",
+    }
 
 
 # ---------------------------------------------------------------------------

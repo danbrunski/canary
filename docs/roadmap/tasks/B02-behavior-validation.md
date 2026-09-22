@@ -103,6 +103,18 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   drives) per model, drive and regime, in the evidence and the report. Evidence:
   `test_no_prediction_is_not_a_valid_observation`,
   `test_row_exceedance_is_not_an_event`; [report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §3.
+  *Re-run 2026-09-22 under `EVALUATOR_VERSION 2`* ([v2 report](../../../data/analyses/2026-09-22-behavior-validation-report-v2.md)):
+  v1 read `datetime64[us]` row times 1000x short, so the 09-21 event counts,
+  control rates and synthetic windows were wrong; per-row metrics reproduce
+  exactly. Event rates are now real, over wall-clock watched time rather
+  than rows×1 s (`_evaluated_hours`, `test_evaluated_hours_is_wall_clock_exposure_not_a_row_count`):
+  timing/load 3 events in 1.02 h (2.9/h) and air mass 10 in 0.95 h (10.6/h)
+  both exceed the declared 2/h control rate; fuel trim 1→0, catalyst 3→0
+  (PID 0x3C on the slow tier: 1 s pairs ~17 s apart, so 3-of-5-in-8 s can
+  never latch); synthetic detection now
+  over 11–65 real windows with delays (warm idle 4/4 within 2 s; every
+  surface < 0.8). No verdict flipped. The 09-21 numbers are preserved with a
+  banner.
 - [x] **B02.6 — Gate on useful skill and sensitivity.** Require predictive
   surfaces to improve on an appropriate training-fitted simple baseline on
   untouched drives and resolve a declared practically meaningful deviation.

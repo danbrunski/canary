@@ -69,7 +69,7 @@ Follow [B00](B00-behavior-models-README.md).
   demoted copy emits nothing and adds no fusion source),
   `::test_hot_reload_applies_a_policy_edit_and_a_rollback`,
   `tests/test_refit_behavior_models_script.py::test_main_report_applies_profile_policy_and_preserves_prior`.
-- [~] **B03.4 — Preserve downstream compatibility.** Sweep feature specs,
+- [x] **B03.4 — Preserve downstream compatibility.** Sweep feature specs,
   model manifests, expected/deviation consumers and hot-reload caches before
   removing any column or changing its meaning. Use existing producibility
   checks to expose affected IF/sequence artifacts and coordinate their retrain
@@ -83,12 +83,25 @@ Follow [B00](B00-behavior-models-README.md).
   columns) names a consumed column whose model withholds `learned_feature`.
   Evidence: `tests/test_behavior_lifecycle.py::test_demoted_deviation_column_is_still_produced_but_not_selectable`,
   `::test_tracked_manifests_consume_no_demoted_behavior_column`.
-  **Remaining:** manifests do not record which behavior artifact produced a
-  consumed deviation column, so a refit of an unvalidated model under a future
-  consumer would change its meaning undetected — record behavior fingerprints
-  in `feature_pipeline.build_feature_spec` and compare them in the
-  producibility check (left out: `feature_pipeline.py` was being edited
-  concurrently). No retrain to coordinate with D02.5/D03.25 today.
+  *Completed 2026-09-22:* `feature_pipeline.build_feature_spec(...,
+  behavior_models=)` records `behavior_model_fingerprints` — the
+  `artifact_fingerprint` of every behavior model a consumed `deviation:*`
+  column names (`consumed_behavior_fingerprints`; a consumed column whose
+  producer is not in the recorded set refuses as a stale feature cache). Both
+  trainers pass the loaded set (`scripts/train_anomaly_model.py`,
+  `scripts/train_sequence.py`). `spec_producibility.behavior_fingerprint_provenance`
+  compares the record against the serving set per model — `match` /
+  `mismatch` (refit since training: `tools/check_manifest_producibility.py`
+  exits 1 and names the retrain, D02.5/D03.25) / `unknown` (no record —
+  every tracked manifest today; reported, not judged) / `absent`; the
+  inventory carries it as `behavior_fingerprint_provenance`. Evidence:
+  `tests/test_behavior_lifecycle.py::test_fresh_spec_records_the_behavior_artifact_that_produced_each_consumed_column`,
+  `::test_refit_behavior_artifact_is_flagged_against_the_consuming_manifest`
+  (same contract fingerprint, different artifact → mismatch),
+  `::test_manifest_without_fingerprints_is_unknown_provenance_not_a_pass`,
+  `tests/test_manifest_producibility.py::test_cli_flags_a_refit_behavior_artifact_and_reports_unknown_provenance`.
+  No retrain to coordinate with D02.5/D03.25 today (deferred, operator
+  2026-09-22).
 
 ## Baseline refit
 

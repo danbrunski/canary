@@ -48,6 +48,7 @@ import pandas as pd
 from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
 
 from src.config import CanaryConfig
+from src.decode.behavior_models import load_behavior_models
 from src.log import configure_logging
 from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
@@ -329,6 +330,14 @@ def train(
             sequence_length=dataset.sequence_length,
             sequence_stride=dataset.stride,
             policy=policy,
+            # B03.4 — record the behavior artifact set the frame was built
+            # against (the sequence trainer consumes no deviation column, so
+            # this pins "none", not "unknown").
+            behavior_models=(
+                load_behavior_models(config.daemon.behavior_models)
+                if config.daemon.behavior_models.exists()
+                else None
+            ),
         ),
         scaler=scaler,
         calibration_sessions_requested=(

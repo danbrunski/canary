@@ -37,7 +37,16 @@ review's catalyst exceedances establish a failed expectation, not a failed cat.
   the newer 45/115 °C bands are applied to it. *Correction to the B02 report:*
   `cat_warmup`'s eleven May training sessions **are** present locally under
   `~/canary-data/<name>`; the report listed them as missing, which is why its
-  catalyst row carries no baseline.
+  catalyst row carries no baseline. *Cadence (2026-09-22, evaluator v2):*
+  PID 0x3C sits on the `slow` poll tier (`obd_scheduler`: 1/15 Hz; measured
+  17–18 s between value changes on the 2026-09-18 cold start), so the
+  resampler marks it fresh for two 1 s rows per read and 235 of the 401
+  rows in the warm-up window are refused `actual_stale:obd:CATALYST_TEMP_B1S1`
+  while mode/cold-start eligibility holds for 312 — it is the poll tier, not
+  the eligibility window, that makes a 3-of-5-ticks-within-8 s event
+  impossible for `cat_warmup` (0 events from 26/34 firing rows in the
+  [v2 report](../../../data/analyses/2026-09-22-behavior-validation-report-v2.md)).
+  Named, not fixed: neither the gate nor the tier is changed here.
 - [x] **B07.2 — Inventory independent genuine cold starts.** Record initial
   coolant, ambient/IAT, runtime continuity, stopped/moving history and load
   coverage per physical drive. Exclude warm restarts and mid-session fragments

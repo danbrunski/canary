@@ -836,6 +836,27 @@ def _median_or_none(values: np.ndarray) -> float | None:
     return float(np.median(finite)) if finite.size else None
 
 
+def _evaluated_hours(
+    seconds: np.ndarray, evaluated: np.ndarray, drives: np.ndarray, *, interval_seconds: float
+) -> float:
+    """Wall-clock exposure of the evaluated rows, in hours (B02.5).
+
+    An event *rate* needs the time the detector was actually watching, not a
+    row count: a slowly polled output (the catalyst PID on its slow tier) is
+    evaluated in 1 s pairs ~17 s apart, and ``rows / 3600`` would call that
+    exposure a twentieth of what it was. Per drive, first-to-last evaluated
+    time plus one tick (so a lone row counts one interval and contiguous
+    1 Hz rows give exactly the old ``n`` seconds), summed over drives.
+    """
+    total = 0.0
+    for drive in set(drives[evaluated].tolist()):
+        stamps = seconds[evaluated & (drives == drive)]
+        stamps = stamps[np.isfinite(stamps)]
+        if stamps.size:
+            total += float(stamps.max() - stamps.min()) + interval_seconds
+    return total / 3600.0
+
+
 def fold_metrics(
     model: BehaviorModel1D | BehaviorModel2D,
     ev: RowEvaluation,
@@ -865,7 +886,9 @@ def fold_metrics(
         "evaluated": n,
         "coverage": (n / int(eligible.sum())) if eligible.any() else None,
         "refusals": dict(sorted(refusals.items(), key=lambda kv: (-kv[1], kv[0]))),
-        "evaluated_hours": n * policy.interval_seconds / 3600.0,
+        "evaluated_hours": _evaluated_hours(
+            ev.seconds, evaluated, drives, interval_seconds=policy.interval_seconds
+        ),
         "envelope_coverage": envelope_coverage(model, ev),
     }
     if n:

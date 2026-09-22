@@ -41,7 +41,12 @@ from src.decode.behavior_models import (
     serving_status,
     validation_scope,
 )
-from src.models.spec_producibility import behavior_feature_conflicts, manifest_feature_columns
+from src.models.spec_producibility import (
+    behavior_feature_conflicts,
+    behavior_fingerprint_provenance,
+    manifest_behavior_fingerprints,
+    manifest_feature_columns,
+)
 
 INVENTORY_VERSION = 1
 
@@ -64,6 +69,7 @@ def _manifest_block(path: Path, models: BehaviorModels | None) -> dict[str, Any]
     try:
         manifest = json.loads(path.read_text())
         columns = manifest_feature_columns(manifest)
+        recorded = manifest_behavior_fingerprints(manifest)
     except (OSError, ValueError) as exc:
         return {"path": str(path), "error": str(exc)}
     consumed = sorted(
@@ -76,6 +82,10 @@ def _manifest_block(path: Path, models: BehaviorModels | None) -> dict[str, Any]
         "feature_count": len(columns),
         "behavior_models_consumed": consumed,
         "behavior_feature_conflicts": behavior_feature_conflicts(columns, models),
+        # B03.4 — per consumed model: match / mismatch / unknown (no record).
+        "behavior_fingerprint_provenance": behavior_fingerprint_provenance(
+            columns, recorded, models
+        ),
     }
 
 

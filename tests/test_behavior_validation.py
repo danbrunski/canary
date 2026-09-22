@@ -380,6 +380,43 @@ def test_no_prediction_is_not_a_valid_observation() -> None:
     assert metrics.input_present == 50
 
 
+def test_evaluated_hours_is_wall_clock_exposure_not_a_row_count() -> None:
+    """B02.5: an event rate's denominator is the time the detector was watching.
+
+    A slowly polled output is evaluated in short bursts far apart (the
+    catalyst PID on its 1/15 Hz tier: 1 s pairs ~17 s apart); counting rows
+    would shrink the exposure and inflate events/h.
+    """
+    names = [f"2026-08-0{d + 1}T120000" for d in range(3)]
+    result = fit_recipe(
+        _timing_recipe(validation=_criteria(min_validation_drives=1)), _corpus(names)
+    )
+    model = result.model or result.candidate
+    assert model is not None
+    probe = _drive("2026-08-09T120000", T0 + timedelta(days=9), n=60, seed=9)
+    dense = fold_metrics(
+        model, evaluate_rows(model, probe), drive_of_piece={}, policy=EventPolicy()
+    )
+    assert dense.evaluated == 60
+    assert dense.evaluated_hours == pytest.approx(60 / 3600)  # contiguous 1 Hz: unchanged
+    sparse = probe.iloc[[0, 1, 18, 19, 36, 37]].reset_index(drop=True)
+    metrics = fold_metrics(
+        model, evaluate_rows(model, sparse), drive_of_piece={}, policy=EventPolicy()
+    )
+    assert metrics.evaluated == 6
+    assert metrics.evaluated_hours == pytest.approx(38 / 3600)  # first-to-last + one tick, not 6 s
+    # Two drives sum their own spans; a lone evaluated row counts one tick.
+    two = pd.concat(
+        [sparse, _drive("2026-08-10T120000", T0 + timedelta(days=10), n=1, seed=10)],
+        ignore_index=True,
+    )
+    metrics = fold_metrics(
+        model, evaluate_rows(model, two), drive_of_piece={}, policy=EventPolicy()
+    )
+    assert metrics.drives == 2
+    assert metrics.evaluated_hours == pytest.approx(39 / 3600)
+
+
 def test_row_exceedance_is_not_an_event() -> None:
     policy = EventPolicy(required=3, window=5, window_seconds=8.0, dedupe_seconds=30.0)
     seconds = np.arange(120, dtype=float)

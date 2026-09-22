@@ -124,10 +124,10 @@ def train(
     # still produced for existing manifests; the refusal is recorded on the
     # spec so the artifact answers why it is absent.
     behavior_models_path = config.daemon.behavior_models
-    withheld = withheld_learned_feature_columns(
-        feature_columns,
-        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None,
+    behavior_models = (
+        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
+    withheld = withheld_learned_feature_columns(feature_columns, behavior_models)
     if withheld:
         log.info(
             "behavior deviation columns withheld from IF training",
@@ -146,7 +146,16 @@ def train(
         config.models.isolation_forest,
         feature_columns=feature_columns,
         feature_spec={
-            **build_feature_spec(features, feature_columns, config=config, policy=policy),
+            **build_feature_spec(
+                features,
+                feature_columns,
+                config=config,
+                policy=policy,
+                # B03.4 — pin which behavior artifact produced each consumed
+                # deviation column, so a later refit is caught by the
+                # producibility check instead of fed to this model.
+                behavior_models=behavior_models,
+            ),
             "behavior_learned_feature_withheld": dict(sorted(withheld.items())),
         },
         fitted_at=datetime.now(UTC),

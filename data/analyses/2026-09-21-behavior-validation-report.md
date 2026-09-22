@@ -1,5 +1,15 @@
 # Behavior-model validation report (B02) — 2026-09-21
 
+> **Re-run under evaluator v2 — see [2026-09-22-behavior-validation-report-v2.md](2026-09-22-behavior-validation-report-v2.md).**
+> This report was produced with `EVALUATOR_VERSION 1`, whose row-time
+> conversion read `datetime64[us]` frames 1000x short (fixed in `4873388`).
+> Every per-row number below (counts, coverage, MAE, bias, quantiles, R²,
+> band half-widths, per-row exceedance rates, skill, bootstrap) is unaffected
+> and reproduces under v2. Every quantity built from time between rows is
+> wrong here: the persisted event counts and control event rates in §3, and
+> the synthetic-window and "every window alerts" statements. Read those from
+> the v2 report; the numbers below are preserved as written (B02.7).
+
 The reproducible successor to the numbers in
 [2026-09-21-behavior-model-review.md](2026-09-21-behavior-model-review.md).
 Every figure below comes from `scripts/evaluate_behavior_models.py`, with its

@@ -9,8 +9,11 @@ feature transform computes from them — can produce. Offline and read-only: it
 never talks to the daemon or the bus, so it is safe to run on the Pi while it
 collects (it is a few seconds of CPU).
 
-Exit status: 0 when every manifest is producible, 1 when any column is not,
-2 when a manifest has no feature spec.
+Exit status: 0 when every manifest is producible, 1 when any column is not or a
+consumed behavior-model column was produced by a different artifact than the one
+serving now (B03.4: a refit changed its meaning), 2 when a manifest has no
+feature spec. A manifest that predates the fingerprint record is reported as
+unknown provenance — neither a pass nor a failure.
 
 Usage:
   tools/check_manifest_producibility.py --config /etc/canary/canary.yaml
@@ -58,8 +61,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     from src.decode.behavior_models import load_behavior_models
     from src.models.spec_producibility import (
         behavior_feature_conflicts,
+        behavior_fingerprint_mismatches,
+        behavior_fingerprint_provenance,
         build_producible_catalog,
-        load_manifest_feature_columns,
+        manifest_behavior_fingerprints,
+        manifest_feature_columns,
         summarize,
         unproducible_feature_columns,
     )
@@ -82,7 +88,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     status = 0
     for path in manifests:
         try:
-            columns = load_manifest_feature_columns(path)
+            manifest = json.loads(path.read_text())
+            columns = manifest_feature_columns(manifest)
+            recorded = manifest_behavior_fingerprints(manifest)
         except (OSError, ValueError) as exc:
             report[str(path)] = {"error": str(exc)}
             status = max(status, 2)
@@ -94,7 +102,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         report[str(path)]["behavior_feature_conflicts"] = behavior_feature_conflicts(
             columns, behavior_models
         )
-        if unproducible:
+        # B03.4 — which artifact produced each consumed deviation column. A
+        # refit since training (``mismatch``) fails like a missing column: the
+        # detector would be fed a column that no longer means what it learned.
+        # No record (``unknown``) is reported, not judged.
+        provenance = behavior_fingerprint_provenance(columns, recorded, behavior_models)
+        report[str(path)]["behavior_fingerprint_provenance"] = provenance
+        if unproducible or behavior_fingerprint_mismatches(provenance):
             status = max(status, 1)
 
     if args.json:
@@ -106,15 +120,25 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"ERROR {path}: {entry['error']}")
             continue
         count = entry["unproducible_count"]
-        verdict = "OK   " if not count else "FAIL "
+        provenance = entry["behavior_fingerprint_provenance"]
+        mismatched = behavior_fingerprint_mismatches(provenance)
+        verdict = "OK   " if not count and not mismatched else "FAIL "
+        refit = (
+            f", {len(mismatched)} behavior artifact(s) refit since training" if mismatched else ""
+        )
         print(
             f"{verdict}{path}: {count}/{entry['expected_count']} unproducible "
-            f"({entry['unproducible_fraction']:.1%})"
+            f"({entry['unproducible_fraction']:.1%}){refit}"
         )
         for base, detail in entry["unproducible_by_base"].items():
             print(f"  {base}: {len(detail['columns'])} column(s) — {detail['reason']}")
         for column, reason in entry["behavior_feature_conflicts"].items():
             print(f"  WARN {column}: {reason}")
+        for name, detail in provenance.items():
+            label = {"mismatch": "FAIL", "unknown": "UNKNOWN", "match": "ok", "absent": "FAIL"}[
+                detail["status"]
+            ]
+            print(f"  {label} behavior:{name}: {detail['reason']}")
     return status
 
 
