@@ -112,8 +112,11 @@ fi
 systemctl restart canary-mcp.service
 
 step "Verifying daemon health"
+# A restart takes ~25 s to answer on the Pi 5 (2026-09-22: 24 s), so the old
+# 20 s window reported a healthy deploy as a failure. Give it 90 s.
+HEALTH_WAIT_SECONDS="${CANARY_HEALTH_WAIT_SECONDS:-90}"
 healthy=0
-for _attempt in {1..20}; do
+for ((_attempt = 0; _attempt < HEALTH_WAIT_SECONDS; _attempt++)); do
   if curl -fsS --max-time 2 "${STATUS_URL}" >/dev/null 2>&1; then
     healthy=1
     break
@@ -124,6 +127,18 @@ if [[ "${healthy}" -ne 1 ]]; then
   echo "Update installed, but CANary did not answer at ${STATUS_URL}." >&2
   echo "Inspect: sudo journalctl -u canary -n 100 --no-pager" >&2
   exit 1
+fi
+
+step "Verifying memory limits are enforced"
+# `systemctl show` echoes MemoryMax even when the kernel has the memory
+# controller disabled; only the cgroup file proves the limit is live.
+cgroup_dir="/sys/fs/cgroup/system.slice/canary.service"
+if [[ -r "${cgroup_dir}/memory.max" ]]; then
+  echo "memory.max $(cat "${cgroup_dir}/memory.max"), memory.swap.max $(cat "${cgroup_dir}/memory.swap.max" 2>/dev/null || echo '?')"
+else
+  echo "WARNING: ${cgroup_dir}/memory.max does not exist: MemoryMax/MemorySwapMax" >&2
+  echo "are NOT enforced. install_pi.sh adds cgroup_enable=memory to the kernel" >&2
+  echo "command line; reboot the Pi (while parked, no capture) to activate it." >&2
 fi
 
 echo "CANary update complete (${after})."

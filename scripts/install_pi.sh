@@ -291,6 +291,37 @@ systemctl restart systemd-journald || true
 # persistence silently waits for the next reboot.
 journalctl --flush >/dev/null 2>&1 || true
 
+# ---------------------------------------------------------------------------
+# Memory cgroup controller (enforces canary.service MemoryMax/MemorySwapMax)
+# ---------------------------------------------------------------------------
+# The Pi firmware prepends cgroup_disable=memory to the kernel command line, so
+# without this the unit's MemoryMax=6G / MemorySwapMax=0 are accepted by
+# systemd, echoed by `systemctl show`, and enforced by nothing — found
+# 2026-09-18, after the limits had been "installed" for a day. The Pi kernel
+# honours a later cgroup_enable=memory over the firmware's disable. Takes
+# effect on the next boot; canary-update checks for it and says so.
+CMDLINE="${CANARY_CMDLINE:-/boot/firmware/cmdline.txt}"
+CGROUP_REBOOT_NEEDED=0
+if [[ -f "${CMDLINE}" ]] && ! grep -qw 'cgroup_enable=memory' "${CMDLINE}"; then
+  backup="${CMDLINE}.canary-$(date +%Y%m%dT%H%M%S)"
+  cp -p "${CMDLINE}" "${backup}"
+  # cmdline.txt must stay ONE line; a stray newline makes the rest of it
+  # invisible to the kernel and can leave the Pi unbootable.
+  sed -i '1 s/[[:space:]]*$/ cgroup_enable=memory/' "${CMDLINE}"
+  if [[ "$(wc -l <"${CMDLINE}")" -gt 1 ]] || ! grep -q 'root=' "${CMDLINE}" \
+      || ! grep -qw 'cgroup_enable=memory' "${CMDLINE}"; then
+    cp -p "${backup}" "${CMDLINE}"
+    echo "WARNING: could not edit ${CMDLINE} safely; restored ${backup}" >&2
+  else
+    echo "Added cgroup_enable=memory to ${CMDLINE} (backup ${backup}); reboot to enforce memory limits."
+    CGROUP_REBOOT_NEEDED=1
+  fi
+fi
+if [[ ! -f /sys/fs/cgroup/cgroup.controllers ]] \
+    || ! grep -qw memory /sys/fs/cgroup/cgroup.controllers; then
+  CGROUP_REBOOT_NEEDED=1
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \
@@ -317,3 +348,8 @@ Next:
      refclock should appear. See docs/time-sync.md
   9. Future updates: sudo canary-update
 EOF
+if [[ "${CGROUP_REBOOT_NEEDED}" -eq 1 ]]; then
+  echo
+  echo "REBOOT REQUIRED: the memory cgroup controller is not active, so"
+  echo "canary.service's MemoryMax/MemorySwapMax are not enforced until the Pi reboots."
+fi

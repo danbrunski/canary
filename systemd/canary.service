@@ -35,6 +35,9 @@ TimeoutStopSec=30
 # This covers the whole service tree, including the out-of-process scorer and
 # the digest child; the digest additionally sets its own RLIMIT_AS so it fails
 # as a catchable MemoryError inside the child rather than as a cgroup kill.
+# Enforced only when the kernel's memory controller is on: the Pi firmware
+# disables it, and install_pi.sh re-enables it (cgroup_enable=memory in
+# cmdline.txt, next boot). Check the cgroup file memory.max, not systemctl show.
 MemoryMax=6G
 MemorySwapMax=0
 
