@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import sys
 from collections.abc import Sequence
 from datetime import UTC, date, datetime
@@ -57,8 +58,11 @@ from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
 from src.decode.behavior_models import (
+    apply_behavior_policy,
+    behavior_policy_path,
     dump_behavior_models,
     load_behavior_models,
+    load_behavior_policy,
     serving_status,
     unknown_operating_modes,
 )
@@ -558,6 +562,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         validation_context=context,
     )
 
+    # B03.3 — the profile policy governs fresh fits too, so the report cannot
+    # show a demoted/quarantined model as trusted just because it was refit.
+    apply_behavior_policy(models, load_behavior_policy(behavior_policy_path(out)))
+
     _print_report(results, frame_rows=len(frame))
 
     # A model gated on a mode this config's segmenter never emits can't be
@@ -579,6 +587,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     report_path = args.report_json or out.with_suffix(out.suffix + ".report.json")
+    # B03.10 — keep the artifact set being replaced (and its report) as a
+    # recoverable prior before anything is overwritten.
+    prior_dir = preserve_prior_artifact(out, report_path)
+    if prior_dir is not None:
+        log.info("preserved prior behavior models", extra={"path": str(prior_dir)})
     _write_bakeoff_report(report_path, results, frame_rows=len(frame))
 
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -587,6 +600,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     tmp.replace(out)
     log.info("wrote behavior models", extra={"path": str(out), "count": len(models.models)})
     return 0
+
+
+#: Recoverable priors live beside the artifact under an ``_``-prefixed
+#: directory (excluded from discovery like every ``_`` path).
+PRIOR_DIRNAME = "_prior"
+
+
+def preserve_prior_artifact(
+    out: Path, report_path: Path | None = None, *, now: datetime | None = None
+) -> Path | None:
+    """Copy the artifact about to be replaced (and its report) to ``_prior/<UTC stamp>/``.
+
+    B03.10: the previous compatible set and its evidence (the evidence lives
+    inside the YAML; the report beside it) stay recoverable. Rolling back is
+    copying the files back — ``poll_behavior_models`` reloads on any stamp
+    change, and ``behavior_policy.yaml`` still governs the restored artifact.
+    ``None`` when there is nothing to preserve.
+    """
+    if not out.exists():
+        return None
+    stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H%M%S")
+    target = out.parent / PRIOR_DIRNAME / stamp
+    target.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(out, target / out.name)
+    if report_path is not None and report_path.exists():
+        shutil.copy2(report_path, target / report_path.name)
+    return target
 
 
 def _print_report(results: Sequence, frame_rows: int) -> None:

@@ -144,3 +144,195 @@ describe("BehaviorModelsPanel", () => {
     expect(screen.getByText("warm_idle_rpm_baseline")).toBeInTheDocument();
   });
 });
+
+// ---------------------------------------------------------------------------
+// B03.8 — status surfaces: empty, demoted, failed, off-map, eligible.
+// ---------------------------------------------------------------------------
+
+const ARTIFACT = {
+  version: 2,
+  fingerprint: "sha256:1a2394e4ca01ebdcc81fb74c752d35a590ed",
+  fitted_at: "2026-07-27T06:09:06.923608+00:00",
+  training_data_hash: "sha256:6db79cbccb866817",
+  tune_revision: null,
+  schema_contract: true,
+  grid_version: null,
+};
+
+function statusModel(
+  name: string,
+  serving_status: Record<string, unknown>,
+  validation_scope: Record<string, unknown>,
+) {
+  return {
+    name,
+    kind: "surface_1d",
+    output: "obd:TIMING_ADVANCE",
+    output_unit: "deg",
+    axis: { name: "rpm", channel: "obd:RPM", unit: "rpm", domain: [400, 7000] },
+    operating_mode: null,
+    version: 2,
+    fit: { ...FIT_BASE, kind: "poly", coefficients: [10] },
+    deviation: { kind: "absolute", warning_band: 5, critical_band: 15, reference_std: null },
+    notes: null,
+    serving_status,
+    artifact: { ...ARTIFACT, name },
+    validation_scope,
+  };
+}
+
+const STATUS_MODELS = {
+  schema_version: 2,
+  models: [
+    statusModel(
+      "eligible_model",
+      {
+        state: "active",
+        reasons: [],
+        lifecycle: "validated",
+        permitted_uses: ["alert", "display", "learned_feature"],
+        policy: null,
+      },
+      {
+        verdict: "passed",
+        tune_revision: "ZS44A-20260920",
+        operating_mode: null,
+        test_drives: ["d1", "d2"],
+      },
+    ),
+    statusModel(
+      "timing_advance_vs_rpm_iat",
+      {
+        state: "diagnostic_only",
+        reasons: ["policy:demoted", "legacy_artifact:no_serving_eligibility_contract"],
+        lifecycle: "demoted",
+        permitted_uses: ["display"],
+        policy: {
+          model: "timing_advance_vs_rpm_iat",
+          lifecycle: "demoted",
+          permitted_uses: ["display"],
+          reason: "RPM/IAT alone omits load",
+          decided: "2026-09-21",
+          evidence: "review",
+        },
+      },
+      { verdict: "none", tune_revision: null, operating_mode: null, held_out_rows: 0 },
+    ),
+    statusModel(
+      "failed_model",
+      {
+        state: "diagnostic_only",
+        reasons: ["validation_failed:skill_vs_baseline:0.02<0.3"],
+        lifecycle: "unvalidated",
+        permitted_uses: ["display", "learned_feature"],
+        policy: null,
+      },
+      {
+        verdict: "failed",
+        failures: ["skill_vs_baseline:0.02<0.3"],
+        tune_revision: "ZS44A-20260920",
+        operating_mode: null,
+      },
+    ),
+  ],
+} as unknown as BehaviorModelsResponse;
+
+function liveTick(overrides: Record<string, unknown>) {
+  return {
+    kind: "surface_1d",
+    x: 1500,
+    y: null,
+    actual: 12,
+    expected: 10,
+    deviation: 2,
+    severity: "ok",
+    mode_match: true,
+    series: [],
+    reason: null,
+    lifecycle: "validated",
+    permitted_uses: ["alert", "display", "learned_feature"],
+    abstain_reason: null,
+    ...overrides,
+  };
+}
+
+describe("BehaviorModelsPanel status (B03.8)", () => {
+  it("says so when no surfaces are fitted", () => {
+    render(
+      createElement(BehaviorModelsPanel, {
+        data: { schema_version: null, models: [] },
+        error: null,
+        live: null,
+      }),
+    );
+    expect(screen.getByText(/no surfaces fitted yet/)).toBeInTheDocument();
+  });
+
+  it("renders eligible, demoted and failed models with identity and scope", () => {
+    const live = {
+      observed: 3,
+      timestamp: "2026-09-21T12:00:00Z",
+      operating_mode: "city",
+      models: {
+        eligible_model: liveTick({}),
+        timing_advance_vs_rpm_iat: liveTick({
+          lifecycle: "demoted",
+          permitted_uses: ["display"],
+          abstain_reason: "not_alerting:demoted",
+          severity: "critical",
+        }),
+        failed_model: liveTick({
+          expected: null,
+          deviation: null,
+          actual: 12,
+          reason: "off_map",
+          lifecycle: "unvalidated",
+          abstain_reason: "off_map",
+        }),
+      },
+    } as unknown as BehaviorLiveResponse;
+    render(createElement(BehaviorModelsPanel, { data: STATUS_MODELS, error: null, live }));
+
+    const eligible = screen.getByTestId("behavior-status-eligible_model");
+    expect(eligible).toHaveTextContent("validated");
+    expect(eligible).toHaveTextContent(/^validated\s*alerting/);
+    expect(eligible).toHaveTextContent("uses: alert, display, learned_feature");
+    expect(eligible).toHaveTextContent("artifact v2");
+    expect(eligible).toHaveTextContent("tune unknown");
+    expect(eligible).toHaveTextContent("passed · 2 test drives · on ZS44A-20260920");
+
+    const demoted = screen.getByTestId("behavior-status-timing_advance_vs_rpm_iat");
+    expect(demoted).toHaveTextContent("demoted");
+    expect(demoted).toHaveTextContent("not alerting");
+    expect(demoted).toHaveTextContent("demoted: RPM/IAT alone omits load");
+    expect(demoted).toHaveTextContent("validation: none recorded");
+    expect(screen.getByText(/abstaining — not_alerting:demoted/)).toBeInTheDocument();
+
+    const failed = screen.getByTestId("behavior-status-failed_model");
+    expect(failed).toHaveTextContent("unvalidated");
+    expect(failed).toHaveTextContent(
+      "why not alerting: validation_failed:skill_vs_baseline:0.02<0.3",
+    );
+    expect(failed).toHaveTextContent("failed");
+    // Off-map is never a clean ok reading.
+    expect(screen.getByText(/off-map — operating point outside/)).toBeInTheDocument();
+  });
+
+  it("names an ineligible tick instead of calling it off-map", () => {
+    const live = {
+      observed: 1,
+      timestamp: null,
+      operating_mode: "city",
+      models: {
+        eligible_model: liveTick({
+          expected: null,
+          deviation: null,
+          reason: "rate_exceeded:obd:RPM",
+          abstain_reason: "rate_exceeded:obd:RPM",
+        }),
+      },
+    } as unknown as BehaviorLiveResponse;
+    render(createElement(BehaviorModelsPanel, { data: STATUS_MODELS, error: null, live }));
+    expect(screen.getByText(/no prediction — rate_exceeded:obd:RPM/)).toBeInTheDocument();
+  });
+});

@@ -83,8 +83,9 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   Per-recipe `min_validation_drives`, `min_eligible_observations`,
   `min_envelope_coverage` are profile data. **Remaining:** the corpus cannot
   meet them — no model has two qualifying independent drives on one current
-  calibration; `2026-07-26T214348` needs an operator resolution (crosses the
-  22:31 flash); event-gated warmup recipes are blocked by **D03.22** (stale
+  calibration; `2026-07-26T214348` (crosses the 22:31 flash) is now excluded
+  by operator decision 2026-09-22 in `behavior_validation.yaml`
+  `provenance_resolutions`; event-gated warmup recipes are blocked by **D03.22** (stale
   sidecar events); cat_warmup's May training sessions are absent locally. All
   eight shipped models stay diagnostic-only ([report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §4).
 - [x] **B02.5 — Report denominators and practical accuracy.** Per model,

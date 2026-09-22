@@ -60,6 +60,28 @@ class BehaviorObservation:
     #: ``behavior_models.serving_status``) plus the named reasons.
     status: str = "active"
     status_reasons: tuple[str, ...] = ()
+    #: B03.8 — ``validated`` | ``unvalidated`` | ``exploratory`` | ``demoted``
+    #: | ``quarantined`` and the typed permitted uses (B03.2); the artifact
+    #: identity and validation scope are on ``GET /models/behavior``.
+    lifecycle: str = "validated"
+    permitted_uses: tuple[str, ...] = ("alert", "display", "learned_feature")
+    artifact_version: int | None = None
+
+    @property
+    def abstain_reason(self) -> str | None:
+        """Why this tick raised no trusted verdict, or ``None`` if it could have.
+
+        The tick's own no-prediction reason (ineligible, off-map, missing
+        actual, out of mode) comes first; otherwise a model that may not
+        alert abstains because of its lifecycle.
+        """
+        if not self.mode_match:
+            return "operating_mode_mismatch"
+        if self.reason is not None:
+            return self.reason
+        if "alert" not in self.permitted_uses:
+            return f"not_alerting:{self.lifecycle}"
+        return None
 
 
 class BehaviorLiveState:
@@ -133,6 +155,10 @@ class BehaviorLiveState:
                 "reason": obs.reason,
                 "status": obs.status,
                 "status_reasons": list(obs.status_reasons),
+                "lifecycle": obs.lifecycle,
+                "permitted_uses": list(obs.permitted_uses),
+                "artifact_version": obs.artifact_version,
+                "abstain_reason": obs.abstain_reason,
             }
             if include_series:
                 entry["series"] = list(self._trail.get(name, ()))

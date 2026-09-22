@@ -43,6 +43,8 @@ except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on 
     )
 
 from src.config import CanaryConfig
+from src.decode.behavior_decoder import withheld_learned_feature_columns
+from src.decode.behavior_models import load_behavior_models
 from src.decode.bindings import load_bindings
 from src.log import configure_logging
 from src.models.isolation_forest import (
@@ -117,6 +119,22 @@ def train(
     # sequence trainer deliberately does NOT apply this — GRU-D consumes
     # missingness as signal.
     feature_columns = _if_feature_columns(features, policy=policy)
+    # B03.2 — a deviation column whose behavior model withholds
+    # ``learned_feature`` (demoted/quarantined/exploratory in the profile's
+    # behavior_policy.yaml) is not selected for a *new* model. The column is
+    # still produced for existing manifests; the refusal is recorded on the
+    # spec so the artifact answers why it is absent.
+    behavior_models_path = config.daemon.behavior_models
+    withheld = withheld_learned_feature_columns(
+        feature_columns,
+        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None,
+    )
+    if withheld:
+        log.info(
+            "behavior deviation columns withheld from IF training",
+            extra={"columns": sorted(withheld)},
+        )
+        feature_columns = [column for column in feature_columns if column not in withheld]
     if not feature_columns:
         raise ValueError(
             "no trainable feature columns — the sessions produced no numeric "
@@ -128,7 +146,10 @@ def train(
         features,
         config.models.isolation_forest,
         feature_columns=feature_columns,
-        feature_spec=build_feature_spec(features, feature_columns, config=config, policy=policy),
+        feature_spec={
+            **build_feature_spec(features, feature_columns, config=config, policy=policy),
+            "behavior_learned_feature_withheld": dict(sorted(withheld.items())),
+        },
         fitted_at=datetime.now(UTC),
         calibration_frame=(
             calibration_frame

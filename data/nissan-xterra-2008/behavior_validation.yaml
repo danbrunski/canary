@@ -32,7 +32,13 @@ drive_join_gap_seconds: 600
 
 # Named decisions for sessions with an unknown tune revision or whose recording
 # crosses a flash. Each needs `revision:` or `exclude: true`, and a `reason:`.
-provenance_resolutions: []
+provenance_resolutions:
+  - session: 2026-07-26T214348
+    exclude: true
+    reason: >
+      Records 47 s past the 2026-07-26 22:31 flash, so its rows cannot be
+      attributed to one calibration. Operator decision 2026-09-22: exclude
+      from behavior-model evidence rather than trim it.
 
 recipes:
   air_charge_vs_rpm_throttle_did:

@@ -33,13 +33,16 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from src.config import CanaryConfig
 from src.telemetry import SOURCE_SEP
+
+if TYPE_CHECKING:
+    from src.decode.behavior_models import BehaviorModels
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -254,6 +257,26 @@ def build_producible_catalog(
     return ProducibleCatalog(
         captured=captured,
         producible=frozenset(str(column) for column in features.columns),
+    )
+
+
+def behavior_feature_conflicts(
+    feature_columns: Iterable[str], behavior_models: BehaviorModels | None
+) -> dict[str, str]:
+    """``{column: reason}`` for consumed ``deviation:*`` columns whose meaning is at risk (B03.4).
+
+    Producibility alone cannot see this: a demoted or quarantined behavior
+    model still *produces* its column (so an existing detector is never
+    starved of it), but the policy withholding ``learned_feature`` says the
+    residual is not one a new model would train on — the consuming detector
+    needs a retrain coordinated with D02.5/D03.25 before the behavior model
+    is refit or retired. A missing column is reported by
+    :func:`unproducible_feature_columns` instead, never here.
+    """
+    from src.decode.behavior_decoder import withheld_learned_feature_columns
+
+    return withheld_learned_feature_columns(
+        (str(column) for column in feature_columns), behavior_models
     )
 
 

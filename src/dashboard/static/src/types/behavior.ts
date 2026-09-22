@@ -75,7 +75,80 @@ export interface DeviationConfig {
   reference_std: number | null;
 }
 
-export interface BehaviorModel1D {
+// ---------------------------------------------------------------------------
+// B03.8 — serving status, artifact identity and validation scope. Additive
+// fields on `GET /models/behavior`; mirrors `serving_status`,
+// `artifact_identity` and `validation_scope` in src/decode/behavior_models.py.
+// ---------------------------------------------------------------------------
+
+/** Why a model may or may not alert. Only `validated` alerts. */
+export type BehaviorLifecycle =
+  | "validated"
+  | "unvalidated"
+  | "exploratory"
+  | "demoted"
+  | "quarantined";
+
+export type BehaviorPermittedUse = "display" | "learned_feature" | "alert";
+
+/** A profile policy entry (`behavior_policy.yaml`) restricting a model. */
+export interface BehaviorPolicyEntry {
+  model: string;
+  lifecycle: "exploratory" | "demoted" | "quarantined";
+  permitted_uses: BehaviorPermittedUse[];
+  artifact_fingerprint?: string;
+  reason: string;
+  decided: string;
+  evidence: string;
+  lift_when?: string;
+}
+
+export interface BehaviorServingStatus {
+  state: "active" | "diagnostic_only";
+  reasons: string[];
+  lifecycle?: BehaviorLifecycle;
+  permitted_uses?: BehaviorPermittedUse[];
+  policy?: BehaviorPolicyEntry | null;
+}
+
+export interface BehaviorArtifactIdentity {
+  name: string;
+  version: number;
+  fingerprint: string;
+  fitted_at: string;
+  training_data_hash: string | null;
+  tune_revision: string | null;
+  schema_contract: boolean;
+  grid_version: number | null;
+}
+
+/** Where the artifact's evidence holds; `verdict: "none"` when it has none. */
+export interface BehaviorValidationScope {
+  verdict: "none" | "passed" | "failed" | "insufficient_evidence";
+  evaluated_at?: string;
+  failures?: string[];
+  tune_revision: string | null;
+  operating_mode: string | null;
+  mode_taxonomy?: string[];
+  test_drives?: string[];
+  calibration_drives?: string[];
+  train_drives?: number;
+  test_evaluated_rows?: number;
+  held_out_rows?: number;
+  held_out_sessions?: string[];
+  criteria_source?: string | null;
+  contract_matches?: boolean;
+}
+
+/** Fields every model carries on `GET /models/behavior` since B01.6/B03.8.
+ *  Optional so an older daemon's payload still type-checks and renders. */
+export interface BehaviorModelStatusFields {
+  serving_status?: BehaviorServingStatus;
+  artifact?: BehaviorArtifactIdentity;
+  validation_scope?: BehaviorValidationScope;
+}
+
+export interface BehaviorModel1D extends BehaviorModelStatusFields {
   name: string;
   kind: "surface_1d";
   output: string;
@@ -89,7 +162,7 @@ export interface BehaviorModel1D {
   notes: string | null;
 }
 
-export interface BehaviorModel2D {
+export interface BehaviorModel2D extends BehaviorModelStatusFields {
   name: string;
   kind: "surface_2d";
   output: string;
@@ -108,6 +181,12 @@ export type BehaviorModel = BehaviorModel1D | BehaviorModel2D;
 export interface BehaviorModelsResponse {
   schema_version: number | null;
   models: BehaviorModel[];
+  /** B03.8 — the profile policy file governing the artifact. */
+  policy?: {
+    path: string;
+    present: boolean;
+    unmatched_entries: string[];
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +220,17 @@ export interface BehaviorLiveModel {
   /** model.operating_mode is unset OR equals the current operating mode. */
   mode_match: boolean;
   series: BehaviorLivePoint[];
+  /** B01.4 — why the model produced no deviation this tick. */
+  reason?: string | null;
+  /** B01.6 — "active" | "diagnostic_only" and the named reasons. */
+  status?: string;
+  status_reasons?: string[];
+  /** B03.8 — lifecycle, typed permitted uses, the serving artifact version and
+   *  why this tick raised no trusted verdict (null when it could have). */
+  lifecycle?: BehaviorLifecycle;
+  permitted_uses?: BehaviorPermittedUse[];
+  artifact_version?: number | null;
+  abstain_reason?: string | null;
 }
 
 /** `GET /models/behavior/live`. Empty `models` when no daemon is wired. */

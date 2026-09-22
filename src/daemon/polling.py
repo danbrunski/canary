@@ -8,6 +8,7 @@ from typing import Any
 from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
+    behavior_policy_path,
     diagnostic_only_models,
     load_behavior_models,
     unknown_operating_modes,
@@ -180,6 +181,14 @@ async def poll_config(
             continue
 
 
+def _behavior_stamp(path: Path, policy_path: Path) -> tuple[float, float | None] | None:
+    """``(artifact mtime, policy mtime)``; ``None`` while the artifact is absent."""
+    if not path.exists():
+        return None
+    policy_mtime = policy_path.stat().st_mtime if policy_path.exists() else None
+    return (path.stat().st_mtime, policy_mtime)
+
+
 async def poll_behavior_models(
     path: Path,
     live_source: LiveFeatureSource,
@@ -195,15 +204,20 @@ async def poll_behavior_models(
     storm-quieting refit ran into exactly that wall, and operator
     coordination on a no-restart Pi is annoying. Reload errors log + skip;
     the previous in-memory set keeps running.
+
+    B03.2/B03.10 — the sibling ``behavior_policy.yaml`` is part of the stamp:
+    editing a demotion reapplies it without a restart. Any stamp *change*
+    reloads (not only a newer one), so restoring the prior artifact with its
+    original mtime (``cp -p``, ``git checkout`` of an old tree) is picked up
+    as a rollback — and the reloaded artifact is governed by the same policy.
     """
-    last_mtime: float | None = None
-    if path.exists():
-        last_mtime = path.stat().st_mtime
+    policy_path = behavior_policy_path(path)
+    last_stamp = _behavior_stamp(path, policy_path)
     while not stop_event.is_set():
         try:
             if path.exists():
-                mtime = path.stat().st_mtime
-                if last_mtime is None or mtime > last_mtime:
+                stamp = _behavior_stamp(path, policy_path)
+                if last_stamp is None or stamp != last_stamp:
                     new_models = load_behavior_models(path)
                     live_source.behavior_models = new_models
                     log.info(
@@ -233,7 +247,7 @@ async def poll_behavior_models(
                             "contract and held-out validation",
                             extra={"models": diagnostic},
                         )
-                    last_mtime = mtime
+                    last_stamp = stamp
         except Exception:  # noqa: BLE001 — keep the previous models; log + retry
             log.exception(
                 "behavior model hot-reload failed; keeping previous",

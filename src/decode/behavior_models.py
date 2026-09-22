@@ -31,11 +31,19 @@ import json
 import logging
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 log = logging.getLogger(__name__)
 
@@ -723,6 +731,128 @@ class ValidationEvidence(_Strict):
     provenance: dict[str, list[str]] = Field(default_factory=dict)
 
 
+# ---------------------------------------------------------------------------
+# Permitted-use policy (B03.2 / B03.3)
+# ---------------------------------------------------------------------------
+
+
+class PermittedUse(StrEnum):
+    """What a loaded behavior artifact may be used for (B03.2).
+
+    One small vocabulary shared by the loader, preprocessing and the daemon:
+
+    * ``display`` — the live overlay, session analysis, dashboard and MCP
+      read it. Always retained: a demoted surface stays inspectable.
+    * ``learned_feature`` — its ``deviation:<name>`` column may be *selected*
+      as a feature by a new IF training run
+      (``feature_pipeline.FeaturePolicy``). Withholding it never stops the
+      column being produced, so an existing detector trained on it keeps its
+      input (the 2026-09 IF-blind incident was a silently deleted column).
+    * ``alert`` — standalone ``BehaviorDetector`` events and fusion votes.
+      Granted only by passed held-out evidence (:func:`serving_status`);
+      a policy entry can withdraw it, never grant it.
+    """
+
+    DISPLAY = "display"
+    LEARNED_FEATURE = "learned_feature"
+    ALERT = "alert"
+
+
+#: Every use an artifact could have before evidence and policy subtract.
+ALL_PERMITTED_USES: frozenset[PermittedUse] = frozenset(PermittedUse)
+
+#: Profile-data file holding :class:`BehaviorPolicy`, next to the artifact.
+BEHAVIOR_POLICY_FILENAME = "behavior_policy.yaml"
+
+Lifecycle = Literal["validated", "unvalidated", "exploratory", "demoted", "quarantined"]
+
+
+class LifecyclePolicyEntry(_Strict):
+    """One operator/review decision restricting a model's permitted uses.
+
+    Lives in profile data (``behavior_policy.yaml``), never in the artifact,
+    so a refit, a partial-refit carry-over, a hot reload or restoring an old
+    artifact cannot drop it (B03.3):
+
+    * ``demoted`` / ``exploratory`` apply to the model *name* — any artifact
+      of that name, including a future refit, until the entry is removed
+      (``lift_when`` says by what).
+    * ``quarantined`` applies to one *artifact* (``artifact_fingerprint``,
+      see :func:`artifact_fingerprint`): reloading or carrying over that
+      artifact stays quarantined; a new fit is a different artifact and must
+      earn trust through B02 evidence like any other.
+    """
+
+    model: str = Field(min_length=1)
+    lifecycle: Literal["exploratory", "demoted", "quarantined"]
+    permitted_uses: list[PermittedUse]
+    artifact_fingerprint: str | None = None
+    reason: str = Field(min_length=1)
+    decided: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    lift_when: str | None = None
+
+    @model_validator(mode="after")
+    def _restrict_only(self) -> LifecyclePolicyEntry:
+        uses = set(self.permitted_uses)
+        if PermittedUse.ALERT in uses:
+            raise ValueError(
+                f"{self.model}: a policy entry cannot grant 'alert' — trust comes only "
+                "from passed held-out evidence; policy can only withdraw uses"
+            )
+        if PermittedUse.DISPLAY not in uses:
+            raise ValueError(
+                f"{self.model}: 'display' must stay permitted — a demoted or quarantined "
+                "surface stays available for inspection"
+            )
+        if self.lifecycle == "quarantined" and not self.artifact_fingerprint:
+            raise ValueError(
+                f"{self.model}: a quarantine pins one artifact; give artifact_fingerprint"
+            )
+        if self.lifecycle != "quarantined" and self.artifact_fingerprint is not None:
+            raise ValueError(
+                f"{self.model}: {self.lifecycle} applies to the model name; "
+                "artifact_fingerprint is only for quarantine"
+            )
+        return self
+
+    def to_dict(self) -> dict[str, object]:
+        return self.model_dump(mode="json", exclude_none=True)
+
+
+class BehaviorPolicy(_Strict):
+    """``behavior_policy.yaml`` — the per-vehicle permitted-use decisions."""
+
+    schema_version: Literal[1] = 1
+    entries: list[LifecyclePolicyEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique(self) -> BehaviorPolicy:
+        seen: set[tuple[str, str | None]] = set()
+        for entry in self.entries:
+            key = (entry.model, entry.artifact_fingerprint)
+            if key in seen:
+                raise ValueError(f"duplicate behavior policy entry for {key}")
+            seen.add(key)
+        return self
+
+    def entry_for(self, model: BehaviorModel1D | BehaviorModel2D) -> LifecyclePolicyEntry | None:
+        """The entry governing ``model``: an artifact quarantine, else a name-wide one."""
+        named = [entry for entry in self.entries if entry.model == model.name]
+        if not named:
+            return None
+        pinned = [entry for entry in named if entry.artifact_fingerprint is not None]
+        if pinned:
+            identity = artifact_fingerprint(model)
+            for entry in pinned:
+                if entry.artifact_fingerprint == identity:
+                    return entry
+        for entry in named:
+            if entry.artifact_fingerprint is None:
+                return entry
+        return None
+
+
 class BehaviorModel1D(_Strict):
     """A 1D expected-behavior surface."""
 
@@ -749,6 +879,10 @@ class BehaviorModel1D(_Strict):
     #: contract, criteria or mode-taxonomy change) withheld trust without
     #: touching ``evidence``. Any entry makes the model diagnostic-only.
     publication_flags: list[str] = Field(default_factory=list)
+    #: B03.2 — the profile policy entry governing this artifact, attached by
+    #: :func:`load_behavior_models` / :func:`apply_behavior_policy`. Private:
+    #: never serialized, and an artifact cannot carry its own policy.
+    _policy_entry: LifecyclePolicyEntry | None = PrivateAttr(default=None)
 
     @model_validator(mode="after")
     def _check_deviation(self) -> BehaviorModel1D:
@@ -784,6 +918,7 @@ class BehaviorModel2D(_Strict):
     diagnostic_limitations: list[str] = Field(default_factory=list)
     evidence: ValidationEvidence | None = None
     publication_flags: list[str] = Field(default_factory=list)
+    _policy_entry: LifecyclePolicyEntry | None = PrivateAttr(default=None)
     #: Cells with fewer fit samples than this evaluate to ``None`` (off-map)
     #: instead of grading against a near-meaningless mean/std. Default 1
     #: keeps pre-existing YAML artifacts (which only excluded count==0)
@@ -817,6 +952,10 @@ class BehaviorModels(_Strict):
 
     schema_version: int
     models: list[BehaviorModel] = Field(default_factory=list)
+    #: B03.2 — the policy :func:`apply_behavior_policy` attached, and its
+    #: entries that matched no loaded artifact.
+    _policy: BehaviorPolicy | None = PrivateAttr(default=None)
+    _policy_unmatched: list[str] = PrivateAttr(default_factory=list)
 
     @field_validator("schema_version")
     @classmethod
@@ -845,6 +984,8 @@ STATUS_NO_GATE_EVIDENCE = "unvalidated:no_gate_evidence"
 #: The evidence was gathered under a different serving contract than the
 #: artifact now declares (hand edit, or a contract field changed after fit).
 STATUS_EVIDENCE_CONTRACT_MISMATCH = "evidence_contract_mismatch"
+#: Prefix of the reason a profile policy entry adds (``policy:demoted`` …).
+STATUS_POLICY_PREFIX = "policy:"
 
 
 def contract_fingerprint_payload(
@@ -907,38 +1048,119 @@ def contract_fingerprint(model: BehaviorModel1D | BehaviorModel2D) -> str:
     )
 
 
+def artifact_fingerprint(model: BehaviorModel1D | BehaviorModel2D) -> str:
+    """Identity of one fitted artifact, stable across carry-over and reload.
+
+    Covers the name, output and the whole ``fit`` (coefficients/knots/cells,
+    training sessions, ``fitted_at``, training-row hash). Excludes ``version``
+    and ``publication_flags``, which a carry-over may change without changing
+    the fitted surface — so a quarantine pinned to this value follows the
+    artifact through partial refits and survives restoring an old file.
+    """
+    return fingerprint(
+        {
+            "name": model.name,
+            "kind": model.kind,
+            "output": model.output,
+            "fit": model.fit.model_dump(mode="json"),
+        }
+    )
+
+
+def artifact_identity(model: BehaviorModel1D | BehaviorModel2D) -> dict[str, object]:
+    """What a status surface shows to say *which* artifact is serving (B03.8)."""
+    return {
+        "name": model.name,
+        "version": model.version,
+        "fingerprint": artifact_fingerprint(model),
+        "fitted_at": model.fit.fitted_at,
+        "training_data_hash": model.fit.training_data_hash or None,
+        "tune_revision": model.fit.tune_revision,
+        "schema_contract": model.eligibility is not None,
+        "grid_version": model.grid_version if isinstance(model, BehaviorModel2D) else None,
+    }
+
+
+def validation_scope(model: BehaviorModel1D | BehaviorModel2D) -> dict[str, object]:
+    """Where the artifact's evidence holds, or that there is none (B03.8).
+
+    An artifact with no B02 evidence says so (``verdict: "none"``) instead of
+    looking like a clean result; held-out rows without evidence are named.
+    """
+    evidence = model.evidence
+    if evidence is None:
+        return {
+            "verdict": "none",
+            "held_out_rows": model.fit.validation_sample_count,
+            "held_out_sessions": list(model.fit.calibration_sessions),
+            "tune_revision": model.fit.tune_revision,
+            "operating_mode": model.operating_mode,
+        }
+    return {
+        "verdict": evidence.verdict,
+        "evaluated_at": evidence.evaluated_at,
+        "failures": list(evidence.failures),
+        "tune_revision": evidence.tune_revision,
+        "operating_mode": model.operating_mode,
+        "mode_taxonomy": list(evidence.mode_taxonomy),
+        "test_drives": [drive.drive_id for drive in evidence.split.test],
+        "calibration_drives": [drive.drive_id for drive in evidence.split.calibration],
+        "train_drives": len(evidence.split.train),
+        "test_evaluated_rows": evidence.test.evaluated if evidence.test is not None else 0,
+        "criteria_source": evidence.criteria_source,
+        "contract_matches": evidence.contract_fingerprint == contract_fingerprint(model),
+    }
+
+
 @dataclass(frozen=True)
 class ServingStatus:
-    """Whether a loaded model may raise trusted alerts, and why not.
+    """Whether a loaded model may raise trusted alerts, what else it may do, and why.
 
     ``diagnostic_only`` models still evaluate — the live overlay, session
     analysis and the ``deviation:*`` feature columns existing detectors were
     trained on keep working — but the daemon never emits or fuses their
-    alerts. B03 extends this with explicit demotion/quarantine policy; the
-    reasons here are the ones derivable from the artifact alone.
+    alerts. ``lifecycle`` separates *why*: ``unvalidated`` (the artifact
+    lacks passing evidence), or a profile policy decision (``exploratory``,
+    ``demoted``, ``quarantined``); ``validated`` is the only alerting one.
+    ``permitted_uses`` is the typed B03.2 policy the loader, preprocessing
+    and daemon all read.
     """
 
     state: Literal["active", "diagnostic_only"]
     reasons: tuple[str, ...] = ()
+    lifecycle: Lifecycle = "validated"
+    permitted_uses: frozenset[PermittedUse] = ALL_PERMITTED_USES
+    policy: LifecyclePolicyEntry | None = None
 
     @property
     def alerting(self) -> bool:
-        return self.state == "active"
+        return PermittedUse.ALERT in self.permitted_uses
+
+    def permits(self, use: PermittedUse) -> bool:
+        return use in self.permitted_uses
 
     def to_dict(self) -> dict[str, object]:
-        return {"state": self.state, "reasons": list(self.reasons)}
+        return {
+            "state": self.state,
+            "reasons": list(self.reasons),
+            "lifecycle": self.lifecycle,
+            "permitted_uses": sorted(use.value for use in self.permitted_uses),
+            "policy": None if self.policy is None else self.policy.to_dict(),
+        }
 
 
 def serving_status(model: BehaviorModel1D | BehaviorModel2D) -> ServingStatus:
-    """Classify a loaded artifact (B01.6, B02.7) without blessing missing metadata.
+    """Classify a loaded artifact (B01.6, B02.7, B03.2) without blessing missing metadata.
 
     The one trust decision: the daemon's model load and hot reload, the
     behavior detector, the dashboard, MCP and the refit report all call this.
     ``active`` requires the schema-2 eligibility contract, held-out rows, and
     B02 :class:`ValidationEvidence` whose verdict is ``passed`` under this
-    model's current contract, with no publication flag. Anything else is
-    ``diagnostic_only`` with every applicable reason named. Loading never
-    upgrades a model; only a refit that writes all of these can.
+    model's current contract, with no publication flag, and no profile
+    policy entry withdrawing ``alert``. Anything else is ``diagnostic_only``
+    with every applicable reason named. Loading never upgrades a model; only
+    a refit that writes all of these can, and a policy entry (attached at
+    load from profile data) can only subtract uses.
     """
     reasons: list[str] = []
     if model.eligibility is None:
@@ -959,9 +1181,28 @@ def serving_status(model: BehaviorModel1D | BehaviorModel2D) -> ServingStatus:
         if evidence.contract_fingerprint != contract_fingerprint(model):
             reasons.append(STATUS_EVIDENCE_CONTRACT_MISMATCH)
     reasons.extend(model.publication_flags)
+    uses = set(ALL_PERMITTED_USES)
+    lifecycle: Lifecycle = "validated"
     if reasons:
-        return ServingStatus("diagnostic_only", tuple(reasons))
-    return ServingStatus("active")
+        uses.discard(PermittedUse.ALERT)
+        lifecycle = "unvalidated"
+    entry = model._policy_entry
+    if entry is not None:
+        # B03.3 — policy is intersected, never unioned: it cannot restore a
+        # use the evidence withheld.
+        uses &= set(entry.permitted_uses)
+        lifecycle = entry.lifecycle
+        reasons.insert(0, f"{STATUS_POLICY_PREFIX}{entry.lifecycle}")
+    state: Literal["active", "diagnostic_only"] = (
+        "active" if PermittedUse.ALERT in uses else "diagnostic_only"
+    )
+    return ServingStatus(
+        state,
+        tuple(reasons),
+        lifecycle=lifecycle,
+        permitted_uses=frozenset(uses),
+        policy=entry,
+    )
 
 
 def diagnostic_only_models(models: BehaviorModels) -> dict[str, list[str]]:
@@ -974,10 +1215,66 @@ def diagnostic_only_models(models: BehaviorModels) -> dict[str, list[str]]:
     return out
 
 
+def behavior_policy_path(behavior_models_path: Path) -> Path:
+    """The profile policy file governing the artifact at ``behavior_models_path``."""
+    return behavior_models_path.parent / BEHAVIOR_POLICY_FILENAME
+
+
+def load_behavior_policy(path: Path) -> BehaviorPolicy:
+    """Load ``behavior_policy.yaml``; a missing file is an empty policy."""
+    if not path.exists():
+        return BehaviorPolicy()
+    raw = yaml.safe_load(path.read_text()) or {}
+    return BehaviorPolicy.model_validate(raw)
+
+
+def apply_behavior_policy(models: BehaviorModels, policy: BehaviorPolicy) -> list[str]:
+    """Attach ``policy`` to every model of ``models``; return unmatched entries.
+
+    An unmatched quarantine means its artifact was replaced (a new fit must
+    earn trust through evidence) — named so a status surface can show it.
+    """
+    matched: set[tuple[str, str | None]] = set()
+    for model in models.models:
+        entry = policy.entry_for(model)
+        model._policy_entry = entry
+        if entry is not None:
+            matched.add((entry.model, entry.artifact_fingerprint))
+    # An empty policy leaves the document exactly as validated (private
+    # attributes take part in pydantic equality).
+    models._policy = policy if policy.entries else None
+    unmatched = [
+        f"{entry.model}:{entry.lifecycle}"
+        + (f"@{entry.artifact_fingerprint}" if entry.artifact_fingerprint else "")
+        for entry in policy.entries
+        if (entry.model, entry.artifact_fingerprint) not in matched
+    ]
+    models._policy_unmatched = unmatched
+    return unmatched
+
+
+def policy_unmatched_entries(models: BehaviorModels) -> list[str]:
+    """Policy entries that governed no artifact of ``models`` at load (B03.8)."""
+    return list(models._policy_unmatched)
+
+
 def load_behavior_models(path: Path) -> BehaviorModels:
-    """Load and validate a ``behavior_models.yaml`` file."""
+    """Load and validate a ``behavior_models.yaml`` file, with its profile policy.
+
+    The sibling ``behavior_policy.yaml`` (B03.2) is applied here — the one
+    loader every consumer (daemon load, hot reload, dashboard, MCP, replay,
+    refit, feature pipeline) goes through — so no caller can read an
+    artifact without the demotions that govern it.
+    """
     raw = yaml.safe_load(path.read_text())
-    return BehaviorModels.model_validate(raw)
+    models = BehaviorModels.model_validate(raw)
+    unmatched = apply_behavior_policy(models, load_behavior_policy(behavior_policy_path(path)))
+    if unmatched:
+        log.info(
+            "behavior policy entries match no loaded artifact (replaced or retired)",
+            extra={"entries": unmatched},
+        )
+    return models
 
 
 def unknown_operating_modes(

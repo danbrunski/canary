@@ -148,3 +148,6 @@ data/_benchmarks/
 # retention sweep skip them; the curated reports live under
 # data/analyses/sustained-validation/ instead.
 data/_validation/
+
+# Behavior refits keep the replaced artifact here (B03.10); local recovery copies.
+data/*/_prior/

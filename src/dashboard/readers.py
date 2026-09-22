@@ -17,8 +17,12 @@ from src.decode.accepted_baselines import (
 )
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
+    artifact_identity,
+    behavior_policy_path,
     load_behavior_models,
+    policy_unmatched_entries,
     serving_status,
+    validation_scope,
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
@@ -326,13 +330,25 @@ def read_can_coverage(
 
 def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
     """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard."""
+    policy_path = behavior_policy_path(path)
+    policy_block: dict[str, Any] = {
+        "path": str(policy_path),
+        "present": policy_path.exists(),
+        "unmatched_entries": [],
+    }
     if not path.exists():
-        return {"schema_version": None, "models": []}
+        return {"schema_version": None, "models": [], "policy": policy_block}
     models = load_behavior_models(path)
     payload = models.model_dump(mode="json")
     # B01.6 — additive: whether each model may alert, and why not.
+    # B03.8 — plus which artifact is serving (identity), its permitted uses
+    # and lifecycle (inside ``serving_status``) and where its evidence holds.
     for entry, model in zip(payload["models"], models.models, strict=True):
         entry["serving_status"] = serving_status(model).to_dict()
+        entry["artifact"] = artifact_identity(model)
+        entry["validation_scope"] = validation_scope(model)
+    policy_block["unmatched_entries"] = policy_unmatched_entries(models)
+    payload["policy"] = policy_block
     return payload
 
 

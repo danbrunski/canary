@@ -1,0 +1,68 @@
+# Behavior-model permitted-use policy for this vehicle (B03.2 / B03.3).
+#
+# Read by src.decode.behavior_models.load_behavior_models — the one loader the
+# daemon (start-up and hot reload), dashboard, MCP, replay, refit and feature
+# pipeline all use — and applied to behavior_models.yaml beside it. It lives
+# here, not in the artifact, so a refit, a partial-refit carry-over, a hot
+# reload or restoring an older artifact cannot silently drop a demotion.
+#
+# Policy only SUBTRACTS uses. `alert` is granted solely by passed held-out B02
+# evidence (serving_status) and cannot be listed here; `display` must stay, so
+# a demoted surface remains inspectable. Uses:
+#   display          overlay, session analysis, dashboard, MCP
+#   learned_feature  its deviation:<name> column may be SELECTED by a new IF
+#                    training run. Withholding it never stops the column being
+#                    produced: an existing detector trained on it keeps its
+#                    input (2026-09 IF-blind incident). No tracked IF/sequence
+#                    manifest consumes any deviation:* column (inventory,
+#                    data/analyses/2026-09-21-behavior-artifact-inventory.md).
+#
+# Lifecycles:
+#   demoted / exploratory  apply to the model NAME (any future refit too) until
+#                          the entry is removed — `lift_when` says by what.
+#   quarantined            applies to ONE artifact (artifact_fingerprint, from
+#                          behavior_models.artifact_fingerprint: name, kind,
+#                          output and the whole fit). Reloading or carrying it
+#                          over stays quarantined; a new fit is a different
+#                          artifact and must earn trust through B02 evidence.
+schema_version: 1
+
+entries:
+  - model: timing_advance_vs_rpm_iat
+    lifecycle: demoted
+    permitted_uses: [display]
+    reason: >-
+      RPM/IAT alone omits load: held-out J26 R² -0.046, MAE 8.80 deg, median
+      warning half-width 31.3 deg; zero evaluable rows on S17/S18 (IAT below
+      the 29 deg C stored domain). Removed from standalone alerting; IAT stays
+      a candidate context input for a load-aware timing model.
+    decided: 2026-09-21 behavior-model review (B00 carried decision)
+    evidence: data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md §3
+    lift_when: never for standalone alerting; retire the recipe when B04 ships a load-aware timing model
+
+  - model: timing_advance_vs_rpm_load
+    lifecycle: exploratory
+    permitted_uses: [display]
+    reason: >-
+      Retained as exploratory visualization: S17/S21 R² 0.33/0.28, MAE
+      4.8/6.7 deg, median warning half-width ~24 deg — too coarse for subtle
+      timing/knock alerts, and an unexpected timing residual does not identify
+      knock.
+    decided: 2026-09-21 behavior-model review (B00 carried decision)
+    evidence: data/analyses/2026-09-21-behavior-model-review.md (Model decisions)
+    lift_when: B04 qualifies a timing model under B02 criteria (remove this entry in that change)
+
+  - model: cat_warmup
+    lifecycle: quarantined
+    artifact_fingerprint: sha256:f14450ab4c88df87047c9994136145d67141668b0813596370ac5a57c637f06a
+    permitted_uses: [display]
+    reason: >-
+      May 25 artifact (v4) with no held-out validation; on S18's genuine cold
+      start n=34, R² -0.737, MAE 55 deg C, 76.5 % exceedance; persisted bands
+      30/80 deg C predate the recipe's 45/115. Its May training sessions are
+      absent locally, so it cannot be re-validated. Temperature trajectory
+      alone does not establish catalyst efficiency; the raw channel and
+      warmup analysis stay.
+    decided: 2026-09-21 behavior-model review (B00 carried decision)
+    evidence: data/analyses/2026-09-21-behavior-model-review.md (Model decisions); data/analyses/2026-09-21-behavior-validation-report.md §4
+    lift_when: a new cat_warmup fit passes B02 validation (B07); this artifact stays quarantined

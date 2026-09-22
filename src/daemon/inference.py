@@ -1917,6 +1917,9 @@ def _observe_behavior(
                 reason=result.reason,
                 status=status.state,
                 status_reasons=status.reasons,
+                lifecycle=status.lifecycle,
+                permitted_uses=tuple(sorted(use.value for use in status.permitted_uses)),
+                artifact_version=model.version,
             )
         )
         residuals.append(

@@ -24,7 +24,7 @@ already handles those correctly.
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, cast
 
@@ -51,6 +51,8 @@ from src.decode.behavior_models import (
     BehaviorModels,
     DeviationConfig,
     GridBinnedMeanFit,
+    PermittedUse,
+    serving_status,
 )
 from src.preprocessing.features import ROC_SUFFIX, FeatureConfig, compute_rate_of_change
 from src.preprocessing.resampler import gap_column
@@ -558,8 +560,48 @@ def _local_std(
     return cell.std
 
 
+def deviation_model_name(column: str) -> str | None:
+    """``deviation:<name>[__mean|__std|__roc|__gap]`` → ``<name>``; else ``None``."""
+    if not column.startswith(DEVIATION_COLUMN_PREFIX):
+        return None
+    name = column.removeprefix(DEVIATION_COLUMN_PREFIX)
+    for suffix in ("__mean", "__std", "__roc", "__gap"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def withheld_learned_feature_columns(
+    columns: Iterable[str], models: BehaviorModels | None
+) -> dict[str, str]:
+    """``{column: reason}`` for deviation columns a new detector may not select (B03.2).
+
+    A column is withheld when its behavior model's permitted uses exclude
+    ``learned_feature`` (a profile policy entry — see
+    ``behavior_policy.yaml``). This governs *selection for new training
+    only*: :func:`append_deviation_columns` keeps producing every column, so
+    an existing manifest trained on one is never starved of its input.
+    """
+    if models is None:
+        return {}
+    status_by_name = {model.name: serving_status(model) for model in models.models}
+    out: dict[str, str] = {}
+    for raw in columns:
+        column = str(raw)
+        name = deviation_model_name(column)
+        status = status_by_name.get(name) if name is not None else None
+        if status is None or status.permits(PermittedUse.LEARNED_FEATURE):
+            continue
+        out[column] = (
+            f"behavior model {name!r} is {status.lifecycle}: learned_feature not permitted"
+        )
+    return out
+
+
 __all__ = [
     "DEVIATION_COLUMN_PREFIX",
+    "deviation_model_name",
+    "withheld_learned_feature_columns",
     "DeviationResult",
     "Severity",
     "append_behavior_prerequisites",

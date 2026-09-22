@@ -55,7 +55,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     sys.path.insert(0, str(REPO_ROOT))
     from src.config import CanaryConfig
+    from src.decode.behavior_models import load_behavior_models
     from src.models.spec_producibility import (
+        behavior_feature_conflicts,
         build_producible_catalog,
         load_manifest_feature_columns,
         summarize,
@@ -74,6 +76,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     catalog = build_producible_catalog(config)
+    behavior_path = config.daemon.behavior_models
+    behavior_models = load_behavior_models(behavior_path) if behavior_path.exists() else None
     report: dict[str, object] = {}
     status = 0
     for path in manifests:
@@ -85,6 +89,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         unproducible = unproducible_feature_columns(columns, catalog)
         report[str(path)] = summarize(unproducible, columns)
+        # B03.4 — still produced, but governed by a behavior demotion: a
+        # warning (exit status unchanged), never a silent meaning change.
+        report[str(path)]["behavior_feature_conflicts"] = behavior_feature_conflicts(
+            columns, behavior_models
+        )
         if unproducible:
             status = max(status, 1)
 
@@ -104,6 +113,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         for base, detail in entry["unproducible_by_base"].items():
             print(f"  {base}: {len(detail['columns'])} column(s) — {detail['reason']}")
+        for column, reason in entry["behavior_feature_conflicts"].items():
+            print(f"  WARN {column}: {reason}")
     return status
 
 

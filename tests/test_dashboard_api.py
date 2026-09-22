@@ -357,7 +357,13 @@ def test_read_behavior_models_returns_empty_when_file_missing(tmp_path: Path) ->
     from src.dashboard.api import read_behavior_models
 
     payload = read_behavior_models(tmp_path / "missing.yaml")
-    assert payload == {"schema_version": None, "models": []}
+    assert payload["schema_version"] is None and payload["models"] == []
+    # B03.8 — additive: the policy file governing the (absent) artifact.
+    assert payload["policy"] == {
+        "path": str(tmp_path / "behavior_policy.yaml"),
+        "present": False,
+        "unmatched_entries": [],
+    }
 
 
 def test_read_behavior_models_round_trips_yaml(tmp_path: Path) -> None:
@@ -421,7 +427,9 @@ def test_behavior_models_endpoint_returns_empty_when_missing(
     client = TestClient(app)
     response = client.get("/models/behavior")
     assert response.status_code == 200
-    assert response.json() == {"schema_version": None, "models": []}
+    body = response.json()
+    assert body["schema_version"] is None and body["models"] == []
+    assert body["policy"]["present"] is False
 
 
 def test_behavior_models_endpoint_returns_yaml_content(

@@ -314,6 +314,47 @@ def test_main_writes_output_yaml(
     assert "fitted (1)" in captured
 
 
+def test_main_report_applies_profile_policy_and_preserves_prior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """B03.3/B03.10 — a fresh fit is governed by the profile policy in the
+    report, and the artifact it replaces is kept as a recoverable prior."""
+    _patch_pipeline(monkeypatch, tmp_path)
+    out = tmp_path / "behavior_models.yaml"
+    (tmp_path / "behavior_policy.yaml").write_text(
+        "schema_version: 1\n"
+        "entries:\n"
+        "  - model: coolant_warmup\n"
+        "    lifecycle: demoted\n"
+        "    permitted_uses: [display]\n"
+        "    reason: test demotion\n"
+        "    decided: '2026-09-21'\n"
+        "    evidence: tests\n"
+    )
+    argv = [
+        "--config",
+        "canary.example.yaml",
+        "--sessions-root",
+        str(tmp_path / "sessions"),
+        "--all",
+        "--out",
+        str(out),
+        "--recipe",
+        "coolant_warmup",
+    ]
+    assert refit_cli.main(argv) == 0
+    report = json.loads(out.with_suffix(out.suffix + ".report.json").read_text())
+    status = report["recipes"][0]["serving_status"]
+    assert status["lifecycle"] == "demoted"
+    assert status["permitted_uses"] == ["display"]
+    assert not (tmp_path / "_prior").exists()  # nothing to preserve on the first write
+    first = out.read_bytes()
+    assert refit_cli.main(argv) == 0
+    priors = sorted((tmp_path / "_prior").glob("*/behavior_models.yaml"))
+    assert len(priors) == 1 and priors[0].read_bytes() == first
+    assert (priors[0].parent / "behavior_models.yaml.report.json").exists()
+
+
 def test_main_rejects_unknown_recipe(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_pipeline(monkeypatch, tmp_path)
     with pytest.raises(SystemExit, match="unknown recipe"):

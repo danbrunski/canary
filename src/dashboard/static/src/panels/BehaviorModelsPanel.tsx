@@ -18,6 +18,7 @@ import {
   placeholderClass,
 } from "../styles";
 import type {
+  BehaviorLifecycle,
   BehaviorLiveModel,
   BehaviorLiveResponse,
   BehaviorModel,
@@ -149,7 +150,13 @@ function ModelCard({
   // Active but the model didn't speak — off the fitted domain or an
   // unobserved grid cell. The deviation columns the IF/LSTM see are NaN
   // here, which is exactly why anomalies get noisy at the envelope edge.
-  const offMap = Boolean(active && active.expected === null);
+  // B01.4: a daemon that names the reason distinguishes off-map from an
+  // ineligible tick (unmet serving condition, missing/stale actual).
+  const noPrediction = Boolean(active && active.expected === null);
+  const offMap =
+    noPrediction && (active?.reason == null || active.reason === "off_map");
+  const ineligibleReason =
+    noPrediction && !offMap ? (active?.reason ?? null) : null;
 
   return (
     <article
@@ -180,6 +187,7 @@ function ModelCard({
           <span>r² {model.fit.r_squared.toFixed(3)}</span>
         )}
       </div>
+      <ModelStatus model={model} />
       {(model.conditions ?? []).length > 0 && (
         <p className="mb-2 text-[0.72rem] text-fg-dim">
           Steady-state only: {(model.conditions ?? []).map((condition) => (
@@ -201,6 +209,7 @@ function ModelCard({
         gatedMode={model.operating_mode}
         currentMode={mode}
         offMap={offMap}
+        ineligibleReason={ineligibleReason}
       />
 
       {model.notes && (
@@ -212,8 +221,93 @@ function ModelCard({
   );
 }
 
+const LIFECYCLE_CLASS: Record<BehaviorLifecycle, string> = {
+  validated: "bg-ok/15 text-ok",
+  unvalidated: "bg-warn/15 text-warn",
+  exploratory: "bg-elev-3 text-fg-dim",
+  demoted: "bg-bad/15 text-bad",
+  quarantined: "bg-bad/15 text-bad",
+};
+
+const LIFECYCLE_TITLE: Record<BehaviorLifecycle, string> = {
+  validated: "passed held-out validation — may alert",
+  unvalidated: "no passing held-out evidence — shown, never alerts",
+  exploratory: "kept for exploration — shown, never alerts",
+  demoted: "removed from alerting by profile policy — shown only",
+  quarantined: "this artifact is quarantined by profile policy — shown only",
+};
+
+/** B03.8 — lifecycle, permitted uses, artifact identity and validation scope.
+ *  Unknown/unvalidated states are said out loud; nothing here reads as a
+ *  clean health result unless the backend says the model is validated. */
+function ModelStatus({ model }: { model: BehaviorModel }) {
+  const status = model.serving_status;
+  if (!status) return null;
+  const lifecycle: BehaviorLifecycle =
+    status.lifecycle ?? (status.state === "active" ? "validated" : "unvalidated");
+  const uses = status.permitted_uses ?? [];
+  const alerting = uses.length > 0 ? uses.includes("alert") : status.state === "active";
+  const artifact = model.artifact;
+  const scope = model.validation_scope;
+  const firstReason = status.reasons.find((r) => !r.startsWith("policy:"));
+  return (
+    <div
+      className="mb-2 flex flex-col gap-1 text-[0.72rem] text-fg-dim"
+      data-testid={`behavior-status-${model.name}`}
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span
+          className={cn(
+            "rounded px-1.5 py-0.5 text-[0.64rem] font-semibold tracking-[0.04em] uppercase",
+            LIFECYCLE_CLASS[lifecycle],
+          )}
+          title={LIFECYCLE_TITLE[lifecycle]}
+        >
+          {lifecycle}
+        </span>
+        <span>{alerting ? "alerting" : "not alerting"}</span>
+        {uses.length > 0 && <span>uses: {uses.join(", ")}</span>}
+      </div>
+      {status.policy && (
+        <p className="m-0">
+          {status.policy.lifecycle}: {status.policy.reason}
+          {status.policy.lift_when && (
+            <span className="text-fg-faint"> (until: {status.policy.lift_when})</span>
+          )}
+        </p>
+      )}
+      {!status.policy && !alerting && firstReason && (
+        <p className="m-0">why not alerting: {firstReason}</p>
+      )}
+      {artifact && (
+        <p className="m-0 font-num tabular-nums">
+          artifact v{artifact.version} · {artifact.fingerprint.slice(0, 19)} · fitted{" "}
+          {artifact.fitted_at.slice(0, 10)}
+          {artifact.tune_revision ? ` · tune ${artifact.tune_revision}` : " · tune unknown"}
+        </p>
+      )}
+      {scope && (
+        <p className="m-0">
+          validation:{" "}
+          {scope.verdict === "none" ? (
+            <span className="text-warn">none recorded</span>
+          ) : (
+            <span className={scope.verdict === "passed" ? "text-ok" : "text-warn"}>
+              {scope.verdict}
+            </span>
+          )}
+          {scope.test_drives && scope.test_drives.length > 0 &&
+            ` · ${scope.test_drives.length} test drive${scope.test_drives.length === 1 ? "" : "s"}`}
+          {scope.verdict !== "none" && scope.tune_revision && ` · on ${scope.tune_revision}`}
+          {scope.failures && scope.failures.length > 0 && ` · ${scope.failures[0]}`}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Numeric expected/actual/Δ + severity chip + Δ sparkline, or the reason
- *  the live layer is absent (gated / off-map / no daemon). */
+ *  the live layer is absent (gated / off-map / ineligible / no daemon). */
 function LiveReadout({
   live,
   unit,
@@ -221,6 +315,7 @@ function LiveReadout({
   gatedMode,
   currentMode,
   offMap,
+  ineligibleReason,
 }: {
   live: BehaviorLiveModel | null;
   unit: string;
@@ -228,6 +323,7 @@ function LiveReadout({
   gatedMode: string | null;
   currentMode: string | null;
   offMap: boolean;
+  ineligibleReason: string | null;
 }) {
   if (gated) {
     return (
@@ -243,6 +339,13 @@ function LiveReadout({
       <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
         off-map — operating point outside the fitted envelope (deviation
         unavailable, anomaly scoring blind here)
+      </p>
+    );
+  }
+  if (ineligibleReason) {
+    return (
+      <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
+        no prediction — {ineligibleReason}
       </p>
     );
   }
@@ -280,6 +383,11 @@ function LiveReadout({
           {live.severity}
         </span>
       </div>
+      {live.abstain_reason && (
+        <span className="text-[0.68rem] text-fg-dim italic">
+          abstaining — {live.abstain_reason}
+        </span>
+      )}
       {devSeries.length >= 2 && (
         <div className="flex items-center gap-2">
           <span className="font-num text-[0.64rem] text-fg-faint">Δ trail</span>

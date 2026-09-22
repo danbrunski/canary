@@ -50,8 +50,8 @@ Endpoint summary:
 | `GET /anomalies?since=...` | persisted anomaly events from JSONL |
 | `GET /bindings` | decoded CAN binding metadata for display |
 | `GET /dids` | Mode 22 DID catalog metadata |
-| `GET /models/behavior` | behavior-model surfaces for dashboard panels |
-| `GET /models/behavior/live?series=` | per-model expected/actual/deviation live view (`series=false` drops the rolling trail) |
+| `GET /models/behavior` | behavior-model surfaces for dashboard panels; per model `serving_status` (`state`, `reasons`, `lifecycle` validated/unvalidated/exploratory/demoted/quarantined, typed `permitted_uses`, governing `policy` entry), `artifact` identity (version, fingerprint, fitted_at, tune) and `validation_scope`; top-level `policy` names the profile `behavior_policy.yaml` |
+| `GET /models/behavior/live?series=` | per-model expected/actual/deviation live view (`series=false` drops the rolling trail); each model also carries `reason`, `status`, `lifecycle`, `permitted_uses`, `artifact_version` and `abstain_reason` (why no trusted verdict this tick) |
 | `GET /obd/coverage` | OBD PID/DID coverage summary |
 | `GET /can/coverage` | broadcast CAN ID coverage summary |
 | `GET /test-profiles` | available UI test profiles |
