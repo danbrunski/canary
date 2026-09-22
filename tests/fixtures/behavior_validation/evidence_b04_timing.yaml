@@ -1,0 +1,292 @@
+# B04.1 evidence manifest — timing baseline reproduction on September drives.
+# Pinned by content hash; a changed or missing session refuses to evaluate.
+manifest: behavior-validation-b04-timing
+corpus_root: ~/canary-data
+command: scripts/evaluate_behavior_models.py --config canary.pi.example.yaml --profile nissan-xterra-2008
+  --artifact data/nissan-xterra-2008/behavior_models.yaml --mode corrected --model timing_advance_vs_rpm_load
+  --model timing_advance_vs_rpm_iat --model air_mass_per_cycle_vs_rpm_load --model ve_vs_rpm_load --manifest
+  tests/fixtures/behavior_validation/evidence_b04_timing.yaml --out <report.json>
+purpose: B04.1 timing baseline on every local September drive with Mode 01 timing (incl. the cooler 09-18/09-20
+  drives), stratified by calibration, IAT, coolant, load, baro and steady/transient; July training sessions
+  supply the simple baseline only. No fit.
+missing_evidence:
+- 'no drive is labelled healthy or faulty: exceedances are not false positives'
+- all September drives postdate the July fits by >= 1 flash (ZS44A-k106 / ZS44A-20260920); no same-calibration
+  independent drive exists
+sessions:
+- path: sessions/nissan-xterra-2008/2026-07-18T202456
+  role: training
+  sha256: sha256:3b4bca062c6e719a9c847aab7f4529df1e0e550e8c5e79b5a35bae1ca8043ac3
+  chunks: 264
+  bytes: 20459959
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-18T215941
+  role: training
+  sha256: sha256:8a8fa3fce3aaef1dbd614c54892b064340c0df9488843cc001c7b824fc9faf66
+  chunks: 237
+  bytes: 21941095
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-18T222019
+  role: training
+  sha256: sha256:c802c49e1bfa415510bb2db9def90d675095ce85a783699fee6e59876f92a9e9
+  chunks: 190
+  bytes: 18426242
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T000112
+  role: training
+  sha256: sha256:e60c357a0c63ee386ed748ba34dd816ba739550ef4183dbc972bb4061f844392
+  chunks: 344
+  bytes: 20470012
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T003124
+  role: training
+  sha256: sha256:6f03d7a699d8130b70230d9ed0e04f586276a553bdcbbd9ba20010a9af8c55f3
+  chunks: 1680
+  bytes: 14186817
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T202721
+  role: training
+  sha256: sha256:74ad0268698852d31df0b91f512060234e2e82bb2687c6e61000dbb86371e402
+  chunks: 667
+  bytes: 19597956
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T143129
+  role: training
+  sha256: sha256:dcbcba2bdf06a78fc190d31a6026e149676b98013b87dc1edad537c444c43ef3
+  chunks: 587
+  bytes: 46374318
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T161632
+  role: training
+  sha256: sha256:d21501b0b711de2127951cf6e7c353eb4990dd6f357703d15f3489c38d549631
+  chunks: 155
+  bytes: 12575602
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T163011
+  role: training
+  sha256: sha256:098e44c1b5a2388d1166037f63b9f62949cacf7c5f24831e6cb4d9483c3d0802
+  chunks: 103
+  bytes: 8179597
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T163917
+  role: training
+  sha256: sha256:5633fd55782fa0c3c058393735f4ecfeef024d6d4044b14e83a6202e8d9b102f
+  chunks: 33
+  bytes: 2624829
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T170353
+  role: training
+  sha256: sha256:24e8d126f0c7b12a8dcc72e0e21ff1180dae9d60969c790b2f37ce0b8f72a350
+  chunks: 137
+  bytes: 4767359
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T162332
+  role: training
+  sha256: sha256:90c867566b93a4ef563fde52a31c6724a0dc3cabcb8b81047647c44c0b879bc9
+  chunks: 243
+  bytes: 21087666
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T164436
+  role: training
+  sha256: sha256:9cf3e7f572c3de4dd27ae53b2c04572c732bef83f2a1a0b8659cf260c3533975
+  chunks: 613
+  bytes: 22702044
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T214348
+  role: training
+  sha256: sha256:02f65f77a4ec3bce725e9095902a8e6124314c07ca7972b532b238effb9ff16c
+  chunks: 579
+  bytes: 50540498
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T223147
+  role: training
+  sha256: sha256:46f656d7109844db2284aead419fd5ada73a25c43dc2b2b3c911e8738d30a0a2
+  chunks: 219
+  bytes: 17513531
+  note: shipped models' training session; baseline fitting only
+- path: sessions-0917/_capture-tuning-hybrid-research-2026-09-17T184821
+  role: evaluation
+  sha256: sha256:de79cf35b0ee9e3641c8a700db8e47101ca57177a93326e96539beef86aafe4a
+  chunks: 306
+  bytes: 34643682
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0917/_capture-tuning-hybrid-research-2026-09-17T191712
+  role: evaluation
+  sha256: sha256:c2865478e73a7a73b11b15363a3d46420f10a583961ba9fb558296ca9cccb859
+  chunks: 397
+  bytes: 39682658
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0917/_capture-tuning-hybrid-research-2026-09-17T201000
+  role: evaluation
+  sha256: sha256:cd4c84f86e40e7f25b20a109949d0603f2f9e5b394fb604192f5f71a73ecac31
+  chunks: 453
+  bytes: 46050131
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T134345
+  role: evaluation
+  sha256: sha256:5d81ef40fa8c50984054693bb45675e10e4415c09a53545b703db864bb336725
+  chunks: 252
+  bytes: 23338197
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-target-research-2026-09-18T140241
+  role: evaluation
+  sha256: sha256:2e907e684b3318dadd0c518314db4b876c63594d6a547592e2af41482ec9fb1e
+  chunks: 78
+  bytes: 8134812
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-pw-research-2026-09-18T140805
+  role: evaluation
+  sha256: sha256:8fea5726e01924a40a9f22841cf78800296eb0179215c0645d182ed0291855de
+  chunks: 495
+  bytes: 56766289
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T144215
+  role: evaluation
+  sha256: sha256:cefc3e37ad3bca0a998cdb711d72db40acb556b7ead6566bb96397190328ebe8
+  chunks: 558
+  bytes: 61720136
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T152144
+  role: evaluation
+  sha256: sha256:93f905beb9cec28ca1bd6d096f8b9e775c76573e987d13bf9a47cfb753cf8672
+  chunks: 188
+  bytes: 19656684
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T153509
+  role: evaluation
+  sha256: sha256:2593f6a4bd836d8661a918ca6e8ecbd49f7d81b09814348c5a1b651e3fb534bf
+  chunks: 485
+  bytes: 53504938
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T160921
+  role: evaluation
+  sha256: sha256:3fd2eaebc0006b287ce91ec04baba2ec5ca534862995a1dc246158a08bdfb905
+  chunks: 871
+  bytes: 36237588
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T171938
+  role: evaluation
+  sha256: sha256:082733921139f2d6b9ca75c5cd3d79978ef53e9e2b2a7a3cd015de9b05f37c4e
+  chunks: 175
+  bytes: 12412611
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T173235
+  role: evaluation
+  sha256: sha256:e2d221633ba2fa9e248343032837da48d268267afc3b7c57d6612f8c632284d4
+  chunks: 74
+  bytes: 7330202
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T173749
+  role: evaluation
+  sha256: sha256:3b5bcb569109c9d7a9aef9bc6e32e1789234a76081b6de0fd634e5cdcf9586c2
+  chunks: 132
+  bytes: 9597630
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-pw-research-2026-09-18T174742
+  role: evaluation
+  sha256: sha256:1f5ae1f39c253053bc27a71e2dffabe3f9509e04817952241e9630963d061b9a
+  chunks: 273
+  bytes: 31037947
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T180630
+  role: evaluation
+  sha256: sha256:2ee0b8a598a1e33f7d01d6cc515fa148a627f325e47d4cefd8d03ae9edaa8f54
+  chunks: 309
+  bytes: 32885607
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T182827
+  role: evaluation
+  sha256: sha256:34837eab65824ac159cc8b0cc0b3bfabecc417cf9b6f863ba2bca8b20304e5f8
+  chunks: 322
+  bytes: 35609429
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T200256
+  role: evaluation
+  sha256: sha256:e23ca3ec8b90fe88fc633378e1564a8aea804184241df98a03e615f75f950528
+  chunks: 44
+  bytes: 4131183
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-pw-research-2-2026-09-18T200606
+  role: evaluation
+  sha256: sha256:fd9ab25ee625d11e599e6f4c27597f3746f6c59ec0b258211a6444ee58519a53
+  chunks: 31
+  bytes: 3283218
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-pw-research-2026-09-18T200809
+  role: evaluation
+  sha256: sha256:2905f5c85f74c41777eaf842edeeef733d617f295ec83db1cd06e1d0c59159f3
+  chunks: 378
+  bytes: 34667238
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T203543
+  role: evaluation
+  sha256: sha256:cc94aa774e04a4752603803c65d9591dbbfb830efd00037d93823bedb800a7ec
+  chunks: 726
+  bytes: 78993927
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/_capture-fuel-pw-research-2026-09-18T212740
+  role: evaluation
+  sha256: sha256:c1f2a7b7196903e9168a4f0513488c42433830d120fee3fc7675f99b3deac07c
+  chunks: 155
+  bytes: 17198827
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T213818
+  role: evaluation
+  sha256: sha256:40bff84664e298350c3e59d6bab05d4c97ae44e02d8c8d0c8ee3c72a7512aa90
+  chunks: 1062
+  bytes: 114370890
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T225605
+  role: evaluation
+  sha256: sha256:91f6d13ba190bb5cb3da8692595e6b7ae06921168631b35742263cb9da412cf0
+  chunks: 220
+  bytes: 23008220
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T231144
+  role: evaluation
+  sha256: sha256:66366d4c13a581d24c91d3c44d0b444f72f00227cf303705f3899bf75173fe1c
+  chunks: 246
+  bytes: 26158963
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T232910
+  role: evaluation
+  sha256: sha256:34aad50d319fa9bb60d3e776e648d09969300b164a9200d01f70770be1caee15
+  chunks: 166
+  bytes: 14536833
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0918/2026-09-18T234120
+  role: evaluation
+  sha256: sha256:5dbaa20a32abcd0b071066120fc5ff1857a9606e3ceee70098037f4e53ddb09e
+  chunks: 450
+  bytes: 48393438
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0920/2026-09-20T152758
+  role: evaluation
+  sha256: sha256:a87f9fd1298b74d96b10485ca85b6ce77b1f1fdfcbb93b24094b0586a1a9824e
+  chunks: 1980
+  bytes: 161645646
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0920/2026-09-20T225927
+  role: evaluation
+  sha256: sha256:0d213d5d165f84882fdc31bf19df4ed5985aa47d24f457427330ce03e98efe7e
+  chunks: 361
+  bytes: 39935221
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0921/_capture-fuel-target-research-2026-09-21T195844
+  role: evaluation
+  sha256: sha256:52180770561fe4d98ca04f1642a98cd0ce8b5c5186ae583af81b11fd65054266
+  chunks: 288
+  bytes: 32417785
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0921b/_capture-tuning-2026-09-21T223734
+  role: evaluation
+  sha256: sha256:e656d7db2270ff01d643c0b61316f74171bddbdeddfacfe12e44711b29df5378
+  chunks: 259
+  bytes: 28284919
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01
+- path: sessions-0921c/_capture-tuning-2026-09-21T232153
+  role: evaluation
+  sha256: sha256:72f6361fed0d6e290513fff3844cee343658178f92c5e310d0f561de2c993797
+  chunks: 393
+  bytes: 42548905
+  note: September drive independent of every July timing fit; RPM/load/IAT via Mode 01

@@ -40,6 +40,28 @@ provenance_resolutions:
       attributed to one calibration. Operator decision 2026-09-22: exclude
       from behavior-model evidence rather than trim it.
 
+# B04.1 — reporting strata. Evaluation reports split every model's rows by
+# these (plus the calibration stratum, always each session's tune revision
+# from tune_revisions.yaml) before any comparison is made. Reporting only: a
+# stratum never selects rows for fitting or serving. A stale or absent
+# channel is its own stratum ("stale" / "missing"), never a numeric bin.
+report_regimes:
+  axes:
+    intake_temp: {channel: "obd:INTAKE_TEMP", unit: degC, edges: [-40, 10, 20, 30, 40, 50, 150]}
+    coolant: {channel: "obd:COOLANT_TEMP", unit: degC, edges: [-40, 60, 80, 90, 100, 130]}
+    load: {channel: "obd:ENGINE_LOAD", unit: "%", edges: [0, 20, 30, 40, 60, 101]}
+    baro: {channel: "obd:BAROMETRIC_PRESSURE", unit: kPa, edges: [50, 70, 76, 82, 90, 110]}
+  steady_state:
+    max_abs_rate_per_second: {"obd:RPM": 10.0, "obd:ENGINE_LOAD": 0.5}
+    basis: >
+      Same limits as the total-trim recipes' persisted gate (refit
+      TOTAL_TRIM_STEADY_RATES): at most ~300 rpm / ~15 % load of *net* change
+      over the feature pipeline's 30 s rolling horizon (the derivative a
+      persisted rate gate reads). A net-change split misses an up-and-back
+      excursion inside the horizon, so "steady" here is an upper bound on
+      steadiness. Measured 2026-09-22 (data/analyses/2026-09-22-b04-b05-measurements.md).
+      Reporting split, not a fit gate.
+
 recipes:
   air_charge_vs_rpm_throttle_did:
     kind: predictive_surface
@@ -83,6 +105,36 @@ recipes:
     max_control_events_per_hour: 2.0
     synthetic_faults:
       - {magnitude: 3.0, direction: negative, duration_seconds: 60}
+    # B04.3 — what "useful timing resolution" means here, declared before the
+    # test and justified by measured spread rather than the PID LSB.
+    resolution:
+      sustained_change: 3.0
+      min_duration_seconds: 60.0
+      max_detection_delay_seconds: 15.0
+      measured_noise:
+        value: 2.2
+        basis: >
+          Steady-state within-window spread, measured 2026-09-22 on seven
+          September drives (6,221 rows): standard deviation of TIMING_ADVANCE
+          about its own 60 s x (400 rpm x 10 % load) cell median, on locally
+          steady rows (5 s rpm range <= 100, load range <= 5 %). p95 1.0 deg,
+          p99 6.0 deg. NOT the PID LSB (0.5 deg) and not noise_floor.yaml's
+          WOT figure. See data/analyses/2026-09-22-b04-b05-measurements.md.
+      diagnostic_question: >
+        Has spark timing moved by at least 3 deg, at the same rpm/load, for
+        long enough to be a change in how the engine is being run rather than
+        ordinary knock-control activity?
+      claim: >
+        An unexpected sustained timing change versus the learned surface at
+        this operating point.
+      not_identified:
+        - retard by the ECM's knock control (one of several causes; a residual does not prove it)
+        - the cause of the change - IAT/coolant compensation, a calibration
+          change, fuel quality, or a transient the surface does not model
+      transient_controls:
+        - {magnitude: 6.0, direction: negative, duration_seconds: 3.0}
+        - {magnitude: 6.0, direction: negative, duration_seconds: 10.0}
+      max_transient_detection: 0.0
 
   timing_advance_vs_rpm_iat:
     kind: predictive_surface
@@ -96,6 +148,36 @@ recipes:
     max_control_events_per_hour: 2.0
     synthetic_faults:
       - {magnitude: 3.0, direction: negative, duration_seconds: 60}
+    # B04.3 — what "useful timing resolution" means here, declared before the
+    # test and justified by measured spread rather than the PID LSB.
+    resolution:
+      sustained_change: 3.0
+      min_duration_seconds: 60.0
+      max_detection_delay_seconds: 15.0
+      measured_noise:
+        value: 2.2
+        basis: >
+          Steady-state within-window spread, measured 2026-09-22 on seven
+          September drives (6,221 rows): standard deviation of TIMING_ADVANCE
+          about its own 60 s x (400 rpm x 10 % load) cell median, on locally
+          steady rows (5 s rpm range <= 100, load range <= 5 %). p95 1.0 deg,
+          p99 6.0 deg. NOT the PID LSB (0.5 deg) and not noise_floor.yaml's
+          WOT figure. See data/analyses/2026-09-22-b04-b05-measurements.md.
+      diagnostic_question: >
+        Has spark timing moved by at least 3 deg, at the same rpm/load, for
+        long enough to be a change in how the engine is being run rather than
+        ordinary knock-control activity?
+      claim: >
+        An unexpected sustained timing change versus the learned surface at
+        this operating point.
+      not_identified:
+        - retard by the ECM's knock control (one of several causes; a residual does not prove it)
+        - the cause of the change - IAT/coolant compensation, a calibration
+          change, fuel quality, or a transient the surface does not model
+      transient_controls:
+        - {magnitude: 6.0, direction: negative, duration_seconds: 3.0}
+        - {magnitude: 6.0, direction: negative, duration_seconds: 10.0}
+      max_transient_detection: 0.0
 
   fuel_trim_vs_rpm_load:
     kind: predictive_surface
@@ -138,7 +220,7 @@ recipes:
 
   total_trim_vs_rpm_load_b1:
     kind: predictive_surface
-    unit: "%"
+    unit: percentage points (additive STFT+LTFT index)
     noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %); two summed channels"}
     meaningful_deviation: 5.0
     meaningful_deviation_basis: "a sustained 5 % total-trim shift"
@@ -151,7 +233,7 @@ recipes:
 
   total_trim_vs_rpm_load_b2:
     kind: predictive_surface
-    unit: "%"
+    unit: percentage points (additive STFT+LTFT index)
     noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %); two summed channels"}
     meaningful_deviation: 5.0
     meaningful_deviation_basis: "a sustained 5 % total-trim shift"

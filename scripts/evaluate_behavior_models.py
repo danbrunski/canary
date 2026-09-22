@@ -68,6 +68,7 @@ from src.analysis.behavior_validation import (
     RowEvaluation,
     apply_criteria,
     breakdown,
+    breakdown_by_labels,
     build_evaluation_frame,
     evaluate_rows,
     file_identity,
@@ -78,12 +79,16 @@ from src.analysis.behavior_validation import (
     parent_session,
     piece_time_ranges,
     qualifying_drive_count,
+    regime_labels,
     session_content_identity,
     synthetic_sensitivity,
     training_leaks,
+    transient_controls,
     validation_document_path,
 )
-from src.analysis.refit import default_recipes, recipe_serving_spec
+from src.analysis.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
+from src.analysis.refit import default_recipes, legacy_reproduction_spec, recipe_serving_spec
+from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from src.decode.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
 from src.decode.behavior_models import (
     BehaviorModel1D,
@@ -159,6 +164,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="behavior_validation.yaml (default: next to the profile's behavior_models.yaml).",
+    )
+    parser.add_argument(
+        "--tune-revisions",
+        type=Path,
+        default=None,
+        help="tune_revisions.yaml for the calibration stratum (default: next to the artifact).",
     )
     parser.add_argument("--bindings", type=Path, default=Path("data/bindings.yaml"))
     parser.add_argument("--dids", type=Path, default=DEFAULT_DIDS_PATH)
@@ -241,7 +252,9 @@ def _row_spec(
     recipe = catalog.get(model.name)
     if recipe is None:
         return None, "artifact legacy gates only (no catalog recipe)"
-    return recipe_serving_spec(recipe), "catalog recipe contract (artifact has none)"
+    spec, substituted = legacy_reproduction_spec(recipe, model)
+    label = "catalog recipe contract (artifact has none)"
+    return spec, label if substituted is None else f"{label}; {substituted}"
 
 
 def _pieces_of(frame: pd.DataFrame, parents: set[str]) -> np.ndarray:
@@ -326,6 +339,7 @@ def _corrected(
     drives: Sequence[Any],
     drive_of_piece: dict[str, str],
     taxonomy_problems: list[str],
+    regimes: dict[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     fit = model.fit
     leaks = training_leaks(drives, [*fit.sessions, *fit.calibration_sessions])
@@ -354,12 +368,18 @@ def _corrected(
         if criteria is not None and ev.evaluated.any()
         else []
     )
+    transients = (
+        transient_controls(model, sub, ev, criteria, policy=policy, spec=spec)
+        if criteria is not None and ev.evaluated.any()
+        else []
+    )
     minimum = criteria.min_observations_per_drive if criteria is not None else 1
     verdict, failures = apply_criteria(
         criteria,
         metrics,
         sensitivity,
         qualifying_test_drives=qualifying_drive_count(ev, drive_of_piece, minimum),
+        transients=transients,
     )
     if taxonomy_problems:
         failures = [*failures, *(f"mode_taxonomy:{p}" for p in taxonomy_problems)]
@@ -389,12 +409,51 @@ def _corrected(
                 baseline=baseline,
             ).items()
         },
+        per_context={
+            dimension: {
+                label: metrics_for.model_dump(mode="json")
+                for label, metrics_for in breakdown_by_labels(
+                    model,
+                    ev,
+                    labels[mask],
+                    drive_of_piece=drive_of_piece,
+                    policy=policy,
+                    baseline=baseline,
+                ).items()
+            }
+            for dimension, labels in (regimes or {}).items()
+        },
         synthetic_sensitivity=[case.model_dump(mode="json") for case in sensitivity],
+        transient_controls=[case.model_dump(mode="json") for case in transients],
         would_be_verdict=verdict,
         failures=failures,
         input_ranges=_input_ranges(model, ev),
     )
     return out
+
+
+def _revision_of(registry: TuneRevisionRegistry, piece: str) -> str | None:
+    found = registry.for_session(parent_session(piece))
+    return None if found is None else found.revision
+
+
+def _input_resolution(
+    model: BehaviorModel1D | BehaviorModel2D, frame: pd.DataFrame
+) -> dict[str, list[str | None]]:
+    """B04.5 — per session, which inputs a derived output actually resolved to.
+
+    The legacy ``derived:VE_PERCENT`` is manifold- or ambient-referenced
+    depending on what a session polled; this names which one each session's
+    rows are, instead of letting a report treat them as one quantity.
+    """
+    output = model.output
+    if output not in DERIVED_CHANNEL_INPUTS or SESSION_COLUMN not in frame.columns:
+        return {}
+    parents = frame[SESSION_COLUMN].astype(str).map(parent_session)
+    return {
+        str(parent): resolved_dependencies(frame[parents == parent], output)
+        for parent in sorted(parents.unique())
+    }
 
 
 def _input_ranges(model: BehaviorModel1D | BehaviorModel2D, ev: RowEvaluation) -> dict[str, Any]:
@@ -434,11 +493,19 @@ def evaluate(
     document: BehaviorValidationDocument | None,
     policy: EventPolicy,
     taxonomy_problems: list[str],
+    revisions: TuneRevisionRegistry | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     catalog = {recipe.name: recipe for recipe in default_recipes()}
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
     drives = group_drives(piece_time_ranges(frame), join_gap_seconds=join_gap)
     drive_of_piece = {piece: d.drive_id for d in drives for piece in d.pieces}
+    regimes = regime_labels(
+        frame,
+        document.report_regimes if document is not None else None,
+        revision_of_piece=(
+            None if revisions is None else lambda piece: _revision_of(revisions, piece)
+        ),
+    )
     results: dict[str, Any] = {}
     for model in models.models:
         spec, contract = _row_spec(model, catalog)
@@ -454,6 +521,9 @@ def evaluate(
             "training_sessions": list(model.fit.sessions),
             "held_out_sessions": list(model.fit.calibration_sessions),
         }
+        resolution = _input_resolution(model, frame)
+        if resolution:
+            entry["derived_input_resolution"] = resolution
         if mode == "historical":
             entry["historical"] = _historical(
                 model, frame, spec=spec, policy=policy, drive_of_piece=drive_of_piece
@@ -468,6 +538,7 @@ def evaluate(
                 drives=drives,
                 drive_of_piece=drive_of_piece,
                 taxonomy_problems=taxonomy_problems,
+                regimes=regimes,
             )
         results[model.name] = entry
     return results, [d.record().model_dump(mode="json") for d in drives]
@@ -568,6 +639,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "none" if args.mode == "historical" else "mode-inputs"
     )
     policy = EventPolicy.from_config(scoped)
+    revisions_path: Path = args.tune_revisions or (
+        scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
+    )
+    revisions = load_tune_revisions(revisions_path)
 
     frame = build_evaluation_frame(
         sessions,
@@ -583,6 +658,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "artifact": file_identity(args.artifact),
         "artifact_schema_version": models.schema_version,
         "validation": file_identity(validation_path),
+        "tune_revisions": file_identity(revisions_path) if revisions_path.exists() else None,
         "bindings": file_identity(args.bindings),
         "dids": file_identity(args.dids),
         "git": _git_identity(),
@@ -597,6 +673,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         document=document,
         policy=policy,
         taxonomy_problems=taxonomy_problems,
+        revisions=revisions,
     )
     report = {
         "report": "behavior-validation",

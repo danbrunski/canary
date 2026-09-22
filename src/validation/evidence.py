@@ -29,7 +29,7 @@ import pandas as pd
 from src.analysis.capture_coverage import recompute_capture_quality
 from src.analysis.channels import ACQUIRED_AT_COLUMN, read_acquisition_frame
 from src.analysis.compare import ComparisonRefusedError, compare_channels
-from src.analysis.pairing import PairingPolicy
+from src.analysis.pairing import PairingPolicy, to_seconds
 from src.collection.capture_losses import (
     RECORDING,
     VERIFIED,
@@ -417,7 +417,7 @@ def channel_cadence(frame: pd.DataFrame, artifacts: RunArtifacts) -> list[dict[s
         values = acquired.dropna().to_numpy(dtype=float)
         if len(values) < len(group):
             basis = "stored_timestamp"
-            values = pd.to_datetime(group["timestamp"], utc=True).astype("int64").to_numpy() / 1e9
+            values = to_seconds(group["timestamp"])
         stats = _interarrival(values)
         want = requested.get(str(channel), {})
         median = stats["median_s"]
@@ -434,7 +434,7 @@ def channel_cadence(frame: pd.DataFrame, artifacts: RunArtifacts) -> list[dict[s
         )
     can = capture[capture["source"] == "can"]
     for channel, group in can.groupby(can["channel"].str.upper()):
-        values = pd.to_datetime(group["timestamp"], utc=True).astype("int64").to_numpy() / 1e9
+        values = to_seconds(group["timestamp"])
         stats = _interarrival(values)
         median = stats["median_s"]
         rows.append(

@@ -25,7 +25,7 @@ from src.analysis.behavior_validation import (
     fold_metrics,
     load_validation_document,
 )
-from src.analysis.refit import _check_publish_gate, default_recipes, recipe_serving_spec
+from src.analysis.refit import _check_publish_gate, default_recipes, legacy_reproduction_spec
 from src.decode.behavior_models import (
     STATUS_LEGACY_NO_CONTRACT,
     STATUS_NO_HELD_OUT_VALIDATION,
@@ -61,7 +61,7 @@ def _model(name: str) -> BehaviorModel1D | BehaviorModel2D:
 
 def _metrics(name: str, frame: pd.DataFrame):  # type: ignore[no-untyped-def]
     model = _model(name)
-    spec = recipe_serving_spec(CATALOG[name]) if model.eligibility is None else None
+    spec = legacy_reproduction_spec(CATALOG[name], model)[0] if model.eligibility is None else None
     ev = evaluate_rows(model, frame, spec=spec)
     return fold_metrics(model, ev, drive_of_piece={}, policy=EventPolicy()), ev
 

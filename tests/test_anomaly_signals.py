@@ -13,7 +13,13 @@ import math
 
 import pandas as pd
 
-from src.analysis.derived import compute_anomaly_signals
+from src.analysis.derived import (
+    LEGACY_VE_CHANNEL,
+    VE_AMBIENT_CHANNEL,
+    VE_MANIFOLD_CHANNEL,
+    compute_anomaly_signals,
+    resolved_dependencies,
+)
 from src.config import VehicleParameters
 
 
@@ -135,6 +141,99 @@ def test_ve_percent_skipped_without_pressure() -> None:
     frame = _base(2).assign(**{"obd:MAF": [5.0] * 2, "obd:RPM": [1200.0] * 2})
     out = compute_anomaly_signals(frame, vehicle)
     assert "derived:VE_PERCENT" not in out.columns
+
+
+# --------------------------------------------------------------------------- #
+# B04.5 — one VE definition per channel: manifold- vs ambient-referenced,
+# measured IAT only, provenance of the legacy channel.
+# --------------------------------------------------------------------------- #
+
+
+def _fill_g(pressure_kpa: float, iat_c: float, displacement_l: float) -> float:
+    return (pressure_kpa * 1000.0) / (287.05 * (iat_c + 273.15)) * displacement_l
+
+
+def test_referenced_ve_channels_never_substitute_one_reference_for_the_other() -> None:
+    vehicle = VehicleParameters(displacement_l=4.0)
+    frame = _base(3).assign(
+        **{
+            "obd:MAF": [5.0] * 3,
+            "obd:RPM": [1200.0] * 3,
+            "obd:INTAKE_PRESSURE": [35.0] * 3,  # part-throttle manifold vacuum
+            "obd:BAROMETRIC_PRESSURE": [80.0] * 3,  # ~2000 m ambient
+            "obd:INTAKE_TEMP": [20.0] * 3,
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    measured = 5.0 * 120.0 / 1200.0
+    manifold = out[VE_MANIFOLD_CHANNEL].iloc[0]
+    ambient = out[VE_AMBIENT_CHANNEL].iloc[0]
+    assert math.isclose(manifold, measured / _fill_g(35.0, 20.0, 4.0) * 100.0, rel_tol=1e-9)
+    assert math.isclose(ambient, measured / _fill_g(80.0, 20.0, 4.0) * 100.0, rel_tol=1e-9)
+    assert manifold > 2.0 * ambient  # two quantities, not one with noise
+    # The legacy channel took MAP because the session carried it.
+    assert math.isclose(out[LEGACY_VE_CHANNEL].iloc[0], manifold, rel_tol=1e-6)
+    assert resolved_dependencies(out, LEGACY_VE_CHANNEL) == [
+        "derived:AIR_MASS_PER_CYCLE",
+        "obd:INTAKE_PRESSURE",
+        "obd:INTAKE_TEMP",
+    ]
+
+
+def test_without_map_only_the_ambient_reference_exists() -> None:
+    vehicle = VehicleParameters(displacement_l=4.0)
+    frame = _base(2).assign(
+        **{
+            "obd:MAF": [5.0] * 2,
+            "obd:RPM": [1200.0] * 2,
+            "obd:BAROMETRIC_PRESSURE": [80.0] * 2,
+            "obd:INTAKE_TEMP": [20.0] * 2,
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    assert VE_MANIFOLD_CHANNEL not in out.columns
+    assert VE_AMBIENT_CHANNEL in out.columns
+    assert not out[f"{VE_AMBIENT_CHANNEL}__gap"].any()
+    # Legacy provenance: this frame's VE_PERCENT is the ambient-referenced one.
+    assert resolved_dependencies(out, LEGACY_VE_CHANNEL)[1] == "obd:BAROMETRIC_PRESSURE"
+    assert math.isclose(
+        out[LEGACY_VE_CHANNEL].iloc[0], out[VE_AMBIENT_CHANNEL].iloc[0], rel_tol=1e-6
+    )
+
+
+def test_missing_iat_is_an_unavailable_input_not_25_degc() -> None:
+    vehicle = VehicleParameters(displacement_l=4.0)
+    frame = _base(2).assign(
+        **{
+            "obd:MAF": [5.0] * 2,
+            "obd:RPM": [1200.0] * 2,
+            "obd:INTAKE_PRESSURE": [35.0] * 2,
+            "obd:BAROMETRIC_PRESSURE": [80.0] * 2,
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    assert VE_MANIFOLD_CHANNEL not in out.columns
+    assert VE_AMBIENT_CHANNEL not in out.columns
+    # The legacy channel still computes at 25 degC (detector compatibility),
+    # but every such row is stale and its provenance names the missing input.
+    assert LEGACY_VE_CHANNEL in out.columns
+    assert out[f"{LEGACY_VE_CHANNEL}__gap"].all()
+    assert resolved_dependencies(out, LEGACY_VE_CHANNEL)[2] is None
+
+
+def test_referenced_ve_row_with_stale_iat_is_stale() -> None:
+    vehicle = VehicleParameters(displacement_l=4.0)
+    frame = _base(2).assign(
+        **{
+            "obd:MAF": [5.0] * 2,
+            "obd:RPM": [1200.0] * 2,
+            "obd:BAROMETRIC_PRESSURE": [80.0] * 2,
+            "obd:INTAKE_TEMP": [20.0, float("nan")],
+        }
+    )
+    out = compute_anomaly_signals(frame, vehicle)
+    assert out[f"{VE_AMBIENT_CHANNEL}__gap"].tolist() == [False, True]
+    assert math.isnan(out[VE_AMBIENT_CHANNEL].iloc[1])
 
 
 # --------------------------------------------------------------------------- #

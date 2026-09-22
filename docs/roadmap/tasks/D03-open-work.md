@@ -1047,6 +1047,15 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   TIMING_ADVANCE and AIR_MASS_PER_CYCLE. The corpus is ~80 kPa. **Desk:**
   condition the surfaces on baro or air density, or add high-altitude sessions to
   the corpus; don't raise thresholds. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+  *Behavior-side measurement 2026-09-22 (B04.1, does not close this):* on 31
+  independent September drives the timing surface carries a **+6.99° bias in
+  the 50–70 kPa stratum** (MAE 10.6°, R² −0.08) against +0.03° at 76–82 kPa,
+  and air mass MAE 0.208 g/cycle overall — measured per baro stratum by the
+  behavior evaluator (`behavior_validation.yaml: report_regimes`). Only **one**
+  local drive is below 70 kPa, so an air-density axis cannot yet be supported;
+  conditioning the surfaces is B04.2/B04.6, deferred on the operator's
+  2026-09-22 "don't retrain yet". The IF/sequence side of this item is
+  untouched. [B04/B05 measurements](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
 
 - [ ] **D03.21 The Pi's memory limits are not enforced.** The kernel cmdline
   has `cgroup_disable=memory`, so `MemoryMax=6G` / `MemorySwapMax=0` exist only in

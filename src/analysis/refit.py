@@ -44,6 +44,7 @@ from src.analysis.behavior_validation import (
     parent_session,
     piece_time_ranges,
 )
+from src.analysis.derived import VE_AMBIENT_CHANNEL, VE_MANIFOLD_CHANNEL
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.control.sessions import session_started_at
@@ -141,6 +142,27 @@ WARMUP_CONTEXT_SESSION_FLOOR = 8
 # Recipes
 # ---------------------------------------------------------------------------
 
+#: B05.2 — ``derived:TOTAL_TRIM_B*`` is STFT + LTFT summed in percentage
+#: points: an additive index, not the multiplicative fuel correction
+#: ``(1 + STFT)(1 + LTFT)`` and not a calibrated injector multiplier.
+TOTAL_TRIM_UNIT = "percentage points (additive STFT+LTFT index)"
+
+#: B05.2 — steady-state gates the total-trim surfaces persist. A rate gate
+#: reads ``<channel>__roc``: the *net* change over the feature pipeline's 30 s
+#: rolling horizon divided by elapsed time, so these allow at most ~300 rpm
+#: and ~15 % load of net change across the last 30 s. Measured on the
+#: dense-trim capture _capture-tuning-2026-09-21T223734 (closed loop, not
+#: warmup, 801 rows): the cam recipes' 75 rpm/s passed 724 rows, 443 of them
+#: locally transient (5 s rpm range > 100 or load range > 5 %), STFT sigma
+#: 3.5 %; these limits pass 247 rows, 74 locally transient, STFT sigma 1.2 %
+#: (the locally-steady figure). A net-change gate cannot see an up-and-back
+#: excursion inside the horizon — see
+#: data/analyses/2026-09-22-b04-b05-measurements.md (B05.2).
+TOTAL_TRIM_STEADY_RATES: Mapping[str, float] = {
+    "obd:RPM": 10.0,
+    "obd:ENGINE_LOAD": 0.5,
+}
+
 
 @dataclass(frozen=True)
 class _RecipeBase:
@@ -177,6 +199,9 @@ class _RecipeBase:
     closed_loop_only: bool = False
     fuel_states: tuple[int, ...] | None = None
     fuel_status_channel: str = "obd:FUEL_STATUS"
+    #: B05.2 — operating modes the model never speaks for (persisted on the
+    #: contract, refused at fit and serve alike).
+    excluded_operating_modes: tuple[str, ...] = ()
     #: Measured quantities the output's meaning depends on; each tuple is an
     #: any-of group that must be present and fresh on the row.
     required_context: tuple[tuple[str, ...], ...] = ()
@@ -242,6 +267,7 @@ class _RecipeBase:
             required_context=[
                 RequiredContext(any_of=list(group)) for group in self.required_context
             ],
+            excluded_operating_modes=list(self.excluded_operating_modes),
             training_selection=TrainingSelection(
                 require_session_events=list(self.require_session_events),
                 require_contiguous_runtime=self.require_contiguous_runtime,
@@ -423,7 +449,15 @@ def default_recipes() -> list[Recipe]:
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
             ),
             notes=(
-                "Ignition surface. Knock-retard activity shows as drops vs. the baseline cell mean."
+                "Ignition surface. A sustained drop versus the learned cell is an "
+                "unexpected timing change; knock-control retard is one possible "
+                "cause among IAT/coolant compensation, calibration change and "
+                "transients, and this surface does not identify which (B04.3)."
+            ),
+            diagnostic_capabilities=("unexpected sustained timing change",),
+            diagnostic_limitations=(
+                "does not identify knock retard or any other cause of a timing change",
+                "load and RPM only: IAT/coolant compensation is unmodelled context",
             ),
         ),
         Surface2DRecipe(
@@ -452,10 +486,10 @@ def default_recipes() -> list[Recipe]:
                 "*normally* does at this thermal+rpm operating point — "
                 "ambient-invariant by construction (the same IAT bin sees "
                 "summer afternoons and winter mornings).\n\n"
-                "Catches:\n"
-                "* Sustained knock-retard activity (negative residuals "
-                "  clustered at the hot-IAT side of the surface — detonation "
-                "  triggers spark pull-back).\n"
+                "Can show (never identify):\n"
+                "* Sustained negative residuals clustered at the hot-IAT side "
+                "  of the surface — consistent with, not proof of, knock-control "
+                "  retard.\n"
                 "* Thermal-compensation or knock-control drift. A biased IAT "
                 "  that the ECU itself uses for timing is a common-mode fault "
                 "  and is not identifiable from this surface alone.\n"
@@ -464,10 +498,11 @@ def default_recipes() -> list[Recipe]:
                 "compensation) — both feed the same timing output through "
                 "different physical axes."
             ),
-            diagnostic_capabilities=("timing-map drift", "sustained knock-control retard"),
+            diagnostic_capabilities=("timing-map drift",),
             diagnostic_limitations=(
                 "cannot identify an IAT bias also consumed by the ECU "
                 "without an independent reference",
+                "does not identify knock retard; RPM/IAT alone omits load",
             ),
         ),
         Surface2DRecipe(
@@ -509,15 +544,25 @@ def default_recipes() -> list[Recipe]:
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.002
             ),
             notes=(
-                "Volumetric efficiency proxy — MAF translated to grams per "
-                "four-stroke cycle. Detects intake leak (low VE), exhaust "
-                "restriction (low VE at high RPM), MAF drift (whole-surface "
-                "shift). Fed by ``compute_anomaly_signals``."
+                "Measured air mass per four-stroke cycle (MAF x 120 / RPM), the raw "
+                "quantity behind both VE channels, kept for inspection. Not "
+                "density-normalized: altitude and intake temperature move it at a "
+                "fixed operating point. Fed by ``compute_anomaly_signals``."
+            ),
+            diagnostic_capabilities=("measured airflow relationship drift",),
+            diagnostic_limitations=(
+                "does not separate MAF bias, unmetered air, restriction or air density",
             ),
         ),
+        # B04.5 — VE is two quantities depending on the reference pressure;
+        # each recipe targets the channel for exactly one of them. The
+        # pre-B04.5 artifact of this name was fitted on the legacy
+        # ``derived:VE_PERCENT`` (baro-referenced on a vehicle without MAP);
+        # its output no longer matches this recipe, so a carry-over is flagged
+        # ``contract_changed:recipe`` rather than served as either definition.
         Surface2DRecipe(
             name="ve_vs_rpm_load",
-            output="derived:VE_PERCENT",
+            output=VE_AMBIENT_CHANNEL,
             output_unit="%",
             x_column="obd:RPM",
             y_column="obd:ENGINE_LOAD",
@@ -527,9 +572,9 @@ def default_recipes() -> list[Recipe]:
             y_axis_unit="%",
             min_samples=500,
             min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fill KOEO — VE is a frozen/meaningless value there
-            # derived.py substitutes 25 degC when no IAT is present; that row
-            # is a different quantity, so a measured IAT is required context.
-            required_context=(("obd:INTAKE_TEMP", "decoded:IAT"),),
+            # The channel exists only with measured baro AND measured IAT
+            # (no 25 degC default), and its gap marks either stale, so no
+            # separate context requirement is needed for them.
             # sigma_floor: same MAF-LSB reasoning as air_mass_per_cycle_vs_rpm_load
             # (0.002 g/cycle) expressed as a percent of a representative idle-cell
             # 100%-VE fill (~0.4 g/cycle for this displacement class) — approximate,
@@ -538,67 +583,100 @@ def default_recipes() -> list[Recipe]:
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
             ),
             notes=(
-                "True VE table (Task 4.1): measured air mass per cycle (MAF/RPM) "
-                "over the theoretical 100%-VE fill from MAP-or-baro/IAT/"
-                "displacement — the physics-normalized upgrade of "
-                "air_mass_per_cycle_vs_rpm_load above. Detects intake leak / "
-                "metering/pressure/IAT drift (whole-surface shift), "
-                "cam/VVT fault (localized cell shift). Fed by "
+                "Ambient-referenced volumetric efficiency: measured air mass per "
+                "cycle (MAF/RPM) over the ideal-gas fill at measured barometric "
+                "pressure and measured IAT. Includes throttling, so it tracks load "
+                "(~20-30 % at idle); it normalizes air density (altitude, "
+                "temperature) out of air_mass_per_cycle_vs_rpm_load, nothing more. "
+                "Fed by ``compute_anomaly_signals``."
+            ),
+            diagnostic_capabilities=("density-normalized airflow relationship drift",),
+            diagnostic_limitations=(
+                "cannot distinguish MAF, baro, IAT, or mechanical airflow causes by itself",
+                "shares the MAF/RPM measurement with air_mass_per_cycle_vs_rpm_load; "
+                "the two are not independent confirmation",
+            ),
+        ),
+        Surface2DRecipe(
+            name="ve_manifold_vs_rpm_load",
+            output=VE_MANIFOLD_CHANNEL,
+            output_unit="%",
+            x_column="obd:RPM",
+            y_column="obd:ENGINE_LOAD",
+            x_axis_name="rpm",
+            y_axis_name="engine_load",
+            x_axis_unit="rpm",
+            y_axis_unit="%",
+            min_samples=500,
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
+            deviation=DeviationConfig(
+                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
+            ),
+            notes=(
+                "Manifold-referenced volumetric efficiency: measured air mass per "
+                "cycle over the ideal-gas fill at measured MAP and measured IAT "
+                "(~80-95 % naturally aspirated at any throttle). Needs a MAP sensor; "
+                "skipped (missing column) on a vehicle without one. Fed by "
                 "``compute_anomaly_signals``."
             ),
             diagnostic_capabilities=("air-model relationship drift",),
             diagnostic_limitations=(
                 "cannot distinguish MAF, MAP, IAT, or mechanical airflow causes by itself",
+                "a restriction moves both measured flow and MAP, so it can cancel",
             ),
         ),
-        Surface2DRecipe(
-            name="total_trim_vs_rpm_load_b1",
-            output="derived:TOTAL_TRIM_B1",
-            output_unit="%",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            closed_loop_only=True,
-            # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈ 0.78%);
-            # TOTAL_TRIM sums two channels sharing that LSB, so this is a lower
-            # bound on the achievable resolution, not a doubled value.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
-            ),
-            notes=(
-                "Total fuel trim (LTFT+STFT), bank 1 (Task 4.3). The "
-                "vacuum-leak-vs-MAF-skew discriminator: elevated only in "
-                "low-rpm/low-load cells → unmetered air (vacuum leak); "
-                "elevated across the whole surface → MAF or fuel-pressure "
-                "bias. A human reads this map; no detection logic here."
-            ),
-        ),
-        Surface2DRecipe(
-            name="total_trim_vs_rpm_load_b2",
-            output="derived:TOTAL_TRIM_B2",
-            output_unit="%",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            closed_loop_only=True,
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
-            ),
-            notes=(
-                "Total fuel trim (LTFT+STFT), bank 2 — sister surface to "
-                "total_trim_vs_rpm_load_b1, same discriminator."
-            ),
-        ),
+        # B05.2 — total trim is an additive STFT+LTFT index in percentage
+        # points, graded only in healthy closed loop (J1979 0x02: excludes
+        # open-loop warmup 0x01, enrichment / fuel cut 0x04 and feedback
+        # faults 0x08/0x10), outside the ``warmup`` mode (closed loop while
+        # cold still carries cold enrichment and inhibited trim learning) and
+        # at steady RPM/load (TOTAL_TRIM_STEADY_RATES). All persisted on the
+        # contract, so fit and serve apply the same rows.
+        *[
+            Surface2DRecipe(
+                name=f"total_trim_vs_rpm_load_b{bank}",
+                output=f"derived:TOTAL_TRIM_B{bank}",
+                output_unit=TOTAL_TRIM_UNIT,
+                x_column="obd:RPM",
+                y_column="obd:ENGINE_LOAD",
+                x_axis_name="rpm",
+                y_axis_name="engine_load",
+                x_axis_unit="rpm",
+                y_axis_unit="%",
+                min_samples=500,
+                min_rpm=ENGINE_RUNNING_MIN_RPM,
+                closed_loop_only=True,
+                excluded_operating_modes=("warmup",),
+                max_abs_rate_of_change=TOTAL_TRIM_STEADY_RATES,
+                # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈
+                # 0.78 %); TOTAL_TRIM sums two channels sharing that LSB, so
+                # this is a lower bound on the achievable resolution.
+                deviation=DeviationConfig(
+                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
+                ),
+                notes=(
+                    f"Total fuel trim, bank {bank}: STFT + LTFT as an additive "
+                    "percentage-point index (not a calibrated fuel multiplier). "
+                    "Elevated only at low rpm/load points suggests unmetered air; "
+                    "elevated across the surface suggests a metering or fuel-supply "
+                    "bias — a human reads the map; no detection logic here."
+                ),
+                diagnostic_capabilities=("closed-loop fuel correction drift",),
+                diagnostic_limitations=(
+                    "an additive index, not a calibrated injector multiplier",
+                    "does not identify a particular injector, leak or sensor",
+                    *(
+                        ()
+                        if bank == 1
+                        else (
+                            "gated on fuel system 1's status (PID 0x03 byte A); "
+                            "system 2's own state is recorded but not decoded",
+                        )
+                    ),
+                ),
+            )
+            for bank in (1, 2)
+        ],
         *[
             Surface1DRecipe(
                 name=f"stft_bank_balance_{mode}",
@@ -1341,6 +1419,34 @@ def recipe_serving_spec(recipe: Recipe) -> ServingSpec:
         # The refit reads ``recipe.output`` verbatim as its column.
         output=recipe.output,
     )
+
+
+def legacy_reproduction_spec(
+    recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D
+) -> tuple[ServingSpec, str | None]:
+    """Row-selection contract for a legacy artifact (no persisted contract).
+
+    Its catalog recipe says which rows it was fitted and validated on. When
+    the recipe has since been retargeted to a different output or axes
+    (B04.5 moved ``ve_vs_rpm_load`` off the legacy ``derived:VE_PERCENT``),
+    the recipe's row gates still apply but the model's *own* output and axes
+    are what it predicts, so they replace the recipe's — and the second
+    element names that substitution so a report cannot present the artifact
+    as the retargeted quantity. ``None`` when nothing was substituted.
+    """
+    spec = recipe_serving_spec(recipe)
+    model_inputs = (
+        (model.axis.channel,)
+        if isinstance(model, BehaviorModel1D)
+        else tuple(axis.channel for axis in model.axes)
+    )
+    if spec.output == model.output and spec.inputs == model_inputs:
+        return spec, None
+    note = (
+        f"recipe now targets {spec.output} on {list(spec.inputs)}; "
+        f"artifact evaluated on its own {model.output} on {list(model_inputs)}"
+    )
+    return replace(spec, output=model.output, inputs=model_inputs), note
 
 
 def _piece_time_key(piece: str) -> tuple[int, str, str]:

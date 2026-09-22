@@ -46,7 +46,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -58,6 +58,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.alerts.fusion import PersistenceGate
+from src.analysis.pairing import to_seconds
 from src.analysis.surface_2d import containing_cell_indices, trusted_cell_mask
 from src.config import CanaryConfig
 from src.control.sessions import session_started_at
@@ -77,6 +78,7 @@ from src.decode.behavior_models import (
     FoldMetrics,
     RobustBaselineFit,
     SyntheticSensitivity,
+    TransientControlResult,
     ValidationCriteria,
     ValidationEvidence,
     contract_fingerprint,
@@ -97,7 +99,10 @@ log = logging.getLogger(__name__)
 
 #: Bump when the evaluator's definitions change (denominators, metrics,
 #: event accounting). Persisted in every evidence record.
-EVALUATOR_VERSION = 1
+#: 2 (2026-09-22, B04.3): row times in true seconds for microsecond frames
+#: (events, dedupe and synthetic windows were 1000x compressed), detection
+#: delay, covered envelope and transient controls.
+EVALUATOR_VERSION = 2
 
 #: Default join gap between adjacent directories of one physical drive. A
 #: capture arm/disarm rotates the writer with ~0 s gap; an engine restart
@@ -174,6 +179,42 @@ class ProvenanceResolution(_Strict):
         return self
 
 
+class RegimeAxis(_Strict):
+    """One reporting stratum: ``channel`` binned at ``edges`` (B04.1)."""
+
+    channel: str = Field(min_length=1)
+    unit: str = Field(min_length=1)
+    edges: list[float] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _increasing(self) -> RegimeAxis:
+        if any(b <= a for a, b in zip(self.edges, self.edges[1:], strict=False)):
+            raise ValueError(f"{self.channel}: edges must strictly increase")
+        return self
+
+
+class SteadyStateRegime(_Strict):
+    """Steady vs transient split: every listed rate within its limit (per s).
+
+    Rates come from the feature pipeline's one rate-of-change implementation
+    at its rolling horizon — the same derivative a persisted rate gate reads.
+    """
+
+    max_abs_rate_per_second: dict[str, float] = Field(min_length=1)
+    basis: str = Field(min_length=1)
+
+
+class ReportRegimes(_Strict):
+    """How evaluation reports stratify rows before any comparison (B04.1).
+
+    Reporting only: a regime never selects rows for fitting or serving. The
+    calibration stratum is always the session's tune revision.
+    """
+
+    axes: dict[str, RegimeAxis] = Field(default_factory=dict)
+    steady_state: SteadyStateRegime | None = None
+
+
 class BehaviorValidationDocument(_Strict):
     """``behavior_validation.yaml`` — per-vehicle validation policy (B02.4/B02.6)."""
 
@@ -185,6 +226,7 @@ class BehaviorValidationDocument(_Strict):
     retired_operating_modes: dict[str, str] = Field(default_factory=dict)
     drive_join_gap_seconds: float = Field(default=DEFAULT_JOIN_GAP_SECONDS, ge=0)
     provenance_resolutions: list[ProvenanceResolution] = Field(default_factory=list)
+    report_regimes: ReportRegimes | None = None
     recipes: dict[str, ValidationCriteria] = Field(default_factory=dict)
 
     def resolution_for(self, session: str) -> ProvenanceResolution | None:
@@ -547,11 +589,16 @@ def _column(frame: pd.DataFrame, name: str) -> np.ndarray:
 
 
 def _seconds(frame: pd.DataFrame, interval: float) -> np.ndarray:
+    """Epoch seconds per row.
+
+    The unit is pinned to nanoseconds before the integer view: session frames
+    carry ``datetime64[us]`` (pandas 3), and ``int64 / 1e9`` on microseconds
+    compressed every interval 1000x — the persistence window (8 s) and dedupe
+    (30 s) then spanned hours of rows and each synthetic window a whole
+    drive. Evaluator version 2 fixed that (B04.3).
+    """
     if TIMESTAMP_COLUMN in frame.columns:
-        stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True, errors="coerce")
-        values = stamps.astype("int64").to_numpy(dtype=float) / 1e9
-        values[stamps.isna().to_numpy()] = np.nan
-        return values
+        return to_seconds(frame[TIMESTAMP_COLUMN])
     return np.arange(len(frame), dtype=float) * interval
 
 
@@ -561,7 +608,7 @@ def evaluate_rows(
     *,
     spec: ServingSpec | None = None,
     interval_seconds: float = 1.0,
-    output_offset: float = 0.0,
+    output_offset: float | np.ndarray = 0.0,
 ) -> RowEvaluation:
     """Evaluate ``model`` on every row of ``frame`` through the B01 evaluator.
 
@@ -569,7 +616,9 @@ def evaluate_rows(
     artifact (no persisted contract) under its catalog recipe's contract; the
     model's own gates still apply on top. ``output_offset`` adds an explicitly
     synthetic step to the actual output column (and to any input that *is*
-    that column), then re-evaluates — derived columns are not recomputed.
+    that column), then re-evaluates — derived columns are not recomputed. A
+    per-row array (aligned with ``frame``) injects a shaped excursion, e.g. a
+    short transient control (B04.3).
     """
     model_spec = serving_spec(model)
     spec = spec or model_spec
@@ -581,9 +630,12 @@ def evaluate_rows(
         # model's frame was built without a contract that asked for it.
         if any(column not in work.columns for column in start_context_columns(cold)):
             work = append_start_context(work, [StartContextSpec.from_requirement(cold)])
-    if output_offset:
+    offset = np.asarray(output_offset, dtype=float)
+    if offset.ndim > 0 and offset.shape != (len(work),):
+        raise ValueError(f"output_offset has {offset.shape[0]} rows, frame has {len(work)}")
+    if np.any(offset != 0.0):
         work = work.copy()
-        work[output] = pd.to_numeric(work[output], errors="coerce") + output_offset
+        work[output] = pd.to_numeric(work[output], errors="coerce").to_numpy(dtype=float) + offset
     channels = [*model_spec.inputs, output]
     present = np.ones(len(work), dtype=bool)
     fresh = np.ones(len(work), dtype=bool)
@@ -672,10 +724,28 @@ def count_events(
     ``groups`` resets the gate (one per drive or synthetic window); refused
     rows are missing verdicts that freeze the window, exactly as live.
     """
-    events = 0
-    for group in pd.unique(groups):
-        idx = np.flatnonzero(groups == group)
-        order = idx[np.argsort(seconds[idx], kind="stable")]
+    return len(event_times(verdicts, seconds, groups, policy))
+
+
+def event_times(
+    verdicts: np.ndarray,
+    seconds: np.ndarray,
+    groups: np.ndarray,
+    policy: EventPolicy,
+) -> list[tuple[object, float]]:
+    """``(group, emit time)`` for every event :func:`count_events` counts."""
+    events: list[tuple[object, float]] = []
+    # One sort instead of a mask per group: synthetic windows number in the
+    # thousands on a month of drives. Within a group rows are time-ordered,
+    # ties keeping row order (lexsort is stable).
+    codes, uniques = pd.factorize(pd.Series(groups, dtype=object), sort=False)
+    ordered = np.lexsort((seconds, codes))
+    boundaries = np.flatnonzero(np.diff(codes[ordered])) + 1
+    for order in np.split(ordered, boundaries):
+        if not order.size:
+            continue
+        code = codes[order[0]]
+        group = uniques[code] if code >= 0 else groups[order[0]]
         gate = PersistenceGate(
             policy.required, window=policy.window, window_seconds=policy.window_seconds
         )
@@ -689,7 +759,7 @@ def count_events(
             if last_emit is not None and now - last_emit < policy.dedupe_seconds:
                 continue
             last_emit = now
-            events += 1
+            events.append((group, now))
     return events
 
 
@@ -863,19 +933,105 @@ def breakdown(
         if by == "drive"
         else ev.modes
     )
-    # Only groups the model could have spoken for: a drive with no eligible
-    # row says nothing about accuracy (its refusals are in the fold totals).
+    return breakdown_by_labels(
+        model, ev, keys, drive_of_piece=drive_of_piece, policy=policy, baseline=baseline
+    )
+
+
+def breakdown_by_labels(
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
+    labels: np.ndarray,
+    *,
+    drive_of_piece: Mapping[str, str],
+    policy: EventPolicy,
+    baseline: Mapping[str, float] | None = None,
+) -> dict[str, FoldMetrics]:
+    """:func:`fold_metrics` per label (one label per row of ``ev``).
+
+    Only groups the model could have spoken for: a group with no eligible
+    row says nothing about accuracy (its refusals are in the fold totals).
+    Events restart per drive *within* a group, so a stratum's event count is
+    the persistence gate run on that stratum's rows only.
+    """
     eligible = ev.eligible
     return {
         str(key): fold_metrics(
             model,
-            ev.subset(keys == key),
+            ev.subset(labels == key),
             drive_of_piece=drive_of_piece,
             policy=policy,
             baseline=baseline,
         )
-        for key in pd.unique(keys[eligible])
+        for key in pd.unique(labels[eligible])
     }
+
+
+def _bin_labels(values: np.ndarray, axis: RegimeAxis) -> np.ndarray:
+    labels = np.full(len(values), "missing", dtype=object)
+    edges = axis.edges
+    finite = np.isfinite(values)
+    labels[finite & (values < edges[0])] = f"<{edges[0]:g} {axis.unit}"
+    labels[finite & (values >= edges[-1])] = f">={edges[-1]:g} {axis.unit}"
+    for lo, hi in zip(edges, edges[1:], strict=False):
+        labels[finite & (values >= lo) & (values < hi)] = f"[{lo:g},{hi:g}) {axis.unit}"
+    return labels
+
+
+def regime_labels(
+    frame: pd.DataFrame,
+    regimes: ReportRegimes | None,
+    *,
+    revision_of_piece: Callable[[str], str | None] | None = None,
+) -> dict[str, np.ndarray]:
+    """Per-row stratum labels for evaluation reports (B04.1).
+
+    ``calibration`` is the tune revision of each row's session (``unknown``
+    when the registry cannot place it). Axis strata label a stale or absent
+    channel ``stale`` / ``missing`` — an unavailable context is its own
+    stratum, never folded into a numeric bin. The steady-state split reads
+    each rate from :func:`src.preprocessing.features.compute_rate_of_change`
+    and labels a row ``transient`` if any listed rate exceeds its limit,
+    ``rate_unavailable`` if any rate is undefined, else ``steady``.
+    """
+    from src.preprocessing.features import compute_rate_of_change, roc_column
+
+    out: dict[str, np.ndarray] = {}
+    if revision_of_piece is not None and SESSION_COLUMN in frame.columns:
+        pieces = frame[SESSION_COLUMN].astype(str).to_numpy()
+        cache: dict[str, str] = {}
+        revisions: list[str] = []
+        for piece in pieces:
+            if piece not in cache:
+                cache[piece] = revision_of_piece(piece) or "unknown"
+            revisions.append(cache[piece])
+        out["calibration"] = np.asarray(revisions, dtype=object)
+    if regimes is None:
+        return out
+    for name, axis in regimes.axes.items():
+        labels = _bin_labels(_column(frame, axis.channel), axis)
+        gap = gap_column(axis.channel)
+        if gap in frame.columns:
+            stale = frame[gap].fillna(True).astype(bool).to_numpy()
+            labels[stale] = "stale"
+        out[name] = labels
+    steady = regimes.steady_state
+    if steady is not None:
+        channels = list(steady.max_abs_rate_per_second)
+        missing_roc = [c for c in channels if roc_column(c) not in frame.columns]
+        rates = compute_rate_of_change(frame, missing_roc) if missing_roc else frame
+        transient = np.zeros(len(frame), dtype=bool)
+        undefined = np.zeros(len(frame), dtype=bool)
+        for channel, limit in steady.max_abs_rate_per_second.items():
+            rate = _column(rates, roc_column(channel))
+            undefined |= ~np.isfinite(rate)
+            with np.errstate(invalid="ignore"):
+                transient |= np.abs(rate) > limit
+        split = np.full(len(frame), "steady", dtype=object)
+        split[undefined] = "rate_unavailable"
+        split[transient] = "transient"
+        out["steady_state"] = split
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -912,15 +1068,19 @@ def synthetic_sensitivity(
         )
         windows = _windows(base, fault.duration_seconds)
         valid = windows >= 0
-        detected = _windows_with_event(
+        first_events = _first_event_per_window(
             _verdicts(injected), injected.seconds, windows, valid, policy
         )
+        detected = set(first_events)
         control = _windows_with_event(_verdicts(base), base.seconds, windows, valid, policy)
         scored = {int(w) for w, ok in zip(windows, valid, strict=True) if ok}
         scored = {w for w in scored if base.evaluated[windows == w].any()}
         control &= scored
         clean = scored - control
         detected &= clean
+        onsets = _first_evaluated_seconds(base, windows)
+        delays = np.asarray([first_events[w] - onsets[w] for w in sorted(detected)], dtype=float)
+        clean_rows = np.isin(windows, sorted(clean)) & base.evaluated
         out.append(
             SyntheticSensitivity(
                 magnitude=fault.magnitude,
@@ -931,9 +1091,95 @@ def synthetic_sensitivity(
                 clean_windows=len(clean),
                 detected=len(detected),
                 detection_fraction=(len(detected) / len(clean)) if clean else None,
+                detection_delay_seconds_median=float(np.median(delays)) if delays.size else None,
+                detection_delay_seconds_max=float(delays.max()) if delays.size else None,
+                covered_envelope=(
+                    envelope_coverage(model, base.subset(clean_rows)) if clean else None
+                ),
             )
         )
     return out
+
+
+def transient_controls(
+    model: BehaviorModel1D | BehaviorModel2D,
+    frame: pd.DataFrame,
+    base: RowEvaluation,
+    criteria: ValidationCriteria,
+    *,
+    policy: EventPolicy,
+    spec: ServingSpec | None = None,
+) -> list[TransientControlResult]:
+    """Events raised by each declared *short* synthetic excursion (B04.3).
+
+    Windows are the resolution's ``min_duration_seconds``. In each window
+    holding an evaluated row whose unmodified control stayed quiet, the
+    excursion is added for ``duration_seconds`` starting at the window's first
+    evaluated row, then scored through the same eligibility and persistence
+    gate. An event is the model mistaking a transient for the sustained
+    change it is meant to resolve.
+    """
+    resolution = criteria.resolution
+    if resolution is None:
+        return []
+    windows = _windows(base, resolution.min_duration_seconds)
+    valid = windows >= 0
+    scored = {int(w) for w, ok in zip(windows, valid, strict=True) if ok}
+    scored = {w for w in scored if base.evaluated[windows == w].any()}
+    control = _windows_with_event(_verdicts(base), base.seconds, windows, valid, policy) & scored
+    clean = scored - control
+    onsets = _first_evaluated_seconds(base, windows)
+    out: list[TransientControlResult] = []
+    for case in resolution.transient_controls:
+        sign = 1.0 if case.direction == "positive" else -1.0
+        offset = np.zeros(len(base.seconds), dtype=float)
+        for window in clean:
+            rows = windows == window
+            start = onsets[window]
+            within = rows & (base.seconds >= start) & (base.seconds < start + case.duration_seconds)
+            offset[within] = sign * case.magnitude
+        injected = evaluate_rows(
+            model, frame, spec=spec, interval_seconds=policy.interval_seconds, output_offset=offset
+        )
+        detected = (
+            _windows_with_event(_verdicts(injected), injected.seconds, windows, valid, policy)
+            & clean
+        )
+        out.append(
+            TransientControlResult(
+                magnitude=case.magnitude,
+                direction=case.direction,
+                duration_seconds=case.duration_seconds,
+                windows=len(scored),
+                clean_windows=len(clean),
+                detected=len(detected),
+                detection_fraction=(len(detected) / len(clean)) if clean else None,
+            )
+        )
+    return out
+
+
+def _first_evaluated_seconds(ev: RowEvaluation, windows: np.ndarray) -> dict[int, float]:
+    """Per window, the time of its first evaluated row (the visible onset)."""
+    out: dict[int, float] = {}
+    evaluated = ev.evaluated & (windows >= 0) & np.isfinite(ev.seconds)
+    for window in pd.unique(windows[evaluated]):
+        out[int(window)] = float(np.min(ev.seconds[evaluated & (windows == window)]))
+    return out
+
+
+def _first_event_per_window(
+    verdicts: np.ndarray,
+    seconds: np.ndarray,
+    windows: np.ndarray,
+    valid: np.ndarray,
+    policy: EventPolicy,
+) -> dict[int, float]:
+    first: dict[int, float] = {}
+    for window, when in event_times(verdicts[valid], seconds[valid], windows[valid], policy):
+        key = int(window)  # type: ignore[call-overload]
+        first[key] = min(when, first.get(key, when))
+    return first
 
 
 def _windows(ev: RowEvaluation, duration: float) -> np.ndarray:
@@ -963,12 +1209,7 @@ def _windows_with_event(
     valid: np.ndarray,
     policy: EventPolicy,
 ) -> set[int]:
-    hit: set[int] = set()
-    for window in pd.unique(windows[valid]):
-        mask = windows == window
-        if count_events(verdicts[mask], seconds[mask], np.zeros(int(mask.sum())), policy):
-            hit.add(int(window))
-    return hit
+    return set(_first_event_per_window(verdicts, seconds, windows, valid, policy))
 
 
 # ---------------------------------------------------------------------------
@@ -982,6 +1223,7 @@ def apply_criteria(
     sensitivity: Sequence[SyntheticSensitivity],
     *,
     qualifying_test_drives: int,
+    transients: Sequence[TransientControlResult] = (),
 ) -> tuple[Literal["passed", "failed", "insufficient_evidence"], list[str]]:
     """Every criterion checked and named; no universal R² floor anywhere."""
     if criteria is None:
@@ -1053,6 +1295,34 @@ def apply_criteria(
             failed.append(
                 f"{label}_detection={case.detection_fraction:.2f}<{criteria.min_synthetic_detection}"
             )
+    resolution = criteria.resolution
+    if resolution is not None:
+        for case in sensitivity:
+            if (
+                case.magnitude < resolution.sustained_change
+                or case.duration_seconds < resolution.min_duration_seconds
+                or case.detection_delay_seconds_median is None
+            ):
+                continue
+            label = f"synthetic_{case.direction}_{case.magnitude:g}_{case.duration_seconds:g}s"
+            if case.detection_delay_seconds_median > resolution.max_detection_delay_seconds:
+                failed.append(
+                    f"{label}_delay_median={case.detection_delay_seconds_median:.3g}s>"
+                    f"{resolution.max_detection_delay_seconds}s"
+                )
+        if not transients:
+            insufficient.append("transient_controls=not_evaluated")
+        for result in transients:
+            label = (
+                f"transient_{result.direction}_{result.magnitude:g}_{result.duration_seconds:g}s"
+            )
+            if result.detection_fraction is None:
+                insufficient.append(f"{label}=no_clean_windows ({result.windows} scored)")
+            elif result.detection_fraction > resolution.max_transient_detection:
+                failed.append(
+                    f"{label}_detection={result.detection_fraction:.2f}>"
+                    f"{resolution.max_transient_detection}"
+                )
     if failed:
         return "failed", failed + [f"insufficient:{item}" for item in insufficient]
     if insufficient:
@@ -1151,12 +1421,18 @@ def build_evidence(
         if criteria is not None and test_ev.evaluated.any()
         else []
     )
+    transients = (
+        transient_controls(model, test_frame, test_ev, criteria, policy=policy, spec=spec)
+        if criteria is not None and test_ev.evaluated.any()
+        else []
+    )
     minimum = criteria.min_observations_per_drive if criteria is not None else 1
     verdict, failures = apply_criteria(
         criteria,
         test,
         sensitivity,
         qualifying_test_drives=qualifying_drive_count(test_ev, drive_of_piece, minimum),
+        transients=transients,
     )
     if context.taxonomy_problems:
         failures = [*failures, *(f"mode_taxonomy:{p}" for p in context.taxonomy_problems)]
@@ -1194,6 +1470,7 @@ def build_evidence(
             baseline=baseline,
         ),
         sensitivity=sensitivity,
+        transient_controls=transients,
         provenance={key: list(values) for key, values in context.provenance.items()},
     )
     return evidence, test_ev
@@ -1356,13 +1633,16 @@ __all__ = [
     "RowEvaluation",
     "UnorderedSessionsError",
     "ValidationContext",
+    "ReportRegimes",
     "apply_criteria",
+    "breakdown_by_labels",
     "build_evaluation_frame",
     "build_evidence",
     "carry_over_flags",
     "chronological_split",
     "count_events",
     "decoder_identity",
+    "event_times",
     "evaluate_rows",
     "explicit_split",
     "fit_baseline",
@@ -1371,8 +1651,10 @@ __all__ = [
     "load_validation_document",
     "parent_session",
     "piece_time_ranges",
+    "regime_labels",
     "session_content_identity",
     "synthetic_sensitivity",
     "training_leaks",
+    "transient_controls",
     "validation_document_path",
 ]

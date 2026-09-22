@@ -528,6 +528,12 @@ class ServingEligibility(_Strict):
     fuel_control: FuelControlRequirement | None = None
     cold_start: ColdStartRequirement | None = None
     required_context: list[RequiredContext] = Field(default_factory=list)
+    #: Operating modes whose rows the model never speaks for (B05.2): a
+    #: closed-loop total-trim surface excludes ``warmup``, where the ECM's
+    #: cold enrichment and inhibited trim learning make the same trim value a
+    #: different quantity. A row with no mode label is refused, not assumed
+    #: to be outside the excluded set.
+    excluded_operating_modes: list[str] = Field(default_factory=list)
     training_selection: TrainingSelection = Field(default_factory=TrainingSelection)
 
 
@@ -559,6 +565,73 @@ class SyntheticFault(_Strict):
     magnitude: float = Field(gt=0)
     direction: Literal["positive", "negative"] = "positive"
     duration_seconds: float = Field(gt=0)
+
+
+class TransientControl(_Strict):
+    """An explicitly synthetic *short* excursion the model must not alert on.
+
+    The negative control of a resolution spec (B04.3): an excursion shorter
+    than the sustained duration the diagnostic question needs (e.g. a
+    momentary knock-control retard) is ordinary engine behavior, so an event
+    for it is a resolution failure, not a detection.
+    """
+
+    magnitude: float = Field(gt=0)
+    direction: Literal["positive", "negative"] = "positive"
+    duration_seconds: float = Field(gt=0)
+
+
+class ResolutionSpec(_Strict):
+    """What "useful resolution" means for one model, declared before testing.
+
+    B04.3: the intended sustained change and how long it must last, justified
+    by a *measured* noise figure (not an LSB) and the diagnostic question the
+    model answers. ``claim`` is what an event may be reported as;
+    ``not_identified`` lists what it must never be reported as (an unexpected
+    timing change is not proven knock retard). Evaluated by
+    ``src.analysis.behavior_validation`` through the real eligibility and
+    persistence path: detection delay and covered envelope for the sustained
+    synthetic faults, and a detection rate for each transient control.
+    """
+
+    #: The sustained change, in output units, the question needs resolved.
+    sustained_change: float = Field(gt=0)
+    #: How long it must persist to matter.
+    min_duration_seconds: float = Field(gt=0)
+    #: Longest acceptable delay from the first evaluated row of an injected
+    #: window to the emitted event.
+    max_detection_delay_seconds: float = Field(gt=0)
+    #: Measured short-horizon spread of the output where the model evaluates;
+    #: its ``basis`` must say what was measured, on which drives.
+    measured_noise: NoiseFloor
+    diagnostic_question: str = Field(min_length=1)
+    claim: str = Field(min_length=1)
+    not_identified: list[str] = Field(min_length=1)
+    transient_controls: list[TransientControl] = Field(min_length=1)
+    #: Largest tolerated fraction of clean windows alerting on a transient.
+    max_transient_detection: float = Field(default=0.0, ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _check_resolution(self) -> ResolutionSpec:
+        if self.sustained_change <= self.measured_noise.value:
+            raise ValueError(
+                f"sustained_change {self.sustained_change} must exceed the measured noise "
+                f"{self.measured_noise.value} — a change inside the noise is not resolvable"
+            )
+        if self.max_detection_delay_seconds > self.min_duration_seconds:
+            raise ValueError(
+                "max_detection_delay_seconds cannot exceed min_duration_seconds: a change "
+                "must be reported while it is still the change being asked about"
+            )
+        long = [
+            c for c in self.transient_controls if c.duration_seconds >= self.min_duration_seconds
+        ]
+        if long:
+            raise ValueError(
+                f"transient controls must be shorter than min_duration_seconds "
+                f"{self.min_duration_seconds}: {[c.duration_seconds for c in long]}"
+            )
+        return self
 
 
 class ValidationCriteria(_Strict):
@@ -607,6 +680,9 @@ class ValidationCriteria(_Strict):
     min_control_hours: float = Field(default=0.5, gt=0)
     synthetic_faults: list[SyntheticFault] = Field(default_factory=list)
     min_synthetic_detection: float = Field(default=0.8, ge=0, le=1)
+    #: B04.3 — the model's declared useful resolution (optional; when present
+    #: its delay and transient controls become criteria).
+    resolution: ResolutionSpec | None = None
     notes: str | None = None
 
     @model_validator(mode="after")
@@ -624,6 +700,22 @@ class ValidationCriteria(_Strict):
             raise ValueError(
                 "declare at least one synthetic fault — sensitivity is a gate, not an option"
             )
+        resolution = self.resolution
+        if resolution is not None:
+            if resolution.sustained_change != self.meaningful_deviation:
+                raise ValueError(
+                    f"resolution.sustained_change {resolution.sustained_change} must equal "
+                    f"meaningful_deviation {self.meaningful_deviation}: one declared target"
+                )
+            if not any(
+                fault.magnitude >= resolution.sustained_change
+                and fault.duration_seconds >= resolution.min_duration_seconds
+                for fault in self.synthetic_faults
+            ):
+                raise ValueError(
+                    "declare a synthetic fault of at least the sustained change lasting at "
+                    "least min_duration_seconds — otherwise the resolution is never tested"
+                )
         return self
 
 
@@ -680,6 +772,26 @@ class SyntheticSensitivity(_Strict):
     detected: int = Field(ge=0)
     #: ``detected / clean_windows``; ``None`` when no clean window exists.
     detection_fraction: float | None = None
+    #: Seconds from each detected window's first evaluated row (the first
+    #: moment the model could see the change) to its first emitted event.
+    detection_delay_seconds_median: float | None = None
+    detection_delay_seconds_max: float | None = None
+    #: Fraction of the trusted envelope the clean windows' evaluated rows
+    #: visited — the envelope this sensitivity was actually shown on.
+    covered_envelope: float | None = None
+
+
+class TransientControlResult(_Strict):
+    """Events raised by one synthetic transient control (B04.3); should be none."""
+
+    synthetic: Literal[True] = True
+    magnitude: float
+    direction: Literal["positive", "negative"]
+    duration_seconds: float
+    windows: int = Field(ge=0)
+    clean_windows: int = Field(default=0, ge=0)
+    detected: int = Field(ge=0)
+    detection_fraction: float | None = None
 
 
 class DriveRecord(_Strict):
@@ -728,6 +840,7 @@ class ValidationEvidence(_Strict):
     per_drive: dict[str, FoldMetrics] = Field(default_factory=dict)
     per_regime: dict[str, FoldMetrics] = Field(default_factory=dict)
     sensitivity: list[SyntheticSensitivity] = Field(default_factory=list)
+    transient_controls: list[TransientControlResult] = Field(default_factory=list)
     provenance: dict[str, list[str]] = Field(default_factory=dict)
 
 

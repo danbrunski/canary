@@ -164,16 +164,27 @@ class MatchedSamples:
 
 
 def to_seconds(timestamps: pd.Series | pd.DatetimeIndex | np.ndarray) -> np.ndarray:
-    """Timestamps as float Unix seconds, the unit the matcher works in."""
-    stamps = pd.to_datetime(pd.Index(timestamps), utc=True)
-    # ``.values`` on a tz-aware index is the UTC datetime64[ns] array. Whole
+    """Timestamps as float Unix seconds, the unit the matcher works in.
+
+    This is the one timestamp-to-seconds conversion in the tree
+    (``tests/test_epoch_seconds_conversion.py`` refuses others). It pins the
+    unit to nanoseconds before the integer view: pandas 3 session frames
+    carry ``datetime64[us]``, and ``astype("int64") / 1e9`` on those reads
+    every interval 1000x short — the behavior evaluator's 8 s persistence
+    window once spanned hours of rows that way (B04.3, 2026-09-22). ``NaT``
+    comes back as ``NaN``, never as the int64 sentinel.
+    """
+    stamps = pd.to_datetime(pd.Index(timestamps), utc=True, errors="coerce")
+    # ``.values`` on a tz-aware index is the UTC datetime64 array. Whole
     # seconds and the sub-second remainder are converted separately so the
     # fraction survives exactly — a stamp exactly ``max_separation`` away
     # must compare as exactly that, not a rounding error past it.
     nanos = np.asarray(stamps.values).astype("datetime64[ns]").astype(np.int64)
     whole = (nanos // 1_000_000_000).astype(np.float64)
     fraction = (nanos % 1_000_000_000).astype(np.float64) / 1e9
-    return np.asarray(whole + fraction, dtype=np.float64)
+    seconds = np.asarray(whole + fraction, dtype=np.float64)
+    seconds[np.asarray(stamps.isna())] = np.nan
+    return seconds
 
 
 def weakest_basis(bases: pd.Series | list[str]) -> TimestampBasis:

@@ -43,16 +43,21 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "DERIVED_CHANNEL_INPUTS",
     "FUEL_PROPERTIES",
     "IDLE_RPM_FLOOR",
     "IDLE_SPEED_CEIL_KPH",
+    "LEGACY_VE_CHANNEL",
     "MAX_INTEGRATION_DT_S",
+    "VE_AMBIENT_CHANNEL",
+    "VE_MANIFOLD_CHANNEL",
     "FuelProperties",
     "TripSummary",
     "compute_anomaly_signals",
     "compute_derived_channels",
     "compute_instantaneous_channels",
     "fuel_properties",
+    "resolved_dependencies",
     "summarize_trip",
 ]
 
@@ -122,15 +127,7 @@ def _append_dependency_gap(
     """
     stale = pd.Series(False, index=frame.index, dtype=bool)
     for candidates in dependency_groups:
-        selected = next(
-            (
-                name
-                for name in candidates
-                if name in frame.columns
-                and pd.to_numeric(frame[name], errors="coerce").notna().any()
-            ),
-            None,
-        )
+        selected = _selected_input(frame, candidates)
         if selected is None:
             stale |= True
             continue
@@ -152,12 +149,46 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("obd:MAF",),
         ("obd:RPM", "decoded:ECM_RPM"),
     ),
+    # Legacy: the reference pressure depends on what the session polled
+    # (MAP when present, else baro) — two physical quantities under one name.
+    # Kept bit-identical only because tracked IF/LSTM manifests consume it;
+    # no behavior recipe targets it (B04.5). See LEGACY_VE_CHANNEL.
     "derived:VE_PERCENT": (
         ("derived:AIR_MASS_PER_CYCLE",),
         ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
         ("obd:INTAKE_TEMP", "decoded:IAT"),
     ),
+    # B04.5 — one physical reference per channel, no fallback between them
+    # and no default temperature: absent MAP / baro / IAT means no value.
+    "derived:VE_MANIFOLD_PERCENT": (
+        ("derived:AIR_MASS_PER_CYCLE",),
+        ("obd:INTAKE_PRESSURE", "decoded:MAP"),
+        ("obd:INTAKE_TEMP", "decoded:IAT"),
+    ),
+    "derived:VE_AMBIENT_PERCENT": (
+        ("derived:AIR_MASS_PER_CYCLE",),
+        ("obd:BAROMETRIC_PRESSURE",),
+        ("obd:INTAKE_TEMP", "decoded:IAT"),
+    ),
 }
+
+#: B04.5 — manifold-referenced VE: measured air mass over the ideal-gas fill
+#: at *measured manifold pressure* and measured intake temperature. Near
+#: 80-95 % on a healthy NA engine at any throttle, because the throttle loss
+#: is already in the reference. Needs a MAP sensor.
+VE_MANIFOLD_CHANNEL = "derived:VE_MANIFOLD_PERCENT"
+#: B04.5 — ambient-referenced VE (the textbook inlet-referenced definition):
+#: the same measured mass over the fill at *measured barometric pressure* and
+#: measured intake temperature. Includes throttling, so it reads ~20-30 % at
+#: idle and approaches manifold VE only at WOT. Available on any vehicle that
+#: answers PID 0x33; the two are different quantities and never substitute.
+VE_AMBIENT_CHANNEL = "derived:VE_AMBIENT_PERCENT"
+#: The pre-B04.5 channel: manifold-referenced when the session carried MAP,
+#: ambient-referenced otherwise, and computed at 25 degC when no IAT column
+#: existed (those rows are flagged stale through its gap). Produced unchanged
+#: for detectors whose manifests already consume it; use
+#: :func:`resolved_dependencies` to say which definition a frame produced.
+LEGACY_VE_CHANNEL = "derived:VE_PERCENT"
 
 
 @dataclass(frozen=True)
@@ -207,6 +238,36 @@ def _series(wide: pd.DataFrame, *names: str) -> pd.Series | None:
             if col.notna().any():
                 return col
     return None
+
+
+def _selected_input(wide: pd.DataFrame, candidates: tuple[str, ...]) -> str | None:
+    """The column :func:`_series` would read from ``candidates`` (or ``None``).
+
+    Freshness gaps and provenance must name the column the *value* came from:
+    a ``decoded:`` candidate with no pinned scale is skipped by ``_series``,
+    so it is skipped here too.
+    """
+    for name in candidates:
+        if name not in wide.columns:
+            continue
+        try:
+            col = physical_series(wide[name], name)
+        except UnscaledDecodedChannelError:
+            continue
+        if col.notna().any():
+            return name
+    return None
+
+
+def resolved_dependencies(wide: pd.DataFrame, output: str) -> list[str | None]:
+    """Which input each of ``output``'s dependency groups resolved to in ``wide``.
+
+    ``None`` for a group with no usable column — for the legacy VE channel's
+    temperature group that means its value used the 25 degC default (and its
+    gap marks every row stale). Provenance for reports that must say which VE
+    definition a frame actually produced (B04.5).
+    """
+    return [_selected_input(wide, group) for group in DERIVED_CHANNEL_INPUTS[output]]
 
 
 def _session_time_rolling(
@@ -613,10 +674,13 @@ def _theoretical_air_mass_per_cycle_g(
     Same ideal-gas form as the speed-density fallback in
     ``_instant_fuel_g_s``: ``density = P[Pa] / (287.05 * T[K])``, mass =
     density * displaced volume. Prefers MAP (``obd:INTAKE_PRESSURE``);
-    falls back to barometric pressure when MAP isn't polled — an
-    unboosted engine at rest reads close to baro anyway, so this degrades
-    gracefully instead of going silent. IAT defaults to 25 C when absent
-    (same convention as ``_instant_fuel_g_s``).
+    falls back to barometric pressure when MAP isn't polled, and IAT defaults
+    to 25 C when absent (same convention as ``_instant_fuel_g_s``). That
+    fallback is why this feeds only the *legacy* ``derived:VE_PERCENT``: at
+    part throttle MAP is far below baro, so the two references give
+    different quantities (~85 % vs ~25 % at idle) under one name. New
+    consumers read :data:`VE_MANIFOLD_CHANNEL` / :data:`VE_AMBIENT_CHANNEL`
+    (B04.5), computed by :func:`_referenced_ve_percent`.
     """
     pressure_kpa = _series(wide, "obd:INTAKE_PRESSURE", "decoded:MAP")
     if pressure_kpa is None:
@@ -624,10 +688,37 @@ def _theoretical_air_mass_per_cycle_g(
     if pressure_kpa is None:
         return None
     iat = _series(wide, "obd:INTAKE_TEMP", "decoded:IAT")
-    iat_k = (iat if iat is not None else pd.Series(25.0, index=wide.index)) + 273.15
+    iat_c = iat if iat is not None else pd.Series(25.0, index=wide.index)
+    return _ideal_gas_fill_g(pressure_kpa, iat_c, vehicle)
+
+
+def _ideal_gas_fill_g(
+    pressure_kpa: pd.Series, iat_c: pd.Series, vehicle: VehicleParameters
+) -> pd.Series:
+    """Ideal-gas air mass (g/cycle) filling the configured displacement at
+    ``pressure_kpa`` and ``iat_c`` — the 100 %-VE reference."""
+    iat_k = iat_c + 273.15
     air_density = (pressure_kpa * 1000.0) / (287.05 * iat_k)  # kg/m^3
     disp_m3 = vehicle.displacement_l / 1000.0
     return (air_density * disp_m3 * 1000.0).astype(float)  # g/cycle at 100% VE
+
+
+def _referenced_ve_percent(
+    wide: pd.DataFrame,
+    air_mass_measured: pd.Series,
+    output: str,
+    vehicle: VehicleParameters,
+) -> pd.Series | None:
+    """B04.5 — VE against exactly one measured pressure reference and a
+    measured intake temperature; ``None`` when either is absent (never a
+    fallback reference, never a default temperature)."""
+    _air, pressure_group, iat_group = DERIVED_CHANNEL_INPUTS[output]
+    pressure_kpa = _series(wide, *pressure_group)
+    iat_c = _series(wide, *iat_group)
+    if pressure_kpa is None or iat_c is None:
+        return None
+    fill = _ideal_gas_fill_g(pressure_kpa, iat_c, vehicle)
+    return (air_mass_measured / fill.where(fill > 0) * 100.0).astype(float)
 
 
 def _switch_count_rolling(wide: pd.DataFrame, voltage: pd.Series, seconds: float) -> pd.Series:
@@ -685,6 +776,17 @@ def compute_anomaly_signals(
       ``vehicle.displacement_l``. There is no DID pressure cross-check:
       this engine has no MAP sensor, and 0x1206/0x1207 (once catalogued as
       intake pressure) are the injected pulse, ``did:ECM_INJECTOR_PULSE_1/2``.
+      **Legacy** (B04.5): its reference is MAP-or-baro depending on what the
+      session polled, so it names two quantities; it is kept unchanged for
+      the detectors that consume it and no behavior recipe targets it.
+
+    * ``derived:VE_MANIFOLD_PERCENT`` / ``derived:VE_AMBIENT_PERCENT``
+      (B04.5) — the same ratio against exactly one measured reference:
+      manifold pressure (needs MAP) or barometric pressure (PID 0x33), each
+      with measured IAT. No fallback between them and no default
+      temperature — a missing reference or IAT means no value. Neither
+      separates MAF, pressure, IAT or mechanical causes by itself: all three
+      VE channels share the MAF/RPM measurement of AIR_MASS_PER_CYCLE.
 
     * ``derived:STFT_BANK_BALANCE`` / ``derived:LTFT_BANK_BALANCE`` —
       short / long fuel trim difference between banks. Expected ~0
@@ -765,6 +867,14 @@ def compute_anomaly_signals(
                     "derived:VE_PERCENT",
                     *DERIVED_CHANNEL_INPUTS["derived:VE_PERCENT"],
                 )
+            # B04.5 — one reference per channel. A vehicle without MAP gets
+            # only the ambient-referenced value; nothing is relabelled.
+            for channel in (VE_MANIFOLD_CHANNEL, VE_AMBIENT_CHANNEL):
+                referenced = _referenced_ve_percent(out, air_mass_measured, channel, vehicle)
+                if referenced is None:
+                    continue
+                out[channel] = referenced
+                _append_dependency_gap(out, channel, *DERIVED_CHANNEL_INPUTS[channel])
 
     # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since
     # they characterize fast (closed-loop) and slow (drift) bias paths.

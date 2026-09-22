@@ -17,7 +17,8 @@ drift apart.
 A refusal is a stable ``code[:detail]`` string; the first unmet condition in
 this order wins:
 
-1. ``operating_mode_mismatch``
+1. ``operating_mode_mismatch``, ``operating_mode_excluded:<mode>``,
+   ``operating_mode_unknown``
 2. engine state — ``engine_state_stale:<ch>``, ``engine_state_unknown:<ch>``,
    ``engine_not_running``
 3. fuel control — ``fuel_status_stale:<ch>``, ``fuel_status_missing:<ch>``,
@@ -65,6 +66,8 @@ from src.preprocessing.session_context import start_context_columns
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 OPERATING_MODE_MISMATCH = "operating_mode_mismatch"
+OPERATING_MODE_EXCLUDED = "operating_mode_excluded"
+OPERATING_MODE_UNKNOWN = "operating_mode_unknown"
 ENGINE_STATE_STALE = "engine_state_stale"
 ENGINE_STATE_UNKNOWN = "engine_state_unknown"
 ENGINE_NOT_RUNNING = "engine_not_running"
@@ -290,6 +293,17 @@ def _evaluate(cols: _Columns, spec: ServingSpec, *, include_actual: bool) -> np.
 
     eligibility = spec.eligibility
     if eligibility is not None:
+        # 1b. excluded operating modes (B05.2) — an unlabelled row is refused,
+        # never assumed to be outside the excluded set.
+        if eligibility.excluded_operating_modes:
+            if cols.has(MODE_COLUMN):
+                for mode in eligibility.excluded_operating_modes:
+                    refusals.assign(
+                        cols.equals(MODE_COLUMN, mode), f"{OPERATING_MODE_EXCLUDED}:{mode}"
+                    )
+            else:
+                refusals.assign(np.ones(cols.size, dtype=bool), OPERATING_MODE_UNKNOWN)
+
         # 2. engine state
         engine = eligibility.engine_state
         if engine.state == "engine_running":
