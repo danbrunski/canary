@@ -83,9 +83,16 @@ its own criteria frozen before its data.
 ## First wake-up, before any capture
 
 - **Deploy only if the plan lists pending code**, with `sudo canary-update`
-  on the Pi (`scripts/update_canary.sh`: ff-pull, dashboard build,
-  `install_pi.sh`, restart, `/status` check). It prints `source: <before> ->
-  <after>` — that line is the hash check, read it against what you pushed. It
+  on the Pi (`scripts/update_canary.sh`: ff-pull, then only the dashboard
+  build / pip / `install_pi.sh` steps the diff needs, restart, `/status`
+  check, rollback to `<before>` if the new code does not come up). Read the
+  `=== canary-update summary ===` block it ends with, not the scroll above
+  it: `source: <before> -> <after>` is the hash check (read it against what
+  you pushed), each step's `ran`/`skipped (<reason>)` says what actually
+  happened, `health: ok after <n> s`, `memory limits: enforced|NOT enforced`,
+  `rollback:`, and `result: ... (exit <code>)`. Exit 0 is healthy; 3 and 4
+  are the two refusals; 6 means it rolled back and the *old* code is what is
+  running; 7/8 mean the daemon is down — `docs/pi-setup.md` has the table. It
   refuses while a capture is active, and refuses tracked local changes: since
   `2c709b5` a saved catalog is never rewritten on load, so a dirty
   `data/<vehicle>/capture_profiles.yaml` is somebody's edit, not daemon noise
@@ -103,9 +110,10 @@ its own criteria frozen before its data.
   the daemon or starts a capture.
 - **Boot checks:** `journalctl -u canary -b | grep -c "batching disabled"`
   is 0 and `/status` `health.obd_scheduler.batching` shows the configured
-  `max_pids` with `size_narrowings 0`. Memory limits: the file
-  `/sys/fs/cgroup/system.slice/canary.service/memory.max` must EXIST —
-  `systemctl show` echoing the values proves nothing. Log what you find.
+  `max_pids` with `size_narrowings 0`. Memory limits:
+  `/status` `health.system.memory_limits_enforced` must be `true` (it reads
+  the cgroup's own `memory.max`; `systemctl show` echoing the values proves
+  nothing). Log what you find.
 - **Calibration:** `/status` `ecu_calibration_id`, `registry_revision`,
   `calibration_matches_registry`, `calibration_alert_reason`. A mismatch means
   the truck was flashed and `tune_revisions.yaml` doesn't know it: put it under
@@ -163,7 +171,10 @@ its own criteria frozen before its data.
 2. Health line, with jq: vehicle_state, dropped records, storage queue
    depth, can0 rx_over_errors, inference misses, anomaly rate, achieved
    reads/s, batching `size_narrowings`, memory (cgroup `memory.current`, else
-   the RSS sum of the cgroup's pids). Flag counter resets. Log it.
+   the RSS sum of the cgroup's pids), and `health.system.memory_limits_enforced`
+   — `false` means the kernel is enforcing no ceiling (the digest wedged the
+   daemon for 38 min once), `null` means unknown, and neither is a pass. Flag
+   counter resets. Log it.
 3. A regression is diagnosed before anything else. Read `vehicle_state`
    before concluding anything about detectors; a burst of anomalies at an
    altitude or condition outside the corpus is out-of-distribution, not a

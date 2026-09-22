@@ -566,3 +566,81 @@ async def test_sink_queue_high_water_survives_the_drain_that_empties_it() -> Non
     assert sink["queue_depth"] == 0
     assert sink["queue_high_water"] == 4
     assert sink["queue_max_size"] == 4
+
+
+def _cgroup(tmp_path: Path, *, group: str = "system.slice/canary.service") -> tuple[Path, Path]:
+    """A fake unified cgroup hierarchy plus the `/proc/self/cgroup` naming it."""
+    self_cgroup = tmp_path / "self-cgroup"
+    self_cgroup.write_text(f"0::/{group}\n")
+    root = tmp_path / "cgroup"
+    (root / group).mkdir(parents=True)
+    return root, self_cgroup
+
+
+def test_memory_limit_status_reads_the_enforced_ceiling(tmp_path: Path) -> None:
+    """A byte ceiling in the cgroup file is the only proof the kernel enforces one.
+
+    The unit carried `MemoryMax=6G` for four days while the kernel enforced
+    nothing (`cgroup_disable=memory`, 2026-09-18) and `systemctl show` agreed
+    with the unit the whole time. This reads the kernel's own answer.
+    """
+    from src.models.health import memory_limit_status
+
+    root, self_cgroup = _cgroup(tmp_path)
+    (root / "system.slice/canary.service/memory.max").write_text("6442450944\n")
+
+    status = memory_limit_status(cgroup_root=root, self_cgroup=self_cgroup)
+    assert status["memory_limits_enforced"] is True
+    assert status["memory_max_bytes"] == 6442450944
+
+
+def test_memory_limit_status_reports_an_unlimited_ceiling_as_not_enforced(
+    tmp_path: Path,
+) -> None:
+    """`max` means the controller is mounted and the ceiling is off — a real False."""
+    from src.models.health import memory_limit_status
+
+    root, self_cgroup = _cgroup(tmp_path)
+    (root / "system.slice/canary.service/memory.max").write_text("max\n")
+
+    status = memory_limit_status(cgroup_root=root, self_cgroup=self_cgroup)
+    assert status["memory_limits_enforced"] is False
+    assert status["memory_max_bytes"] is None
+
+
+def test_memory_limit_status_is_unknown_when_the_cgroup_file_is_absent(
+    tmp_path: Path,
+) -> None:
+    """No file is *unknown*, never False: a laptop or container has no answer."""
+    from src.models.health import memory_limit_status
+
+    root, self_cgroup = _cgroup(tmp_path)
+
+    status = memory_limit_status(cgroup_root=root, self_cgroup=self_cgroup)
+    assert status["memory_limits_enforced"] is None
+    assert status["memory_max_source"].endswith("canary.service/memory.max")
+
+
+def test_memory_limit_status_is_unknown_when_the_cgroup_file_is_unreadable(
+    tmp_path: Path,
+) -> None:
+    """An unreadable file is unknown too, and must not raise into `/status`."""
+    from src.models.health import memory_limit_status
+
+    root, self_cgroup = _cgroup(tmp_path)
+    denied = root / "system.slice/canary.service/memory.max"
+    denied.write_text("6442450944\n")
+    denied.chmod(0o000)
+    try:
+        status = memory_limit_status(cgroup_root=root, self_cgroup=self_cgroup)
+    finally:
+        denied.chmod(0o644)
+    assert status["memory_limits_enforced"] is None
+
+    # Same for a missing /proc/self/cgroup.
+    assert (
+        memory_limit_status(cgroup_root=root, self_cgroup=tmp_path / "nope")[
+            "memory_limits_enforced"
+        ]
+        is None
+    )
