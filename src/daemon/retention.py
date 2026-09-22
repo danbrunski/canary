@@ -50,103 +50,133 @@ async def run_retention_sweeper(
         raise ValueError("interval_seconds must be positive")
 
     while not stop_event.is_set():
+        # Read on the loop: both callables reach loop-owned state (the
+        # writer's current session, the replay controller).
         active = active_session_path()
+        active_replay = active_replay_dir() if active_replay_dir is not None else None
         try:
-            sizes_before = _session_sizes(storage_path)
-            deleted = delete_expired_sessions(
+            # Off the loop. A tick walks every session file and opens each
+            # parquet to check its footer: 26 s on the event loop at a cold
+            # boot with 62k files (py-spy, 2026-09-22), during which no sink
+            # ran and the collectors had not even started. A session the
+            # writer rotates to mid-tick is younger than delete_empty_sessions'
+            # min_age_seconds, and the one it replaced is ``active``, so
+            # neither can be taken for a husk.
+            await asyncio.to_thread(
+                _sweep_once,
                 storage_path,
                 retention_days,
-                protect={active},
+                active=active,
+                active_replay=active_replay,
+                storage_max_mb=storage_max_mb,
+                storage_warning_mb=storage_warning_mb,
+                replay_retention_days=replay_retention_days,
                 catalog_db=catalog_db,
             )
-            if deleted:
-                log.info(
-                    "expired sessions deleted",
-                    extra={
-                        "count": len(deleted),
-                        "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in deleted),
-                        "sessions": [str(path) for path in deleted],
-                        "active_session": str(active),
-                    },
-                )
-            husks = delete_empty_sessions(storage_path, protect={active}, catalog_db=catalog_db)
-            if husks.removed_sessions or husks.removed_files:
-                log.info(
-                    "empty session husks cleaned",
-                    extra={
-                        "removed_sessions": len(husks.removed_sessions),
-                        "removed_zero_byte_files": len(husks.removed_files),
-                        "active_session": str(active),
-                    },
-                )
-            if storage_max_mb is not None:
-                evicted = enforce_storage_cap(
-                    storage_path,
-                    storage_max_mb,
-                    protect={active},
-                    catalog_db=catalog_db,
-                )
-                if evicted:
-                    log.info(
-                        "storage cap evicted sessions",
-                        extra={
-                            "count": len(evicted),
-                            "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in evicted),
-                            "sessions": [str(path) for path in evicted],
-                            "storage_max_mb": storage_max_mb,
-                            "active_session": str(active),
-                        },
-                    )
-            if replay_retention_days is not None:
-                active_replay = active_replay_dir() if active_replay_dir is not None else None
-                protected_replays: set[Path] = (
-                    {active_replay} if active_replay is not None else set()
-                )
-                evicted_replays = delete_expired_replays(
-                    storage_path,
-                    replay_retention_days,
-                    protect=protected_replays,
-                    catalog_db=catalog_db,
-                )
-                if evicted_replays:
-                    log.info(
-                        "expired replays deleted",
-                        extra={
-                            "count": len(evicted_replays),
-                            "replays": [str(path) for path in evicted_replays],
-                            "replay_retention_days": replay_retention_days,
-                        },
-                    )
-            if storage_warning_mb is not None:
-                free_before = free_space_mb(storage_path)
-                if free_before < storage_warning_mb:
-                    salvaged = emergency_evict_for_free_space(
-                        storage_path,
-                        storage_warning_mb,
-                        protect={active},
-                        catalog_db=catalog_db,
-                    )
-                    if salvaged:
-                        log.warning(
-                            "emergency low-space eviction",
-                            extra={
-                                "count": len(salvaged),
-                                "reclaimed_bytes": sum(
-                                    sizes_before.get(path, 0) for path in salvaged
-                                ),
-                                "sessions": [str(path) for path in salvaged],
-                                "storage_warning_mb": storage_warning_mb,
-                                "free_mb_before": round(free_before, 1),
-                                "free_mb_after": round(free_space_mb(storage_path), 1),
-                                "active_session": str(active),
-                            },
-                        )
         except Exception:  # noqa: BLE001 — cleanup must not kill capture
             log.exception("retention sweep failed", extra={"storage_path": str(storage_path)})
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+def _sweep_once(
+    storage_path: Path,
+    retention_days: int,
+    *,
+    active: Path,
+    active_replay: Path | None,
+    storage_max_mb: int | None,
+    storage_warning_mb: int | None,
+    replay_retention_days: int | None,
+    catalog_db: Path | None,
+) -> None:
+    """One retention tick; blocking filesystem work, run in a thread."""
+    sizes_before = _session_sizes(storage_path)
+    deleted = delete_expired_sessions(
+        storage_path,
+        retention_days,
+        protect={active},
+        catalog_db=catalog_db,
+    )
+    if deleted:
+        log.info(
+            "expired sessions deleted",
+            extra={
+                "count": len(deleted),
+                "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in deleted),
+                "sessions": [str(path) for path in deleted],
+                "active_session": str(active),
+            },
+        )
+    husks = delete_empty_sessions(storage_path, protect={active}, catalog_db=catalog_db)
+    if husks.removed_sessions or husks.removed_files:
+        log.info(
+            "empty session husks cleaned",
+            extra={
+                "removed_sessions": len(husks.removed_sessions),
+                "removed_zero_byte_files": len(husks.removed_files),
+                "active_session": str(active),
+            },
+        )
+    if storage_max_mb is not None:
+        evicted = enforce_storage_cap(
+            storage_path,
+            storage_max_mb,
+            protect={active},
+            catalog_db=catalog_db,
+        )
+        if evicted:
+            log.info(
+                "storage cap evicted sessions",
+                extra={
+                    "count": len(evicted),
+                    "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in evicted),
+                    "sessions": [str(path) for path in evicted],
+                    "storage_max_mb": storage_max_mb,
+                    "active_session": str(active),
+                },
+            )
+    if replay_retention_days is not None:
+        protected_replays: set[Path] = {active_replay} if active_replay is not None else set()
+        evicted_replays = delete_expired_replays(
+            storage_path,
+            replay_retention_days,
+            protect=protected_replays,
+            catalog_db=catalog_db,
+        )
+        if evicted_replays:
+            log.info(
+                "expired replays deleted",
+                extra={
+                    "count": len(evicted_replays),
+                    "replays": [str(path) for path in evicted_replays],
+                    "replay_retention_days": replay_retention_days,
+                },
+            )
+    if storage_warning_mb is not None:
+        free_before = free_space_mb(storage_path)
+        if free_before < storage_warning_mb:
+            salvaged = emergency_evict_for_free_space(
+                storage_path,
+                storage_warning_mb,
+                protect={active},
+                catalog_db=catalog_db,
+            )
+            if salvaged:
+                log.warning(
+                    "emergency low-space eviction",
+                    extra={
+                        "count": len(salvaged),
+                        "reclaimed_bytes": sum(sizes_before.get(path, 0) for path in salvaged),
+                        "sessions": [str(path) for path in salvaged],
+                        "storage_warning_mb": storage_warning_mb,
+                        "free_mb_before": round(free_before, 1),
+                        "free_mb_after": round(free_space_mb(storage_path), 1),
+                        "active_session": str(active),
+                    },
+                )
 
 
 def _active_replay_dir(components: DaemonComponents) -> Path | None:

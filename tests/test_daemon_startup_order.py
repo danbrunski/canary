@@ -229,3 +229,37 @@ async def test_run_daemon_keeps_recording_when_the_live_source_cannot_be_built(
     stop.set()
     await asyncio.wait_for(daemon_task, timeout=10.0)
     assert list(config.collection.storage_path.rglob("*.parquet"))
+
+
+# ---------------------------------------------------------------------------
+# Retention: the sweep is filesystem work and runs off the loop
+# ---------------------------------------------------------------------------
+
+
+async def test_retention_sweep_runs_off_the_event_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tick walked 62k files and opened every parquet on the loop: 26 s at
+    a cold boot (py-spy, 2026-09-22) with the collectors queued behind it."""
+    from src.daemon import retention
+
+    loop_thread = threading.get_ident()
+    swept_on: list[int] = []
+    stop = asyncio.Event()
+
+    def _fake_sweep(*_args: Any, **_kwargs: Any) -> None:
+        swept_on.append(threading.get_ident())
+        stop.set()
+
+    monkeypatch.setattr(retention, "_sweep_once", _fake_sweep)
+    await asyncio.wait_for(
+        retention.run_retention_sweeper(
+            tmp_path,
+            30,
+            stop,
+            interval_seconds=60.0,
+            active_session_path=lambda: tmp_path / "live",
+        ),
+        timeout=5.0,
+    )
+    assert swept_on and all(ident != loop_thread for ident in swept_on)
