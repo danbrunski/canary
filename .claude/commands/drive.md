@@ -33,9 +33,12 @@ experiments are driver-limited and came back "unresolved" most often.
 
 ## Talking to the operator
 
-Never ask a question that blocks you. You may post one-line maneuver
-requests in chat and in the Glance ("when safe: a 10 s 4th-gear WOT hold"),
-and you read what the operator says — they do answer, and a sentence from
+Never ask a question that blocks you. **The operator is driving and cannot
+read the screen or announce a maneuver before doing it** — never time a
+capture on a chat exchange, and never rely on them seeing a request
+mid-drive. Maneuver requests belong in the prompt before the drive; one-line
+notes in chat and the Glance are for after it. You do read what they say —
+a sentence from them — they do answer, and a sentence from
 them ("no WOT today", "parking in 10") outranks the written plan. Decisions
 only they can make go in the log under "For the operator", each as a
 question with the evidence and the cost of each answer. Never take those
@@ -196,8 +199,24 @@ its own criteria frozen before its data.
 - Never reinstate a retired profile from the road. `rom-trace` stalled its
   continuous session (opened, then sent nothing for over a minute) and its
   trace channels return to `tuning` when that is found (W05), not before.
-- Isolated captures ≤ one third of driving time. Stop one as soon as its
-  sample target is met, and before a stop that ends a block.
+- **A tuning run is on `tuning` for the whole drive.** When the operator says
+  the drive is a tuning run (or the OUTCOME is a `tuning` experiment such as
+  NA1), start the `tuning` capture the moment `vehicle_state` first reads
+  `engine_running` — not at a coolant threshold, not "just before the pulls" —
+  and keep it open until the operator says they are parking or the state
+  leaves `engine_running`. Warm-up rows are filtered at analysis time
+  (coolant from the capture itself), never by delaying the start. On
+  2026-09-22 a warm-engine gate, a 4-minute wake cadence and a 10-minute cap
+  left three pulls over 5,000 rpm on `default` at ~1 Hz and caught one 4,512
+  rpm burst on `tuning`. Poll ~60 s until the capture is open.
+- On any other drive, isolated captures ≤ one third of driving time. Stop one
+  as soon as its sample target is met, and before a stop that ends a block.
+- **Until the capture-start fix lands:** `POST /control/capture` returns a
+  bare 500 `failed_step: profile_activation` while a `drive` window is open
+  (the start opens its own capture window and conflicts), and every failed
+  attempt rotates the session. Stop the drive window first (`POST
+  /control/captures/current/stop` with body `{}`), then start the capture;
+  reopen the drive window when the capture stops.
 - **A prerequisite is measured, not configured.** Before spending maneuvers
   on a test, confirm from stored acquisition timestamps that the profile
   achieves the rate and separation the test needs — separate batches, for
@@ -207,8 +226,9 @@ its own criteria frozen before its data.
   and return to `default`.
 - **A tip-in is not a pull.** Ninety-odd 2–11 s accelerations over three
   drives gave a scatter and never one steady 3rd-gear pull from 2,500 rpm to
-  the limiter. That pull, three times on the same road, tagged at start and
-  end, is NA1 — the standing line-1 request until it is done. Report a drive
+  the limiter. That pull, three times on the same road, is NA1. The operator cannot tag it
+  live: find pulls in the capture from load ≥ 85 % and rising rpm, and gear
+  from rpm ÷ speed. Report a drive
   of tip-ins as tip-ins.
 - **Instruments that disagree:** report the disagreement without guessing its
   cause unless a third instrument decides it, and leave every conclusion that

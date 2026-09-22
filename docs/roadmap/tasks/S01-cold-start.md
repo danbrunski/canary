@@ -165,7 +165,7 @@ system starting beside it.
 
 ## Needs the truck
 
-- [ ] **S01.6 Key-on after the startup changes.** After the 16:32Z reboot on
+- [~] **S01.6 Key-on after the startup changes.** After the 16:32Z reboot on
   2026-09-22 `/status` read `no_data`, and the kernel's `can0` counter showed
   0 frames received since boot (70 transmitted, no errors). That is below
   anything the daemon does, and the most likely reading is that the bus had
@@ -177,6 +177,14 @@ system starting beside it.
   (S01.1, or the session's first parquet timestamp if S01.1 has not landed)
   measured from power-on. **Accept:** both states observed, CAN and OBD rows
   stored, and the power-on figure recorded here.
+  **2026-09-22 (partial):** bus sleep confirmed as the reading of the 16:32Z
+  `no_data` boot — after key-on can0 counted 16,038 → 539,295 frames and
+  `/status` read `engine_running` (16:54:02Z), later `ignition_only` at
+  17:18:50Z on key-off, so the classifier and the interface are both fine.
+  The `ignition_only` *edge at key-on* was not sampled: key-on to start took
+  < 27 s and fell between a manual read and the 5 s poller's first sample.
+  Still owed: that edge, plus the cold power-on figure (the Pi was already up
+  for 20 min). Next drive: have the poller running before the key turns.
 
 ## Operator decision
 

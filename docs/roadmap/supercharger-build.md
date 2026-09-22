@@ -85,6 +85,15 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   drives produced only 2–6 s tip-ins; a steady pull is what makes a fuelling,
   timing and airflow curve rather than a scatter. Also the only way to reach the
   5,200 rpm / BFS 18.20 cell edited in the 2026-09-20 flash.
+  **2026-09-22:** still open, and not for want of pulls — the operator drove
+  three over 5,000 rpm (peaks 5,475, 5,362, 5,250 rpm) but every one landed
+  on `default` at ~1 Hz with no RAM channels: one was lost to a slow warm-up
+  check, two to the capture-start defect fixed in `cdd355e`. The `tuning`
+  capture (17:05–17:15Z) caught a single 2.7 s burst to 4,512 rpm. Its known
+  answers all landed (φ 1.0000, rpm 1.0000, timing median Δ 0°), so the
+  profile itself is sound. `POST /control/capture/autostart` now arms the
+  capture for the whole drive, which is what NA1 needs; the pulls still need
+  3rd gear from ≤ 2,500 rpm.
 - [ ] **NA2 — Fuel pressure through a pull.** The AEM CAN gauge (P2) on the
   stock system, logged through NA1 — which means P2's fuel-pressure half must
   land *before* teardown, not after. Settles the 2026-09-21 question — steady pressure
