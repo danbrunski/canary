@@ -149,8 +149,11 @@ sudo canary-update
 ```
 
 The command stops before changing anything when a capture is active, then
-updates the source, rebuilds the dashboard, reapplies Pi configuration and
-dependencies, restarts both services, and checks that the daemon comes back.
+updates the source, does only the dashboard build / dependency / Pi
+configuration work that change needs (`--full` forces all of it), restarts both
+services, checks that the daemon comes back, and rolls back to the previous
+commit if it does not. It ends with a summary block and an exit code that says
+what happened; see `docs/pi-setup.md`.
 
 The daemon serves the browser dashboard, public observation endpoints, and an
 authenticated control API on the configured LAN address, defaulting to

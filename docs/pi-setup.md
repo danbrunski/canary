@@ -193,11 +193,56 @@ sudo journalctl -u canary --since "10 minutes ago"
 ```
 
 `canary-update` is installed into `/usr/local/sbin` by `install_pi.sh`. It
-refuses to update during an active capture, fast-forwards the checkout, rebuilds
-the dashboard, applies dependency and system configuration changes, restarts
-both CANary services, and waits for the daemon health endpoint. It uses the
-checkout's configured Git remote, so private-repository installs still need a
-working deploy key or SSH credential for now.
+refuses to update during an active capture (through `restart_canary.sh
+--check`) or when the checkout has tracked local changes, fast-forwards the
+checkout, then does only the work the change needs, restarts both CANary
+services through `scripts/restart_canary.sh`, and waits up to 90 s for the
+daemon health endpoint. It uses the checkout's configured Git remote, so
+private-repository installs still need a working deploy key or SSH credential
+for now.
+
+What runs is decided from `git diff --name-only <before> <after>` and from the
+artefacts on disk, and every decision is printed as `ran (<reason>)` or
+`skipped (<reason>)`:
+
+| Step | Runs when |
+| --- | --- |
+| dashboard build (`pnpm install && pnpm build`) | anything under `src/dashboard/static/` changed, or `dist/index.html` is missing or older than a source file there |
+| `pip install -e .` | `pyproject.toml` (or a lock/requirements file) changed, or `.venv/bin/python -m pip check` fails |
+| `install_pi.sh` | it, `scripts/install_deps.py`, `scripts/update_canary.sh`, `canary.pi.example.yaml` or anything under `systemd/` changed, or `.venv` is missing (it installs dependencies itself, so the pip step reads `ran (by install_pi.sh)`) |
+
+When the checkout is already at the fetched commit it says `already at
+<hash>`, still checks the artefacts, and restarts. `--full` runs every step
+regardless; use it for a first install and for "something is wrong" runs.
+
+If the update changes `scripts/update_canary.sh` itself, the running copy
+hands over to the new one right after the fetch (`re-executing the new
+copy`), so the rest of the update runs the updater it just installed rather
+than the copy bash had already opened.
+
+If the restart fails or `/status` does not answer within the wait, the
+checkout is reset to the commit it was on before the fetch (`git reset --hard
+<before>`, safe because a dirty tree was refused up front — and never
+anything older than that recorded commit), the steps that reverse diff needs
+are redone, the daemon is restarted again, and health is re-checked.
+`--no-rollback` leaves the failed version in place for debugging.
+
+Every run ends with one summary block: `source: <before> -> <after>`, each
+step's `ran`/`skipped` line, `restart:`, `health: ok after <n> s`, `memory
+limits: enforced (...)` or `NOT enforced`, `rollback:`, `result: ... (exit
+<code>)` and `total: <n> s`. The exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| 0 | updated (or already current) and healthy |
+| 1 | setup error: not root, missing checkout or installer |
+| 2 | usage error |
+| 3 | refused: a capture is active (`restart_canary.sh --check`'s own code) |
+| 4 | refused: the checkout has tracked local changes |
+| 5 | fetch or fast-forward failed; nothing was changed |
+| 6 | new code failed its health check; rolled back to `<before>`, which is healthy again |
+| 7 | new code failed its health check and the rollback did not come up either |
+| 8 | new code failed its health check and was left in place (`--no-rollback`, or nothing older to roll back to) |
 
 Pass `--force` only when intentionally ending an active capture. To test a
 specific remote ref without changing the updater, set `CANARY_UPDATE_REF`:
@@ -205,6 +250,10 @@ specific remote ref without changing the updater, set `CANARY_UPDATE_REF`:
 ```bash
 sudo CANARY_UPDATE_REF=main canary-update
 ```
+
+The updater is tested offline by `tests/test_update_canary_script.py`, which
+runs it against a throwaway git upstream with shimmed `systemctl`, `curl`,
+`pnpm` and `runuser`; add a test there before changing its behaviour.
 
 The planned public distribution replaces the Git fetch with a signed or
 checksummed release bundle. The rest of this update path remains the same, and
