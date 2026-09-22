@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 
 from src.analysis.channels import ChannelSpecError
+from src.analysis.rom_trace import load_viewer_definition, mapping_refusal
 from src.analysis.tuning import GateError
 from src.analysis.workbench import (
     AIRFLOW_SPEC,
@@ -29,6 +30,7 @@ from src.analysis.workbench import (
     TIMING_SPEC,
 )
 from src.config import CanaryConfig
+from src.control.calibration import profile_dir
 from src.control.logs import DEFAULT_LOG_LIMIT, list_logs
 from src.control.sessions import resolve_session
 from src.control.workbench_jobs import (
@@ -146,6 +148,54 @@ def register_workbench_routes(
             "max_rows": max_rows,
         }
         return await run("frame", params, [session_id])
+
+    @app.get("/control/sessions/{session_id}/cell-residency", dependencies=[Depends(authorize)])
+    async def get_cell_residency(
+        session_id: str,
+        table: str = Query(..., description="ROM table kind, e.g. fuel_targets"),
+    ) -> dict[str, Any]:
+        """Per-cell sample count and dwell seconds from the ECM's trace channels
+        (W05.6). Deferred while a capture records; a log, table or mapping that
+        cannot answer returns ``available: false`` with a named ``reason``,
+        never an empty grid."""
+        try:
+            definition = load_viewer_definition(profile_dir(config))
+        except FileNotFoundError as exc:
+            raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc
+        info = definition.table(table)
+        if info is None:
+            raise HTTPException(404, f"no ROM table {table!r} for this vehicle")
+        try:
+            session = resolve_session(config.collection.storage_path, session_id)
+        except FileNotFoundError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        try:
+            capture_deferral(config, [session_id])
+        except WorkbenchRefusedError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        # A profile fact, not a data fact: refuse before spawning a child.
+        refusal = mapping_refusal(info.trace)
+        if refusal is not None:
+            return {
+                "session_id": session.name,
+                "table": table,
+                "available": False,
+                **refusal,
+            }
+        try:
+            selection = select_sessions(config, sessions=[session_id])
+        except WorkbenchRefusedError as exc:
+            raise HTTPException(exc.status, exc.detail) from exc
+        if selection.over_budget:
+            raise HTTPException(
+                409,
+                {
+                    "error": "analysis_refused",
+                    "reason": "over_budget",
+                    "message": selection.over_budget[0].reason,
+                },
+            )
+        return await run("cell_residency", {"session": str(session), "table": table}, [session_id])
 
     @app.get("/analysis/delivery-error", dependencies=[Depends(authorize)])
     async def get_delivery_error(

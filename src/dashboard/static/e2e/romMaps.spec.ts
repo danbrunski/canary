@@ -17,6 +17,12 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
       x_axis: [8, 10, 12, 14, 16, 18, 20, 22], y_axis: [1200, 1600, 2000, 2800, 3600, 4000, 4400, 5200],
       raw: Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => 128 + r * 3 + c)),
       values: Array.from({ length: 8 }, (_, r) => Array.from({ length: 8 }, (_, c) => 1881.6 / (128 + r * 3 + c))),
+      // W05.1 as shipped: the X trace's mapping onto BFS is unverified.
+      trace: slot === 1 && kind === "fuel_targets" ? {
+        x: { channel: "mem:ECM_FUEL_TARGET_MAP_X_TRACE", axis_mapping: "unverified" as const, scale: null, offset: null, evidence: "Not settled.", request_channel: "mem:fuel_axis" },
+        y: { channel: "mem:ECM_ENGINE_SPEED_RAM", axis_mapping: "verified" as const, scale: 1, offset: 0, evidence: "rpm", request_channel: "mem:spark" },
+        unavailable_note: "No capture profile polls the fuel-target trace channels.",
+      } : null,
     }))),
   };
   await mockDaemon(page, { status: { vehicle_state: {
@@ -40,6 +46,11 @@ test("ROM picker, colored target table, live trace and five-slot TBD navigation"
   await expect(table.locator("td")).toHaveCount(64);
   await page.getByRole("checkbox", { name: /I confirm/ }).check();
   await expect(table.locator('[data-trace="nearest"]')).toHaveCount(1);
+  // The ECM cell is refused by name while its mapping is unverified, and the
+  // trace greys out rather than freezing when nothing polls its channels.
+  await expect(table.locator("[data-ecm]")).toHaveCount(0);
+  await expect(page.getByText(/ECM cell not drawn: how the X trace/)).toBeVisible();
+  await expect(page.locator("[data-trace-liveness]")).not.toHaveAttribute("data-trace-liveness", "live");
   await expect(table.locator("td").first()).toHaveCSS("background-color", "rgb(230, 80, 65)");
   await page.screenshot({ path: testInfo.outputPath("rom-maps-desktop.png"), fullPage: true });
   await page.getByLabel("Map slot").selectOption("5");

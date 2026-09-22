@@ -4,14 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
-import yaml
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from src.analysis.rom_targets import TargetEditor, sha256
+from src.analysis.rom_trace import (
+    load_viewer_definition,
+    trace_payload,
+)
 from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
@@ -20,32 +22,12 @@ from src.dashboard.security import _client_is_loopback, _require_control_auth
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
 
 
-class TableInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    kind: Literal["fuel_targets", "fuel_compensation"]
-    title: str
-    x_label: str
-    x_unit: str
-    y_label: str
-    y_unit: str
-    unit: str
-
-
-class ViewerDefinition(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    schema_version: Literal[1]
-    map_slots: list[int] = Field(min_length=1)
-    target_definition: str
-    tables: list[TableInfo]
-    warnings: list[str] = Field(default_factory=list)
-
-
-def inspect_rom(data: bytes, profile_dir: Path) -> dict[str, Any]:
+def inspect_rom(
+    data: bytes, profile_dir: Path, dids_path: Path = Path("data/dids.yaml")
+) -> dict[str, Any]:
     if not data or len(data) > MAX_ROM_UPLOAD:
         raise ValueError("ROM upload is empty or exceeds 2 MiB")
-    definition = ViewerDefinition.model_validate(
-        yaml.safe_load((profile_dir / "rom_viewer.yaml").read_text())
-    )
+    definition = load_viewer_definition(profile_dir)
     editor = TargetEditor.from_bytes(data, profile_dir / definition.target_definition)
     target = editor.export()
     tables = []
@@ -54,7 +36,10 @@ def inspect_rom(data: bytes, profile_dir: Path) -> dict[str, Any]:
             available = info.kind == "fuel_targets" and slot == editor.definition.map_slot
             tables.append(
                 {
-                    **info.model_dump(),
+                    **info.model_dump(exclude={"trace"}),
+                    # W05.1: the ECM's own coordinates into this table and
+                    # whether their mapping onto its axes is established.
+                    "trace": trace_payload(info.trace, dids_path) if available else None,
                     "slot": slot,
                     "status": "available" if available else "tbd",
                     "reason": None
@@ -89,7 +74,11 @@ def inspect_rom(data: bytes, profile_dir: Path) -> dict[str, Any]:
 
 
 def register_rom_routes(
-    app: FastAPI, *, config: CanaryConfig, resolved_control_token: str | None
+    app: FastAPI,
+    *,
+    config: CanaryConfig,
+    resolved_control_token: str | None,
+    dids_path: Path = Path("data/dids.yaml"),
 ) -> None:
     def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
         _require_control_auth(
@@ -108,7 +97,7 @@ def register_rom_routes(
             body.extend(chunk)
         try:
             return await run_in_threadpool(
-                inspect_rom, bytes(body), config.daemon.afr_calibration.parent
+                inspect_rom, bytes(body), config.daemon.afr_calibration.parent, dids_path
             )
         except FileNotFoundError as exc:
             raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc

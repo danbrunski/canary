@@ -151,6 +151,8 @@ function renderItem(
           status={d.status}
           loaded={tuning.loadedRom}
           onLoadedChange={tuning.setLoadedRom}
+          selectedLogId={tuning.selectedLogId}
+          onNavigate={onNavigate}
         />
       );
     case "system-data-sources":

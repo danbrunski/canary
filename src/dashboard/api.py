@@ -233,7 +233,9 @@ def create_app(
         emitter=emitter,
         publish_control_event=publish_control_event,
     )
-    register_rom_routes(app, config=config, resolved_control_token=resolved_control_token)
+    register_rom_routes(
+        app, config=config, resolved_control_token=resolved_control_token, dids_path=dids_path
+    )
     register_calibration_routes(
         app,
         config=config,

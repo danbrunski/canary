@@ -16,7 +16,7 @@ def client(monkeypatch):
     app = FastAPI()
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
     rom_maps.register_rom_routes(app, config=config, resolved_control_token="secret")
-    monkeypatch.setattr(rom_maps, "inspect_rom", lambda data, path: {"bytes": len(data)})
+    monkeypatch.setattr(rom_maps, "inspect_rom", lambda data, path, dids=None: {"bytes": len(data)})
     with TestClient(app) as client:
         yield client
 
@@ -44,7 +44,7 @@ def test_upload_size_type_and_errors(client, monkeypatch):
         == 415
     )
 
-    def reject(data, path):
+    def reject(data, path, dids=None):
         raise ValueError("Unrecognized source hash")
 
     monkeypatch.setattr(rom_maps, "inspect_rom", reject)
@@ -80,5 +80,13 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     assert result["live"]["base_fuel_schedule"]["factor"] == 0.00049
     assert not result["matches_recorded_revision"]
     assert result["live"]["rpm"]["spec"] == "did:ECM_RPM"
+    # W05.1: the available table carries its trace mapping and request
+    # channels; the X axis is unverified, so it carries no scale.
+    trace = available[0]["trace"]
+    assert trace["x"]["axis_mapping"] == "unverified" and trace["x"]["scale"] is None
+    assert trace["x"]["request_channel"] == "mem:fuel_axis"
+    assert trace["y"]["channel"] == "mem:ECM_ENGINE_SPEED_RAM"
+    assert trace["y"]["axis_mapping"] == "verified"
+    assert all(t["trace"] is None for t in result["tables"] if t["status"] == "tbd")
     with pytest.raises(ValueError, match="empty"):
         rom_maps.inspect_rom(b"", tmp_path)

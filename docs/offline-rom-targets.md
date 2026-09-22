@@ -26,6 +26,21 @@ This is an **inferred geometric lookup**, not proof of ECU interpolation or
 active cell selection. Pedal enrichment and other overrides are not modeled;
 the independently read final commanded AFR is shown separately when fresh.
 
+Beside it the page draws the **ECM cell** (double ring) from the map-trace
+memory channels — the ECM's own coordinates — and states any disagreement
+with the inferred cell in rows/columns. Each table's trace channels and
+whether their mapping onto the axes is established live in `rom_viewer.yaml`
+(`trace.x/y.axis_mapping`); an `unverified` axis carries no scale and the ECM
+cell is refused with its evidence. As of 2026-09-21 the fuel-target X trace
+is unverified, so only the inferred cell draws. The ECM trace greys out after
+3 s without samples and names why: no ECM data, not polled by the active
+profile (naming a catalog profile that carries the channels, if any), or
+polled but not answering (per-request counters). Tracing is also refused when
+`/status` reports an ECU calibration id that contradicts the flash history.
+A per-table **coverage overlay** shades cells by sample count for the log
+selected on Logs (`GET /control/sessions/{id}/cell-residency`) or, during a
+capture, accumulates live; "Drive presentation" shows one table full-screen.
+
 Tracing clears on stale/missing inputs (>2.5 s), RPM/BFS skew >750 ms,
 out-of-axis points, fuel-cut sentinel, replay, or missing/stale (>15 s)
 engine-running status. Channel IDs and BFS scaling come from confirmed

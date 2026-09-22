@@ -30,6 +30,7 @@ from typing import Any
 
 from src.analysis.afr import load_afr_calibration
 from src.analysis.noise_floor import load_noise_floor
+from src.analysis.rom_trace import cell_residency, load_viewer_definition
 from src.analysis.tune_revisions import load_tune_revisions, resolve_session_revision
 from src.analysis.tuning_frame import load_provider_registry
 from src.analysis.workbench import (
@@ -60,7 +61,14 @@ from src.preprocessing.loader import count_session_rows
 #: child, so this bounds wall time rather than memory.
 MAX_POOLED_SESSIONS = 40
 
-JOB_KINDS = ("frame", "delivery_error", "trim_surface", "timing", "pull_comparison")
+JOB_KINDS = (
+    "frame",
+    "delivery_error",
+    "trim_surface",
+    "timing",
+    "pull_comparison",
+    "cell_residency",
+)
 
 
 class WorkbenchRefusedError(Exception):
@@ -309,6 +317,21 @@ def run_workbench_job(
             min_n=int(params["min_n"]),
             floor_channel=params.get("floor_channel"),
             unavailable=skipped,
+        )
+    if kind == "cell_residency":
+        table = load_viewer_definition(profile_dir(config)).table(params["table"])
+        if table is None:
+            raise ValueError(f"no ROM table {params['table']!r} in this vehicle's rom_viewer.yaml")
+        session = Path(params["session"])
+        revision, source, _conflict = resolve_session_revision(session, inputs.registry)
+        return cell_residency(
+            session,
+            table=table,
+            revision=revision,
+            revision_source=source,
+            calibration=inputs.calibration,
+            bindings_path=bindings_path,
+            dids_path=dids_path,
         )
     raise ValueError(f"unknown workbench job {kind!r}")
 

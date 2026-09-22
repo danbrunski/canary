@@ -43,6 +43,16 @@ describe("ROM map trace", () => {
     expect(liveValue(channels, provider, now, 14.7)).toBeNull();
   });
 
+  it("finds a mem: provider on its obd:mem: stream key, where memory rows actually arrive", () => {
+    const now = Date.parse("2026-09-21T12:00:00Z");
+    const row = { timestamp: new Date(now).toISOString(), source: "obd", channel: "mem:PHI", value: 1.2, unit: "phi" };
+    const channels = new Map<string, ChannelSnapshot>([["obd:mem:PHI", { latest: row, history: [] }]]);
+    const provider = { spec: "mem:PHI", transform: "equiv_ratio_afr" as const, factor: null };
+    expect(liveValue(channels, provider, now, 14.7)?.value).toBeCloseTo(12.25);
+    channels.set("obd:mem:PHI_SENTINEL", { latest: { ...row, channel: "mem:PHI_SENTINEL", value: 0 }, history: [] });
+    expect(liveValue(channels, provider, now, 14.7)).toBeNull();
+  });
+
   it("uses green-yellow-orange-red with finite constant-table colors", () => {
     expect(mapColor(0, 0, 3)).toBe("rgb(80, 190, 110)");
     expect(mapColor(1, 0, 3)).toBe("rgb(245, 210, 65)");

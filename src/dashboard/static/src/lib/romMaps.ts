@@ -1,4 +1,6 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import type { TelemetryRow } from "../types";
+import type { TableTrace } from "./romTrace";
 
 export interface RomProvider {
   spec: string;
@@ -21,6 +23,9 @@ export interface RomTable {
   y_axis: number[];
   values: number[][];
   raw: number[][];
+  /** W05.1: the ECM's trace channels for this table and whether their
+   *  mapping onto its axes is verified. Null on TBD tables. */
+  trace?: TableTrace | null;
 }
 
 export interface RomInspection {
@@ -40,12 +45,19 @@ export interface RomInspection {
 export const TRACE_MAX_AGE_MS = 2500;
 export const TRACE_MAX_SKEW_MS = 750;
 
+/** A stored channel spec's row on the live stream. Stream keys are
+ *  `<source>:<channel>`, and memory rows are stored as source `obd`, channel
+ *  `mem:<NAME>` — so the spec `mem:X` arrives keyed `obd:mem:X`. */
+export function streamRow(channels: Map<string, ChannelSnapshot>, spec: string): TelemetryRow | null {
+  return (channels.get(spec) ?? channels.get(`obd:${spec}`))?.latest ?? null;
+}
+
 export function liveValue(
   channels: Map<string, ChannelSnapshot>, provider: RomProvider | null,
   now: number, stoich: number,
 ): { value: number; timestamp: number } | null {
   if (!provider) return null;
-  const row = channels.get(provider.spec)?.latest;
+  const row = streamRow(channels, provider.spec);
   if (!row || typeof row.value !== "number" || !Number.isFinite(row.value) || !row.timestamp) return null;
   const timestamp = Date.parse(row.timestamp);
   if (!Number.isFinite(timestamp) || now - timestamp > TRACE_MAX_AGE_MS || timestamp - now > 1000) return null;
@@ -54,7 +66,7 @@ export function liveValue(
     if (provider.factor === null || !Number.isFinite(provider.factor)) return null;
     value *= provider.factor;
   } else if (provider.transform === "equiv_ratio_afr") {
-    const sentinel = channels.get(`${provider.spec}_SENTINEL`)?.latest;
+    const sentinel = streamRow(channels, `${provider.spec}_SENTINEL`);
     if (sentinel?.timestamp && Date.parse(sentinel.timestamp) >= timestamp) return null;
     if (value <= 0) return null;
     value = stoich / value;

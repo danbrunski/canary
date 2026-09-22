@@ -10,6 +10,42 @@ tables:
     y_label: Rotations Per Minute
     y_unit: rpm
     unit: AFR
+    # W05.1 — the ECM's own coordinates into this table (data/dids.yaml
+    # `memory:`). `axis_mapping` is a required state per axis: an unverified
+    # axis carries no scale, and the page and the cell-residency endpoint
+    # refuse to place an ECM cell until it is settled.
+    trace:
+      x:
+        channel: 'mem:ECM_FUEL_TARGET_MAP_X_TRACE'
+        axis_mapping: unverified
+        evidence: >-
+          Not settled. UpRev displays this word as raw x 0.250859 ("Fuel
+          Target X Trace", 405 rows, 2026-09-20), but how that value lands on
+          the loaded ROM's BFS axis (raw 0x34-0x80, displayed 8.76-21.57 ms)
+          is not established, and no recorded session holds the channel: the
+          rom-trace profile that polled it stalled with zero requests sent,
+          and none of the 2026-09-21 captures (fuel-target-research, tuning x2)
+          selected it. To settle it, capture this channel beside
+          did:ECM_AIR_CHARGE (BFS, confirmed raw x 0.00049 ms) holding steady
+          points in at least three load columns, fit trace against BFS
+          same-instant with compare_channels, and check the fit puts each
+          steady point in the column its BFS names.
+      y:
+        channel: 'mem:ECM_ENGINE_SPEED_RAM'
+        axis_mapping: verified
+        scale: 1.0
+        offset: 0.0
+        evidence: >-
+          The stored value is rpm: it equals coarse-rpm DID 0x1201 on
+          2,825/3,000 same-reply reads (ram-timing-repro, 2026-09-21), and
+          UpRev reads this address as its own "Fuel Target Y Trace" (raw x
+          12.4995, 2026-09-20 CSV). The table's rpm axis is decoded as count x
+          50 rpm, so coordinate and breakpoints share units unchanged.
+      unavailable_note: >-
+        No capture profile polls the fuel-target trace channels on 2026-09-21:
+        the rom-trace profile was retired after its continuous session stalled
+        with zero requests sent. They rejoin the tuning profile once that stall
+        is found.
   - kind: fuel_compensation
     title: Fuel Compensation
     x_label: Volumetric Flow Ratio
@@ -18,6 +54,6 @@ tables:
     y_unit: rpm
     unit: '%'
 warnings:
-  - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. Pedal enrichment can override the normal fuel-target column.'
+  - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. Pedal enrichment can override the normal fuel-target column. The ECM cell, drawn beside it, comes from the map-trace memory channels and only where their axis mapping is verified.'
   - 'Fuel Compensation has one verified cell but not a verified complete layout. Its live Volumetric Flow Ratio channel is also unresolved; throttle, calculated load and BFS are not substitutes.'
   - 'Map selection is for viewing only. CANary does not read or change the ECU active map slot here.'
