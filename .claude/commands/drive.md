@@ -9,7 +9,12 @@ lines for THIS drive follow; everything after them is the standing protocol.
 $ARGUMENTS
 
 If the lines above name no OUTCOME, take it from the newest
-`data/analyses/*-deploy-plan.md`. If DRIVE FACTS are missing, assume the
+`data/analyses/*-deploy-plan.md`. A plan older than the newest
+`data/analyses/*-drive-*.md` analysis is stale: say so, and until the
+supercharger install take the outcome from Phase 1 of
+`docs/roadmap/supercharger-build.md` (NA1–NA8) — the NA baseline is what every
+post-build number is compared against, and the truck is only NA for a few more
+weeks. If DRIVE FACTS are missing, assume the
 conservative answer (no WOT pulls, short drive, no external logger). If the
 plan needs something the drive cannot give, say so on the log's first line
 and fall back to what the plan lists, else to the plain `default` drive.
@@ -49,11 +54,14 @@ after the truck has sat usually means the Pi is powered off, not a fault.
 
 1. Newest `data/analyses/*-deploy-plan.md`: what is pending for the Pi, the
    written predictions, the drive order, the preconditions.
-2. `docs/roadmap/tasks/D03-open-work.md` "Suggested order", and the other
-   live task docs it points at.
-3. Previous `data/analyses/*-drive-log.md`, newest first: incidents and
-   their causes. Don't repeat them.
-4. Log each precondition the plan names as met / not met.
+2. `docs/roadmap/supercharger-build.md` Phase 1: which NA items are still
+   unticked, and what each needs from a drive.
+3. `docs/roadmap/tasks/D03-open-work.md` "Suggested order" and "Needs the
+   truck", and the other live task docs it points at.
+4. Previous `data/analyses/*-drive-log.md` and `*-drive-*.md` analyses,
+   newest first: incidents, their causes, and what is already established.
+   Don't repeat either.
+5. Log each precondition the plan names as met / not met.
 
 Create `data/analyses/<today>-drive-log.md`: a 3-line **Glance** (refreshed
 every wake-up, the only thing the operator reads; line 1 is the maneuver you
@@ -71,17 +79,56 @@ its own criteria frozen before its data.
 
 ## First wake-up, before any capture
 
-- **Deploy only if the plan lists pending code.** `git pull --ff-only origin
-  main` on the Pi (a git bundle over ssh is the fallback). The Pi's
-  `data/<vehicle>/capture_profiles.yaml` is usually dirty from the daemon's
-  own built-in-profile upgrade: diff it semantically, back it up to `/tmp`,
-  reset it. Verify `git log -1` matches what you pushed; healthy within
-  3 min. If the operator already deployed, verify and move on.
+- **Deploy only if the plan lists pending code**, with `sudo canary-update`
+  on the Pi (`scripts/update_canary.sh`: ff-pull, dashboard build,
+  `install_pi.sh`, restart, `/status` check). It prints `source: <before> ->
+  <after>` — that line is the hash check, read it against what you pushed. It
+  refuses while a capture is active, and refuses tracked local changes: since
+  `2c709b5` a saved catalog is never rewritten on load, so a dirty
+  `data/<vehicle>/capture_profiles.yaml` is somebody's edit, not daemon noise
+  — back it up to `/tmp`, diff it, and ask before resetting. `canary-update`
+  is installed by `install_pi.sh` from `a85411c` on; if the Pi predates that,
+  pull, then `sudo bash scripts/update_canary.sh` from the checkout. A git
+  bundle over ssh is the fallback when the pull fails. Healthy within 3 min.
+  If the operator already deployed, verify and move on.
+- **Every restart goes through `scripts/restart_canary.sh`** (`--check`
+  first; `--force` names the capture it kills). Never a bare `systemctl
+  restart canary`: on 2026-09-21 one agent's deploy, four minutes into another
+  agent's tuning capture, ended it silently and the drive could not be
+  repeated that day. Another session may be on the Pi at the same time as
+  you — read `/status` `capture_profile.active` before anything that restarts
+  the daemon or starts a capture.
 - **Boot checks:** `journalctl -u canary -b | grep -c "batching disabled"`
   is 0 and `/status` `health.obd_scheduler.batching` shows the configured
   `max_pids` with `size_narrowings 0`. Memory limits: the file
   `/sys/fs/cgroup/system.slice/canary.service/memory.max` must EXIST —
   `systemctl show` echoing the values proves nothing. Log what you find.
+- **Calibration:** `/status` `ecu_calibration_id`, `registry_revision`,
+  `calibration_matches_registry`, `calibration_alert_reason`. A mismatch means
+  the truck was flashed and `tune_revisions.yaml` doesn't know it: put it under
+  For the operator and label every session of the drive with the ECU id, not
+  the registry revision. RAM channels are no longer withheld on a revision
+  change (`6ef51b4`; the capture payload's `running_tune_revision` is
+  provenance only) — re-verify them with `tools.verify_memory_channels` only
+  on a program change or when a channel looks wrong; the known-answer table
+  below does it cheaper. A session that crosses a flash is excluded from
+  behavior evidence, so a flash never happens mid-drive.
+- **LTFT, both banks, once warm.** Exactly 0.00 % is a reset adaptation, not
+  a small number: the 2026-09-20 flash zeroed it, and after June it took weeks
+  to relearn. A trim map recorded then is STFT alone, and NA3 waits — say
+  which state it is in.
+- **Behavior models:** save `GET /models/behavior` once per drive (B03.9 wants
+  it as `--deployed-snapshot`) and note the lifecycle per model. As of
+  2026-09-21 no shipped model is validated; a demoted one casts no fusion vote
+  and its deviation is display only, so neither its silence nor its noise is
+  evidence about the truck.
+- **Aux sensor bus, once the AEM fuel-pressure gauge is fitted**
+  (`hardware.sensor_can`, `docs/can-setup.md` "Aux sensor bus"): before
+  leaving, `candump <iface>` shows `0A0301` ~20×/s, the daemon's start-up log
+  names any signal still `verified: false`, and `sensor:FUEL_PRESSURE` shows
+  in `/telemetry/latest`. The byte layout is verified in the driveway beside
+  the gauge's own display, never inferred from road data; until then the
+  pressure is a candidate and NA2 is not closed by it.
 - **Arm keepalive** (`POST /control/power/keepalive {"minutes": N}`) for the
   expected drive + 60 min. It holds the Pi up on battery after key-off: on
   2026-09-18 "the Pi's off" was false for 90 min. Disarm it (`{"minutes": 0}`)
@@ -135,15 +182,34 @@ its own criteria frozen before its data.
   all already catalogued saves live via `PUT /control/capture/profiles`.
   Mirror any live-saved profile into git the same hour. Make a new profile
   rather than editing a saved one.
-- Read every stop verdict: each `fail` clause is explained or becomes a
-  task, never ignored.
+- **Start a capture on a running engine and stop it before key-off.**
+  Start-up takes ~15 s, a cranking ECM puts PIDs into backoff (76 s on
+  2026-09-21), and a capture left open past key-off records an all-channel
+  gap (95 s on 2026-09-21) — engine-off edges are not excluded, by design,
+  because they cannot be told from CANary not polling.
+- Read every stop verdict: `pass`; `degraded` (only `acquisition_gap`
+  clauses, every gapped channel ≥ 90 % covered — usable data with named gaps,
+  which is what both 2026-09-21 tuning drives were); `fail`; `unverified`.
+  Each `fail` clause is explained or becomes a task, never ignored.
+  `can0.rx_over_errors` is reported under `losses` as controller loss and
+  never fails a capture; socket and storage drops do.
+- Never reinstate a retired profile from the road. `rom-trace` stalled its
+  continuous session (opened, then sent nothing for over a minute) and its
+  trace channels return to `tuning` when that is found (W05), not before.
 - Isolated captures ≤ one third of driving time. Stop one as soon as its
   sample target is met, and before a stop that ends a block.
 - **A prerequisite is measured, not configured.** Before spending maneuvers
   on a test, confirm from stored acquisition timestamps that the profile
   achieves the rate and separation the test needs — separate batches, for
-  instance, do not by themselves establish timing resolution. If the
-  prerequisite fails, log the blocker and return to `default`.
+  instance, do not by themselves establish timing resolution, and a memory
+  window's send count is not its configured rate (251 sends in 25 s against
+  2 Hz on 2026-09-21, an open bug). If the prerequisite fails, log the blocker
+  and return to `default`.
+- **A tip-in is not a pull.** Ninety-odd 2–11 s accelerations over three
+  drives gave a scatter and never one steady 3rd-gear pull from 2,500 rpm to
+  the limiter. That pull, three times on the same road, tagged at start and
+  end, is NA1 — the standing line-1 request until it is done. Report a drive
+  of tip-ins as tip-ins.
 - **Instruments that disagree:** report the disagreement without guessing its
   cause unless a third instrument decides it, and leave every conclusion that
   depends on the unsettled reference unresolved.
@@ -162,6 +228,19 @@ its own criteria frozen before its data.
   refuse to continue if not), then the written predictions. Report pass /
   fail / unresolved per claim with `n_pairs`. An empty result names which
   kind of empty it is.
+- **Known answers on a `tuning` capture:** RAM ignition timing vs PID 0x0E
+  (median Δ 0°, ~80 % within 1° — pairing skew on a fast quantity), RAM
+  target φ vs PID 0x44 (ratio 1.0000; the tails are target steps landing
+  between the two reads), RAM rpm vs PID rpm (1.0000). Three captures on
+  `ZS44A-20260920` land there; one that doesn't is stopped, not interpreted.
+- **Measure delivery on the ECM's λ (PID 0x24)**, load-gated, with the first
+  second of each enrichment event dropped. The A/F-voltage path goes through
+  an UpRev-derived transfer and `delivery_error` refuses it as a measurement.
+  PID 0x44 is quantised in closed loop (0.9796 ↔ 1.0204, never 1.000), so the
+  enrichment gate is > 1.05; the RAM target word is the final target and reads
+  its `_SENTINEL` in fuel cut. VE needs measured baro and IAT — every profile
+  carries them at ~1 Hz since `89e2f7c`; never a GPS-estimated baro or an
+  assumed intake temperature.
 - **`decoded:` rows are RAW counts by design** (the model features are raw),
   even when their `unit` says `degC` or `V`. Read engineering values through
   `read_channels` / `bindings.apply_scaling`, never from a stored or
@@ -175,6 +254,18 @@ its own criteria frozen before its data.
   roadmap figure the outcome rests on) with the cheapest check that could
   falsify it. A falsification is the best result a drive can produce:
   correct the memory or doc the same day.
+- **Until the supercharger install, a drive that fills an NA baseline gap
+  (NA1–NA7) outranks a repeat of what is known.** After it, nothing is
+  compared across the build without saying so (P1), and a first start is not
+  a drive — it follows Phase 3 of the build plan, and this protocol resumes
+  at F4.
+- **The WOT-lean question is closed to drives without fuel pressure.** Three
+  drives put WOT ~3 % lean of target on λ and both banks' volts, flat
+  2,000–5,800 rpm and independent of settle time, while warm part-throttle
+  STFT is negative and idle positive: airflow-dependent, so neither a supply
+  offset nor anything K fixes. Only fuel pressure through a pull (NA2)
+  separates the MAF curve from delivery sag. Don't re-derive this, and never
+  recommend a calibration change from a drive.
 - **Desk analysis of data already on the laptop is the best use of warm-up
   and transit time.** Delegate it, and code fixes, to subagents so the loop
   stays light; review their diffs and re-run their tests yourself.
@@ -183,8 +274,9 @@ its own criteria frozen before its data.
   passive `did_log` survey per drive at most, diffed against the previous.
 - **Code: fixes for defects observed this drive, small, tested.** Refactors
   and design changes are desk work; queue them as roadmap tasks.
-- **Deploying mid-drive is allowed** for a good fix, with a restart to check
-  it — never while an isolated capture or a maneuver set is running. Hash
+- **Deploying mid-drive is allowed** for a good fix, with a restart
+  (through `restart_canary.sh`) to check it — never while an isolated capture
+  or a maneuver set is running. Hash
   verified, drive window reopened, unhealthy after 3 min → revert and
   redeploy, two failures → stop deploying. Say what the restart can and
   cannot prove. A restart costs corpus continuity and the sequence model's
@@ -246,7 +338,8 @@ long-session acceptance. Disarm the keepalive only after this check.
 Then: stop the capture window if the Pi still answers; final summary = the
 OUTCOME's state per claim or priority (completed, falsified, or unresolved
 with the specific evidence still missing),
-beliefs verified or falsified, commits, candidates, the operator's decision
+beliefs verified or falsified, every capture's verdict with its clauses,
+which NA baseline items moved, commits, candidates, the operator's decision
 list, and what the next drive must produce; write that next-drive plan as
 `data/analyses/<today>-next-drive-deploy-plan.md`; preserve the poller JSONL
 and analysis scripts under `~/canary-data/`; commit with explicit pathspecs;
