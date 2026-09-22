@@ -37,8 +37,8 @@ test("toggles between the drive screen and the parked workbench", async ({ page 
   // reflects the parked context so a kiosk reload returns here.
   const nav = page.getByRole("navigation", { name: "Workbench sections" });
   await expect(nav).toBeVisible();
-  await expect(nav.getByText("Live", { exact: true })).toBeVisible();
-  await expect(nav.getByText("Diagnostics", { exact: true })).toBeVisible();
+  await expect(nav.getByText("Observe", { exact: true })).toBeVisible();
+  await expect(nav.getByText("Diagnose", { exact: true })).toBeVisible();
   await expect(page).toHaveURL(/#wb/);
 
   // And back to driving.
