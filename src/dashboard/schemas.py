@@ -26,6 +26,21 @@ class CaptureStartRequest(_ControlRequest):
     fields: dict[str, Any] = Field(default_factory=dict)
 
 
+class CaptureAutostartArmRequest(_ControlRequest):
+    """Arm a capture the daemon starts itself once the vehicle qualifies."""
+
+    profile: str = Field(..., min_length=1)
+    #: Engineering °C. ``None`` starts as soon as the engine runs; the
+    #: default keeps warm-up on ``default``, where the cold-start models
+    #: learn it.
+    coolant_min_c: float | None = Field(default=80.0, ge=-40.0, le=130.0)
+    rate_hz: float | None = Field(default=None, gt=0, le=MAX_TARGET_RATE_HZ)
+    bus_budget_requests_per_second: float | None = Field(default=None, ge=2.0, le=200.0)
+    tune_revision: str | None = Field(default=None, max_length=255)
+    start_after_ticks: int = Field(default=2, ge=1, le=60)
+    stop_after_seconds: float = Field(default=10.0, ge=0.0, le=600.0)
+
+
 class CaptureTagRequest(_ControlRequest):
     label: str
     kind: str = "event"

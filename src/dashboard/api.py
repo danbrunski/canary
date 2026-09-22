@@ -231,6 +231,7 @@ def create_app(
         ups_status_path=ups_status_path,
         ups_keepalive_path=ups_keepalive_path,
         emitter=emitter,
+        live_source=live_source,
         publish_control_event=publish_control_event,
     )
     register_rom_routes(

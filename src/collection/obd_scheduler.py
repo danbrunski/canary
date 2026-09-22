@@ -1580,6 +1580,15 @@ class DidWindowController:
         close), so a DID profile armed mid-drive starts within a budget slot
         instead of up to a config interval later — the 26.56 s first-DID
         delay recorded on 2026-08-07.
+
+        That held only when the change arrived in the ``mode01`` phase. A
+        capture armed *during* a window or its lapse closed the window and
+        then waited out the OLD profile's ``window_interval_seconds``: on
+        2026-09-22 a `tuning` capture asking for a window every 0.5 s took
+        27.6 s to record its first DID, because `default`'s ~50 s interval
+        was still running. The lapse is a protocol constraint (the ECU's
+        session has to expire), so it is respected; the stale interval is
+        not — the next window is due the moment the lapse ends.
         """
         self.release(now)
         self.cycle.abandon(now)
@@ -1587,8 +1596,7 @@ class DidWindowController:
         self._plan = None
         self._infeasible_logged = None
         self._cycle_anchor = None
-        if self.phase == "mode01":
-            self._next_window_at = now
+        self._next_window_at = max(now, self._lapse_until) if self.phase == "lapse" else now
 
     def _close_window(self, now: float) -> None:
         self.cycle.on_window_closed(unattempted=len(self._pending))

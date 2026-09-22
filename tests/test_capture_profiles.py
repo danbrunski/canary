@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterator
+import time
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -1288,3 +1289,165 @@ def test_every_capture_profile_carries_air_density_and_thermal_context(path: Pat
         if gaps:
             missing[profile.name] = gaps
     assert not missing, f"capture profiles without density/thermal context: {missing}"
+
+
+def test_profile_capture_supersedes_and_resumes_an_open_capture_window(tmp_path: Path) -> None:
+    """A drive window must not make `POST /control/capture` fail (2026-09-22).
+
+    The profile capture opens its own controller window, so an operator-opened
+    one used to raise `CaptureConflictError` mid-start: a bare 500 that named
+    `profile_activation`, after the writer had already rotated. Two WOT pulls
+    were recorded on `default` while the start was retried. The start now ends
+    the open window itself and reopens it on the new session at stop.
+    """
+    from src.control.capture import CaptureController
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 9, 22, 16, 53, tzinfo=UTC),
+        )
+    )
+    controller = CaptureController(lambda: writer.paths.root)
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            storage_writer=writer,
+            capture_profile_store=store,
+            capture_controller=controller,
+        )
+    )
+    headers = {"Authorization": "Bearer secret"}
+
+    opened = client.post("/control/captures", headers=headers, json={"protocol": "drive"})
+    assert opened.status_code == 201
+    drive_session = opened.json()["capture"]["session_id"]
+
+    started = client.post("/control/capture", headers=headers, json={"profile": "fuel-map"})
+    assert started.status_code == 200, started.json()
+    assert started.json()["superseded_capture_window"]["protocol"] == "drive"
+    # The capture owns the window while it runs, and it names the profile.
+    current = client.get("/control/captures/current", headers=headers).json()["capture"]
+    assert current["purpose"] == "fuel-map"
+    assert current["session_id"].startswith("_capture-fuel-map-")
+
+    stopped = client.delete("/control/capture", headers=headers)
+    assert stopped.status_code == 200
+    resumed = stopped.json()["resumed_capture_window"]
+    assert resumed["protocol"] == "drive"
+    # Reopened on the session that is live *now*, not the one it was bound to.
+    assert resumed["session_id"] != drive_session
+    assert resumed["session_id"] == writer.paths.root.name
+    assert (
+        client.get("/control/captures/current", headers=headers).json()["capture"]["capture_id"]
+        == resumed["capture_id"]
+    )
+
+
+def test_capture_autostart_starts_warm_and_stops_with_the_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The daemon arms the capture, the vehicle starts it (2026-09-22).
+
+    The operator drives; they cannot watch a terminal for the set point. Arm
+    once and `tuning` must begin itself on the first warm running tick and
+    end when the engine does — so a drive's pulls cannot land on `default`.
+    """
+    from src.control.capture import CaptureController
+
+    class _FakeLive:
+        """Just the `vehicle_state_inputs` contract the classifier reads."""
+
+        def __init__(self) -> None:
+            self.rpm: float | None = 0.0
+            self.coolant: float | None = 20.0
+
+        def vehicle_state_inputs(self, now: datetime) -> dict[str, float | None]:
+            return {
+                "rpm": self.rpm,
+                "coolant_temp": self.coolant,
+                "run_time": 0.0,
+                "obd_freshness_seconds": 0.1,
+                "can_freshness_seconds": 0.1,
+                "broadcast_rpm": None,
+            }
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "collection": config.collection.model_copy(
+                update={"storage_path": tmp_path / "sessions"}
+            )
+        }
+    )
+    store = _store(tmp_path, config)
+    writer = AsyncParquetTelemetryWriter(
+        ParquetTelemetryWriter(
+            tmp_path / "sessions",
+            session_started_at=datetime(2026, 9, 22, 16, 53, tzinfo=UTC),
+        )
+    )
+    live = _FakeLive()
+    # The rule is under test, not the tick interval.
+    monkeypatch.setattr("src.dashboard.routes.control.AUTOSTART_TICK_SECONDS", 0.02)
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        control_token="secret",
+        storage_writer=writer,
+        capture_profile_store=store,
+        capture_controller=CaptureController(lambda: writer.paths.root),
+        live_source=live,
+    )
+    headers = {"Authorization": "Bearer secret"}
+
+    def _await(predicate: Callable[[], bool], timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            time.sleep(0.02)
+        return predicate()
+
+    with TestClient(app) as client:
+        armed = client.post(
+            "/control/capture/autostart",
+            headers=headers,
+            json={"profile": "fuel-map", "coolant_min_c": 80.0, "stop_after_seconds": 0.5},
+        )
+        assert armed.status_code == 200, armed.json()
+        assert armed.json()["armed"] is True
+
+        # Cold idle: nothing starts, and the reason says which nothing it is.
+        live.rpm, live.coolant = 800.0, 40.0
+        assert _await(
+            lambda: (
+                "warming up"
+                in client.get("/control/capture/autostart", headers=headers).json()["reason"]
+            )
+        )
+        assert client.get("/status").json()["capture_profile"]["name"] == "default"
+
+        # Warm and running: the daemon starts the capture by itself.
+        live.coolant = 88.0
+        assert _await(lambda: client.get("/status").json()["capture_profile"]["name"] == "fuel-map")
+        assert writer.paths.root.name.startswith("_capture-fuel-map-")
+
+        # Engine off: it stops itself (debounced), before key-off records a gap.
+        live.rpm = 0.0
+        assert _await(lambda: client.get("/status").json()["capture_profile"]["name"] == "default")
+        assert not writer.paths.root.name.startswith("_")
+
+        disarmed = client.delete("/control/capture/autostart", headers=headers)
+        assert disarmed.json() == {"armed": False, "was_armed": True}

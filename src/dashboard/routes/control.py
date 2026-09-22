@@ -61,8 +61,13 @@ from src.control.can_activity import CanActivityBusError, capture_can_activity
 from src.control.capture import (
     CaptureConflictError,
     CaptureController,
+    CaptureState,
     NoActiveCaptureError,
     no_active_capture_detail,
+)
+from src.control.capture_autostart import (
+    CaptureAutostartDecider,
+    CaptureAutostartRule,
 )
 from src.control.capture_finalize import (
     CaptureQualityUnavailableError,
@@ -105,6 +110,7 @@ from src.dashboard.readers import read_anomalies_since
 from src.dashboard.schemas import (
     BusBudgetRequest,
     CanActivityRequest,
+    CaptureAutostartArmRequest,
     CapturePauseRequest,
     CaptureProfileSaveRequest,
     CaptureProfileStartRequest,
@@ -134,6 +140,7 @@ from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import (
     _active_session_dir,
     _derive_vehicle_state,
+    _derive_vehicle_state_live,
     _resolve_latest_session,
 )
 from src.dashboard.ups import (
@@ -154,6 +161,11 @@ from src.storage.async_writer import AsyncParquetTelemetryWriter
 _T = TypeVar("_T")
 
 log = logging.getLogger(__name__)
+
+#: How often the capture-autostart tick classifies the vehicle. Its inputs
+#: are in-memory (`vehicle_state_inputs`), so this is cheap; 2 s bounds the
+#: lag between the set point and the capture's first recorded row.
+AUTOSTART_TICK_SECONDS = 2.0
 
 
 def _require(component: _T | None, name: str, *, detail: str | None = None) -> _T:
@@ -197,6 +209,10 @@ def register_control_routes(
     ups_status_path: Path = DEFAULT_UPS_STATUS_PATH,
     ups_keepalive_path: Path = DEFAULT_UPS_KEEPALIVE_PATH,
     emitter: AnomalyEventEmitter | None = None,
+    #: The daemon's in-memory observations, so the capture-autostart tick can
+    #: classify the vehicle without Parquet I/O. ``None`` (tests, replay-only
+    #: apps) leaves arming available but never firing, and says so.
+    live_source: Any = None,
     publish_control_event: Callable[[str, str, dict[str, Any]], None],
 ) -> None:
 
@@ -209,7 +225,31 @@ def register_control_routes(
     #: durable capture manifest identifies the completed session, but a caller
     #: must not assume a previous stop response is still available.
     last_ended_capture: dict[str, Any] | None = None
+    #: A labelled window (e.g. ``protocol: drive``) that a profile capture
+    #: closed in order to open its own. The profile capture owns the one
+    #: controller window while it runs; this window is reopened, on the new
+    #: session, when the capture stops or fails to start (2026-09-22: an open
+    #: drive window made every capture start a bare 500 and cost two pulls).
+    superseded_window: CaptureState | None = None
     capture_transition_lock = asyncio.Lock()
+    #: Armed autostart rule, or ``None``. In memory by design: a restart ends
+    #: the capture it started, and re-arming is one request — a rule that
+    #: outlived the daemon would start captures nobody asked for.
+    autostart: CaptureAutostartDecider | None = None
+    autostart_task: asyncio.Task[None] | None = None
+
+    def _reopen_superseded_window() -> dict[str, Any] | None:
+        nonlocal superseded_window
+        window, superseded_window = superseded_window, None
+        if window is None or capture_controller is None:
+            return None
+        reopened = capture_controller.start_capture(
+            purpose=window.purpose,
+            protocol=window.protocol,
+            vehicle_state=window.vehicle_state,
+            fields={"resumes_capture_id": window.capture_id},
+        )
+        return reopened.to_dict()
 
     profile_store = capture_profile_store or CaptureProfileStore(
         config.daemon.capture_profiles,
@@ -734,9 +774,20 @@ def register_control_routes(
             previous_profile = tuning_profile.active_profile()
             previous_writer_dir = storage_writer.paths.root
             entered = False
-            failed_step = "storage_rotation"
-            nonlocal budget_before_capture
+            failed_step = "capture_window"
+            nonlocal budget_before_capture, superseded_window
             try:
+                open_window = (
+                    capture_controller.current_capture() if capture_controller is not None else None
+                )
+                if open_window is not None:
+                    assert capture_controller is not None
+                    capture_controller.stop_capture(
+                        reason="superseded_by_capture_profile",
+                        fields={"capture_profile": profile.name},
+                    )
+                    superseded_window = open_window
+                failed_step = "storage_rotation"
                 await storage_writer.enter_capture_mode(
                     profile,
                     capture_id,
@@ -753,6 +804,7 @@ def register_control_routes(
                     )
                 failed_step = "profile_activation"
                 tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
+                failed_step = "capture_window_start"
                 if capture_controller is not None:
                     capture_controller.start_capture(
                         purpose=profile.name,
@@ -790,9 +842,17 @@ def register_control_routes(
                     )
                 except Exception as rollback_exc:  # noqa: BLE001
                     rollback_errors.append(f"profile: {rollback_exc}")
+                if capture_controller is not None and superseded_window is not None:
+                    try:
+                        if capture_controller.current_capture() is not None:
+                            capture_controller.stop_capture(reason="capture_start_failed")
+                        _reopen_superseded_window()
+                    except Exception as rollback_exc:  # noqa: BLE001
+                        rollback_errors.append(f"capture_window: {rollback_exc}")
                 detail: dict[str, Any] = {
                     "error": "capture_start_failed",
                     "failed_step": failed_step,
+                    "reason": f"{type(exc).__name__}: {exc}",
                     "restored": {
                         "writer_session_dir": str(storage_writer.paths.root),
                         "profile": tuning_profile.snapshot(),
@@ -806,8 +866,128 @@ def register_control_routes(
                 "capture_profile": tuning_profile.snapshot(),
                 "output_session_dir": str(storage_writer.paths.root),
                 "bus_budget": bus_budget.snapshot(),
+                "superseded_capture_window": (
+                    superseded_window.to_dict() if superseded_window is not None else None
+                ),
             }
         publish_control_event("capture_profile.start", "ok", payload)
+        return payload
+
+    async def _autostart_tick() -> None:
+        """Start and stop the armed capture from the vehicle's own state.
+
+        Deliberately calls the same route handlers an operator would: a
+        capture the daemon starts must be identical to one started by hand,
+        including the quality sidecar, the budget override and the drive
+        window it supersedes.
+        """
+        nonlocal autostart
+        while True:
+            await asyncio.sleep(AUTOSTART_TICK_SECONDS)
+            decider = autostart
+            if decider is None or live_source is None:
+                continue
+            try:
+                vehicle = _derive_vehicle_state_live(
+                    live_source, replay_controller=replay_controller
+                )
+                action = decider.update(
+                    state=vehicle.state,
+                    coolant_temp=vehicle.coolant_temp,
+                    capture_active=tuning_profile.is_active(),
+                    now=time.monotonic(),
+                )
+                if action is None:
+                    continue
+                rule = decider.rule
+                if action == "start":
+                    await start_profile_capture(
+                        CaptureProfileStartRequest(
+                            profile=rule.profile,
+                            rate_hz=rule.rate_hz,
+                            bus_budget_requests_per_second=rule.bus_budget_requests_per_second,
+                            tune_revision=rule.tune_revision,
+                        ),
+                        _auth=None,
+                    )
+                    log.warning("capture autostart started %s (%s)", rule.profile, decider.reason)
+                else:
+                    await stop_profile_capture(_auth=None)
+                    log.warning("capture autostart stopped %s (%s)", rule.profile, decider.reason)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001
+                # A failed transition must not kill the loop: the next tick
+                # re-reads the daemon's own view and tries again.
+                log.exception("capture autostart tick failed")
+
+    def _autostart_snapshot() -> dict[str, Any]:
+        if autostart is None:
+            return {"armed": False}
+        return {
+            "armed": True,
+            "rule": autostart.rule.to_dict(),
+            "reason": autostart.reason,
+            "capture_active": tuning_profile.is_active(),
+            "can_fire": live_source is not None,
+        }
+
+    @app.post("/control/capture/autostart")
+    async def arm_capture_autostart(
+        request: CaptureAutostartArmRequest,
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Arm a capture the daemon starts when the vehicle qualifies.
+
+        Nothing starts here. The daemon starts the capture on the first tick
+        the engine is running at or above ``coolant_min_c``, and stops it
+        when the engine stops — the operator is driving and cannot do either.
+        """
+        nonlocal autostart, autostart_task
+        if profile_store.load().by_name(request.profile) is None:
+            raise HTTPException(status_code=404, detail=f"unknown profile: {request.profile}")
+        if live_source is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "no live telemetry source, so the daemon cannot classify the "
+                    "vehicle; start the capture directly with POST /control/capture"
+                ),
+            )
+        autostart = CaptureAutostartDecider(
+            rule=CaptureAutostartRule(
+                profile=request.profile,
+                coolant_min_c=request.coolant_min_c,
+                rate_hz=request.rate_hz,
+                bus_budget_requests_per_second=request.bus_budget_requests_per_second,
+                tune_revision=request.tune_revision,
+                start_after_ticks=request.start_after_ticks,
+                stop_after_seconds=request.stop_after_seconds,
+            )
+        )
+        if autostart_task is None or autostart_task.done():
+            autostart_task = asyncio.get_running_loop().create_task(_autostart_tick())
+        payload = _autostart_snapshot()
+        publish_control_event("capture_autostart.arm", "ok", payload)
+        return payload
+
+    @app.get("/control/capture/autostart")
+    def get_capture_autostart(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        return _autostart_snapshot()
+
+    @app.delete("/control/capture/autostart")
+    def disarm_capture_autostart(
+        _auth: None = Depends(require_control_auth),
+    ) -> dict[str, Any]:
+        """Disarm. A capture already running is left running, by design:
+        disarming is "stop deciding for me", not "throw away my data"."""
+        nonlocal autostart
+        was_armed = autostart is not None
+        autostart = None
+        payload = {"armed": False, "was_armed": was_armed}
+        publish_control_event("capture_autostart.disarm", "ok", payload)
         return payload
 
     @app.post("/control/capture/pause")
@@ -880,6 +1060,7 @@ def register_control_routes(
                 "ended_capture_dir": ended_capture_dir,
                 "bus_budget": bus_budget.snapshot(),
                 "capture_quality": quality,
+                "resumed_capture_window": _reopen_superseded_window(),
             }
             last_ended_capture = dict(payload)
         publish_control_event("capture_profile.stop", "ok", payload)

@@ -2128,3 +2128,34 @@ def test_select_next_due_request_honours_round_membership_and_the_tuple() -> Non
     # The priority lane still wins over the tuple when it is a member.
     assert _select_next_due_request(requests, states, 1.0, among={0, 1, 2}, preferred={1})[0] == 2  # type: ignore[index]
     assert _select_next_due_request(requests, states, 1.0, among=set()) is None
+
+
+def test_a_capture_armed_mid_window_does_not_wait_out_the_old_interval() -> None:
+    """A profile change mid-window must not defer DIDs by the old interval.
+
+    2026-09-22: a `tuning` capture asking for a window every 0.5 s recorded
+    its first Mode 22 row 27.6 s in, because the change landed while a
+    `default` window was open and the controller kept counting `default`'s
+    ~50 s interval. The lapse (the ECU's session expiring) is real and is
+    still honoured; the stale interval is not.
+    """
+    from src.collection.obd_scheduler import SessionControlResult
+
+    for phase in ("window", "lapse"):
+        controller, states = _controller()
+        now = 100.0
+        controller.on_session_response(result=SessionControlResult(ok=True), states=states, now=now)
+        assert controller.phase == "window"
+        if phase == "lapse":
+            now += 10.0
+            controller.advance(states, now=now)
+            assert controller.phase == "lapse"
+
+        controller.on_generation_change(now)
+
+        elapsed = 0.0
+        while elapsed < 120.0 and not controller.session_control_due(states, now + elapsed):
+            elapsed += 0.1
+            controller.advance(states, now=now + elapsed)
+        # The 5 s lapse, not the 60 s window interval.
+        assert elapsed <= 6.0, f"{phase}: first window {elapsed:.1f}s after the change"
