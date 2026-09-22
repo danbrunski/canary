@@ -1,5 +1,22 @@
 # Implementation task index
 
+**Status 2026-09-22 — anomaly detector checklists (A-series).**
+[`A00-anomaly-detectors-README.md`](A00-anomaly-detectors-README.md) indexes
+A01–A06, written from the
+[anomaly detector review](../../../data/analyses/2026-09-22-anomaly-detector-review.md).
+The review found four things:
+
+- serve-time defects in the sequence detector (A01);
+- no evaluation that measures fault detection on unseen drives (A02);
+- an Isolation Forest that cannot see a single-quantity fault of any size
+  (A04);
+- sequence thresholds resting on one session, which flag 38–75 % of windows
+  on unseen drives.
+
+A05 adds deterministic plausibility checks. A06 holds the operator's
+decisions on what the two detectors are for. The existing overnight queue is
+unchanged.
+
 **Status 2026-09-22 — two new checklists: cold start and the Pi updater.**
 [`S01-cold-start.md`](S01-cold-start.md) picks up after `04b6cd0` and
 `a870887` took the daemon's first record from 93 s to 69 s after the unit
