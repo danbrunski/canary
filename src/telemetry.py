@@ -50,8 +50,15 @@ DERIVED_SOURCE: Final = "derived"
 #: convention, same as ``_archive``), so a foreign log format riding this
 #: source can never reach the training corpus or a live capture.
 UPREV_SOURCE: Final = "uprev"
+#: Add-on sensors that are not the vehicle's own: a CAN-output gauge on a
+#: second, private CAN interface (``sensor:FUEL_PRESSURE`` from an AEM X-Series
+#: gauge), and later an ADC-read sender (boost MAP). A first-class source like
+#: GPS: it rides a ``TelemetryRecord`` and is persisted into every session while
+#: the hardware is configured. Frame layouts are data
+#: (``data/sensor_can_signals.yaml``), not code.
+SENSOR_SOURCE: Final = "sensor"
 
-TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu", "uprev"]
+TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor"]
 # PEP 586 forbids spelling a Literal from variables, so the line above is the
 # one unavoidable duplication. Guard it against silently drifting from the
 # constants it must mirror.
@@ -63,6 +70,7 @@ assert set(get_args(TelemetrySource)) == {
     DERIVED_SOURCE,
     IMU_SOURCE,
     UPREV_SOURCE,
+    SENSOR_SOURCE,
 }
 
 #: Sources the live pipeline **re-derives from a raw row** rather than
@@ -78,7 +86,7 @@ RE_DERIVED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DECODED_SOURC
 #: Sources that only ever originate at a collector/importer: nothing
 #: downstream can reconstruct them, so they are always safe to re-emit.
 CAPTURED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset(
-    {OBD_SOURCE, CAN_SOURCE, GPS_SOURCE, IMU_SOURCE, UPREV_SOURCE}
+    {OBD_SOURCE, CAN_SOURCE, GPS_SOURCE, IMU_SOURCE, UPREV_SOURCE, SENSOR_SOURCE}
 )
 # Every source must be classified as one or the other. A new entry in
 # ``TelemetrySource`` therefore fails here at import time until someone

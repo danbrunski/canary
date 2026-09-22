@@ -64,7 +64,7 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "mem"]
+SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "mem", "sensor"]
 
 _RAW_UNIT = "counts"
 
@@ -102,9 +102,10 @@ def parse_spec(text: str) -> ChannelSpec:
     name = name.strip()
     if not name:
         raise ChannelSpecError(f"channel spec {text!r} has no channel name")
-    if source not in ("obd", "did", "decoded", "can", "uprev", "gps", "mem"):
+    if source not in ("obd", "did", "decoded", "can", "uprev", "gps", "mem", "sensor"):
         raise ChannelSpecError(
-            f"unknown namespace {source!r} in {text!r}; expected obd/did/decoded/can/uprev/gps/mem"
+            f"unknown namespace {source!r} in {text!r}; "
+            "expected obd/did/decoded/can/uprev/gps/mem/sensor"
         )
     return ChannelSpec(source=source, name=name, text=raw)  # type: ignore[arg-type]
 
@@ -576,6 +577,7 @@ def read_channels(
         "obd": lambda s: _numeric_series(frame, s, "obd"),
         "uprev": lambda s: _numeric_series(frame, s, "uprev"),
         "gps": lambda s: _numeric_series(frame, s, "gps"),
+        "sensor": lambda s: _numeric_series(frame, s, "sensor"),
         "mem": lambda s: _memory_series(frame, s),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),

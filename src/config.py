@@ -117,6 +117,27 @@ class GpsConfig(_Strict):
     gpsd_port: int = 2947
 
 
+class SensorCanConfig(_Strict):
+    """A second, private CAN interface carrying add-on sensors (not the vehicle bus).
+
+    Disabled by default: a config without the hardware keeps loading and
+    behaves exactly as before. When enabled, the daemon listens on
+    ``channel`` and decodes the frames catalogued in ``signals`` into
+    ``sensor:*`` records. It never transmits. First use: an AEM X-Series
+    fuel-pressure gauge (30-0301) — 500 kbit/s, 29-bit IDs, 20 Hz — ahead of
+    the supercharger build (``docs/roadmap/supercharger-build.md``).
+
+    The gauge has no internal termination: a bus of just the Pi and the gauge
+    needs 120 ohm at each end (the Pi's HAT jumper, and one at the gauge).
+    """
+
+    enabled: bool = False
+    interface: str = "socketcan"
+    channel: str = "can1"
+    bitrate: int = 500_000
+    signals: Path = Path("data/sensor_can_signals.yaml")
+
+
 class ImuConfig(_Strict):
     """3-axis IMU (accel + gyro) for motion-aware auto-tagging.
 
@@ -157,6 +178,7 @@ class HardwareConfig(_Strict):
     can: CanBusConfig
     gps: GpsConfig = GpsConfig()
     imu: ImuConfig = ImuConfig()
+    sensor_can: SensorCanConfig = SensorCanConfig()
 
 
 class RecordArmingConfig(_Strict):

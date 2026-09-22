@@ -47,6 +47,7 @@ from src.collection.obd_scheduler import (
 from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
+from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.config import CanaryConfig
 from src.telemetry import TelemetryRecord
 
@@ -105,7 +106,12 @@ def default_collectors(
     # GPS runs alongside whatever OBD/CAN source is configured (it's an
     # independent serial device), so it's appended to every branch's collector
     # list rather than gated on obd_source.
-    gps_collectors = _gps_collectors(config, reconnect_policy)
+    # Add-on sensors likewise: a separate CAN interface, independent of which
+    # vehicle-bus path is configured.
+    aux_collectors = [
+        *_gps_collectors(config, reconnect_policy),
+        *_sensor_collectors(config, reconnect_policy),
+    ]
 
     if config.collection.obd_source == "canable":
         # Task 2.6: loaded once here, not per poll tick. Absent file ⇒ an
@@ -199,7 +205,7 @@ def default_collectors(
                 on_handoff_stats=obd_handoff_stats_callback,
             )
 
-        return [canable_obd, *gps_collectors]
+        return [canable_obd, *aux_collectors]
 
     async def can(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_can_from_config(
@@ -211,7 +217,7 @@ def default_collectors(
         )
 
     if config.collection.obd_source == "disabled":
-        return [can, *gps_collectors]
+        return [can, *aux_collectors]
 
     obd_pids = (
         config.collection.obd_pids
@@ -228,7 +234,7 @@ def default_collectors(
     async def obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collect_obd(obd_spec, queue, stop, reconnect_policy=reconnect_policy)
 
-    return [can, obd, *gps_collectors]
+    return [can, obd, *aux_collectors]
 
 
 def _gps_collectors(
@@ -272,6 +278,25 @@ def _gps_collectors(
         await collect_gps_from_config(spec, queue, stop, reconnect_policy=reconnect_policy)
 
     return [gps_collector]
+
+
+def _sensor_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """The add-on sensor CAN collector, or empty when it is not enabled."""
+    sensor_can = config.hardware.sensor_can
+    if not sensor_can.enabled:
+        return []
+
+    async def sensor_can_collector(
+        queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
+    ) -> None:
+        await collect_sensor_can_from_config(
+            sensor_can, queue, stop, reconnect_policy=reconnect_policy
+        )
+
+    return [sensor_can_collector]
 
 
 __all__ = ["CollectorStarter", "default_collectors"]

@@ -124,3 +124,37 @@ adapter-level auto-reconnect (`scripts/record.py --obd-source canable`,
 default on) rebuilds the python-can bus on top of the recovered link. If
 your Canable enumerates as `canN`, mirror the rule/unit for that name or pin
 a stable name via the serial-based udev rule above.
+
+## Aux sensor bus (add-on CAN gauges)
+
+A second, private CAN interface for sensors CANary adds to the truck — first the
+AEM X-Series fuel-pressure gauge (AEMnet: 500 kbit/s, 29-bit ID `0x000A0301`,
+20 Hz). It is not the vehicle bus: nothing else is on it, and its frames are
+recorded as `sensor:<NAME>`, never in the vehicle's `can:` namespace. The
+hardware is either a second on-board channel (CANary HAT rev 2.1 CAN1) or a USB
+CAN adapter; config names the interface, the code does not care which
+(`docs/CANary-HAT-Rev2.1.md` §13.5.4).
+
+- **Active mode, never listen-only.** The gauge is the only other node; if
+  nothing ACKs its frames it retransmits until error-passive.
+- **Termination at both ends.** The gauge has none. One 120 Ω at the Pi end
+  (HAT JP2, or the adapter's jumper) and one in the harness at the gauge.
+- **Bring-up** (until a per-interface unit exists):
+  `sudo CAN_IFACE=can1 CAN_BITRATE=500000 scripts/canup.sh`, then
+  `candump can1` should show `0A0301` about 20 times a second.
+- **Enable in config:**
+
+  ```yaml
+  hardware:
+    sensor_can:
+      enabled: true
+      channel: can1          # or the USB adapter's interface name
+      bitrate: 500000
+      signals: data/sensor_can_signals.yaml
+  ```
+
+- **Verify the layout before trusting it.** `data/sensor_can_signals.yaml`
+  carries `verified: false` for the AEM gauge until a `candump` beside the
+  gauge's own display confirms bytes 0–1 big-endian at 1 kPa/bit; the daemon
+  logs the unverified signals at start-up.
+

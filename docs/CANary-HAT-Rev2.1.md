@@ -575,7 +575,10 @@ committed work.
   apply calibration.
 - **Aux socketcan bus as a config role** (HAT CAN1 *or* USB adapter, §13.5.4),
   stable interface naming, and an AEMnet decoder producing engineering-unit
-  channels. Keep raw frames out of the vehicle-bus `can:` namespace — "which
+  channels. *Decoder and config role landed 2026-09-21:* `hardware.sensor_can`
+  (interface from config), `data/sensor_can_signals.yaml` (AEM layout,
+  `verified: false` until open item 6 closes), `sensor:FUEL_PRESSURE` in kPa
+  gauge. Stable udev naming and a per-interface bring-up unit remain. Keep raw frames out of the vehicle-bus `can:` namespace — "which
   bus" must not be lost.
 - **ADC transfer functions as pinned data**, not literals in code — `a`/`b` for
   MAP and the Steinhart–Hart coefficients for IAT live beside the other decode

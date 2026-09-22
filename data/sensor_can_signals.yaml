@@ -1,0 +1,31 @@
+# Add-on CAN sensors: frame layouts for the second, private CAN interface
+# (config `hardware.sensor_can`). Recorded as `sensor:<name>`. Every decode
+# field is required; see src/decode/sensor_can.py.
+signals:
+  # AEM X-Series oil/fuel pressure gauge 30-0301 (100 psig sensor).
+  # Manual "10-0301", 2020-03-23, AEMnet section: CAN 2.0B, 500 kbit/s, 29-bit
+  # ID 0x000A0301, DLC 8, 20 Hz, big-endian; byte 0 "Pressure (gauge)",
+  # 16-bit unsigned, 0.01 bar/bit, offset 0, range 0-655.35 bar.
+  # UNVERIFIED: the manual's table is internally inconsistent — a 16-bit value in
+  # "byte 0" with bytes 1-7 marked unused. Bytes 0-1 big-endian is almost
+  # certainly right (docs/CANary-HAT-Rev2.1.md 13.5.4, open item 6). Confirm with
+  # `candump can1` against the gauge face, then set verified: true.
+  # 0.01 bar is exactly 1 kPa, so scale 1.0 kPa/bit (the project's pressure unit,
+  # as baro). Gauge pressure: add baro for absolute. The sensor is rated to
+  # 100 psig (689.5 kPa); valid_max leaves headroom for overshoot, and anything
+  # beyond it is a fault or a wrong layout, dropped rather than recorded.
+  - name: FUEL_PRESSURE
+    device: AEM X-Series 30-0301 oil/fuel pressure gauge
+    source: AEM install manual 10-0301 (2020-03-23), AEMnet message definition
+    arbitration_id: 0x000A0301
+    extended: true
+    byte_start: 0
+    byte_length: 2
+    endianness: big
+    signed: false
+    scale: 1.0
+    offset: 0.0
+    unit: kPa
+    verified: false
+    valid_min: 0.0
+    valid_max: 800.0

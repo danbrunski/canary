@@ -14,6 +14,7 @@ from src.telemetry import (
     GPS_SOURCE,
     IMU_SOURCE,
     OBD_SOURCE,
+    SENSOR_SOURCE,
     UPREV_SOURCE,
     TelemetryRecord,
     TelemetrySource,
@@ -83,4 +84,5 @@ def test_telemetry_source_literal_stays_in_sync_with_constants() -> None:
         DERIVED_SOURCE,
         IMU_SOURCE,
         UPREV_SOURCE,
+        SENSOR_SOURCE,
     }

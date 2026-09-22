@@ -27,10 +27,16 @@ automated fetches, so the Level 2 details below are open questions, not facts.
   recommendation? Its injector data (K, dead times) for the Bosch 700 cc.
 - [ ] Where the MAF sits in the kit's intake path and its housing diameter —
   the MAF scaling depends on both.
-- [ ] Where intake-air temperature is measured after the kit (pre- or
-  post-intercooler). Every VE and density number depends on it.
-- [ ] Fuel pressure the Aeromotive assembly regulates to, and whether it is
-  referenced to manifold pressure.
+- [~] Where intake-air temperature is measured after the kit (pre- or
+  post-intercooler). Every VE and density number depends on it. *Partly
+  answered:* CANary gets a **post-intercooler** IAT from the kit's Bosch TMAP
+  (ADC, HAT rev 2.1). Where the ECM's own IAT (in the MAF) ends up is still
+  open — the two read different air, and that difference is the intercooler.
+- [~] Fuel pressure the Aeromotive assembly regulates to, and whether it is
+  referenced to manifold pressure. *Partly answered:* the system is
+  **returnless** — the regulator does not see manifold pressure, so injector
+  ΔP falls with boost (`docs/CANary-HAT-Rev2.1.md` §13.5). The set pressure is
+  still open; the AEM gauge will measure it.
 - [ ] Bypass-valve behaviour at part throttle (what the ECM's MAF sees off-boost).
 
 ## What the build breaks in CANary
@@ -117,6 +123,16 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   per AGENTS.md, fix the model rather than adding kill-switches for the
   interim.
 - [ ] **P2 — Boost and fuel pressure sensors.** The ECM supplies neither.
+  The hardware design is `docs/CANary-HAT-Rev2.1.md` §13.5 (2026-09-14): the
+  kit's Bosch `0 261 230 416` TMAP in the back of the intercooler (not
+  connected to the ECM — CANary's only boost and post-intercooler temperature),
+  and the AEM gauge on the rail. The fuel system is **returnless**, so injector
+  ΔP = rail − (MAP − baro) falls under boost; that derived channel is why both
+  sensors matter together. **The current HAT (rev 2.0) has one CAN channel** —
+  until rev 2.1 is built, the aux bus is a USB CAN adapter.
+  *Landed 2026-09-21:* the AEM decoder and collector (`hardware.sensor_can`,
+  `sensor:FUEL_PRESSURE`, `docs/can-setup.md` "Aux sensor bus"); layout
+  `verified: false` until a bench `candump`.
   **Decided (operator, 2026-09-21):**
   - *Fuel pressure* — an **AEM fuel-pressure gauge with CAN output**, on a
     **second CAN channel** on the Pi (not the vehicle bus). CANary work: bring
