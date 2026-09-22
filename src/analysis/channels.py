@@ -526,19 +526,10 @@ def _commanded_afr_series(
     rows = frame[(frame["source"] == "obd") & (frame["channel"] == _EQUIV_RATIO_CHANNEL)]
     out = rows.loc[:, ["timestamp"]].copy()
     ratio = pd.to_numeric(rows["value_number"], errors="coerce")
-    # Raises for an unverified convention — deliberately loud, and once per
-    # call rather than per row. Probe with a POSITIVE value: 0.0 is decel fuel
-    # cut (no target at all), which the per-row conversion below drops, and a
-    # session that happened to open on a fuel cut used to raise "equivalence
-    # ratio must be positive" and lose the whole session.
-    positive = ratio[ratio > 0].dropna()
-    probe = float(positive.iloc[0]) if not positive.empty else 1.0
-    calibration.commanded_afr(probe, afr_stoich=afr_stoich)
-    if calibration.commanded_equiv_ratio_convention == "phi":
-        values = afr_stoich / ratio.where(ratio > 0)
-    else:
-        values = afr_stoich * ratio.where(ratio > 0)
-    out["value"] = values
+    # Raises for an unverified convention — deliberately loud, once per call.
+    # A ratio of 0.0 is decel fuel cut (no target at all) and converts to NaN,
+    # which is dropped below; see AfrCalibration.commanded_afr_series.
+    out["value"] = calibration.commanded_afr_series(ratio, afr_stoich=afr_stoich)
     out["unit"] = "AFR"
     return out.dropna(subset=["value"])
 
@@ -659,6 +650,33 @@ def read_aligned(
         calibration=calibration,
         afr_stoich=afr_stoich,
     )
+    return align_long(
+        long,
+        specs,
+        grid=grid,
+        require_all=require_all,
+        cell_agg=cell_agg,
+        max_staleness=max_staleness,
+        with_age=with_age,
+    )
+
+
+def align_long(
+    long: pd.DataFrame,
+    specs: list[str],
+    *,
+    grid: str = "1s",
+    require_all: bool = True,
+    cell_agg: Literal["last", "mean"] = "last",
+    max_staleness: pd.Timedelta | str | None = None,
+    with_age: bool = False,
+) -> pd.DataFrame:
+    """:func:`read_aligned`'s alignment step over an already-read long frame.
+
+    Split out so a caller that also needs :func:`read_channels`' per-row
+    ``unit`` (the workbench log frame) reads the session once rather than
+    twice. Same freshness contract as :func:`read_aligned`.
+    """
     names = [parse_spec(text).text for text in specs]
     if long.empty:
         return pd.DataFrame(columns=["timestamp", *names])

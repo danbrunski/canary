@@ -146,6 +146,12 @@ Control endpoints:
 | `GET /control/captures/current` | inspect the active capture window |
 | `GET /control/capture/quality` | capture-quality v2 verdict for the running capture profile, scored arm-to-now on what has persisted (`scope: live`); `batching` counters are arm-to-now deltas (`batching.scope: capture`), never the scheduler's lifetime totals; `failing_constraints` names what bound. Scored in a child process (it reads the rows back); `503` if that child cannot answer |
 | `GET /control/capture/quality/{session_id}` | recompute coverage and tuple yield from a stored capture session's rows (never rewritten), returned beside its stored sidecar (`scope: stop`, or `trailing_snapshot` for v1 files); also scored in a child process (`503` if it cannot answer); see `docs/capture-quality.md` |
+| `GET /control/logs?include_sessions=&limit=` | Engine Tuning capture browser (W04.1): captures (plus ordinary sessions when asked) newest first by parsed start time, each with profile, duration, row count (Parquet footers only), tune revision + source, flash boundaries inside the log, quality verdict and `end_reason` |
+| `GET /control/sessions/{session_id}/frame?specs=&grid=&regime=&offset=&max_rows=` | one log as a wide frame (W04.3): channels on one clock via `read_aligned` (a row only where every channel was sampled in the cell; `freshness.dropped` counts the rest), per-column unit, `regime` = `all`\|`closed_loop`\|`enrichment`\|`fuel_cut`\|`idle` (an unavailable regime names the missing channel), tags and revision boundaries; capped at 20,000 rows per page with `capped` stated |
+| `GET /analysis/delivery-error?sessions=&revision=&measured=&min_load=` | delivery error by rpm band pooled over sessions (W04.7) — each session gated on its own clock, band-averaged once; `measured` names the source (`obd:O2_WR_LAMBDA_S1` or `semantic:measured_afr_b1`/`_b2`); carries `noise_floor` with its `conditions`, `gates`, `conditions`, and `unavailable_kind` (`not_captured` vs `gates_removed_everything`) |
+| `GET /analysis/trim-surface?sessions=&revision=&rpm=&airflow=&min_n=` | closed-loop STFT + LTFT per bank by rpm x airflow, pooled and per session |
+| `GET /analysis/timing?sessions=&revision=&timing=&rpm=&airflow=&min_n=` | final timing per rpm x airflow cell |
+| `GET /analysis/pull-comparison?revision_a=&revision_b=&value=&floor_channel=` | a value per cell, revision A vs B; `dropped` flags a drop in a cell A had advanced |
 | `POST /control/captures/current/tags` | append a tag to the active capture's `tags.jsonl` |
 | `POST /control/captures/current/stop` | stop the active capture window |
 | `GET /control/sessions?since=&until=&limit=` | list timestamped session directories; optional ISO-8601 start-time bounds and newest-match limit |
@@ -179,6 +185,8 @@ Control endpoints:
 | `PUT /control/capture/profiles` / `DELETE /control/capture/profiles/{name}` | save or delete a capture profile (`default` cannot be deleted); DID weights must be finite, positive, and name selected `mode22` members |
 | `POST /control/capture` / `DELETE /control/capture` | start a named isolated capture / return to default collection; start returns capture session path and budget state, stop returns `ended_capture_dir` and restores the exact pre-capture budget. Retrying an identical active start or immediately repeated stop returns the existing result with `idempotent: true`; that stop-response cache does not survive a daemon restart. |
 | `POST /control/rom/inspect` | authenticated, read-only ROM inspection: raw `application/octet-stream`, maximum 2 MiB. Decodes in memory, validates source hash/CRCs/table evidence, returns maps, axes, verified live-channel providers and explicit TBD entries. Does not persist the file, change the active tune, or communicate with the ECU. |
+
+The frame and every `/analysis/*` route in this table (W04) run in the digest's bounded single-flight child and refuse while a capture is recording: `409 {"error": "analysis_deferred", "profile", "message", "laptop_path"}`. A second, different analysis (or a running digest) is `409 analysis_busy`; a child failure is `503 analysis_unavailable`. Calculated load is refused as an axis.
 
 `GET /control/sessions?captures=true` lists only `_capture-*` sessions and
 tags each from its `capture_profile.json` sidecar; the default listing remains

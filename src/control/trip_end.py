@@ -303,6 +303,16 @@ def digest_in_flight(session_dir: Path) -> bool:
     return session_dir in _IN_FLIGHT
 
 
+def any_digest_in_flight() -> bool:
+    """Whether any digest child is running on this loop.
+
+    The workbench's whole-session analyses (:mod:`src.control.workbench_jobs`)
+    share this child's memory budget, so they wait for a digest rather than
+    run a second multi-gigabyte child beside it.
+    """
+    return bool(_IN_FLIGHT)
+
+
 async def handle_trip_end_off_loop(  # noqa: PLR0913
     session_dir: Path,
     config: CanaryConfig,

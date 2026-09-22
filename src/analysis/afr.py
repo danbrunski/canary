@@ -146,6 +146,31 @@ class AfrCalibration(_Strict):
             return afr_stoich / value
         return afr_stoich * value
 
+    def commanded_afr_series(self, ratio: pd.Series, *, afr_stoich: float) -> pd.Series:
+        """Convert a series of raw PID 0x44 readings, fuel cut included.
+
+        A reading of exactly zero is decel fuel cut — the ECU is commanding no
+        target at all — so it becomes ``NaN`` (no commanded AFR), never an
+        error. Only :meth:`commanded_afr` on a single value refuses a
+        non-positive ratio; applied row by row it raised "equivalence ratio
+        must be positive, got 0.0" and cost four sessions of the 2026-09-21
+        corpus run. Callers that need to *count* the cut samples test
+        ``ratio <= 0`` themselves (``delivery_error`` reports them as the
+        ``fuel_cut`` gate).
+
+        Still refuses an unverified convention, once per call, probing with a
+        positive value so a session that opens on fuel cut is not mistaken
+        for a malformed one.
+        """
+        numeric = pd.to_numeric(ratio, errors="coerce")
+        positive = numeric[numeric > 0].dropna()
+        probe = float(positive.iloc[0]) if not positive.empty else 1.0
+        self.commanded_afr(probe, afr_stoich=afr_stoich)
+        valid = numeric.where(numeric > 0)
+        if self.commanded_equiv_ratio_convention == "phi":
+            return afr_stoich / valid
+        return afr_stoich * valid
+
     def target_map(self, revision: str | None = None) -> TargetAfrMap | None:
         selected = revision or self.active_revision
         return next((item for item in self.target_maps if item.revision == selected), None)

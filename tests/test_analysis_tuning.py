@@ -474,3 +474,38 @@ def test_delivery_error_refuses_a_voltage_channel_as_the_measurement() -> None:
             measured_is_lambda=False,
             dids_path=Path("data/dids.yaml"),
         )
+
+
+def test_fuel_cut_samples_are_gated_not_fatal(tmp_path: Path) -> None:
+    """W04.8: commanded phi 0.0 is decel fuel cut, and must be gated by name.
+
+    Converting it raised ``equivalence ratio must be positive, got 0.0`` and
+    cost four sessions on 2026-09-21. The cut cells are now removed as the
+    ``fuel_cut`` gate — counted, so a session that is mostly overrun says so —
+    and the enrichment samples beside them still answer.
+    """
+    session = _rows(
+        tmp_path,
+        [(3000, 20, 4, 0.0, 5.0)] * 3  # opens on decel fuel cut
+        + [(3000, 90, 4, 1.2, 0.83)] * 4  # enrichment
+        + [(3000, 20, 4, 0.0, 5.0)] * 2,  # and cuts again
+    )
+    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    assert result.n == 4
+    assert result.gates["filtered"]["fuel_cut"] == 5
+    assert result.gates["started"] == 9
+
+
+def test_an_all_fuel_cut_session_is_gates_removed_everything(tmp_path: Path) -> None:
+    """Every sample in fuel cut is an answer about the drive, not missing inputs."""
+    session = _rows(tmp_path, [(3000, 20, 4, 0.0, 5.0)] * 5)
+    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    assert result.n == 0
+    assert result.gates == {"started": 5, "filtered": {"fuel_cut": 5}, "remaining": 0}
+
+
+def test_commanded_afr_series_maps_fuel_cut_to_nan() -> None:
+    """The vectorised conversion never raises on a zero ratio."""
+    out = PHI.commanded_afr_series(pd.Series([0.0, 1.2, -1.0]), afr_stoich=14.7)
+    assert np.isnan(out.iloc[0]) and np.isnan(out.iloc[2])
+    assert out.iloc[1] == pytest.approx(14.7 / 1.2)

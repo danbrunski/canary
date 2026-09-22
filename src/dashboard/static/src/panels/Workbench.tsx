@@ -52,7 +52,9 @@ import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 import { RomMapsPanel } from "./RomMapsPanel";
+import { AnalysisPage } from "./tuning/AnalysisPage";
 import { LoggingPage } from "./tuning/LoggingPage";
+import { LogsPage } from "./tuning/LogsPage";
 import { CalibrationPage } from "./tuning/CalibrationPage";
 import { TuningContextBar } from "./tuning/TuningContextBar";
 
@@ -232,9 +234,9 @@ function renderItem(
         />
       );
     case "tuning-logs":
-      return <PlaceholderPanel title="Logs" task="W04" summary="Recorded tuning-log tables and charts will live here." />;
+      return <LogsPage token={d.token} context={tuning} />;
     case "tuning-analysis":
-      return <PlaceholderPanel title="Analysis" task="W04" summary="Delivery-error, trim, and timing analysis will live here." />;
+      return <AnalysisPage token={d.token} status={d.status} context={tuning} />;
     case "tuning-calibration":
       return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":

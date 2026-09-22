@@ -80,6 +80,20 @@ describe("Workbench navigation", () => {
     expect(screen.getByText(/waits on the server-side flash interlocks/)).toBeInTheDocument();
   });
 
+  it("tuning-logs loads directly with empty group state: the browser, no viewer (W04)", () => {
+    window.localStorage.clear();
+    renderAt("tuning-logs");
+    expect(screen.getByRole("heading", { name: "Captures" })).toBeInTheDocument();
+    expect(screen.getByText("Enter the control token to browse logs.")).toBeInTheDocument();
+    expect(screen.queryByText(/W04/)).not.toBeInTheDocument();
+  });
+
+  it("tuning-analysis loads directly and asks for sessions (W04)", () => {
+    renderAt("tuning-analysis");
+    expect(screen.getByText(/Choose sessions or a revision/)).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Delivery error" })).toBeInTheDocument();
+  });
+
   it("renders the detector page as Alert Thresholds, not Tuning", () => {
     renderAt("model-thresholds");
     expect(screen.getByRole("heading", { name: "Alert Thresholds" })).toBeInTheDocument();

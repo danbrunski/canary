@@ -58,6 +58,7 @@ from src.dashboard.routes import (
 )
 from src.dashboard.routes.calibration import register_calibration_routes
 from src.dashboard.routes.rom_maps import register_rom_routes
+from src.dashboard.routes.workbench import register_workbench_routes
 from src.dashboard.security import _client_is_loopback, _require_control_auth
 from src.dashboard.status import (
     StatusSnapshot,
@@ -236,6 +237,13 @@ def create_app(
     register_calibration_routes(
         app,
         config=config,
+        dids_path=dids_path,
+        resolved_control_token=resolved_control_token,
+    )
+    register_workbench_routes(
+        app,
+        config=config,
+        bindings_path=bindings_path,
         dids_path=dids_path,
         resolved_control_token=resolved_control_token,
     )

@@ -53,6 +53,11 @@ class ChannelFloor(_Strict):
     #: itself a finding (the runs were not equivalent after all).
     mean: float = 0.0
     n_cells: int = Field(ge=1)
+    #: Smallest and largest per-cell delta of the null run. Optional because
+    #: floors recorded before 2026-09-21 did not keep them; a page drawing
+    #: the per-cell range must say "not recorded" rather than invent one.
+    min: float | None = None
+    max: float | None = None
 
 
 class NoiseFloor(_Strict):
@@ -138,6 +143,8 @@ def record_null_run(
             sd=float(values.std(ddof=1)),
             mean=float(values.mean()),
             n_cells=int(len(values)),
+            min=float(values.min()),
+            max=float(values.max()),
         )
     return NoiseFloor(
         provenance={"sessions": list(sessions), "note": note},
