@@ -449,14 +449,50 @@ def _decode_session_to_resampled(
     resampler's ffill/``__gap`` bookkeeping ever sees it, so a reject is
     indistinguishable from any other gap to every downstream consumer.
     """
-    wide = _decode_session_to_wide(session_dir, bindings, dbc_database, did_map)
+    return resample_long_session(
+        read_session(session_dir),
+        bindings,
+        dbc_database,
+        did_map,
+        resample_config,
+        session_name=session_dir.name,
+    )
+
+
+def resample_long_session(
+    long: pd.DataFrame,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+    *,
+    session_name: str,
+) -> pd.DataFrame:
+    """decode → wide → reject gate → resample for one session's long frame.
+
+    The body of :func:`_decode_session_to_resampled`, taking the long frame
+    instead of reading it, so a bounded reader (the behavior-validation
+    evaluator reads only the CAN ids its decoded channels need) runs the
+    identical decode/gate/resample chain rather than a copy of it.
+    """
+    wide = to_wide(_decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
     gated, quality = apply_quality_gate(wide)
     if quality.total_rejected:
         log.info(
             "quality gate rejected cells in session",
-            extra={"session": session_dir.name, "reject_counts": quality.reject_counts},
+            extra={"session": session_name, "reject_counts": quality.reject_counts},
         )
     return resample_wide(gated, config=resample_config)
+
+
+def resample_config_for(config: CanaryConfig) -> ResampleConfig:
+    """The batch :class:`ResampleConfig` every offline feature build uses."""
+    return ResampleConfig(
+        hz=config.preprocessing.resample_hz,
+        max_gap_factor=config.preprocessing.max_gap_factor,
+        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
+        session_gap_seconds=config.preprocessing.session_gap_seconds,
+    )
 
 
 def _worker_process_session(
@@ -666,12 +702,7 @@ def build_feature_frame(
     # ``_resolve_worker_count``). Caller can pin ``max_workers=1`` to
     # force the serial path — kept exactly as it was for back-compat with tests
     # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
-    resample_config = ResampleConfig(
-        hz=config.preprocessing.resample_hz,
-        max_gap_factor=config.preprocessing.max_gap_factor,
-        slow_channel_max_gap_seconds=config.preprocessing.slow_channel_max_gap_seconds,
-        session_gap_seconds=config.preprocessing.session_gap_seconds,
-    )
+    resample_config = resample_config_for(config)
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
 
@@ -754,7 +785,7 @@ def build_feature_frame(
             ", ".join(skipped),
         )
     resampled = pd.concat(resampled_parts, ignore_index=True)
-    resampled = _drop_fully_stale_rows(resampled)
+    resampled = drop_fully_stale_rows(resampled)
 
     features = featurize_wide_frame(
         resampled, config, behavior_models=behavior_models, bindings=bindings
@@ -764,7 +795,7 @@ def build_feature_frame(
     return features
 
 
-def _drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
+def drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
     """Drop resampled rows where *every* gap-flagged channel is stale.
 
     The resampler emits a row per second across a session's whole span and
@@ -812,6 +843,10 @@ class FeaturizedFrame:
     features: pd.DataFrame
     operating_frame: pd.DataFrame
     segmenter_fell_back: bool = False
+
+
+#: Pre-B02 private name, kept for existing importers.
+_drop_fully_stale_rows = drop_fully_stale_rows
 
 
 def featurize_wide_frame(

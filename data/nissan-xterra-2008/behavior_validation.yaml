@@ -1,0 +1,185 @@
+# Behavior-model validation policy for this vehicle (B02).
+#
+# Read by scripts/refit_behavior_models.py (publication) and
+# scripts/evaluate_behavior_models.py (the reproducible report) through
+# src/analysis/behavior_validation.py. A recipe with no entry here may still
+# publish, but its evidence verdict is `insufficient_evidence:
+# no_declared_criteria` and it can never alert.
+#
+# Declared 2026-09-21, BEFORE any final test was run against these numbers
+# (B02.6). Changing a criterion afterwards flags every carried-over model that
+# was judged against the old one (`criteria_changed`) — edit deliberately and
+# refit, never to make a result pass. Noise floors state their basis because a
+# floor measured under one condition is routinely quoted against another
+# (noise_floor.yaml's WOT timing floor is ~16x below the all-condition spread).
+#
+# `meaningful_deviation` is the smallest shift the operator needs resolved, in
+# output units; the median warning half-width on untouched drives must be at or
+# below it, and each synthetic fault is a labelled synthetic step on the actual
+# output — synthetic sensitivity, never real fault recall.
+schema_version: 1
+
+# The segmenter vocabulary the Pi runs (canary.pi.example.yaml, OVERNIGHT-QUEUE
+# Q5 plus the 2026-07-26 decision folding `suburban` into `city`). A config with
+# another vocabulary can reproduce history, but its evidence cannot pass.
+approved_operating_modes: [koeo, warmup, idle_transient, idle, idle_high, city, highway]
+retired_operating_modes:
+  suburban: city
+
+# Directories closer than this belong to one physical drive (a capture rotates
+# the writer with ~0 s gap; a short stop is still the same outing).
+drive_join_gap_seconds: 600
+
+# Named decisions for sessions with an unknown tune revision or whose recording
+# crosses a flash. Each needs `revision:` or `exclude: true`, and a `reason:`.
+provenance_resolutions: []
+
+recipes:
+  air_charge_vs_rpm_throttle_did:
+    kind: predictive_surface
+    unit: raw counts
+    noise_floor: {value: 1.0, basis: "DID LSB (scale constant not pinned); quantization only"}
+    meaningful_deviation: 1500.0
+    meaningful_deviation_basis: >
+      ~12 % of the median populated training cell (12.5k counts) -- the size of
+      airflow change (leak, MAF bias) the review treats as diagnosable.
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 1500.0, direction: negative, duration_seconds: 60}
+
+  warm_idle_rpm_baseline:
+    kind: constant_baseline
+    unit: rpm
+    noise_floor: {value: 25.0, basis: "recipe sigma_floor: ordinary accessory-load idle steps; PID LSB is 0.25 rpm"}
+    meaningful_deviation: 100.0
+    meaningful_deviation_basis: "a sustained 100 rpm warm-idle shift is a real idle-control change"
+    min_validation_drives: 2
+    min_eligible_observations: 150
+    max_mae: 40.0
+    max_abs_error_p95: 75.0
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 150.0, direction: positive, duration_seconds: 60}
+      - {magnitude: 150.0, direction: negative, duration_seconds: 60}
+
+  timing_advance_vs_rpm_load:
+    kind: predictive_surface
+    unit: degBTDC
+    noise_floor: {value: 0.5, basis: "PID 0x0E LSB (0.5 deg/bit); not the all-condition spread"}
+    meaningful_deviation: 3.0
+    meaningful_deviation_basis: "3 deg of sustained retard is knock-control activity worth seeing"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 3.0, direction: negative, duration_seconds: 60}
+
+  timing_advance_vs_rpm_iat:
+    kind: predictive_surface
+    unit: degBTDC
+    noise_floor: {value: 0.5, basis: "PID 0x0E LSB (0.5 deg/bit); not the all-condition spread"}
+    meaningful_deviation: 3.0
+    meaningful_deviation_basis: "same target as the load-axis timing surface"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 3.0, direction: negative, duration_seconds: 60}
+
+  fuel_trim_vs_rpm_load:
+    kind: predictive_surface
+    unit: "%"
+    noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %)"}
+    meaningful_deviation: 5.0
+    meaningful_deviation_basis: "a sustained 5 % trim shift is the conventional lean/rich concern"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 5.0, direction: positive, duration_seconds: 120}
+
+  air_mass_per_cycle_vs_rpm_load:
+    kind: predictive_surface
+    unit: g/cycle
+    noise_floor: {value: 0.002, basis: "one MAF LSB (0.01 g/s) at idle, expressed per cycle"}
+    meaningful_deviation: 0.08
+    meaningful_deviation_basis: "~10 % of the median training cell (0.74 g/cycle)"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 0.08, direction: negative, duration_seconds: 60}
+
+  ve_vs_rpm_load:
+    kind: predictive_surface
+    unit: "%"
+    noise_floor: {value: 0.5, basis: "recipe sigma_floor: MAF LSB over a representative idle fill (approximate)"}
+    meaningful_deviation: 3.0
+    meaningful_deviation_basis: "~10-15 % of the median training cell (21 VE points)"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 3.0, direction: negative, duration_seconds: 60}
+
+  total_trim_vs_rpm_load_b1:
+    kind: predictive_surface
+    unit: "%"
+    noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %); two summed channels"}
+    meaningful_deviation: 5.0
+    meaningful_deviation_basis: "a sustained 5 % total-trim shift"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.2
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 5.0, direction: positive, duration_seconds: 120}
+
+  total_trim_vs_rpm_load_b2:
+    kind: predictive_surface
+    unit: "%"
+    noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %); two summed channels"}
+    meaningful_deviation: 5.0
+    meaningful_deviation_basis: "a sustained 5 % total-trim shift"
+    min_validation_drives: 2
+    min_eligible_observations: 300
+    min_skill_vs_baseline: 0.2
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 5.0, direction: positive, duration_seconds: 120}
+
+  coolant_warmup:
+    kind: predictive_surface
+    unit: degC
+    noise_floor: {value: 1.0, basis: "PID 0x05 LSB (1 degC)"}
+    meaningful_deviation: 8.0
+    meaningful_deviation_basis: "a thermostat stuck open delays warmup by well over 8 degC mid-curve"
+    min_validation_drives: 2
+    min_eligible_observations: 120
+    min_envelope_coverage: 0.5
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 10.0, direction: negative, duration_seconds: 120}
+
+  cat_warmup:
+    kind: predictive_surface
+    unit: degC
+    noise_floor: {value: 0.1, basis: "PID 0x3C LSB (0.1 degC)"}
+    meaningful_deviation: 50.0
+    meaningful_deviation_basis: "a light-off delay shows as tens of degC below the healthy curve"
+    min_validation_drives: 2
+    min_eligible_observations: 120
+    min_envelope_coverage: 0.5
+    min_skill_vs_baseline: 0.3
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 60.0, direction: negative, duration_seconds: 120}

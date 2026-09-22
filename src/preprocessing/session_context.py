@@ -186,6 +186,18 @@ class EngineStartTracker:
                 self._begin_run(runtime_v, observed_transition=False, now=now)
             elif not self._running:
                 self._begin_run(runtime_v, observed_transition=self._saw_stopped, now=now)
+            elif (
+                not self._evidence
+                and self._last_runtime is None
+                and runtime_v is not None
+                and runtime_v <= self.spec.max_start_runtime_s
+            ):
+                # RPM and the run-time clock are separate polls: the first
+                # running rows often precede the first RUN_TIME answer by a
+                # few seconds. That first reading still places the start
+                # (2026-09-18 cold start: RPM from 13:45:31, RUN_TIME=20 s at
+                # 13:45:36) — recorded evidence, not an assumption.
+                self._evidence = True
             self._saw_stopped = False
         # rpm unknown (missing/stale): keep the current run's state; the
         # engine-state gate refuses such rows on its own.

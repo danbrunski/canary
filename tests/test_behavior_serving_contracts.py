@@ -29,18 +29,26 @@ from src.decode.behavior_decoder import deviation, explain_expected_column
 from src.decode.behavior_eligibility import point_eligibility, required_channel_groups
 from src.decode.behavior_models import (
     CURRENT_SCHEMA_VERSION,
+    STATUS_EVIDENCE_CONTRACT_MISMATCH,
     STATUS_LEGACY_NO_CONTRACT,
+    STATUS_NO_GATE_EVIDENCE,
     STATUS_NO_HELD_OUT_VALIDATION,
     Axis1D,
     BehaviorModel1D,
     BehaviorModels,
     ColdStartRequirement,
     DeviationConfig,
+    DriveSplitRecord,
     EngineStateRequirement,
     FuelControlRequirement,
+    NoiseFloor,
     PolynomialFit,
     RateOfChangeCondition,
     ServingEligibility,
+    SyntheticFault,
+    ValidationCriteria,
+    ValidationEvidence,
+    contract_fingerprint,
     dump_behavior_models,
     load_behavior_models,
     serving_status,
@@ -440,21 +448,37 @@ def test_legacy_artifact_loads_diagnostic_only(tmp_path: Path) -> None:
     assert deviation(loaded.models[0], 22.0, {"obd:RPM": 1500.0}).deviation == 12.0
 
 
+def _passed_evidence(model: Any) -> ValidationEvidence:
+    return ValidationEvidence(
+        evaluator_version=1,
+        evaluated_at="2026-09-21T00:00:00+00:00",
+        verdict="passed",
+        contract_fingerprint=contract_fingerprint(model),
+        split=DriveSplitRecord(policy="test", join_gap_seconds=600.0),
+    )
+
+
 def test_contract_round_trips_and_unsupported_schema_rejected(tmp_path: Path) -> None:
     path = tmp_path / "behavior_models.yaml"
-    model = _fuel_model().model_copy(
+    held_out = _fuel_model().model_copy(
         update={
             "fit": _fuel_model().fit.model_copy(
                 update={"validation_sample_count": 50, "calibration_sessions": ["held-out"]}
             )
         }
     )
+    # B02.7 — held-out rows without recorded gate evidence cannot alert.
+    assert serving_status(held_out).reasons == (STATUS_NO_GATE_EVIDENCE,)
+    model = held_out.model_copy(update={"evidence": _passed_evidence(held_out)})
     dump_behavior_models(
         BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[model]), path
     )
     loaded = load_behavior_models(path)
     assert loaded.models[0] == model
     assert serving_status(loaded.models[0]).alerting
+    # A hand edit to the contract after validation voids the evidence.
+    edited = model.model_copy(update={"operating_mode": "idle"})
+    assert serving_status(edited).reasons == (STATUS_EVIDENCE_CONTRACT_MISMATCH,)
 
     path.write_text(path.read_text().replace("schema_version: 2", "schema_version: 3"))
     with pytest.raises(ValueError, match="schema_version 3"):
@@ -545,7 +569,9 @@ def test_diagnostic_only_model_is_shown_but_never_alerts(
 # ---------------------------------------------------------------------------
 
 
-def _parity_drive(session: str, seed: int, *, initial_coolant: float = 20.0) -> pd.DataFrame:
+def _parity_drive(
+    session: str, seed: int, *, initial_coolant: float = 20.0, started: datetime = T0
+) -> pd.DataFrame:
     """A 1 Hz drive: KOEO, idle, steady cruise bands with ramps between, a
     decel fuel cut, and a gap in the speed channel."""
     rng = np.random.default_rng(seed)
@@ -565,7 +591,7 @@ def _parity_drive(session: str, seed: int, *, initial_coolant: float = 20.0) -> 
     fuel[~running] = 0.0
     frame = pd.DataFrame(
         {
-            "timestamp": pd.date_range(T0, periods=n, freq="1s", tz="UTC"),
+            "timestamp": pd.date_range(started, periods=n, freq="1s", tz="UTC"),
             SESSION_COLUMN: session,
             "obd:RPM": rpm_arr,
             "obd:SPEED": np.where(running, rpm_arr / 40.0, 0.0),
@@ -597,8 +623,27 @@ _CHANNELS = [
 ]
 
 
+def _criteria(*, noise: float, meaningful: float, fault: float) -> ValidationCriteria:
+    return ValidationCriteria(
+        kind="predictive_surface",
+        unit="test",
+        noise_floor=NoiseFloor(value=noise, basis="synthetic test signal"),
+        meaningful_deviation=meaningful,
+        meaningful_deviation_basis="synthetic test",
+        min_validation_drives=1,
+        min_eligible_observations=50,
+        min_envelope_coverage=0.0,
+        min_skill_vs_baseline=0.2,
+        synthetic_faults=[SyntheticFault(magnitude=fault, duration_seconds=30.0)],
+    )
+
+
 def _fitted_models(config: CanaryConfig, tmp_path: Path) -> BehaviorModels:
-    drives = [_parity_drive(f"train-{i}", seed=i) for i in range(3)]
+    # Three independent drives (hours apart): B02.3 groups pieces by
+    # physical drive, so the newest one is the held-out test fold.
+    drives = [
+        _parity_drive(f"train-{i}", seed=i, started=T0 + timedelta(hours=3 * i)) for i in range(3)
+    ]
     wide = pd.concat([_with_gap_flags(d, _CHANNELS) for d in drives], ignore_index=True)
     features = featurize_wide_frame(wide, config).features
     recipes = [
@@ -615,6 +660,7 @@ def _fitted_models(config: CanaryConfig, tmp_path: Path) -> BehaviorModels:
             closed_loop_only=True,
             max_abs_rate_of_change={"obd:RPM": 20.0},
             deviation=DeviationConfig(kind="absolute", warning_band=1.0, critical_band=3.0),
+            validation=_criteria(noise=0.5, meaningful=2.0, fault=3.0),
         ),
         Surface1DRecipe(
             name="coolant_warmup",
@@ -628,6 +674,7 @@ def _fitted_models(config: CanaryConfig, tmp_path: Path) -> BehaviorModels:
             min_rpm=400.0,
             max_initial_coolant_c=40.0,
             deviation=DeviationConfig(kind="absolute", warning_band=0.5, critical_band=2.0),
+            validation=_criteria(noise=0.1, meaningful=1.0, fault=2.0),
         ),
     ]
     fitted, results = refit_all(recipes, features)

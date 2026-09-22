@@ -26,6 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.config import CanaryConfig  # noqa: E402
+from src.control.sessions import session_started_at  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
@@ -80,9 +81,10 @@ def filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> li
     cutoff = now - timedelta(days=days)
     kept: list[Path] = []
     for session in sessions:
-        try:
-            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
+        # The one session-time parser: a `_capture-…` prefix must not read as
+        # "unknown format" and slip past the age filter.
+        started = session_started_at(session)
+        if started is None:
             kept.append(session)  # unknown format → keep
             continue
         if started >= cutoff:
@@ -120,9 +122,8 @@ def filter_sessions_since(sessions: list[Path], since: datetime) -> list[Path]:
     """
     kept: list[Path] = []
     for session in sessions:
-        try:
-            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
+        started = session_started_at(session)
+        if started is None:
             kept.append(session)  # unknown format → keep
             continue
         if started >= since:

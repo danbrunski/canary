@@ -26,6 +26,8 @@ during RE; auto-written by the refit CLI (4.E.8) once it exists.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass
@@ -521,6 +523,206 @@ class ServingEligibility(_Strict):
     training_selection: TrainingSelection = Field(default_factory=TrainingSelection)
 
 
+# ---------------------------------------------------------------------------
+# Validation criteria and persisted evidence (B02)
+# ---------------------------------------------------------------------------
+
+
+class NoiseFloor(_Strict):
+    """The smallest output change this model can resolve, with its basis.
+
+    ``basis`` is required because a floor measured under one condition is
+    routinely quoted against another (the WOT timing floor is 16x smaller
+    than the all-condition spread — see ``noise_floor.yaml``). A sensor LSB
+    is a lower bound, not a measured noise; say which one this is.
+    """
+
+    value: float = Field(gt=0)
+    basis: str = Field(min_length=1)
+
+
+class SyntheticFault(_Strict):
+    """An explicitly synthetic step offset added to the model's actual output.
+
+    Reported as *synthetic sensitivity* on untouched test drives — never as
+    real fault recall, which needs labelled faults this corpus does not have.
+    """
+
+    magnitude: float = Field(gt=0)
+    direction: Literal["positive", "negative"] = "positive"
+    duration_seconds: float = Field(gt=0)
+
+
+class ValidationCriteria(_Strict):
+    """Per-recipe acceptance criteria, declared in profile data before testing.
+
+    Loaded from the vehicle profile's ``behavior_validation.yaml`` (never
+    hard-coded in shared code). ``kind`` selects the criteria family:
+
+    * ``predictive_surface`` — must beat a training-fitted simple baseline
+      on untouched drives by ``min_skill_vs_baseline`` (fractional MAE
+      reduction) and resolve ``meaningful_deviation``.
+    * ``constant_baseline`` — a robust constant location has no predictive
+      skill to show; it is judged on its own error (``max_mae``,
+      ``max_abs_error_p95``), coverage and sensitivity. No R² floor exists
+      for either family.
+    """
+
+    kind: Literal["predictive_surface", "constant_baseline"]
+    unit: str = Field(min_length=1)
+    noise_floor: NoiseFloor
+    #: The smallest deviation, in output units, the operator needs this model
+    #: to resolve. Must exceed the noise floor.
+    meaningful_deviation: float = Field(gt=0)
+    meaningful_deviation_basis: str = Field(min_length=1)
+    #: Independent physical drives (grouped, B02.3) in the test fold.
+    min_validation_drives: int = Field(default=2, ge=1)
+    #: Drives between train and test, available to any data-driven choice
+    #: (band acceptance); final test drives never choose anything.
+    calibration_drives: int = Field(default=0, ge=0)
+    min_eligible_observations: int = Field(default=300, ge=1)
+    min_observations_per_drive: int = Field(default=30, ge=1)
+    #: Evaluated ÷ eligible on the test fold (off-map rows are not predictions).
+    min_coverage: float = Field(default=0.5, gt=0, le=1)
+    #: Fraction of the model's trusted operating envelope (populated 2D cells,
+    #: or 1D domain deciles) visited by test drives.
+    min_envelope_coverage: float = Field(default=0.3, ge=0, le=1)
+    baseline: Literal["training_median", "training_mode_median"] = "training_mode_median"
+    min_skill_vs_baseline: float | None = Field(default=None, le=1)
+    max_mae: float | None = Field(default=None, gt=0)
+    max_abs_error_p95: float | None = Field(default=None, gt=0)
+    #: Emitted events (after persistence + dedupe) per evaluated hour on the
+    #: unmodified test drives — a no-fault control, not a false-positive rate.
+    max_control_events_per_hour: float | None = Field(default=None, ge=0)
+    #: Evaluated time below which one event is not a rate: the control-event
+    #: criterion then reports insufficient evidence instead of failing.
+    min_control_hours: float = Field(default=0.5, gt=0)
+    synthetic_faults: list[SyntheticFault] = Field(default_factory=list)
+    min_synthetic_detection: float = Field(default=0.8, ge=0, le=1)
+    notes: str | None = None
+
+    @model_validator(mode="after")
+    def _check_family(self) -> ValidationCriteria:
+        if self.meaningful_deviation <= self.noise_floor.value:
+            raise ValueError(
+                f"meaningful_deviation {self.meaningful_deviation} must exceed the noise "
+                f"floor {self.noise_floor.value} — a deviation inside the noise is not resolvable"
+            )
+        if self.kind == "predictive_surface" and self.min_skill_vs_baseline is None:
+            raise ValueError("predictive_surface criteria require min_skill_vs_baseline")
+        if self.kind == "constant_baseline" and self.max_mae is None:
+            raise ValueError("constant_baseline criteria require max_mae")
+        if not self.synthetic_faults:
+            raise ValueError(
+                "declare at least one synthetic fault — sensitivity is a gate, not an option"
+            )
+        return self
+
+
+class FoldMetrics(_Strict):
+    """Denominators and physical-unit accuracy on one set of drives (B02.5)."""
+
+    drives: int = Field(ge=0)
+    rows: int = Field(ge=0)
+    input_present: int = Field(ge=0)
+    fresh: int = Field(ge=0)
+    eligible: int = Field(ge=0)
+    evaluated: int = Field(ge=0)
+    coverage: float | None = None
+    refusals: dict[str, int] = Field(default_factory=dict)
+    mae: float | None = None
+    bias: float | None = None
+    abs_error_p50: float | None = None
+    abs_error_p90: float | None = None
+    abs_error_p95: float | None = None
+    r_squared: float | None = None
+    warning_half_width_median: float | None = None
+    critical_half_width_median: float | None = None
+    warning_row_rate: float | None = None
+    critical_row_rate: float | None = None
+    baseline_mae: float | None = None
+    skill_vs_baseline: float | None = None
+    #: Time the model was actually grading (evaluated rows × tick interval):
+    #: the denominator of ``events_per_hour``.
+    evaluated_hours: float = Field(default=0.0, ge=0)
+    events: int = Field(default=0, ge=0)
+    events_per_hour: float | None = None
+    envelope_coverage: float | None = None
+    #: Drive-level uncertainty: min/max per-drive MAE, and a drive-resampled
+    #: bootstrap interval once there are enough drives to resample.
+    drive_mae_min: float | None = None
+    drive_mae_max: float | None = None
+    mae_drive_bootstrap_90: list[float] | None = None
+
+
+class SyntheticSensitivity(_Strict):
+    """Detection of one explicitly synthetic fault case (never real recall)."""
+
+    synthetic: Literal[True] = True
+    magnitude: float
+    direction: Literal["positive", "negative"]
+    duration_seconds: float
+    #: Windows with at least one evaluated row.
+    windows: int = Field(ge=0)
+    #: Same windows without the injection — the no-fault control.
+    control_detected: int = Field(default=0, ge=0)
+    #: Trials: windows whose control raised no event. A window that alerts
+    #: anyway cannot show the injection was seen.
+    clean_windows: int = Field(default=0, ge=0)
+    detected: int = Field(ge=0)
+    #: ``detected / clean_windows``; ``None`` when no clean window exists.
+    detection_fraction: float | None = None
+
+
+class DriveRecord(_Strict):
+    drive_id: str
+    pieces: list[str] = Field(min_length=1)
+    started_at: str | None = None
+    ended_at: str | None = None
+
+
+class DriveSplitRecord(_Strict):
+    """Grouped folds, by independent physical drive, ordered by parsed time."""
+
+    policy: str
+    join_gap_seconds: float = Field(ge=0)
+    train: list[DriveRecord] = Field(default_factory=list)
+    calibration: list[DriveRecord] = Field(default_factory=list)
+    test: list[DriveRecord] = Field(default_factory=list)
+    #: Drives that could not serve as evidence (too few eligible rows) — in
+    #: no fold, listed so the denominator of "independent drives" is visible.
+    excluded: list[DriveRecord] = Field(default_factory=list)
+
+
+class ValidationEvidence(_Strict):
+    """The immutable record a publication route reads to decide trust (B02.7).
+
+    Written once, by the fit that produced the model; carry-over and reload
+    never rewrite it. ``contract_fingerprint`` pins the serving contract the
+    evidence was gathered under — a model whose contract no longer matches
+    (hand edit, changed recipe) is not covered by this evidence.
+    """
+
+    evaluator_version: int = Field(ge=1)
+    evaluated_at: str
+    verdict: Literal["passed", "failed", "insufficient_evidence"]
+    failures: list[str] = Field(default_factory=list)
+    criteria: ValidationCriteria | None = None
+    criteria_source: str | None = None
+    contract_fingerprint: str
+    decoder_identity: dict[str, str] = Field(default_factory=dict)
+    mode_taxonomy: list[str] = Field(default_factory=list)
+    tune_revision: str | None = None
+    split: DriveSplitRecord
+    baseline: dict[str, float] = Field(default_factory=dict)
+    calibration: FoldMetrics | None = None
+    test: FoldMetrics | None = None
+    per_drive: dict[str, FoldMetrics] = Field(default_factory=dict)
+    per_regime: dict[str, FoldMetrics] = Field(default_factory=dict)
+    sensitivity: list[SyntheticSensitivity] = Field(default_factory=list)
+    provenance: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class BehaviorModel1D(_Strict):
     """A 1D expected-behavior surface."""
 
@@ -541,6 +743,12 @@ class BehaviorModel1D(_Strict):
     notes: str | None = None
     diagnostic_capabilities: list[str] = Field(default_factory=list)
     diagnostic_limitations: list[str] = Field(default_factory=list)
+    #: B02 held-out validation record; written once by the fit, never rewritten.
+    evidence: ValidationEvidence | None = None
+    #: B02.7 — named reasons a publication route (carry-over after a decoder,
+    #: contract, criteria or mode-taxonomy change) withheld trust without
+    #: touching ``evidence``. Any entry makes the model diagnostic-only.
+    publication_flags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_deviation(self) -> BehaviorModel1D:
@@ -574,6 +782,8 @@ class BehaviorModel2D(_Strict):
     notes: str | None = None
     diagnostic_capabilities: list[str] = Field(default_factory=list)
     diagnostic_limitations: list[str] = Field(default_factory=list)
+    evidence: ValidationEvidence | None = None
+    publication_flags: list[str] = Field(default_factory=list)
     #: Cells with fewer fit samples than this evaluate to ``None`` (off-map)
     #: instead of grading against a near-meaningless mean/std. Default 1
     #: keeps pre-existing YAML artifacts (which only excluded count==0)
@@ -629,6 +839,72 @@ class BehaviorModels(_Strict):
 #: strings: the daemon, dashboard and MCP surface them verbatim.
 STATUS_LEGACY_NO_CONTRACT = "legacy_artifact:no_serving_eligibility_contract"
 STATUS_NO_HELD_OUT_VALIDATION = "unvalidated:no_held_out_evidence"
+#: Held-out rows were scored but no B02 gate evidence was recorded (a
+#: schema-2 artifact written before the B02 gate, or a hand edit).
+STATUS_NO_GATE_EVIDENCE = "unvalidated:no_gate_evidence"
+#: The evidence was gathered under a different serving contract than the
+#: artifact now declares (hand edit, or a contract field changed after fit).
+STATUS_EVIDENCE_CONTRACT_MISMATCH = "evidence_contract_mismatch"
+
+
+def contract_fingerprint_payload(
+    *,
+    kind: str,
+    output: str,
+    inputs: Sequence[str],
+    operating_mode: str | None,
+    conditions: Sequence[RateOfChangeCondition],
+    eligibility: ServingEligibility | None,
+    deviation: DeviationConfig | None,
+) -> dict[str, object]:
+    """The serving-contract fields validation evidence is only valid for.
+
+    Excludes fit-derived values (cells, coefficients, ``reference_std``) and
+    the training-only selection, which is provenance rather than contract —
+    so a recipe and the model it produced fingerprint identically.
+    """
+    return {
+        "kind": kind,
+        "output": output,
+        "inputs": list(inputs),
+        "operating_mode": operating_mode,
+        "conditions": [condition.model_dump(mode="json") for condition in conditions],
+        "eligibility": (
+            None
+            if eligibility is None
+            else eligibility.model_dump(mode="json", exclude={"training_selection"})
+        ),
+        "deviation": (
+            None
+            if deviation is None
+            else deviation.model_dump(mode="json", exclude={"reference_std"})
+        ),
+    }
+
+
+def fingerprint(payload: object) -> str:
+    """``sha256:`` of canonical JSON — the one hashing rule for B02 identities."""
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    return "sha256:" + hashlib.sha256(blob.encode()).hexdigest()
+
+
+def contract_fingerprint(model: BehaviorModel1D | BehaviorModel2D) -> str:
+    inputs = (
+        [model.axis.channel]
+        if isinstance(model, BehaviorModel1D)
+        else [axis.channel for axis in model.axes]
+    )
+    return fingerprint(
+        contract_fingerprint_payload(
+            kind=model.kind,
+            output=model.output,
+            inputs=inputs,
+            operating_mode=model.operating_mode,
+            conditions=model.conditions,
+            eligibility=model.eligibility,
+            deviation=model.deviation,
+        )
+    )
 
 
 @dataclass(frozen=True)
@@ -654,17 +930,35 @@ class ServingStatus:
 
 
 def serving_status(model: BehaviorModel1D | BehaviorModel2D) -> ServingStatus:
-    """Classify a loaded artifact (B01.6) without blessing missing metadata.
+    """Classify a loaded artifact (B01.6, B02.7) without blessing missing metadata.
 
-    A model lacking the schema-2 eligibility contract, or lacking held-out
-    validation evidence, is ``diagnostic_only`` with every applicable reason
-    named. Loading never upgrades a model; only a refit that writes both can.
+    The one trust decision: the daemon's model load and hot reload, the
+    behavior detector, the dashboard, MCP and the refit report all call this.
+    ``active`` requires the schema-2 eligibility contract, held-out rows, and
+    B02 :class:`ValidationEvidence` whose verdict is ``passed`` under this
+    model's current contract, with no publication flag. Anything else is
+    ``diagnostic_only`` with every applicable reason named. Loading never
+    upgrades a model; only a refit that writes all of these can.
     """
     reasons: list[str] = []
     if model.eligibility is None:
         reasons.append(STATUS_LEGACY_NO_CONTRACT)
-    if model.fit.validation_sample_count <= 0 or not model.fit.calibration_sessions:
+    held_out = model.fit.validation_sample_count > 0 and bool(model.fit.calibration_sessions)
+    if not held_out:
         reasons.append(STATUS_NO_HELD_OUT_VALIDATION)
+    # B02.7 — held-out rows alone are not a pass: the evidence must record a
+    # passed gate against declared criteria, under this exact contract.
+    evidence = model.evidence
+    if evidence is None:
+        if held_out:
+            reasons.append(STATUS_NO_GATE_EVIDENCE)
+    else:
+        if evidence.verdict != "passed":
+            details = evidence.failures or ["no failure recorded"]
+            reasons.extend(f"validation_{evidence.verdict}:{detail}" for detail in details)
+        if evidence.contract_fingerprint != contract_fingerprint(model):
+            reasons.append(STATUS_EVIDENCE_CONTRACT_MISMATCH)
+    reasons.extend(model.publication_flags)
     if reasons:
         return ServingStatus("diagnostic_only", tuple(reasons))
     return ServingStatus("active")

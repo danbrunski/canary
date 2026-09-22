@@ -35,7 +35,18 @@ from pathlib import Path
 
 from _cli import add_common_args, filter_sessions_by_age, load_config, resolve_sessions
 
-from src.analysis.refit import Recipe, default_recipes, refit_all
+from src.analysis.behavior_validation import (
+    BehaviorValidationDocument,
+    ValidationContext,
+    decoder_identity,
+    file_identity,
+    group_drives,
+    load_validation_document,
+    mode_labels_predate_fix,
+    piece_time_ranges,
+    validation_document_path,
+)
+from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_all
 from src.analysis.session_classifier import read_classification
 from src.analysis.tune_revisions import (
     TuneRevisionRegistry,
@@ -44,14 +55,16 @@ from src.analysis.tune_revisions import (
 )
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.control.capture_manifest import read_capture_manifest
+from src.control.sessions import session_started_at
 from src.decode.behavior_models import (
     dump_behavior_models,
     load_behavior_models,
     serving_status,
     unknown_operating_modes,
 )
+from src.decode.dbc import DEFAULT_DBC_DIR
 from src.log import configure_logging
-from src.preprocessing.feature_pipeline import build_feature_frame
+from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
 from src.profiles import resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
@@ -148,6 +161,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--validation",
+        type=Path,
+        default=None,
+        help=(
+            "Per-recipe validation criteria (B02). Default: behavior_validation.yaml "
+            "next to the profile's behavior_models.yaml. Recipes without declared "
+            "criteria may publish but stay diagnostic-only."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print what would refit (recipe → fitted / skipped) but don't write --out.",
@@ -175,9 +198,10 @@ def _filter_sessions_by_boundary(sessions: list[Path], boundary: date) -> list[P
     """
     kept: list[Path] = []
     for session in sessions:
-        try:
-            started = datetime.strptime(session.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
+        # The one parser: a capture prefix must not turn a dated session into
+        # an "unknown format" that silently survives the boundary.
+        started = session_started_at(session)
+        if started is None:
             kept.append(session)  # unknown format → keep
             continue
         if started.date() >= boundary:
@@ -224,14 +248,24 @@ def _discover_behavior_capture_sessions(
 def _consistent_tune_revision(
     sessions: list[Path],
     registry: TuneRevisionRegistry | None,
+    document: BehaviorValidationDocument | None = None,
 ) -> str | None:
-    """Return the single calibration identity, refusing ambiguity when known."""
+    """Return the single calibration identity, refusing ambiguity when known.
+
+    An unknown revision is refused unless ``behavior_validation.yaml`` names a
+    resolution for that session (B02.4); excluded sessions must already have
+    been removed by :func:`_apply_exclusions`.
+    """
     if registry is None:
         return None
     resolved: dict[str, list[str]] = {}
     unknown: list[str] = []
     conflicts: list[str] = []
     for session in sessions:
+        resolution = document.resolution_for(session.name) if document is not None else None
+        if resolution is not None and resolution.revision is not None:
+            resolved.setdefault(resolution.revision, []).append(session.name)
+            continue
         revision, _source, conflict = resolve_session_revision(session, registry)
         if conflict:
             conflicts.append(session.name)
@@ -255,6 +289,83 @@ def _consistent_tune_revision(
             f"with explicit session paths or a corpus boundary ({details})"
         )
     return next(iter(resolved))
+
+
+def _apply_exclusions(
+    sessions: list[Path], document: BehaviorValidationDocument | None
+) -> tuple[list[Path], list[str]]:
+    """Drop sessions a named provenance resolution excludes (B02.4)."""
+    if document is None:
+        return sessions, []
+    kept: list[Path] = []
+    notes: list[str] = []
+    for session in sessions:
+        resolution = document.resolution_for(session.name)
+        if resolution is not None and resolution.exclude:
+            notes.append(f"{session.name}: excluded ({resolution.reason})")
+            continue
+        kept.append(session)
+    return kept, notes
+
+
+def _flash_crossings(
+    frame_ranges: dict[str, tuple[datetime | None, datetime | None]],
+    registry: TuneRevisionRegistry | None,
+    document: BehaviorValidationDocument | None,
+) -> tuple[list[str], list[str]]:
+    """Sessions whose recording spans a flash (``(refusals, resolved notes)``).
+
+    A session is assigned the revision in force when it *started*; one that
+    kept recording past the next flash mixes two calibrations and needs a
+    named resolution, not an assumed calibration (B02.4).
+    """
+    if registry is None:
+        return [], []
+    spans: dict[str, tuple[datetime, datetime]] = {}
+    for piece, (first, last) in frame_ranges.items():
+        parent = piece.split("#segment-", 1)[0]
+        start = session_started_at(parent) or first
+        end = last or start
+        if start is None or end is None:
+            continue
+        lo, hi = spans.get(parent, (start, end))
+        spans[parent] = (min(lo, start), max(hi, end))
+    refusals: list[str] = []
+    notes: list[str] = []
+    for parent, (start, end) in sorted(spans.items(), key=lambda item: item[1][0]):
+        at_start, at_end = registry.at(start), registry.at(end)
+        if (at_start and at_start.revision) == (at_end and at_end.revision):
+            continue
+        crossing = (
+            f"{parent} starts on {at_start.revision if at_start else 'unknown'} and ends on "
+            f"{at_end.revision if at_end else 'unknown'}"
+        )
+        resolution = document.resolution_for(parent) if document is not None else None
+        if resolution is not None and resolution.revision is not None:
+            notes.append(f"{crossing}: resolved to {resolution.revision} ({resolution.reason})")
+        else:
+            refusals.append(crossing)
+    return refusals, notes
+
+
+def _event_sidecars(
+    sessions: Sequence[Path],
+) -> tuple[dict[str, set[str]], list[str]]:
+    """Session events from classifier sidecars, excluding pre-D03.22 labels."""
+    session_events: dict[str, set[str]] = {}
+    stale: list[str] = []
+    for session in sessions:
+        classification = read_classification(session)
+        if classification is None:
+            continue
+        if mode_labels_predate_fix(classification.classified_at):
+            stale.append(
+                f"{session.name}: sidecar classified {classification.classified_at} predates "
+                "the mode-label fix f8b7d38; events unusable until D03.22 relabels it"
+            )
+            continue
+        session_events[session.name] = set(classification.event_counts.keys())
+    return session_events, stale
 
 
 def _capture_recipe_allowlists(
@@ -291,7 +402,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     sessions_root = args.sessions_root or scoped.collection.storage_path
     out: Path = args.out or scoped.daemon.behavior_models
 
-    catalog = default_recipes()
+    validation_path: Path = args.validation or validation_document_path(
+        scoped.daemon.behavior_models
+    )
+    try:
+        validation_document = load_validation_document(validation_path)
+    except ValueError as exc:
+        print(f"error: invalid {validation_path}: {exc}", file=sys.stderr)
+        return 2
+    catalog = attach_criteria(default_recipes(), validation_document)
     recipes = _select_recipes(catalog, args.recipe)
     explicit_sessions = bool(args.sessions)
     sessions = resolve_sessions(args, sessions_root)
@@ -326,11 +445,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
+    sessions, exclusion_notes = _apply_exclusions(sessions, validation_document)
+    if not sessions:
+        print("error: every session is excluded by a provenance resolution", file=sys.stderr)
+        return 1
     revision_registry = load_tune_revisions(
         scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
     )
     try:
-        tune_revision = _consistent_tune_revision(sessions, revision_registry)
+        tune_revision = _consistent_tune_revision(sessions, revision_registry, validation_document)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -360,22 +483,67 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     log.info("built feature frame", extra={"rows": len(frame), "columns": len(frame.columns)})
 
+    # B02.4 — a session recording across a flash mixes two calibrations.
+    frame_ranges = piece_time_ranges(frame)
+    crossings, crossing_notes = _flash_crossings(
+        frame_ranges, revision_registry, validation_document
+    )
+    if crossings:
+        print(
+            "error: sessions cross a flash boundary and need a named resolution in "
+            f"{validation_path}: " + "; ".join(crossings),
+            file=sys.stderr,
+        )
+        return 2
+
     # Load each session's classifier sidecar so recipes that require
     # specific events (e.g. ``coolant_warmup`` requires ``cold_start``)
     # filter the input frame down to eligible sessions. Sessions
     # without a sidecar yet are excluded from event-gated recipes; they
     # still feed un-gated ones. Run ``scripts/label_sessions.py`` to
-    # close the gap before relying on event-gated training.
-    session_events: dict[str, set[str]] = {}
-    for session in sessions:
-        classification = read_classification(session)
-        if classification is None:
-            continue
-        session_events[session.name] = set(classification.event_counts.keys())
+    # close the gap before relying on event-gated training. Sidecars
+    # classified before the mode-label fix are excluded too (D03.22).
+    session_events, stale_labels = _event_sidecars(sessions)
     log.info(
         "loaded session classifications for event-gated recipes",
-        extra={"classified": len(session_events), "total_sessions": len(sessions)},
+        extra={
+            "classified": len(session_events),
+            "stale_mode_labels": len(stale_labels),
+            "total_sessions": len(sessions),
+        },
     )
+    drives = group_drives(
+        frame_ranges,
+        join_gap_seconds=(
+            validation_document.drive_join_gap_seconds if validation_document else 600.0
+        ),
+    )
+    provenance = {
+        "sessions": [s.name for s in sessions],
+        "independent_drives": [f"{drive.drive_id}: {', '.join(drive.pieces)}" for drive in drives],
+        "capture_grants": [
+            f"{name}: {', '.join(sorted(grants))}"
+            for name, grants in sorted(capture_recipe_allowlists.items())
+        ],
+        "provenance_resolutions": exclusion_notes + crossing_notes,
+        "mode_labels_stale": stale_labels,
+        "config": [file_identity(args.config)],
+    }
+    context = ValidationContext.for_run(
+        config,
+        validation_document,
+        decoder=decoder_identity(
+            bindings_path=args.bindings, dids_path=DEFAULT_DIDS_PATH, dbc_dir=DEFAULT_DBC_DIR
+        ),
+        criteria_source=file_identity(validation_path),
+        provenance=provenance,
+    )
+    if context.taxonomy_problems:
+        log.warning(
+            "config operating modes differ from the approved taxonomy; new evidence "
+            "cannot pass: %s",
+            list(context.taxonomy_problems),
+        )
 
     models, results = refit_all(
         recipes,
@@ -387,6 +555,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         regrid_recipes=set(args.regrid or ()),
         tune_revision=tune_revision,
         capture_recipe_allowlists=capture_recipe_allowlists,
+        validation_context=context,
     )
 
     _print_report(results, frame_rows=len(frame))
@@ -442,7 +611,7 @@ def _print_report(results: Sequence, frame_rows: int) -> None:
             )
             status = serving_status(res.model)
             status_note = (
-                "" if status.alerting else f"  [diagnostic-only: {', '.join(status.reasons)}]"
+                "" if status.alerting else f"  [diagnostic-only: {', '.join(status.reasons[:3])}]"
             )
             print(
                 f"    ✓ {res.name:35s}  n={fit.sample_count:>6d}  {r2}  "
@@ -491,6 +660,11 @@ def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> 
                         else None
                     ),
                     "serving_status": serving_status(model).to_dict(),
+                    "evidence": (
+                        model.evidence.model_dump(mode="json")
+                        if model.evidence is not None
+                        else None
+                    ),
                 }
             )
             if model.kind == "surface_2d":

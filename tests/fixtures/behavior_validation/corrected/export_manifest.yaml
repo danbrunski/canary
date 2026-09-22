@@ -1,0 +1,43 @@
+# Committed slice (corrected): evaluated columns of the sessions below, written by
+# scripts/evaluate_behavior_models.py --export-rows. Source sessions are pinned by
+# content hash; the parquet files by their own hash. Regenerate with the command in
+# ../evidence_corrected.yaml plus --export-rows <dir>.
+generated_by: scripts/evaluate_behavior_models.py --export-rows
+config: canary.pi.example.yaml@sha256:e95cd6f2183639ba19a54564fc752b4b80cd263dd40ad9fbdb79d378adfee6ec
+profile: nissan-xterra-2008
+artifact: data/nissan-xterra-2008/behavior_models.yaml@sha256:9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa
+artifact_schema_version: 1
+validation: data/nissan-xterra-2008/behavior_validation.yaml@sha256:eadf6f92777557fc1f4c50b49bea44b946d87f26e373ea394e835db18d30c491
+bindings: data/bindings.yaml@sha256:c798f8f6c9d879ce1a9b99b380f2292b379536c0ac84e99e2184cc8ceebd7d8c
+dids: data/dids.yaml@sha256:50943e8ee639a417f949d103434b6ef59690a7564ca2da0c41efbec2f476303f
+git:
+  commit: 94d027d16ec91c471443676e659dca5f23aa0872
+  note: working tree carried the uncommitted B02 change set
+decode_can: mode-inputs
+event_policy: 3-of-5 ticks within 8.0 s, then 30.0 s dedupe
+sessions:
+- name: _capture-tuning-hybrid-research-2026-09-17T184821
+  chunks: 306
+  bytes: 34643682
+  sha256: sha256:de79cf35b0ee9e3641c8a700db8e47101ca57177a93326e96539beef86aafe4a
+  path: ~/canary-data/sessions-0917/_capture-tuning-hybrid-research-2026-09-17T184821
+- name: 2026-09-18T134345
+  chunks: 252
+  bytes: 23338197
+  sha256: sha256:5d81ef40fa8c50984054693bb45675e10e4415c09a53545b703db864bb336725
+  path: ~/canary-data/sessions-0918/2026-09-18T134345
+- name: _capture-fuel-target-research-2026-09-21T195844
+  chunks: 288
+  bytes: 32417785
+  sha256: sha256:52180770561fe4d98ca04f1642a98cd0ce8b5c5186ae583af81b11fd65054266
+  path: ~/canary-data/sessions-0921/_capture-fuel-target-research-2026-09-21T195844
+files:
+- file: 2026-09-18T134345.parquet
+  rows: 1085
+  sha256: sha256:1093d556562d410e5782590cf255af36efc537d49a454571c140c776b38d592a
+- file: _capture-fuel-target-research-2026-09-21T195844.parquet
+  rows: 1192
+  sha256: sha256:75cc4839103f04c45e2cb87f6dc3b840cf2a95362662405f5f47bb5ab1ccd62d
+- file: _capture-tuning-hybrid-research-2026-09-17T184821.parquet
+  rows: 1263
+  sha256: sha256:b0f9b8bee1bc138b710f6423094153b23063e0c2dc467c9779e6ca5bda8c046b

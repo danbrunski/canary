@@ -311,6 +311,38 @@ def _cell_eligible(model: BehaviorModel2D, cell: GridCell) -> bool:
     )
 
 
+def trusted_cell_mask(model: BehaviorModel2D) -> np.ndarray:
+    """Row-major mask of cells the evaluator will serve (count, sessions, dwell)."""
+    return np.asarray([_cell_eligible(model, cell) for cell in model.fit.cells], dtype=bool)
+
+
+def containing_cell_indices(model: BehaviorModel2D, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """Flat row-major index of the cell containing each ``(x, y)``; ``-1`` off-grid.
+
+    Uses the same bin rule as :func:`evaluate_2d` (closed on the right end),
+    so envelope-coverage accounting (B02.4) counts the cells serving uses.
+    """
+    x_axis, y_axis = model.axes
+    x_edges = np.asarray(x_axis.bin_edges, dtype=float)
+    y_edges = np.asarray(y_axis.bin_edges, dtype=float)
+    xv = np.asarray(x, dtype=float)
+    yv = np.asarray(y, dtype=float)
+    inside = (
+        np.isfinite(xv)
+        & np.isfinite(yv)
+        & (xv >= x_edges[0])
+        & (xv <= x_edges[-1])
+        & (yv >= y_edges[0])
+        & (yv <= y_edges[-1])
+    )
+    out = np.full(len(xv), -1, dtype=int)
+    if inside.any():
+        i = _digitize_into_bins(xv[inside], x_edges)
+        j = _digitize_into_bins(yv[inside], y_edges)
+        out[inside] = i * y_axis.bin_count + j
+    return out
+
+
 # ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------

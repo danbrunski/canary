@@ -202,7 +202,9 @@ def _patch_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     ``cold_start`` event so the post-Phase-C event-gated ``coolant_warmup``
     recipe finds the session eligible.
     """
-    sessions = [tmp_path / "sessions" / f"2026-05-13T12{minute:02d}00" for minute in range(3)]
+    # Three independent drives (days apart): B02.3 groups directories within
+    # the join gap into one physical drive, so minutes-apart names would be one.
+    sessions = [tmp_path / "sessions" / f"2026-05-1{day}T120000" for day in range(3)]
     # Mirror what ``label_sessions.py`` would write — minimal but valid.
     import json
 
@@ -213,7 +215,9 @@ def _patch_pipeline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
                 {
                     "schema_version": 1,
                     "classifier_version": "0.1.0",
-                    "classified_at": "2026-05-13T12:00:00Z",
+                    # After the mode-label fix (f8b7d38): older sidecars are
+                    # excluded from event gating until D03.22 relabels them.
+                    "classified_at": "2026-09-21T12:00:00Z",
                     "session_id": session.name,
                     "duration_seconds": 600.0,
                     "summary": {
@@ -291,6 +295,14 @@ def test_main_writes_output_yaml(
     assert report["recipes"][0]["calibration_sessions"]
     assert "tune_revision" in report["recipes"][0]
     assert "conditions" in report["recipes"][0]
+    # B02 — the report carries the held-out evidence and its named verdict.
+    # canary.example.yaml adds IMU event modes the profile has not approved,
+    # so this evidence cannot pass whatever the numbers say.
+    evidence = report["recipes"][0]["evidence"]
+    assert evidence["split"]["test"] and evidence["test"]["evaluated"] > 0
+    assert evidence["verdict"] != "passed"
+    assert "mode_taxonomy:unapproved_mode:launch" in evidence["failures"]
+    assert report["recipes"][0]["serving_status"]["state"] == "diagnostic_only"
     # YAML loads cleanly and contains the model
     from src.decode.behavior_models import load_behavior_models
 
@@ -476,7 +488,7 @@ def test_main_bumps_version_when_underlying_data_changes(
         refit_cli,
         "build_feature_frame",
         lambda *_a, **_k: pd.concat(
-            [_frame(f"2026-05-13T12{minute:02d}00", seed=10 + minute) for minute in range(3)],
+            [_frame(f"2026-05-1{day}T120000", seed=10 + day) for day in range(3)],
             ignore_index=True,
         ),
     )

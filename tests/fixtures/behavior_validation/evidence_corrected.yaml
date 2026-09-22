@@ -1,0 +1,146 @@
+# B02.2 evidence manifest — the sessions behind the reproducible behavior
+# validation report (data/analyses/2026-09-21-behavior-validation-report.md).
+#
+# Too large to commit (~20-40 MB each); pinned by content hash instead. Run
+#   .venv/bin/python scripts/evaluate_behavior_models.py --manifest <this file> ...
+# and a changed or missing session refuses to evaluate. The small committed
+# slices next to this file (historical/, corrected/) are the evaluated columns
+# of these same sessions, written by --export-rows, for the offline tests.
+manifest: behavior-validation-corrected
+corpus_root: ~/canary-data
+command: scripts/evaluate_behavior_models.py --config canary.pi.example.yaml --profile nissan-xterra-2008
+  --artifact data/nissan-xterra-2008/behavior_models.yaml --mode corrected --manifest tests/fixtures/behavior_validation/evidence_corrected.yaml
+  --out <report.json>
+purpose: September counterexamples under the approved taxonomy; training sessions supply the simple baseline
+  only.
+missing_evidence:
+- 'cat_warmup training sessions (2026-05-18..24) are not in the local corpus: its baseline, and so its
+  skill, cannot be computed'
+- 'no independent drive for any model is labelled healthy or faulty: exceedances are not false positives'
+sessions:
+- path: sessions/nissan-xterra-2008/2026-07-18T202456
+  role: training
+  sha256: sha256:3b4bca062c6e719a9c847aab7f4529df1e0e550e8c5e79b5a35bae1ca8043ac3
+  chunks: 264
+  bytes: 20459959
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-18T215941
+  role: training
+  sha256: sha256:8a8fa3fce3aaef1dbd614c54892b064340c0df9488843cc001c7b824fc9faf66
+  chunks: 237
+  bytes: 21941095
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-18T222019
+  role: training
+  sha256: sha256:c802c49e1bfa415510bb2db9def90d675095ce85a783699fee6e59876f92a9e9
+  chunks: 190
+  bytes: 18426242
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T000112
+  role: training
+  sha256: sha256:e60c357a0c63ee386ed748ba34dd816ba739550ef4183dbc972bb4061f844392
+  chunks: 344
+  bytes: 20470012
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T003124
+  role: training
+  sha256: sha256:6f03d7a699d8130b70230d9ed0e04f586276a553bdcbbd9ba20010a9af8c55f3
+  chunks: 1680
+  bytes: 14186817
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-19T202721
+  role: training
+  sha256: sha256:74ad0268698852d31df0b91f512060234e2e82bb2687c6e61000dbb86371e402
+  chunks: 667
+  bytes: 19597956
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T143129
+  role: training
+  sha256: sha256:dcbcba2bdf06a78fc190d31a6026e149676b98013b87dc1edad537c444c43ef3
+  chunks: 587
+  bytes: 46374318
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T161632
+  role: training
+  sha256: sha256:d21501b0b711de2127951cf6e7c353eb4990dd6f357703d15f3489c38d549631
+  chunks: 155
+  bytes: 12575602
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T163011
+  role: training
+  sha256: sha256:098e44c1b5a2388d1166037f63b9f62949cacf7c5f24831e6cb4d9483c3d0802
+  chunks: 103
+  bytes: 8179597
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T163917
+  role: training
+  sha256: sha256:5633fd55782fa0c3c058393735f4ecfeef024d6d4044b14e83a6202e8d9b102f
+  chunks: 33
+  bytes: 2624829
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-22T170353
+  role: training
+  sha256: sha256:24e8d126f0c7b12a8dcc72e0e21ff1180dae9d60969c790b2f37ce0b8f72a350
+  chunks: 137
+  bytes: 4767359
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T162332
+  role: training
+  sha256: sha256:90c867566b93a4ef563fde52a31c6724a0dc3cabcb8b81047647c44c0b879bc9
+  chunks: 243
+  bytes: 21087666
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T164436
+  role: training
+  sha256: sha256:9cf3e7f572c3de4dd27ae53b2c04572c732bef83f2a1a0b8659cf260c3533975
+  chunks: 613
+  bytes: 22702044
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T214348
+  role: training
+  sha256: sha256:02f65f77a4ec3bce725e9095902a8e6124314c07ca7972b532b238effb9ff16c
+  chunks: 579
+  bytes: 50540498
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/2026-07-26T223147
+  role: training
+  sha256: sha256:46f656d7109844db2284aead419fd5ada73a25c43dc2b2b3c911e8738d30a0a2
+  chunks: 219
+  bytes: 17513531
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/_capture-tuning-did-2026-08-06T003148
+  role: training
+  sha256: sha256:8c5de7068fb6b8d384a6442fd7b4e718330e2517f4347e814161266d22ca79fc
+  chunks: 154
+  bytes: 10540653
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/_capture-tuning-did-2026-08-06T034041
+  role: training
+  sha256: sha256:51090cd4a51b977696b1766fe74b3aa66f33f3c229a55eae289c3f439347cf39
+  chunks: 49
+  bytes: 4611731
+  note: shipped models' training session; baseline fitting only
+- path: sessions/nissan-xterra-2008/_capture-tuning-did-2026-08-06T145004
+  role: training
+  sha256: sha256:a31b186bb1a2b7370b39ba36d4c5bd920badf1a53d144554bbd87b078a186db4
+  chunks: 353
+  bytes: 43051116
+  note: shipped models' training session; baseline fitting only
+- path: sessions-0917/_capture-tuning-hybrid-research-2026-09-17T184821
+  role: evaluation
+  sha256: sha256:de79cf35b0ee9e3641c8a700db8e47101ca57177a93326e96539beef86aafe4a
+  chunks: 306
+  bytes: 34643682
+  note: S17 later hybrid capture
+- path: sessions-0918/2026-09-18T134345
+  role: evaluation
+  sha256: sha256:5d81ef40fa8c50984054693bb45675e10e4415c09a53545b703db864bb336725
+  chunks: 252
+  bytes: 23338197
+  note: S18 cold start, baro 71-73 kPa, IAT 13-21 degC
+- path: sessions-0921/_capture-fuel-target-research-2026-09-21T195844
+  role: evaluation
+  sha256: sha256:52180770561fe4d98ca04f1642a98cd0ce8b5c5186ae583af81b11fd65054266
+  chunks: 288
+  bytes: 32417785
+  note: S21 after the September calibration edit

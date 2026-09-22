@@ -1,0 +1,35 @@
+# Committed slice (historical): evaluated columns of the sessions below, written by
+# scripts/evaluate_behavior_models.py --export-rows. Source sessions are pinned by
+# content hash; the parquet files by their own hash. Regenerate with the command in
+# ../evidence_historical.yaml plus --export-rows <dir>.
+generated_by: scripts/evaluate_behavior_models.py --export-rows
+config: canary.pi.example.yaml@sha256:e95cd6f2183639ba19a54564fc752b4b80cd263dd40ad9fbdb79d378adfee6ec
+profile: nissan-xterra-2008
+artifact: data/nissan-xterra-2008/behavior_models.yaml@sha256:9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa
+artifact_schema_version: 1
+validation: data/nissan-xterra-2008/behavior_validation.yaml@sha256:eadf6f92777557fc1f4c50b49bea44b946d87f26e373ea394e835db18d30c491
+bindings: data/bindings.yaml@sha256:c798f8f6c9d879ce1a9b99b380f2292b379536c0ac84e99e2184cc8ceebd7d8c
+dids: data/dids.yaml@sha256:50943e8ee639a417f949d103434b6ef59690a7564ca2da0c41efbec2f476303f
+git:
+  commit: 94d027d16ec91c471443676e659dca5f23aa0872
+  note: working tree carried the uncommitted B02 change set
+decode_can: none
+event_policy: 3-of-5 ticks within 8.0 s, then 30.0 s dedupe
+sessions:
+- name: 2026-07-26T225058
+  chunks: 674
+  bytes: 42107705
+  sha256: sha256:f95f109db094d121fd24dc023db1218e516ac75fa2dae51ff52cef4427f758bf
+  path: ~/canary-data/sessions/nissan-xterra-2008/2026-07-26T225058
+- name: _capture-tuning-did-2026-08-07T005351
+  chunks: 341
+  bytes: 42537455
+  sha256: sha256:15661c068b4ff092a9fe9e38a88d8906e687b9dca68614c067a5844ab8129b7e
+  path: ~/canary-data/sessions/nissan-xterra-2008/_capture-tuning-did-2026-08-07T005351
+files:
+- file: 2026-07-26T225058.parquet
+  rows: 3422
+  sha256: sha256:51003cc37e0dd30c6f2b2c6ea5d5ca6f4562ae437ec2f754a6f9e0dc46d805aa
+- file: _capture-tuning-did-2026-08-07T005351.parquet
+  rows: 1486
+  sha256: sha256:b190d9511873ef6e40d0206c77f13016793e0b179df57ca452359f36b592b68c

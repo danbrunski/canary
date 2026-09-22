@@ -1,0 +1,1378 @@
+"""Reproducible behavior-model validation (B02).
+
+One evaluator for every question the refit and the offline review ask of a
+behavior model: which rows could it speak for, how wrong was it there in
+physical units, would it have alerted, could it have seen a fault of the size
+the operator cares about, and on how many *independent* drives was that
+measured.
+
+The pieces, each used by both ``src.analysis.refit`` (publication) and
+``scripts/evaluate_behavior_models.py`` (the reproducible report):
+
+* **Drive grouping** (B02.3). A physical drive is split across directories —
+  a capture rotates the writer into ``_capture-…`` and back — and the
+  resampler splits a directory at gaps into ``#segment-NNN`` pieces. Pieces
+  are grouped by parent directory, then adjacent directories are joined when
+  the gap between them is at most ``join_gap_seconds``. Order comes from
+  parsed start times (``src.control.sessions.session_started_at``) or the
+  frame's own timestamps — never from directory names, where a capture prefix
+  sorts a later drive "earlier".
+* **Grouped splits.** Newest drives form the test fold, the next ones the
+  calibration fold, the rest train. No drive's pieces may cross folds; an
+  explicit assignment that tries is refused (:class:`LeakedDriveError`).
+* **Row evaluation** through the single B01 eligibility evaluator, with
+  denominators kept apart: rows, input-present, fresh, eligible (passes the
+  serving contract), evaluated (on-map with an actual). An ineligible row is
+  never an ``ok`` measurement.
+* **Metrics in physical units** — MAE, signed bias, absolute-error quantiles,
+  R² only as a descriptor, warning/critical band half-widths — plus event
+  counts after the daemon's own persistence gate and emitter dedupe, reported
+  separately from per-row band exceedance. Drive-level uncertainty: per-drive
+  MAE spread, and a drive-resampled bootstrap once three drives exist
+  (adjacent seconds are never treated as independent).
+* **Skill and sensitivity** (B02.6): a training-fitted simple baseline scored
+  on the same rows, and explicitly synthetic step faults of declared
+  magnitude/duration run through the same gate. Synthetic detection is never
+  called fault recall.
+* **Criteria** come from the vehicle profile's ``behavior_validation.yaml``;
+  :func:`apply_criteria` turns metrics into ``passed`` / ``failed`` /
+  ``insufficient_evidence`` with every failure named, and
+  :func:`src.decode.behavior_models.serving_status` is the only consumer of
+  that verdict.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal
+
+import numpy as np
+import pandas as pd
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.alerts.fusion import PersistenceGate
+from src.analysis.surface_2d import containing_cell_indices, trusted_cell_mask
+from src.config import CanaryConfig
+from src.control.sessions import session_started_at
+from src.decode.behavior_decoder import band_half_widths, explain_expected_column, grade_deviation
+from src.decode.behavior_eligibility import (
+    OFF_MAP,
+    ServingSpec,
+    eligibility_reasons,
+    serving_spec,
+)
+from src.decode.behavior_models import (
+    BehaviorModel1D,
+    BehaviorModel2D,
+    BehaviorModels,
+    DriveRecord,
+    DriveSplitRecord,
+    FoldMetrics,
+    RobustBaselineFit,
+    SyntheticSensitivity,
+    ValidationCriteria,
+    ValidationEvidence,
+    contract_fingerprint,
+)
+from src.preprocessing.resampler import (
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    gap_column,
+)
+from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.session_context import (
+    StartContextSpec,
+    append_start_context,
+    start_context_columns,
+)
+
+log = logging.getLogger(__name__)
+
+#: Bump when the evaluator's definitions change (denominators, metrics,
+#: event accounting). Persisted in every evidence record.
+EVALUATOR_VERSION = 1
+
+#: Default join gap between adjacent directories of one physical drive. A
+#: capture arm/disarm rotates the writer with ~0 s gap; an engine restart
+#: after a short stop is still the same outing (same fuel, ambient, heat).
+DEFAULT_JOIN_GAP_SECONDS = 600.0
+
+#: Drives needed before a drive-resampled bootstrap interval is reported.
+MIN_BOOTSTRAP_DRIVES = 3
+
+#: Evaluated rows a cell / decile needs to count as visited (envelope coverage).
+ENVELOPE_MIN_ROWS = 5
+
+#: Name of the profile-data file holding the criteria (next to behavior_models.yaml).
+VALIDATION_FILENAME = "behavior_validation.yaml"
+
+Fold = Literal["train", "calibration", "test"]
+
+#: D03.22 — classifier sidecars written before this commit derived mode
+#: labels (and the events keyed on them) from raw broadcast counts whenever
+#: Mode 01 was stale. Rows in a refit frame are re-segmented with current
+#: code; the sidecar *events* that gate warmup recipes are not, so a sidecar
+#: classified before the fix is not evidence until D03.22 relabels it.
+MODE_LABEL_FIX_COMMIT = "f8b7d38"
+MODE_LABEL_FIX_AT = datetime(2026, 9, 20, 4, 0, 7, tzinfo=UTC)
+
+
+def mode_labels_predate_fix(classified_at: str) -> bool:
+    """True when a sidecar was classified before :data:`MODE_LABEL_FIX_AT`
+    (or its timestamp cannot be read — unknown is not current)."""
+    try:
+        stamp = datetime.fromisoformat(classified_at.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=UTC)
+    return stamp < MODE_LABEL_FIX_AT
+
+
+class UnorderedSessionsError(ValueError):
+    """A session piece has neither a parseable start stamp nor timestamps."""
+
+
+class LeakedDriveError(ValueError):
+    """Pieces of one physical drive were assigned to more than one fold."""
+
+
+# ---------------------------------------------------------------------------
+# Profile data: criteria document
+# ---------------------------------------------------------------------------
+
+
+class _Strict(BaseModel):
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+
+class ProvenanceResolution(_Strict):
+    """A named decision for a session whose calibration identity is ambiguous.
+
+    Sessions with an unknown tune revision, or whose recording crosses a
+    flash, are refused until one of these names what to do and why.
+    """
+
+    session: str
+    #: The calibration the session's rows belong to, or ``None`` with
+    #: ``exclude: true`` to drop it from behavior-model evidence.
+    revision: str | None = None
+    exclude: bool = False
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _one_decision(self) -> ProvenanceResolution:
+        if self.exclude == (self.revision is not None):
+            raise ValueError("a resolution either names a revision or excludes the session")
+        return self
+
+
+class BehaviorValidationDocument(_Strict):
+    """``behavior_validation.yaml`` — per-vehicle validation policy (B02.4/B02.6)."""
+
+    schema_version: Literal[1] = 1
+    #: The operator-approved segmenter vocabulary. A config whose modes
+    #: differ can reproduce history but not produce corrected evidence.
+    approved_operating_modes: list[str] = Field(min_length=1)
+    #: Modes that existed historically and what replaced them.
+    retired_operating_modes: dict[str, str] = Field(default_factory=dict)
+    drive_join_gap_seconds: float = Field(default=DEFAULT_JOIN_GAP_SECONDS, ge=0)
+    provenance_resolutions: list[ProvenanceResolution] = Field(default_factory=list)
+    recipes: dict[str, ValidationCriteria] = Field(default_factory=dict)
+
+    def resolution_for(self, session: str) -> ProvenanceResolution | None:
+        for resolution in self.provenance_resolutions:
+            if resolution.session == session:
+                return resolution
+        return None
+
+    def taxonomy_problems(self, configured_modes: Iterable[str]) -> list[str]:
+        """Named differences between a config's modes and the approved set."""
+        configured = set(configured_modes)
+        approved = set(self.approved_operating_modes)
+        problems = [
+            f"retired_mode_present:{mode}->{self.retired_operating_modes[mode]}"
+            for mode in sorted(configured & set(self.retired_operating_modes))
+        ]
+        problems += [
+            f"unapproved_mode:{mode}"
+            for mode in sorted(configured - approved - set(self.retired_operating_modes))
+        ]
+        problems += [f"approved_mode_missing:{mode}" for mode in sorted(approved - configured)]
+        return problems
+
+
+def validation_document_path(behavior_models_path: Path) -> Path:
+    return behavior_models_path.parent / VALIDATION_FILENAME
+
+
+def load_validation_document(path: Path) -> BehaviorValidationDocument | None:
+    if not path.exists():
+        return None
+    return BehaviorValidationDocument.model_validate(yaml.safe_load(path.read_text()))
+
+
+def file_identity(path: Path) -> str:
+    """``<path>@sha256:<hex>`` or ``<path>@missing`` — for provenance records."""
+    if not path.exists() or not path.is_file():
+        return f"{path}@missing"
+    return f"{path}@sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def file_sha256(path: Path) -> str | None:
+    if not path.exists() or not path.is_file():
+        return None
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def decoder_identity(
+    *, bindings_path: Path, dids_path: Path, dbc_dir: Path | None = None
+) -> dict[str, str]:
+    """Content identity of every catalog that turns bytes into model inputs."""
+    identity = {
+        "bindings": file_sha256(bindings_path) or "missing",
+        "dids": file_sha256(dids_path) or "missing",
+    }
+    if dbc_dir is not None:
+        digest = hashlib.sha256()
+        files = sorted(dbc_dir.glob("*.dbc")) if dbc_dir.exists() else []
+        for dbc in files:
+            digest.update(dbc.name.encode())
+            digest.update(dbc.read_bytes())
+        identity["dbc"] = "sha256:" + digest.hexdigest() if files else "none"
+    return identity
+
+
+# ---------------------------------------------------------------------------
+# Drive grouping and grouped splits (B02.3)
+# ---------------------------------------------------------------------------
+
+SEGMENT_MARKER = "#segment-"
+
+
+def parent_session(piece: str) -> str:
+    """The recording directory a (possibly ``#segment``) piece came from."""
+    return piece.split(SEGMENT_MARKER, 1)[0]
+
+
+@dataclass(frozen=True)
+class Drive:
+    """One independent physical drive: every piece recorded during it."""
+
+    drive_id: str
+    pieces: tuple[str, ...]
+    started_at: datetime
+    ended_at: datetime
+
+    def record(self) -> DriveRecord:
+        return DriveRecord(
+            drive_id=self.drive_id,
+            pieces=list(self.pieces),
+            started_at=self.started_at.isoformat(),
+            ended_at=self.ended_at.isoformat(),
+        )
+
+
+def piece_time_ranges(frame: pd.DataFrame) -> dict[str, tuple[datetime | None, datetime | None]]:
+    """``{piece: (first, last)}`` from the frame's timestamps, if it has them."""
+    if SESSION_COLUMN not in frame.columns:
+        return {}
+    pieces = frame[SESSION_COLUMN].astype(str)
+    if TIMESTAMP_COLUMN not in frame.columns:
+        return {piece: (None, None) for piece in pieces.unique()}
+    stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True, errors="coerce")
+    grouped = pd.DataFrame({"piece": pieces, "t": stamps}).groupby("piece", sort=False)["t"]
+    out: dict[str, tuple[datetime | None, datetime | None]] = {}
+    for piece, lo, hi in zip(
+        grouped.min().index, grouped.min().to_numpy(), grouped.max().to_numpy(), strict=True
+    ):
+        first = None if pd.isna(lo) else pd.Timestamp(lo).tz_convert(UTC).to_pydatetime()
+        last = None if pd.isna(hi) else pd.Timestamp(hi).tz_convert(UTC).to_pydatetime()
+        out[str(piece)] = (first, last)
+    return out
+
+
+def group_drives(
+    ranges: Mapping[str, tuple[datetime | None, datetime | None]],
+    *,
+    join_gap_seconds: float = DEFAULT_JOIN_GAP_SECONDS,
+) -> list[Drive]:
+    """Group pieces into independent drives, oldest first.
+
+    A parent directory's start is its parsed name stamp, else its earliest
+    timestamp; its end is its latest timestamp, else its start. Parents are
+    joined into one drive when the next one starts within
+    ``join_gap_seconds`` of the current drive's end (overlap included).
+    """
+    by_parent: dict[str, list[str]] = {}
+    for piece in ranges:
+        by_parent.setdefault(parent_session(piece), []).append(piece)
+    spans: list[tuple[datetime, datetime, str]] = []
+    unordered: list[str] = []
+    for parent, pieces in by_parent.items():
+        firsts = [t for p in pieces if (t := ranges[p][0]) is not None]
+        lasts = [t for p in pieces if (t := ranges[p][1]) is not None]
+        named = session_started_at(parent)
+        first = min(firsts) if firsts else None
+        start = named if named is not None else first
+        if start is None:
+            unordered.append(parent)
+            continue
+        end = max([start, *lasts]) if lasts else start
+        spans.append((start, end, parent))
+    if unordered:
+        raise UnorderedSessionsError(
+            "cannot order sessions without a parseable start stamp or timestamps: "
+            + ", ".join(sorted(unordered))
+        )
+    spans.sort(key=lambda item: (item[0], item[1]))
+    drives: list[Drive] = []
+    current: list[tuple[datetime, datetime, str]] = []
+    current_end: datetime | None = None
+    for start, end, parent in spans:
+        if current and current_end is not None:
+            gap = (start - current_end).total_seconds()
+            if gap > join_gap_seconds:
+                drives.append(_make_drive(current, by_parent))
+                current = []
+                current_end = None
+        current.append((start, end, parent))
+        current_end = end if current_end is None else max(current_end, end)
+    if current:
+        drives.append(_make_drive(current, by_parent))
+    return drives
+
+
+def _make_drive(
+    spans: Sequence[tuple[datetime, datetime, str]], by_parent: Mapping[str, list[str]]
+) -> Drive:
+    pieces: list[str] = []
+    for _start, _end, parent in spans:
+        pieces.extend(sorted(by_parent[parent], key=_segment_order))
+    return Drive(
+        drive_id=spans[0][2],
+        pieces=tuple(pieces),
+        started_at=min(start for start, _end, _parent in spans),
+        ended_at=max(end for _start, end, _parent in spans),
+    )
+
+
+def _segment_order(piece: str) -> tuple[int, str]:
+    _, _, segment = piece.partition(SEGMENT_MARKER)
+    return (int(segment) if segment.isdigit() else 0, piece)
+
+
+@dataclass(frozen=True)
+class DriveSplit:
+    train: tuple[Drive, ...]
+    calibration: tuple[Drive, ...]
+    test: tuple[Drive, ...]
+    policy: str
+    join_gap_seconds: float
+    excluded: tuple[Drive, ...] = ()
+
+    def pieces(self, fold: Fold) -> set[str]:
+        drives = {"train": self.train, "calibration": self.calibration, "test": self.test}[fold]
+        return {piece for drive in drives for piece in drive.pieces}
+
+    def record(self) -> DriveSplitRecord:
+        return DriveSplitRecord(
+            policy=self.policy,
+            join_gap_seconds=self.join_gap_seconds,
+            train=[d.record() for d in self.train],
+            calibration=[d.record() for d in self.calibration],
+            test=[d.record() for d in self.test],
+            excluded=[d.record() for d in self.excluded],
+        )
+
+
+def chronological_split(
+    drives: Sequence[Drive],
+    *,
+    n_test: int,
+    n_calibration: int = 0,
+    join_gap_seconds: float = DEFAULT_JOIN_GAP_SECONDS,
+    excluded: Sequence[Drive] = (),
+) -> DriveSplit:
+    """Newest ``n_test`` drives test, the ``n_calibration`` before them
+    calibration, the rest train — by parsed start time."""
+    ordered = sorted(drives, key=lambda d: (d.started_at, d.ended_at))
+    n_test = max(0, min(n_test, len(ordered)))
+    n_calibration = max(0, min(n_calibration, len(ordered) - n_test))
+    cut_test = len(ordered) - n_test
+    cut_cal = cut_test - n_calibration
+    return DriveSplit(
+        train=tuple(ordered[:cut_cal]),
+        calibration=tuple(ordered[cut_cal:cut_test]),
+        test=tuple(ordered[cut_test:]),
+        policy=(
+            f"chronological by parsed start: newest {n_test} drive(s) test, "
+            f"previous {n_calibration} calibration, remainder train"
+        ),
+        join_gap_seconds=join_gap_seconds,
+        excluded=tuple(excluded),
+    )
+
+
+def explicit_split(
+    drives: Sequence[Drive],
+    assignment: Mapping[str, Fold],
+    *,
+    join_gap_seconds: float = DEFAULT_JOIN_GAP_SECONDS,
+) -> DriveSplit:
+    """Folds named per piece or parent directory; refuses a drive in two folds."""
+    folds: dict[str, list[Drive]] = {"train": [], "calibration": [], "test": []}
+    excluded: list[Drive] = []
+    for drive in drives:
+        named = {
+            assignment[key]
+            for piece in drive.pieces
+            for key in (piece, parent_session(piece))
+            if key in assignment
+        }
+        if len(named) > 1:
+            raise LeakedDriveError(
+                f"drive {drive.drive_id} (pieces {', '.join(drive.pieces)}) is assigned to "
+                f"folds {sorted(named)}; pieces of one physical drive may not cross folds"
+            )
+        if not named:
+            excluded.append(drive)
+            continue
+        folds[next(iter(named))].append(drive)
+    return DriveSplit(
+        train=tuple(folds["train"]),
+        calibration=tuple(folds["calibration"]),
+        test=tuple(folds["test"]),
+        policy="explicit assignment",
+        join_gap_seconds=join_gap_seconds,
+        excluded=tuple(excluded),
+    )
+
+
+def training_leaks(
+    test_drives: Sequence[Drive],
+    training_pieces: Iterable[str],
+) -> dict[str, list[str]]:
+    """Test drives that contain any piece (or parent directory) a model trained on."""
+    trained = {parent_session(piece) for piece in training_pieces}
+    leaks: dict[str, list[str]] = {}
+    for drive in test_drives:
+        hit = sorted({p for p in drive.pieces if parent_session(p) in trained})
+        if hit:
+            leaks[drive.drive_id] = hit
+    return leaks
+
+
+# ---------------------------------------------------------------------------
+# Row evaluation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EventPolicy:
+    """The daemon's alert path, offline: persistence gate + emitter dedupe."""
+
+    required: int = 3
+    window: int | None = 5
+    window_seconds: float | None = 8.0
+    dedupe_seconds: float = 30.0
+    interval_seconds: float = 1.0
+
+    @classmethod
+    def from_config(cls, config: CanaryConfig) -> EventPolicy:
+        alerts = config.alerts
+        return cls(
+            required=alerts.min_consecutive_ticks,
+            window=alerts.persistence_window_ticks,
+            window_seconds=alerts.persistence_window_seconds,
+            dedupe_seconds=alerts.min_seconds_between_events,
+            interval_seconds=1.0 / config.preprocessing.resample_hz,
+        )
+
+    def describe(self) -> str:
+        return (
+            f"{self.required}-of-{self.window or self.required} ticks within "
+            f"{self.window_seconds} s, then {self.dedupe_seconds} s dedupe"
+        )
+
+
+@dataclass(frozen=True)
+class RowEvaluation:
+    """Per-row outcome arrays for one model over one frame."""
+
+    pieces: np.ndarray
+    seconds: np.ndarray
+    modes: np.ndarray
+    present: np.ndarray
+    fresh: np.ndarray
+    reasons: np.ndarray
+    expected: np.ndarray
+    actual: np.ndarray
+    severity: np.ndarray
+    warning_half_width: np.ndarray
+    critical_half_width: np.ndarray
+    x: np.ndarray
+    y: np.ndarray
+
+    @property
+    def evaluated(self) -> np.ndarray:
+        return np.asarray(pd.isna(self.reasons), dtype=bool)
+
+    @property
+    def eligible(self) -> np.ndarray:
+        off_map = np.asarray([reason == OFF_MAP for reason in self.reasons], dtype=bool)
+        return np.asarray(self.evaluated | off_map, dtype=bool)
+
+    @property
+    def residual(self) -> np.ndarray:
+        return np.asarray(self.actual - self.expected, dtype=float)
+
+    def subset(self, mask: np.ndarray) -> RowEvaluation:
+        return RowEvaluation(
+            **{name: getattr(self, name)[mask] for name in self.__dataclass_fields__}
+        )
+
+
+def _column(frame: pd.DataFrame, name: str) -> np.ndarray:
+    if name not in frame.columns:
+        return np.full(len(frame), np.nan)
+    return np.asarray(pd.to_numeric(frame[name], errors="coerce"), dtype=float)
+
+
+def _seconds(frame: pd.DataFrame, interval: float) -> np.ndarray:
+    if TIMESTAMP_COLUMN in frame.columns:
+        stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True, errors="coerce")
+        values = stamps.astype("int64").to_numpy(dtype=float) / 1e9
+        values[stamps.isna().to_numpy()] = np.nan
+        return values
+    return np.arange(len(frame), dtype=float) * interval
+
+
+def evaluate_rows(
+    model: BehaviorModel1D | BehaviorModel2D,
+    frame: pd.DataFrame,
+    *,
+    spec: ServingSpec | None = None,
+    interval_seconds: float = 1.0,
+    output_offset: float = 0.0,
+) -> RowEvaluation:
+    """Evaluate ``model`` on every row of ``frame`` through the B01 evaluator.
+
+    ``spec`` replaces the row-selection contract — used to reproduce a legacy
+    artifact (no persisted contract) under its catalog recipe's contract; the
+    model's own gates still apply on top. ``output_offset`` adds an explicitly
+    synthetic step to the actual output column (and to any input that *is*
+    that column), then re-evaluates — derived columns are not recomputed.
+    """
+    model_spec = serving_spec(model)
+    spec = spec or model_spec
+    output = model_spec.output
+    work = frame
+    cold = spec.eligibility.cold_start if spec.eligibility is not None else None
+    if cold is not None and SESSION_COLUMN in work.columns:
+        # Same engine-start fold the refit and live source run; a legacy
+        # model's frame was built without a contract that asked for it.
+        if any(column not in work.columns for column in start_context_columns(cold)):
+            work = append_start_context(work, [StartContextSpec.from_requirement(cold)])
+    if output_offset:
+        work = work.copy()
+        work[output] = pd.to_numeric(work[output], errors="coerce") + output_offset
+    channels = [*model_spec.inputs, output]
+    present = np.ones(len(work), dtype=bool)
+    fresh = np.ones(len(work), dtype=bool)
+    for channel in channels:
+        values = _column(work, channel)
+        present &= np.isfinite(values)
+        gap = gap_column(channel)
+        if gap in work.columns:
+            fresh &= ~work[gap].fillna(False).astype(bool).to_numpy()
+    fresh &= present
+
+    contract_reasons = eligibility_reasons(work, spec, include_actual=True)
+    expected, model_reasons = explain_expected_column(work, model)
+    reasons = np.where(pd.isna(contract_reasons), model_reasons, contract_reasons).astype(object)
+    actual = _column(work, output)
+    evaluated = np.asarray(pd.isna(reasons), dtype=bool) & np.isfinite(expected)
+    evaluated &= np.isfinite(actual)
+    # A row the contract passed with a finite expected but no finite actual
+    # already carries an actual_* reason from ``include_actual``.
+    severity = np.full(len(work), None, dtype=object)
+    warn = np.full(len(work), np.nan)
+    crit = np.full(len(work), np.nan)
+    axis_channels = (
+        [model.axis.channel]
+        if isinstance(model, BehaviorModel1D)
+        else [axis.channel for axis in model.axes]
+    )
+    axis_values = [_column(work, channel) for channel in axis_channels]
+    for i in np.flatnonzero(evaluated):
+        point = {
+            channel: float(values[i])
+            for channel, values in zip(axis_channels, axis_values, strict=True)
+        }
+        severity[i] = grade_deviation(model, point, float(actual[i] - expected[i]))
+        w, c = band_half_widths(model, point)
+        warn[i] = np.nan if w is None else w
+        crit[i] = np.nan if c is None else c
+    pieces = (
+        work[SESSION_COLUMN].astype(str).to_numpy()
+        if SESSION_COLUMN in work.columns
+        else np.full(len(work), "", dtype=object)
+    )
+    modes = (
+        work[MODE_COLUMN].astype(str).to_numpy()
+        if MODE_COLUMN in work.columns
+        else np.full(len(work), "all", dtype=object)
+    )
+    return RowEvaluation(
+        pieces=pieces,
+        seconds=_seconds(work, interval_seconds),
+        modes=modes,
+        present=present,
+        fresh=fresh,
+        reasons=reasons,
+        expected=np.where(evaluated, expected, np.nan),
+        actual=actual,
+        severity=severity,
+        warning_half_width=warn,
+        critical_half_width=crit,
+        x=axis_values[0],
+        y=axis_values[1] if len(axis_values) > 1 else np.full(len(work), np.nan),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Events, baselines, envelope
+# ---------------------------------------------------------------------------
+
+
+def _verdicts(ev: RowEvaluation) -> np.ndarray:
+    """Per-row detector verdict: ``None`` (no measurement), True/False."""
+    out = np.full(len(ev.reasons), None, dtype=object)
+    evaluated = ev.evaluated
+    out[evaluated] = [sev in ("warning", "critical") for sev in ev.severity[evaluated]]
+    return out
+
+
+def count_events(
+    verdicts: np.ndarray,
+    seconds: np.ndarray,
+    groups: np.ndarray,
+    policy: EventPolicy,
+) -> int:
+    """Events emitted by the daemon's persistence gate + dedupe, per group.
+
+    ``groups`` resets the gate (one per drive or synthetic window); refused
+    rows are missing verdicts that freeze the window, exactly as live.
+    """
+    events = 0
+    for group in pd.unique(groups):
+        idx = np.flatnonzero(groups == group)
+        order = idx[np.argsort(seconds[idx], kind="stable")]
+        gate = PersistenceGate(
+            policy.required, window=policy.window, window_seconds=policy.window_seconds
+        )
+        last_emit: float | None = None
+        for i in order:
+            verdict = verdicts[i]
+            now = float(seconds[i]) if np.isfinite(seconds[i]) else 0.0
+            sustained = gate.observe("behavior", verdict, now=now)
+            if verdict is not True or not sustained:
+                continue
+            if last_emit is not None and now - last_emit < policy.dedupe_seconds:
+                continue
+            last_emit = now
+            events += 1
+    return events
+
+
+BaselineKind = Literal["training_median", "training_mode_median"]
+
+
+def fit_baseline(actual: np.ndarray, modes: np.ndarray, kind: BaselineKind) -> dict[str, float]:
+    """Training-fitted simple baseline: robust median, optionally per mode."""
+    finite = np.isfinite(actual)
+    if not finite.any():
+        return {}
+    baseline = {"__all__": float(np.median(actual[finite]))}
+    if kind == "training_mode_median":
+        for mode in pd.unique(modes[finite]):
+            values = actual[finite & (modes == mode)]
+            if values.size:
+                baseline[str(mode)] = float(np.median(values))
+    return baseline
+
+
+def baseline_predictions(baseline: Mapping[str, float], modes: np.ndarray) -> np.ndarray:
+    if not baseline:
+        return np.full(len(modes), np.nan)
+    fallback = baseline["__all__"]
+    return np.asarray([baseline.get(str(mode), fallback) for mode in modes], dtype=float)
+
+
+def envelope_coverage(
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
+    *,
+    min_rows: int = ENVELOPE_MIN_ROWS,
+) -> float | None:
+    """Fraction of the model's trusted operating envelope the rows visited.
+
+    2D: trusted cells (the cells serving uses) with ``min_rows`` evaluated
+    rows. 1D lookup/poly: domain deciles. Robust constant baselines have no
+    envelope (``None``).
+    """
+    evaluated = ev.evaluated
+    if isinstance(model, BehaviorModel2D):
+        trusted = trusted_cell_mask(model)
+        if not trusted.any():
+            return 0.0
+        idx = containing_cell_indices(model, ev.x[evaluated], ev.y[evaluated])
+        counts = np.bincount(idx[idx >= 0], minlength=len(trusted))
+        return float(((counts >= min_rows) & trusted).sum() / trusted.sum())
+    if isinstance(model.fit, RobustBaselineFit):
+        return None
+    lo, hi = model.axis.domain
+    edges = np.linspace(lo, hi, 11)
+    x = ev.x[evaluated]
+    bins = np.clip(np.digitize(x, edges) - 1, 0, 9)
+    counts = np.bincount(bins, minlength=10)
+    return float((counts >= min_rows).sum() / 10)
+
+
+# ---------------------------------------------------------------------------
+# Metrics
+# ---------------------------------------------------------------------------
+
+
+def _r_squared(actual: np.ndarray, predicted: np.ndarray) -> float | None:
+    if actual.size < 2:
+        return None
+    denominator = float(np.sum((actual - actual.mean()) ** 2))
+    if denominator <= 0:
+        return None
+    return float(1.0 - np.sum((actual - predicted) ** 2) / denominator)
+
+
+def _median_or_none(values: np.ndarray) -> float | None:
+    finite = values[np.isfinite(values)]
+    return float(np.median(finite)) if finite.size else None
+
+
+def fold_metrics(
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
+    *,
+    drive_of_piece: Mapping[str, str],
+    policy: EventPolicy,
+    baseline: Mapping[str, float] | None = None,
+    bootstrap_seed: int = 0,
+) -> FoldMetrics:
+    """Denominators, physical-unit accuracy and events over ``ev``'s rows."""
+    evaluated = ev.evaluated
+    eligible = ev.eligible
+    drives = np.asarray([drive_of_piece.get(str(p), str(p)) for p in ev.pieces], dtype=object)
+    refusals = Counter(str(r) for r in ev.reasons[~evaluated])
+    residual = ev.residual[evaluated]
+    abs_err = np.abs(residual)
+    actual = ev.actual[evaluated]
+    expected = ev.expected[evaluated]
+    n = int(evaluated.sum())
+    severity = ev.severity[evaluated]
+    metrics: dict[str, Any] = {
+        "drives": len(set(drives[evaluated].tolist())),
+        "rows": len(ev.reasons),
+        "input_present": int(ev.present.sum()),
+        "fresh": int(ev.fresh.sum()),
+        "eligible": int(eligible.sum()),
+        "evaluated": n,
+        "coverage": (n / int(eligible.sum())) if eligible.any() else None,
+        "refusals": dict(sorted(refusals.items(), key=lambda kv: (-kv[1], kv[0]))),
+        "evaluated_hours": n * policy.interval_seconds / 3600.0,
+        "envelope_coverage": envelope_coverage(model, ev),
+    }
+    if n:
+        metrics.update(
+            mae=float(abs_err.mean()),
+            bias=float(residual.mean()),
+            abs_error_p50=float(np.quantile(abs_err, 0.50)),
+            abs_error_p90=float(np.quantile(abs_err, 0.90)),
+            abs_error_p95=float(np.quantile(abs_err, 0.95)),
+            r_squared=_r_squared(actual, expected),
+            warning_half_width_median=_median_or_none(ev.warning_half_width[evaluated]),
+            critical_half_width_median=_median_or_none(ev.critical_half_width[evaluated]),
+            warning_row_rate=float(np.mean(severity == "warning")),
+            critical_row_rate=float(np.mean(severity == "critical")),
+        )
+        events = count_events(_verdicts(ev), ev.seconds, drives, policy)
+        metrics["events"] = events
+        hours = metrics["evaluated_hours"]
+        metrics["events_per_hour"] = events / hours if hours > 0 else None
+        if baseline:
+            base = baseline_predictions(baseline, ev.modes[evaluated])
+            same = np.isfinite(base)
+            if same.any():
+                base_mae = float(np.abs(actual[same] - base[same]).mean())
+                model_mae = float(abs_err[same].mean())
+                metrics["baseline_mae"] = base_mae
+                metrics["skill_vs_baseline"] = 1.0 - model_mae / base_mae if base_mae > 0 else None
+        per_drive = {
+            drive: float(abs_err[drives[evaluated] == drive].mean())
+            for drive in pd.unique(drives[evaluated])
+        }
+        metrics["drive_mae_min"] = min(per_drive.values())
+        metrics["drive_mae_max"] = max(per_drive.values())
+        if len(per_drive) >= MIN_BOOTSTRAP_DRIVES:
+            metrics["mae_drive_bootstrap_90"] = _drive_bootstrap(
+                abs_err, drives[evaluated], seed=bootstrap_seed
+            )
+    return FoldMetrics(**metrics)
+
+
+def _drive_bootstrap(
+    abs_err: np.ndarray, drives: np.ndarray, *, seed: int, reps: int = 2000
+) -> list[float]:
+    """90 % interval of pooled MAE, resampling whole drives (not rows)."""
+    rng = np.random.default_rng(seed)
+    labels = pd.unique(drives)
+    sums = np.asarray([abs_err[drives == d].sum() for d in labels])
+    counts = np.asarray([(drives == d).sum() for d in labels], dtype=float)
+    draws = rng.integers(0, len(labels), size=(reps, len(labels)))
+    pooled = sums[draws].sum(axis=1) / counts[draws].sum(axis=1)
+    return [float(np.quantile(pooled, 0.05)), float(np.quantile(pooled, 0.95))]
+
+
+def breakdown(
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
+    *,
+    by: Literal["drive", "regime"],
+    drive_of_piece: Mapping[str, str],
+    policy: EventPolicy,
+    baseline: Mapping[str, float] | None = None,
+) -> dict[str, FoldMetrics]:
+    keys = (
+        np.asarray([drive_of_piece.get(str(p), str(p)) for p in ev.pieces], dtype=object)
+        if by == "drive"
+        else ev.modes
+    )
+    # Only groups the model could have spoken for: a drive with no eligible
+    # row says nothing about accuracy (its refusals are in the fold totals).
+    eligible = ev.eligible
+    return {
+        str(key): fold_metrics(
+            model,
+            ev.subset(keys == key),
+            drive_of_piece=drive_of_piece,
+            policy=policy,
+            baseline=baseline,
+        )
+        for key in pd.unique(keys[eligible])
+    }
+
+
+# ---------------------------------------------------------------------------
+# Synthetic sensitivity (B02.6)
+# ---------------------------------------------------------------------------
+
+
+def synthetic_sensitivity(
+    model: BehaviorModel1D | BehaviorModel2D,
+    frame: pd.DataFrame,
+    base: RowEvaluation,
+    criteria: ValidationCriteria,
+    *,
+    policy: EventPolicy,
+    spec: ServingSpec | None = None,
+) -> list[SyntheticSensitivity]:
+    """Detection of each declared synthetic step on non-overlapping windows.
+
+    Every ``duration_seconds`` window of each piece holding at least one
+    evaluated row is scored twice with a fresh gate (no carried hits): as
+    recorded (the no-fault control) and with the step added. Only windows
+    whose control stayed quiet are trials — a window that alerts anyway
+    cannot show the injection was what the detector saw.
+    """
+    out: list[SyntheticSensitivity] = []
+    for fault in criteria.synthetic_faults:
+        offset = fault.magnitude if fault.direction == "positive" else -fault.magnitude
+        injected = evaluate_rows(
+            model,
+            frame,
+            spec=spec,
+            interval_seconds=policy.interval_seconds,
+            output_offset=offset,
+        )
+        windows = _windows(base, fault.duration_seconds)
+        valid = windows >= 0
+        detected = _windows_with_event(
+            _verdicts(injected), injected.seconds, windows, valid, policy
+        )
+        control = _windows_with_event(_verdicts(base), base.seconds, windows, valid, policy)
+        scored = {int(w) for w, ok in zip(windows, valid, strict=True) if ok}
+        scored = {w for w in scored if base.evaluated[windows == w].any()}
+        control &= scored
+        clean = scored - control
+        detected &= clean
+        out.append(
+            SyntheticSensitivity(
+                magnitude=fault.magnitude,
+                direction=fault.direction,
+                duration_seconds=fault.duration_seconds,
+                windows=len(scored),
+                control_detected=len(control),
+                clean_windows=len(clean),
+                detected=len(detected),
+                detection_fraction=(len(detected) / len(clean)) if clean else None,
+            )
+        )
+    return out
+
+
+def _windows(ev: RowEvaluation, duration: float) -> np.ndarray:
+    """Window id per row (non-overlapping ``duration`` s, per piece); -1 unknown."""
+    out = np.full(len(ev.seconds), -1, dtype=int)
+    next_id = 0
+    for piece in pd.unique(ev.pieces):
+        idx = np.flatnonzero(ev.pieces == piece)
+        secs = ev.seconds[idx]
+        finite = np.isfinite(secs)
+        if not finite.any():
+            continue
+        start = np.nanmin(secs)
+        local = np.floor((secs - start) / duration)
+        local_ids = np.where(finite, local, -1).astype(int)
+        uniq = sorted({int(v) for v in local_ids if v >= 0})
+        mapping = {v: next_id + k for k, v in enumerate(uniq)}
+        next_id += len(uniq)
+        out[idx] = [mapping.get(int(v), -1) for v in local_ids]
+    return out
+
+
+def _windows_with_event(
+    verdicts: np.ndarray,
+    seconds: np.ndarray,
+    windows: np.ndarray,
+    valid: np.ndarray,
+    policy: EventPolicy,
+) -> set[int]:
+    hit: set[int] = set()
+    for window in pd.unique(windows[valid]):
+        mask = windows == window
+        if count_events(verdicts[mask], seconds[mask], np.zeros(int(mask.sum())), policy):
+            hit.add(int(window))
+    return hit
+
+
+# ---------------------------------------------------------------------------
+# Criteria → verdict
+# ---------------------------------------------------------------------------
+
+
+def apply_criteria(
+    criteria: ValidationCriteria | None,
+    test: FoldMetrics | None,
+    sensitivity: Sequence[SyntheticSensitivity],
+    *,
+    qualifying_test_drives: int,
+) -> tuple[Literal["passed", "failed", "insufficient_evidence"], list[str]]:
+    """Every criterion checked and named; no universal R² floor anywhere."""
+    if criteria is None:
+        return "insufficient_evidence", ["no_declared_criteria"]
+    if test is None or test.evaluated == 0:
+        return "insufficient_evidence", ["no_evaluated_test_rows"]
+    insufficient: list[str] = []
+    failed: list[str] = []
+    if qualifying_test_drives < criteria.min_validation_drives:
+        insufficient.append(
+            f"test_drives={qualifying_test_drives}<{criteria.min_validation_drives}"
+            f" (each >= {criteria.min_observations_per_drive} evaluated rows)"
+        )
+    if test.eligible < criteria.min_eligible_observations:
+        insufficient.append(f"eligible={test.eligible}<{criteria.min_eligible_observations}")
+    if (
+        test.envelope_coverage is not None
+        and test.envelope_coverage < criteria.min_envelope_coverage
+    ):
+        insufficient.append(
+            f"envelope_coverage={test.envelope_coverage:.2f}<{criteria.min_envelope_coverage}"
+        )
+    if test.coverage is not None and test.coverage < criteria.min_coverage:
+        failed.append(f"coverage={test.coverage:.2f}<{criteria.min_coverage}")
+    if criteria.kind == "predictive_surface":
+        assert criteria.min_skill_vs_baseline is not None
+        if test.skill_vs_baseline is None:
+            insufficient.append("skill_vs_baseline=unavailable (no training baseline)")
+        elif test.skill_vs_baseline < criteria.min_skill_vs_baseline:
+            failed.append(
+                f"skill_vs_baseline={test.skill_vs_baseline:.3f}<{criteria.min_skill_vs_baseline}"
+            )
+    # Physical resolution, for every family: a typical error larger than the
+    # deviation the model must resolve means it cannot resolve it.
+    if test.mae is not None and test.mae > criteria.meaningful_deviation:
+        failed.append(f"mae={test.mae:.4g}>meaningful_deviation={criteria.meaningful_deviation}")
+    if criteria.max_mae is not None and test.mae is not None and test.mae > criteria.max_mae:
+        failed.append(f"mae={test.mae:.4g}>{criteria.max_mae}")
+    if (
+        criteria.max_abs_error_p95 is not None
+        and test.abs_error_p95 is not None
+        and test.abs_error_p95 > criteria.max_abs_error_p95
+    ):
+        failed.append(f"abs_error_p95={test.abs_error_p95:.4g}>{criteria.max_abs_error_p95}")
+    width = test.warning_half_width_median
+    if width is None:
+        failed.append("warning_half_width=unavailable")
+    elif width > criteria.meaningful_deviation:
+        failed.append(
+            f"warning_half_width_median={width:.4g}>meaningful_deviation="
+            f"{criteria.meaningful_deviation}"
+        )
+    if criteria.max_control_events_per_hour is not None and test.events_per_hour is not None:
+        if test.evaluated_hours < criteria.min_control_hours:
+            insufficient.append(
+                f"control_hours={test.evaluated_hours:.2f}<{criteria.min_control_hours} "
+                f"({test.events} event(s) is not a rate)"
+            )
+        elif test.events_per_hour > criteria.max_control_events_per_hour:
+            failed.append(
+                f"control_events_per_hour={test.events_per_hour:.3g}>"
+                f"{criteria.max_control_events_per_hour}"
+            )
+    for case in sensitivity:
+        label = f"synthetic_{case.direction}_{case.magnitude:g}_{case.duration_seconds:g}s"
+        if case.detection_fraction is None:
+            insufficient.append(f"{label}=no_clean_windows ({case.windows} scored)")
+        elif case.detection_fraction < criteria.min_synthetic_detection:
+            failed.append(
+                f"{label}_detection={case.detection_fraction:.2f}<{criteria.min_synthetic_detection}"
+            )
+    if failed:
+        return "failed", failed + [f"insufficient:{item}" for item in insufficient]
+    if insufficient:
+        return "insufficient_evidence", insufficient
+    return "passed", []
+
+
+# ---------------------------------------------------------------------------
+# Evidence assembly
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ValidationContext:
+    """What a publication route knows beyond the frame (B02.4/B02.7)."""
+
+    policy: EventPolicy = field(default_factory=EventPolicy)
+    decoder_identity: Mapping[str, str] = field(default_factory=dict)
+    mode_taxonomy: tuple[str, ...] = ()
+    criteria_source: str | None = None
+    join_gap_seconds: float = DEFAULT_JOIN_GAP_SECONDS
+    provenance: Mapping[str, Sequence[str]] = field(default_factory=dict)
+    #: Differences between the config's operating modes and the approved
+    #: taxonomy (:meth:`BehaviorValidationDocument.taxonomy_problems`). Any
+    #: entry keeps the evidence from passing: it was not gathered under the
+    #: operator-approved segmentation.
+    taxonomy_problems: tuple[str, ...] = ()
+
+    @classmethod
+    def for_run(
+        cls,
+        config: CanaryConfig,
+        document: BehaviorValidationDocument | None,
+        *,
+        decoder: Mapping[str, str],
+        criteria_source: str | None,
+        provenance: Mapping[str, Sequence[str]] | None = None,
+    ) -> ValidationContext:
+        modes = tuple(config.preprocessing.operating_modes)
+        return cls(
+            policy=EventPolicy.from_config(config),
+            decoder_identity=dict(decoder),
+            mode_taxonomy=modes,
+            criteria_source=criteria_source,
+            join_gap_seconds=(
+                document.drive_join_gap_seconds
+                if document is not None
+                else DEFAULT_JOIN_GAP_SECONDS
+            ),
+            provenance=dict(provenance or {}),
+            taxonomy_problems=tuple(document.taxonomy_problems(modes)) if document else (),
+        )
+
+
+def qualifying_drive_count(
+    ev: RowEvaluation, drive_of_piece: Mapping[str, str], minimum: int
+) -> int:
+    evaluated = ev.evaluated
+    drives = [drive_of_piece.get(str(p), str(p)) for p in ev.pieces[evaluated]]
+    return sum(1 for count in Counter(drives).values() if count >= minimum)
+
+
+def build_evidence(
+    model: BehaviorModel1D | BehaviorModel2D,
+    *,
+    split: DriveSplit,
+    test_frame: pd.DataFrame,
+    calibration_frame: pd.DataFrame | None,
+    criteria: ValidationCriteria | None,
+    baseline: Mapping[str, float],
+    context: ValidationContext,
+    tune_revision: str | None,
+    spec: ServingSpec | None = None,
+) -> tuple[ValidationEvidence, RowEvaluation]:
+    """Score the untouched test drives and turn the numbers into a verdict."""
+    policy = context.policy
+    drive_of_piece = {
+        piece: drive.drive_id
+        for drive in (*split.train, *split.calibration, *split.test)
+        for piece in drive.pieces
+    }
+    test_ev = evaluate_rows(model, test_frame, spec=spec, interval_seconds=policy.interval_seconds)
+    test = fold_metrics(
+        model, test_ev, drive_of_piece=drive_of_piece, policy=policy, baseline=baseline
+    )
+    calibration = None
+    if calibration_frame is not None and not calibration_frame.empty:
+        cal_ev = evaluate_rows(
+            model, calibration_frame, spec=spec, interval_seconds=policy.interval_seconds
+        )
+        calibration = fold_metrics(
+            model, cal_ev, drive_of_piece=drive_of_piece, policy=policy, baseline=baseline
+        )
+    sensitivity = (
+        synthetic_sensitivity(model, test_frame, test_ev, criteria, policy=policy, spec=spec)
+        if criteria is not None and test_ev.evaluated.any()
+        else []
+    )
+    minimum = criteria.min_observations_per_drive if criteria is not None else 1
+    verdict, failures = apply_criteria(
+        criteria,
+        test,
+        sensitivity,
+        qualifying_test_drives=qualifying_drive_count(test_ev, drive_of_piece, minimum),
+    )
+    if context.taxonomy_problems:
+        failures = [*failures, *(f"mode_taxonomy:{p}" for p in context.taxonomy_problems)]
+        if verdict == "passed":
+            verdict = "insufficient_evidence"
+    evidence = ValidationEvidence(
+        evaluator_version=EVALUATOR_VERSION,
+        evaluated_at=datetime.now(UTC).isoformat(),
+        verdict=verdict,
+        failures=failures,
+        criteria=criteria,
+        criteria_source=context.criteria_source,
+        contract_fingerprint=contract_fingerprint(model),
+        decoder_identity=dict(context.decoder_identity),
+        mode_taxonomy=list(context.mode_taxonomy),
+        tune_revision=tune_revision,
+        split=split.record(),
+        baseline=dict(baseline),
+        calibration=calibration,
+        test=test,
+        per_drive=breakdown(
+            model,
+            test_ev,
+            by="drive",
+            drive_of_piece=drive_of_piece,
+            policy=policy,
+            baseline=baseline,
+        ),
+        per_regime=breakdown(
+            model,
+            test_ev,
+            by="regime",
+            drive_of_piece=drive_of_piece,
+            policy=policy,
+            baseline=baseline,
+        ),
+        sensitivity=sensitivity,
+        provenance={key: list(values) for key, values in context.provenance.items()},
+    )
+    return evidence, test_ev
+
+
+# ---------------------------------------------------------------------------
+# Carry-over (B02.7)
+# ---------------------------------------------------------------------------
+
+
+def carry_over_flags(
+    prior: BehaviorModel1D | BehaviorModel2D,
+    *,
+    recipe_contract: str | None,
+    criteria: ValidationCriteria | None,
+    context: ValidationContext,
+) -> list[str]:
+    """Why a prior kept on disk may no longer be trusted, without rewriting it.
+
+    Compared against the evidence the prior was published with: a changed
+    recipe contract, decoder catalog, mode taxonomy or declared criteria each
+    means that evidence no longer describes what would be served.
+    """
+    flags: list[str] = []
+    if recipe_contract is not None and recipe_contract != contract_fingerprint(prior):
+        flags.append("contract_changed:recipe")
+    evidence = prior.evidence
+    if evidence is None:
+        return flags
+    for key, value in sorted(context.decoder_identity.items()):
+        recorded = evidence.decoder_identity.get(key)
+        if recorded is not None and recorded != value:
+            flags.append(f"decoder_changed:{key}")
+    if (
+        context.mode_taxonomy
+        and evidence.mode_taxonomy
+        and sorted(context.mode_taxonomy) != sorted(evidence.mode_taxonomy)
+    ):
+        flags.append("context_changed:mode_taxonomy")
+    if criteria is not None and evidence.criteria is not None and criteria != evidence.criteria:
+        flags.append("criteria_changed")
+    return flags
+
+
+# ---------------------------------------------------------------------------
+# Bounded offline frame builder (the reproducible report's input)
+# ---------------------------------------------------------------------------
+
+
+def evaluation_decoded_signals(models: BehaviorModels) -> set[str]:
+    """Binding names the evaluation frame must decode from raw CAN: the
+    segmenter's ``decoded:`` mode candidates plus any ``decoded:`` channel a
+    model reads (input, output, gate or required context)."""
+    from src.decode.behavior_eligibility import required_channel_groups
+    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+
+    names: set[str] = set()
+    columns: list[str] = []
+    for candidates in _SEGMENTER_SIGNAL_COLUMNS.values():
+        columns.extend([candidates] if isinstance(candidates, str) else list(candidates))
+    for model in models.models:
+        for group in required_channel_groups(model):
+            columns.extend(group)
+        columns.append(serving_spec(model).output)
+    for column in columns:
+        if column.startswith("decoded:"):
+            names.add(column.split(":", 1)[1])
+    return names
+
+
+def build_evaluation_frame(
+    sessions: Sequence[Path],
+    config: CanaryConfig,
+    models: BehaviorModels,
+    *,
+    bindings_path: Path,
+    dids_path: Path,
+    decode_can: Literal["none", "mode-inputs"] = "mode-inputs",
+) -> pd.DataFrame:
+    """The training preprocessing chain, bounded to what evaluation reads.
+
+    Identical decode → reject gate → resample → derive → segment → prerequisite
+    chain as ``build_feature_frame`` (shared functions, not copies), except raw
+    CAN frames are read only for the ids of the bindings in
+    :func:`evaluation_decoded_signals` — a whole-bus decode of one 42 MB drive
+    peaked above 6 GB. DBC decoding is not run. Returns the operating frame
+    (deviation and prerequisite columns included), one row per resampled
+    second, with ``session`` naming the piece.
+
+    ``decode_can="none"`` skips raw CAN entirely: the segmenter's decoded
+    fallback candidates did not exist when the July 2026 artifacts were fit,
+    so reproducing their persisted held-out numbers needs the historical
+    input scope (the idle holdout is 90 rows without it, 114 with it).
+    """
+    from src.decode.bindings import load_bindings
+    from src.decode.dids import load_did_map
+    from src.preprocessing.feature_pipeline import (
+        drop_fully_stale_rows,
+        featurize_wide_frame,
+        resample_config_for,
+        resample_long_session,
+    )
+    from src.preprocessing.loader import read_session
+
+    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    did_map = load_did_map(dids_path) if dids_path.exists() else None
+    wanted = evaluation_decoded_signals(models)
+    subset = None
+    can_channels: list[str] = []
+    if bindings is not None and decode_can == "mode-inputs":
+        signals = [signal for signal in bindings.signals if signal.name in wanted]
+        subset = bindings.model_copy(update={"signals": signals})
+        can_channels = sorted({f"0x{signal.can_id:X}" for signal in signals})
+    filters: list[list[tuple[str, str, Any]]] = [[("source", "!=", "can")]]
+    if can_channels:
+        filters.append([("source", "==", "can"), ("channel", "in", can_channels)])
+    resample_config = resample_config_for(config)
+    parts = []
+    for session in sessions:
+        long = read_session(Path(session), filters=filters)
+        parts.append(
+            resample_long_session(
+                long, subset, None, did_map, resample_config, session_name=Path(session).name
+            )
+        )
+    resampled = drop_fully_stale_rows(pd.concat(parts, ignore_index=True))
+    return featurize_wide_frame(
+        resampled, config, behavior_models=models, bindings=bindings
+    ).operating_frame
+
+
+def session_content_identity(session: Path) -> dict[str, Any]:
+    """Content hash of a session's telemetry chunks, for evidence manifests."""
+    digest = hashlib.sha256()
+    files = sorted(session.glob("telemetry-*.parquet"))
+    total = 0
+    for chunk in files:
+        data = chunk.read_bytes()
+        total += len(data)
+        digest.update(chunk.name.encode())
+        digest.update(len(data).to_bytes(8, "big"))
+        digest.update(data)
+    return {
+        "name": session.name,
+        "chunks": len(files),
+        "bytes": total,
+        "sha256": "sha256:" + digest.hexdigest(),
+    }
+
+
+__all__ = [
+    "DEFAULT_JOIN_GAP_SECONDS",
+    "EVALUATOR_VERSION",
+    "BehaviorValidationDocument",
+    "Drive",
+    "DriveSplit",
+    "EventPolicy",
+    "LeakedDriveError",
+    "ProvenanceResolution",
+    "RowEvaluation",
+    "UnorderedSessionsError",
+    "ValidationContext",
+    "apply_criteria",
+    "build_evaluation_frame",
+    "build_evidence",
+    "carry_over_flags",
+    "chronological_split",
+    "count_events",
+    "decoder_identity",
+    "evaluate_rows",
+    "explicit_split",
+    "fit_baseline",
+    "fold_metrics",
+    "group_drives",
+    "load_validation_document",
+    "parent_session",
+    "piece_time_ranges",
+    "session_content_identity",
+    "synthetic_sensitivity",
+    "training_leaks",
+    "validation_document_path",
+]

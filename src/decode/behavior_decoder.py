@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -188,6 +188,47 @@ def deviation(
     else:
         severity = _grade_severity(model, operating_point, delta)
     return DeviationResult(expected=expected, actual=actual, deviation=delta, severity=severity)
+
+
+def grade_deviation(
+    model: BehaviorModel1D | BehaviorModel2D,
+    operating_point: Mapping[str, object],
+    delta: float,
+) -> Severity:
+    """Grade an already-computed ``actual − expected`` exactly as
+    :func:`deviation` does (the model's own bands, no override). For
+    evaluators that computed ``expected`` over a whole frame (B02)."""
+    return _grade_severity(model, cast("Mapping[str, float]", operating_point), delta)
+
+
+def band_half_widths(
+    model: BehaviorModel1D | BehaviorModel2D,
+    operating_point: Mapping[str, object],
+) -> tuple[float | None, float | None]:
+    """``(warning, critical)`` band half-widths in *output units* at a point.
+
+    ``absolute`` bands are their own half-width; ``sigma`` bands scale by the
+    local std (cell std / ``reference_std``) floored by ``sigma_floor`` —
+    the same arithmetic :func:`deviation` grades with. ``None`` where a band
+    is unset or the local std is unavailable. A "3 σ" band says nothing about
+    resolution until it is expressed like this (B02.5).
+    """
+    dev_cfg = model.deviation
+    if dev_cfg is None:
+        return None, None
+    point = cast("Mapping[str, float]", operating_point)
+    scale = 1.0
+    if dev_cfg.kind == "sigma" or (dev_cfg.kind == "directional" and dev_cfg.std_scaled):
+        local_std = _local_std(model, point, dev_cfg)
+        if local_std is None:
+            return None, None
+        local_std = max(local_std, dev_cfg.sigma_floor or 0.0)
+        if local_std <= 0:
+            return None, None
+        scale = local_std
+    warning = None if dev_cfg.warning_band is None else dev_cfg.warning_band * scale
+    critical = None if dev_cfg.critical_band is None else dev_cfg.critical_band * scale
+    return warning, critical
 
 
 def deviation_for_override(
@@ -523,6 +564,8 @@ __all__ = [
     "Severity",
     "append_behavior_prerequisites",
     "append_deviation_columns",
+    "band_half_widths",
+    "grade_deviation",
     "deviation",
     "deviation_for_override",
     "expected_value",

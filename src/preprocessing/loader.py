@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -84,8 +84,13 @@ def count_session_rows(session_dir: Path) -> int | None:
     return total if seen else None
 
 
-def read_session(session_dir: Path) -> pd.DataFrame:
-    """Read one telemetry session directory into a long-format DataFrame."""
+def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
+    """Read one telemetry session directory into a long-format DataFrame.
+
+    ``filters`` is passed to ``pd.read_parquet`` (pyarrow DNF row filters) so
+    a bounded reader can skip rows it will never use — e.g. the raw CAN
+    frames of ids no requested binding decodes — without a second reader.
+    """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
@@ -101,7 +106,7 @@ def read_session(session_dir: Path) -> pd.DataFrame:
             skipped.append(path.name)
             continue
         try:
-            frames.append(pd.read_parquet(path))
+            frames.append(pd.read_parquet(path, filters=filters))
         except (OSError, ValueError, pd.errors.ParserError):
             skipped.append(path.name)
     if skipped:

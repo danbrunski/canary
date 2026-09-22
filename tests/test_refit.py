@@ -838,7 +838,11 @@ def test_choose_warmup_confounding_strategy_branches_at_floor() -> None:
 
 def test_robust_recipe_calibrates_on_a_whole_held_out_session() -> None:
     rows = []
-    for session, center in (("s1", 0.0), ("s2", 0.1), ("s3", 0.05)):
+    for session, center in (
+        ("2026-08-01T100000", 0.0),
+        ("2026-08-02T100000", 0.1),
+        ("2026-08-03T100000", 0.05),
+    ):
         rows.extend(
             {
                 SESSION_COLUMN: session,
@@ -862,6 +866,6 @@ def test_robust_recipe_calibrates_on_a_whole_held_out_session() -> None:
     result = fit_recipe(recipe, pd.DataFrame(rows))
     assert result.fitted, result.reason
     assert result.model is not None
-    assert result.model.fit.sessions == ["s1", "s2"]
-    assert result.model.fit.calibration_sessions == ["s3"]
+    assert result.model.fit.sessions == ["2026-08-01T100000", "2026-08-02T100000"]
+    assert result.model.fit.calibration_sessions == ["2026-08-03T100000"]
     assert result.model.fit.validation_coverage == 1.0

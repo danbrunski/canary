@@ -26,15 +26,27 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Literal, cast
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 
+from src.analysis.behavior_validation import (
+    BehaviorValidationDocument,
+    DriveSplit,
+    UnorderedSessionsError,
+    ValidationContext,
+    build_evidence,
+    carry_over_flags,
+    chronological_split,
+    fit_baseline,
+    group_drives,
+    parent_session,
+    piece_time_ranges,
+)
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
-from src.decode.behavior_decoder import deviation as evaluate_deviation
-from src.decode.behavior_decoder import expected_value
+from src.control.sessions import session_started_at
 from src.decode.behavior_eligibility import (
     ServingSpec,
     eligibility_reasons,
@@ -56,6 +68,9 @@ from src.decode.behavior_models import (
     RequiredContext,
     ServingEligibility,
     TrainingSelection,
+    ValidationCriteria,
+    contract_fingerprint_payload,
+    fingerprint,
 )
 from src.preprocessing.features import roc_column
 from src.preprocessing.resampler import SESSION_COLUMN
@@ -182,6 +197,11 @@ class _RecipeBase:
     #: describe key-on-engine-off behavior. Catalog recipes that describe
     #: *running* behavior set ``ENGINE_RUNNING_MIN_RPM`` explicitly.
     min_rpm: float | None = None
+    #: B02 acceptance criteria from the vehicle profile's
+    #: ``behavior_validation.yaml`` (attach with :func:`attach_criteria`).
+    #: ``None`` → the model may publish, but its evidence verdict is
+    #: ``insufficient_evidence: no_declared_criteria`` and it cannot alert.
+    validation: ValidationCriteria | None = None
     #: 4.1 publish gate (1D only — grid fits' R² isn't well-defined, see
     #: ``Surface2DRecipe.min_populated_cell_fraction``). A fit whose R²
     #: falls below this is skipped rather than published, same as a
@@ -907,6 +927,7 @@ def fit_recipe(
     regrid: bool = False,
     tune_revision: str | None = None,
     capture_recipe_allowlists: Mapping[str, Collection[str]] | None = None,
+    validation_context: ValidationContext | None = None,
 ) -> RecipeResult:
     """Run one recipe; return a ``RecipeResult`` (never raises on missing data).
 
@@ -927,8 +948,17 @@ def fit_recipe(
     successful fit whose ``training_data_hash`` matches the prior's keeps
     the prior's ``version`` instead of bumping (4.5 — a no-op refit
     shouldn't churn the version).
+
+    B02 — when the recipe declares criteria (``recipe.validation``) or needs
+    several sessions, rows are split into grouped train/calibration/test
+    folds by independent physical drive (parsed time, never directory
+    names), the model is fitted on train only, and the untouched test drives
+    produce the :class:`ValidationEvidence` that ``serving_status`` reads.
+    ``validation_context`` carries the event policy, decoder identity, mode
+    taxonomy and provenance recorded with that evidence.
     """
     version = (next_version_for or {}).get(recipe.name, 1)
+    validation = validation_context or ValidationContext()
 
     # 0. Capture evidence is authorized per recipe.  General sessions are
     # unrestricted here; isolated captures are present in this mapping only
@@ -962,16 +992,9 @@ def fit_recipe(
     # B01.3/B01.4 — the serving contract this recipe will persist. Training
     # rows pass through the *same* evaluator the decoder, daemon and replay
     # use, so the fit cannot learn from rows its model would refuse to grade.
+    spec = recipe_serving_spec(recipe)
     eligibility = recipe.serving_eligibility()
-    conditions = recipe.rate_conditions()
-    spec = ServingSpec(
-        operating_mode=recipe.operating_mode,
-        conditions=tuple(conditions),
-        eligibility=eligibility,
-        inputs=tuple(_recipe_columns(recipe)[:-1]),
-        # The refit reads ``recipe.output`` verbatim as its column.
-        output=recipe.output,
-    )
+    conditions = list(spec.conditions)
 
     # 0a. Refuse when a contract column is absent from the whole frame —
     # silently fitting without an enforceable gate would re-introduce the
@@ -1138,32 +1161,67 @@ def fit_recipe(
             skipped=True,
             reason=f"{len(clean)} clean samples < min_samples={recipe.min_samples}",
         )
+    # 3b. B02.3 — grouped folds by independent physical drive, ordered by
+    # parsed time. Pieces of one drive (captures, ``#segment`` splits) never
+    # cross folds; bin edges, bands and the baseline come from train only.
     clean_sessions: tuple[str, ...] = tuple(sessions)
-    calibration = clean.iloc[0:0]
-    if SESSION_COLUMN in clean.columns:
-        counts = clean[SESSION_COLUMN].astype(str).value_counts()
+    split: DriveSplit | None = None
+    test_rows = sub.iloc[0:0]
+    calibration_rows = sub.iloc[0:0]
+    wants_holdout = recipe.min_sessions > 1 or recipe.validation is not None
+    if SESSION_COLUMN in clean.columns and not wants_holdout:
+        # One drive is enough and nothing is held out: no ordering needed.
+        # Recorded chronologically where a stamp parses (never by name alone).
         clean_sessions = tuple(
             sorted(
-                str(session)
-                for session, count in counts.items()
-                if count >= recipe.min_session_samples
+                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
+                key=_piece_time_key,
             )
         )
-        if len(clean_sessions) < recipe.min_sessions:
+    elif SESSION_COLUMN in clean.columns:
+        try:
+            drives = group_drives(
+                piece_time_ranges(sub), join_gap_seconds=validation.join_gap_seconds
+            )
+        except UnorderedSessionsError as exc:
+            return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
+        clean_counts = clean[SESSION_COLUMN].astype(str).value_counts()
+        qualifying = [
+            drive
+            for drive in drives
+            if int(sum(clean_counts.get(piece, 0) for piece in drive.pieces))
+            >= recipe.min_session_samples
+        ]
+        if len(qualifying) < recipe.min_sessions:
             return RecipeResult(
                 recipe.name,
                 None,
                 skipped=True,
                 reason=(
-                    f"{len(clean_sessions)} independent sessions with >= "
+                    f"{len(qualifying)} independent drives with >= "
                     f"{recipe.min_session_samples} samples < min_sessions={recipe.min_sessions}"
                 ),
             )
-        if recipe.min_sessions > 1:
-            calibration_session = clean_sessions[-1]
-            calibration = clean[clean[SESSION_COLUMN].astype(str) == calibration_session]
-            clean = clean[clean[SESSION_COLUMN].astype(str) != calibration_session]
-            clean_sessions = clean_sessions[:-1]
+        by_time = {piece: i for i, drive in enumerate(drives) for piece in drive.pieces}
+        if wants_holdout and len(qualifying) > 1:
+            criteria = recipe.validation
+            n_calibration = criteria.calibration_drives if criteria is not None else 0
+            n_test = criteria.min_validation_drives if criteria is not None else 1
+            # Never train on nothing: shrink the held-out folds to leave one
+            # training drive; the evidence then records too few test drives.
+            n_calibration = min(n_calibration, len(qualifying) - 2)
+            n_test = max(1, min(n_test, len(qualifying) - 1 - max(0, n_calibration)))
+            split = chronological_split(
+                qualifying,
+                n_test=n_test,
+                n_calibration=max(0, n_calibration),
+                join_gap_seconds=validation.join_gap_seconds,
+                excluded=[drive for drive in drives if drive not in qualifying],
+            )
+            pieces = sub[SESSION_COLUMN].astype(str)
+            test_rows = sub[pieces.isin(split.pieces("test"))]
+            calibration_rows = sub[pieces.isin(split.pieces("calibration"))]
+            clean = clean[clean[SESSION_COLUMN].astype(str).isin(split.pieces("train"))]
             if len(clean) < recipe.min_samples:
                 return RecipeResult(
                     recipe.name,
@@ -1171,9 +1229,27 @@ def fit_recipe(
                     skipped=True,
                     reason=(
                         f"{len(clean)} training samples after holding out "
-                        f"session {calibration_session!r} < min_samples={recipe.min_samples}"
+                        f"{len(split.test)} test drive(s) < min_samples={recipe.min_samples}"
                     ),
                 )
+            leaked = _prior_grid_leak(prior_model, split, regrid=regrid, recipe=recipe)
+            if leaked:
+                return RecipeResult(
+                    recipe.name,
+                    None,
+                    skipped=True,
+                    reason=(
+                        "prior grid edges were fitted on test drive piece(s) "
+                        f"{', '.join(leaked)}; re-grid (--regrid) so test drives cannot "
+                        "choose the bins"
+                    ),
+                )
+        clean_sessions = tuple(
+            sorted(
+                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
+                key=lambda piece: (by_time.get(piece, len(by_time)), piece),
+            )
+        )
 
     # 4. dispatch
     try:
@@ -1200,8 +1276,18 @@ def fit_recipe(
         }
     )
 
-    if not calibration.empty:
-        validation_reason, model = _validate_held_out(recipe, model, calibration)
+    if split is not None:
+        validation_reason, model = _validate_held_out(
+            recipe,
+            model,
+            split=split,
+            test_rows=test_rows,
+            calibration_rows=calibration_rows,
+            training_rows=clean,
+            spec=spec,
+            context=validation,
+            tune_revision=tune_revision,
+        )
         if validation_reason is not None:
             return RecipeResult(
                 recipe.name,
@@ -1233,10 +1319,33 @@ def fit_recipe(
         and model.conditions == prior_model.conditions
         and model.eligibility == prior_model.eligibility
         and model.fit.tune_revision == prior_model.fit.tune_revision
+        and _same_evidence_context(model, prior_model)
     ):
         model = model.model_copy(update={"version": prior_model.version})
 
     return RecipeResult(recipe.name, model)
+
+
+def recipe_serving_spec(recipe: Recipe) -> ServingSpec:
+    """The serving contract a recipe persists, before any model exists.
+
+    Also the row-selection contract for reproducing a legacy artifact that
+    predates persisted contracts (B02.1): its catalog recipe says which rows
+    it was fitted and validated on.
+    """
+    return ServingSpec(
+        operating_mode=recipe.operating_mode,
+        conditions=tuple(recipe.rate_conditions()),
+        eligibility=recipe.serving_eligibility(),
+        inputs=tuple(_recipe_columns(recipe)[:-1]),
+        # The refit reads ``recipe.output`` verbatim as its column.
+        output=recipe.output,
+    )
+
+
+def _piece_time_key(piece: str) -> tuple[int, str, str]:
+    started = session_started_at(parent_session(piece))
+    return (0, started.isoformat(), piece) if started is not None else (1, "", piece)
 
 
 def _check_publish_gate(recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D) -> str | None:
@@ -1257,6 +1366,9 @@ def _check_publish_gate(recipe: Recipe, model: BehaviorModel1D | BehaviorModel2D
             f"min_sessions={recipe.min_sessions}"
         )
     if isinstance(recipe, Surface1DRecipe):
+        # A fit-quality sanity floor for *publication* only. Alerting never
+        # rests on training R²: without passed held-out evidence the model is
+        # diagnostic-only whatever this says (``serving_status``, B02.7).
         floor = recipe.min_r_squared
         r2 = (
             model.fit.validation_r_squared
@@ -1296,6 +1408,7 @@ def refit_all(
     regrid_recipes: Collection[str] = (),
     tune_revision: str | None = None,
     capture_recipe_allowlists: Mapping[str, Collection[str]] | None = None,
+    validation_context: ValidationContext | None = None,
 ) -> tuple[BehaviorModels, list[RecipeResult]]:
     """Fit ``recipes``; return the new ``BehaviorModels`` + per-recipe results.
 
@@ -1314,7 +1427,14 @@ def refit_all(
     from ``existing`` unchanged. ``regrid_recipes`` names 2D recipes that
     should recompute auto-edges (and bump ``grid_version``) this round
     instead of reusing the prior model's stored edges (4.3).
+
+    B02.7 — every prior that survives as a carry-over (not refit this round,
+    or refit but skipped) is checked against the current recipe contract,
+    decoder identity, mode taxonomy and declared criteria. A mismatch adds a
+    named ``publication_flags`` entry (so ``serving_status`` reports it
+    diagnostic-only on load and hot reload); its evidence is never rewritten.
     """
+    context = validation_context or ValidationContext()
     catalog_names = {r.name for r in (catalog if catalog is not None else recipes)}
     refit_names = {r.name for r in recipes}
 
@@ -1328,10 +1448,23 @@ def refit_all(
             name = prior_model.name
             if name not in catalog_names:
                 continue  # retired
-            gate_reason = _check_publish_gate(catalog_by_name[name], prior_model)
+            recipe_for_prior = catalog_by_name[name]
+            gate_reason = _check_publish_gate(recipe_for_prior, prior_model)
             if gate_reason is not None:
                 log.warning("retiring prior behavior model %s: %s", name, gate_reason)
                 continue
+            flags = carry_over_flags(
+                prior_model,
+                recipe_contract=recipe_contract_fingerprint(recipe_for_prior),
+                criteria=recipe_for_prior.validation,
+                context=context,
+            )
+            new_flags = [flag for flag in flags if flag not in prior_model.publication_flags]
+            if new_flags:
+                log.warning("carried-over behavior model %s loses trust: %s", name, new_flags)
+                prior_model = prior_model.model_copy(
+                    update={"publication_flags": [*prior_model.publication_flags, *new_flags]}
+                )
             carry_over[name] = prior_model
             if name in refit_names:
                 next_version_for[name] = prior_model.version + 1
@@ -1349,6 +1482,7 @@ def refit_all(
             regrid=recipe.name in regrid_recipes,
             tune_revision=tune_revision,
             capture_recipe_allowlists=capture_recipe_allowlists,
+            validation_context=context,
         )
         results.append(res)
         if res.model is not None:
@@ -1431,49 +1565,75 @@ def _fit_1d(
 def _validate_held_out(
     recipe: Recipe,
     model: BehaviorModel1D | BehaviorModel2D,
-    calibration: pd.DataFrame,
+    *,
+    split: DriveSplit,
+    test_rows: pd.DataFrame,
+    calibration_rows: pd.DataFrame,
+    training_rows: pd.DataFrame,
+    spec: ServingSpec,
+    context: ValidationContext,
+    tune_revision: str | None,
 ) -> tuple[str | None, BehaviorModel1D | BehaviorModel2D]:
-    residuals: list[float] = []
-    actual_values: list[float] = []
-    expected_values: list[float] = []
-    warnings = 0
-    critical = 0
-    for row in calibration.to_dict(orient="records"):
-        point = cast(Mapping[str, float], {str(key): value for key, value in row.items()})
-        expected = expected_value(model, point)
-        actual_raw = row.get(recipe.output)
-        actual = None if actual_raw is None or pd.isna(actual_raw) else float(actual_raw)
-        if expected is None or actual is None:
-            continue
-        result = evaluate_deviation(model, actual, point)
-        residuals.append(actual - expected)
-        actual_values.append(actual)
-        expected_values.append(expected)
-        warnings += result.severity == "warning"
-        critical += result.severity == "critical"
-    total = len(calibration)
-    covered = len(residuals)
-    coverage = covered / total if total else 0.0
-    warning_rate = warnings / covered if covered else 1.0
-    critical_rate = critical / covered if covered else 1.0
-    sessions = sorted(calibration[SESSION_COLUMN].astype(str).unique().tolist())
+    """Score the held-out drives with the shared evaluator (B02).
+
+    The test drives' rows are scored whole — every denominator from rows to
+    evaluated — and become the model's :class:`ValidationEvidence`; the
+    legacy ``validation_*`` fit fields are filled from the same numbers.
+    The recipe's publish checks (coverage, per-row warning/critical rate)
+    read the calibration fold when one exists, so the final test drives never
+    decide anything but the recorded verdict.
+    """
+    criteria = recipe.validation
+    baseline_kind = criteria.baseline if criteria is not None else "training_mode_median"
+    modes = (
+        training_rows[MODE_COLUMN].astype(str).to_numpy()
+        if MODE_COLUMN in training_rows.columns
+        else np.full(len(training_rows), "all", dtype=object)
+    )
+    baseline = fit_baseline(
+        pd.to_numeric(training_rows[recipe.output], errors="coerce").to_numpy(dtype=float),
+        modes,
+        baseline_kind,
+    )
+    evidence, test_ev = build_evidence(
+        model,
+        split=split,
+        test_frame=test_rows,
+        calibration_frame=calibration_rows,
+        criteria=criteria,
+        baseline=baseline,
+        context=context,
+        tune_revision=tune_revision,
+        spec=spec,
+    )
+    test = evidence.test
+    assert test is not None
+    residuals = test_ev.residual[test_ev.evaluated]
     fit = model.fit.model_copy(
         update={
-            "calibration_sessions": sessions,
-            "validation_sample_count": covered,
-            "validation_coverage": coverage,
-            "validation_warning_rate": warning_rate,
-            "validation_critical_rate": critical_rate,
-            "validation_residual_median": (float(np.median(residuals)) if residuals else None),
+            "calibration_sessions": sorted(split.pieces("test")),
+            "validation_sample_count": test.evaluated,
+            "validation_coverage": test.coverage if test.coverage is not None else 0.0,
+            "validation_warning_rate": (
+                test.warning_row_rate if test.warning_row_rate is not None else 1.0
+            ),
+            "validation_critical_rate": (
+                test.critical_row_rate if test.critical_row_rate is not None else 1.0
+            ),
+            "validation_residual_median": (float(np.median(residuals)) if residuals.size else None),
             "validation_residual_mad": (
-                float(np.median(np.abs(np.asarray(residuals) - np.median(residuals))))
-                if residuals
+                float(np.median(np.abs(residuals - np.median(residuals))))
+                if residuals.size
                 else None
             ),
-            "validation_r_squared": _validation_r_squared(actual_values, expected_values),
+            "validation_r_squared": test.r_squared,
         }
     )
-    model = model.model_copy(update={"fit": fit})
+    model = model.model_copy(update={"fit": fit, "evidence": evidence})
+    gate = evidence.calibration if evidence.calibration is not None else test
+    coverage = gate.coverage if gate.coverage is not None else 0.0
+    warning_rate = gate.warning_row_rate if gate.warning_row_rate is not None else 1.0
+    critical_rate = gate.critical_row_rate if gate.critical_row_rate is not None else 1.0
     if coverage < recipe.min_validation_coverage:
         return (
             f"held-out coverage {coverage:.1%} below "
@@ -1493,6 +1653,72 @@ def _validate_held_out(
             model,
         )
     return None, model
+
+
+def _prior_grid_leak(
+    prior_model: BehaviorModel1D | BehaviorModel2D | None,
+    split: DriveSplit,
+    *,
+    regrid: bool,
+    recipe: Recipe,
+) -> list[str]:
+    """Test pieces the prior's reused bin edges were fitted on (B02.3).
+
+    Reused auto-edges are a data-driven choice made on the prior's training
+    rows; if those include a drive now in the test fold, the test drive has
+    chosen the bins. Recipe-declared edges and an explicit re-grid are safe.
+    """
+    if (
+        regrid
+        or not isinstance(prior_model, BehaviorModel2D)
+        or not isinstance(recipe, Surface2DRecipe)
+        or (recipe.x_edges is not None and recipe.y_edges is not None)
+    ):
+        return []
+    trained = {parent_session(piece) for piece in prior_model.fit.sessions}
+    return sorted(piece for piece in split.pieces("test") if parent_session(piece) in trained)
+
+
+def _same_evidence_context(
+    model: BehaviorModel1D | BehaviorModel2D, prior: BehaviorModel1D | BehaviorModel2D
+) -> bool:
+    """A no-op refit keeps its version only if decoder, taxonomy and criteria
+    are unchanged too — the training-row hash cannot see those (B02.7)."""
+    new, old = model.evidence, prior.evidence
+    if new is None or old is None:
+        return new is None and old is None
+    return (
+        new.decoder_identity == old.decoder_identity
+        and sorted(new.mode_taxonomy) == sorted(old.mode_taxonomy)
+        and new.criteria == old.criteria
+    )
+
+
+def recipe_contract_fingerprint(recipe: Recipe) -> str:
+    """The contract fingerprint the recipe's next fit would carry."""
+    return fingerprint(
+        contract_fingerprint_payload(
+            kind=recipe.kind,
+            output=recipe.output,
+            inputs=_recipe_columns(recipe)[:-1],
+            operating_mode=recipe.operating_mode,
+            conditions=recipe.rate_conditions(),
+            eligibility=recipe.serving_eligibility(),
+            deviation=recipe.deviation,
+        )
+    )
+
+
+def attach_criteria(
+    recipes: Sequence[Recipe], document: BehaviorValidationDocument | None
+) -> list[Recipe]:
+    """Attach each recipe's declared criteria from profile data (B02.6)."""
+    if document is None:
+        return list(recipes)
+    unknown = sorted(set(document.recipes) - {recipe.name for recipe in recipes})
+    if unknown:
+        log.warning("behavior_validation.yaml declares criteria for unknown recipes: %s", unknown)
+    return [replace(recipe, validation=document.recipes.get(recipe.name)) for recipe in recipes]
 
 
 def _validation_r_squared(actual: list[float], expected: list[float]) -> float | None:
@@ -1618,6 +1844,9 @@ __all__ = [
     "WARMUP_CONTEXT_SESSION_FLOOR",
     "Recipe",
     "RecipeResult",
+    "attach_criteria",
+    "recipe_contract_fingerprint",
+    "recipe_serving_spec",
     "Surface1DRecipe",
     "Surface2DRecipe",
     "choose_warmup_confounding_strategy",
