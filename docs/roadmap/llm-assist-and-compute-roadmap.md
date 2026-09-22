@@ -194,6 +194,11 @@ already in place). No model runs on the handheld.
 
 ## Cross-references
 
+- [ECU second brain](ecu-second-brain.md) — exploratory extension connecting
+  this reasoning tier to persistent investigation memory, adaptive numerical
+  models, and experiment outcomes; includes Pi sizing caveats and candidate
+  model benchmarks from the 2026-09-22 discussion. Does not change queue order
+  or authorize model hosting.
 - `docs/implementation-tasks.md` — Phase 9 (selectable TCN/LSTM sequence
   autoencoder — since shipped), Phase 7 (feature-spec safety 7.1/7.3,
   alert fusion 7.2).
