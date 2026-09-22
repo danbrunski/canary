@@ -1,5 +1,15 @@
 # Implementation task index
 
+**Status 2026-09-22 — two new checklists: cold start and the Pi updater.**
+[`S01-cold-start.md`](S01-cold-start.md) picks up after `04b6cd0` and
+`a870887` took the daemon's first record from 93 s to 69 s after the unit
+starts on a cold boot: startup timing in `/status`, torch and the other heavy
+imports off the path to recording, a shorter VIN probe against a sleeping ECU,
+a cheaper retention tick, a key-on check, and the operator's NVMe decision.
+[`S02-pi-updater.md`](S02-pi-updater.md) covers `canary-update`: tests first,
+re-exec after self-update, skipping unchanged steps, no gratuitous gpsd/chrony
+restarts, rollback on a failed health check, and a summary with exit codes.
+
 **Status 2026-09-22 — six checklists finished and archived.** W01, W03, W04,
 W06, W07 and B01 have every box ticked and moved to [`archive/`](archive/).
 Still live: W02 and W05 (one truck item each), B02–B07 (B02.4 needs

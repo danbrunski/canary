@@ -1,0 +1,154 @@
+# S02 — the Pi updater (`canary-update`)
+
+Opened 2026-09-22, after four runs of `scripts/update_canary.sh` (installed as
+`/usr/local/sbin/canary-update` by `install_pi.sh`, first added in `a85411c`).
+Same conventions as D03: `[x]` only with the evidence linked, `[~]` partial
+with the rest named.
+
+## Where it stands
+
+It works, and the parts that protect a drive already hold. It refuses while a
+capture is active (through `restart_canary.sh --check`), refuses a checkout
+with tracked local changes, and prints `source: <before> -> <after>`, which
+`.claude/commands/drive.md` treats as the deploy's hash check. It restarts
+only through `restart_canary.sh`. Since `119527d` it waits 90 s for `/status`
+(it used to report a healthy 24 s start as a failure), then checks that
+`canary.service`'s cgroup `memory.max` exists and says so loudly when the
+limits are not enforced.
+
+What 2026-09-22 showed is still rough:
+
+- A run that changes `update_canary.sh` itself executes the **old** copy to
+  the end: `install_pi.sh` replaces the file mid-run, and bash keeps the old
+  one open. The first run after `119527d` printed the old 20 s "did not
+  answer" failure while the daemon was healthy.
+- Every run does everything: `pnpm install --frozen-lockfile && pnpm build`, a
+  full `pip install -e .`, and `install_pi.sh`'s unconditional restarts of
+  gpsd, chrony and journald (the daemon logs `gpsd collector failed;
+  reconnecting` on every update). A docs-only update costs minutes and a GPS
+  gap.
+- A failed health check leaves the new code installed and the daemon down or
+  broken, with nothing but an exit code.
+- `install_pi.sh` prints "Set 'hardware.gps.source: gpsd' in
+  /etc/canary/canary.yaml to use it." on every run, including on the Pi,
+  whose config already says `source: gpsd`.
+- None of it has a test. Every behaviour above was found by running it on the
+  Pi.
+
+## Rules
+
+- The refusals stay first and unconditional: an active capture, tracked local
+  changes. Nothing here may add a path that restarts the daemon without
+  `restart_canary.sh`.
+- `source: <before> -> <after>` stays, on its own line, in that form —
+  `drive.md` reads it. If the output changes, update `drive.md` in the same
+  commit.
+- "Skip unchanged work" never means "skip because it looks fine": the
+  decision is made from `git diff --name-only <before> <after>` and from the
+  artefact's presence, and every skip is printed.
+- Changes to `install_pi.sh` must keep it safe to run on a fresh card (the
+  first-install path), not only on the dev Pi.
+
+---
+
+## Desk
+
+- [ ] **S02.1 Put the updater under test first.** Everything below changes
+  a script nobody can run off the Pi today. **Do:** a pytest module that
+  builds a throwaway git "origin" and checkout in `tmp_path`, puts shims for
+  `systemctl`, `curl`, `pnpm`, `runuser`, `restart_canary.sh` and
+  `install_pi.sh` on `PATH` (each logging its argv to a file and exiting with a
+  scripted code), and runs `update_canary.sh` with `CANARY_HOME` pointed at the
+  checkout. Needs a way to run without root: an env override for the
+  `EUID` check that only the tests set. **Accept:** tests for today's
+  behaviour first: refusal on an active capture, refusal on a dirty tracked
+  tree, the `source:` line, the 90 s health loop (with a shimmed `curl` that
+  succeeds on the Nth call and a shortened `CANARY_HEALTH_WAIT_SECONDS`), and
+  the memory-limit warning when the cgroup file is absent (make the cgroup path
+  overridable for the test). Then each item below adds its own.
+
+- [ ] **S02.2 Re-exec the new updater when the update changes it.** After the
+  fetch, if `git diff --name-only <before> <after>` includes
+  `scripts/update_canary.sh`, `exec` the checkout's new copy with the same
+  arguments and an environment marker (`CANARY_UPDATE_REEXEC=<after>`) so it
+  skips the fetch and cannot loop. Print that it did. **Accept:** a test where
+  the "after" commit changes the script's health message, and the run prints
+  the new message; a test that the marker prevents a second re-exec.
+
+- [ ] **S02.3 Skip the work the diff doesn't touch.** From `git diff
+  --name-only <before> <after>`:
+  - Dashboard build: only if anything under `src/dashboard/static/` changed,
+    or `dist/` is missing, or older than the newest source file there. A
+    stale gitignored `dist` has misled a drive before (a panel that looked
+    empty on the Pi was an old build, not missing code), so "missing or
+    stale" must rebuild even with no diff.
+  - `pip install -e .`: only if `pyproject.toml` (or a lock/requirements file,
+    if one is added) changed, or `pip check` fails.
+  - `install_pi.sh`: only if it, anything under `systemd/`, or the files it
+    installs changed. When `before == after`, say "already at <hash>" and do
+    only the restart the operator asked for.
+  - `--full` forces every step, and is what a first install and a
+    "something's wrong" run use.
+  Print one line per step: `ran` or `skipped (<reason>)`. **Accept:** tests
+  for a docs-only diff (no build, no pip, no install, one restart), a
+  dashboard-only diff, a `pyproject.toml` diff, a missing `dist/`, and
+  `--full`. On the Pi, time a docs-only update before and after and record
+  both here.
+
+- [ ] **S02.4 `install_pi.sh` restarts a service only when its config changed.**
+  It restarts gpsd (`systemctl restart gpsd.socket gpsd.service`), chrony and
+  journald unconditionally, so every update drops GPS for a reconnect cycle.
+  **Do:** restart each only when the file the script writes for it changed
+  (compare before writing, or checksum), and on the first install. The
+  canary units' `daemon-reload` stays unconditional; it is cheap and restarts
+  nothing. **Accept:** a second `install_pi.sh` run on an unchanged system
+  restarts nothing and says so; on the Pi, no `gpsd collector failed;
+  reconnecting` line in the daemon log across an update that did not touch
+  the GPS config.
+
+- [ ] **S02.5 Roll back when the new code does not come up.** Record
+  `<before>` before the fetch. If the health check fails, or the restart
+  itself fails: fast-forward is undone with `git -C "$CANARY_HOME" reset
+  --hard <before>` (safe here, because the updater already refused a dirty
+  tracked tree), redo the steps S02.3 would run for `<after> -> <before>`,
+  restart through `restart_canary.sh`, and re-check health. Print both
+  outcomes, and exit non-zero with a distinct code whether or not the rollback
+  succeeded (see S02.7). `--no-rollback` leaves the failed version in place for
+  debugging. Never roll back past a commit the operator deployed by hand (the
+  target is always the recorded `<before>`, nothing older). **Accept:** tests
+  for a failing health check → rolled back and healthy; rollback also failing
+  → says so, different exit code; `--no-rollback`. Before trusting it on the
+  Pi, one driveway run against a deliberately broken ref
+  (`CANARY_UPDATE_REF=<branch with a syntax error in src/main.py>`), parked, no
+  capture active — record the output here.
+
+- [ ] **S02.6 Say only what is true about GPS.** The "Set
+  'hardware.gps.source: gpsd'" line is printed after configuring gpsd,
+  whatever the config says. **Do:** read `hardware.gps.source` from
+  `${CANARY_CONFIG}` (with the venv's Python and the project's own config
+  loader, not a `grep`), and print the hint only when it is not already
+  `gpsd`. **Accept:** a test for both cases; the Pi's update output no longer
+  shows it.
+
+- [ ] **S02.7 One summary, and exit codes that say what happened.** End every
+  run with one block: `<before> -> <after>`, each step's `ran`/`skipped`, the
+  restart result, health (with seconds to answer), memory limits enforced or
+  not, rollback if any, and the total time. Distinct exit codes, documented in
+  `usage()` and `docs/pi-setup.md`: refused (active capture), refused (dirty
+  tree), fetch failed, health failed and rolled back, health failed and
+  rollback failed. The capture refusal already exits 3 from
+  `restart_canary.sh`; keep that value. **Accept:** the S02.1 tests assert the
+  codes; `drive.md`'s deploy bullet names the summary instead of scraping
+  lines, updated in the same commit.
+
+- [ ] **S02.8 Decide whether unenforced memory limits fail the update.**
+  Today they are a warning. The limits exist because the digest once wedged
+  the daemon for 38 minutes (D03.6), and they went unenforced for four days
+  while `systemctl show` said otherwise. **Options:** (a) keep the warning;
+  (b) fail the update, with exit code and message, unless
+  `--allow-unenforced-memory`; (c) warn, and have the daemon itself report
+  `memory_limits_enforced: false` in `/status` so a drive's health line
+  shows it. (c) is the one that cannot be missed, since every drive reads
+  `/status`, and it covers a Pi that was never updated through this script.
+  **Accept:** the choice recorded here with the reason, and implemented with a
+  test.
