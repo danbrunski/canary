@@ -118,3 +118,88 @@ async def test_poll_keeps_previous_models_on_load_error(tmp_path: Path) -> None:
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)
+
+
+async def test_hot_reloaded_cold_start_contract_cannot_qualify_mid_drive(tmp_path: Path) -> None:
+    """B01.5/B01.6 — a schema-2 artifact hot-reloaded mid-drive keeps its
+    serving contract, and its engine-start tracker begins with no evidence:
+    a warmup model cannot be qualified by a reload any more than by a
+    daemon restart."""
+    from datetime import UTC, datetime, timedelta
+
+    from src.config import CanaryConfig
+    from src.decode.behavior_decoder import deviation
+    from src.decode.behavior_models import (
+        CURRENT_SCHEMA_VERSION,
+        ColdStartRequirement,
+        EngineStateRequirement,
+        ServingEligibility,
+        serving_status,
+    )
+    from src.telemetry import TelemetryRecord
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    live_source = LiveFeatureSource(
+        config=config, behavior_models=_models("coolant_warmup", operating_mode=None)
+    )
+    now = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
+    # The engine has been running for ten minutes before the reload lands.
+    for second in range(5):
+        tick = now + timedelta(seconds=second)
+        for channel, value in (
+            ("RPM", 800.0),
+            ("RUN_TIME", 600.0 + second),
+            ("COOLANT_TEMP", 20.0),
+        ):
+            live_source.observe(TelemetryRecord.obd(tick.timestamp(), channel, value, ""))
+        live_source.tick(tick)
+
+    contract = _models("coolant_warmup", operating_mode=None)
+    contract = BehaviorModels(
+        schema_version=CURRENT_SCHEMA_VERSION,
+        models=[
+            contract.models[0].model_copy(
+                update={
+                    "eligibility": ServingEligibility(
+                        engine_state=EngineStateRequirement(state="engine_running"),
+                        cold_start=ColdStartRequirement(max_initial_coolant_c=40.0),
+                    )
+                }
+            )
+        ],
+    )
+    yaml_path = tmp_path / "behavior_models.yaml"
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        poll_behavior_models(yaml_path, live_source, stop, interval_seconds=0.05)
+    )
+    try:
+        await asyncio.sleep(0.1)
+        # The refit lands on disk while the daemon is already polling.
+        dump_behavior_models(contract, yaml_path)
+
+        async def _wait_for_swap() -> None:
+            while live_source.behavior_models is None or (
+                live_source.behavior_models.models[0].eligibility is None
+            ):
+                await asyncio.sleep(0.05)
+
+        await asyncio.wait_for(_wait_for_swap(), timeout=2.0)
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+    reloaded = live_source.behavior_models
+    assert reloaded is not None
+    assert reloaded.models[0].eligibility == contract.models[0].eligibility
+    # Contract present but no held-out evidence: still diagnostic-only.
+    assert serving_status(reloaded.models[0]).reasons == ("unvalidated:no_held_out_evidence",)
+    tick = now + timedelta(seconds=6)
+    for channel, value in (("RPM", 800.0), ("RUN_TIME", 606.0), ("COOLANT_TEMP", 20.0)):
+        live_source.observe(TelemetryRecord.obd(tick.timestamp(), channel, value, ""))
+    live_source.tick(tick)
+    point = live_source.latest_operating_point
+    assert point is not None
+    result = deviation(reloaded.models[0], point["obd:COOLANT_TEMP"], point)
+    assert result.expected is None
+    assert result.reason == "cold_start_no_start_evidence"

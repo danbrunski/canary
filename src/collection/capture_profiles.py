@@ -23,6 +23,7 @@ from src.collection.bus_budget import (
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
 from src.config import CollectionConfig
+from src.decode.behavior_eligibility import required_channel_groups
 from src.decode.behavior_models import load_behavior_models
 
 log = logging.getLogger(__name__)
@@ -674,21 +675,13 @@ def model_input_warnings(
         return []
     warnings: list[dict[str, Any]] = []
     for model in load_behavior_models(behavior_models_path).models:
-        required = (
-            {model.output, model.axis.channel}
-            if model.kind == "surface_1d"
-            else {
-                model.output,
-                *(axis.channel for axis in model.axes),
-            }
-        )
-        for condition in model.conditions:
-            base = condition.channel
-            for suffix in ("__mean", "__std", "__roc"):
-                base = base.removesuffix(suffix)
-            required.add(base)
+        # Every channel the serving contract reads (B01.4): axes, output,
+        # rate-gate bases, engine-state/fuel-status/cold-start channels and
+        # any-of required context groups.
         missing = sorted(
-            channel for channel in required if not _channel_satisfied(channel, profile, frozenset())
+            "|".join(group)
+            for group in required_channel_groups(model)
+            if not any(_channel_satisfied(channel, profile, frozenset()) for channel in group)
         )
         if missing:
             warnings.append({"model": model.name, "missing_channels": missing})

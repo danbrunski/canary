@@ -37,6 +37,10 @@ ROC_SUFFIX = "__roc"
 
 _FEATURE_SUFFIXES: tuple[str, ...] = (MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
 
+#: Mirrors ``src.preprocessing.session_context.CONTEXT_PREFIX`` (kept local to
+#: avoid importing the behavior schema into this leaf module).
+CONTEXT_COLUMN_PREFIX = "context:"
+
 # Telemetry features feed a downstream model after z-score normalization;
 # float32 (~7 significant digits) is ample and roughly halves the RAM held
 # by the featurized frame, which is the dominant cost during training (each
@@ -150,34 +154,7 @@ def _features_one_session(
                 new_cols[std_column(col)] = stds[col].to_numpy(dtype=FEATURE_DTYPE)
 
     if cfg.include_roc:
-        # Rate-of-change uses a row-count shift derived from the median
-        # inter-row interval. For a uniform-grid input (which resample_wide
-        # produces) this equals window_seconds × hz. Falling back to a
-        # one-row shift when the session has only one sample keeps the
-        # operation defined; the resulting ROC will simply be NaN.
-        n_rows = _rows_in_window(timestamps, cfg.window_seconds)
-        # Divide by the row pair's actual elapsed time, not the nominal
-        # window_seconds (8.4). On a dense grid the two are identical
-        # (n_rows was derived to make n_rows × median_delta ≈ window_seconds),
-        # but feature_pipeline._drop_fully_stale_rows can remove whole rows
-        # (a long power-off gap), leaving row-index-adjacent-but-time-distant
-        # neighbors on either side of the seam. Dividing that pair's real
-        # delta by the fixed window_seconds understates the elapsed time and
-        # manufactures a spurious slope right at the seam; the true elapsed
-        # time normalizes it away instead. A non-positive/undefined elapsed
-        # time (warmup, or a duplicate timestamp) makes the ratio meaningless
-        # — NaN it rather than divide by zero.
-        shifted_timestamps = timestamps.shift(n_rows)
-        elapsed = (timestamps - shifted_timestamps).dt.total_seconds()
-        safe_elapsed = elapsed.where(elapsed > 0)
-        # Whole-frame for the same reason as the rolling block above: one
-        # `shift` and one divide over every channel rather than three pandas
-        # round-trips per channel.
-        values = ordered[list(columns)]
-        deltas = values - values.shift(n_rows)
-        rocs = deltas.div(safe_elapsed, axis=0)
-        for col in columns:
-            new_cols[roc_column(col)] = rocs[col].to_numpy(dtype=FEATURE_DTYPE)
+        new_cols.update(_rate_of_change_block(ordered, timestamps, columns, cfg.window_seconds))
 
     # Narrow the passthrough value columns too, so the whole featurized
     # frame is float32 rather than just the appended feature columns.
@@ -194,6 +171,96 @@ def _features_one_session(
     base = base.astype({c: t for c, t in value_downcast.items() if c in base.columns})
     feature_block = pd.DataFrame(new_cols, index=base.index)
     return pd.concat([base, feature_block], axis=1)
+
+
+def _rate_of_change_block(
+    ordered: pd.DataFrame,
+    timestamps: pd.Series,
+    columns: Sequence[str],
+    window_seconds: int,
+) -> dict[str, np.ndarray]:
+    """``{<channel>__roc: values}`` for one time-ordered session.
+
+    The only rate-of-change implementation: :func:`compute_features` and
+    :func:`compute_rate_of_change` (the behavior models' prerequisite
+    context, B01.2) both call it, so a persisted steady-state gate sees the
+    exact derivative the refit filtered on.
+    """
+    # Rate-of-change uses a row-count shift derived from the median
+    # inter-row interval. For a uniform-grid input (which resample_wide
+    # produces) this equals window_seconds × hz. Falling back to a
+    # one-row shift when the session has only one sample keeps the
+    # operation defined; the resulting ROC will simply be NaN.
+    n_rows = _rows_in_window(timestamps, window_seconds)
+    # Divide by the row pair's actual elapsed time, not the nominal
+    # window_seconds (8.4). On a dense grid the two are identical
+    # (n_rows was derived to make n_rows × median_delta ≈ window_seconds),
+    # but feature_pipeline._drop_fully_stale_rows can remove whole rows
+    # (a long power-off gap), leaving row-index-adjacent-but-time-distant
+    # neighbors on either side of the seam. Dividing that pair's real
+    # delta by the fixed window_seconds understates the elapsed time and
+    # manufactures a spurious slope right at the seam; the true elapsed
+    # time normalizes it away instead. A non-positive/undefined elapsed
+    # time (warmup, or a duplicate timestamp) makes the ratio meaningless
+    # — NaN it rather than divide by zero.
+    shifted_timestamps = timestamps.shift(n_rows)
+    elapsed = (timestamps - shifted_timestamps).dt.total_seconds()
+    safe_elapsed = elapsed.where(elapsed > 0)
+    # Whole-frame for the same reason as the rolling block above: one
+    # `shift` and one divide over every channel rather than three pandas
+    # round-trips per channel.
+    values = ordered[list(columns)]
+    deltas = values - values.shift(n_rows)
+    rocs = deltas.div(safe_elapsed, axis=0)
+    return {roc_column(col): rocs[col].to_numpy(dtype=FEATURE_DTYPE) for col in columns}
+
+
+def compute_rate_of_change(
+    frame: pd.DataFrame,
+    columns: Iterable[str],
+    *,
+    config: FeatureConfig | None = None,
+) -> pd.DataFrame:
+    """Append ``<channel>__roc`` for ``columns`` without reordering ``frame``.
+
+    Prerequisite context for behavior models with persisted rate gates
+    (B01.2): the behavior decoder runs *before* :func:`compute_features`,
+    so the derivatives it needs are computed here first — same session
+    grouping, time ordering, horizon and units as :func:`compute_features`,
+    through the same :func:`_rate_of_change_block`. Rows keep their input
+    order and index (the pre-feature operating frame is not re-sorted).
+    Columns absent from ``frame`` are skipped (the gate then refuses with a
+    named reason); an already-derived ``__roc`` column is never itself
+    differentiated.
+    """
+    cfg = FeatureConfig() if config is None else config
+    wanted = [
+        col
+        for col in dict.fromkeys(columns)
+        if col in frame.columns and not col.endswith(_FEATURE_SUFFIXES)
+    ]
+    out = frame.copy()
+    if not wanted or frame.empty:
+        for col in wanted:
+            out[roc_column(col)] = np.full(len(frame), np.nan, dtype=FEATURE_DTYPE)
+        return out
+    _require_columns(frame, [SESSION_COLUMN, TIMESTAMP_COLUMN])
+    numeric = frame[wanted].apply(pd.to_numeric, errors="coerce")
+    results = {roc_column(col): np.full(len(frame), np.nan, dtype=FEATURE_DTYPE) for col in wanted}
+    positions = np.arange(len(frame))
+    for _, idx in frame.groupby(SESSION_COLUMN, sort=True, dropna=False).indices.items():
+        group_positions = positions[np.asarray(idx)]
+        stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN].iloc[group_positions], utc=True)
+        order = np.argsort(stamps.to_numpy(), kind="stable")
+        ordered_positions = group_positions[order]
+        ordered = numeric.iloc[ordered_positions].reset_index(drop=True)
+        timestamps = stamps.iloc[order].reset_index(drop=True)
+        block = _rate_of_change_block(ordered, timestamps, wanted, cfg.window_seconds)
+        for name, values in block.items():
+            results[name][ordered_positions] = values
+    for name, values in results.items():
+        out[name] = values
+    return out
 
 
 def _rows_in_window(timestamps: pd.Series, window_seconds: int) -> int:
@@ -234,6 +301,10 @@ def _value_columns(
     for raw in df.columns:
         col = str(raw)
         if col in skip_exact:
+            continue
+        # Serving context (B01.5, src.preprocessing.session_context) is
+        # per-start bookkeeping for behavior eligibility, not telemetry.
+        if col.startswith(CONTEXT_COLUMN_PREFIX):
             continue
         if any(col.endswith(suffix) for suffix in (GAP_SUFFIX, *_FEATURE_SUFFIXES)):
             continue

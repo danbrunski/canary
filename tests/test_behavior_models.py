@@ -315,6 +315,57 @@ def test_yaml_round_trip(tmp_path: Path) -> None:
     assert fuel is not None and fuel.kind == "surface_2d"
 
 
+def test_yaml_round_trip_preserves_serving_contract(tmp_path: Path) -> None:
+    """B01.6 — a schema-2 contract survives dump/load exactly."""
+    from src.decode.behavior_models import (
+        CURRENT_SCHEMA_VERSION,
+        ColdStartRequirement,
+        EngineStateRequirement,
+        FuelControlRequirement,
+        RequiredContext,
+        ServingEligibility,
+        TrainingSelection,
+    )
+
+    contract = ServingEligibility(
+        engine_state=EngineStateRequirement(state="engine_running", min_running_rpm=400.0),
+        fuel_control=FuelControlRequirement(allowed_states=[2]),
+        cold_start=ColdStartRequirement(max_initial_coolant_c=40.0),
+        required_context=[RequiredContext(any_of=["obd:INTAKE_TEMP", "decoded:IAT"])],
+        training_selection=TrainingSelection(
+            require_session_events=["cold_start"], require_contiguous_runtime=True, min_sessions=3
+        ),
+    )
+    model = _model_1d().model_copy(update={"eligibility": contract})
+    path = tmp_path / "behavior_models.yaml"
+    dump_behavior_models(
+        BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[model, _model_2d()]), path
+    )
+    loaded = load_behavior_models(path)
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION
+    assert loaded.models[0].eligibility == contract
+    assert loaded.models[1].eligibility is None  # legacy model in a v2 document
+
+
+def test_fuel_control_rejects_non_j1979_states() -> None:
+    from src.decode.behavior_models import FuelControlRequirement
+
+    with pytest.raises(ValidationError, match="J1979"):
+        FuelControlRequirement(allowed_states=[3])
+
+
+def test_shipped_artifact_loads_diagnostic_only() -> None:
+    """B01.6 — the shipped schema-1 artifacts predate the serving contract;
+    they load, but none is presented as a trusted alert source."""
+    from src.decode.behavior_models import STATUS_LEGACY_NO_CONTRACT, diagnostic_only_models
+
+    path = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
+    models = load_behavior_models(path)
+    diagnostic = diagnostic_only_models(models)
+    assert set(diagnostic) == {model.name for model in models.models}
+    assert all(STATUS_LEGACY_NO_CONTRACT in reasons for reasons in diagnostic.values())
+
+
 def test_shipped_air_charge_surface_is_revision_scoped() -> None:
     path = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
     surface = load_behavior_models(path).by_name("air_charge_vs_rpm_throttle_did")

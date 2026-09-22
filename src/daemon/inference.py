@@ -27,9 +27,12 @@ from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.dashboard.status import VehicleState, classify_vehicle_state
 from src.decode.accepted_baselines import load_accepted_baselines
 from src.decode.behavior_decoder import deviation, deviation_for_override
+from src.decode.behavior_eligibility import resolve_output_column
 from src.decode.behavior_models import (
     BehaviorModel1D,
+    diagnostic_only_models,
     load_behavior_models,
+    serving_status,
     unknown_operating_modes,
 )
 from src.decode.bindings import load_bindings
@@ -506,6 +509,10 @@ class BehaviorDetector:
         persistence = self._components.persistence_gate
         tuner = self._components.alert_tuner
         for residual in residuals:
+            # B01.6 — a diagnostic-only model never raises a trusted alert or
+            # a fusion vote; it stays visible on the overlay with its reason.
+            if not residual.alerting:
+                continue
             # Sibling surfaces grading the same output channel share a
             # fusion group so they count as one agreeing voice, not two.
             behavior = self._fusion.behavior_source(
@@ -519,7 +526,11 @@ class BehaviorDetector:
             # the last time this model was in-mode. On-mode-but-not-deviating
             # is a genuine miss and still displaces a stale hit (flood
             # protection intact).
-            verdict: bool | None = behavior.fired if residual.mode_match else None
+            # B01.4 — likewise any tick the model refused (ineligible,
+            # off-map, missing actual): no measurement is not a clean one.
+            verdict: bool | None = (
+                behavior.fired if residual.mode_match and residual.reason is None else None
+            )
             # 6.3/3.1: a tuner override for (behavior, mode) fully owns
             # persistence for this key instead of stacking — see
             # `gate_and_collect`, shared with the IF + sequence detectors.
@@ -1491,6 +1502,13 @@ class _BehaviorResidual:
     #: this tick's severity was graded against a recentered one-sided band
     #: instead of the model's own static config; ``None`` otherwise.
     override_reason: str | None = None
+    #: B01.4 — why no deviation was produced this tick (``None`` when one
+    #: was). A refused tick is a missing verdict, never a healthy miss.
+    reason: str | None = None
+    #: B01.6 — ``False`` for a diagnostic-only model (legacy artifact without
+    #: a serving contract, or no held-out validation): still graded and
+    #: shown, never emitted or fused.
+    alerting: bool = True
 
 
 def _record_if_health(
@@ -1863,11 +1881,8 @@ def _observe_behavior(
         # Same actual-column resolution as append_deviation_columns: a
         # qualified source:channel output is verbatim; a bare CAN signal
         # name falls back to the legacy decoded:<NAME>.
-        actual_col = (
-            model.output
-            if SOURCE_SEP in model.output
-            else channel_key(DECODED_SOURCE, model.output)
-        )
+        actual_col = resolve_output_column(model.output)
+        status = serving_status(model)
         actual = _num(point.get(actual_col))
         # 2.2 — an active, non-expired override for this model recenters
         # the band (worse side trips, better side never alerts, per
@@ -1899,6 +1914,9 @@ def _observe_behavior(
                 deviation=result.deviation,
                 severity=result.severity,
                 mode_match=mode_match,
+                reason=result.reason,
+                status=status.state,
+                status_reasons=status.reasons,
             )
         )
         residuals.append(
@@ -1914,6 +1932,8 @@ def _observe_behavior(
                 operating_mode=mode,
                 timestamp=timestamp,
                 override_reason=None if override is None else override.provenance.reason,
+                reason=result.reason,
+                alerting=status.alerting,
             )
         )
     # 2.2 — raw-channel overrides (e.g. `obd:SHORT_FUEL_TRIM_1`) have no
@@ -2011,6 +2031,14 @@ def build_live_feature_source(
                 "can't emit — they will NEVER evaluate; add the modes to "
                 "preprocessing.operating_modes",
                 extra={"models": mismatched},
+            )
+        diagnostic = diagnostic_only_models(behavior_models)
+        if diagnostic:
+            log.warning(
+                "behavior models loaded diagnostic-only — evaluated and shown, "
+                "but they will not raise alerts until refit with a serving "
+                "contract and held-out validation",
+                extra={"models": diagnostic},
             )
     accepted_baselines = load_accepted_baselines(accepted_baselines_path)
     # The training feature pipeline decodes CAN twice — bindings.yaml

@@ -47,6 +47,7 @@ from src.control.capture_manifest import read_capture_manifest
 from src.decode.behavior_models import (
     dump_behavior_models,
     load_behavior_models,
+    serving_status,
     unknown_operating_modes,
 )
 from src.log import configure_logging
@@ -439,9 +440,13 @@ def _print_report(results: Sequence, frame_rows: int) -> None:
                 if fit.validation_coverage is not None and fit.validation_warning_rate is not None
                 else ""
             )
+            status = serving_status(res.model)
+            status_note = (
+                "" if status.alerting else f"  [diagnostic-only: {', '.join(status.reasons)}]"
+            )
             print(
                 f"    ✓ {res.name:35s}  n={fit.sample_count:>6d}  {r2}  "
-                f"v{res.model.version}{validation}"
+                f"v{res.model.version}{validation}{status_note}"
             )
     if skipped:
         print(f"\n  skipped ({len(skipped)}):")
@@ -480,6 +485,12 @@ def _write_bakeoff_report(path: Path, results: Sequence, *, frame_rows: int) -> 
                     "diagnostic_capabilities": model.diagnostic_capabilities,
                     "diagnostic_limitations": model.diagnostic_limitations,
                     "conditions": [condition.model_dump() for condition in model.conditions],
+                    "eligibility": (
+                        model.eligibility.model_dump(mode="json")
+                        if model.eligibility is not None
+                        else None
+                    ),
+                    "serving_status": serving_status(model).to_dict(),
                 }
             )
             if model.kind == "surface_2d":

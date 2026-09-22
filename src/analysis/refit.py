@@ -35,16 +35,36 @@ from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robus
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.decode.behavior_decoder import deviation as evaluate_deviation
 from src.decode.behavior_decoder import expected_value
+from src.decode.behavior_eligibility import (
+    ServingSpec,
+    eligibility_reasons,
+    eligible_mask,
+    reason_code,
+    summarize_reasons,
+)
 from src.decode.behavior_models import (
+    CLOSED_LOOP_FUEL_STATES,
+    CURRENT_SCHEMA_VERSION,
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
+    ColdStartRequirement,
     DeviationConfig,
+    EngineStateRequirement,
+    FuelControlRequirement,
     RateOfChangeCondition,
+    RequiredContext,
+    ServingEligibility,
+    TrainingSelection,
 )
 from src.preprocessing.features import roc_column
 from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.session_context import (
+    StartContextSpec,
+    append_start_context,
+    start_context_columns,
+)
 
 log = logging.getLogger(__name__)
 
@@ -127,9 +147,24 @@ class _RecipeBase:
     max_validation_critical_rate: float = 0.02
     diagnostic_capabilities: tuple[str, ...] = ()
     diagnostic_limitations: tuple[str, ...] = ()
+    #: B01.3 serving rule — rows must belong to an observed engine start
+    #: whose coolant was at or below this (see ``ColdStartRequirement``).
     max_initial_coolant_c: float | None = None
+    #: Window after a start within which it counts as observed and its first
+    #: coolant reading stands in for the initial temperature.
+    cold_start_evidence_seconds: float = 60.0
+    #: Training-only corpus rule: drop whole sessions whose run-time clock
+    #: resets or gaps. Persisted as provenance, never evaluated at serve.
     require_contiguous_runtime: bool = False
+    #: B01.4 — explicit fuel-status membership. ``closed_loop_only`` is the
+    #: common case and means ``CLOSED_LOOP_FUEL_STATES``; ``fuel_states``
+    #: names any other explicit set. Never "any nonzero status".
     closed_loop_only: bool = False
+    fuel_states: tuple[int, ...] | None = None
+    fuel_status_channel: str = "obd:FUEL_STATUS"
+    #: Measured quantities the output's meaning depends on; each tuple is an
+    #: any-of group that must be present and fresh on the row.
+    required_context: tuple[tuple[str, ...], ...] = ()
     #: Persisted steady-state constraints. Keys are base telemetry columns;
     #: values are maximum absolute per-second rates over the feature
     #: pipeline's rolling horizon. The fitter applies them and the resulting
@@ -152,6 +187,53 @@ class _RecipeBase:
     #: falls below this is skipped rather than published, same as a
     #: missing-column or too-few-samples skip. ``None`` disables the gate.
     min_r_squared: float | None = 0.6
+
+    def fuel_control_states(self) -> tuple[int, ...] | None:
+        if self.fuel_states is not None:
+            return self.fuel_states
+        return CLOSED_LOOP_FUEL_STATES if self.closed_loop_only else None
+
+    def serving_eligibility(self) -> ServingEligibility:
+        """The typed contract this recipe persists on its model (B01.3)."""
+        fuel_states = self.fuel_control_states()
+        return ServingEligibility(
+            engine_state=EngineStateRequirement(
+                state="engine_running" if self.min_rpm is not None else "any",
+                rpm_channel=RPM_COLUMN,
+                min_running_rpm=self.min_rpm or ENGINE_RUNNING_MIN_RPM,
+            ),
+            fuel_control=(
+                FuelControlRequirement(
+                    channel=self.fuel_status_channel, allowed_states=list(fuel_states)
+                )
+                if fuel_states is not None
+                else None
+            ),
+            cold_start=(
+                ColdStartRequirement(
+                    rpm_channel=RPM_COLUMN,
+                    min_running_rpm=self.min_rpm or ENGINE_RUNNING_MIN_RPM,
+                    max_start_runtime_s=self.cold_start_evidence_seconds,
+                    max_initial_coolant_c=self.max_initial_coolant_c,
+                )
+                if self.max_initial_coolant_c is not None
+                else None
+            ),
+            required_context=[
+                RequiredContext(any_of=list(group)) for group in self.required_context
+            ],
+            training_selection=TrainingSelection(
+                require_session_events=list(self.require_session_events),
+                require_contiguous_runtime=self.require_contiguous_runtime,
+                min_sessions=self.min_sessions,
+            ),
+        )
+
+    def rate_conditions(self) -> list[RateOfChangeCondition]:
+        return [
+            RateOfChangeCondition(channel=roc_column(channel), max_abs_per_second=limit)
+            for channel, limit in self.max_abs_rate_of_change.items()
+        ]
 
     def __post_init__(self) -> None:
         invalid = {
@@ -425,6 +507,9 @@ def default_recipes() -> list[Recipe]:
             y_axis_unit="%",
             min_samples=500,
             min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fill KOEO — VE is a frozen/meaningless value there
+            # derived.py substitutes 25 degC when no IAT is present; that row
+            # is a different quantity, so a measured IAT is required context.
+            required_context=(("obd:INTAKE_TEMP", "decoded:IAT"),),
             # sigma_floor: same MAF-LSB reasoning as air_mass_per_cycle_vs_rpm_load
             # (0.002 g/cycle) expressed as a percent of a representative idle-cell
             # 100%-VE fill (~0.4 g/cycle for this displacement class) — approximate,
@@ -874,47 +959,41 @@ def fit_recipe(
                 reason="no rows from sessions authorized for this behavior-model recipe",
             )
 
-    # 0a. engine-running gate — applied before everything else so KOEO rows
-    # can't reach the fitters OR the 2D auto-edge quantiles.
-    if recipe.min_rpm is not None:
-        if RPM_COLUMN not in sub.columns:
-            # The gate is load-bearing (KOEO contamination); silently fitting
-            # without it would re-introduce the bug it exists to prevent.
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no {RPM_COLUMN} column in frame; can't enforce min_rpm gate",
-            )
-        rpm = pd.to_numeric(sub[RPM_COLUMN], errors="coerce")
-        sub = sub[rpm >= recipe.min_rpm]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no rows with {RPM_COLUMN} >= {recipe.min_rpm} (engine-running gate)",
-            )
+    # B01.3/B01.4 — the serving contract this recipe will persist. Training
+    # rows pass through the *same* evaluator the decoder, daemon and replay
+    # use, so the fit cannot learn from rows its model would refuse to grade.
+    eligibility = recipe.serving_eligibility()
+    conditions = recipe.rate_conditions()
+    spec = ServingSpec(
+        operating_mode=recipe.operating_mode,
+        conditions=tuple(conditions),
+        eligibility=eligibility,
+        inputs=tuple(_recipe_columns(recipe)[:-1]),
+        # The refit reads ``recipe.output`` verbatim as its column.
+        output=recipe.output,
+    )
 
-    # 1. operating_mode filter (cheap, scope-narrowing)
-    if recipe.operating_mode is not None:
-        if MODE_COLUMN not in sub.columns:
-            return RecipeResult(
-                recipe.name, None, skipped=True, reason=f"no {MODE_COLUMN} column in frame"
-            )
-        sub = sub[sub[MODE_COLUMN] == recipe.operating_mode]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no rows in operating_mode={recipe.operating_mode!r}",
-            )
+    # 0a. Refuse when a contract column is absent from the whole frame —
+    # silently fitting without an enforceable gate would re-introduce the
+    # contamination it exists to prevent (KOEO timing, open-loop trims).
+    if eligibility.engine_state.state == "engine_running" and RPM_COLUMN not in sub.columns:
+        return RecipeResult(
+            recipe.name,
+            None,
+            skipped=True,
+            reason=f"no {RPM_COLUMN} column in frame; can't enforce min_rpm gate",
+        )
+    if recipe.operating_mode is not None and MODE_COLUMN not in sub.columns:
+        return RecipeResult(
+            recipe.name, None, skipped=True, reason=f"no {MODE_COLUMN} column in frame"
+        )
 
-    # 1b. require_session_events filter — drop rows from sessions that don't
-    # carry every event kind in ``recipe.require_session_events``. Only
-    # applies when ``session_events`` is provided; otherwise no-op so
-    # callers that haven't wired up the classifier still work.
+    # 1b. Training-only selection: require_session_events filter — drop rows
+    # from sessions that don't carry every event kind in
+    # ``recipe.require_session_events``. Only applies when ``session_events``
+    # is provided; otherwise no-op so callers that haven't wired up the
+    # classifier still work. Recorded in ``TrainingSelection``; never a
+    # serve-time rule.
     if recipe.require_session_events and session_events is not None:
         if SESSION_COLUMN not in sub.columns:
             return RecipeResult(
@@ -951,43 +1030,25 @@ def fit_recipe(
                 ),
             )
 
-    if recipe.closed_loop_only:
-        status_column = "obd:FUEL_STATUS"
-        if status_column not in sub.columns:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no {status_column} column; can't enforce closed-loop-only fit",
-            )
-        status = pd.to_numeric(sub[status_column], errors="coerce").fillna(0).astype(int)
-        sub = sub[((status & 0x02) != 0) | ((status & 0x10) != 0)]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name, None, skipped=True, reason="no closed-loop fuel-system rows"
-            )
+    if eligibility.fuel_control is not None and eligibility.fuel_control.channel not in sub.columns:
+        return RecipeResult(
+            recipe.name,
+            None,
+            skipped=True,
+            reason=(
+                f"no {eligibility.fuel_control.channel} column; can't enforce closed-loop-only fit"
+            ),
+        )
 
     # 1d. Steady-state conditions are a model contract, not merely a corpus
-    # cleanup. Refuse if the derivative cannot be enforced, filter training
-    # and held-out rows here, then persist the same bounds on the model below
-    # so runtime evaluation applies them identically.
-    for channel, limit in recipe.max_abs_rate_of_change.items():
-        derivative = roc_column(channel)
-        if derivative not in sub.columns:
+    # cleanup: refuse if a derivative cannot be enforced.
+    for condition in conditions:
+        if condition.channel not in sub.columns:
             return RecipeResult(
                 recipe.name,
                 None,
                 skipped=True,
-                reason=f"missing {derivative}; can't enforce steady-state rate gate",
-            )
-        rate = pd.to_numeric(sub[derivative], errors="coerce")
-        sub = sub[rate.notna() & (rate.abs() <= limit)]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no rows satisfy abs({derivative}) <= {limit}",
+                reason=f"missing {condition.channel}; can't enforce steady-state rate gate",
             )
 
     # 2. required columns present?
@@ -996,46 +1057,71 @@ def fit_recipe(
     if missing:
         return RecipeResult(recipe.name, None, skipped=True, reason=f"missing columns {missing}")
 
-    if recipe.max_initial_coolant_c is not None or recipe.require_contiguous_runtime:
-        eligible: list[str] = []
+    # 2a. Cold-start context: the same engine-start fold the live source and
+    # batch featurizer run, derived here when the frame was built without a
+    # model that needed it.
+    if eligibility.cold_start is not None:
+        observed_col, coolant_col = start_context_columns(eligibility.cold_start)
+        if observed_col not in sub.columns or coolant_col not in sub.columns:
+            if SESSION_COLUMN not in sub.columns:
+                return RecipeResult(
+                    recipe.name,
+                    None,
+                    skipped=True,
+                    reason="cold-start eligibility requires session ids",
+                )
+            # ``sub`` still holds whole sessions (only session-level
+            # selections ran so far), so each fold sees the pre-start rows.
+            sub = append_start_context(
+                sub, [StartContextSpec.from_requirement(eligibility.cold_start)]
+            )
+
+    # 2b. Training-only: whole sessions with a broken run-time clock are
+    # poor warmup evidence (provenance in ``TrainingSelection``).
+    if recipe.require_contiguous_runtime:
         if SESSION_COLUMN not in sub.columns:
             return RecipeResult(
-                recipe.name, None, skipped=True, reason="warmup eligibility requires session ids"
+                recipe.name,
+                None,
+                skipped=True,
+                reason="runtime-continuity selection requires session ids",
             )
+        contiguous: list[str] = []
         for session_id, rows in sub.groupby(SESSION_COLUMN, sort=False):
             ordered = rows.sort_values("timestamp") if "timestamp" in rows else rows
-            if recipe.max_initial_coolant_c is not None:
-                if "obd:COOLANT_TEMP" not in ordered:
-                    continue
-                coolant = pd.to_numeric(ordered["obd:COOLANT_TEMP"], errors="coerce").dropna()
-                if coolant.empty or float(coolant.iloc[0]) > recipe.max_initial_coolant_c:
-                    continue
-            if recipe.require_contiguous_runtime:
-                if "obd:RUN_TIME" not in ordered:
-                    continue
-                runtime = pd.to_numeric(ordered["obd:RUN_TIME"], errors="coerce").dropna()
-                if len(runtime) < 2 or bool((runtime.diff().dropna() < 0).any()):
-                    continue
-                if "obd:RUN_TIME__gap" in ordered and bool(
-                    ordered["obd:RUN_TIME__gap"].astype(bool).any()
-                ):
-                    continue
-            eligible.append(str(session_id))
-        sub = sub[sub[SESSION_COLUMN].astype(str).isin(eligible)]
+            if "obd:RUN_TIME" not in ordered:
+                continue
+            runtime = pd.to_numeric(ordered["obd:RUN_TIME"], errors="coerce").dropna()
+            if len(runtime) < 2 or bool((runtime.diff().dropna() < 0).any()):
+                continue
+            if "obd:RUN_TIME__gap" in ordered and bool(
+                ordered["obd:RUN_TIME__gap"].astype(bool).any()
+            ):
+                continue
+            contiguous.append(str(session_id))
+        sub = sub[sub[SESSION_COLUMN].astype(str).isin(contiguous)]
         if sub.empty:
             return RecipeResult(
                 recipe.name,
                 None,
                 skipped=True,
-                reason="no session satisfies cold-start temperature/runtime continuity gates",
+                reason="no session satisfies the run-time continuity selection",
             )
 
-    # 3. enough clean samples?
-    clean = sub.dropna(subset=required)
-    freshness_columns = [f"{column}__gap" for column in required]
-    available_freshness = [column for column in freshness_columns if column in clean.columns]
-    if available_freshness:
-        clean = clean.loc[~clean[available_freshness].astype(bool).any(axis=1)]
+    # 3. Per-row serving contract (engine state, fuel control, cold-start
+    # context, required context, fresh inputs and actual, rate gates).
+    reasons = eligibility_reasons(sub, spec, include_actual=True)
+    eligible_rows = eligible_mask(reasons)
+    if not eligible_rows.any():
+        codes = {reason_code(str(reason)) for reason in reasons if reason is not None}
+        if codes == {"operating_mode_mismatch"}:
+            detail = f"no rows in operating_mode={recipe.operating_mode!r}"
+        elif codes == {"engine_not_running"}:
+            detail = f"no rows with {RPM_COLUMN} >= {recipe.min_rpm} (engine-running gate)"
+        else:
+            detail = f"no rows satisfy the serving contract: {summarize_reasons(reasons)}"
+        return RecipeResult(recipe.name, None, skipped=True, reason=detail)
+    clean = sub.loc[eligible_rows]
     if any(column.startswith("did:") for column in required):
         gap_columns = [f"{column}__gap" for column in required if column.startswith("did:")]
         if any(column not in clean.columns for column in gap_columns):
@@ -1106,13 +1192,10 @@ def fit_recipe(
         )
         return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
 
-    conditions = [
-        RateOfChangeCondition(channel=roc_column(channel), max_abs_per_second=limit)
-        for channel, limit in recipe.max_abs_rate_of_change.items()
-    ]
     model = model.model_copy(
         update={
             "conditions": conditions,
+            "eligibility": eligibility,
             "fit": model.fit.model_copy(update={"tune_revision": tune_revision}),
         }
     )
@@ -1148,6 +1231,7 @@ def fit_recipe(
         and model.fit.training_data_hash
         and model.fit.training_data_hash == prior_model.fit.training_data_hash
         and model.conditions == prior_model.conditions
+        and model.eligibility == prior_model.eligibility
         and model.fit.tune_revision == prior_model.fit.tune_revision
     ):
         model = model.model_copy(update={"version": prior_model.version})
@@ -1293,9 +1377,11 @@ def refit_all(
                 ordered.append(prior_model.name)
                 seen.add(prior_model.name)
 
-    schema_version = existing.schema_version if existing is not None else 1
+    # Newly fitted models carry a serving contract (schema 2). A carried-over
+    # legacy prior keeps ``eligibility=None`` and therefore stays
+    # diagnostic-only: rewriting the document never blesses it (B01.6).
     return BehaviorModels(
-        schema_version=schema_version,
+        schema_version=CURRENT_SCHEMA_VERSION,
         models=[fitted[name] for name in ordered],
     ), results
 

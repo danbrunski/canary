@@ -49,7 +49,11 @@ from src.preprocessing.feature_cache import (
 from src.preprocessing.feature_cache import (
     build_feature_frame_cache_key as build_feature_frame_cache_key,
 )
-from src.preprocessing.features import FeatureConfig, compute_features
+from src.preprocessing.features import (
+    CONTEXT_COLUMN_PREFIX,
+    FeatureConfig,
+    compute_features,
+)
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
@@ -843,6 +847,14 @@ def featurize_wide_frame(
     ``dashboard.paths.DEFAULT_BINDINGS_PATH`` — asserted in
     tests/test_decoded_mode_signals.py, which is why the per-tick live path
     does not have to ship a catalog across the scoring-process boundary).
+
+    B01.2 — behavior models are evaluated *before* ``compute_features``;
+    ``append_deviation_columns`` builds the context their serving contracts
+    read first (``__roc`` derivatives at this transform's rolling horizon,
+    ``context:*`` engine-start evidence). The live path's
+    :class:`~src.preprocessing.live.LiveFeatureSource` carries start
+    evidence across ticks itself (its ring buffer is far shorter than a
+    warmup) and has already written those columns into ``wide``.
     """
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
     # Derived anomaly signals (air mass per cycle, VE, bank-balance
@@ -879,11 +891,13 @@ def featurize_wide_frame(
     # input quality. Non-trainable committees are emitted here but excluded from
     # the trained feature set below — see analysis.committees.
     framed = append_committee_residuals(framed)
-    if behavior_models is not None and behavior_models.models:
-        framed = append_deviation_columns(framed, behavior_models)
     cfg = feature_config or FeatureConfig(
         window_seconds=config.preprocessing.rolling_window_seconds
     )
+    if behavior_models is not None and behavior_models.models:
+        framed = append_deviation_columns(
+            framed, behavior_models, rate_window_seconds=cfg.window_seconds
+        )
     features = compute_features(framed, config=cfg)
     return FeaturizedFrame(
         features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
@@ -1094,6 +1108,10 @@ def candidate_feature_columns(
     for raw in features.columns:
         col = str(raw)
         if col in skip_exact or col.endswith("__gap"):
+            continue
+        # Behavior serving context (B01.5) — eligibility bookkeeping, never
+        # a learned feature.
+        if col.startswith(CONTEXT_COLUMN_PREFIX):
             continue
         if (
             col.startswith("dbc:")

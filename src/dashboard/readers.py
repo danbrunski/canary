@@ -18,6 +18,7 @@ from src.decode.accepted_baselines import (
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
     load_behavior_models,
+    serving_status,
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
@@ -327,7 +328,12 @@ def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str,
     """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard."""
     if not path.exists():
         return {"schema_version": None, "models": []}
-    return load_behavior_models(path).model_dump(mode="json")
+    models = load_behavior_models(path)
+    payload = models.model_dump(mode="json")
+    # B01.6 — additive: whether each model may alert, and why not.
+    for entry, model in zip(payload["models"], models.models, strict=True):
+        entry["serving_status"] = serving_status(model).to_dict()
+    return payload
 
 
 def read_accepted_baselines(path: Path = DEFAULT_ACCEPTED_BASELINES_PATH) -> dict[str, Any]:

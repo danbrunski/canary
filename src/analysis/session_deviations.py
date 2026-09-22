@@ -33,6 +33,7 @@ from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
+    serving_status,
     unknown_operating_modes,
 )
 from src.decode.bindings import load_bindings
@@ -71,6 +72,12 @@ class SurfaceDeviationSummary:
     #: Per-(rpm,load)-bin mean deviation, surface_2d models only — see
     #: ``_bin_2d_deviations``. Empty for surface_1d.
     cells: list[dict[str, Any]] = field(default_factory=list)
+    #: B01.4 — in-mode rows the model refused, counted by named reason
+    #: (eligibility condition, ``off_map``, missing/stale actual). A refused
+    #: row is not an in-band row; it is excluded from the fractions above.
+    refusal_reasons: dict[str, int] = field(default_factory=dict)
+    #: B01.6 — the artifact's serving status (``state`` + ``reasons``).
+    serving_status: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -79,6 +86,8 @@ class SurfaceDeviationSummary:
             "operating_mode": self.operating_mode,
             "n_observed": self.n_observed,
             "n_in_domain": self.n_in_domain,
+            "refusal_reasons": self.refusal_reasons,
+            "serving_status": self.serving_status,
             "mean_actual": self.mean_actual,
             "mean_expected": self.mean_expected,
             "mean_deviation": self.mean_deviation,
@@ -190,6 +199,7 @@ def _summarize_surface(
     xs: list[float] = []
     ys: list[float] = []
     n_observed = 0
+    refusals: dict[str, int] = {}
 
     if actual_col:
         for row in records:
@@ -197,6 +207,8 @@ def _summarize_surface(
                 continue
             n_observed += 1
             result = evaluate_deviation(model, row.get(actual_col), row)
+            if result.reason is not None:
+                refusals[result.reason] = refusals.get(result.reason, 0) + 1
             if result.expected is None:
                 continue
             expecteds.append(result.expected)
@@ -238,6 +250,8 @@ def _summarize_surface(
         warning_fraction=warning_fraction,
         critical_fraction=critical_fraction,
         cells=cells,
+        refusal_reasons=dict(sorted(refusals.items(), key=lambda item: (-item[1], item[0]))),
+        serving_status=serving_status(model).to_dict(),
     )
 
 

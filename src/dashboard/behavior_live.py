@@ -52,6 +52,14 @@ class BehaviorObservation:
     deviation: float | None
     severity: str  # "ok" | "warning" | "critical"
     mode_match: bool  # model.operating_mode is None OR == current mode
+    #: B01.4 — why the model produced no deviation this tick (``None`` when
+    #: it did): an unmet eligibility condition, ``off_map``, or a
+    #: missing/stale actual. Additive; older fields keep their meaning.
+    reason: str | None = None
+    #: B01.6 — ``"active"`` or ``"diagnostic_only"`` (see
+    #: ``behavior_models.serving_status``) plus the named reasons.
+    status: str = "active"
+    status_reasons: tuple[str, ...] = ()
 
 
 class BehaviorLiveState:
@@ -95,6 +103,7 @@ class BehaviorLiveState:
                     "expected": obs.expected,
                     "deviation": obs.deviation,
                     "severity": obs.severity,
+                    "reason": obs.reason,
                 }
             )
 
@@ -121,6 +130,9 @@ class BehaviorLiveState:
                 "deviation": obs.deviation,
                 "severity": obs.severity,
                 "mode_match": obs.mode_match,
+                "reason": obs.reason,
+                "status": obs.status,
+                "status_reasons": list(obs.status_reasons),
             }
             if include_series:
                 entry["series"] = list(self._trail.get(name, ()))

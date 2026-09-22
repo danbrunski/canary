@@ -237,7 +237,9 @@ def _append_behavior_deviations(frame: pd.DataFrame, config: CanaryConfig) -> pd
         return frame
     if not models.models:
         return frame
-    return append_deviation_columns(frame, models)
+    return append_deviation_columns(
+        frame, models, rate_window_seconds=config.preprocessing.rolling_window_seconds
+    )
 
 
 # --------------------------------------------------------------------------- #

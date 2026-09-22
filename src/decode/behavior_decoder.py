@@ -34,6 +34,17 @@ import pandas as pd
 from src.analysis.surface_1d import evaluate_1d
 from src.analysis.surface_2d import evaluate_2d
 from src.decode.accepted_baselines import AcceptedBaselineOverride
+from src.decode.behavior_eligibility import (
+    ACTUAL_MISSING,
+    ACTUAL_STALE,
+    OFF_MAP,
+    eligibility_reasons,
+    eligible_mask,
+    point_eligibility,
+    point_flag,
+    resolve_output_column,
+    serving_spec,
+)
 from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
@@ -41,9 +52,9 @@ from src.decode.behavior_models import (
     DeviationConfig,
     GridBinnedMeanFit,
 )
+from src.preprocessing.features import ROC_SUFFIX, FeatureConfig, compute_rate_of_change
 from src.preprocessing.resampler import gap_column
-from src.preprocessing.segmenter import MODE_COLUMN
-from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
+from src.preprocessing.session_context import append_start_context, start_context_specs
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +78,12 @@ class DeviationResult:
     actual: float | None
     deviation: float | None
     severity: Severity
+    #: B01.4 — why no deviation was produced (``None`` when one was): the
+    #: first unmet eligibility condition from
+    #: ``src.decode.behavior_eligibility``, ``off_map``, or a missing/stale
+    #: actual. An ineligible point is never an ``ok`` measurement: callers
+    #: that count or alert must check this, not ``severity`` alone.
+    reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -81,25 +98,35 @@ def expected_value(
     """Look up the model's expected output at the given operating point.
 
     ``operating_point`` is a column-name → value mapping (typically one wide
-    row converted to a dict). Returns ``None`` when:
-
-    * ``operating_mode`` is set on the model and ``operating_point[MODE_COLUMN]``
-      doesn't match,
-    * a persisted rate-of-change condition is missing or outside its bound,
-    * a required input column is missing or NaN,
-    * the point is outside the fit domain / grid extent,
-    * (2D only) the grid cell is empty (``count == 0``).
+    row converted to a dict). Returns ``None`` whenever
+    :func:`explain_expected_value` names a reason — an unmet eligibility
+    condition (operating mode, engine state, fuel control, cold-start
+    context, required context, stale/missing input, rate gate) or an
+    off-map point.
     """
-    if not _operating_mode_matches(model, operating_point) or not _conditions_match(
-        model, operating_point
-    ):
-        return None
+    return explain_expected_value(model, operating_point)[0]
+
+
+def explain_expected_value(
+    model: BehaviorModel1D | BehaviorModel2D,
+    operating_point: Mapping[str, object],
+) -> tuple[float | None, str | None]:
+    """``(expected, reason)`` — exactly one of the two is ``None``."""
+    reason = point_eligibility(operating_point, model)
+    if reason is not None:
+        return None, reason
+    expected = _surface_value(model, operating_point)
+    if expected is None:
+        return None, OFF_MAP
+    return expected, None
+
+
+def _surface_value(
+    model: BehaviorModel1D | BehaviorModel2D, operating_point: Mapping[str, object]
+) -> float | None:
     if isinstance(model, BehaviorModel1D):
         x = _scalar(operating_point.get(model.axis.channel))
-        if x is None:
-            return None
-        return evaluate_1d(model, x)
-    # 2D
+        return None if x is None else evaluate_1d(model, x)
     x = _scalar(operating_point.get(model.axes[0].channel))
     y = _scalar(operating_point.get(model.axes[1].channel))
     if x is None or y is None:
@@ -120,7 +147,9 @@ def deviation(
     Returns ``DeviationResult`` with severity ``"ok"`` / ``"warning"`` /
     ``"critical"`` per the model's ``DeviationConfig``. With no
     ``DeviationConfig`` set, severity is always ``"ok"`` (we still return the
-    deviation number for logging).
+    deviation number for logging). When no deviation can be produced,
+    ``reason`` names why (B01.4); ``severity`` is then ``"ok"`` only for API
+    compatibility and must not be counted as a healthy measurement.
 
     ``override`` (2.2, online-training-strategy.md Phase 2) is an active,
     non-expired ``behavior_model``-targeted ``AcceptedBaselineOverride`` —
@@ -135,10 +164,23 @@ def deviation(
     grades against the model's own static ``deviation`` config unchanged —
     the symmetric path's behavior is exactly as before.
     """
-    expected = expected_value(model, operating_point)
-    if expected is None or actual is None or _scalar(actual) is None:
-        return DeviationResult(expected=expected, actual=actual, deviation=None, severity="ok")
-    delta = float(actual) - expected
+    expected, reason = explain_expected_value(model, operating_point)
+    if expected is None:
+        return DeviationResult(
+            expected=None, actual=actual, deviation=None, severity="ok", reason=reason
+        )
+    actual_value = _scalar(actual)
+    if actual_value is None:
+        output = serving_spec(model).output
+        stale = point_flag(operating_point, gap_column(output))
+        return DeviationResult(
+            expected=expected,
+            actual=actual,
+            deviation=None,
+            severity="ok",
+            reason=f"{ACTUAL_STALE if stale else ACTUAL_MISSING}:{output}",
+        )
+    delta = actual_value - expected
     if override is not None:
         dev_cfg = override.to_deviation_config()
         local_std = _local_std(model, operating_point, dev_cfg) if dev_cfg.std_scaled else None
@@ -184,42 +226,100 @@ def expected_value_column(
     """Row-vectorized ``expected_value`` over a wide DataFrame.
 
     Returns a float series indexed like ``frame`` with NaN where the model
-    has no expectation. The same operating-mode / domain / empty-cell rules
-    as the scalar API apply.
+    has no expectation. The same eligibility / domain / empty-cell rules as
+    the scalar API apply (one evaluator, B01.4).
     """
+    expected, _ = explain_expected_column(frame, model)
+    return pd.Series(expected, index=frame.index, dtype=float)
+
+
+def explain_expected_column(
+    frame: pd.DataFrame,
+    model: BehaviorModel1D | BehaviorModel2D,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(expected, reasons)`` arrays — the frame form of
+    :func:`explain_expected_value`, row for row identical to it."""
     result = np.full(len(frame), np.nan, dtype=float)
-    in_mode = _operating_mode_mask(frame, model) & _conditions_mask(frame, model)
-    if not in_mode.any():
-        return pd.Series(result, index=frame.index, dtype=float)
+    reasons = eligibility_reasons(frame, model)
+    eligible = eligible_mask(reasons)
+    if not eligible.any():
+        return result, reasons
 
     if isinstance(model, BehaviorModel1D):
-        column = model.axis.channel
-        if column not in frame.columns:
-            return pd.Series(result, index=frame.index, dtype=float)
-        x_vals = pd.to_numeric(frame[column], errors="coerce").to_numpy()
-        for i in np.flatnonzero(in_mode):
-            xi = x_vals[i]
-            if not np.isfinite(xi):
-                continue
-            y = evaluate_1d(model, float(xi))
-            if y is not None:
+        x_vals = pd.to_numeric(frame[model.axis.channel], errors="coerce").to_numpy()
+        for i in np.flatnonzero(eligible):
+            y = evaluate_1d(model, float(x_vals[i]))
+            if y is None:
+                reasons[i] = OFF_MAP
+            else:
                 result[i] = y
-        return pd.Series(result, index=frame.index, dtype=float)
+        return result, reasons
 
-    # 2D
     cx, cy = model.axes[0].channel, model.axes[1].channel
-    if cx not in frame.columns or cy not in frame.columns:
-        return pd.Series(result, index=frame.index, dtype=float)
     x_vals = pd.to_numeric(frame[cx], errors="coerce").to_numpy()
     y_vals = pd.to_numeric(frame[cy], errors="coerce").to_numpy()
-    for i in np.flatnonzero(in_mode):
-        xi, yi = x_vals[i], y_vals[i]
-        if not (np.isfinite(xi) and np.isfinite(yi)):
-            continue
-        cell = evaluate_2d(model, float(xi), float(yi))
-        if cell is not None:
+    for i in np.flatnonzero(eligible):
+        cell = evaluate_2d(model, float(x_vals[i]), float(y_vals[i]))
+        if cell is None:
+            reasons[i] = OFF_MAP
+        else:
             result[i] = cell.mean
-    return pd.Series(result, index=frame.index, dtype=float)
+    return result, reasons
+
+
+def append_behavior_prerequisites(
+    frame: pd.DataFrame,
+    models: BehaviorModels,
+    *,
+    rate_window_seconds: int | None = None,
+) -> pd.DataFrame:
+    """Build the context behavior eligibility reads, before decoding (B01.2).
+
+    * ``<base>__roc`` for every base channel a persisted rate gate names and
+      ``frame`` lacks, via :func:`~src.preprocessing.features.
+      compute_rate_of_change` — the one rate-of-change implementation, with
+      ``compute_features``' session grouping, horizon and units (it later
+      rebuilds identical values for every channel). Only base telemetry is
+      differentiated: a gate on a ``__roc`` of a ``__roc``, or on a
+      ``deviation:*`` column (behavior depending on behavior), is logged and
+      left to refuse as ``rate_unavailable``.
+    * ``context:*`` engine-start evidence for cold-start contracts when
+      ``frame`` lacks it (batch), folded per session by
+      :func:`~src.preprocessing.session_context.append_start_context`. The
+      live source supplies its own, which outlives its ring buffer.
+
+    Returns ``frame`` itself when nothing is needed.
+    """
+    roc_bases: list[str] = []
+    for model in models.models:
+        for condition in model.conditions:
+            base = condition.channel.removesuffix(ROC_SUFFIX)
+            if condition.channel == base or condition.channel in frame.columns:
+                continue
+            if base.endswith(ROC_SUFFIX) or base.startswith(DEVIATION_COLUMN_PREFIX):
+                log.warning(
+                    "behavior rate gate names a derived/behavior column; not computed",
+                    extra={"model": model.name, "channel": condition.channel},
+                )
+                continue
+            if base not in roc_bases:
+                roc_bases.append(base)
+    out = frame
+    if roc_bases:
+        config = (
+            FeatureConfig()
+            if rate_window_seconds is None
+            else FeatureConfig(window_seconds=rate_window_seconds)
+        )
+        out = compute_rate_of_change(out, roc_bases, config=config)
+    specs = [
+        spec
+        for spec in start_context_specs(models)
+        if spec.observed_column not in out.columns or spec.start_coolant_column not in out.columns
+    ]
+    if specs:
+        out = append_start_context(out, specs)
+    return out
 
 
 def append_deviation_columns(
@@ -227,6 +327,7 @@ def append_deviation_columns(
     models: BehaviorModels,
     *,
     output_columns: Mapping[str, str] | None = None,
+    rate_window_seconds: int | None = None,
 ) -> pd.DataFrame:
     """Append ``deviation:<model_name>`` columns to ``frame`` (Task 4.E.7).
 
@@ -244,41 +345,42 @@ def append_deviation_columns(
     ``obd:COOLANT_TEMP`` from the refit recipes — it has a ``:``); else the
     legacy ``decoded:<output>`` for a bare CAN signal name (e.g.
     ``ECM_INJECTOR_PW`` → ``decoded:ECM_INJECTOR_PW``).
+
+    Eligibility (B01.4) is the shared evaluator's. The context it reads is
+    built here first by :func:`append_behavior_prerequisites` (B01.2), so no
+    caller can forget it: ``rate_window_seconds`` must be the rolling horizon
+    the models were fitted at (``preprocessing.rolling_window_seconds``;
+    ``None`` means the ``FeatureConfig`` default, the same default
+    ``compute_features`` uses). The ``deviation:<name>__gap`` flag is set on
+    every row where no deviation was produced, whatever the reason.
     """
-    out = frame.copy()
+    out = append_behavior_prerequisites(frame, models, rate_window_seconds=rate_window_seconds)
+    if out is frame:
+        out = frame.copy()  # never mutate the caller's frame
+    new_columns: dict[str, pd.Series] = {}
     for model in models.models:
-        actual_col = (output_columns or {}).get(model.name) or (
-            model.output
-            if SOURCE_SEP in model.output
-            else channel_key(DECODED_SOURCE, model.output)
-        )
-        expected = expected_value_column(out, model)
+        actual_col = (output_columns or {}).get(model.name) or resolve_output_column(model.output)
+        expected, _ = explain_expected_column(out, model)
         if actual_col in out.columns:
-            actual = pd.to_numeric(out[actual_col], errors="coerce")
+            actual = pd.to_numeric(out[actual_col], errors="coerce").to_numpy(dtype=float)
             delta = actual - expected
+            stale = ~np.isfinite(delta)
+            actual_gap = gap_column(actual_col)
+            if actual_gap in out.columns:
+                stale |= out[actual_gap].astype(object).fillna(True).astype(bool).to_numpy()
+                delta = np.where(stale, np.nan, delta)
         else:
             log.info(
                 "actual column not present; deviation will be NaN",
                 extra={"model": model.name, "actual_column": actual_col},
             )
-            delta = pd.Series(np.nan, index=out.index, dtype=float)
-        out[f"{DEVIATION_COLUMN_PREFIX}{model.name}"] = delta
-        dependencies = [actual_col]
-        if isinstance(model, BehaviorModel1D):
-            dependencies.append(model.axis.channel)
-        else:
-            dependencies.extend(axis.channel for axis in model.axes)
-        dependencies.extend(condition.channel for condition in model.conditions)
-        stale = delta.isna()
-        for dependency in dependencies:
-            if dependency not in out.columns:
-                stale |= True
-                continue
-            stale |= pd.to_numeric(out[dependency], errors="coerce").isna()
-            dependency_gap = gap_column(dependency)
-            if dependency_gap in out.columns:
-                stale |= out[dependency_gap].fillna(True).astype(bool)
-        out[gap_column(f"{DEVIATION_COLUMN_PREFIX}{model.name}")] = stale.astype(bool)
+            delta = np.full(len(out), np.nan)
+            stale = np.ones(len(out), dtype=bool)
+        column = f"{DEVIATION_COLUMN_PREFIX}{model.name}"
+        new_columns[column] = pd.Series(delta, index=out.index, dtype=float)
+        new_columns[gap_column(column)] = pd.Series(stale, index=out.index, dtype=bool)
+    for name, values in new_columns.items():
+        out[name] = values
     return out
 
 
@@ -298,46 +400,6 @@ def _scalar(value: object) -> float | None:
     if not np.isfinite(f):
         return None
     return f
-
-
-def _operating_mode_matches(
-    model: BehaviorModel1D | BehaviorModel2D, point: Mapping[str, object]
-) -> bool:
-    if model.operating_mode is None:
-        return True
-    actual_mode = point.get(MODE_COLUMN)
-    return actual_mode == model.operating_mode
-
-
-def _operating_mode_mask(
-    frame: pd.DataFrame, model: BehaviorModel1D | BehaviorModel2D
-) -> np.ndarray:
-    if model.operating_mode is None:
-        return np.ones(len(frame), dtype=bool)
-    if MODE_COLUMN not in frame.columns:
-        return np.zeros(len(frame), dtype=bool)
-    return (frame[MODE_COLUMN].astype(object) == model.operating_mode).to_numpy()
-
-
-def _conditions_match(
-    model: BehaviorModel1D | BehaviorModel2D, point: Mapping[str, object]
-) -> bool:
-    """Fail closed when a persisted serve-time condition cannot be checked."""
-    for condition in model.conditions:
-        value = _scalar(point.get(condition.channel))
-        if value is None or abs(value) > condition.max_abs_per_second:
-            return False
-    return True
-
-
-def _conditions_mask(frame: pd.DataFrame, model: BehaviorModel1D | BehaviorModel2D) -> np.ndarray:
-    mask = np.ones(len(frame), dtype=bool)
-    for condition in model.conditions:
-        if condition.channel not in frame.columns:
-            return np.zeros(len(frame), dtype=bool)
-        values = pd.to_numeric(frame[condition.channel], errors="coerce").to_numpy(dtype=float)
-        mask &= np.isfinite(values) & (np.abs(values) <= condition.max_abs_per_second)
-    return mask
 
 
 def _grade_severity(
@@ -459,11 +521,14 @@ __all__ = [
     "DEVIATION_COLUMN_PREFIX",
     "DeviationResult",
     "Severity",
+    "append_behavior_prerequisites",
     "append_deviation_columns",
     "deviation",
     "deviation_for_override",
     "expected_value",
     "expected_value_column",
+    "explain_expected_column",
+    "explain_expected_value",
     # Re-exported for convenience so callers don't need a second import.
     "BehaviorModels",
     "GridBinnedMeanFit",

@@ -70,6 +70,11 @@ from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_f
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import ResampleConfig, gap_column, is_slow_channel
+from src.preprocessing.session_context import (
+    EngineStartTracker,
+    StartContextSpec,
+    start_context_specs,
+)
 from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
@@ -117,6 +122,9 @@ def build_prepared_live_tick(prepared: PreparedLiveTick) -> BuiltLiveTick:
     in a persistent process. The full rolling frames never cross back to the
     daemon; only the two newest rows needed by inference and behavior do.
     """
+    # Start evidence outlives the ring buffer: ``prepare_tick`` already wrote
+    # the source's tracked ``context:*`` values into ``wide``, so the behavior
+    # decoder uses them instead of re-folding this short window (B01.5).
     result: FeaturizedFrame = featurize_wide_frame(
         prepared.wide,
         prepared.config,
@@ -188,6 +196,13 @@ class LiveFeatureSource:
     #: reset because the loop remains responsive while it works; tagging the
     #: snapshot makes that stale result impossible to apply to the new run.
     _generation: int = field(init=False, default=0)
+    #: B01.5 — engine-start evidence per cold-start contract in the loaded
+    #: behavior models, keyed by tracker spec. Created lazily (a model
+    #: hot-reloaded mid-drive gets a tracker with no evidence, so it cannot
+    #: qualify until a start is observed) and cleared on :meth:`reset`.
+    _start_trackers: dict[StartContextSpec, EngineStartTracker] = field(
+        init=False, default_factory=dict
+    )
 
     #: Last wide-row operating point (raw channels + ``operating_mode`` +
     #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
@@ -504,6 +519,7 @@ class LiveFeatureSource:
             # path derives mask (¬gap) and Δt (age) identically to training.
             **gap_flags,
         }
+        snapshot.update(self._start_context(snapshot, now_utc))
         self._buffer.append(snapshot)
 
         wide = pd.DataFrame(list(self._buffer))
@@ -543,6 +559,32 @@ class LiveFeatureSource:
             prepared.now, self.latest_operating_point
         )
         return built.feature_row
+
+    def _start_context(self, snapshot: dict[str, Any], now: datetime) -> dict[str, float]:
+        """Advance each cold-start tracker by this tick (B01.5).
+
+        Fed the same bounded (stale → NaN) values the batch fold sees on a
+        resampled row, so live, replay and batch reach the same evidence.
+        """
+        specs = start_context_specs(self.behavior_models)
+        live = set(specs)
+        for stale_spec in [spec for spec in self._start_trackers if spec not in live]:
+            del self._start_trackers[stale_spec]
+        out: dict[str, float] = {}
+        for spec in specs:
+            tracker = self._start_trackers.get(spec)
+            if tracker is None:
+                tracker = EngineStartTracker(spec)
+                self._start_trackers[spec] = tracker
+            observed, start_coolant = tracker.update(
+                snapshot.get(spec.rpm_channel),
+                snapshot.get(spec.runtime_channel),
+                snapshot.get(spec.coolant_channel),
+                now.timestamp(),
+            )
+            out[spec.observed_column] = observed
+            out[spec.start_coolant_column] = start_coolant
+        return out
 
     def _accumulate_derived_integrals(
         self, now: datetime, point: dict[str, Any]
@@ -717,6 +759,8 @@ class LiveFeatureSource:
         self._buffer = deque(maxlen=self._max_rows)
         self.latest_operating_point = None
         self.last_segmenter_fallback = False
+        # Replay entry/exit is a session boundary: no start evidence carries.
+        self._start_trackers = {}
         # Trip integrals are session-scoped (Task 1.3) — zero them on the
         # same boundary as everything else so a new session (or a replay
         # run) never inherits the previous session's running totals.

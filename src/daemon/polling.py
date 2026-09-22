@@ -7,7 +7,11 @@ from typing import Any
 
 from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig
-from src.decode.behavior_models import load_behavior_models, unknown_operating_modes
+from src.decode.behavior_models import (
+    diagnostic_only_models,
+    load_behavior_models,
+    unknown_operating_modes,
+)
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.preprocessing.live import LiveFeatureSource
@@ -220,6 +224,14 @@ async def poll_behavior_models(
                             "segmenter can't emit — they will NEVER evaluate; "
                             "add the modes to preprocessing.operating_modes",
                             extra={"models": mismatched},
+                        )
+                    diagnostic = diagnostic_only_models(new_models)
+                    if diagnostic:
+                        log.warning(
+                            "hot-reloaded behavior models are diagnostic-only — "
+                            "shown but not alerting until refit with a serving "
+                            "contract and held-out validation",
+                            extra={"models": diagnostic},
                         )
                     last_mtime = mtime
         except Exception:  # noqa: BLE001 — keep the previous models; log + retry
