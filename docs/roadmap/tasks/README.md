@@ -1,5 +1,11 @@
 # Implementation task index
 
+**Status 2026-09-22 — six checklists finished and archived.** W01, W03, W04,
+W06, W07 and B01 have every box ticked and moved to [`archive/`](archive/).
+Still live: W02 and W05 (one truck item each), B02–B07 (B02.4 needs
+independent drives; the B03 refit/replay/deploy and the IF + sequence retrain
+are deferred by the operator, 2026-09-22), D03 and D04.
+
 **Status 2026-09-21 — behavior-model accuracy and consolidation checklists.**
 [`B00-behavior-models-README.md`](B00-behavior-models-README.md) indexes B01–B07:
 fit/serve correctness, trustworthy validation, model retirement/refitting,

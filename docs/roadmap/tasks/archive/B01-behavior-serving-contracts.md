@@ -1,7 +1,7 @@
 # B01 — behavior fit/serve contracts
 
 **Depends on:** nothing. **Unlocks:** every conditioned candidate in B04–B07.
-Follow [B00](B00-behavior-models-README.md)'s shared rules.
+Follow [B00](../B00-behavior-models-README.md)'s shared rules.
 
 The review reproduced a steady model returning no live prediction: behavior
 evaluation precedes the `__roc` inputs it requires. Closed-loop and cold-start

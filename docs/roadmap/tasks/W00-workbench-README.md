@@ -10,13 +10,17 @@ commit, screenshot, or measurement), `[~]` for partial with the remainder named.
 
 | file | covers | roadmap task | needs the truck |
 |---|---|---|---|
-| [W01](W01-navigation-regroup.md) | five groups, renames, redirects, reserved entries | W1, W10 | no |
+| [W01](archive/W01-navigation-regroup.md) ✅ | five groups, renames, redirects, reserved entries | W1, W10 | no |
 | [W02](W02-tuning-context-bar.md) | shared context bar, calibration id in `/status`, readiness chips | W2 | one KOEO probe |
-| [W03](W03-logging-page.md) | Logging page, ended-capture announcement | W3, W4 | final check only |
-| [W04](W04-logs-and-analysis.md) | Logs (table / visual) and Analysis pages | W5, W6 | no |
+| [W03](archive/W03-logging-page.md) ✅ | Logging page, ended-capture announcement | W3, W4 | final check only |
+| [W04](archive/W04-logs-and-analysis.md) ✅ | Logs (table / visual) and Analysis pages | W5, W6 | no |
 | [W05](W05-rom-maps-trace-coverage.md) | ECM-coordinate trace, coverage overlay | W7, W8 | final check only |
-| [W06](W06-calibration-page.md) | flash history, memory-channel state, re-verify | W9 | final check only |
-| [W07](W07-flash-interlocks.md) | the two AGENTS.md conditions as server-side code | W11 | no |
+| [W06](archive/W06-calibration-page.md) ✅ | flash history, memory-channel state, re-verify | W9 | final check only |
+| [W07](archive/W07-flash-interlocks.md) ✅ | the two AGENTS.md conditions as server-side code | W11 | no |
+
+✅ complete and moved to [`archive/`](archive/). W02 and W05 stay live: each
+has one item that needs the truck (W02.1 KOEO probe; W05.1 X-trace mapping,
+plus W05's final drive check).
 
 ## Order
 
