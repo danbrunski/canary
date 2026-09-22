@@ -658,6 +658,10 @@ def _semantic_delivery_frame(
     keep = ["timestamp", "rpm", "measured_afr", "commanded_afr", "fueling_active"]
     if "measured_afr_censored" in values:
         keep.append("measured_afr_censored")
+    # The target word's fuel-cut sentinel (build_tuning_frame), so cut samples
+    # are counted by the named `fuel_cut` gate instead of never starting.
+    if "fuel_cut" in values:
+        keep.append("fuel_cut")
     return values.loc[:, keep]
 
 
@@ -771,6 +775,19 @@ def pooled_delivery_error(
         "per_session": per_session,
         "unavailable": [item.as_dict() for item in skipped],
         "noise_floor": floor,
+        # What "same instant" means here, stated rather than implied. These
+        # gates pair inside a one-second cell (one target and one measurement
+        # per second, last of each), which bounds a *band average* but is not
+        # instantaneous target tracking: a residual against a target that
+        # moved inside the cell is not resolvable at this pairing. The
+        # acquisition-clock relationship (src/analysis/lambda_delivery.py)
+        # is the one that pairs real observations within a declared
+        # separation and names each ineligible state.
+        "pairing": {
+            "method": "1s grid, last observation per cell",
+            "claims_instantaneous_target_tracking": False,
+            "acquisition_time_path": "src.analysis.lambda_delivery.delivery_samples",
+        },
     }
     if not per_session:
         base.update(

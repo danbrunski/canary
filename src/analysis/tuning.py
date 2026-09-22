@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.analysis.afr import AfrCalibration
 from src.analysis.channels import read_aligned, read_channels
+from src.analysis.lambda_delivery import residual_pct
 from src.analysis.noise_floor import NoiseFloor
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
@@ -533,8 +534,15 @@ def delivery_error_from_gated(
             tune_revision_source=tune_revision_source,
         )
 
+    # The one delivery residual (B06.4): the same definition, sign and
+    # refusal of phi as the lambda-delivery relationship, so analysis and any
+    # serving path cannot drift apart. Positive = leaner than commanded.
     values = values.assign(
-        error_pct=(values["measured_afr"] / values["commanded_afr"] - 1.0) * 100.0
+        error_pct=residual_pct(
+            values["measured_afr"].astype(float),
+            values["commanded_afr"].astype(float),
+            quantity="afr",
+        )
     )
     binned = values.groupby(pd.cut(values["rpm"], list(rpm_bands)), observed=True)
     bands = binned.agg(

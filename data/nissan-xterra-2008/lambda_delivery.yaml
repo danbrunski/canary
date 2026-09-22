@@ -1,0 +1,171 @@
+# Commanded-versus-measured lambda delivery (B06) — the declared quantities.
+#
+# Schema: src/analysis/lambda_delivery.py (LambdaDeliveryDeclaration).
+# Loaded with the memory catalog (data/dids.yaml) and tuning_providers.yaml,
+# which it is cross-checked against: a mem: target must carry the catalog's
+# unit and sentinel, and the provider registry's commanded_afr channel must be
+# declared here as usable or refused.
+#
+# Evidence for every number below:
+#   data/analyses/2026-09-22-lambda-delivery-and-warmup-inventory.md
+# reproduced by scripts/lambda_delivery_evidence.py and pinned on a committed
+# slice by tests/test_lambda_delivery_known_answers.py.
+schema_version: 1
+
+residual:
+  definition: "100 * (lambda_measured / lambda_target - 1)"
+  unit: percent
+  positive: lean
+
+commanded_sources:
+  # Preferred: the ECM's FINAL commanded equivalence ratio (program RAM).
+  - name: ram_final_target
+    spec: 'mem:ECM_TARGET_EQUIV_RATIO'
+    quantity: phi
+    sentinel_spec: 'mem:ECM_TARGET_EQUIV_RATIO_SENTINEL'
+    valid_regimes: [closed_loop, enrichment]
+    plausible_min: 0.9
+    plausible_max: 1.4
+    convention_evidence: >-
+      phi, by chain rather than by assertion. (1) Its catalog known answer:
+      word 0x4A80 = 1.1640625 is DID 0x1134 raw 74, the Mode 01 PID 0x44
+      value observed there (data/dids.yaml). (2) On the 2026-09-21 captures
+      it equals PID 0x44 EXACTLY on every steady enrichment pair (7/7, 10/10
+      and 3/3 on the three drives, acquisition-time paired within 250 ms),
+      and PID 0x44 above stoich is phi (78592f4, re-derived against the
+      lambda sensor on 2026-09-21T223734: 18 off-stoich pairs, 2.38 % as phi
+      against 24.44 % as lambda). A direct check of this channel against the
+      lambda sensor is NOT available: enrichment never held the declared
+      dwell often enough (0-5 steady off-stoich pairs per drive), so
+      check_target_convention returns `unresolvable` there and says so.
+    limitations:
+      - >-
+        Polled at ~1 Hz on the 2026-09-21 profiles (1,085-1,376 reads per
+        20-25 min), so target steps are located to about a second; a dwell
+        rule, not a sub-second lag fit, is what this cadence supports.
+  # Mode 01 PID 0x44. phi convention settled at WOT (commit 78592f4) and
+  # recorded in afr_calibration.yaml, so it defers to that record.
+  - name: mode01_pid_0x44
+    spec: 'obd:COMMANDED_EQUIV_RATIO'
+    quantity: from_calibration
+    fuel_cut_value: 0.0
+    valid_regimes: [enrichment]
+    plausible_min: 0.8
+    plausible_max: 1.4
+    convention_evidence: >-
+      afr_calibration.yaml commanded_equiv_ratio_convention: phi (78592f4:
+      at WOT 1.109-1.242 as phi matches the ROM target curve to -0.4 %, as
+      lambda it is a -27 % phantom error).
+    limitations:
+      - >-
+        NOT the final target in closed loop, and not even phi there. With the
+        RAM target holding exactly 1.0, PID 0x44 read quantized values
+        (0.8707, 0.9796, 1.0204, ...) and matched the RAM word on 8-29 % of
+        steady pairs (ratio p95 1.1485). Judged per side against the lambda
+        sensor, its readings BELOW 1.0 track measured lambda (18 pairs,
+        2.40 % as lambda against 24.09 % as phi on 2026-09-21T223734; 43
+        pairs, 1.34 % on 232153) — a sensor-like quantity, not a command.
+        It is therefore valid only for enrichment, and closed-loop rows from
+        it are refused as source_not_valid_in_regime.
+
+refused_commanded:
+  - spec: 'did:ECM_ENRICHMENT_TARGET_EQUIV_RATIO_CANDIDATE'
+    reason: >-
+      DID 0x1134 is the floor-clamped high byte of the RAM target (raw =
+      max(64, floor(word/256)) on 5,000/5,000 same-reply observations): it
+      holds raw 64 at both stoich and fuel cut, so it cannot tell cut from
+      stoich, and its 1/64 resolution is 1.6 % of phi.
+
+measured_sources:
+  - name: ecm_lambda_pid_0x24
+    spec: 'obd:O2_WR_LAMBDA_S1'
+    quantity: lambda
+    rail_high: 1.999
+    convention_evidence: >-
+      lambda, verified 2026-08-07 on _capture-tuning-hybrid-research-
+      2026-08-07T210613: under decel fuel cut it pegs at 2.000 (lean), where
+      phi would fall toward zero; at a phi=1.16 command (lambda 0.862) it read
+      0.866 (afr_calibration.yaml provenance).
+  - name: af_voltage_b1
+    spec: 'did:ECM_AF_SENSOR_V_B1'
+    quantity: afr
+    transform: voltage_afr
+    convention_evidence: >-
+      Calibrated voltage-to-AFR transfer, afr_calibration.yaml
+      voltage_transfer (UpRev held-out MAE 0.0049 AFR in the 10-13 band);
+      censored outside censored_floor_afr/censored_ceiling_afr.
+  - name: af_voltage_b2
+    spec: 'did:ECM_AF_SENSOR_V_B2'
+    quantity: afr
+    transform: voltage_afr
+    convention_evidence: >-
+      Same transfer as bank 1; the two banks agree independently (MAE
+      0.0294 / 0.0283 AFR against UpRev, afr_calibration.yaml).
+
+source_disagreements:
+  - between: [ecm_lambda_pid_0x24, af_voltage_b1]
+    value_pct: -3.84
+    conditions: >-
+      WOT enrichment near 12.6 AFR, UpRev K-line conversion vs the Pi's
+      Mode 01 lambda (2026-08-05, commit 78592f4)
+    status: unresolved
+    evidence: >-
+      2026-08-07 same-clock cross-check: +0.52 % near stoich (174 pairs);
+      rich of stoich +1.38 % once the mixture is stable (n=7), the rest being
+      ~0.34 s Mode-01/Mode-22 acquisition skew. Never settled at 12.6 AFR
+      because no drive has sustained deep enrichment on that profile
+      (afr_calibration.yaml cross_check_2026-08-07). Neither source may be
+      silently preferred: every result names its measured source.
+
+eligibility:
+  # Target-defined regime: the RAM word reads exactly 1.0 whenever it is not
+  # enriching, so +-0.01 separates stoich from the smallest enrichment step
+  # (1/64 phi above 1.0 is the coarsest the RAM word has shown).
+  closed_loop_band: 0.01
+  steady_target_dwell_s: 3.0
+  target_step_tolerance: 0.005
+  max_target_gap_s: 2.5
+  post_fuel_cut_holdoff_s: 15.0
+  informed_by:
+    - _capture-fuel-target-research-2026-09-21T195844
+    - _capture-tuning-2026-09-21T223734
+    - _capture-tuning-2026-09-21T232153
+  justification: >-
+    Dwell: the RAM target is polled at ~1 Hz and the sensor sits downstream of
+    the exhaust, so a sample is steady only when the target has held for at
+    least three polls; transitions inside that window are the tip-in lag a
+    delivery residual must not report. Post-cut holdoff: after decel fuel cut
+    the ECM leaves the target at 1.0 while measured lambda runs rich for
+    several seconds (post-cut recovery with PID 0x44 at 0.8707). Measured
+    settling times (lambda within 3 % of target and staying there 2 s) over
+    112 cut episodes on the three informing drives: median 5.6-8.5 s, p90
+    12.2-17.6 s, max 18.4-22.9 s, and 39 episodes never settled before the
+    next cut or a 30 s horizon. 15 s is about the pooled p90; it does not
+    make every post-cut sample steady, and the residuals that remain are
+    reported as measurements, not as a clean floor.
+    These three drives chose the constants and are therefore NOT independent
+    evidence for any evaluation of this rule.
+
+acquisition:
+  max_separation_s: 0.25
+  evidence: >-
+    Stored acquisition clocks on the 2026-09-21 captures: the RAM target and
+    the Mode 01 PIDs are read in one poll cycle. Target-to-lambda-sensor
+    separation is median 0.093-0.104 s, p95 0.130-0.142 s, and 1085/1085,
+    926/927 and 1375/1376 target reads are inside 0.25 s on the three
+    drives. This is polling skew, not exhaust transport.
+
+transport_delay:
+  status: not_estimated
+  note: >-
+    No lag model is fitted. estimate_transport_delay() may only choose one on
+    named training drives and the frozen TransportDelay then refuses those
+    drives; until then the dwell rule stands in for it (B06.3). Deferred:
+    needs the operator's corpus choice (2026-09-22).
+
+noise_floors:
+  # The only measured delivery floor is WOT-only; it is refused for closed
+  # loop rather than quoted ~16x too tight.
+  enrichment:
+    channel: delivery_error_pct
+    conditions: 'WOT: throttle>=85, 3000-5000 rpm, matched on rpm x MAF voltage, 50 ms grid'

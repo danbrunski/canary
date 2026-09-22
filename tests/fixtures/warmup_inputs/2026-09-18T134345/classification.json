@@ -1,0 +1,77 @@
+{
+  "classified_at": "2026-09-22T06:41:28.199858Z",
+  "classifier_version": "0.3.0",
+  "disposition": "ready",
+  "duration_seconds": 1086.0,
+  "events": [
+    {
+      "fields": {
+        "coolant_temp_c": 16.0,
+        "run_time_s": 20.0
+      },
+      "kind": "cold_start",
+      "timestamp": "2026-09-18T13:45:36Z"
+    },
+    {
+      "fields": {
+        "pre_stop_speed_kph": 14.0,
+        "stopped_duration_seconds": 329.0
+      },
+      "kind": "stop",
+      "timestamp": "2026-09-18T13:56:23Z"
+    }
+  ],
+  "mode_segments": [
+    {
+      "duration_seconds": 90.0,
+      "end": "2026-09-18T13:45:17Z",
+      "mode": "unknown",
+      "start": "2026-09-18T13:43:47Z"
+    },
+    {
+      "duration_seconds": 364.0,
+      "end": "2026-09-18T13:51:21Z",
+      "mode": "warmup",
+      "start": "2026-09-18T13:45:17Z"
+    },
+    {
+      "duration_seconds": 302.0,
+      "end": "2026-09-18T13:56:23Z",
+      "mode": "city",
+      "start": "2026-09-18T13:51:21Z"
+    },
+    {
+      "duration_seconds": 176.0,
+      "end": "2026-09-18T13:59:19Z",
+      "mode": "idle_transient",
+      "start": "2026-09-18T13:56:23Z"
+    },
+    {
+      "duration_seconds": 154.0,
+      "end": "2026-09-18T14:01:53Z",
+      "mode": "idle",
+      "start": "2026-09-18T13:59:19Z"
+    }
+  ],
+  "quality": {
+    "complete_row_fraction": 0.0,
+    "feature_columns": 66,
+    "row_count": 1086,
+    "unknown_mode_fraction": 0.0829
+  },
+  "schema_version": 1,
+  "session_id": "2026-09-18T134345",
+  "summary": {
+    "event_counts": {
+      "cold_start": 1,
+      "stop": 1
+    },
+    "mode_seconds": {
+      "city": 302.0,
+      "idle": 154.0,
+      "idle_transient": 176.0,
+      "unknown": 90.0,
+      "warmup": 364.0
+    }
+  }
+}

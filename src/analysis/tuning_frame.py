@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
 import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -164,6 +165,7 @@ def build_tuning_frame(
     calibration: AfrCalibration | None = None,
     allow_candidates: bool = False,
     afr_stoich: float = 14.7,
+    dids_path: Path = Path("data/dids.yaml"),
 ) -> TuningFrame:
     """Resolve semantic roles without embedding vehicle DID names in callers.
 
@@ -178,6 +180,7 @@ def build_tuning_frame(
     manifest = read_capture_manifest(session_dir)
     parts: list[pd.DataFrame] = []
     capability: dict[str, dict[str, str | bool | None]] = {}
+    fuel_cut_declared = False
     for provider in registry.providers:
         role = provider.role
         if provider.confidence != "confirmed" and not allow_candidates:
@@ -256,6 +259,13 @@ def build_tuning_frame(
             values[f"{role}_raw"] = values[role]
             values[role] = pd.to_numeric(values[role], errors="coerce") * provider.factor
         capability[role] = {"available": True, "provider": provider.spec, "reason": None}
+        if role == "commanded_afr" and provider.transform == "equiv_ratio_afr":
+            cut = _fuel_cut_rows(session_dir, provider.spec, dids_path=dids_path)
+            if cut is not None:
+                fuel_cut_declared = True
+                if not cut.empty:
+                    parts.append(cut)
+                capability[role]["fuel_cut_provider"] = f"{provider.spec}_SENTINEL"
         if provider.confidence != "confirmed":
             capability[role].update(
                 {
@@ -270,6 +280,10 @@ def build_tuning_frame(
         frame = part if frame.empty else pd.merge(frame, part, on="timestamp", how="outer")
     if not frame.empty:
         frame = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
+        if fuel_cut_declared and "fuel_cut" not in frame:
+            # Declared and never observed: this drive had no cut. NaN (no cut
+            # observation at that instant) matches the observed-cut case.
+            frame["fuel_cut"] = pd.Series(np.nan, index=frame.index, dtype=object)
     return TuningFrame(
         values=frame,
         capability=capability,
@@ -277,6 +291,41 @@ def build_tuning_frame(
         tune_revision=None if manifest is None else manifest.tune_revision,
         wot_criterion=registry.wot_criterion,
     )
+
+
+def _fuel_cut_rows(session_dir: Path, target_spec: str, *, dids_path: Path) -> pd.DataFrame | None:
+    """A ``fuel_cut`` column from the target word's declared sentinel, if it has one.
+
+    The RAM target records fuel cut on a companion ``_SENTINEL`` channel and
+    produces no numeric row at all, so a frame built from the target alone
+    lets every cut sample vanish before a gate can count it — an empty result
+    that cannot say which kind of empty it is (B06.2). This emits ``True`` at
+    each sentinel observation so :func:`src.analysis.tuning.
+    gate_delivery_samples` removes them as the named ``fuel_cut`` gate, and
+    every consumer of the frame gets the column without having to remember to
+    ask for it. ``None`` when the target is not a memory channel with a
+    declared sentinel.
+    """
+    source, _, name = target_spec.partition(":")
+    if source != "mem" or not dids_path.exists():
+        return None
+    from src.decode.dids import load_did_map
+
+    entry = next((m for m in load_did_map(dids_path).memory if m.name == name), None)
+    if entry is None or entry.sentinel_raw is None:
+        return None
+    try:
+        rows = read_channels(
+            session_dir, [f"{target_spec}_SENTINEL"], acquired_time=True, dids_path=dids_path
+        )
+    except ChannelSpecError:
+        return None
+    # True at each cut observation only; other instants are NaN ("no cut
+    # observed here"), so a grid cell's ``last()`` keeps a cut seen anywhere
+    # in it. An empty frame means declared-but-never-observed: the caller
+    # still adds the column, so "no cut on this drive" is distinguishable
+    # from "cut was not observable".
+    return pd.DataFrame({"timestamp": rows["timestamp"], "fuel_cut": True})
 
 
 def section_capabilities(
