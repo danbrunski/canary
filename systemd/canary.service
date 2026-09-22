@@ -1,7 +1,9 @@
 [Unit]
 Description=CANary headless vehicle telemetry daemon
-After=network-online.target
-Wants=network-online.target
+# No network-online.target: recording needs the CAN bus, not a network, and
+# waiting for one put NetworkManager-wait-online (~4 s) and everything before
+# it on the boot's critical path (2026-09-22). The dashboard binds 0.0.0.0,
+# which works before any interface is up; the clock comes from GPS via chrony.
 ConditionPathExists=/etc/canary/canary.yaml
 ConditionPathExists=/etc/canary/canary.env
 

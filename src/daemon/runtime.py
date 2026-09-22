@@ -4,7 +4,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Callable, Sequence
-from contextlib import suppress
+from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from src.collection.can_collector import CanReceiveStats
     from src.collection.queueing import CollectorHandoffStats
     from src.models.health import HealthMonitor
+    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 
@@ -157,6 +158,27 @@ def _can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveSt
     return _observe
 
 
+async def _build_live_source_off_loop(
+    components: DaemonComponents, *, enabled: bool
+) -> LiveFeatureSource | None:
+    """Build the live feature source in a thread, or ``None`` if disabled.
+
+    ~14 s on a cold boot (2026-09-22), reading bindings, DBCs, the DID map and
+    the behavior models; run on the loop it stalled every sink while the
+    collectors were already filling the queue. Built off the loop it costs
+    nothing but the scoring of the records that arrive before it is ready.
+    A build that fails leaves the daemon recording without live inference,
+    loudly, rather than crash-looping with nothing recorded at all.
+    """
+    if not enabled:
+        return None
+    try:
+        return await asyncio.to_thread(build_live_feature_source, components)
+    except Exception:
+        log.exception("could not build the live feature source; recording without live inference")
+        return None
+
+
 async def run_daemon(
     config: CanaryConfig,
     stop_event: asyncio.Event,
@@ -186,10 +208,20 @@ async def run_daemon(
         ``JobController``, never on this event loop
       * the dashboard via ``serve_in_background``
 
+    **Collection starts first.** On a cold boot off the SD card the model
+    artifacts, the live feature source and the dashboard app took ~60 s to
+    build (2026-09-22: collectors started 93 s after the unit), and nothing
+    was recorded until they were done. Now the collectors, storage and the
+    fanout start before any of them: the model managers are built empty and
+    ``poll_model_managers`` loads them off the loop, and the live source and
+    the app are built in threads while collection runs. Inference and HTTP
+    come up when their inputs are ready; the records before that are stored,
+    just not scored.
+
     Returns the components so a caller can inspect counters / model
     versions for diagnostics or tests.
     """
-    components = components or build_components(config)
+    components = components or build_components(config, load_models=False)
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
     arming_config = config.collection.record_arming
     # Task 8.6: config-gated, defaults off (RecordArmingConfig.enabled=False)
@@ -225,22 +257,6 @@ async def run_daemon(
             write_capture_quality(interrupted_dir, quality.to_dict())
         except Exception:  # noqa: BLE001 — recovery is best effort, stamp remains truthful
             log.exception("failed to finalize interrupted capture %s", interrupted_dir)
-
-    # Build the live source (no-op if bindings/behavior_models are absent on
-    # disk — observe still works, just without decoded:* / deviation:* columns).
-    # Built before the ReplayController below so 7.1's in-memory reset can
-    # reach it (and the shared persistence gate / emitter) on replay boundaries.
-    live_source = build_live_feature_source(components) if enable_live_inference else None
-    components.live_source = live_source
-    components.replay_controller = ReplayController(
-        queue=queue,
-        writer=storage_writer,
-        anomaly_logger=components.event_logger,
-        storage_root=config.collection.storage_path,
-        live_source=live_source,
-        persistence_gate=components.persistence_gate,
-        emitter=components.emitter,
-    )
 
     # Lazy import — keeps daemon module importable without the collector deps
     # at module-load time. Task 4.7: this used to reach into `src.main`
@@ -292,13 +308,18 @@ async def run_daemon(
             },
         )
 
+    # The live source is built after collection starts (below); the drain's
+    # live sink joins the fanout when this resolves.
+    live_source_ready: asyncio.Future[LiveFeatureSource | None] | None = (
+        asyncio.get_running_loop().create_future() if enable_live_inference else None
+    )
     drain_task = asyncio.create_task(
         drain_queue_with_broadcast(
             queue,
             storage_writer,
             stop_event,
             telemetry_broadcaster=components.telemetry_broadcaster,
-            live_source=live_source,
+            live_source_ready=live_source_ready,
             gps_tracker=components.gps_tracker,
             dtc_state=components.dtc_state,
             dtc_emitter=components.emitter,
@@ -362,47 +383,73 @@ async def run_daemon(
                 poll_interval_seconds=config.online_training.poll_interval_seconds,
             )
         )
-    behavior_models_task: asyncio.Task[Any] | None = None
-    if live_source is not None:
-        # Hot-reload the behavior-models YAML so refit deployments don't
-        # require a daemon restart (otherwise a ``label_sessions →
-        # refit_behavior_models → upload`` cycle stops here until the
-        # operator can ssh in and ``systemctl restart canary``).
-        behavior_models_task = asyncio.create_task(
-            poll_behavior_models(
-                config.daemon.behavior_models,
-                live_source,
-                stop_event,
-                interval_seconds=config.daemon.model_poll_seconds,
-            )
-        )
-    config_task: asyncio.Task[Any] | None = None
-    if live_source is not None:
-        # Hot-reload operating-mode config so an operating_modes edit doesn't
-        # require a restart (structural changes still do — see poll_config).
-        config_task = asyncio.create_task(
-            poll_config(
-                Path(os.environ.get("CANARY_CONFIG", "canary.yaml")),
-                live_source,
-                stop_event,
-                interval_seconds=config.daemon.model_poll_seconds,
-            )
-        )
-    inference_tasks: list[asyncio.Task[Any]] = []
-    if live_source is not None:
-        # One unified task scores IF + LSTM + behavior per tick and fuses
-        # them (7.2). It owns the LSTM engine/hot-swap internally — the old
-        # standalone LSTM-only task was production-dead and deleted (4.1).
-        inference_tasks.append(
-            asyncio.create_task(run_live_inference(live_source, components, stop_event))
-        )
+    # Recording starts here. Everything below it is slow on a cold boot and
+    # none of it is needed to record.
     collector_tasks = [
         asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
     ]
     stop_task = asyncio.create_task(stop_event.wait())
+    log.info("collectors started; building live inference and the dashboard")
 
-    async with serve_in_background(components):
+    behavior_models_task: asyncio.Task[Any] | None = None
+    config_task: asyncio.Task[Any] | None = None
+    inference_tasks: list[asyncio.Task[Any]] = []
+    # The stack enters the dashboard server last, so it exits after the
+    # shutdown sequence in ``finally`` (HTTP answers while the daemon winds
+    # down, as before) — and a failure while building still runs that
+    # sequence, now that collectors are already recording by then.
+    async with AsyncExitStack() as stack:
         try:
+            live_source = await _build_live_source_off_loop(
+                components, enabled=enable_live_inference
+            )
+            components.live_source = live_source
+            if live_source_ready is not None:
+                live_source_ready.set_result(live_source)
+            # After the live source, so 7.1's in-memory reset can reach it (and
+            # the shared persistence gate / emitter) on replay boundaries.
+            components.replay_controller = ReplayController(
+                queue=queue,
+                writer=storage_writer,
+                anomaly_logger=components.event_logger,
+                storage_root=config.collection.storage_path,
+                live_source=live_source,
+                persistence_gate=components.persistence_gate,
+                emitter=components.emitter,
+            )
+            if live_source is not None:
+                # Hot-reload the behavior-models YAML so refit deployments don't
+                # require a daemon restart (otherwise a ``label_sessions →
+                # refit_behavior_models → upload`` cycle stops here until the
+                # operator can ssh in and ``systemctl restart canary``).
+                behavior_models_task = asyncio.create_task(
+                    poll_behavior_models(
+                        config.daemon.behavior_models,
+                        live_source,
+                        stop_event,
+                        interval_seconds=config.daemon.model_poll_seconds,
+                    )
+                )
+                # Hot-reload operating-mode config so an operating_modes edit
+                # doesn't require a restart (structural changes still do — see
+                # poll_config).
+                config_task = asyncio.create_task(
+                    poll_config(
+                        Path(os.environ.get("CANARY_CONFIG", "canary.yaml")),
+                        live_source,
+                        stop_event,
+                        interval_seconds=config.daemon.model_poll_seconds,
+                    )
+                )
+                # One unified task scores IF + LSTM + behavior per tick and
+                # fuses them (7.2). It owns the LSTM engine/hot-swap internally
+                # — the old standalone LSTM-only task was production-dead and
+                # deleted (4.1). Models still loading score as absent.
+                inference_tasks.append(
+                    asyncio.create_task(run_live_inference(live_source, components, stop_event))
+                )
+
+            await stack.enter_async_context(serve_in_background(components))
             done, _ = await asyncio.wait(
                 [stop_task, *collector_tasks], return_when=asyncio.FIRST_COMPLETED
             )
@@ -410,6 +457,8 @@ async def run_daemon(
                 if task is not stop_task:
                     task.result()
         finally:
+            if live_source_ready is not None and not live_source_ready.done():
+                live_source_ready.set_result(None)
             stop_event.set()
             await asyncio.gather(*collector_tasks, return_exceptions=True)
             # Bound the drain: if the drain task wedged, queue.join() would block

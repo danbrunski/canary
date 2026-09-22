@@ -67,6 +67,15 @@ def accepts_source(source: str) -> Callable[[TelemetryRecord], bool]:
     return _accepts
 
 
+def _resolved_live_source(
+    ready: asyncio.Future[LiveFeatureSource | None] | None,
+) -> LiveFeatureSource | None:
+    """The live source once ``ready`` has resolved to one, else ``None``."""
+    if ready is None or not ready.done() or ready.cancelled() or ready.exception() is not None:
+        return None
+    return ready.result()
+
+
 async def run_telemetry_fanout(
     ingest_queue: asyncio.Queue[TelemetryRecord],
     sinks: Sequence[TelemetrySink],
@@ -257,11 +266,17 @@ async def run_telemetry_broadcast_sink(
     stop_event: asyncio.Event,
     *,
     live_source: LiveFeatureSource | None = None,
+    live_source_getter: Callable[[], LiveFeatureSource | None] | None = None,
     poll_interval: float = 0.5,
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
 ) -> None:
-    """Publish telemetry records to the dashboard stream."""
+    """Publish telemetry records to the dashboard stream.
+
+    ``live_source_getter`` is for a source that is built after this sink
+    starts (see ``drain_queue_with_broadcast``'s ``live_source_ready``);
+    until it returns one, records are published without their decodes.
+    """
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
     while not stop_event.is_set() or not queue.empty():
         queue_monitor.observe(queue)
@@ -280,10 +295,13 @@ async def run_telemetry_broadcast_sink(
             if broadcaster.subscriber_count == 0:
                 continue
             broadcaster.publish(_record_to_dict(record))
-            if live_source is not None:
-                for decoded in live_source.decode_for_telemetry(record):
+            source = live_source
+            if source is None and live_source_getter is not None:
+                source = live_source_getter()
+            if source is not None:
+                for decoded in source.decode_for_telemetry(record):
                     broadcaster.publish(_record_to_dict(decoded))
-                did = live_source.decode_did_for_telemetry(record)
+                did = source.decode_did_for_telemetry(record)
                 if did is not None:
                     broadcaster.publish(_did_to_dict(record, did))
         except Exception as exc:  # noqa: BLE001 — dashboard stream is best-effort
@@ -472,6 +490,7 @@ async def drain_queue_with_broadcast(
     *,
     telemetry_broadcaster: Broadcaster | None = None,
     live_source: LiveFeatureSource | None = None,
+    live_source_ready: asyncio.Future[LiveFeatureSource | None] | None = None,
     gps_tracker: GpsTracker | None = None,
     dtc_state: DtcState | None = None,
     dtc_emitter: AnomalyEventEmitter | None = None,
@@ -499,7 +518,16 @@ async def drain_queue_with_broadcast(
     other source) — so raw CAN frames, the bulk of ingest on a live bus, are
     not enqueued to three queues that would discard them unread. Loss
     semantics are unchanged: the storage sink still drops newest and counts.
+
+    ``live_source_ready`` stands in for ``live_source`` when the source is
+    still being built: storage and the other sinks run at once, and the live
+    sink joins the fanout when the future resolves. Records before that are
+    not observed — the same as when the daemon had not started yet — and are
+    not counted as live-sink drops, because no live queue exists to drop
+    them from.
     """
+    if live_source is not None and live_source_ready is not None:
+        raise ValueError("pass live_source or live_source_ready, not both")
     sink_queue_size = _sink_queue_size(queue)
     sinks: list[TelemetrySink] = []
     sink_tasks: list[asyncio.Task[None]] = []
@@ -533,6 +561,31 @@ async def drain_queue_with_broadcast(
                     telemetry_broadcaster,
                     stop_event,
                     live_source=live_source,
+                    live_source_getter=(
+                        (lambda: _resolved_live_source(live_source_ready))
+                        if live_source_ready is not None
+                        else None
+                    ),
+                    poll_interval=poll_interval,
+                    queue_warning_fraction=queue_warning_fraction,
+                    health_monitor=health_monitor,
+                )
+            )
+        )
+
+    def _add_live_sink(source: LiveFeatureSource) -> None:
+        live_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
+        # The fanout reads ``sinks`` afresh for every batch, and the shutdown
+        # path below joins and cancels ``sink_tasks`` by reference, so a sink
+        # appended while the drain is running is fed and torn down like any
+        # other.
+        sinks.append(TelemetrySink("live", live_queue, "drop_oldest"))
+        sink_tasks.append(
+            asyncio.create_task(
+                run_live_source_sink(
+                    live_queue,
+                    source,
+                    stop_event,
                     poll_interval=poll_interval,
                     queue_warning_fraction=queue_warning_fraction,
                     health_monitor=health_monitor,
@@ -541,20 +594,15 @@ async def drain_queue_with_broadcast(
         )
 
     if live_source is not None:
-        live_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("live", live_queue, "drop_oldest"))
-        sink_tasks.append(
-            asyncio.create_task(
-                run_live_source_sink(
-                    live_queue,
-                    live_source,
-                    stop_event,
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                )
-            )
-        )
+        _add_live_sink(live_source)
+    elif live_source_ready is not None:
+
+        def _on_live_source_ready(ready: asyncio.Future[LiveFeatureSource | None]) -> None:
+            source = _resolved_live_source(ready)
+            if source is not None and not stop_event.is_set():
+                _add_live_sink(source)
+
+        live_source_ready.add_done_callback(_on_live_source_ready)
 
     if gps_tracker is not None:
         gps_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)

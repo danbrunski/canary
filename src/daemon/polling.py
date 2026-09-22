@@ -90,7 +90,10 @@ async def poll_model_managers(
         # size during iteration" here.
         for name, manager in list(managers.items()):
             try:
-                attempt = manager.poll()
+                # A swap is a full artifact load (seconds warm, tens of
+                # seconds cold off the SD card); run on the loop it stalled
+                # collection, HTTP and every sink for that long.
+                attempt = await asyncio.to_thread(manager.poll)
             except Exception:  # noqa: BLE001 — manager.poll already swallows + logs internally
                 log.exception("model manager poll raised", extra={"manager": name})
                 if health is not None:

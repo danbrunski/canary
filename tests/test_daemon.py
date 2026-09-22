@@ -2461,6 +2461,12 @@ async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfi
         # datetime.now(UTC), and 1.4's fully-stale gate NaNs/drops a channel
         # whose age exceeds max_gap — a fixed historical epoch would read as
         # permanently stale and never score.
+        # Collection starts before the live source is built (run_daemon
+        # builds it off the loop), and records that arrive earlier are
+        # stored but not scored. A real bus keeps producing; this five-record
+        # producer has to wait for the source to exist.
+        while components.live_source is None:
+            await asyncio.sleep(0.01)
         base = datetime.now(UTC).timestamp()
         for i in range(5):
             await queue.put(TelemetryRecord.obd(base + i, "RPM", float(700 + i), "rpm"))

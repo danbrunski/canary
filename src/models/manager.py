@@ -282,11 +282,18 @@ def manager_for_artifact(
     loader: Callable[[Path], Any],
     *,
     model_type: str | None = None,
+    load: bool = True,
 ) -> ModelManager[Any]:
-    """Convenience: build a ``ModelManager`` and load the initial artifact."""
+    """Convenience: build a ``ModelManager`` and load the initial artifact.
+
+    ``load=False`` returns it empty (``current`` is ``None``); the first
+    ``poll()`` then loads it, which is how the daemon keeps a cold artifact
+    load off its start-up path.
+    """
     allowed = (model_type,) if model_type is not None else None
     manager = ModelManager(artifact_path, loader=loader, allowed_model_types=allowed)
-    manager.load_initial()
+    if load:
+        manager.load_initial()
     return manager
 
 

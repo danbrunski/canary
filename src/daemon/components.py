@@ -131,8 +131,13 @@ class DaemonComponents:
     inference_timing: InferenceTimingRecorder = field(default_factory=InferenceTimingRecorder)
 
 
-def build_components(config: CanaryConfig) -> DaemonComponents:
-    """Construct all long-lived components from config. No I/O beyond mkdir."""
+def build_components(config: CanaryConfig, *, load_models: bool = True) -> DaemonComponents:
+    """Construct all long-lived components from config.
+
+    ``load_models=False`` builds the model managers empty: the daemon's
+    ``poll_model_managers`` loads them off the event loop once collection is
+    running, instead of making every record wait for a model read.
+    """
     telemetry_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
     anomalies_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
     scores_bus = Broadcaster(queue_size=config.daemon.broadcaster_queue_size)
@@ -151,7 +156,7 @@ def build_components(config: CanaryConfig) -> DaemonComponents:
         notify_min_severity=config.notifications.min_severity,
         notify_max_pushes_per_session=config.notifications.max_pushes_per_session,
     )
-    model_managers = _load_model_managers(config)
+    model_managers = _load_model_managers(config, load=load_models)
     alerts_cfg = config.alerts
     persistence_gate = PersistenceGate(
         alerts_cfg.min_consecutive_ticks,
@@ -264,7 +269,9 @@ def _make_broadcasting_emitter(
     )
 
 
-def _load_model_managers(config: CanaryConfig) -> dict[str, ModelManager[Any]]:
+def _load_model_managers(
+    config: CanaryConfig, *, load: bool = True
+) -> dict[str, ModelManager[Any]]:
     """Build one ``ModelManager`` per active detector, loading the initial
     artifact if present. Missing artifacts are fine — the manager keeps polling,
     and ``current`` is ``None`` until something lands.
@@ -282,7 +289,7 @@ def _load_model_managers(config: CanaryConfig) -> dict[str, ModelManager[Any]]:
 
         if_path = config.daemon.models_dir / config.daemon.isolation_forest_artifact
         managers["isolation_forest"] = manager_for_artifact(
-            if_path, load_isolation_forest_model, model_type="isolation_forest"
+            if_path, load_isolation_forest_model, model_type="isolation_forest", load=load
         )
 
     backend = resolve_sequence_backend(config)
@@ -299,6 +306,7 @@ def _load_model_managers(config: CanaryConfig) -> dict[str, ModelManager[Any]]:
                 backend.artifact_path(config),
                 backend.load_model,
                 model_type=backend.model_type,
+                load=load,
             )
     return managers
 

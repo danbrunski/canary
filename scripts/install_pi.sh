@@ -292,6 +292,18 @@ systemctl restart systemd-journald || true
 journalctl --flush >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
+# cloud-init: first boot only
+# ---------------------------------------------------------------------------
+# Raspberry Pi Imager provisions the card through cloud-init on first boot
+# (user, hostname, first network). By the time this script runs that is done,
+# and the network connections are NetworkManager's own keyfiles, so cloud-init
+# only costs ~4.5 s on every later boot's critical path (2026-09-22).
+if [[ -d /etc/cloud && ! -e /etc/cloud/cloud-init.disabled ]]; then
+  touch /etc/cloud/cloud-init.disabled
+  echo "Disabled cloud-init for later boots (/etc/cloud/cloud-init.disabled)."
+fi
+
+# ---------------------------------------------------------------------------
 # Memory cgroup controller (enforces canary.service MemoryMax/MemorySwapMax)
 # ---------------------------------------------------------------------------
 # The Pi firmware prepends cgroup_disable=memory to the kernel command line, so

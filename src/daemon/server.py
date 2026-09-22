@@ -35,7 +35,11 @@ async def serve_in_background(
     its own event loop, which conflicts with the daemon's. ``Server.serve``
     is the documented "I already have a loop" entry.
     """
-    app = create_app(
+    # Building the app is ~11 s on a cold boot (2026-09-22). Collection is
+    # already running by now, so do it in a thread rather than stall the loop
+    # every sink runs on.
+    app = await asyncio.to_thread(
+        create_app,
         components.config,
         anomalies_dir=components.config.daemon.anomalies_dir,
         models_dir=components.config.daemon.models_dir,
