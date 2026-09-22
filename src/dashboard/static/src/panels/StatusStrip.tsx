@@ -14,6 +14,7 @@ import type {
   StatusResponse,
 } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
+import { useLocalStorageJson } from "../hooks/useLocalStorage";
 
 interface StatusStripProps {
   status: StatusResponse | null;
@@ -47,9 +48,31 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
   // the full-width ReplayBanner (which can be dismissed from view by
   // scrolling); this one line stays pinned under the header in both modes.
   const replaying = status?.replay?.running === true;
+  const [acknowledgedCapture, setAcknowledgedCapture] = useLocalStorageJson<string | null>(
+    "canary.lastCaptureAcknowledged.v1",
+    null,
+  );
+  const endedCapture = status?.last_capture;
+  const announceCapture = Boolean(
+    endedCapture?.end_reason &&
+    endedCapture.end_reason !== "operator_stop" &&
+    endedCapture.session_dir !== acknowledgedCapture,
+  );
 
   return (
     <div className={cn(statusStripClass, "relative")} aria-label="System status">
+      {announceCapture && endedCapture && (
+        <div className="flex items-center gap-2 border border-warn/60 bg-warn/10 px-2 py-1 text-xs text-warn">
+          <span>{captureEndedMessage(endedCapture)}</span>
+          <button
+            type="button"
+            className="underline"
+            onClick={() => setAcknowledgedCapture(endedCapture.session_dir)}
+          >
+            acknowledge
+          </button>
+        </div>
+      )}
       <StatusItem label="source">
         <span className={cn(statusValueClass, replaying && "text-warn")}>
           {replaying ? "replay" : "live"}
@@ -151,6 +174,22 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
       )}
     </div>
   );
+}
+
+function captureEndedMessage(capture: NonNullable<StatusResponse["last_capture"]>): string {
+  const started = Date.parse(capture.started_at);
+  const ended = capture.ended_at == null ? Number.NaN : Date.parse(capture.ended_at);
+  const minutes = Number.isFinite(started) && Number.isFinite(ended)
+    ? Math.max(0, Math.round((ended - started) / 60000))
+    : null;
+  const reason = capture.end_reason === "daemon_shutdown"
+    ? "daemon stopped"
+    : capture.end_reason === "interrupted"
+      ? "daemon restarted or lost power"
+      : capture.end_reason === "profile_switch"
+        ? "profile switched"
+        : "unknown reason";
+  return `${capture.name} ended${minutes == null ? "" : ` after ${minutes} min`}: ${reason}`;
 }
 
 /** Expandable per-override provenance (2.3) — "N accepted-baseline

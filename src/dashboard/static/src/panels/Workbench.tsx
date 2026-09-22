@@ -51,6 +51,7 @@ import { TripPanel } from "./TripPanel";
 import { TuningPanel } from "./TuningPanel";
 import { TpmsPanel } from "./TpmsPanel";
 import { RomMapsPanel } from "./RomMapsPanel";
+import { LoggingPage } from "./tuning/LoggingPage";
 
 export interface DashboardData {
   mode: AppMode;
@@ -202,7 +203,14 @@ function renderItem(
     case "system-export":
       return <ExportPanel token={d.token} />;
     case "tuning-logging":
-      return <PlaceholderPanel title="Logging" task="W03" summary="Capture controls and live channel delivery will live here." />;
+      return (
+        <LoggingPage
+          token={d.token}
+          status={d.status}
+          channels={d.channels}
+          onNavigate={onNavigate}
+        />
+      );
     case "tuning-logs":
       return <PlaceholderPanel title="Logs" task="W04" summary="Recorded tuning-log tables and charts will live here." />;
     case "tuning-analysis":

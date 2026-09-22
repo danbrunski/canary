@@ -72,7 +72,7 @@ from src.control.capture_finalize import (
     recompute_quality_off_loop,
     record_capture_start,
 )
-from src.control.capture_manifest import read_capture_manifest
+from src.control.capture_manifest import read_capture_manifest, stamp_capture_end
 from src.control.classification import (
     classify_one_session,
     corpus_mode_summary,
@@ -753,6 +753,12 @@ def register_control_routes(
                     )
                 failed_step = "profile_activation"
                 tuning_profile.activate(profile, session_dir=str(storage_writer.paths.root))
+                if capture_controller is not None:
+                    capture_controller.start_capture(
+                        purpose=profile.name,
+                        protocol="capture_profile",
+                        fields={"tune_revision": request.tune_revision},
+                    )
                 last_ended_capture = None
                 nonlocal capture_start_epoch
                 capture_start_epoch = record_capture_start(
@@ -849,6 +855,9 @@ def register_control_routes(
                 writer=storage_writer,
                 start=capture_start_epoch,
             )
+            stamp_capture_end(Path(ended_capture_dir), "operator_stop")
+            if capture_controller is not None and capture_controller.current_capture() is not None:
+                capture_controller.stop_capture(reason="operator_stop")
             capture_start_epoch = None
             await storage_writer.exit_capture_mode()
             default_profile = profile_store.load().by_name("default")

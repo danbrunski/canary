@@ -12,6 +12,12 @@ from src.collection import tuning_profile
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
+from src.control.capture_finalize import finalize_capture, recompute_quality_off_loop
+from src.control.capture_manifest import (
+    recover_interrupted_capture,
+    stamp_capture_end,
+    write_capture_quality,
+)
 from src.control.replay_control import ReplayController
 from src.control.trip_end import handle_trip_end_off_loop
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
@@ -211,6 +217,15 @@ async def run_daemon(
     # channels land in the same Parquet session as everything else.
     components.storage_writer = storage_writer
 
+    interrupted = recover_interrupted_capture(config.collection.storage_path)
+    if interrupted is not None:
+        interrupted_dir, _manifest = interrupted
+        try:
+            quality = await recompute_quality_off_loop(interrupted_dir)
+            write_capture_quality(interrupted_dir, quality.to_dict())
+        except Exception:  # noqa: BLE001 — recovery is best effort, stamp remains truthful
+            log.exception("failed to finalize interrupted capture %s", interrupted_dir)
+
     # Build the live source (no-op if bindings/behavior_models are absent on
     # disk — observe still works, just without decoded:* / deviation:* columns).
     # Built before the ReplayController below so 7.1's in-memory reset can
@@ -408,6 +423,15 @@ async def run_daemon(
                 drain_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await drain_task
+            if tuning_profile.is_active():
+                capture_dir = Path(storage_writer.paths.root)
+                await finalize_capture(
+                    capture_dir,
+                    health=components.health_monitor,
+                    writer=storage_writer,
+                    start=None,
+                )
+                stamp_capture_end(capture_dir, "daemon_shutdown")
             # Task 5.4 fallback trip-end trigger: the drive can end because
             # the daemon stopped (Pi shutdown) rather than a clean
             # GPS-detected stop. Settle whatever the GPS edge already

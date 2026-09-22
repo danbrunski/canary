@@ -98,11 +98,14 @@ export function CaptureProfilesPanel({
   token,
   status,
   channels,
+  authoring = true,
 }: {
   token: string;
   status: StatusResponse | null;
   /** Live values, so a running capture shows what it is recording. */
   channels?: Map<string, ChannelSnapshot>;
+  /** Logging reuses the runner/readout without exposing profile editing. */
+  authoring?: boolean;
 }) {
   const [profiles, setProfiles] = useState<CaptureProfile[]>([]);
   const [resolvedPlans, setResolvedPlans] = useState<Record<string, ResolvedPollingPlan>>({});
@@ -159,6 +162,11 @@ export function CaptureProfilesPanel({
   const active = optimistic ?? polled;
   const paused = active?.paused ?? false;
 
+  useEffect(() => {
+    const running = polled?.running_tune_revision;
+    if (!active?.active && !tuneRevision && running) setTuneRevision(running);
+  }, [active?.active, polled?.running_tune_revision, tuneRevision]);
+
   // Drop the optimistic snapshot as soon as polling agrees on the three things
   // the controls are driven by. Keeping it any longer would mask a capture that
   // the daemon ended on its own.
@@ -203,10 +211,23 @@ export function CaptureProfilesPanel({
   const achievedRates = Object.entries(scheduler?.achieved_hz_capture ?? {}).sort(
     ([a], [b]) => a.localeCompare(b),
   );
+  const requestRows = (scheduler?.requests ?? [])
+    .filter((row) => row.capture_selected)
+    .map((row) => ({
+      ...row,
+      displayChannel: row.profile_channel || row.channel,
+      achievedHz:
+        scheduler?.achieved_hz_capture?.[row.profile_channel || row.channel] ?? 0,
+    }))
+    .sort((a, b) => a.displayChannel.localeCompare(b.displayChannel));
+  const captureAgeSeconds = active?.started_at
+    ? Math.max(0, (Date.now() - Date.parse(active.started_at)) / 1000)
+    : 0;
   const maxGaps = scheduler?.capture_max_gap_seconds ?? {};
   const didWindow = scheduler?.did_profile;
   const mode01Count = plan.mode01_enabled ? Object.keys(plan.mode01).length : 0;
   const mode22Count = plan.mode22_enabled ? plan.mode22.length : 0;
+  const memoryCount = plan.mode22_enabled ? (plan.memory?.length ?? 0) : 0;
   const sessionPolicy = mode22Count === 0
     ? "Mode 01 only"
     : plan.did_continuous
@@ -305,6 +326,9 @@ export function CaptureProfilesPanel({
       </header>
       <Notice notice={notice} />
       <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />
+      {token && profiles.length === 0 && !busy && (
+        <p className="text-sm text-bad">No capture profiles — the catalog failed to load.</p>
+      )}
 
       {/* Running a capture and authoring a profile are different jobs that
           shared one button row, which is what made "New" ambiguous. They are
@@ -450,9 +474,11 @@ export function CaptureProfilesPanel({
             )}
           </div>
           {plan.description && <p className="mt-1 text-fg-dim">{plan.description}</p>}
+          {plan.notes && <p className="mt-1 text-xs text-fg-dim">{plan.notes}</p>}
           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-fg-dim">
             <span>{mode01Count} Mode 01 channels</span>
             <span>{mode22Count} Mode 22 DIDs</span>
+            <span>{memoryCount} memory channels</span>
             <span>{plan.target_rate_hz == null ? "relative cadence" : `${plan.target_rate_hz} Hz/channel`}</span>
             <span>{sessionPolicy}</span>
             {plan.did_interval_seconds != null && <span>DID window every {plan.did_interval_seconds}s</span>}
@@ -544,7 +570,29 @@ export function CaptureProfilesPanel({
                       : " · fast exit unavailable")}
                 </p>
               )}
-              {achievedRates.length > 0 && (
+              {requestRows.length > 0 ? (
+                <table className="mt-1 w-full font-num text-[0.72rem] tabular-nums">
+                  <thead><tr className="text-fg-dim"><th className="text-left">Channel</th><th>kind</th><th>requested</th><th>achieved</th><th>sent</th><th>responses</th><th>timeouts</th><th>NRCs</th></tr></thead>
+                  <tbody>
+                    {requestRows.map((row) => {
+                      const neverSent = captureAgeSeconds >= 10 && (row.requests_sent ?? 0) === 0;
+                      const short = plan.min_achieved_rate_hz != null
+                        && row.achievedHz < plan.min_achieved_rate_hz;
+                      return (
+                        <tr key={`${row.kind}:${row.channel}`} className={`border-b border-border/40 ${neverSent ? "text-bad" : short ? "text-warn" : ""}`}>
+                          <td>{row.displayChannel}</td><td className="text-center">{row.kind}</td>
+                          <td className="text-right">{row.configured_rate_hz.toFixed(2)}</td>
+                          <td className="text-right">{row.achievedHz.toFixed(2)}</td>
+                          <td className="text-right">{row.requests_sent ?? 0}</td>
+                          <td className="text-right">{row.responses ?? 0}</td>
+                          <td className="text-right">{row.timeouts ?? 0}</td>
+                          <td className="text-right">{row.negative_responses ?? 0}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : achievedRates.length > 0 && (
                 <table className="mt-1 w-full font-num tabular-nums">
                   <thead><tr className="text-fg-dim"><th className="text-left">Captured channel</th><th className="text-right">Hz</th><th className="text-right">max gap</th></tr></thead>
                   <tbody>
@@ -563,6 +611,7 @@ export function CaptureProfilesPanel({
         </div>
       )}
 
+      {authoring && <>
       <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
         <span className="text-sm font-semibold">Edit profile</span>
         <span className="text-xs text-fg-dim">
@@ -697,6 +746,7 @@ export function CaptureProfilesPanel({
           setSelectedName("default");
         }, { then: refresh })}>Delete</button>
       </div>
+      </>}
     </section>
   );
 }

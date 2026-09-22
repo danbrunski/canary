@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -31,6 +31,11 @@ class CaptureManifest(BaseModel):
     tune_revision: str | None = None
     profile_snapshot: dict[str, Any]
     resolved_polling_plan: dict[str, Any] | None = None
+    ended_at: datetime | None = None
+    end_reason: (
+        Literal["operator_stop", "profile_switch", "daemon_shutdown", "interrupted"] | None
+    ) = None
+    detected_at: datetime | None = None
 
     @property
     def corpus_eligible(self) -> bool:
@@ -103,6 +108,89 @@ def read_capture_quality(session_dir: Path) -> dict[str, Any] | None:
     return normalize_quality_payload(payload) if isinstance(payload, dict) else None
 
 
+def stamp_capture_end(
+    session_dir: Path,
+    end_reason: Literal["operator_stop", "profile_switch", "daemon_shutdown", "interrupted"],
+    *,
+    ended_at: datetime | None = None,
+    detected_at: datetime | None = None,
+) -> CaptureManifest:
+    """Atomically close one manifest; an existing end record is immutable."""
+    path = Path(session_dir) / CAPTURE_MANIFEST_FILENAME
+    manifest = read_capture_manifest(session_dir)
+    if manifest is None:
+        raise ValueError(f"no capture manifest in {session_dir}")
+    if manifest.end_reason is not None:
+        return manifest
+    now = ended_at or datetime.now(UTC)
+    updated = manifest.model_copy(
+        update={"ended_at": now, "end_reason": end_reason, "detected_at": detected_at}
+    )
+    atomic_write_text(path, updated.model_dump_json(indent=2) + "\n")
+    return updated
+
+
+def recover_interrupted_capture(
+    storage_root: Path, *, detected_at: datetime | None = None
+) -> tuple[Path, CaptureManifest] | None:
+    """Stamp the newest unclosed capture once after an unclean daemon exit."""
+    from src.control.sessions import session_started_at
+
+    root = Path(storage_root)
+    candidates: list[tuple[datetime, Path]] = []
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        if not child.is_dir():
+            continue
+        manifest = read_capture_manifest(child)
+        if manifest is None or manifest.end_reason is not None:
+            continue
+        started = session_started_at(child)
+        candidates.append((started or manifest.started_at, child))
+    if not candidates:
+        return None
+    _, session_dir = max(candidates, key=lambda item: item[0])
+    detected = detected_at or datetime.now(UTC)
+    return session_dir, stamp_capture_end(
+        session_dir,
+        "interrupted",
+        ended_at=detected,
+        detected_at=detected,
+    )
+
+
+def latest_capture_summary(storage_root: Path) -> dict[str, Any] | None:
+    """Return the newest capture by parsed start time, prefixes ignored."""
+    from src.control.sessions import session_started_at
+
+    root = Path(storage_root)
+    rows: list[tuple[datetime, Path, CaptureManifest]] = []
+    try:
+        children = list(root.iterdir())
+    except OSError:
+        return None
+    for child in children:
+        manifest = read_capture_manifest(child)
+        if manifest is None:
+            continue
+        rows.append((session_started_at(child) or manifest.started_at, child, manifest))
+    if not rows:
+        return None
+    _, session_dir, manifest = max(rows, key=lambda item: item[0])
+    quality = read_capture_quality(session_dir)
+    return {
+        "name": manifest.profile,
+        "session_dir": str(session_dir),
+        "started_at": manifest.started_at.isoformat(),
+        "ended_at": None if manifest.ended_at is None else manifest.ended_at.isoformat(),
+        "end_reason": manifest.end_reason,
+        "quality_verdict": None if quality is None else quality.get("verdict"),
+    }
+
+
 def write_capture_quality(session_dir: Path, payload: dict[str, Any]) -> Path:
     path = Path(session_dir) / CAPTURE_QUALITY_FILENAME
     atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
@@ -132,6 +220,9 @@ __all__ = [
     "read_capture_epoch",
     "read_capture_manifest",
     "read_capture_quality",
+    "recover_interrupted_capture",
+    "latest_capture_summary",
+    "stamp_capture_end",
     "write_capture_epoch",
     "write_capture_quality",
 ]

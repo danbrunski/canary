@@ -104,12 +104,15 @@ export interface SessionsResponse {
 export interface CaptureProfile {
   name: string;
   description: string;
+  notes?: string;
   /** Visible warning: this profile still needs an in-vehicle validation run. */
   experimental: boolean;
   /** OBD PIDs (Mode 01), channel -> relative rate weight. */
   mode01: Record<string, number>;
   /** Manufacturer DIDs (Mode 22 / UDS ReadDataByIdentifier). */
   mode22: string[];
+  memory?: string[];
+  mode01_batch_groups?: string[][];
   /** Selected DID name -> relative cadence weight; absent members use 1. */
   mode22_rate_weights: Record<string, number>;
   mode01_enabled: boolean;
@@ -146,6 +149,7 @@ export interface CaptureProfileState {
   active: boolean;
   name: string;
   description: string;
+  notes?: string;
   experimental: boolean;
   started_at: string | null;
   session_dir: string | null;
@@ -153,6 +157,7 @@ export interface CaptureProfileState {
   channels: string[];
   mode01: Record<string, number>;
   mode22: string[];
+  memory?: string[];
   mode22_rate_weights: Record<string, number>;
   mode01_enabled: boolean;
   mode22_enabled: boolean;
@@ -166,6 +171,7 @@ export interface CaptureProfileState {
   min_achieved_rate_hz: number | null;
   requires_tune_revision: boolean;
   paused: boolean;
+  running_tune_revision?: string | null;
   /** Rows accepted into the current session; absent if the writer is unwired. */
   rows_written?: number;
   broadcast_decode: boolean;
@@ -368,7 +374,13 @@ export interface DidWindowStatus {
 export interface ObdSchedulerRequestStatus {
   kind: string;
   channel: string;
+  profile_channel?: string | null;
+  capture_selected?: boolean;
   configured_rate_hz: number;
+  requests_sent?: number;
+  responses?: number;
+  timeouts?: number;
+  negative_responses?: number;
   backed_off: boolean;
   last_response_age_seconds: number | null;
 }

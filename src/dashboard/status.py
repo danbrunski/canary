@@ -17,6 +17,7 @@ from src.analysis.gps_tracker import GpsTracker
 from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
+from src.control.capture_manifest import latest_capture_summary
 from src.control.replay_control import ReplayController
 from src.decode.engineering import physical_value
 from src.models.feature_spec_health import structural_blindness_snapshot
@@ -184,6 +185,7 @@ class StatusSnapshot:
     latest_session_path: str | None
     model_versions: dict[str, str | None]
     vehicle: str
+    storage_warning_mb: float | None = None
     #: Inference-health block (Task 6.27) — latency, freshness, missing-feature
     #: rate, model-swap outcomes, host load, drift — or ``None`` when the
     #: daemon hasn't wired a monitor in (tests / bare app).
@@ -242,11 +244,14 @@ class StatusSnapshot:
     #: Operator-selected capture profile. Alias of the generalized runtime
     #: state; ``tuning_mode`` remains for compatibility with older clients.
     capture_profile: dict[str, Any] | None = None
+    #: Most recent bounded capture, including why it ended (W03).
+    last_capture: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "storage_path": self.storage_path,
             "free_mb": round(self.free_mb, 1),
+            "storage_warning_mb": self.storage_warning_mb,
             "latest_session": self.latest_session,
             "latest_session_path": self.latest_session_path,
             "model_versions": self.model_versions,
@@ -263,6 +268,7 @@ class StatusSnapshot:
             "tuning_mode": self.tuning_mode,
             "bus_budget": self.bus_budget,
             "capture_profile": self.capture_profile,
+            "last_capture": self.last_capture,
         }
 
 
@@ -863,6 +869,7 @@ def build_status(
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=sources.free_mb,
+        storage_warning_mb=config.collection.storage_warning_mb,
         latest_session=latest.name if latest else None,
         latest_session_path=str(latest) if latest else None,
         model_versions=model_versions,
@@ -879,6 +886,7 @@ def build_status(
         tuning_mode=tuning_profile.snapshot(),
         bus_budget=sources.bus_budget,
         capture_profile=sources.capture_profile,
+        last_capture=latest_capture_summary(storage),
     )
 
 

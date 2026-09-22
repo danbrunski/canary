@@ -77,6 +77,7 @@ export interface CompanionStatusResponse {
 export interface StatusResponse {
   storage_path: string;
   free_mb: number;
+  storage_warning_mb?: number | null;
   latest_session: string | null;
   latest_session_path: string | null;
   model_versions: Record<string, string | null>;
@@ -118,6 +119,14 @@ export interface StatusResponse {
    *  when the daemon has no replay controller wired (tests / bare app). */
   replay?: ReplayStatus | null;
   capture_profile?: CaptureProfileState | null;
+  last_capture?: {
+    name: string;
+    session_dir: string;
+    started_at: string;
+    ended_at: string | null;
+    end_reason: "operator_stop" | "profile_switch" | "daemon_shutdown" | "interrupted" | null;
+    quality_verdict: string | null;
+  } | null;
 }
 
 /** `/status.vehicle_state` — mirrors

@@ -17,35 +17,35 @@ could not be repeated that day.
 
 ## Backend: why a capture ended
 
-- [ ] **W03.1 — Record an end reason on every capture.** Add `end_reason` to
+- [x] **W03.1 — Record an end reason on every capture.** Add `end_reason` to
   the capture manifest: `operator_stop`, `profile_switch`, `daemon_shutdown`
   (clean SIGTERM — write it from the shutdown path), or `interrupted`. The
   dying process cannot write the last one, so:
-- [ ] **W03.2 — Detect an interrupted capture at start-up.** When the daemon
+- [x] **W03.2 — Detect an interrupted capture at start-up.** When the daemon
   starts, find the newest `_capture-*` manifest with a start and no end record,
   stamp it `end_reason: interrupted` with `detected_at`, and run the normal
   finalization on it (it currently never gets a quality verdict). Use
   `src.control.sessions.session_started_at` to order — never the directory
   name. *Test:* a manifest with no end record is stamped exactly once across
   two start-ups.
-- [ ] **W03.3 — `/status.last_capture`.** `{name, session_dir, started_at,
+- [x] **W03.3 — `/status.last_capture`.** `{name, session_dir, started_at,
   ended_at, end_reason, quality_verdict}` for the most recent capture, present
   even when none is active.
 
 ## Frontend
 
-- [ ] **W03.4 — Profile picker.** Every profile from
+- [x] **W03.4 — Profile picker.** Every profile from
   `GET /control/capture/profiles`, each showing description, `notes`,
   `experimental`, channel counts (Mode 01 / Mode 22 / memory), `target_rate_hz`
   and `expected_total_demand_hz`. Read-only here — editing stays on
   System › Capture Profiles, linked.
-- [ ] **W03.5 — Start / stop / pause** against the existing routes, with the
+- [x] **W03.5 — Start / stop / pause** against the existing routes, with the
   optional `tune_revision` field pre-filled from the context bar's running
   calibration.
-- [ ] **W03.6 — Keepalive on this page.** A minutes input and an arm button
+- [x] **W03.6 — Keepalive on this page.** A minutes input and an arm button
   against `POST /control/power/keepalive`, with remaining time shown. Offer it,
   pre-filled, when a capture starts with UPS SOC under the readiness floor.
-- [ ] **W03.7 — Live per-channel table** while a capture runs: channel, kind,
+- [x] **W03.7 — Live per-channel table** while a capture runs: channel, kind,
   requested Hz, achieved Hz, sent, responses, timeouts, NRCs — the rows the
   scheduler already reports per request. A channel achieving under
   `min_achieved_rate_hz` is amber; `requests_sent == 0` after 10 s is red. That
@@ -57,11 +57,11 @@ could not be repeated that day.
   operator: the RAM layout survives calibration flashes), and the
   `memory_withheld` payload field is gone. A channel that is not delivering
   shows up in W03.7's per-channel `requests_sent`/achieved rate like any other.
-- [ ] **W03.9 — Tap-to-tag.** Buttons for the physical actions the project
+- [x] **W03.9 — Tap-to-tag.** Buttons for the physical actions the project
   tags: pull start / pull end, steady hold start / end, decel, idle. Through
   `useTagQueue` so a tap during a connectivity gap is queued, not lost. Tag the
   physical action, never a UI selection (AGENTS.md).
-- [ ] **W03.10 — Announce an ended capture.** When `last_capture.end_reason` is
+- [x] **W03.10 — Announce an ended capture.** When `last_capture.end_reason` is
   anything other than `operator_stop` and the operator has not acknowledged it,
   show a persistent banner on this page **and** in `StatusStrip.tsx`:
   "`tuning` ended after 4 min: daemon restarted". Acknowledgement is per
@@ -82,3 +82,10 @@ A capture can be started, tagged, kept alive and stopped without leaving the
 page; an interrupted capture is announced on the next page load after the
 daemon comes back; a channel that is selected but never sent is red within ten
 seconds. *Truck check:* one real capture, start to stop, from this page.
+
+Desk implementation completed 2026-09-21. `test_capture_end_reason.py` proves
+restart recovery is idempotent and ordering ignores directory prefixes;
+`StatusStrip.test.ts` proves interruption acknowledgement persists. The
+dashboard suite (279 tests after the new assertion) and typecheck pass, and
+the Python lint/format/mypy gates are clean. The final real-truck start/stop
+check remains pending because the Pi was unreachable from this workstation.

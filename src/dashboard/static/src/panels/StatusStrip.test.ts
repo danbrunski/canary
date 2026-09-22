@@ -78,6 +78,32 @@ describe("StatusStrip — replay source label (Task 1.2)", () => {
   });
 });
 
+describe("StatusStrip — ended capture announcement (W03)", () => {
+  it("persists an interruption until the operator acknowledges it", () => {
+    const interrupted: StatusResponse = {
+      ...status({ active: 0, overrides: [] }),
+      last_capture: {
+        name: "tuning",
+        session_dir: "/data/_capture-tuning-2026-09-21T180000",
+        started_at: "2026-09-21T18:00:00Z",
+        ended_at: "2026-09-21T18:04:00Z",
+        end_reason: "interrupted",
+        quality_verdict: "unknown",
+      },
+    };
+    render(
+      createElement(StatusStrip, {
+        status: interrupted,
+        channels: new Map(),
+        events: [],
+      }),
+    );
+    expect(screen.getByText(/tuning ended after 4 min: daemon restarted/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "acknowledge" }));
+    expect(screen.queryByText(/tuning ended after 4 min/)).not.toBeInTheDocument();
+  });
+});
+
 describe("StatusStrip — accepted-baseline overrides (2.3)", () => {
   it("is not shown when the daemon hasn't wired the field", () => {
     render(
