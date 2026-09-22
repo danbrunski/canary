@@ -41,10 +41,13 @@ order comes from `docs/roadmap/OVERNIGHT-QUEUE.md`.
   `ruff check --fix` (F401 excluded) + `ruff format` on every Python
   edit and feeds remaining diagnostics back. Don't fight it — fix the
   diagnostics.
-- **Subagents**: `implementer` (writes one roadmap task to a green
-  gate; never commits) and `verifier` (adversarial per-task check;
-  write-less). Keep them separate — the orchestrator owns commits,
-  checkboxes, and blocked calls.
+- **Subagents**: `implementer` (one checklist file per dispatch;
+  targeted tests; records its own `[x]`/`[~]` evidence; marks
+  truck/Pi/operator-decision items partial rather than blocking; never
+  commits) and `verifier` (adversarial per-checklist check; write-less).
+  Keep them separate — the orchestrator owns the full gate, commits,
+  and blocked calls, and names each running implementer's area to the
+  others when it runs them in parallel.
 
 ## Drive sessions (`/drive`)
 
