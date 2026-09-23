@@ -27,6 +27,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -90,12 +91,15 @@ def train(
     calibration_sessions: Sequence[Path] | None = None,
     calibration_frame: pd.DataFrame | None = None,
     feature_policy: FeaturePolicy | None = None,
+    evaluation_sessions: Sequence[Path] | None = None,
 ) -> TrainedIsolationForest:
     """Build features, fit the per-mode IF + scaler, write artifact + manifest.
 
     ``calibration_frame`` is the already-built feature frame of the held-out
     sessions (``scripts/retrain.py`` builds it once for every detector); when
     omitted it is built here from ``calibration_sessions``.
+    ``evaluation_sessions`` (A02.1) are the held-out sessions the retrain gate
+    scores — disjoint from calibration — recorded in the manifest.
     """
     policy = (
         feature_policy
@@ -172,6 +176,14 @@ def train(
         ),
     )
 
+    if evaluation_sessions:
+        trained = replace(
+            trained,
+            manifest=replace(
+                trained.manifest,
+                evaluation_sessions=tuple(Path(s).name for s in evaluation_sessions),
+            ),
+        )
     out_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = out_dir / "model.joblib"
     manifest_path = default_manifest_path(artifact_path)

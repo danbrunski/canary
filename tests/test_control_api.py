@@ -678,6 +678,38 @@ def test_retrain_all_job_command_since_param_builds_since_flag(tmp_path: Path) -
     assert "--all" not in command
 
 
+def test_sequence_retrain_jobs_pass_an_operator_thin_calibration_reason(tmp_path: Path) -> None:
+    """A02.2: a thin calibration is refused unless the operator states a
+    reason; the job API carries it through, and never adds one by itself."""
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    config = CanaryConfig.from_yaml(cfg_path)
+    controller = JobController(
+        config=config,
+        repo_root=tmp_path,
+        config_path=cfg_path,
+        jobs_dir=tmp_path / "jobs",
+        python=Path(sys.executable),
+    )
+
+    for kind in ("retrain_lstm", "retrain_tcn", "retrain_all"):
+        plain = controller._build_command(kind, {"since": "2026-06-01"})  # noqa: SLF001
+        assert "--accept-thin-calibration" not in plain, kind
+        blank = controller._build_command(kind, {"accept_thin_calibration": "  "})  # noqa: SLF001
+        assert "--accept-thin-calibration" not in blank, kind
+        command = controller._build_command(  # noqa: SLF001
+            kind, {"accept_thin_calibration": "operator: only two drives this month"}
+        )
+        index = command.index("--accept-thin-calibration")
+        assert command[index + 1] == "operator: only two drives this month", kind
+    assert "--accept-thin-calibration" not in controller._build_command(  # noqa: SLF001
+        "retrain_if", {"accept_thin_calibration": "x"}
+    )
+    for bad in (["a", "list"], {"a": 1}, 3, "   ", ""):
+        with pytest.raises(ValueError, match="accept_thin_calibration"):
+            controller.submit("retrain_lstm", {"accept_thin_calibration": bad})
+
+
 def test_export_dataset_job_command_shape(tmp_path: Path) -> None:
     """Task 5.6b: the Export panel's job kind builds the exact
     ``scripts/export_dataset.py`` invocation an operator would type by hand."""

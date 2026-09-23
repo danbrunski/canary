@@ -126,7 +126,14 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     )
 
     # Report shape + JSON-safe (the training ledger / dashboard consume it).
-    assert set(report) == {"fault_kinds", "n_injections", "seed", "nominal_fp", "per_fault"}
+    assert set(report) == {
+        "fault_kinds",
+        "n_injections",
+        "seed",
+        "nominal_fp",
+        "per_fault",
+        "withheld",
+    }
     json.loads(json.dumps(report))
     for metric in report["per_fault"]:
         assert set(metric) == {
@@ -156,10 +163,11 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     metrics = {(m["detector"], m["fault_kind"]): m["detection_rate"] for m in report["per_fault"]}
     for kind in ("dropout", "stuck", "scale"):
         assert metrics[("isolation_forest", kind)] > 0.0, kind
-    # Fusion sees only IF in this harness and requires two independent
-    # agreeing sources, so it must remain quiet for every fault kind.
-    for kind in DEFAULT_FAULT_KINDS:
-        assert metrics[("fused", kind)] == 0.0, kind
+    # A02.9: fusion needs two independent sources and only the IF ran, so fused
+    # cannot fire by construction. It is withheld with that reason, never
+    # graded as a recall of 0.0 (the 2026-09-20 benchmark's "fused 0 of 250").
+    assert not any(detector == "fused" for detector, _ in metrics)
+    assert "min_agreement" in report["withheld"]["fused"]
     # Every fault kind from DEFAULT_FAULT_KINDS got graded.
     assert {m["fault_kind"] for m in report["per_fault"]} == set(DEFAULT_FAULT_KINDS)
 
@@ -170,10 +178,9 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     # tighter Done-Definition v1 #7 (≤1 FP/hr) gate, which needs a real
     # held-out drive.
     assert report["nominal_fp"]["isolation_forest"]["per_hour"] < 400.0
-    # 6.2: single-source fused can never satisfy the agreement gate, so its
-    # nominal FP floor is now exactly zero — a stronger, exact guarantee
-    # than the old loose ceiling.
-    assert report["nominal_fp"]["fused"]["per_hour"] == 0.0
+    # 6.2: single-source fused can never satisfy the agreement gate, so it has
+    # no nominal rate either — withheld, not a measured zero.
+    assert "fused" not in report["nominal_fp"]
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +267,8 @@ def test_evaluate_detectors_skips_sequence_metrics_when_no_artifact_supplied() -
     )
 
     assert "sequence" not in report["nominal_fp"]
-    assert {m["detector"] for m in report["per_fault"]} == {"isolation_forest", "fused"}
+    assert {m["detector"] for m in report["per_fault"]} == {"isolation_forest"}
+    assert set(report["withheld"]) == {"fused"}
 
 
 def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
@@ -329,6 +337,9 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
 
     assert "sequence" in report["nominal_fp"]
     json.loads(json.dumps(report))  # still JSON-safe with the third detector
+    # A02.9: two sources ran, so fusion is graded rather than withheld.
+    assert report["withheld"] == {}
+    assert "fused" in report["nominal_fp"]
     sequence_metrics = [m for m in report["per_fault"] if m["detector"] == "sequence"]
     assert {m["fault_kind"] for m in sequence_metrics} == set(DEFAULT_FAULT_KINDS)
     for metric in sequence_metrics:
@@ -652,3 +663,206 @@ def test_lstm_training_completes_and_populates_per_mode_thresholds() -> None:
     for mode, dist in per_mode.items():
         assert isinstance(mode, str)
         assert np.isfinite(dist["threshold"])
+
+
+# ---------------------------------------------------------------------------
+# A02.9 — fusion graded on the sources the daemon fuses
+# ---------------------------------------------------------------------------
+
+
+def _scored_frame(n: int, *, if_fires: bool) -> pd.DataFrame:
+    from src.models.isolation_forest import (
+        CALIBRATED_THRESHOLD_COLUMN,
+        MISSING_FEATURES_COLUMN,
+        MODEL_MODE_COLUMN,
+        SCORE_COLUMN,
+    )
+
+    return pd.DataFrame(
+        {
+            TIMESTAMP_COLUMN: pd.date_range("2026-09-20T00:00:00Z", periods=n, freq="1s"),
+            MODEL_MODE_COLUMN: ["city"] * n,
+            CALIBRATED_THRESHOLD_COLUMN: [0.1] * n,
+            SCORE_COLUMN: [0.5 if if_fires else 0.0] * n,
+            MISSING_FEATURES_COLUMN: [False] * n,
+        }
+    )
+
+
+def test_fused_fires_only_when_both_sources_are_sustained_together() -> None:
+    """The daemon gates each source, then fuses; one voice never fuses (6.2)."""
+    from types import SimpleNamespace
+
+    from src.alerts.fusion import FusionScorer
+    from src.models.synthetic_fault_eval import _fused_anomalous
+
+    config = _config()
+    fusion = FusionScorer(config.models.fusion)
+    n = 6
+    firing_sequence = [
+        SimpleNamespace(global_score=2.0, global_threshold=1.0, is_anomaly=True) for _ in range(n)
+    ]
+    quiet_sequence = [
+        SimpleNamespace(global_score=0.1, global_threshold=1.0, is_anomaly=False) for _ in range(n)
+    ]
+
+    both = _fused_anomalous(
+        _scored_frame(n, if_fires=True),
+        fusion=fusion,
+        scales={"city": 0.1},
+        config=config,
+        sequence_results=firing_sequence,  # type: ignore[arg-type]
+    )
+    required = config.alerts.min_consecutive_ticks
+    assert list(both) == [False] * (required - 1) + [True] * (n - required + 1)
+
+    if_only = _fused_anomalous(
+        _scored_frame(n, if_fires=True),
+        fusion=fusion,
+        scales={"city": 0.1},
+        config=config,
+        sequence_results=quiet_sequence,  # type: ignore[arg-type]
+    )
+    assert not any(bool(v) for v in if_only)
+
+
+# ---------------------------------------------------------------------------
+# A02.6 — realistic faults
+# ---------------------------------------------------------------------------
+
+
+def _engine_frame(n: int = 600, *, idle_rows: int = 0) -> pd.DataFrame:
+    """A running, closed-loop drive: idle rows first, then cruise."""
+    timestamps = pd.date_range("2026-09-20T00:00:00Z", periods=n, freq="1s")
+    idle = np.arange(n) < idle_rows
+    return pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * n,
+            TIMESTAMP_COLUMN: timestamps,
+            "obd:RPM": np.where(idle, 750.0, 2200.0),
+            "obd:SPEED": np.where(idle, 0.0, 60.0),
+            "obd:MAF": np.where(idle, 4.0, 20.0),
+            "obd:ENGINE_LOAD": np.full(n, 30.0),
+            "obd:SHORT_FUEL_TRIM_1": np.zeros(n),
+            "obd:SHORT_FUEL_TRIM_2": np.zeros(n),
+            "obd:FUEL_STATUS": np.full(n, 2.0),
+            "obd:COOLANT_TEMP": np.full(n, 88.0),
+            "obd:O2_WR_LAMBDA_S1": np.where(np.arange(n) % 20 < 10, 0.98, 1.02),
+            "decoded:ECM_COOLANT_TEMP": np.full(n, 128.0),  # degC + 40 raw counts
+        }
+    )
+
+
+def test_maf_gain_scales_every_airflow_channel_and_trims_compensate() -> None:
+    from src.models.synthetic_fault_eval import inject_realistic_fault
+
+    frame = _engine_frame()
+    start, end = frame[TIMESTAMP_COLUMN].iloc[200], frame[TIMESTAMP_COLUMN].iloc[440]
+    out, injection = inject_realistic_fault(
+        frame, kind="maf_gain", severity=0.95, start=start, end=end
+    )
+    inside = slice(200, 439)
+    assert np.allclose(out["obd:MAF"].iloc[inside], 20.0 * 0.95)
+    assert np.allclose(out["obd:ENGINE_LOAD"].iloc[inside], 30.0 * 0.95)
+    assert np.allclose(out["obd:SHORT_FUEL_TRIM_1"].iloc[inside], (1 / 0.95 - 1) * 100)
+    assert np.allclose(out["obd:SHORT_FUEL_TRIM_2"].iloc[inside], (1 / 0.95 - 1) * 100)
+    # Outside the window nothing moves.
+    assert out["obd:MAF"].iloc[:200].eq(20.0).all()
+    assert out["obd:MAF"].iloc[440:].eq(20.0).all()
+    # An empty result says which kind of empty: the absent sibling is named.
+    assert injection.not_perturbed == {"obd:ABSOLUTE_LOAD": "absent"}
+    assert set(injection.perturbed) == {
+        "obd:MAF",
+        "obd:ENGINE_LOAD",
+        "obd:SHORT_FUEL_TRIM_1",
+        "obd:SHORT_FUEL_TRIM_2",
+    }
+
+
+def test_thermostat_fault_moves_decoded_counts_through_the_binding_scale() -> None:
+    """A physical 10 degC drop is 10 raw counts on a degC+40 broadcast channel
+    — the fault is applied in engineering units, never to raw counts."""
+    from src.decode.engineering import repo_bindings
+    from src.models.synthetic_fault_eval import (
+        THERMOSTAT_RAMP_SECONDS,
+        inject_realistic_fault,
+    )
+
+    frame = _engine_frame()
+    start = frame[TIMESTAMP_COLUMN].iloc[100]
+    out, injection = inject_realistic_fault(
+        frame,
+        kind="thermostat",
+        severity=10.0,
+        start=start,
+        end=start + pd.Timedelta(seconds=300),
+        roles={"coolant": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP")},
+        bindings=repo_bindings(),
+    )
+    plateau = 100 + int(THERMOSTAT_RAMP_SECONDS) + 10
+    assert out["obd:COOLANT_TEMP"].iloc[plateau] == pytest.approx(78.0)
+    assert out["decoded:ECM_COOLANT_TEMP"].iloc[plateau] == pytest.approx(118.0)
+    # The ramp starts at zero: the first window row is unchanged.
+    assert out["obd:COOLANT_TEMP"].iloc[100] == pytest.approx(88.0)
+    assert "decoded:ECM_COOLANT_TEMP" in injection.perturbed
+
+
+def test_lazy_o2_lags_the_sensor_without_changing_its_mean_level() -> None:
+    from src.models.synthetic_fault_eval import inject_realistic_fault
+
+    frame = _engine_frame()
+    start, end = frame[TIMESTAMP_COLUMN].iloc[100], frame[TIMESTAMP_COLUMN].iloc[400]
+    out, _ = inject_realistic_fault(frame, kind="lazy_o2", severity=10.0, start=start, end=end)
+    before = frame["obd:O2_WR_LAMBDA_S1"].iloc[100:400]
+    after = out["obd:O2_WR_LAMBDA_S1"].iloc[100:400]
+    assert after.std() < 0.5 * before.std()  # the swing is damped
+    assert after.mean() == pytest.approx(before.mean(), abs=0.01)
+
+
+def test_idle_air_leak_signature_is_largest_at_idle() -> None:
+    from src.models.synthetic_fault_eval import inject_realistic_fault
+
+    frame = _engine_frame(idle_rows=300)
+    start, end = frame[TIMESTAMP_COLUMN].iloc[200], frame[TIMESTAMP_COLUMN].iloc[400]
+    out, _ = inject_realistic_fault(frame, kind="idle_air_leak", severity=0.4, start=start, end=end)
+    idle_trim = out["obd:SHORT_FUEL_TRIM_1"].iloc[250]
+    cruise_trim = out["obd:SHORT_FUEL_TRIM_1"].iloc[350]
+    assert idle_trim == pytest.approx(100 * 0.4 / 4.0)
+    assert cruise_trim == pytest.approx(100 * 0.4 / 20.0)
+
+
+def test_fault_window_names_why_a_drive_cannot_carry_the_fault() -> None:
+    from src.models.synthetic_fault_eval import choose_fault_window
+
+    no_idle = _engine_frame(idle_rows=0)
+    reason = choose_fault_window(
+        no_idle,
+        kind="idle_air_leak",
+        length_seconds=120,
+        lead_seconds=60,
+        rng=np.random.default_rng(0),
+    )
+    assert isinstance(reason, str) and "idle_air_leak" in reason
+
+    window = choose_fault_window(
+        _engine_frame(idle_rows=600),
+        kind="idle_air_leak",
+        length_seconds=120,
+        lead_seconds=60,
+        rng=np.random.default_rng(0),
+    )
+    assert isinstance(window, tuple)
+
+
+def test_fault_channel_roles_refuse_an_unknown_role(tmp_path: Path) -> None:
+    from src.models.synthetic_fault_eval import load_fault_channel_roles
+
+    good = tmp_path / "good.yaml"
+    good.write_text("roles:\n  coolant: [decoded:ECM_COOLANT_TEMP]\n")
+    roles = load_fault_channel_roles(good)
+    assert roles["coolant"] == ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP")
+
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("roles:\n  coolent: [obd:COOLANT_TEMP]\n")
+    with pytest.raises(ValueError, match="unknown fault-channel roles"):
+        load_fault_channel_roles(bad)

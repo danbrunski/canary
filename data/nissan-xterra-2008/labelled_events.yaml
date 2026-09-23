@@ -1,0 +1,87 @@
+schema_version: 1
+# Real events on this vehicle, as intervals the evaluation harness scores
+# against (A02.7, docs/roadmap/tasks/A02-calibration-and-evaluation.md).
+# Loader and kinds: src/analysis/labelled_events.py. Times are UTC.
+#
+# None of these is a fault. The project has no confirmed real fault label yet;
+# induced faults on the parked truck (A02.8) are the first that could be.
+#
+# Flashes are NOT listed here: the loader derives one intervention per
+# revision in tune_revisions.yaml, which stays the single source for flash
+# times.
+#
+# Not yet labelled: the supercharger install (Z1 Level 2, planned within weeks
+# of 2026-09-21, docs/roadmap/supercharger-build.md). Add it as an
+# `intervention` with `corpus_boundary: true` once it happens.
+events:
+  - id: ltft-cleared-battery-disconnect-2026-06-28
+    kind: novelty
+    title: Learned LTFT cleared by the battery disconnect; relearn not seen until 2026-09-18
+    start: 2026-06-28T00:00:00Z
+    end: 2026-09-18T13:45:24Z
+    end_basis: approximate
+    provenance: >-
+      Vehicle ledger observation 90fd244e (battery disconnect for the header
+      and spacer work, 2026-06-28; docs/roadmap/engine-tuning-support.md G.2).
+      Measured 2026-09-22 from obd:LONG_FUEL_TRIM_1/2 per local session:
+      exactly 0.0 in every session 2026-07-22 .. 2026-08-10, first nonzero in
+      2026-09-18T134345 (bank 1 median -2.3 %). The start has no time of day;
+      the end is the first observation of the relearned table, which the
+      ledger places after 2026-09-10.
+    affected_channels: [obd:LONG_FUEL_TRIM_1, obd:LONG_FUEL_TRIM_2]
+
+  - id: ltft-cleared-flash-2026-09-20
+    kind: novelty
+    title: Learned LTFT cleared by the 2026-09-20 flash, still relearning
+    start: 2026-09-21T03:08:45.954035Z
+    end: 2026-09-22T17:18:39Z
+    end_basis: last_observation
+    provenance: >-
+      Flash time from tune_revisions.yaml (ZS44A-20260920). Measured
+      2026-09-22 from obd:LONG_FUEL_TRIM_1/2 per local session: active before
+      the flash (2026-09-21T010459 bank 1 median -1.6 %), exactly 0.0 in every
+      later local session through 2026-09-22T171544. The table had not
+      relearned by the last local session, so the true end is later.
+    affected_channels: [obd:LONG_FUEL_TRIM_1, obd:LONG_FUEL_TRIM_2]
+
+  - id: altitude-2026-08-06
+    kind: novelty
+    title: Altitude trip, barometric pressure 72-82 kPa (median 75)
+    start: 2026-08-06T16:26:57.795885Z
+    end: 2026-08-06T17:30:32.880699Z
+    end_basis: measured
+    provenance: >-
+      Measured 2026-09-22 from obd:BAROMETRIC_PRESSURE per local session
+      against the ~80 kPa home baseline: 2026-08-06T162657 (median 75, min 72)
+      and 2026-08-06T172957 (75). Span is the first to last OBD row of
+      those sessions.
+    affected_channels: [obd:BAROMETRIC_PRESSURE]
+
+  - id: altitude-2026-09-18
+    kind: novelty
+    title: Altitude trip, barometric pressure 63-79 kPa (D03.20)
+    start: 2026-09-18T13:45:24.909449Z
+    end: 2026-09-18T18:28:16.572448Z
+    end_basis: measured
+    provenance: >-
+      Measured 2026-09-22 from obd:BAROMETRIC_PRESSURE per local session:
+      2026-09-18T134345 (median 72) through 2026-09-18T180630 (median 74, the
+      descent home; the next session, 182827, reads 80). Lowest 63 kPa in
+      144215. Span is the first to last OBD row of those sessions. D03.20
+      records the detectors firing out of distribution here;
+      data/analyses/2026-09-18-drive-log.md.
+    affected_channels: [obd:BAROMETRIC_PRESSURE]
+
+  - id: altitude-2026-09-20
+    kind: novelty
+    title: Short run at barometric pressure 75-76 kPa
+    start: 2026-09-20T20:51:30.481572Z
+    end: 2026-09-20T20:53:57.017955Z
+    end_basis: measured
+    provenance: >-
+      Measured 2026-09-22 from obd:BAROMETRIC_PRESSURE: 2026-09-20T205117
+      (median 75, 7 samples). Mode 01 answered only for these 2.5 minutes of
+      the session, so the interval is where baro was measured, not the whole
+      drive. The anomaly-detector review's highway flooding example
+      (data/analyses/2026-09-22-anomaly-detector-review.md).
+    affected_channels: [obd:BAROMETRIC_PRESSURE]

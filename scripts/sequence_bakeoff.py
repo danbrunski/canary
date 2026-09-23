@@ -42,6 +42,7 @@ from _cli import add_common_args, load_config  # noqa: E402
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.evaluation import holdout_by_drive  # noqa: E402
 from src.models.false_positive_benchmark import (  # noqa: E402
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
@@ -163,6 +164,7 @@ def run_backbone(
     device: str = "cpu",
     k_grid: Sequence[float] | None = None,
     calibration_sessions: Sequence[Path] | None = None,
+    calibration_override: str | None = None,
 ) -> BackboneResult:
     """Train one backbone, benchmark it on held-out sessions, summarize.
 
@@ -179,6 +181,7 @@ def run_backbone(
         bindings_path=bindings_path,
         device=device,
         calibration_sessions=calibration_sessions,
+        calibration_override=calibration_override,
     )
     artifact_path = out_dir / "model.pt"
     # Z-score the held-out frame with the freshly trained model's own scaler so
@@ -223,6 +226,7 @@ def run_bakeoff(
     device: str = "cpu",
     k_grid: Sequence[float] | None = None,
     calibration_sessions: Sequence[Path] | None = None,
+    calibration_override: str | None = None,
 ) -> list[BackboneResult]:
     """Train + benchmark each requested backbone on identical splits.
 
@@ -253,6 +257,7 @@ def run_bakeoff(
                 device=device,
                 k_grid=k_grid,
                 calibration_sessions=calibration_sessions,
+                calibration_override=calibration_override,
             )
         )
     return results
@@ -343,6 +348,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "thresholds are calibrated on the training windows themselves, which "
         "inflates cross-session false positives on both backbones.",
     )
+    parser.add_argument(
+        "--accept-thin-calibration",
+        default=None,
+        metavar="REASON",
+        help="Train even though the calibration sessions do not cover what the models "
+        "will score (fewer than three drives, a scored mode without its own band, a "
+        "channel never observed). Refused without this (A02.2); the reason is stamped "
+        "into each manifest.",
+    )
     add_common_args(parser)
     parser.add_argument("--bindings", type=Path, default=DEFAULT_BINDINGS_PATH)
     parser.add_argument(
@@ -386,19 +400,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
-    if args.sessions:
-        # Explicit training sessions: strip any calibration sessions the caller
-        # may have left in the positional list by accident — calibration must
-        # be unseen by the model.
-        held_out = {Path(p).resolve() for p in (args.calibration_sessions or ())}
-        return [s for s in args.sessions if Path(s).resolve() not in held_out] or None
-    discovered = discover_sessions(args.sessions_root)
-    if not discovered:
+    """Training sessions without the --evaluate / --calibration-sessions
+    drives (``holdout_by_drive``: siblings of a held-out session go with it,
+    and a drive on both sides is refused with ``ValueError``)."""
+    pool = list(args.sessions) if args.sessions else discover_sessions(args.sessions_root)
+    if not pool:
         return None
-    held_out = {Path(p).resolve() for p in args.evaluate}
-    held_out.update(Path(p).resolve() for p in (args.calibration_sessions or ()))
-    kept = [s for s in discovered if Path(s).resolve() not in held_out]
-    return kept or None
+    holdout = holdout_by_drive(
+        pool,
+        calibration=list(args.calibration_sessions or ()),
+        evaluation=list(args.evaluate or ()),
+    )
+    args.calibration_sessions = list(holdout.calibration) or None
+    args.evaluate = list(holdout.evaluation)
+    return list(holdout.training) or None
 
 
 def _auto_carve_calibration_sessions(sessions: Sequence[Path]) -> list[Path]:
@@ -422,26 +437,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = load_config(args)
 
     log.info("bake-off device=%s", args.device)
-    sessions = _resolve_training_sessions(args)
+    try:
+        sessions = _resolve_training_sessions(args)
+    except ValueError as exc:
+        # Calibration and evaluation must be disjoint, by physical drive, so
+        # the FP benchmark stays a true held-out test (no peeking).
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     if not sessions:
         print(
             f"error: no training sessions given and none found under {args.sessions_root}.",
             file=sys.stderr,
         )
         return 1
-
-    # Guard: calibration and evaluation must be disjoint so the FP benchmark
-    # stays a true held-out test (no peeking).
-    if args.calibration_sessions:
-        eval_set = {Path(p).resolve() for p in args.evaluate}
-        overlap = [p for p in args.calibration_sessions if Path(p).resolve() in eval_set]
-        if overlap:
-            print(
-                "error: --calibration-sessions must be disjoint from --evaluate "
-                f"(overlap: {[str(p) for p in overlap]}).",
-                file=sys.stderr,
-            )
-            return 1
 
     # Task 3.3: a default (no --calibration-sessions) invocation used to
     # calibrate in-sample silently — the exact FPR≈1.0 flood mechanism. Auto-
@@ -461,8 +469,15 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        held = {s.resolve() for s in calibration_sessions}
-        sessions = [s for s in sessions if Path(s).resolve() not in held]
+        try:
+            carved = holdout_by_drive(
+                sessions, calibration=calibration_sessions, evaluation=list(args.evaluate)
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        calibration_sessions = list(carved.calibration)
+        sessions = list(carved.training)
         log.info(
             "auto-carved calibration holdout sessions",
             extra={"calibration_sessions": [str(s) for s in calibration_sessions]},
@@ -479,6 +494,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             device=args.device,
             k_grid=args.evaluate_k,
             calibration_sessions=calibration_sessions,
+            calibration_override=args.accept_thin_calibration,
         )
     except MissingTCNDependencyError as e:
         print(f"error: {e}", file=sys.stderr)

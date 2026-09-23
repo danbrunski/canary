@@ -313,7 +313,11 @@ def test_calibrate_lstm_thresholds_can_be_run_explicitly() -> None:
     calibration = SequenceThresholdCalibration.from_dict(calibrated.manifest.thresholds)
     assert calibration.threshold_k == 1.5
     assert calibration.calibrated_at == "2026-05-12T13:00:00Z"
-    assert calibration.global_error.count == len(dataset)
+    assert calibration.window_count == len(dataset)
+    # A02.3: the distribution rests on independent per-block maxima, not on
+    # every overlapping window.
+    assert calibration.global_error.count == calibration.effective_window_count
+    assert 0 < calibration.global_error.count < len(dataset)
 
 
 def test_calibrate_lstm_thresholds_rejects_mismatched_schema() -> None:
@@ -414,6 +418,9 @@ def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> N
         trained_at="2026-05-12T12:00:00Z",
         model_version="oos-calib",
         calibration_dataset=calib_ds,
+        # One held-out session is refused (A02.2); this test is about which
+        # dataset the thresholds come from, so it overrides, and says so.
+        calibration_override="test fixture: one held-out session",
     )
     assert trained.manifest.thresholds is not None
     assert trained.manifest.calibration == "held_out"

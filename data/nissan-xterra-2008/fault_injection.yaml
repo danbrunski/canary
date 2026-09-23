@@ -1,0 +1,26 @@
+# Channels on this vehicle that carry the same quantity as each realistic
+# fault's J1979 core (src/models/synthetic_fault_eval.py,
+# DEFAULT_FAULT_CHANNEL_ROLES), so an injected fault moves every mirror of the
+# quantity together (A02.6). Loaded by scripts/evaluate_detectors.py.
+#
+# A `decoded:` channel is perturbed in engineering units through its binding's
+# scale; one with no pinned scale cannot be, and every injection report names
+# it under `not_perturbed: unscaled`. Such a channel is left inconsistent with
+# its perturbed siblings, which a detector watching it could use — read the
+# per-injection record before trusting a recall that leans on it.
+roles:
+  airflow:
+    # Air charge per intake event, counts proportional to grams (dids.yaml:
+    # scale null, ~63,800 counts per g at K 1.06): a gain applies exactly.
+    - did:ECM_AIR_CHARGE
+    # Broadcast airflow byte; scale not pinned.
+    - decoded:ECM_AIRFLOW_233_B2
+  calculated_load:
+    # Broadcast calculated load; scale not pinned.
+    - decoded:ECM_CALC_LOAD_A
+  af_sensor_b1:
+    - did:ECM_AF_SENSOR_V_B1
+  coolant:
+    - decoded:ECM_COOLANT_TEMP
+    - decoded:ECM_COOLANT_TEMP_233
+    - decoded:ECM_COOLANT_TEMP_23D

@@ -196,6 +196,9 @@ class SequenceAutoencoderManifest:
     #: :data:`MIN_CALIBRATION_SESSIONS` backed the thresholds. ``None`` for
     #: in-sample/uncalibrated artifacts and manifests written before this field.
     calibration_holdout: Mapping[str, Any] | None = None
+    #: A02.1 — held-out sessions the post-retrain gate scored, disjoint from
+    #: ``calibration_sessions``. Empty when no evaluation holdout was spared.
+    evaluation_sessions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -230,6 +233,7 @@ class SequenceAutoencoderManifest:
             "calibration_holdout": (
                 None if self.calibration_holdout is None else dict(self.calibration_holdout)
             ),
+            "evaluation_sessions": list(self.evaluation_sessions),
         }
 
     @classmethod
@@ -268,6 +272,7 @@ class SequenceAutoencoderManifest:
                 if data.get("calibration_holdout") is None
                 else dict(data["calibration_holdout"])
             ),
+            evaluation_sessions=tuple(str(x) for x in data.get("evaluation_sessions", [])),
         )
 
 

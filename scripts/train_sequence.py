@@ -38,7 +38,7 @@ import argparse
 import logging
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
@@ -50,6 +50,7 @@ from _cli import add_common_args, add_profile_arg, load_config, scoped_models_di
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models
 from src.log import configure_logging
+from src.models.evaluation import DriveHoldout, holdout_by_drive
 from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
@@ -195,6 +196,8 @@ def train(
     calibration_sessions: Sequence[Path] | None = None,
     calibration_frame: pd.DataFrame | None = None,
     feature_policy: FeaturePolicy | None = None,
+    calibration_override: str | None = None,
+    evaluation_sessions: Sequence[Path] | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Build windows, train + calibrate ``backend``'s autoencoder, write artifact + manifest.
 
@@ -209,6 +212,13 @@ def train(
     sessions — ``scripts/retrain.py`` builds it once and hands the *same* frame
     to the IF and to this trainer, so both detectors calibrate on one pooled
     multi-session holdout. When omitted it is built here.
+
+    A calibration that does not cover what the model will score (fewer than
+    three physical drives, a scored mode without its own band, a channel never
+    observed) is refused before training (A02.2); ``calibration_override`` is
+    the operator's stated reason to publish anyway, stamped into the manifest.
+    ``evaluation_sessions`` (A02.1) — the held-out sessions the retrain gate
+    scores, disjoint from calibration — are recorded in the manifest too.
     """
     policy = (
         feature_policy
@@ -357,7 +367,16 @@ def train(
         # help text): omitting the flag is a deliberate dev/manual-run path,
         # not the accidental-bypass 3.1 targets at the library level.
         allow_in_sample_calibration=calibration_ds is None,
+        calibration_override=calibration_override,
     )
+    if evaluation_sessions:
+        trained = replace(
+            trained,
+            manifest=replace(
+                trained.manifest,
+                evaluation_sessions=tuple(Path(s).name for s in evaluation_sessions),
+            ),
+        )
 
     out_dir.mkdir(parents=True, exist_ok=True)
     artifact_path = out_dir / "model.pt"
@@ -547,6 +566,15 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
         "underestimates real cross-session error and inflates false positives.",
     )
     parser.add_argument(
+        "--accept-thin-calibration",
+        default=None,
+        metavar="REASON",
+        help="Publish even though the calibration sessions do not cover what the model "
+        "will score (fewer than three drives, a scored mode without its own band, a "
+        "channel never observed). Refused without this (A02.2); the reason and the "
+        "violations are stamped into the manifest.",
+    )
+    parser.add_argument(
         "--evaluate-k",
         type=float,
         nargs="+",
@@ -569,23 +597,31 @@ def parse_args(
     return parser.parse_args(argv)
 
 
-def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
-    """Pick the training sessions, excluding any --evaluate / --calibration-sessions."""
-    if args.sessions:
-        return list(args.sessions)
-    discovered = discover_sessions(args.sessions_root)
-    if not discovered:
+def _resolve_holdout(args: argparse.Namespace) -> DriveHoldout | None:
+    """Training, calibration and evaluation sessions, split by physical drive.
+
+    ``--calibration-sessions`` and ``--evaluate`` take the rest of their
+    drives with them (``holdout_by_drive``), a drive on both sides is refused,
+    and neither side trains. ``None`` when there are no sessions at all.
+    """
+    pool = list(args.sessions) if args.sessions else discover_sessions(args.sessions_root)
+    if not pool:
         return None
-    held_out: set[Path] = set()
-    if args.evaluate:
-        held_out.update(Path(p).resolve() for p in args.evaluate)
-    if args.calibration_sessions:
-        held_out.update(Path(p).resolve() for p in args.calibration_sessions)
-    if held_out:
-        kept = [s for s in discovered if Path(s).resolve() not in held_out]
-        if kept:
-            return kept
-    return discovered or None
+    return holdout_by_drive(
+        pool,
+        calibration=list(args.calibration_sessions or ()),
+        evaluation=list(args.evaluate or ()),
+    )
+
+
+def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
+    """Pick the training sessions, excluding the --evaluate and
+    --calibration-sessions drives. ``None`` when nothing is left to train on —
+    never every session, which would train on the held-out drives."""
+    holdout = _resolve_holdout(args)
+    if holdout is None:
+        return None
+    return list(holdout.training) or None
 
 
 def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
@@ -594,7 +630,15 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     config = load_config(args)
     args.out = args.out or scoped_models_dir(config, args.profile) / backend.model_type
 
-    sessions = _resolve_training_sessions(args)
+    try:
+        holdout = _resolve_holdout(args)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    sessions = list(holdout.training) if holdout is not None else []
+    if holdout is not None:
+        args.calibration_sessions = list(holdout.calibration) or None
+        args.evaluate = list(holdout.evaluation) or None
     if not sessions:
         print(
             f"error: no sessions given and none found under {args.sessions_root}. "
@@ -615,6 +659,7 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
             device=args.device,
             calibration_sessions=args.calibration_sessions,
             model_version=args.model_version,
+            calibration_override=args.accept_thin_calibration,
         )
     except backend.missing_dependency_error_cls() as e:
         print(f"error: {e}", file=sys.stderr)

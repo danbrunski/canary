@@ -135,6 +135,12 @@ class JobController:
         if kind not in ALLOWED_JOB_KINDS:
             raise ValueError(f"unsupported job kind: {kind}")
         clean_params = dict(params or {})
+        if "accept_thin_calibration" in clean_params:
+            reason = clean_params["accept_thin_calibration"]
+            # A02.2: the override is an operator's stated reason, stamped into
+            # the manifest. Anything but a non-empty string is not a reason.
+            if not isinstance(reason, str) or not reason.strip():
+                raise ValueError("accept_thin_calibration must be a non-empty reason string")
         job_id = uuid4().hex
         log_path = self._jobs_dir / f"{job_id}.log"
         command = tuple(self._build_command(kind, clean_params, job_id=job_id))
@@ -231,6 +237,11 @@ class JobController:
                 str(self._config.daemon.models_dir / "isolation_forest"),
                 "--skip-sequence",
             ]
+        # A02.2: the sequence trainer refuses a calibration that does not cover
+        # what it will score; an operator's stated reason (and only that)
+        # publishes anyway, stamped into the manifest.
+        thin_reason = str(params.get("accept_thin_calibration") or "").strip()
+        thin_arg = ["--accept-thin-calibration", thin_reason] if thin_reason else []
         if kind in ("retrain_lstm", "retrain_tcn"):
             device = str(params.get("device", "cpu"))
             sequence_model = "lstm" if kind == "retrain_lstm" else "tcn"
@@ -251,6 +262,7 @@ class JobController:
                 "--skip-if",
                 "--device",
                 device,
+                *thin_arg,
             ]
         if kind == "retrain_all":
             device = str(params.get("device", "cpu"))
@@ -276,6 +288,7 @@ class JobController:
                 str(self._config.daemon.models_dir / model_type),
                 "--device",
                 device,
+                *thin_arg,
             ]
         if kind == "refit_behavior_models":
             command = [

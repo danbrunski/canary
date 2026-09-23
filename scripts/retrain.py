@@ -72,6 +72,11 @@ from src.config import CanaryConfig  # noqa: E402
 from src.control.sessions import session_started_at  # noqa: E402
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.evaluation import (  # noqa: E402
+    HoldoutSplit,
+    drives_of_sessions,
+    holdout_by_drive,
+)
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
 from src.models.manifest import ManifestValidationError  # noqa: E402
@@ -229,6 +234,20 @@ def _pick_calibration_holdouts(
             continue
         healthy.append(session)
 
+    # One pick per physical drive (A02.1/A02.2): three sessions of one day's
+    # drive are one drive's conditions, and the sequence trainer refuses a
+    # calibration resting on fewer than MIN_CALIBRATION_SESSIONS drives.
+    drives = drives_of_sessions(ordered)
+    drive_of = {name: drive.drive_id for drive in drives for name in drive.session_names}
+    drive_members = {
+        drive.drive_id: [span.path for span in drive.sessions if span.path is not None]
+        for drive in drives
+    }
+
+    def new_drive(candidate: Path, chosen: Sequence[Path]) -> bool:
+        taken = {drive_of.get(held.name, held.name) for held in chosen}
+        return drive_of.get(candidate.name, candidate.name) not in taken
+
     selected: list[Path] = []
     covered: set[str] = set()
     for session in healthy:
@@ -238,14 +257,18 @@ def _pick_calibration_holdouts(
         if not selected:
             selected.append(session)
             covered |= modes or set()
-        elif modes and modes - covered:
+        elif modes and modes - covered and new_drive(session, selected):
             selected.append(session)
             covered |= modes
         if corpus_modes and covered >= corpus_modes:
             break
 
     while selected and len(selected) < max_holdouts:
-        remaining = [session for session in healthy if session not in selected]
+        remaining = [
+            session
+            for session in healthy
+            if session not in selected and new_drive(session, selected)
+        ]
         if not remaining:
             break
         selected.append(
@@ -257,7 +280,55 @@ def _pick_calibration_holdouts(
                 ),
             )
         )
-    return selected
+    # Whole drives, in pick order: a picked session's restart/capture siblings
+    # are held out with it, so no caller of the picker can train on half a
+    # calibration drive (callers still split through ``holdout_by_drive``).
+    whole: list[Path] = []
+    for session in selected:
+        for member in drive_members.get(drive_of.get(session.name, ""), [session]):
+            if member not in whole:
+                whole.append(member)
+    return whole
+
+
+#: Held-out drives the post-retrain gate scores (A02.1), disjoint from the
+#: calibration drives. Same count as the calibration floor: one drive is one
+#: day's conditions, for grading as much as for calibrating.
+EVALUATION_HOLDOUT_DRIVES = MIN_CALIBRATION_HOLDOUT_SESSIONS
+
+
+def _pick_evaluation_holdouts(
+    sessions: Sequence[Path],
+    *,
+    max_sessions: int,
+    max_drives: int = EVALUATION_HOLDOUT_DRIVES,
+) -> list[Path]:
+    """The newest healthy, substantial drives, for the regression gate only.
+
+    Drawn from ``sessions`` after calibration has taken its drives, so the gate
+    never scores a session the thresholds were cut from (A02.1). Whole drives
+    or nothing, newest first, within ``max_sessions`` so training keeps its
+    floor.
+    """
+    selected: list[Path] = []
+    drives = 0
+    for drive in reversed(drives_of_sessions(sessions)):
+        if drives >= max_drives:
+            break
+        members = [span.path for span in drive.sessions if span.path is not None]
+        if len(selected) + len(members) > max_sessions:
+            continue
+        healthy = [
+            m
+            for m in members
+            if _session_parquet_bytes(m) >= _MIN_CALIBRATION_HOLDOUT_BYTES
+            and ((health := _session_holdout_health(m)) is None or health[0] == "ready")
+        ]
+        if not healthy:
+            continue
+        selected.extend(members)
+        drives += 1
+    return sorted(selected, key=_started_at_key)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -348,6 +419,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "Default: auto-hold-out the most-recent discovered session — in-sample "
         "calibration inflates cross-session false positives. Pass "
         "--no-calibration-holdout to disable.",
+    )
+    parser.add_argument(
+        "--evaluation-sessions",
+        nargs="+",
+        type=Path,
+        default=None,
+        metavar="SESSION",
+        help="Held-out session(s) the post-retrain benchmark gate scores (A02.1). "
+        "Must be disjoint from --calibration-sessions — a session in both is refused. "
+        "Default: the newest healthy drives left after calibration, grouped by "
+        "physical drive.",
+    )
+    parser.add_argument(
+        "--accept-thin-calibration",
+        default=None,
+        metavar="REASON",
+        help="Publish a sequence model whose calibration does not cover what it will "
+        "score (fewer than three drives, a scored mode without its own band, a "
+        "channel never observed). Refused without this (A02.2); the reason and the "
+        "violations are stamped into the manifest.",
     )
     parser.add_argument(
         "--no-calibration-holdout",
@@ -571,7 +662,18 @@ def main(argv: Sequence[str] | None = None) -> int:
     # rows to make a useful calibration band, and picking them would just push
     # everything to the global threshold. With fewer than 3 sessions we can't
     # afford to hold one out, so we log and fall back to in-sample.
+    pool = list(sessions)
     calibration_sessions: list[Path] = []
+    evaluation_sessions: list[Path] = []
+    if args.calibration_sessions and args.evaluation_sessions:
+        try:
+            HoldoutSplit(
+                calibration=tuple(Path(p).name for p in args.calibration_sessions),
+                evaluation=tuple(Path(p).name for p in args.evaluation_sessions),
+            )
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
     if args.calibration_sessions:
         requested = {Path(p).resolve() for p in args.calibration_sessions}
         calibration_sessions = [s for s in sessions if Path(s).resolve() in requested]
@@ -596,6 +698,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             "falling back to in-sample (cross-session FPR likely inflated)",
             extra={"session_count": len(sessions)},
         )
+
+    # A02.1: the regression gate scores sessions disjoint from calibration,
+    # grouped by physical drive. ``holdout_by_drive`` expands every named or
+    # picked session to its whole drive and refuses a drive on both sides;
+    # the evaluation drives come from what calibration left, keeping at
+    # least two sessions for training.
+    try:
+        after_calibration = holdout_by_drive(pool, calibration=calibration_sessions)
+        if args.evaluation_sessions:
+            requested = {Path(p).resolve() for p in args.evaluation_sessions}
+            evaluation_sessions = [s for s in pool if Path(s).resolve() in requested]
+        elif (
+            calibration_sessions
+            and not args.no_calibration_holdout
+            and len(after_calibration.training) > 2
+        ):
+            evaluation_sessions = _pick_evaluation_holdouts(
+                after_calibration.training,
+                max_sessions=len(after_calibration.training) - 2,
+            )
+        holdout = holdout_by_drive(
+            pool, calibration=calibration_sessions, evaluation=evaluation_sessions
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    moved = sorted(
+        {s.name for s in (*holdout.calibration, *holdout.evaluation)}
+        - {Path(s).name for s in (*calibration_sessions, *evaluation_sessions)}
+    )
+    if moved:
+        log.info("holdouts take the rest of their drives", extra={"sessions": moved})
+    sessions = list(holdout.training)
+    calibration_sessions = list(holdout.calibration)
+    evaluation_sessions = list(holdout.evaluation)
+    args.holdout_split = holdout.split
 
     # Task 3.1: a --since window is explicitly the scheduled-retrain shape (a
     # rolling window, not a fixed corpus) — the calibration-holdout fallback
@@ -625,6 +763,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         extra={
             "sessions": len(sessions),
             "calibration_sessions": [str(s) for s in calibration_sessions],
+            "evaluation_sessions": [str(s) for s in evaluation_sessions],
             "skip_if": args.skip_if,
             "skip_sequence": args.skip_sequence,
             "sequence_model": seq_model_type,
@@ -779,6 +918,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bindings_path=args.bindings,
                 calibration_sessions=calibration_sessions or None,
                 feature_policy=feature_policy,
+                evaluation_sessions=evaluation_sessions or None,
                 **calibration_kwargs,
                 **feature_kwargs,
             )
@@ -803,6 +943,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 device=args.device,
                 calibration_sessions=calibration_sessions or None,
                 feature_policy=feature_policy,
+                evaluation_sessions=evaluation_sessions or None,
+                calibration_override=args.accept_thin_calibration,
                 **calibration_kwargs,
                 **feature_kwargs,
             )
@@ -817,8 +959,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     benchmark_report_path: Path | None = None
     benchmark_diff: dict[str, Any] | None = None
     if not args.skip_benchmark:
+        # A02.1: evaluation sessions only — never the ones thresholds were cut from.
         benchmark_report_path, benchmark_diff = _run_benchmark_gate(
-            config, calibration_sessions, args
+            config, evaluation_sessions, args
         )
     for out_dir in ledger_pending:
         _ingest_ledger(
@@ -1050,21 +1193,18 @@ def _ingest_ledger(
         log.warning("ledger ingest skipped: %s", exc)
 
 
-def _latest_benchmark_report(analyses_dir: Path) -> Path | None:
-    """Most recent prior `detector_benchmark.py` report under `analyses_dir`.
-
-    Filenames sort lexicographically by timestamp (`benchmark-YYYYMMDD-HHMMSS.json`),
-    so a plain sorted glob picks the latest without parsing anything.
-    """
+def _prior_benchmark_reports(analyses_dir: Path) -> list[Path]:
+    """Prior `detector_benchmark.py` reports, newest first — the gate diffs
+    against the newest one that scored the same sessions with the same
+    decode chain (`detector_benchmark.incomparable_reason`)."""
     if not analyses_dir.is_dir():
-        return None
-    candidates = sorted(analyses_dir.glob("benchmark-*.json"))
-    return candidates[-1] if candidates else None
+        return []
+    return sorted(analyses_dir.glob("benchmark-*.json"), reverse=True)
 
 
 def _run_benchmark_gate(
     config: CanaryConfig,
-    calibration_sessions: Sequence[Path],
+    evaluation_sessions: Sequence[Path],
     args: argparse.Namespace,
 ) -> tuple[Path | None, dict[str, Any] | None]:
     """Post-retrain regression gate (Task 2.6): benchmark the freshly-trained
@@ -1072,21 +1212,22 @@ def _run_benchmark_gate(
     report. Returns ``(report_path, diff)``, or ``(None, None)`` when the
     gate didn't run (skipped, or nothing to compare it against).
 
-    Requires calibration holdouts: those are sessions excluded from training
-    specifically so they're honest out-of-sample eval data (see
-    `_pick_calibration_holdouts`); scoring the benchmark against training
-    sessions would just measure memorization. No holdouts (e.g.
-    `--no-calibration-holdout`, or too small a corpus) means no honest
-    benchmark, so the gate is skipped — logged, not a failure — rather than
-    silently testing on training data.
+    Scores the *evaluation* holdout only (A02.1). It used to score the
+    calibration sessions — the sessions the thresholds were cut from — so the
+    sequence detector's clean-alert rate read ~0.1 % by construction while it
+    flagged 38-75 % of windows on unseen drives. No evaluation holdout (a
+    corpus too small to spare one after calibration, or
+    ``--no-calibration-holdout``) means no honest benchmark, so the gate is
+    skipped — logged, not a failure — rather than silently testing on
+    calibration or training data.
 
     Never raises: like the trainers themselves, an unexpected failure here is
     logged and treated as "gate didn't run", not a retrain-flow crash.
     """
-    if not calibration_sessions:
+    if not evaluation_sessions:
         log.warning(
-            "no held-out sessions for the post-retrain benchmark gate; skipping "
-            "(see --calibration-sessions/--no-calibration-holdout)"
+            "no evaluation holdout for the post-retrain benchmark gate; skipping "
+            "(the gate never scores calibration sessions; see --evaluation-sessions)"
         )
         return None, None
 
@@ -1118,7 +1259,7 @@ def _run_benchmark_gate(
         )
 
         sessions_loaded: list[tuple[str, Any]] = []
-        for session_dir in calibration_sessions:
+        for session_dir in evaluation_sessions:
             try:
                 resampled = detector_benchmark.load_resampled_session(
                     session_dir, config, bindings_path=args.bindings
@@ -1138,18 +1279,49 @@ def _run_benchmark_gate(
         report = detector_benchmark.build_report(
             cells, seed=42, n_injections=5, generated_at=timestamp
         )
+        split = getattr(args, "holdout_split", None)
+        report["holdout"] = (
+            split.to_dict()
+            if split is not None
+            else {"calibration": [], "evaluation": [s.name for s in evaluation_sessions]}
+        )
 
-        baseline_path = args.benchmark_baseline or _latest_benchmark_report(args.analyses_dir)
         diff: dict[str, Any] | None = None
-        if baseline_path is not None and Path(baseline_path).exists():
+        candidates = (
+            [Path(args.benchmark_baseline)]
+            if args.benchmark_baseline is not None
+            else _prior_benchmark_reports(args.analyses_dir)
+        )
+        first_reason: str | None = None
+        for baseline_path in candidates:
             try:
                 baseline_report = json.loads(Path(baseline_path).read_text())
-                diff = detector_benchmark.diff_reports(
-                    baseline_report, report, tolerance=args.benchmark_tolerance
-                )
-                report["regressions"] = diff
             except (OSError, json.JSONDecodeError) as exc:
                 log.warning("benchmark gate: cannot read baseline %s: %s", baseline_path, exc)
+                continue
+            attempt = detector_benchmark.diff_reports(
+                baseline_report, report, tolerance=args.benchmark_tolerance
+            )
+            if attempt.get("comparable", True):
+                diff = {**attempt, "baseline": str(baseline_path)}
+                break
+            first_reason = first_reason or f"{Path(baseline_path).name}: {attempt['reason']}"
+        if diff is None and first_reason is not None:
+            # A02: a baseline from other drives or another decode chain is not
+            # a regression check; say so and do not fail the retrain on it.
+            log.warning(
+                "benchmark gate: no comparable prior report (%s); nothing to regress against",
+                first_reason,
+            )
+            diff = {
+                "tolerance": args.benchmark_tolerance,
+                "regressed": False,
+                "comparable": False,
+                "reason": first_reason,
+                "cells": [],
+            }
+        if diff is not None:
+            report["regressions"] = diff
 
         args.analyses_dir.mkdir(parents=True, exist_ok=True)
         report_path = args.analyses_dir / f"benchmark-{timestamp}.json"
@@ -1183,6 +1355,10 @@ def _print_report(
     print("=" * 72)
     print(f"RETRAIN  ({len(sessions)} sessions)")
     print("=" * 72)
+    split = getattr(args, "holdout_split", None)
+    if split is not None:
+        print(f"  calibration holdout  →  {', '.join(split.calibration) or 'none'}")
+        print(f"  evaluation holdout   →  {', '.join(split.evaluation) or 'none (gate skipped)'}")
     if feedback_report is not None:
         print(
             "  feedback policy  →  "
@@ -1206,6 +1382,8 @@ def _print_report(
     if benchmark_report_path is not None:
         if benchmark_diff is None:
             symbol, status = "✓", "ok (no prior baseline to compare)"
+        elif not benchmark_diff.get("comparable", True):
+            symbol, status = "○", f"not compared: {benchmark_diff['reason']}"
         elif benchmark_diff["regressed"]:
             symbol, status = "✗", "regression detected vs baseline"
         else:

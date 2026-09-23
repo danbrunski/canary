@@ -8,9 +8,12 @@ plus the multiplicative *scale* fault), this:
 * injects the fault into a copy of a clean *resampled* wide frame,
 * re-runs the shared feature builder (so the rolling features pick up the
   injected values exactly like training does),
-* scores with the trained Isolation Forest and the fused stream (the IF
-  half of fusion is exercised even when no LSTM/behavior sources are
-  available, so the regression guard sees the fusion code path),
+* scores with the trained Isolation Forest, the sequence detector when an
+  artifact is supplied, and the fused stream built from those sources the
+  way the daemon builds it (each source persistence-gated, then
+  ``FusionScorer.fuse``). With fewer sources than
+  ``models.fusion.min_agreement`` fused cannot fire by construction, so it
+  is *withheld* with the reason rather than graded as recall 0 (A02.9),
 * runs every row through a fresh ``PersistenceGate`` (config's 6.1 M-of-N —
   ``alerts.min_consecutive_ticks`` of ``alerts.persistence_window_ticks``,
   wall-clock-bound by ``alerts.persistence_window_seconds`` off the row's
@@ -21,8 +24,8 @@ plus the multiplicative *scale* fault), this:
   late-but-real detection with recorded latency, not a miss) — and counts
   alerts outside any window for the nominal false-positive rate.
 
-The harness stays IF/fused-only (fast, torch-free) when no sequence-detector
-artifact is supplied; passing a ``trained_sequence`` (2.3) additionally ticks
+The harness stays IF-only (fast, torch-free; fused withheld) when no
+sequence-detector artifact is supplied; passing a ``trained_sequence`` (2.3) additionally ticks
 every row through the real ``SequenceInferenceEngine.observe`` windowed
 contract, gated through its own fresh ``PersistenceGate`` key, and adds a
 third ``detector="sequence"`` metrics entry per fault (plus a ``sequence``
@@ -48,16 +51,33 @@ See the roadmap doc's landed-note for the full numbers.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import yaml
 
-from src.alerts.fusion import FusionScorer, PersistenceGate, isolation_forest_source
+from src.alerts.fusion import (
+    FusionScorer,
+    FusionSource,
+    PersistenceGate,
+    downgrade_unsustained,
+    isolation_forest_source,
+    lstm_source,
+)
+from src.analysis.refit import ENGINE_RUNNING_MIN_RPM
 from src.config import CanaryConfig
-from src.models.inference import SequenceInferenceEngine
+from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES
+from src.decode.bindings import Bindings
+from src.decode.engineering import (
+    UnscaledDecodedChannelError,
+    decoded_factors,
+    is_decoded_column,
+)
+from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult
 from src.models.isolation_forest import (
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
@@ -148,41 +168,128 @@ def _if_anomalous(scored: pd.DataFrame) -> pd.Series:
     return verdict
 
 
+#: Persistence-gate key the daemon uses for the sequence detector's fusion
+#: source (``daemon.inference``) — the harness gates the same key the same way.
+SEQUENCE_FUSION_KEY = "lstm_autoencoder"
+
+
+def _persistence_gate(config: CanaryConfig) -> PersistenceGate:
+    """A fresh production M-of-N gate (``alerts.*``), one per scoring pass."""
+    return PersistenceGate(
+        config.alerts.min_consecutive_ticks,
+        window=config.alerts.persistence_window_ticks,
+        window_seconds=config.alerts.persistence_window_seconds,
+    )
+
+
+def fusion_withheld_reason(available_sources: Sequence[str], config: CanaryConfig) -> str | None:
+    """Why the fused detector cannot be graded on these sources, or ``None``.
+
+    A02.9: the 2026-09-20 benchmark reported fused recall 0 of 250. The fused
+    verdict needs ``models.fusion.min_agreement`` independent firing sources
+    (6.2); that run had the Isolation Forest alone (``canary.dev.example.yaml``
+    disables the sequence detector, and this harness never simulates the
+    behavior residuals), so fusion could not fire *by construction*. Reporting
+    that as recall 0.0 read as a detector that looked and missed. It is now
+    withheld and says why.
+    """
+    required = int(config.models.fusion.min_agreement)
+    if len(available_sources) >= required:
+        return None
+    return (
+        f"fusion requires {required} independent sources (models.fusion.min_agreement) "
+        f"and only {len(available_sources)} ran in this harness "
+        f"({', '.join(available_sources) or 'none'}); behavior residuals are not simulated"
+    )
+
+
 def _fused_anomalous(
     scored: pd.DataFrame,
     *,
     fusion: FusionScorer,
     scales: dict[str, float],
+    config: CanaryConfig,
+    sequence_results: Sequence[SequenceInferenceResult | None] | None = None,
 ) -> pd.Series:
-    """Boolean fused-anomaly per row using IF as the only fusion source.
+    """Boolean fused verdict per row, built the way the daemon builds it.
 
-    Surfacing it through the actual ``FusionScorer`` path exercises the
-    production fusion code even with no LSTM/behavior sources available.
-    6.2: fused ``is_anomaly`` now requires ``min_agreement`` (default 2)
-    *independent* firing sources, so with IF as the sole source here fused
-    structurally never fires — that's the intended agreement gate working,
-    not a bug in this harness; the regression guard checks the code path
-    runs cleanly (and that the FP floor is genuinely zero), not that it
-    matches IF's own verdict any more."""
+    Each source passes its own persistence gate first and an unsustained one
+    is downgraded to non-firing (``downgrade_unsustained``) before
+    ``FusionScorer.fuse`` sees it, exactly as ``daemon.inference`` does; the
+    fused verdict itself is then *not* gated again (the daemon emits it
+    directly), so callers pass ``"fused"`` in ``pre_gated``.
+
+    ``sequence_results`` (aligned with ``scored``) adds the sequence detector
+    as the second source via ``lstm_source(global_score, global_threshold)``
+    — the daemon's fusion input, which is the global score only, never the
+    per-family path. Without it fusion has one source and can never reach
+    ``min_agreement`` (6.2); ``evaluate_detectors`` withholds the fused
+    metrics in that case instead of reporting a structural zero (A02.9).
+    """
     out = np.full(len(scored), None, dtype=object)
+    stamps = pd.to_datetime(scored[TIMESTAMP_COLUMN], utc=True)
+    seconds = (stamps - pd.Timestamp(0, tz="UTC")).dt.total_seconds().to_numpy()
+    modes = scored[MODEL_MODE_COLUMN].to_numpy(dtype=object)
+    thresholds = pd.to_numeric(scored[CALIBRATED_THRESHOLD_COLUMN], errors="coerce").to_numpy(
+        dtype=float
+    )
+    score_values = pd.to_numeric(scored[SCORE_COLUMN], errors="coerce").to_numpy(dtype=float)
+    missing = (
+        scored[MISSING_FEATURES_COLUMN].fillna(False).astype(bool).to_numpy()
+        if MISSING_FEATURES_COLUMN in scored.columns
+        else np.zeros(len(scored), dtype=bool)
+    )
+    gate = _persistence_gate(config)
     for i in range(len(scored)):
-        row = scored.iloc[i]
-        if bool(row.get(MISSING_FEATURES_COLUMN, False)):
+        now = float(seconds[i])
+        sources: list[FusionSource] = []
+        if_verdict: bool | None = None
+        mode = modes[i]
+        threshold = thresholds[i]
+        score = score_values[i]
+        if not (
+            bool(missing[i])
+            or mode is None
+            or pd.isna(mode)
+            or np.isnan(threshold)
+            or np.isnan(score)
+        ):
+            ifsrc = isolation_forest_source(
+                float(score),
+                float(threshold),
+                scale=scales.get(str(mode)),
+            )
+            if_verdict = ifsrc.fired
+            sources.append(
+                downgrade_unsustained(ifsrc, gate.observe("isolation_forest", ifsrc.fired, now=now))
+            )
+        else:
+            gate.observe("isolation_forest", None, now=now)
+        if sequence_results is not None:
+            result = sequence_results[i]
+            if result is None:
+                gate.observe(SEQUENCE_FUSION_KEY, None, now=now)
+            else:
+                seqsrc = lstm_source(result.global_score, result.global_threshold)
+                sustained = gate.observe(SEQUENCE_FUSION_KEY, result.is_anomaly, now=now)
+                sources.append(downgrade_unsustained(seqsrc, sustained))
+        if not sources or (if_verdict is None and sequence_results is None):
             continue
-        mode = row.get(MODEL_MODE_COLUMN)
-        threshold = row.get(CALIBRATED_THRESHOLD_COLUMN)
-        if mode is None or pd.isna(mode) or pd.isna(threshold):
-            continue
-        score = row.get(SCORE_COLUMN)
-        if pd.isna(score):
-            continue
-        ifsrc = isolation_forest_source(
-            float(score),
-            float(threshold),
-            scale=scales.get(str(mode)),
-        )
-        out[i] = fusion.fuse([ifsrc], timestamp="", operating_mode=str(mode)).is_anomaly
+        mode_label = None if mode is None or pd.isna(mode) else str(mode)
+        out[i] = fusion.fuse(sources, timestamp="", operating_mode=mode_label).is_anomaly
     return pd.Series(out, index=scored.index)
+
+
+def _sequence_results(
+    engine: SequenceInferenceEngine, featurized: pd.DataFrame
+) -> list[SequenceInferenceResult | None]:
+    """Tick ``featurized`` row by row through the real ``observe`` contract.
+
+    ``engine`` is reset first so a previous run's tail never leaks into this
+    one. Rows before the window fills are ``None`` (no verdict yet).
+    """
+    engine.reset()
+    return [engine.observe(featurized.iloc[i]) for i in range(len(featurized))]
 
 
 def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFrame) -> pd.Series:
@@ -194,15 +301,19 @@ def _sequence_anomalous(engine: SequenceInferenceEngine, featurized: pd.DataFram
     ``engine``'s buffer is cleared first so a previous run's tail sequence
     never leaks into this one (fresh state per injection run, same reason
     ``persistence`` is rebuilt per run). A row before the buffer has filled
-    (``observe`` returns ``None``, no verdict yet) reads as not-anomalous —
-    the live daemon simply doesn't emit anything for it either."""
-    engine.buffer.clear()
-    out = np.full(len(featurized), None, dtype=object)
-    for i in range(len(featurized)):
-        result = engine.observe(featurized.iloc[i])
+    (``observe`` returns ``None``, no verdict yet) is ``None`` — the live
+    daemon simply doesn't emit anything for it either."""
+    return _sequence_verdicts(_sequence_results(engine, featurized), featurized.index)
+
+
+def _sequence_verdicts(
+    results: Sequence[SequenceInferenceResult | None], index: pd.Index
+) -> pd.Series:
+    out = np.full(len(results), None, dtype=object)
+    for i, result in enumerate(results):
         if result is not None:
             out[i] = bool(result.is_anomaly)
-    return pd.Series(out, index=featurized.index)
+    return pd.Series(out, index=index)
 
 
 def _first_sustained_detection(
@@ -213,6 +324,7 @@ def _first_sustained_detection(
     match_start: pd.Timestamp,
     match_end: pd.Timestamp,
     grace_end: pd.Timestamp,
+    pre_gated: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[pd.Timestamp, bool] | None]:
     """First row within ``[match_start, grace_end)`` where each detector's
     persistence-gated verdict flips sustained (2.4/8.2).
@@ -236,6 +348,11 @@ def _first_sustained_detection(
     rather than resetting at an arbitrary slice boundary). ``persistence``
     must be fresh per injection run: sharing one gate across runs would leak
     streak state from a previous run's tail into the next run's start.
+
+    ``pre_gated`` names signals that already went through persistence
+    upstream (the fused verdict, whose sources are gated individually the
+    way the daemon gates them) — gating them twice would delay them past
+    what the daemon emits.
     """
     names = tuple(signals)
     detected: dict[str, tuple[pd.Timestamp, bool] | None] = dict.fromkeys(names)
@@ -250,7 +367,10 @@ def _first_sustained_detection(
         now = ts.timestamp()
         for name, fired in zip(names, fired_values, strict=True):
             verdict = None if fired is None or pd.isna(fired) else bool(fired)
-            sustained = persistence.observe(name, verdict, now=now)
+            if name in pre_gated:
+                sustained = verdict is True
+            else:
+                sustained = persistence.observe(name, verdict, now=now)
             if detected[name] is None and verdict is True and sustained and in_match:
                 detected[name] = (ts, ts >= match_end)
     return detected
@@ -260,20 +380,21 @@ def _persistence_gated_nominal(
     signals: Mapping[str, pd.Series],
     timestamps: pd.Series,
     config: CanaryConfig,
+    *,
+    pre_gated: frozenset[str] = frozenset(),
 ) -> dict[str, pd.Series]:
-    """Run nominal per-tick verdicts through the production M-of-N gate."""
-    persistence = PersistenceGate(
-        config.alerts.min_consecutive_ticks,
-        window=config.alerts.persistence_window_ticks,
-        window_seconds=config.alerts.persistence_window_seconds,
-    )
+    """Run nominal per-tick verdicts through the production M-of-N gate
+    (signals named in ``pre_gated`` were gated upstream and pass through)."""
+    persistence = _persistence_gate(config)
     gated = {name: np.zeros(len(timestamps), dtype=bool) for name in signals}
     for index, row in enumerate(zip(timestamps, *(signals[name] for name in signals), strict=True)):
         timestamp, verdicts = row[0], row[1:]
         now = pd.Timestamp(timestamp).timestamp()
         for name, verdict in zip(signals, verdicts, strict=True):
             firing = None if verdict is None or pd.isna(verdict) else bool(verdict)
-            sustained = persistence.observe(name, firing, now=now)
+            sustained = (
+                firing is True if name in pre_gated else persistence.observe(name, firing, now=now)
+            )
             gated[name][index] = firing is True and sustained
     return {name: pd.Series(values, index=timestamps.index) for name, values in gated.items()}
 
@@ -379,32 +500,55 @@ def evaluate_detectors(
     (2.3) is optional — the LSTM/TCN artifact the daemon would actually load for
     its configured ``sequence_detector`` backbone; when ``None`` (no manifest
     configured/available, the common case in this test environment) the harness
-    runs exactly as before, IF/fused only. Returns a dict with ``per_fault``
-    metrics for each detector + a ``nominal_fp`` block measured on the
-    unmodified frame.
+    runs IF only and withholds fused (one source cannot meet
+    ``min_agreement``). Returns a dict with ``per_fault`` metrics for each
+    graded detector, a ``nominal_fp`` block measured on the unmodified frame,
+    and ``withheld`` naming each detector that could not be graded and why.
     """
     rng = np.random.default_rng(seed)
-    fusion = FusionScorer(config.models.fusion)
+    fusion = FusionScorer(config.models.fusion, roles=config.models.roles.by_source())
     scales = dict(trained_if.score_scales)
     sequence_engine = (
         SequenceInferenceEngine(trained_sequence) if trained_sequence is not None else None
     )
-    detector_names = ["isolation_forest", "fused", *(["sequence"] if sequence_engine else [])]
+    fusion_sources = ["isolation_forest", *(["sequence"] if sequence_engine else [])]
+    withheld: dict[str, str] = {}
+    fused_reason = fusion_withheld_reason(fusion_sources, config)
+    if fused_reason is not None:
+        withheld["fused"] = fused_reason
+    detector_names = [
+        "isolation_forest",
+        *([] if "fused" in withheld else ["fused"]),
+        *(["sequence"] if sequence_engine else []),
+    ]
+    pre_gated = frozenset({"fused"})
+
+    def _signals(scored: pd.DataFrame, featurized: pd.DataFrame) -> dict[str, pd.Series]:
+        results = (
+            _sequence_results(sequence_engine, featurized) if sequence_engine is not None else None
+        )
+        signals = {"isolation_forest": _if_anomalous(scored)}
+        if "fused" not in withheld:
+            signals["fused"] = _fused_anomalous(
+                scored,
+                fusion=fusion,
+                scales=scales,
+                config=config,
+                sequence_results=results,
+            )
+        if results is not None:
+            signals["sequence"] = _sequence_verdicts(results, featurized.index)
+        return signals
 
     # Nominal: one featurize + score pass — this is the FP rate every other
     # injection run is measured against.
     nominal_features = featurize_wide_frame(resampled, config).features
     nominal_scored = trained_if.score(nominal_features)
-    nominal_signals = {
-        "isolation_forest": _if_anomalous(nominal_scored),
-        "fused": _fused_anomalous(nominal_scored, fusion=fusion, scales=scales),
-    }
-    if sequence_engine is not None:
-        nominal_signals["sequence"] = _sequence_anomalous(sequence_engine, nominal_features)
     nominal_signals = _persistence_gated_nominal(
-        nominal_signals,
+        _signals(nominal_scored, nominal_features),
         pd.to_datetime(nominal_features[TIMESTAMP_COLUMN], utc=True),
         config,
+        pre_gated=pre_gated,
     )
     hours = _hours_covered(nominal_features)
     nominal_fp = {
@@ -436,24 +580,14 @@ def evaluate_detectors(
             # Fresh gate per run — 2.4: run scoring through the production
             # persistence config so a hit reflects what would actually alert,
             # not any single over-threshold row.
-            persistence = PersistenceGate(
-                config.alerts.min_consecutive_ticks,
-                window=config.alerts.persistence_window_ticks,
-                window_seconds=config.alerts.persistence_window_seconds,
-            )
-            signals = {
-                "isolation_forest": _if_anomalous(scored),
-                "fused": _fused_anomalous(scored, fusion=fusion, scales=scales),
-            }
-            if sequence_engine is not None:
-                signals["sequence"] = _sequence_anomalous(sequence_engine, featurized)
             hits = _first_sustained_detection(
-                signals=signals,
+                signals=_signals(scored, featurized),
                 timestamps=timestamps,
-                persistence=persistence,
+                persistence=_persistence_gate(config),
                 match_start=window.start,
                 match_end=window.end,
                 grace_end=window.end + grace,
+                pre_gated=pre_gated,
             )
             for name in detector_names:
                 hit = hits[name]
@@ -480,7 +614,397 @@ def evaluate_detectors(
         "seed": seed,
         "nominal_fp": nominal_fp,
         "per_fault": per_fault,
+        # A02.9: a detector that could not be graded is named with the reason,
+        # never reported as a zero recall.
+        "withheld": withheld,
     }
 
 
-__all__ = ["DEFAULT_FAULT_KINDS", "INTERMITTENT_FAULT_KIND", "evaluate_detectors"]
+# ---------------------------------------------------------------------------
+# A02.6 — realistic faults with severity sweeps
+# ---------------------------------------------------------------------------
+#
+# ``_inject_one``'s kinds (spike = 5 x max + 1,000, scale x 5, drift = 10
+# sigma + 100) are plumbing tests: a range check catches every one of them by
+# construction. The faults below are the ones a range check cannot catch —
+# small, physically consistent, and applied to every channel that measures the
+# same quantity — swept over severity so the report reads as recall against
+# severity rather than one rate.
+
+RealisticFaultKind = Literal["maf_gain", "lazy_o2", "thermostat", "bank_imbalance", "idle_air_leak"]
+
+#: The vehicle-agnostic core of each channel role: SAE J1979 Mode 01 PIDs that
+#: any OBD-II vehicle defines. A profile adds the channels that mirror the same
+#: quantity on its own bus (Mode 22 DIDs, broadcast bindings) through its
+#: ``fault_injection.yaml`` (:func:`load_fault_channel_roles`), so a fault is
+#: applied consistently across related channels without naming one vehicle's
+#: catalog in code.
+DEFAULT_FAULT_CHANNEL_ROLES: dict[str, tuple[str, ...]] = {
+    "airflow": ("obd:MAF",),
+    "calculated_load": ("obd:ENGINE_LOAD", "obd:ABSOLUTE_LOAD"),
+    "stft_b1": ("obd:SHORT_FUEL_TRIM_1",),
+    "stft_b2": ("obd:SHORT_FUEL_TRIM_2",),
+    "af_sensor_b1": ("obd:O2_WR_LAMBDA_S1",),
+    "coolant": ("obd:COOLANT_TEMP",),
+}
+
+MAF_CHANNEL = "obd:MAF"
+RPM_CHANNEL = "obd:RPM"
+SPEED_CHANNEL = "obd:SPEED"
+FUEL_STATUS_CHANNEL = "obd:FUEL_STATUS"
+
+#: Seconds a stuck-open thermostat takes to pull coolant to its new plateau.
+THERMOSTAT_RAMP_SECONDS = 120.0
+#: Short-term trim authority. A leak that needs more than this is a code-setting
+#: lean condition, not the subtle signature this sweep is for.
+TRIM_AUTHORITY_PERCENT = 25.0
+#: Floor on the airflow denominator of the leak signature (g/s), so a MAF
+#: reading of ~0 during a stall cannot turn a small leak into an infinite trim.
+MIN_LEAK_AIRFLOW_G_S = 0.5
+
+
+@dataclass(frozen=True)
+class RealisticFault:
+    """One realistic fault and the severities it is swept over."""
+
+    kind: RealisticFaultKind
+    severity_unit: str
+    #: Swept values, least detectable last is NOT implied — each kind states
+    #: its own direction in ``description``.
+    severities: tuple[float, ...]
+    description: str
+
+
+#: The channel roles each realistic fault writes (``inject_realistic_fault``
+#: edits exactly these), for callers that must know which channels a fault
+#: can touch — e.g. restricting a per-channel detector to them.
+REALISTIC_FAULT_ROLES: dict[str, tuple[str, ...]] = {
+    "maf_gain": ("airflow", "calculated_load", "stft_b1", "stft_b2"),
+    "lazy_o2": ("af_sensor_b1",),
+    "thermostat": ("coolant",),
+    "bank_imbalance": ("stft_b1",),
+    "idle_air_leak": ("stft_b1", "stft_b2"),
+}
+
+REALISTIC_FAULTS: dict[str, RealisticFault] = {
+    "maf_gain": RealisticFault(
+        "maf_gain",
+        "MAF gain",
+        (0.90, 0.93, 0.95, 0.97),
+        "MAF under-reads by the gain; airflow and calculated-load channels scale with it, "
+        "and closed-loop short-term trims add (1/g - 1) x 100 % of fuel. 0.97 is subtlest.",
+    ),
+    "lazy_o2": RealisticFault(
+        "lazy_o2",
+        "time constant s",
+        (2.0, 5.0, 10.0, 20.0),
+        "The bank-1 A/F sensor responds through a first-order lag of this time constant, "
+        "on every channel carrying that sensor. 2 s is subtlest.",
+    ),
+    "thermostat": RealisticFault(
+        "thermostat",
+        "coolant plateau drop degC",
+        (3.0, 6.0, 10.0, 15.0),
+        "A stuck-open thermostat: coolant falls this far below its reading over "
+        f"{THERMOSTAT_RAMP_SECONDS:.0f} s and stays there, on every coolant channel. 3 degC "
+        "is subtlest.",
+    ),
+    "bank_imbalance": RealisticFault(
+        "bank_imbalance",
+        "bank-1 lean %",
+        (2.0, 4.0, 6.0, 10.0),
+        "Bank 1 runs lean by this much; its closed-loop short-term trim adds it back while "
+        "bank 2 is unchanged. 2 % is subtlest.",
+    ),
+    "idle_air_leak": RealisticFault(
+        "idle_air_leak",
+        "unmetered air g/s",
+        (0.2, 0.4, 0.6, 1.0),
+        "Unmetered air enters after the MAF: closed-loop short-term trims on both banks add "
+        "100 x leak / MAF %, so the signature is largest at idle and fades with load. "
+        "0.2 g/s is subtlest.",
+    ),
+}
+
+
+@dataclass(frozen=True)
+class RealisticInjection:
+    """What one realistic injection actually changed — and what it could not."""
+
+    kind: str
+    severity: float
+    start: pd.Timestamp
+    end: pd.Timestamp
+    #: Channels whose values changed inside the window.
+    perturbed: tuple[str, ...]
+    #: Role channels left untouched, each with the reason: ``absent`` from the
+    #: frame, ``not observed`` in the window, or ``unscaled`` (a ``decoded:``
+    #: channel with no pinned engineering scale to convert the fault into).
+    not_perturbed: Mapping[str, str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "severity": self.severity,
+            "start": self.start.isoformat(),
+            "end": self.end.isoformat(),
+            "perturbed": list(self.perturbed),
+            "not_perturbed": dict(self.not_perturbed),
+        }
+
+
+def load_fault_channel_roles(path: Path | None) -> dict[str, tuple[str, ...]]:
+    """The default J1979 roles plus a profile's own mirrors of each quantity.
+
+    ``path`` is a YAML file of ``roles: {<role>: [<channel>, ...]}``; unknown
+    roles are refused (a typo would silently apply nothing). ``None`` or a
+    missing file returns the defaults.
+    """
+    roles = {role: tuple(channels) for role, channels in DEFAULT_FAULT_CHANNEL_ROLES.items()}
+    if path is None or not path.exists():
+        return roles
+    raw = yaml.safe_load(path.read_text()) or {}
+    extra = raw.get("roles", {})
+    if not isinstance(extra, Mapping):
+        raise ValueError(f"{path}: 'roles' must be a mapping of role -> channel list")
+    unknown = sorted(set(extra) - set(roles))
+    if unknown:
+        raise ValueError(f"{path}: unknown fault-channel roles {unknown}; known: {sorted(roles)}")
+    for role, channels in extra.items():
+        roles[role] = tuple(dict.fromkeys([*roles[role], *(str(c) for c in channels)]))
+    return roles
+
+
+def _running_mask(frame: pd.DataFrame) -> pd.Series:
+    if RPM_CHANNEL not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    return frame[RPM_CHANNEL].astype("float64") >= ENGINE_RUNNING_MIN_RPM
+
+
+def _idle_mask(frame: pd.DataFrame) -> pd.Series:
+    if SPEED_CHANNEL not in frame.columns:
+        return pd.Series(False, index=frame.index)
+    return _running_mask(frame) & (frame[SPEED_CHANNEL].astype("float64") <= 0.0)
+
+
+def _closed_loop_mask(frame: pd.DataFrame) -> pd.Series:
+    """Rows where the ECM trims from O2 feedback. Without a fuel-status
+    channel every running row is assumed closed-loop (the trims only move when
+    it is, so this over-applies at worst to open-loop rows). Fuel status is a
+    slowly polled state: it holds until the next reading, so it is carried
+    forward past the resampler's staleness ceiling."""
+    running = _running_mask(frame)
+    if FUEL_STATUS_CHANNEL not in frame.columns:
+        return running
+    status = frame[FUEL_STATUS_CHANNEL].astype("float64").ffill()
+    return running & status.isin([float(s) for s in CLOSED_LOOP_FUEL_STATES])
+
+
+def _window_eligible(frame: pd.DataFrame, mask: pd.Series, kind: str) -> bool:
+    rows = frame.loc[mask]
+    if rows.empty:
+        return False
+    if kind == "idle_air_leak":
+        return bool(_idle_mask(rows).mean() >= 0.25) and _observed(rows, MAF_CHANNEL)
+    if kind == "thermostat":
+        return _observed(rows, "obd:COOLANT_TEMP")
+    if kind == "lazy_o2":
+        return bool(_running_mask(rows).mean() >= 0.5) and _observed(rows, "obd:O2_WR_LAMBDA_S1")
+    if kind in {"maf_gain", "bank_imbalance"}:
+        return bool(_closed_loop_mask(rows).mean() >= 0.5)
+    raise ValueError(f"unsupported realistic fault kind: {kind!r}")
+
+
+def _observed(frame: pd.DataFrame, column: str) -> bool:
+    return column in frame.columns and bool(frame[column].notna().any())
+
+
+def choose_fault_window(
+    resampled: pd.DataFrame,
+    *,
+    kind: str,
+    length_seconds: float,
+    lead_seconds: float,
+    rng: np.random.Generator,
+    attempts: int = 64,
+) -> tuple[pd.Timestamp, pd.Timestamp] | str:
+    """A window where ``kind`` can physically show, or the reason there is none.
+
+    ``lead_seconds`` of clean rows must precede the window (the scorers'
+    warm-up). The window must hold the fault's operating condition — idle for
+    a leak, closed loop for a trim fault, the sensor observed for a sensor
+    fault. A drive with no such stretch returns a string naming why, which the
+    harness reports as *skipped*, not as a miss.
+    """
+    timestamps = pd.to_datetime(resampled[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True)
+    if timestamps.empty:
+        return "no rows"
+    first = timestamps.iloc[0] + pd.Timedelta(seconds=lead_seconds)
+    last_start = timestamps.iloc[-1] - pd.Timedelta(seconds=length_seconds)
+    candidates = np.flatnonzero(((timestamps >= first) & (timestamps <= last_start)).to_numpy())
+    if candidates.size == 0:
+        return f"drive shorter than {lead_seconds:.0f} s lead + {length_seconds:.0f} s window"
+    frame = resampled.reset_index(drop=True)
+    for position in rng.permutation(candidates)[:attempts]:
+        start = timestamps.iloc[int(position)]
+        end = start + pd.Timedelta(seconds=length_seconds)
+        if _window_eligible(frame, (timestamps >= start) & (timestamps < end), kind):
+            return start, end
+    return f"no {length_seconds:.0f} s stretch meets the {kind} condition"
+
+
+def _physical_apply(
+    frame: pd.DataFrame,
+    column: str,
+    mask: pd.Series,
+    fn: Callable[[pd.Series], pd.Series],
+    bindings: Bindings | None,
+) -> str | None:
+    """Apply ``fn`` (physical units in, physical units out) to ``column`` on
+    ``mask``; return the reason when the column cannot be perturbed."""
+    if column not in frame.columns:
+        return "absent"
+    window = mask & frame[column].notna()
+    if not bool(window.any()):
+        return "not observed"
+    values = frame.loc[window, column].astype("float64")
+    if is_decoded_column(column):
+        try:
+            scale, offset = decoded_factors(column, bindings)
+        except UnscaledDecodedChannelError:
+            return "unscaled"
+        changed = (fn(values * scale + offset) - offset) / scale
+    else:
+        changed = fn(values)
+    # Keep the column's float width (the resampler emits float32 channels);
+    # a non-float column is widened rather than truncating the fault.
+    if pd.api.types.is_float_dtype(frame[column].dtype):
+        frame.loc[window, column] = changed.astype(frame[column].dtype)
+    else:
+        frame[column] = frame[column].astype("float64")
+        frame.loc[window, column] = changed
+    return None
+
+
+def _scaled_by(gain: float) -> Callable[[pd.Series], pd.Series]:
+    def apply(values: pd.Series) -> pd.Series:
+        return values * gain
+
+    return apply
+
+
+def _offset_by(delta: float | pd.Series) -> Callable[[pd.Series], pd.Series]:
+    """Add a constant, or a per-row series aligned on the frame index."""
+
+    def apply(values: pd.Series) -> pd.Series:
+        if isinstance(delta, pd.Series):
+            return values + delta.loc[values.index]
+        return values + delta
+
+    return apply
+
+
+def inject_realistic_fault(
+    resampled: pd.DataFrame,
+    *,
+    kind: str,
+    severity: float,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    roles: Mapping[str, Sequence[str]] = DEFAULT_FAULT_CHANNEL_ROLES,
+    bindings: Bindings | None = None,
+) -> tuple[pd.DataFrame, RealisticInjection]:
+    """Inject one realistic fault into a copy of a clean resampled frame.
+
+    Every channel in the fault's roles is changed consistently, in physical
+    units (``decoded:`` counts go through the binding's scale). The derived
+    channels — air mass, total trim, bank balances, VE — are recomputed from
+    these by ``featurize_wide_frame``, so they follow without being touched
+    here. Returns the frame and what was, and was not, perturbed.
+    """
+    if kind not in REALISTIC_FAULTS:
+        raise ValueError(f"unsupported realistic fault kind: {kind!r}")
+    frame = resampled.copy()
+    timestamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
+    in_window = (timestamps >= start) & (timestamps < end)
+    closed_loop = in_window & _closed_loop_mask(frame)
+    edits: list[tuple[str, pd.Series, Callable[[pd.Series], pd.Series]]] = []
+
+    def role(name: str) -> Sequence[str]:
+        return roles.get(name, ())
+
+    if kind == "maf_gain":
+        gain = float(severity)
+        compensation = (1.0 / gain - 1.0) * 100.0
+        for column in (*role("airflow"), *role("calculated_load")):
+            edits.append((column, in_window, _scaled_by(gain)))
+        for column in (*role("stft_b1"), *role("stft_b2")):
+            edits.append((column, closed_loop, _offset_by(compensation)))
+    elif kind == "bank_imbalance":
+        for column in role("stft_b1"):
+            edits.append((column, closed_loop, _offset_by(float(severity))))
+    elif kind == "thermostat":
+        elapsed = (timestamps - start).dt.total_seconds()
+        ramp = (elapsed / THERMOSTAT_RAMP_SECONDS).clip(lower=0.0, upper=1.0)
+        drop = float(severity) * ramp
+        for column in role("coolant"):
+            edits.append((column, in_window, _offset_by(-drop)))
+    elif kind == "lazy_o2":
+        tau = float(severity)
+
+        def lag(values: pd.Series) -> pd.Series:
+            times = timestamps.loc[values.index]
+            steps = times.diff().dt.total_seconds().fillna(0.0).to_numpy()
+            alpha = 1.0 - np.exp(-steps / tau)
+            raw = values.to_numpy(dtype="float64")
+            out = np.empty_like(raw)
+            out[0] = raw[0]
+            for i in range(1, raw.size):
+                out[i] = out[i - 1] + alpha[i] * (raw[i] - out[i - 1])
+            return pd.Series(out, index=values.index)
+
+        for column in role("af_sensor_b1"):
+            edits.append((column, in_window, lag))
+    elif kind == "idle_air_leak":
+        if MAF_CHANNEL in frame.columns:
+            airflow = frame[MAF_CHANNEL].astype("float64").clip(lower=MIN_LEAK_AIRFLOW_G_S)
+            added = (100.0 * float(severity) / airflow).clip(upper=TRIM_AUTHORITY_PERCENT)
+            leak_rows = closed_loop & added.notna()
+        else:
+            added = pd.Series(np.nan, index=frame.index)
+            leak_rows = pd.Series(False, index=frame.index)
+        for column in (*role("stft_b1"), *role("stft_b2")):
+            edits.append((column, leak_rows, _offset_by(added)))
+
+    perturbed: list[str] = []
+    not_perturbed: dict[str, str] = {}
+    for column, mask, fn in edits:
+        reason = _physical_apply(frame, column, mask, fn, bindings)
+        if reason is None:
+            perturbed.append(column)
+        else:
+            not_perturbed[column] = reason
+    return frame, RealisticInjection(
+        kind=kind,
+        severity=float(severity),
+        start=pd.Timestamp(start),
+        end=pd.Timestamp(end),
+        perturbed=tuple(dict.fromkeys(perturbed)),
+        not_perturbed=not_perturbed,
+    )
+
+
+__all__ = [
+    "DEFAULT_FAULT_CHANNEL_ROLES",
+    "DEFAULT_FAULT_KINDS",
+    "INTERMITTENT_FAULT_KIND",
+    "REALISTIC_FAULTS",
+    "REALISTIC_FAULT_ROLES",
+    "RealisticFault",
+    "RealisticInjection",
+    "choose_fault_window",
+    "evaluate_detectors",
+    "fusion_withheld_reason",
+    "inject_realistic_fault",
+    "load_fault_channel_roles",
+]

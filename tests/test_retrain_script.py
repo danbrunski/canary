@@ -626,7 +626,7 @@ def test_retrain_ok_benchmark_does_not_fail_run(
 # ---------------------------------------------------------------------------
 
 
-def test_run_benchmark_gate_skips_cleanly_with_no_calibration_sessions(
+def test_run_benchmark_gate_skips_cleanly_with_no_evaluation_sessions(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
@@ -645,7 +645,7 @@ def test_run_benchmark_gate_skips_cleanly_with_no_calibration_sessions(
     result = retrain._run_benchmark_gate(config, [], args)
 
     assert result == (None, None)
-    assert "no held-out sessions" in caplog.text
+    assert "no evaluation holdout" in caplog.text
 
 
 def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
@@ -735,7 +735,23 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     report = json.loads(report_path.read_text())
     assert report["cells"]  # the real grid produced per-(session, channel) cells
     assert diff is not None  # baseline auto-discovered from prior_report on disk
-    assert "regressed" in diff
+    # A02: that prior report came from the pre-A02 decode chain and other
+    # sessions — not a regression baseline. Reported, never failed on.
+    assert diff["comparable"] is False
+    assert diff["regressed"] is False
+    assert "loader_version" in diff["reason"]
+    assert report["holdout"]["evaluation"] == [session.name]
+
+    # A report that scored the same sessions with the same chain is found and
+    # compared, even when an incomparable one is newer.
+    comparable = analyses_dir / "benchmark-20260102-000000.json"
+    comparable.write_text(report_path.read_text())
+    newer_other = analyses_dir / "benchmark-20990101-000000.json"
+    newer_other.write_text(json.dumps({**report, "sessions": ["some-other-drive"], "table": []}))
+    _, diff = retrain._run_benchmark_gate(config, [session], args)
+    assert diff is not None and diff["comparable"] is True
+    # Newest comparable wins: the first run's own report, not the 2099 one.
+    assert diff["baseline"].endswith(report_path.name)
 
 
 def test_retrain_auto_holds_out_most_recent_session_for_calibration(
@@ -1176,3 +1192,142 @@ def test_default_cli_paths_cannot_append_to_the_real_training_ledger(
         )
     after = _REAL_TRAINING_LEDGER.stat().st_size if _REAL_TRAINING_LEDGER.exists() else None
     assert before == after
+
+
+# ---------------------------------------------------------------------------
+# A02.1 — calibration and evaluation holdouts are disjoint, by physical drive
+# ---------------------------------------------------------------------------
+
+
+def _day_sessions(root: Path, count: int) -> list[Path]:
+    sessions = [root / f"2026-05-{10 + i:02d}T120000" for i in range(count)]
+    for session in sessions:
+        session.mkdir(parents=True)
+    return sessions
+
+
+def test_a_session_in_both_holdouts_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    sessions = _day_sessions(tmp_path / "sessions", 5)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(
+        retrain.if_trainer,
+        "train",
+        lambda *a, **k: pytest.fail("no trainer may run on an overlapping holdout"),
+    )
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+            "--calibration-sessions",
+            str(sessions[3]),
+            str(sessions[4]),
+            "--evaluation-sessions",
+            str(sessions[4]),
+        ]
+    )
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "2026-05-14T120000" in err
+    assert "both the calibration and the evaluation holdout" in err
+
+
+def test_gate_scores_evaluation_drives_disjoint_from_calibration(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The gate used to score the calibration sessions themselves (A02.1)."""
+    sessions = _day_sessions(tmp_path / "sessions", 8)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    seen: dict[str, object] = {}
+
+    def _seq_train(positional: list[Path], *_a: object, **kwargs: object) -> None:
+        seen["training"] = list(positional)
+        seen["calibration"] = kwargs.get("calibration_sessions")
+        seen["evaluation"] = kwargs.get("evaluation_sessions")
+        seen["override"] = kwargs.get("calibration_override")
+
+    def _gate(_config: object, evaluation: list[Path], args: object) -> tuple[None, None]:
+        seen["gate"] = list(evaluation)
+        seen["split"] = args.holdout_split  # type: ignore[attr-defined]
+        return None, None
+
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(retrain.lstm_trainer, "train", _seq_train)
+    monkeypatch.setattr(retrain, "_run_benchmark_gate", _gate)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--no-feedback-policy",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--accept-thin-calibration",
+            "test fixture",
+        ]
+    )
+
+    assert rc == 0
+    calibration = set(seen["calibration"])  # type: ignore[arg-type]
+    evaluation = set(seen["gate"])  # type: ignore[arg-type]
+    training = set(seen["training"])  # type: ignore[arg-type]
+    assert calibration and evaluation
+    assert not calibration & evaluation
+    assert not training & (calibration | evaluation)
+    assert set(seen["evaluation"]) == evaluation  # type: ignore[arg-type]
+    assert len(training) >= 2
+    split = seen["split"]
+    assert set(split.evaluation) == {s.name for s in evaluation}  # type: ignore[attr-defined]
+    assert seen["override"] == "test fixture"
+
+
+def test_a_calibration_drive_takes_its_sibling_sessions(tmp_path: Path) -> None:
+    """A daemon restart two minutes into a drive leaves two sessions of one
+    drive; the second may not train or grade while the first calibrates."""
+    root = tmp_path / "sessions"
+    first = root / "2026-05-12T120000"
+    restart = root / "2026-05-12T120200"
+    other = root / "2026-05-13T120000"
+    for session in (first, restart, other):
+        session.mkdir(parents=True)
+
+    held = retrain.holdout_by_drive([first, restart, other], calibration=[first])
+    assert held.calibration == (first, restart)
+    assert held.training == (other,)
+
+
+def test_calibration_picker_takes_one_session_per_physical_drive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "sessions"
+    names = [
+        "2026-05-10T120000",
+        "2026-05-10T120200",  # a restart two minutes into the same drive
+        "2026-05-12T120000",
+        "2026-05-14T120000",
+    ]
+    sessions = [root / name for name in names]
+    for session in sessions:
+        session.mkdir(parents=True)
+    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+
+    picked = retrain._pick_calibration_holdouts(sessions, max_holdouts=3)
+
+    # Three drives, not three sessions — and whole drives: the restart comes
+    # with its drive rather than staying behind to train.
+    assert sorted(picked) == sorted(sessions)

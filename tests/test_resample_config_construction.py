@@ -260,8 +260,11 @@ def test_detector_benchmark_uses_the_recipe(
     tuned: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import scripts.detector_benchmark as benchmark
+    from src.preprocessing import feature_pipeline
 
-    seen = _spy_resample_wide(monkeypatch, benchmark)
+    # The benchmark runs the trainers' own per-session chain
+    # (feature_pipeline.resample_long_session), so that is where it resamples.
+    seen = _spy_resample_wide(monkeypatch, feature_pipeline)
     benchmark.load_resampled_session(
         _write_session(tmp_path), tuned, bindings_path=tmp_path / "absent.yaml"
     )

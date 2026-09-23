@@ -216,6 +216,8 @@ def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> No
         trained_at="2026-05-12T12:00:00Z",
         model_version="oos-calib",
         calibration_dataset=calib_ds,
+        # One held-out session is refused (A02.2); override, and say so.
+        calibration_override="test fixture: one held-out session",
     )
     assert trained.manifest.thresholds is not None
     assert trained.manifest.calibration == "held_out"

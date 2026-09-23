@@ -155,6 +155,9 @@ def test_main_writes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) ->
             str(held_out),
             "--calibration-sessions",
             str(calib_session),
+            # One fixture calibration session: refused without this (A02.2).
+            "--accept-thin-calibration",
+            "test fixture: one calibration session",
             "--json",
             str(out_json),
         ]
@@ -226,6 +229,9 @@ def test_main_auto_carves_calibration_sessions_when_corpus_is_large_enough(
             str(tmp_path / "bakeoff"),
             "--evaluate",
             str(held_out),
+            # Two fixture sessions carved for calibration: refused without this.
+            "--accept-thin-calibration",
+            "test fixture: small corpus",
         ]
     )
 
@@ -237,3 +243,36 @@ def test_main_auto_carves_calibration_sessions_when_corpus_is_large_enough(
 def test_auto_carve_calibration_sessions_returns_empty_below_minimum(tmp_path: Path) -> None:
     sessions = [tmp_path / "a", tmp_path / "b"]
     assert _auto_carve_calibration_sessions(sessions) == []
+
+
+def test_bakeoff_holdouts_take_their_whole_drive(tmp_path: Path) -> None:
+    """A02.1: a calibration session's restart sibling may not train, and a
+    drive may not sit on the calibration and evaluation sides at once."""
+    from argparse import Namespace
+
+    from scripts.sequence_bakeoff import _resolve_training_sessions
+
+    root = tmp_path / "sessions"
+    root.mkdir()
+    calib = _write_obd_session(root, "calib", rows=40, start_epoch=1_778_600_000.0)
+    restart = _write_obd_session(root, "calib-restart", rows=40, start_epoch=1_778_600_060.0)
+    train = _write_obd_session(root, "train", rows=40, start_epoch=1_778_500_000.0)
+    held_out = _write_obd_session(root, "holdout", rows=40, start_epoch=1_778_700_000.0)
+
+    args = Namespace(
+        sessions=[train, calib, restart],
+        sessions_root=root,
+        evaluate=[held_out],
+        calibration_sessions=[calib],
+    )
+    assert _resolve_training_sessions(args) == [train]
+    assert args.calibration_sessions == [calib, restart]
+
+    overlapping = Namespace(
+        sessions=[train, calib, restart],
+        sessions_root=root,
+        evaluate=[restart],
+        calibration_sessions=[calib],
+    )
+    with pytest.raises(ValueError, match="both the calibration and the evaluation"):
+        _resolve_training_sessions(overlapping)

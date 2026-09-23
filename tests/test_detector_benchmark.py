@@ -454,9 +454,14 @@ def test_main_baseline_flag_exits_nonzero_on_regression(
     # A hand-crafted, deliberately-regressed "baseline" (real detector output
     # can't be forced to regress deterministically without a broken model) —
     # exercises the CLI's --baseline wiring/exit-code contract end to end.
+    # (Fused used to supply the regressable row — a structural recall of 0 —
+    # but A02.9 withholds a single-source fused instead of grading it, so the
+    # IF row carries the regression: a baseline that detected instantly.)
     baseline_report = json.loads(baseline_path.read_text())
+    assert baseline_report["table"], "the IF row must be graded"
     for row in baseline_report["table"]:
         row["recall"] = 1.0
+        row["median_time_to_detect_seconds"] = 1e-3
     baseline_path.write_text(json.dumps(baseline_report))
 
     out_path = tmp_path / "out" / "second.json"
@@ -635,3 +640,38 @@ def test_main_missing_if_model_reports_error(tmp_path: Path) -> None:
 
 def test_default_target_channels_are_engine_telemetry_obd_columns() -> None:
     assert all(channel.startswith("obd:") for channel in DEFAULT_TARGET_CHANNELS)
+
+
+def test_reports_from_other_drives_or_another_decode_chain_are_incomparable() -> None:
+    """A02: the retrain gate used to diff pooled totals from different drives."""
+    table = [
+        {
+            "detector": "isolation_forest",
+            "fault_kind": "spike",
+            "recall": 1.0,
+            "precision": 1.0,
+            "median_time_to_detect_seconds": 1.0,
+            "alerts_per_hour_clean": 0.0,
+        }
+    ]
+    base = {"loader_version": 2, "sessions": ["a", "b"], "table": table}
+    worse = [{**table[0], "recall": 0.0}]
+
+    same = diff_reports(base, {**base, "table": worse})
+    assert same["comparable"] is True and same["regressed"] is True
+
+    other_drives = diff_reports(base, {**base, "sessions": ["a", "c"], "table": worse})
+    assert other_drives["comparable"] is False
+    assert other_drives["regressed"] is False
+    assert "different sessions" in other_drives["reason"]
+
+    old_loader = diff_reports({**base, "loader_version": 1}, {**base, "table": worse})
+    assert old_loader["comparable"] is False and "loader_version" in old_loader["reason"]
+    legacy = {k: v for k, v in base.items() if k != "loader_version"}
+    assert diff_reports(legacy, base)["comparable"] is False
+
+    holdouts = diff_reports(
+        {**base, "holdout": {"evaluation": ["a"]}},
+        {**base, "holdout": {"evaluation": ["b"]}, "table": worse},
+    )
+    assert holdouts["comparable"] is False and "holdout" in holdouts["reason"]

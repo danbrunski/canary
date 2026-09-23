@@ -290,12 +290,27 @@ def test_train_calibrates_on_the_pooled_multi_session_holdout_frame(tmp_path: Pa
     assert "train" not in manifest.calibration_sessions
 
 
-def test_train_on_a_single_holdout_says_so_in_the_manifest(tmp_path: Path) -> None:
+def test_train_refuses_a_single_holdout_unless_the_override_is_stamped(tmp_path: Path) -> None:
+    """A02.2: a one-drive calibration used to publish with a WARNING (the
+    2026-09-20 artifact). It is refused before training now, and publishes only
+    under an explicit operator override that the manifest records."""
+    from src.models.sequence_autoencoder_training import CalibrationCoverageError
+
     _torch()
     config = _config(tmp_path)
     no_bindings = _no_bindings(tmp_path)
     training = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     held = _write_obd_session(tmp_path, "held", rows=40, start_epoch=1_778_600_000.0)
+
+    with pytest.raises(CalibrationCoverageError, match="1 physical drive"):
+        train(
+            [training],
+            config,
+            tmp_path / "models" / "lstm",
+            bindings_path=no_bindings,
+            calibration_sessions=[held],
+        )
+    assert not (tmp_path / "models" / "lstm" / "model.pt").exists()
 
     trained = train(
         [training],
@@ -303,11 +318,56 @@ def test_train_on_a_single_holdout_says_so_in_the_manifest(tmp_path: Path) -> No
         tmp_path / "models" / "lstm",
         bindings_path=no_bindings,
         calibration_sessions=[held],
+        calibration_override="test: the only held-out drive",
     )
 
     report = trained.manifest.calibration_holdout
     assert report is not None
     assert report["sessions_used"] == ["held"]
     assert report["below_recommended_minimum"] is True
+    assert report["override"]["reason"] == "test: the only held-out drive"
     payload = json.loads((tmp_path / "models" / "lstm" / "model.manifest.json").read_text())
-    assert payload["calibration_holdout"]["below_recommended_minimum"] is True
+    assert payload["calibration_holdout"]["override"]["violations"]
+
+
+def test_calibration_and_evaluate_sessions_take_their_whole_drive(tmp_path: Path) -> None:
+    """A02.1: ``--calibration-sessions``/``--evaluate`` expand to every session
+    of the same physical drive; a drive on both sides is refused; holding
+    everything out leaves nothing to train on rather than training on it all."""
+    from scripts.train_sequence import _resolve_holdout
+
+    root = tmp_path / "sessions"
+    root.mkdir()
+    train_session = _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    calib = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    restart = _write_obd_session(root, "b2", rows=10, start_epoch=1_778_600_060.0)
+    held_out = _write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
+
+    holdout = _resolve_holdout(
+        SimpleNamespace(
+            sessions=[], sessions_root=root, evaluate=[held_out], calibration_sessions=[calib]
+        )
+    )
+    assert holdout is not None
+    assert [p.name for p in holdout.training] == ["a"]
+    assert [p.name for p in holdout.calibration] == ["b", "b2"]
+    assert [p.name for p in holdout.evaluation] == ["c"]
+
+    with pytest.raises(ValueError, match="both the calibration and the evaluation"):
+        _resolve_holdout(
+            SimpleNamespace(
+                sessions=[], sessions_root=root, evaluate=[restart], calibration_sessions=[calib]
+            )
+        )
+
+    assert (
+        _resolve_training_sessions(
+            SimpleNamespace(
+                sessions=[train_session],
+                sessions_root=root,
+                evaluate=None,
+                calibration_sessions=[train_session],
+            )
+        )
+        is None
+    )

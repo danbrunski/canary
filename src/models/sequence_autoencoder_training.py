@@ -45,8 +45,8 @@ from src.models.sequence_registry import (
     SequenceTrainingBackend,
     sequence_training_backend_for_model_type,
 )
-from src.models.sequence_training import EpochLoss as _EpochLoss
 from src.models.sequence_training import (
+    MIN_CALIBRATION_SAMPLES,
     SequenceThresholdCalibration,
     calibrate_sequence_thresholds,
     coerce_timestamp,
@@ -55,12 +55,16 @@ from src.models.sequence_training import (
     evaluate_loss,
     max_window_timestamp,
     min_window_timestamp,
+    observed_block_counts,
     split_dataset,
     train_one_epoch,
     training_data_hash,
     training_sessions,
     validate_dataset_observations,
+    window_blocks,
+    window_modes,
 )
+from src.models.sequence_training import EpochLoss as _EpochLoss
 from src.preprocessing.feature_pipeline import build_feature_spec
 from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp as _format_timestamp
@@ -68,6 +72,87 @@ from src.timefmt import format_timestamp as _format_timestamp
 log = logging.getLogger(__name__)
 
 ARTIFACT_FORMAT_VERSION = 1
+
+
+class CalibrationCoverageError(ValueError):
+    """The calibration cannot stand behind the thresholds this model would serve.
+
+    Raised before training (A02.2, A02.12), so a thin holdout costs seconds,
+    not the hours of a training run. ``violations`` names each gap.
+    """
+
+    def __init__(self, violations: Sequence[str]) -> None:
+        self.violations = tuple(violations)
+        super().__init__(
+            "refusing to calibrate thresholds that do not cover what they will score: "
+            + "; ".join(self.violations)
+            + ". Widen the calibration holdout, or pass calibration_override='<reason>' "
+            "to publish anyway (the reason and these violations are stamped into the "
+            "manifest's calibration_holdout)."
+        )
+
+
+def calibration_coverage_violations(
+    training: SequenceWindowDataset,
+    calibration: SequenceWindowDataset,
+    *,
+    held_out: bool,
+) -> list[str]:
+    """What a calibration fails to cover, before anything is trained.
+
+    * fewer than :data:`MIN_CALIBRATION_SESSIONS` *physical drives* (sessions
+      grouped as ``evaluation.group_into_drives`` groups them) — held-out only;
+    * an operating mode the model will score (at least
+      :data:`MIN_CALIBRATION_SAMPLES` independent training windows) that the
+      calibration gives no band of its own — held-out only;
+    * a channel the model is trained to score that is never observed in any
+      calibration window.
+
+    The 2026-09-20 artifact failed all three: one session, city and warmup
+    only, and two injector-pulse channels with no calibration observations.
+    """
+    from src.models.evaluation import SessionSpan, group_into_drives
+
+    violations: list[str] = []
+    if held_out:
+        spans: dict[str, list[pd.Timestamp]] = {}
+        for window in calibration.windows:
+            stamps = spans.setdefault(window.session, [])
+            stamps.append(pd.Timestamp(window.start_timestamp))
+            stamps.append(pd.Timestamp(window.end_timestamp))
+        drives = group_into_drives(
+            [
+                SessionSpan(name, min(stamps).to_pydatetime(), max(stamps).to_pydatetime())
+                for name, stamps in spans.items()
+            ]
+        )
+        if len(drives) < MIN_CALIBRATION_SESSIONS:
+            violations.append(
+                f"calibration rests on {len(drives)} physical drive(s) "
+                f"({', '.join(sorted(spans))}); {MIN_CALIBRATION_SESSIONS} are required"
+            )
+        trained_modes = _modes_with_blocks(training)
+        calibrated_modes = _modes_with_blocks(calibration)
+        uncovered = sorted(trained_modes - calibrated_modes)
+        if uncovered:
+            violations.append(
+                f"operating mode(s) {uncovered} are scored by the model but have fewer than "
+                f"{MIN_CALIBRATION_SAMPLES} independent calibration windows "
+                f"(calibration covers {sorted(calibrated_modes) or 'none'})"
+            )
+    unobserved = sorted(c for c, n in observed_block_counts(calibration).items() if n == 0)
+    if unobserved:
+        violations.append(f"channel(s) never observed in calibration: {unobserved}")
+    return violations
+
+
+def _modes_with_blocks(dataset: SequenceWindowDataset) -> set[str]:
+    blocks = window_blocks(dataset)
+    return {
+        mode
+        for mode, indexes in window_modes(dataset).items()
+        if len(set(blocks[indexes].tolist())) >= MIN_CALIBRATION_SAMPLES
+    }
 
 
 class SequenceAutoencoderTrainingConfigLike(Protocol):
@@ -121,6 +206,7 @@ def train_sequence_autoencoder(
     scaler: ZScoreScaler | None = None,
     allow_in_sample_calibration: bool = False,
     calibration_sessions_requested: Sequence[str] | None = None,
+    calibration_override: str | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Train ``backend``'s autoencoder on clean sequence windows.
 
@@ -140,6 +226,13 @@ def train_sequence_autoencoder(
     it should never be a silent default. The escape hatch stamps
     ``calibration="in_sample"`` into the manifest so a load-time consumer
     (``ModelManager``) can warn on it.
+
+    A02.2/A02.12: before training, the calibration is checked against what the
+    model will score (:func:`calibration_coverage_violations`) and a gap raises
+    :class:`CalibrationCoverageError` — it used to publish with a WARNING.
+    ``calibration_override`` (the operator's reason, required non-empty)
+    publishes anyway and stamps the reason and every violation into
+    ``calibration_holdout["override"]``.
     """
     _validate_training_config(backend, config)
     if len(dataset) == 0:
@@ -169,6 +262,21 @@ def train_sequence_autoencoder(
         context="training dataset",
     )
     calibration_source = calibration_dataset if calibration_dataset is not None else dataset
+    override_record: dict[str, Any] | None = None
+    if calibrate_thresholds:
+        violations = calibration_coverage_violations(
+            dataset, calibration_source, held_out=calibration_dataset is not None
+        )
+        if violations:
+            if calibration_override is None or not calibration_override.strip():
+                raise CalibrationCoverageError(violations)
+            log.warning(
+                "%s calibration published under operator override: %s",
+                backend.model_type,
+                "; ".join(violations),
+                extra={"override_reason": calibration_override},
+            )
+            override_record = {"reason": calibration_override.strip(), "violations": violations}
     calibration_health = (
         validate_dataset_observations(
             calibration_source,
@@ -342,20 +450,24 @@ def train_sequence_autoencoder(
         device=device,
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
+        training_observed_blocks=observed_block_counts(dataset),
     )
     used_sessions = training_sessions(calibration_source)
+    holdout = (
+        _calibration_holdout_report(
+            backend, used=used_sessions, requested=calibration_sessions_requested
+        )
+        if calibration_dataset is not None
+        else None
+    )
+    if override_record is not None:
+        holdout = {**(holdout or {}), "override": override_record}
     stamped = replace(
         calibrated.manifest,
         calibration=calibration_provenance,
         calibration_sessions=used_sessions,
         calibration_health=calibration_health,
-        calibration_holdout=(
-            _calibration_holdout_report(
-                backend, used=used_sessions, requested=calibration_sessions_requested
-            )
-            if calibration_dataset is not None
-            else None
-        ),
+        calibration_holdout=holdout,
     )
     return TrainedSequenceAutoencoder(model=calibrated.model, manifest=stamped)
 
@@ -401,6 +513,7 @@ def calibrate_sequence_autoencoder_thresholds(
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
     threshold_quantile: float | None = None,
+    training_observed_blocks: Mapping[str, int] | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained bundle.
 
@@ -417,6 +530,7 @@ def calibrate_sequence_autoencoder_thresholds(
         device=device,
         calibrated_at=calibrated_at,
         threshold_quantile=threshold_quantile,
+        training_observed_blocks=training_observed_blocks,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedSequenceAutoencoder(model=trained.model, manifest=manifest)
@@ -665,9 +779,11 @@ def _torch_module(backend: SequenceTrainingBackend) -> Any:
 
 __all__ = [
     "ARTIFACT_FORMAT_VERSION",
+    "CalibrationCoverageError",
     "SequenceAutoencoderTrainingConfigLike",
     "TrainedSequenceAutoencoder",
     "calibrate_sequence_autoencoder_thresholds",
+    "calibration_coverage_violations",
     "default_sequence_manifest_path",
     "load_sequence_autoencoder_model",
     "save_sequence_autoencoder_model",

@@ -40,6 +40,19 @@ from src.timefmt import format_timestamp as _format_timestamp
 #: inference (mirrors the IF calibration floor).
 MIN_CALIBRATION_SAMPLES = 10
 
+#: A02.12 — a channel observed in no calibration window, or *rarely* observed
+#: in the calibration or the training windows, gets no threshold: it is recorded
+#: in ``uncalibrated_channels`` with the reason and its threshold is 0.0, which
+#: the serving engine reads as "not scored". A threshold from zero observations
+#: was 0.0 in the 2026-09-20 artifact and flagged any nonzero error (1,525 of
+#: 1,554 family flags on one capture); one from a handful is that handful's
+#: maximum. "Rarely" is relative *and* absolute: fewer than
+#: ``MIN_OBSERVED_BLOCKS`` independent windows AND fewer than
+#: ``RARE_OBSERVED_FRACTION`` of the windows available — a channel present in
+#: every window of a small dataset is not rare, one present in 5 of 200 is.
+MIN_OBSERVED_BLOCKS = MIN_CALIBRATION_SAMPLES
+RARE_OBSERVED_FRACTION = 0.5
+
 
 class SequenceModelLike(Protocol):
     """The reconstruction surface calibration needs from any sequence model."""
@@ -149,6 +162,21 @@ class SequenceThresholdCalibration:
     #: preserving localized faults without an uncorrected many-channel OR.
     family_errors: Mapping[str, ReconstructionErrorDistribution] | None = None
     family_max_score: ReconstructionErrorDistribution | None = None
+    #: A02.12 — channel -> why it has no threshold (never, or too rarely,
+    #: observed in calibration or in training). Their ``channel_errors`` entry
+    #: is a zero distribution (threshold 0.0) and the global, per-mode and
+    #: family thresholds were computed without them, exactly as the serving
+    #: engine scores them (out of the score mask).
+    uncalibrated_channels: Mapping[str, str] | None = None
+    #: Families left without a threshold, same meaning.
+    uncalibrated_families: Mapping[str, str] | None = None
+    #: A02.3 — the distributions are per-block maxima over non-overlapping
+    #: blocks of this many rows, pooled across sessions: independent samples,
+    #: not ~30x-overlapping stride-1 windows. ``None`` on older manifests.
+    block_rows: int | None = None
+    #: Independent blocks behind ``global_error`` (its ``count``); the
+    #: finest quantile these thresholds can resolve is about ``1 - 10/n``.
+    effective_window_count: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -175,6 +203,14 @@ class SequenceThresholdCalibration:
             }
         if self.family_max_score is not None:
             out["family_max_score"] = self.family_max_score.to_dict()
+        if self.uncalibrated_channels is not None:
+            out["uncalibrated_channels"] = dict(self.uncalibrated_channels)
+        if self.uncalibrated_families is not None:
+            out["uncalibrated_families"] = dict(self.uncalibrated_families)
+        if self.block_rows is not None:
+            out["block_rows"] = self.block_rows
+        if self.effective_window_count is not None:
+            out["effective_window_count"] = self.effective_window_count
         return out
 
     @classmethod
@@ -216,7 +252,39 @@ class SequenceThresholdCalibration:
                 if raw_family_max is None
                 else ReconstructionErrorDistribution.from_dict(raw_family_max)
             ),
+            uncalibrated_channels=_optional_reasons(data.get("uncalibrated_channels")),
+            uncalibrated_families=_optional_reasons(data.get("uncalibrated_families")),
+            block_rows=None if data.get("block_rows") is None else int(data["block_rows"]),
+            effective_window_count=(
+                None
+                if data.get("effective_window_count") is None
+                else int(data["effective_window_count"])
+            ),
         )
+
+
+def _optional_reasons(raw: Any) -> dict[str, str] | None:
+    return None if raw is None else {str(k): str(v) for k, v in dict(raw).items()}
+
+
+def uncalibrated_distribution() -> ReconstructionErrorDistribution:
+    """The record of a channel with no calibration: threshold 0.0, count 0.
+
+    The serving engine treats a non-positive threshold as "never observed in
+    calibration" and keeps the channel out of the score (A02.12).
+    """
+    return ReconstructionErrorDistribution(
+        count=0,
+        mean=0.0,
+        std=0.0,
+        minimum=0.0,
+        maximum=0.0,
+        p50=0.0,
+        p90=0.0,
+        p95=0.0,
+        p99=0.0,
+        threshold=0.0,
+    )
 
 
 def masked_mse_loss(reconstruction: Any, value: Any, mask: Any) -> Any:
@@ -369,15 +437,28 @@ def calibrate_sequence_thresholds(
     device: str = "cpu",
     calibrated_at: datetime | pd.Timestamp | str | None = None,
     threshold_quantile: float | None = None,
+    training_observed_blocks: Mapping[str, int] | None = None,
 ) -> SequenceThresholdCalibration:
-    """Compute global / per-channel / per-mode reconstruction-error thresholds.
+    """Compute global / per-channel / per-family / per-mode thresholds.
 
-    Global errors are per-window masked MAE over all cells; per-channel errors
-    are per-window masked MAE over timesteps; thresholds are
-    ``mean + threshold_k · population_std`` (or, with ``threshold_quantile``,
-    that quantile of the errors — see :func:`error_distribution`).
-    Backbone-agnostic — any model with
-    ``reconstruction_error(value, mask, delta, reduction=...)`` works.
+    Per window: each channel's masked MAE over the timesteps where it was
+    observed, and the global masked MAE over the *calibrated* channels' cells.
+    Thresholds are ``mean + threshold_k · population_std`` (or, with
+    ``threshold_quantile``, that quantile — see :func:`error_distribution`).
+
+    **Only observed windows count (A02.12).** A channel's (and family's)
+    distribution uses only windows where it was observed. A channel observed
+    in fewer than :data:`MIN_OBSERVED_BLOCKS` independent calibration windows —
+    or, via ``training_observed_blocks``, training windows — is recorded in
+    ``uncalibrated_channels`` with the reason, gets threshold 0.0, and is left
+    out of the global, per-mode and family distributions, which is how the
+    serving engine scores it.
+
+    **Independent windows (A02.3).** Stride-1 windows overlap by all but one
+    row, so a 0.999 quantile over a session's ~1,000 windows is its maximum.
+    Every distribution is taken over per-block maxima: the worst window ending
+    in each non-overlapping ``sequence_length``-row block, pooled across
+    sessions. ``effective_window_count`` records how many there were.
     """
     if threshold_k < 0:
         raise ValueError("threshold_k must be non-negative")
@@ -401,84 +482,111 @@ def calibrate_sequence_thresholds(
     model.to(device_obj)
     model.eval()
 
-    global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
-    channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
+    sum_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
+    count_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     with torch.no_grad():
         for value, mask, delta in loader:
             value = value.to(device_obj, non_blocking=True)
             mask = mask.to(device_obj, non_blocking=True)
             delta = delta.to(device_obj, non_blocking=True)
-            global_errors = model.reconstruction_error(value, mask, delta, reduction="sample")
-            channel_errors = model.reconstruction_error(value, mask, delta, reduction="channel")
-            global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
-            channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
+            cell_errors = model.reconstruction_error(value, mask, delta, reduction="none")
+            sum_chunks.append(cell_errors.sum(dim=1).detach().cpu().numpy().astype(np.float64))
+            count_chunks.append(mask.sum(dim=1).detach().cpu().numpy().astype(np.float64))
 
-    global_values = np.concatenate(global_chunks)
-    channel_matrix = np.concatenate(channel_chunks, axis=0)
-    global_distribution = error_distribution(
-        global_values, threshold_k=threshold_k, threshold_quantile=threshold_quantile
+    sums = np.concatenate(sum_chunks, axis=0)
+    counts = np.concatenate(count_chunks, axis=0)
+    columns = tuple(dataset.feature_columns)
+    blocks = window_blocks(dataset)
+    observed = counts > 0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        channel_matrix = np.where(observed, sums / np.where(observed, counts, 1.0), np.nan)
+
+    calibration_blocks = _observed_blocks(observed, blocks)
+    available_blocks = len(set(blocks.tolist()))
+    training_available = (
+        max(training_observed_blocks.values(), default=0) if training_observed_blocks else 0
     )
-    channel_distributions = {
-        column: error_distribution(
-            channel_matrix[:, index],
-            threshold_k=threshold_k,
-            threshold_quantile=threshold_quantile,
+    uncalibrated: dict[str, str] = {}
+    for index, column in enumerate(columns):
+        seen = int(calibration_blocks[index])
+        trained = None if training_observed_blocks is None else training_observed_blocks.get(column)
+        if seen == 0:
+            uncalibrated[column] = "never observed in calibration"
+        elif is_rarely_observed(seen, available_blocks):
+            uncalibrated[column] = (
+                f"observed in {seen} of {available_blocks} independent calibration windows"
+            )
+        elif trained is not None and is_rarely_observed(trained, training_available):
+            uncalibrated[column] = (
+                f"observed in {trained} of ~{training_available} independent training windows"
+            )
+    calibrated = np.array([column not in uncalibrated for column in columns], dtype=bool)
+    if not calibrated.any():
+        raise ValueError(
+            "no channel was observed in enough independent calibration windows to calibrate"
         )
-        for index, column in enumerate(dataset.feature_columns)
-    }
-    family_indexes: dict[str, list[int]] = {}
-    for index, column in enumerate(dataset.feature_columns):
-        family_indexes.setdefault(_feature_family(column), []).append(index)
-    family_values = {
-        family: np.max(channel_matrix[:, indexes], axis=1)
-        for family, indexes in family_indexes.items()
-    }
-    family_distributions = {
-        family: error_distribution(
+
+    global_cells = counts[:, calibrated].sum(axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        global_values = np.where(
+            global_cells > 0, sums[:, calibrated].sum(axis=1) / global_cells, np.nan
+        )
+
+    def distribution(
+        values: np.ndarray[Any, np.dtype[np.float64]],
+    ) -> ReconstructionErrorDistribution:
+        return error_distribution(
             values, threshold_k=threshold_k, threshold_quantile=threshold_quantile
         )
-        for family, values in family_values.items()
+
+    global_maxima = _block_maxima(global_values, blocks)
+    global_distribution = distribution(global_maxima)
+    channel_distributions = {
+        column: (
+            distribution(_block_maxima(channel_matrix[:, index], blocks))
+            if calibrated[index]
+            else uncalibrated_distribution()
+        )
+        for index, column in enumerate(columns)
     }
-    normalized_family_matrix = np.column_stack(
-        [
-            values / max(family_distributions[family].threshold, np.finfo(np.float64).eps)
-            for family, values in family_values.items()
-        ]
-    )
-    family_max_distribution = error_distribution(
-        np.max(normalized_family_matrix, axis=1),
-        threshold_k=threshold_k,
-        threshold_quantile=threshold_quantile,
+
+    family_indexes: dict[str, list[int]] = {}
+    for index, column in enumerate(columns):
+        family_indexes.setdefault(_feature_family(column), []).append(index)
+    family_distributions: dict[str, ReconstructionErrorDistribution] = {}
+    uncalibrated_families: dict[str, str] = {}
+    normalized_columns: list[np.ndarray[Any, np.dtype[np.float64]]] = []
+    for family, indexes in family_indexes.items():
+        members = [i for i in indexes if calibrated[i]]
+        if not members:
+            uncalibrated_families[family] = "no calibrated member channel"
+            family_distributions[family] = uncalibrated_distribution()
+            continue
+        member_values = channel_matrix[:, members]
+        present: np.ndarray[Any, np.dtype[np.bool_]] = np.asarray(
+            np.isfinite(member_values).any(axis=1), dtype=bool
+        )
+        filled = np.where(np.isfinite(member_values), member_values, -np.inf)
+        values = np.where(present, filled.max(axis=1), np.nan)
+        family_distributions[family] = distribution(_block_maxima(values, blocks))
+        threshold = max(family_distributions[family].threshold, np.finfo(np.float64).eps)
+        # An unobserved family contributes 0 to the serving max (its channel
+        # scores are 0 there), so it does here too.
+        normalized_columns.append(np.where(present, values / threshold, 0.0))
+    family_max_distribution = distribution(
+        _block_maxima(np.max(np.column_stack(normalized_columns), axis=1), blocks)
     )
 
     # Per-operating-mode global thresholds. The mode for a window is its last
     # row's mode (the row the score is attributed to); ``shuffle=False`` keeps
-    # the loader order aligned with ``global_values``. Modes below the floor
-    # fall back to ``global_error`` at inference.
+    # the loader order aligned with the windows. Modes below the floor fall
+    # back to ``global_error`` at inference.
     per_mode_distributions: dict[str, ReconstructionErrorDistribution] = {}
-    frame = dataset.frame
-    if MODE_COLUMN in frame.columns:
-        by_mode: dict[str, list[int]] = {}
-        for index, window in enumerate(dataset.windows):
-            raw = frame.iloc[window.end_row - 1].get(MODE_COLUMN)
-            if raw is None or pd.isna(raw):
-                continue
-            by_mode.setdefault(str(raw), []).append(index)
-        for mode, indexes in by_mode.items():
-            # The floor counts EFFECTIVE (non-overlapping) windows: at
-            # stride 1, ten windows share almost all their rows — ten
-            # seconds of one idle is not enough evidence for a mode to own
-            # its own mean+k·σ band.
-            starts = [dataset.windows[i].start_row for i in indexes]
-            if _non_overlapping_window_count(starts, dataset.sequence_length) < (
-                MIN_CALIBRATION_SAMPLES
-            ):
-                continue
-            per_mode_distributions[mode] = error_distribution(
-                global_values[indexes],
-                threshold_k=threshold_k,
-                threshold_quantile=threshold_quantile,
-            )
+    for mode, indexes in window_modes(dataset).items():
+        mode_maxima = _block_maxima(global_values[indexes], blocks[indexes])
+        if mode_maxima.size < MIN_CALIBRATION_SAMPLES:
+            continue
+        per_mode_distributions[mode] = distribution(mode_maxima)
 
     return SequenceThresholdCalibration(
         threshold_k=threshold_k,
@@ -491,7 +599,83 @@ def calibrate_sequence_thresholds(
         threshold_quantile=threshold_quantile,
         family_errors=family_distributions,
         family_max_score=family_max_distribution,
+        uncalibrated_channels=uncalibrated,
+        uncalibrated_families=uncalibrated_families,
+        block_rows=int(dataset.sequence_length),
+        effective_window_count=int(global_maxima.size),
     )
+
+
+def is_rarely_observed(observed_blocks: int, available_blocks: int) -> bool:
+    """Fewer than :data:`MIN_OBSERVED_BLOCKS` independent windows *and* under
+    :data:`RARE_OBSERVED_FRACTION` of those available (see the constants)."""
+    return (
+        observed_blocks < MIN_OBSERVED_BLOCKS
+        and observed_blocks < RARE_OBSERVED_FRACTION * available_blocks
+    )
+
+
+def window_blocks(dataset: SequenceWindowDataset) -> np.ndarray[Any, np.dtype[np.int64]]:
+    """Block id per window: its session and which non-overlapping
+    ``sequence_length``-row block its last row falls in (A02.3)."""
+    length = max(1, int(dataset.sequence_length))
+    keys = [(window.session, (window.end_row - 1) // length) for window in dataset.windows]
+    return np.asarray(pd.factorize(pd.Series(keys, dtype=object))[0], dtype=np.int64)
+
+
+def window_modes(dataset: SequenceWindowDataset) -> dict[str, list[int]]:
+    """Window indexes by the operating mode of each window's last row."""
+    frame = dataset.frame
+    if MODE_COLUMN not in frame.columns:
+        return {}
+    modes = frame[MODE_COLUMN].to_numpy()
+    by_mode: dict[str, list[int]] = {}
+    for index, window in enumerate(dataset.windows):
+        raw = modes[window.end_row - 1]
+        if raw is None or pd.isna(raw):
+            continue
+        by_mode.setdefault(str(raw), []).append(index)
+    return by_mode
+
+
+def _block_maxima(
+    values: np.ndarray[Any, np.dtype[np.float64]],
+    blocks: np.ndarray[Any, np.dtype[np.int64]],
+) -> np.ndarray[Any, np.dtype[np.float64]]:
+    """Maximum finite value per block (blocks with no finite value dropped)."""
+    finite = np.isfinite(values)
+    if not finite.any():
+        return np.zeros(0, dtype=np.float64)
+    series = pd.Series(values[finite], index=blocks[finite])
+    return series.groupby(level=0).max().to_numpy(dtype=np.float64)
+
+
+def _observed_blocks(
+    observed: np.ndarray[Any, np.dtype[np.bool_]],
+    blocks: np.ndarray[Any, np.dtype[np.int64]],
+) -> np.ndarray[Any, np.dtype[np.int64]]:
+    """Per channel: how many blocks hold at least one window observing it."""
+    if observed.size == 0:
+        return np.zeros(observed.shape[1] if observed.ndim == 2 else 0, dtype=np.int64)
+    frame = pd.DataFrame(observed, index=blocks)
+    return frame.groupby(level=0).any().sum(axis=0).to_numpy(dtype=np.int64)
+
+
+def observed_block_counts(dataset: SequenceWindowDataset) -> dict[str, int]:
+    """Per channel: independent windows (blocks) in which it was observed.
+
+    Read from the dataset's mask alone — no model needed — so training can
+    record how often each channel was seen before any calibration runs.
+    """
+    if len(dataset) == 0:
+        return {column: 0 for column in dataset.feature_columns}
+    mask = np.asarray(dataset._mask, dtype=np.float64)
+    prefix = np.vstack([np.zeros((1, mask.shape[1])), np.cumsum(mask, axis=0)])
+    starts = np.array([window.start_row for window in dataset.windows], dtype=np.int64)
+    ends = np.array([window.end_row for window in dataset.windows], dtype=np.int64)
+    observed = (prefix[ends] - prefix[starts]) > 0
+    counts = _observed_blocks(observed, window_blocks(dataset))
+    return {column: int(counts[i]) for i, column in enumerate(dataset.feature_columns)}
 
 
 def _feature_family(column: str) -> str:
@@ -743,6 +927,13 @@ def configure_torch_threads(thread_count: int | None = None) -> None:
 
 __all__ = [
     "MIN_CALIBRATION_SAMPLES",
+    "MIN_OBSERVED_BLOCKS",
+    "RARE_OBSERVED_FRACTION",
+    "is_rarely_observed",
+    "observed_block_counts",
+    "uncalibrated_distribution",
+    "window_blocks",
+    "window_modes",
     "EpochLoss",
     "ReconstructionErrorDistribution",
     "SequenceModelLike",

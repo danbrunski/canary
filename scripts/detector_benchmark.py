@@ -42,7 +42,7 @@ import json
 import logging
 import statistics
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -57,20 +57,21 @@ except ImportError:  # loaded as `scripts.detector_benchmark` — repo root on p
 
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
+from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
+from src.decode.dids import load_did_map
 from src.log import configure_logging
 from src.models.isolation_forest import TrainedIsolationForest, load_isolation_forest_model
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_registry import resolve_sequence_backend
 from src.models.synthetic_fault_eval import DEFAULT_FAULT_KINDS, evaluate_detectors
-from src.preprocessing import AnomalyKind, decode_can_rows, discover_sessions, read_session, to_wide
-from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH
-from src.preprocessing.loader import numeric_value_columns
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    resample_config_for,
-    resample_wide,
+from src.preprocessing import AnomalyKind, discover_sessions, read_session
+from src.preprocessing.feature_pipeline import (
+    DEFAULT_BINDINGS_PATH,
+    DEFAULT_DIDS_PATH,
+    drop_fully_stale_rows,
+    resample_long_session,
 )
+from src.preprocessing.resampler import resample_config_for
 
 log = logging.getLogger(__name__)
 
@@ -157,35 +158,30 @@ def load_resampled_session(
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
 ) -> pd.DataFrame:
-    """Read + decode + wide-pivot + resample one session (no segmentation —
-    2.3/2.4's `evaluate_detectors` calls `featurize_wide_frame`, which
-    segments internally, so doing it here too would be redundant work).
+    """Read + decode + wide-pivot + quality-gate + resample one session (no
+    segmentation — `evaluate_detectors` calls `featurize_wide_frame`, which
+    segments internally).
 
-    CAN-signal decode (`decoded:*` columns, same as `train_anomaly_model.py`)
-    runs when `bindings_path` exists so an IF artifact trained on decoded
-    channels schema-matches; skipped (not an error) when absent, matching
-    `train_anomaly_model.py`'s own optional-bindings handling."""
-    long = read_session(session_dir)
-    if bindings_path.exists():
-        long = decode_can_rows(long, load_bindings(bindings_path))
-    wide = to_wide(long)
-    value_columns = numeric_value_columns(wide)
-    if not value_columns:
-        return pd.DataFrame(
-            {
-                SESSION_COLUMN: wide[SESSION_COLUMN].copy()
-                if SESSION_COLUMN in wide.columns
-                else pd.Series(dtype="object"),
-                TIMESTAMP_COLUMN: pd.to_datetime(wide[TIMESTAMP_COLUMN], utc=True)
-                if TIMESTAMP_COLUMN in wide.columns
-                else pd.Series(dtype="datetime64[ns, UTC]"),
-            }
-        )
-    return resample_wide(
-        wide,
-        config=resample_config_for(config),
-        value_columns=value_columns,
+    The same per-session chain the trainers run
+    (`feature_pipeline.resample_long_session`): bindings, `.dbc` files and the
+    DID map all decode, and the reject gate NaNs impossible cells before the
+    resampler sees them. This used to decode bindings only, with no DID
+    decode and no quality gate, so the benchmark scored the sequence detector
+    on frames with every `did:` channel absent — rows the artifact never saw
+    that way in training or serving (A02). A missing bindings file or DID map
+    is skipped, not an error, as in training.
+    """
+    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
+    resampled = resample_long_session(
+        read_session(session_dir),
+        bindings,
+        load_dbc_dir(DEFAULT_DBC_DIR),
+        did_map,
+        resample_config_for(config),
+        session_name=session_dir.name,
     )
+    return drop_fully_stale_rows(resampled)
 
 
 def run_grid(
@@ -336,13 +332,27 @@ def aggregate_cells(cells: Sequence[GridCell]) -> dict[str, Any]:
             }
         )
 
+    withheld: dict[str, str] = {}
+    for cell in cells:
+        for name, reason in cell.report.get("withheld", {}).items():
+            withheld.setdefault(name, reason)
     return {
         "sessions": sorted(nominal_by_session),
         "channels": sorted({cell.channel for cell in cells}),
         "fault_kinds": sorted({fault_kind for _, fault_kind in pooled}),
         "nominal_fp": nominal_totals,
         "table": table,
+        # A02.9: detectors the grid could not grade, with the reason — never a
+        # silent 0.0 recall row.
+        "withheld": withheld,
     }
+
+
+#: Version of the per-session decode chain behind a report
+#: (`load_resampled_session`). 1: bindings-only decode, no DID/DBC decode, no
+#: quality gate (reports without the field). 2: the trainers' chain (A02). Two
+#: reports from different chains score different rows and are not compared.
+LOADER_VERSION = 2
 
 
 def build_report(
@@ -358,6 +368,7 @@ def build_report(
     aggregate = aggregate_cells(cells)
     return {
         "generated_at": generated_at,
+        "loader_version": LOADER_VERSION,
         "seed": seed,
         "n_injections": n_injections,
         "grid_cells": len(cells),
@@ -391,6 +402,8 @@ def print_report(report: dict[str, Any]) -> None:
             f"{row['recall']:>7.3f} {precision:>10} {latency:>11} "
             f"{row['alerts_per_hour_clean']:>10.3f}"
         )
+    for name, reason in report.get("withheld", {}).items():
+        print(f"  {name:<16} withheld: {reason}")
 
 
 def diff_reports(
@@ -405,7 +418,22 @@ def diff_reports(
     ``tolerance`` — a cell that only exists in one report (a detector/channel
     dropped or added between runs) is recorded as ``added``/``removed`` for
     visibility but can't have "regressed", there being nothing to compare.
+
+    Two reports that scored different sessions, different evaluation
+    holdouts, or rows from a different decode chain are ``incomparable``
+    (``comparable: False`` with the reason, never ``regressed``): their
+    totals come from different drives, and comparing them is comparing
+    aggregates of different populations.
     """
+    reason = incomparable_reason(baseline, current)
+    if reason is not None:
+        return {
+            "tolerance": tolerance,
+            "regressed": False,
+            "comparable": False,
+            "reason": reason,
+            "cells": [],
+        }
     baseline_by_key = {(row["detector"], row["fault_kind"]): row for row in baseline["table"]}
     current_by_key = {(row["detector"], row["fault_kind"]): row for row in current["table"]}
 
@@ -455,13 +483,36 @@ def diff_reports(
             }
         )
 
-    return {"tolerance": tolerance, "regressed": any_regressed, "cells": cells}
+    return {"tolerance": tolerance, "regressed": any_regressed, "comparable": True, "cells": cells}
+
+
+def incomparable_reason(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> str | None:
+    """Why two benchmark reports cannot be diffed, or ``None``."""
+    base_loader = int(baseline.get("loader_version", 1))
+    cur_loader = int(current.get("loader_version", 1))
+    if base_loader != cur_loader:
+        return f"decode chain differs (loader_version {base_loader} vs {cur_loader})"
+    base_sessions = sorted(baseline.get("sessions", []))
+    cur_sessions = sorted(current.get("sessions", []))
+    if base_sessions != cur_sessions:
+        return f"scored different sessions ({base_sessions} vs {cur_sessions})"
+    base_holdout = (baseline.get("holdout") or {}).get("evaluation")
+    cur_holdout = (current.get("holdout") or {}).get("evaluation")
+    if base_holdout is not None and cur_holdout is not None:
+        if sorted(base_holdout) != sorted(cur_holdout):
+            return (
+                f"different evaluation holdouts ({sorted(base_holdout)} vs {sorted(cur_holdout)})"
+            )
+    return None
 
 
 def print_regression_diff(diff: dict[str, Any]) -> None:
     print("=" * 88)
     print(f"REGRESSION COMPARE  tolerance={diff['tolerance']:.0%}")
     print("=" * 88)
+    if not diff.get("comparable", True):
+        print(f"  incomparable: {diff['reason']}")
+        return
     if not diff["cells"]:
         print("  (no baseline cells to compare)")
         return

@@ -233,8 +233,9 @@ estimated signal; they cannot establish how UpRev calculates its display.
   highway→city, 91 unknown→idle_transient); that session had zero `idle` rows
   pre-fix.
   **Owed, laptop-side, in order:** (1) `label_sessions.py` sidecars regenerate
-  (mode/event/disposition); (2) IF + sequence retrain and out-of-sample (LOO)
-  threshold recalibration, since per-mode row membership moves; (3)
+  (mode/event/disposition); (2) IF + sequence retrain and out-of-sample
+  threshold recalibration (a fixed held-out set, not leave-one-out — A02.10),
+  since per-mode row membership moves; (3)
   `refit_behavior_models.py` after (1); (4) trip sidecars recompute (idle
   seconds were over-counted on stale-OBD rows); (5) `data/cache/feature_frames`
   can be deleted — the cache version bump already ignores stale entries.
@@ -284,7 +285,8 @@ estimated signal; they cannot establish how UpRev calculates its display.
   **(5) Cache:** checked that all 20 entries in `data/cache/feature_frames` are
   keyed by the hash of metadata that includes `cache_version`. The 18
   non-v4 entries can therefore never be hit. Deleted (924 MB).
-  **Remaining:** (2) the IF + sequence retrain with LOO recalibration, and (3)
+  **Remaining:** (2) the IF + sequence retrain with held-out recalibration
+  (fixed holdout, not leave-one-out — A02.10), and (3)
   `refit_behavior_models.py`. Both are coordinated with B03 / D03.25 and need
   the operator's corpus choice. Also the Pi side: pull + restart, then
   `label_sessions.py` (the version bump makes it relabel) and a trip-sidecar

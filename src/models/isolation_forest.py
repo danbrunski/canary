@@ -304,6 +304,9 @@ class IsolationForestManifest:
     #: for manifests written before 2.2, or when every mode cleared the floor.
     skipped_modes: tuple[SkippedModeSummary, ...] = ()
     calibration_sessions: tuple[str, ...] = ()
+    #: A02.1 — held-out sessions the post-retrain gate scored, disjoint from
+    #: ``calibration_sessions`` (the gate used to score the calibration ones).
+    evaluation_sessions: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -324,6 +327,7 @@ class IsolationForestManifest:
             "modes": [mode.to_dict() for mode in self.modes],
             "skipped_modes": [mode.to_dict() for mode in self.skipped_modes],
             "calibration_sessions": list(self.calibration_sessions),
+            "evaluation_sessions": list(self.evaluation_sessions),
         }
 
     @classmethod
@@ -348,6 +352,7 @@ class IsolationForestManifest:
                 SkippedModeSummary.from_dict(mode) for mode in data.get("skipped_modes", [])
             ),
             calibration_sessions=tuple(str(x) for x in data.get("calibration_sessions", [])),
+            evaluation_sessions=tuple(str(x) for x in data.get("evaluation_sessions", [])),
         )
 
 
