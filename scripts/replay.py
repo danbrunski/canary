@@ -40,9 +40,9 @@ from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX
 from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
 from src.preprocessing.resampler import (
-    GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
+    is_flag_column,
     resample_config_for,
     resample_wide,
 )
@@ -265,7 +265,7 @@ def _numeric_value_columns(df: pd.DataFrame) -> list[str]:
         for column in df.columns
         if str(column) not in skip
         and pd.api.types.is_numeric_dtype(df[column])
-        and not str(column).endswith(GAP_SUFFIX)
+        and not is_flag_column(column)
     ]
 
 

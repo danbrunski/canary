@@ -31,6 +31,7 @@ from src.models.false_positive_benchmark import (
 )
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.lstm_training import load_lstm_autoencoder_model
+from src.models.sequence_dataset import observation_mask_from_schema
 from src.preprocessing.normalization import ZScoreScaler
 
 
@@ -69,6 +70,7 @@ def run_false_positive_benchmark(
         feature_columns=trained.feature_columns,
         stride=stride,
         scaler=scaler,
+        observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
     )
     return benchmark_false_positives(
         trained,

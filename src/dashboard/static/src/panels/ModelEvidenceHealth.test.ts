@@ -67,6 +67,22 @@ describe("ModelEvidencePanel", () => {
     expect(screen.getAllByText("LSTM").length).toBeGreaterThan(0);
     expect(screen.getAllByText("obd:RPM").length).toBeGreaterThan(0);
     expect(screen.getByText("1.50x")).toBeInTheDocument();
+    // A03.7: the ranking is labelled as a deviation, not a cause.
+    expect(
+      screen.getByText("largest deviation from training envelope (not a cause)"),
+    ).toBeInTheDocument();
+  });
+
+  it("titles the ranking with the artifact's own scope when the API gives it", () => {
+    const note = "Engine-response channels ranked ... (driving conditions are context, never ranked)";
+    const event: AnomalyEvent = {
+      ...LSTM_EVENT,
+      detail: { ...LSTM_EVENT.detail, channel_ranking_note: note },
+    };
+    render(createElement(ModelEvidencePanel, { event, relatedEvents: [event] }));
+    expect(
+      screen.getByText("largest deviation from training envelope (not a cause)"),
+    ).toHaveAttribute("title", note);
   });
 });
 

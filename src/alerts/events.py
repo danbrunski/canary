@@ -37,6 +37,24 @@ AnomalySource = Literal[
 ]
 
 
+#: A03.7 — the sequence detector's channel ranking, named for what it is.
+SEQUENCE_CHANNEL_RANKING = "largest_deviation_from_training_envelope"
+#: Keyed by ``SequenceInferenceResult.ranking_scope``: an ``all_channels``
+#: artifact ranks driving conditions too; an ``engine_response`` one ranks its
+#: engine-response targets only (context inputs never scored, A03.2).
+SEQUENCE_CHANNEL_RANKING_NOTES: dict[str, str] = {
+    "all_channels": (
+        "Channels ranked by reconstruction error over their calibrated band, driving "
+        "conditions included: the largest deviations from the training envelope, not a cause."
+    ),
+    "engine_response_targets": (
+        "Engine-response channels ranked by reconstruction error over their calibrated band "
+        "(driving conditions are context, never ranked): the largest deviations from the "
+        "training envelope, not a cause."
+    ),
+}
+
+
 class AnomalyEvent(BaseModel):
     """One anomaly detection, from either detector.
 
@@ -133,6 +151,16 @@ class AnomalyEvent(BaseModel):
             "channel_scores": channel_scores,
             "channel_thresholds": channel_thresholds,
             "anomalous_channels": list(result.anomalous_channels),
+            # A03.7 — what the channel ranking is. It ranks each channel's
+            # reconstruction error against its own calibrated band over every
+            # column, driving conditions included (it named baro on every
+            # altitude-trip event, D03.20): the largest deviation from the
+            # training envelope, not the cause of the event.
+            "channel_ranking": SEQUENCE_CHANNEL_RANKING,
+            "channel_ranking_note": SEQUENCE_CHANNEL_RANKING_NOTES.get(
+                str(getattr(result, "ranking_scope", "all_channels")),
+                SEQUENCE_CHANNEL_RANKING_NOTES["all_channels"],
+            ),
         }
         recon_series = getattr(result, "reconstruction_series", None)
         if recon_series:

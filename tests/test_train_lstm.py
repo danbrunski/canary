@@ -371,3 +371,181 @@ def test_calibration_and_evaluate_sessions_take_their_whole_drive(tmp_path: Path
         )
         is None
     )
+
+
+def _write_shifted_session(
+    root: Path, name: str, *, rows: int, start_epoch: float, rpm_offset: float = 0.0
+) -> Path:
+    session = root / name
+    records: list[TelemetryRecord] = []
+    for i in range(rows):
+        t = start_epoch + i
+        records.extend(
+            [
+                TelemetryRecord.obd(t, "RPM", 780.0 + rpm_offset + (i % 4), "rpm"),
+                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
+                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
+                TelemetryRecord.obd(t, "BAROMETRIC_PRESSURE", 80.0 + (i % 2), "kPa"),
+            ]
+        )
+    write_records_to_parquet(records, session, max_rows=10_000)
+    return session
+
+
+def test_validation_rows_do_not_move_the_scaler(tmp_path: Path) -> None:
+    """A03.4/A03.5: validation drives are fixed by the stated rule *before* the
+    scaler is fit, and the scaler is fit on the training rows only — changing
+    every value in the validation drive leaves it unchanged."""
+    _torch()
+    config = _config(tmp_path, validation_fraction=0.25)
+    no_bindings = _no_bindings(tmp_path)
+
+    def corpus(root: Path, offset: float) -> list[Path]:
+        root.mkdir()
+        return [
+            _write_shifted_session(
+                root,
+                f"s{i}",
+                rows=120,
+                start_epoch=1_778_500_000.0 + 3600 * i,
+                rpm_offset=offset if i == 0 else 0.0,
+            )
+            for i in range(4)
+        ]
+
+    manifests = []
+    for label, offset in (("a", 0.0), ("b", 5_000.0)):
+        sessions = corpus(tmp_path / label, offset)
+        trained = train(sessions, config, tmp_path / label / "m", bindings_path=no_bindings)
+        manifests.append(trained.manifest)
+
+    first, second = manifests
+    holdout = first.validation_holdout
+    assert holdout is not None
+    assert holdout["rule"] == "mode_coverage_by_drive_v1"
+    assert holdout["scaler_fit_excludes_validation"] is True
+    assert second.validation_holdout is not None
+    assert holdout["sessions"] == second.validation_holdout["sessions"]
+    assert first.scaler is not None and second.scaler is not None
+    if "s0" in holdout["sessions"]:
+        # The shifted session validated: the scaler never saw it.
+        assert first.scaler == second.scaler
+    else:
+        # The shifted session trained: the scaler moved with it (the check can fail).
+        assert first.scaler != second.scaler
+    # Either way the manifest's scaler is the training rows' scaler.
+    features = build_feature_frame(
+        sorted((tmp_path / "a").glob("s*")), config, bindings_path=no_bindings
+    )
+    from src.preprocessing.normalization import ZScoreScaler
+
+    columns = list(first.schema["feature_columns"])
+    expected = ZScoreScaler.fit(
+        features.loc[~features["session"].isin(holdout["sessions"])], columns=columns
+    )
+    assert first.scaler["means"] == pytest.approx(expected.to_dict()["means"])
+
+
+def test_the_manifest_records_the_mask_rule_and_the_training_envelope(tmp_path: Path) -> None:
+    """A03.1: new training records ``arrived_sample``; A03.8: per-mode hours and
+    baro/speed ranges of what the model was fit on, beside the calibration's."""
+    _torch()
+    config = _config(tmp_path)
+    no_bindings = _no_bindings(tmp_path)
+    training = _write_shifted_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    holdouts = [
+        _write_shifted_session(
+            tmp_path, f"held-{i}", rows=60, start_epoch=1_778_600_000.0 + 1000 * i
+        )
+        for i in range(3)
+    ]
+    trained = train(
+        [training],
+        config,
+        tmp_path / "m",
+        bindings_path=no_bindings,
+        calibration_sessions=holdouts,
+    )
+    manifest = trained.manifest
+    assert manifest.schema["observation_mask"]["rule"] == "arrived_sample"
+    envelope = manifest.training_envelope
+    assert envelope is not None
+    assert envelope["sessions"] == ["train"]
+    (mode, record), *_ = envelope["modes"].items()
+    assert record["hours"] > 0
+    baro = record["quantities"]["baro_kpa"]
+    assert (baro["min"], baro["max"]) == (80.0, 81.0)
+    assert manifest.calibration_envelope is not None
+    assert set(manifest.calibration_envelope["sessions"]) == {"held-0", "held-1", "held-2"}
+    # The engine serves this artifact with the arrival mask.
+    from src.models.inference import SequenceInferenceEngine
+
+    assert SequenceInferenceEngine(trained).observation_mask == "arrived_sample"
+
+
+def test_a_calibration_outside_the_training_envelope_is_refused(tmp_path: Path) -> None:
+    """A02.2 wired to A03.8: three held-out drives at 63 kPa cannot calibrate a
+    model fit at 80 kPa, and the refusal says so in those units."""
+    from src.models.sequence_autoencoder_training import CalibrationCoverageError
+
+    _torch()
+    config = _config(tmp_path)
+    no_bindings = _no_bindings(tmp_path)
+    training = _write_shifted_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    holdouts = []
+    for i in range(3):
+        session = tmp_path / f"alt-{i}"
+        records = []
+        for k in range(60):
+            t = 1_778_600_000.0 + 1000 * i + k
+            records.extend(
+                [
+                    TelemetryRecord.obd(t, "RPM", 780.0 + (k % 4), "rpm"),
+                    TelemetryRecord.obd(t, "SPEED", float(k % 5), "km/h"),
+                    TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (k % 3), "%"),
+                    TelemetryRecord.obd(t, "BAROMETRIC_PRESSURE", 63.0, "kPa"),
+                ]
+            )
+        write_records_to_parquet(records, session, max_rows=10_000)
+        holdouts.append(session)
+
+    with pytest.raises(CalibrationCoverageError, match="baro_kpa spans 63–63, covering 0%"):
+        train(
+            [training],
+            config,
+            tmp_path / "m",
+            bindings_path=no_bindings,
+            calibration_sessions=holdouts,
+        )
+
+
+def test_main_refuses_when_every_explicit_session_is_held_out(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A03.6: explicit positional sessions lose their held-out drives too, and
+    an empty remainder is refused with the cause — not trained, and not
+    reported as "none found"."""
+    config_path = _write_config(tmp_path)
+    only = _write_obd_session(tmp_path, "only", rows=20, start_epoch=1_778_500_000.0)
+    restart = _write_obd_session(tmp_path, "restart", rows=20, start_epoch=1_778_500_060.0)
+
+    exit_code = main(
+        [
+            str(only),
+            str(restart),
+            "--config",
+            str(config_path),
+            "--bindings",
+            str(_no_bindings(tmp_path)),
+            "--out",
+            str(tmp_path / "m"),
+            "--calibration-sessions",
+            str(restart),
+        ]
+    )
+
+    assert exit_code == 2
+    err = capsys.readouterr().err
+    assert "nothing left to train on" in err
+    assert "only, restart" in err
+    assert not (tmp_path / "m" / "model.pt").exists()

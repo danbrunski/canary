@@ -29,9 +29,9 @@ import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import (
-    GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
+    is_flag_column,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
 
@@ -181,7 +181,7 @@ def _resolve_columns(
         col = str(raw)
         if col in skip_exact:
             continue
-        if col.endswith(GAP_SUFFIX):
+        if is_flag_column(col):
             continue
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue

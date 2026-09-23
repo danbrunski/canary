@@ -240,3 +240,56 @@ def test_slow_classification_keeps_run_time_ungapped_at_real_cadence() -> None:
     )
     out = resample_wide(wide, config=ResampleConfig(hz=1.0))
     assert not out[gap_column("obd:RUN_TIME")].astype(bool).any()
+
+
+def test_arrived_flag_marks_only_rows_a_sample_was_delivered_to() -> None:
+    """A03.1: ``__arrived`` is set on the row whose interval ``(t-1, t]``
+    received a sample; forward-filled rows inside ``max_gap`` keep ``__gap``
+    False but are *not* arrivals. A slow channel's rows between polls are the
+    case the old mask got wrong (baro: 52 samples, mask 1 on 90.8 % of rows)."""
+    from src.preprocessing.resampler import arrived_column, is_flag_column
+
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:RPM": 700.0, "obd:BAROMETRIC": 80.0},
+            # Off-grid: labelled on row 1 by value binning, delivered by row 2.
+            {"session": "s1", "timestamp": _ts(1) + timedelta(milliseconds=400), "obd:RPM": 710.0},
+            {"session": "s1", "timestamp": _ts(2), "obd:RPM": 720.0},
+            {"session": "s1", "timestamp": _ts(8), "obd:RPM": 730.0, "obd:BAROMETRIC": 81.0},
+        ]
+    )
+
+    result = resample_wide(wide, config=ResampleConfig(hz=1.0, max_gap_factor=2.0))
+
+    rpm = result[arrived_column("obd:RPM")].tolist()
+    assert rpm == [True, False, True, False, False, False, False, False, True]
+    baro = result[arrived_column("obd:BAROMETRIC")].tolist()
+    assert baro == [True, False, False, False, False, False, False, False, True]
+    # Baro is fresh (slow ceiling) on every row, arrived on two.
+    assert not result[gap_column("obd:BAROMETRIC")].any()
+    assert is_flag_column(arrived_column("obd:RPM"))
+    assert is_flag_column(gap_column("obd:RPM"))
+    assert not is_flag_column("obd:RPM")
+
+
+def test_resample_long_emits_the_same_arrival_flags_as_resample_wide() -> None:
+    from src.preprocessing.resampler import arrived_column, resample_long
+
+    stamps = [_ts(0), _ts(1) + timedelta(milliseconds=300), _ts(4), _ts(6)]
+    long = pd.DataFrame(
+        {
+            SESSION_COLUMN: "s1",
+            TIMESTAMP_COLUMN: stamps,
+            "source_channel": "obd:RPM",
+            "value_number": [700.0, 710.0, 720.0, 730.0],
+        }
+    )
+    wide = pd.DataFrame(
+        {SESSION_COLUMN: "s1", TIMESTAMP_COLUMN: stamps, "obd:RPM": [700.0, 710.0, 720.0, 730.0]}
+    )
+    config = ResampleConfig(hz=1.0, max_gap_factor=2.0)
+
+    from_long = resample_long(long, config=config)[arrived_column("obd:RPM")].tolist()
+    from_wide = resample_wide(wide, config=config)[arrived_column("obd:RPM")].tolist()
+
+    assert from_long == from_wide == [True, False, True, False, True, False, True]

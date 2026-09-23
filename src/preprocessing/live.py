@@ -70,7 +70,12 @@ from src.decode.engineering import physical_value
 from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
-from src.preprocessing.resampler import gap_column, is_slow_channel, resample_config_for
+from src.preprocessing.resampler import (
+    arrived_column,
+    gap_column,
+    is_slow_channel,
+    resample_config_for,
+)
 from src.preprocessing.session_context import (
     EngineStartTracker,
     StartContextSpec,
@@ -178,6 +183,12 @@ class LiveFeatureSource:
     #: serve derives each channel's mask (``age ≤ max_gap``) and Δt (``age``)
     #: from this, mirroring the resampler's ``__gap`` rule with no resampler.
     _last_observed_at: dict[str, datetime] = field(default_factory=dict)
+    #: A03.1 — ``now`` of the previous :meth:`prepare_tick` call (emitted or
+    #: not). A channel's ``__arrived`` flag is set when its newest accepted
+    #: observation was stamped after this: the cell's value was delivered
+    #: since the previous tick, the live twin of the resampler's
+    #: ``(t - interval, t]`` rule.
+    _last_tick_at: datetime | None = field(init=False, default=None)
     #: Per-channel count of values rejected by the quality gate (Task 1.2) —
     #: never silently swallowed, surfaced via :attr:`reject_counts`. Cleared
     #: on :meth:`reset` like every other observation-derived state.
@@ -501,10 +512,14 @@ class LiveFeatureSource:
         serialized with :meth:`observe`. The returned value is self-contained
         and safe to pickle to the persistent feature process.
         """
+        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
+        previous_tick = self._last_tick_at
+        # Every tick call closes an arrival window, emitted or not, exactly as
+        # the offline grid has a row per interval before fully-stale rows drop.
+        self._last_tick_at = now_utc
         if not self._current_values:
             self.latest_operating_point = None
             return None
-        now_utc = now if now.tzinfo is not None else now.replace(tzinfo=UTC)
         gap_flags = self._gap_flags(now_utc)
         if gap_flags and all(gap_flags.values()):
             self.latest_operating_point = None
@@ -521,6 +536,9 @@ class LiveFeatureSource:
             # channel is now gap-tracked, fast and slow) so the GRU-D serve
             # path derives mask (¬gap) and Δt (age) identically to training.
             **gap_flags,
+            # A03.1 — per-channel "a sample arrived this tick" flags; the
+            # sequence mask of an artifact trained on them reads these.
+            **self._arrival_flags(previous_tick),
         }
         snapshot.update(self._start_context(snapshot, now_utc))
         self._buffer.append(snapshot)
@@ -676,6 +694,23 @@ class LiveFeatureSource:
             flags[gap_column(channel)] = age > max_gap
         return flags
 
+    def _arrival_flags(self, previous_tick: datetime | None) -> dict[str, bool]:
+        """Per-channel ``<channel>__arrived`` flags (A03.1).
+
+        ``True`` when the channel's newest accepted observation was stamped
+        after the previous tick: the value in this row's cell was delivered
+        since then. On the first tick after a reset every observed channel has
+        arrived. Quality-gate rejects never stamp, so they never arrive — as
+        offline, where the gate NaNs them before the resampler sees them.
+        """
+        flags: dict[str, bool] = {}
+        for channel in self._current_values:
+            observed_at = self._last_observed_at.get(channel)
+            flags[arrived_column(channel)] = observed_at is not None and (
+                previous_tick is None or observed_at > previous_tick
+            )
+        return flags
+
     def _bounded_values(self, gap_flags: dict[str, bool]) -> dict[str, float]:
         """``_current_values`` with each stale (gap-flagged) channel NaN'd out.
 
@@ -758,6 +793,7 @@ class LiveFeatureSource:
         self._generation += 1
         self._current_values = {}
         self._last_observed_at = {}
+        self._last_tick_at = None
         self._reject_counts = {}
         self._buffer = deque(maxlen=self._max_rows)
         self.latest_operating_point = None

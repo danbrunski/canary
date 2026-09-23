@@ -13,11 +13,17 @@ a gap: every window inside a session is valid, and staleness is handed to the
 model through the mask/Δt channels rather than dropped. The only remaining guard
 is leading rows before a channel's first observation, which are imputed to 0
 (the empirical mean in z-scored feature space) and masked as unobserved.
+
+"Freshly observed" is literal only under :data:`MASK_ARRIVED_SAMPLE` (A03.1,
+a sample arrived this tick). Artifacts trained before it recorded
+:data:`MASK_FRESH_WITHIN_MAX_GAP`, where forward-filled cells younger than
+``max_gap`` (2 s fast, 120 s slow) also read as observed; they keep receiving
+that mask (``OBSERVATION_MASK_SCHEMA_KEY``).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -29,7 +35,13 @@ from src.config import CanaryConfig
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.features import _FEATURE_SUFFIXES, FeatureConfig, compute_features
 from src.preprocessing.loader import TelemetryValueKind, resample_and_segment
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.resampler import (
+    ARRIVED_SUFFIX,
+    GAP_SUFFIX,
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    is_flag_column,
+)
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -42,6 +54,67 @@ DEFAULT_SEQUENCE_STRIDE = 1
 #: the live ``SequenceWindowBuffer`` both read this one value, so a model is
 #: calibrated on exactly the windows it will be served.
 WINDOW_MAX_GAP_SECONDS = 5.0
+
+#: A03.1 — manifest ``schema`` key recording what the sequence mask means for
+#: an artifact: ``{"rule": <one of MASK_RULES>, "freshness_fallback_columns":
+#: [...]}``. Training writes the rule the dataset actually used; serving reads
+#: it, so an artifact is always fed the mask it was trained on. Absent on
+#: artifacts trained before the record existed, which all used
+#: :data:`MASK_FRESH_WITHIN_MAX_GAP`.
+OBSERVATION_MASK_SCHEMA_KEY = "observation_mask"
+#: Legacy: ``1`` where ``¬<channel>__gap`` and the value is finite — "the newest
+#: sample is younger than ``max_gap``". Forward-filled cells read as observed
+#: (baro: 52 real samples in 1,085 s, mask 1 on 90.8 % of rows). The deployed
+#: 2026-09-20 artifact was trained on this; it keeps receiving it.
+MASK_FRESH_WITHIN_MAX_GAP = "fresh_within_max_gap"
+#: ``1`` where ``<channel>__arrived`` and the value is finite — a sample was
+#: delivered this tick. A column whose channel carries no arrival flag (some
+#: derived channels) falls back to the freshness rule and is named in the
+#: record's ``freshness_fallback_columns``.
+MASK_ARRIVED_SAMPLE = "arrived_sample"
+MASK_RULES: tuple[str, ...] = (MASK_FRESH_WITHIN_MAX_GAP, MASK_ARRIVED_SAMPLE)
+#: What new training uses.
+DEFAULT_TRAINING_MASK_RULE = MASK_ARRIVED_SAMPLE
+
+
+def observation_mask_record(
+    rule: str, freshness_fallback_columns: Sequence[str] = ()
+) -> dict[str, Any]:
+    """The schema entry a trainer writes under :data:`OBSERVATION_MASK_SCHEMA_KEY`."""
+    _check_mask_rule(rule)
+    return {
+        "rule": rule,
+        "freshness_fallback_columns": [str(column) for column in freshness_fallback_columns],
+    }
+
+
+def observation_mask_from_schema(schema: Mapping[str, Any]) -> tuple[str, frozenset[str]]:
+    """``(rule, freshness_fallback_columns)`` an artifact was trained with.
+
+    A schema without the record predates it and was trained on
+    :data:`MASK_FRESH_WITHIN_MAX_GAP`. An unknown rule is refused: guessing
+    would feed the encoder a mask it never saw.
+    """
+    record = schema.get(OBSERVATION_MASK_SCHEMA_KEY)
+    if record is None:
+        return MASK_FRESH_WITHIN_MAX_GAP, frozenset()
+    if not isinstance(record, Mapping):
+        raise ValueError(f"schema {OBSERVATION_MASK_SCHEMA_KEY!r} must be a mapping")
+    rule = str(record.get("rule"))
+    _check_mask_rule(rule)
+    fallback = record.get("freshness_fallback_columns") or ()
+    return rule, frozenset(str(column) for column in fallback)
+
+
+def _check_mask_rule(rule: str) -> None:
+    if rule not in MASK_RULES:
+        raise ValueError(f"unknown observation mask rule {rule!r}; expected one of {MASK_RULES}")
+
+
+def arrival_column_for(feature_column: str) -> str:
+    """The ``__arrived`` flag a feature column's mask reads (rolling siblings
+    share their base channel's)."""
+    return f"{_channel_base(feature_column)}{ARRIVED_SUFFIX}"
 
 
 class MissingSequenceDependencyError(ImportError):
@@ -90,6 +163,10 @@ class SequenceWindowBuildResult:
     windows: tuple[SequenceWindow, ...]
     mask: np.ndarray[Any, np.dtype[np.float64]]
     delta: np.ndarray[Any, np.dtype[np.float64]]
+    #: A03.1 — the mask rule applied, and the columns that fell back to the
+    #: freshness rule under :data:`MASK_ARRIVED_SAMPLE` (no arrival flag).
+    observation_mask: str = MASK_FRESH_WITHIN_MAX_GAP
+    freshness_fallback_columns: tuple[str, ...] = ()
 
 
 class SequenceWindowDataset:
@@ -109,6 +186,8 @@ class SequenceWindowDataset:
         feature_columns: Iterable[str] | None = None,
         gap_columns: Iterable[str] | None = None,
         dtype: str = "float32",
+        observation_mask: str | None = None,
+        session_envelopes: Mapping[str, Any] | None = None,
     ) -> None:
         build = build_sequence_windows(
             frame,
@@ -116,7 +195,15 @@ class SequenceWindowDataset:
             stride=stride,
             feature_columns=feature_columns,
             gap_columns=gap_columns,
+            observation_mask=observation_mask,
         )
+        #: A03.1 — the mask rule these windows carry (recorded in the manifest).
+        self.observation_mask = build.observation_mask
+        self.freshness_fallback_columns = build.freshness_fallback_columns
+        #: A03.8 — per-session, per-mode envelope summaries of the *unscaled*
+        #: frame (``sequence_training.session_envelopes``), attached by the
+        #: caller that still has raw values. ``None`` when nobody did.
+        self.session_envelopes = None if session_envelopes is None else dict(session_envelopes)
         self.frame = build.frame
         self.feature_columns = build.feature_columns
         self.gap_columns = build.gap_columns
@@ -145,6 +232,7 @@ class SequenceWindowDataset:
         feature_columns: Iterable[str] | None = None,
         gap_columns: Iterable[str] | None = None,
         dtype: str = "float32",
+        observation_mask: str | None = None,
     ) -> SequenceWindowDataset:
         frame = sequence_frame_from_sessions(session_dirs, config, value=value)
         length = (
@@ -159,6 +247,7 @@ class SequenceWindowDataset:
             feature_columns=feature_columns,
             gap_columns=gap_columns,
             dtype=dtype,
+            observation_mask=observation_mask,
         )
 
     def __len__(self) -> int:
@@ -205,6 +294,7 @@ def build_sequence_windows(
     feature_columns: Iterable[str] | None = None,
     gap_columns: Iterable[str] | None = None,
     max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS,
+    observation_mask: str | None = None,
 ) -> SequenceWindowBuildResult:
     """Return every window that stays inside a session, with per-cell mask/Δt.
 
@@ -214,10 +304,14 @@ def build_sequence_windows(
 
     GRU-D feeds missingness to the model, so this no longer rejects windows that
     touch a gap or contain forward-filled cells — every contiguous window inside
-    a session is valid. The mask (``1`` where the channel was freshly observed,
-    derived from ``¬<channel>__gap``) and Δt (cumulative seconds since the last
+    a session is valid. The mask and Δt (cumulative seconds since the last
     observation per channel) are computed once over the full frame and sliced
-    per window.
+    per window. What the mask means is ``observation_mask`` (A03.1, see
+    :data:`MASK_RULES`): ``None`` picks :data:`MASK_ARRIVED_SAMPLE` when the
+    frame carries ``__arrived`` flags for its features and the legacy
+    :data:`MASK_FRESH_WITHIN_MAX_GAP` otherwise. Asking for the arrival rule on
+    a frame without a single arrival flag (a feature frame built before the
+    flags existed) is refused rather than silently degraded.
     """
     _validate_window_params(sequence_length, stride)
     _require_columns(frame, [SESSION_COLUMN, TIMESTAMP_COLUMN])
@@ -238,8 +332,11 @@ def build_sequence_windows(
         feature_bases = {_channel_base(column) for column in features}
         gaps = tuple(gap for gap in gaps if gap[: -len(GAP_SUFFIX)] in feature_bases)
 
+    rule = _resolve_mask_rule(ordered, features, observation_mask)
     segments = contiguous_segments(ordered, max_gap_seconds=max_gap_seconds)
-    mask, delta = _frame_mask_delta(ordered, features, gaps, gap_columns is not None, segments)
+    mask, delta, fallback = _frame_mask_delta(
+        ordered, features, gaps, gap_columns is not None, segments, observation_mask=rule
+    )
 
     windows: list[SequenceWindow] = []
     for session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
@@ -270,7 +367,26 @@ def build_sequence_windows(
         windows=tuple(windows),
         mask=mask,
         delta=delta,
+        observation_mask=rule,
+        freshness_fallback_columns=fallback,
     )
+
+
+def _resolve_mask_rule(
+    ordered: pd.DataFrame, features: Sequence[str], requested: str | None
+) -> str:
+    has_arrivals = any(arrival_column_for(column) in ordered.columns for column in features)
+    if requested is None:
+        return MASK_ARRIVED_SAMPLE if has_arrivals else MASK_FRESH_WITHIN_MAX_GAP
+    _check_mask_rule(requested)
+    if requested == MASK_ARRIVED_SAMPLE and not has_arrivals and len(ordered):
+        raise ValueError(
+            "observation mask 'arrived_sample' requested but the frame carries no "
+            "<channel>__arrived flags for any feature column — it was built before "
+            "A03.1's arrival flags (rebuild the feature cache; FEATURE_FRAME_CACHE_VERSION "
+            "5) or by a path that drops them"
+        )
+    return requested
 
 
 def contiguous_segments(
@@ -304,10 +420,19 @@ def _frame_mask_delta(
     gaps: Sequence[str],
     explicit_gaps: bool,
     segments: np.ndarray[Any, np.dtype[np.int64]] | None = None,
-) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
+    *,
+    observation_mask: str = MASK_FRESH_WITHIN_MAX_GAP,
+) -> tuple[
+    np.ndarray[Any, np.dtype[np.float64]],
+    np.ndarray[Any, np.dtype[np.float64]],
+    tuple[str, ...],
+]:
     """Compute per-cell observed-mask and Δt over the full frame.
 
-    Mask is ``1`` where a channel is freshly observed. For an auto-resolved
+    Under :data:`MASK_ARRIVED_SAMPLE` a column whose ``__arrived`` flag is in
+    the frame is observed where the flag is set and the value is finite; the
+    rest fall back to the freshness rule below and are returned as the third
+    element. Under :data:`MASK_FRESH_WITHIN_MAX_GAP` (legacy): for an auto-resolved
     ``<channel>__gap`` column the resampler already encodes freshness, so
     ``mask = ¬gap`` AND the value is non-NaN. A channel with no gap column
     (slow / forward-filled, or an explicit gap-column caller) is observed
@@ -319,8 +444,9 @@ def _frame_mask_delta(
     n_features = len(features)
     mask = np.zeros((n_rows, n_features), dtype=np.float64)
     delta = np.zeros((n_rows, n_features), dtype=np.float64)
+    fallback: list[str] = []
     if n_rows == 0 or n_features == 0:
-        return mask, delta
+        return mask, delta, ()
 
     gap_by_base = {gap[: -len(GAP_SUFFIX)]: gap for gap in gaps if gap.endswith(GAP_SUFFIX)}
     values = ordered.loc[:, list(features)].to_numpy(dtype="float64")
@@ -328,6 +454,13 @@ def _frame_mask_delta(
 
     for col_index, column in enumerate(features):
         fresh = observed_value[:, col_index]
+        if observation_mask == MASK_ARRIVED_SAMPLE:
+            arrived = arrival_column_for(column)
+            if arrived in ordered.columns:
+                arrived_flags = ordered[arrived].fillna(False).astype(bool).to_numpy()
+                mask[:, col_index] = (fresh & arrived_flags).astype(np.float64)
+                continue
+            fallback.append(str(column))
         if not explicit_gaps:
             gap_col = gap_by_base.get(_channel_base(column))
             if gap_col is not None and gap_col in ordered.columns:
@@ -362,7 +495,7 @@ def _frame_mask_delta(
                     acc += step_seconds[local_index]
                 col_delta[local_index] = acc
             delta[rows, col_index] = col_delta
-    return mask, delta
+    return mask, delta, tuple(fallback)
 
 
 def resolve_sequence_feature_columns(
@@ -382,7 +515,7 @@ def resolve_sequence_feature_columns(
     discovered: list[str] = []
     for raw in frame.columns:
         column = str(raw)
-        if column in skip or column.endswith(GAP_SUFFIX):
+        if column in skip or is_flag_column(column):
             continue
         if pd.api.types.is_numeric_dtype(frame[column]):
             discovered.append(column)

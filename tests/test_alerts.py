@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -86,6 +87,14 @@ def test_event_from_lstm_result() -> None:
     assert event.operating_mode == "highway"
     assert event.session == "2026-05-13T005522"
     assert event.detail["channel_scores"]["rpm"] == 0.6
+    # A03.7: the ranking says what it is — a deviation, not a cause.
+    assert event.detail["channel_ranking"] == "largest_deviation_from_training_envelope"
+    assert "not a cause" in event.detail["channel_ranking_note"]
+    assert "driving conditions included" in event.detail["channel_ranking_note"]
+    # An engine_response artifact never ranks its context inputs; the note says so.
+    scoped = AnomalyEvent.from_lstm_result(replace(result, ranking_scope="engine_response_targets"))
+    assert "never ranked" in scoped.detail["channel_ranking_note"]
+    assert "driving conditions included" not in scoped.detail["channel_ranking_note"]
     # serialisable
     json.loads(event.to_json_line())
 

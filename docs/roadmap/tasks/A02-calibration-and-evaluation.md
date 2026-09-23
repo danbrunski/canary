@@ -143,6 +143,14 @@ This checklist builds the yardstick.
   themselves. A03.8's envelope record (baro/IAT/speed ranges per mode) does
   not exist yet; when it lands, its ranges become further violations in the
   same function.
+
+  *Envelope wired 2026-09-23 (A03.8).* `calibration_coverage_violations`
+  takes the training and calibration envelopes and refuses a scored mode
+  whose calibration range covers less than `MIN_ENVELOPE_COVERAGE` (80 %) of
+  its training rows on baro, IAT or speed, naming both ranges and the hours.
+  The same `--accept-thin-calibration` override stamps it. Test:
+  `test_a_calibration_outside_the_training_envelope_is_refused`. It takes
+  effect at the deferred retrain.
 - [~] **A02.3 — Set thresholds from the alert budget, over independent
   windows.** Each of the 98 families is cut at its 0.999 quantile over about
   36 non-overlapping windows, which is that session's maximum. Beating the

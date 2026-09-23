@@ -46,7 +46,12 @@ import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.preprocessing.resampler import (
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    arrived_column,
+    gap_column,
+)
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale", "intermittent"]
 
@@ -274,6 +279,12 @@ class AnomalyInjector:
             # stale everywhere (`observed_at.empty → True` for every row), not
             # just past the ceiling, so the whole window is flagged too.
             self._df.loc[mask, gap_col] = True
+        # A03.1: nothing arrives during a dropout. Without this an
+        # ``arrived_sample`` artifact would see the held value keep arriving —
+        # a stuck sensor, not a dropout — and derived channels would inherit it.
+        arrived_col = arrived_column(channel)
+        if arrived_col in self._df.columns:
+            self._df.loc[mask, arrived_col] = False
 
         self._windows.append(InjectionWindow(channel=channel, kind="dropout", start=s, end=e))
         return self

@@ -17,6 +17,20 @@ if TYPE_CHECKING:
 SESSION_COLUMN = "session"
 TIMESTAMP_COLUMN = "timestamp"
 GAP_SUFFIX = "__gap"
+#: A03.1 — per-cell "a sample arrived this tick" flag. ``True`` at grid row
+#: ``t`` when at least one (quality-gated, numeric) sample of the channel has a
+#: timestamp in ``(t - interval, t]``: the sample was delivered by the row's own
+#: time, since the previous row. ``__gap`` answers a different question ("is
+#: the newest sample younger than ``max_gap``?") and stays the dead-sensor
+#: signal; the two differ on every forward-filled row inside ``max_gap``.
+#: The live source (``LiveFeatureSource``) emits the same flag for the same
+#: stream: "the cell's value was delivered after the previous tick".
+ARRIVED_SUFFIX = "__arrived"
+#: Every per-channel bookkeeping suffix the resampler emits. A column ending in
+#: one of these is never a value channel: use :func:`is_flag_column` rather
+#: than testing one suffix, so a new flag cannot leak into rolling features,
+#: scalers or model schemas at the one call site that forgot it.
+FLAG_SUFFIXES: tuple[str, ...] = (GAP_SUFFIX, ARRIVED_SUFFIX)
 
 #: Default forward-fill ceiling for slow channels (seconds) — generous
 #: because slow sensors (coolant, IAT, baro) legitimately update on the
@@ -211,6 +225,7 @@ def _resample_one_long(
     fast = set(_fast_channels(channels, config))
     values: dict[str, np.ndarray] = {}
     gaps: dict[str, np.ndarray] = {}
+    arrivals: dict[str, np.ndarray] = {}
     for channel in channels:
         rows = numeric.loc[numeric[channel_column].astype(str) == channel]
         series = pd.Series(
@@ -225,6 +240,7 @@ def _resample_one_long(
         stale = _gap_flags(series, sampled_times, max_gap).to_numpy()
         values[channel] = sampled.where(~stale, np.nan).to_numpy(dtype="float32")
         gaps[gap_column(channel)] = stale
+        arrivals[arrived_column(channel)] = _arrival_flags(series, sampled_times, config.interval)
 
     return pd.concat(
         [
@@ -236,6 +252,7 @@ def _resample_one_long(
             ),
             pd.DataFrame(values),
             pd.DataFrame(gaps),
+            pd.DataFrame(arrivals),
         ],
         axis=1,
     )
@@ -244,6 +261,39 @@ def _resample_one_long(
 def gap_column(channel: str) -> str:
     """Return the boolean gap-flag column name for a channel."""
     return f"{channel}{GAP_SUFFIX}"
+
+
+def arrived_column(channel: str) -> str:
+    """Return the boolean "sample arrived this tick" column name (A03.1)."""
+    return f"{channel}{ARRIVED_SUFFIX}"
+
+
+def is_flag_column(column: object) -> bool:
+    """``True`` for per-channel bookkeeping columns (``__gap``, ``__arrived``)."""
+    return str(column).endswith(FLAG_SUFFIXES)
+
+
+def _arrival_flags(
+    original: pd.Series,
+    sampled_index: pd.Series,
+    interval: pd.Timedelta,
+) -> np.ndarray:
+    """``True`` at each grid point ``t`` with an observation in ``(t - interval, t]``.
+
+    The causal twin of the live source's arrival flag: a sample at 10.4 s is
+    flagged on the 11 s row (delivered since the 10 s row), however the grid's
+    *value* binning labels it.
+    """
+    sampled_times = pd.DatetimeIndex(pd.to_datetime(sampled_index, utc=True))
+    observed = original.dropna()
+    if observed.empty or len(sampled_times) == 0:
+        return np.zeros(len(sampled_times), dtype=bool)
+    # Both sides in nanoseconds: a DatetimeIndex may carry us or ns units.
+    stamps = np.sort(_epoch_ns(pd.DatetimeIndex(pd.to_datetime(observed.index, utc=True))))
+    grid = _epoch_ns(sampled_times)
+    upto_now = np.searchsorted(stamps, grid, side="right")
+    upto_previous = np.searchsorted(stamps, grid - int(interval.value), side="right")
+    return np.asarray(upto_now > upto_previous, dtype=bool)
 
 
 def is_slow_channel(channel: str, hints: Iterable[str] = DEFAULT_SLOW_CHANNEL_HINTS) -> bool:
@@ -279,21 +329,33 @@ def _resample_one_session(
     fast = set(_fast_channels(value_columns, config))
     masked: dict[str, np.ndarray] = {}
     gaps: dict[str, np.ndarray] = {}
+    arrivals: dict[str, np.ndarray] = {}
     for column in value_columns:
         max_gap = config.max_gap if column in fast else config.slow_channel_max_gap
         stale = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], max_gap)
         stale_mask = stale.to_numpy()
         gaps[gap_column(column)] = stale_mask
         masked[column] = sampled[column].where(~stale_mask, np.nan).to_numpy()
+        arrivals[arrived_column(column)] = _arrival_flags(
+            pd.to_numeric(indexed[column], errors="coerce"),
+            sampled[TIMESTAMP_COLUMN],
+            config.interval,
+        )
 
     return pd.concat(
         [
             sampled[[SESSION_COLUMN, TIMESTAMP_COLUMN]],
             pd.DataFrame(masked, index=sampled.index),
             pd.DataFrame(gaps, index=sampled.index),
+            pd.DataFrame(arrivals, index=sampled.index),
         ],
         axis=1,
     )
+
+
+def _epoch_ns(index: pd.DatetimeIndex) -> np.ndarray:
+    """UTC epoch nanoseconds, whatever the index's stored unit."""
+    return index.tz_convert("UTC").as_unit("ns").tz_localize(None).to_numpy().astype(np.int64)
 
 
 def _gap_flags(
@@ -342,8 +404,7 @@ def _value_columns(
         columns = [
             str(column)
             for column in wide.columns
-            if column not in {SESSION_COLUMN, TIMESTAMP_COLUMN}
-            and not str(column).endswith(GAP_SUFFIX)
+            if column not in {SESSION_COLUMN, TIMESTAMP_COLUMN} and not is_flag_column(column)
         ]
     _require_columns(wide, columns)
     return columns
@@ -351,4 +412,7 @@ def _value_columns(
 
 def _empty_resampled(value_columns: list[str], config: ResampleConfig) -> pd.DataFrame:
     gap_columns = [gap_column(column) for column in value_columns]
-    return pd.DataFrame(columns=[SESSION_COLUMN, TIMESTAMP_COLUMN, *value_columns, *gap_columns])
+    arrived_columns = [arrived_column(column) for column in value_columns]
+    return pd.DataFrame(
+        columns=[SESSION_COLUMN, TIMESTAMP_COLUMN, *value_columns, *gap_columns, *arrived_columns]
+    )

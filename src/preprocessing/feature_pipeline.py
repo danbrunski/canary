@@ -57,7 +57,7 @@ from src.preprocessing.features import (
 )
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, resample_wide
+from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, is_flag_column, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
@@ -322,7 +322,7 @@ def feature_policy_exclusions(
     out: dict[str, str] = {}
     for raw in features.columns:
         column = str(raw)
-        if column.endswith(GAP_SUFFIX):
+        if is_flag_column(column):
             continue
         base = _base_feature_name(column)
         if base in out:
@@ -1134,7 +1134,7 @@ def candidate_feature_columns(
     cols: list[str] = []
     for raw in features.columns:
         col = str(raw)
-        if col in skip_exact or col.endswith("__gap"):
+        if col in skip_exact or is_flag_column(col):
             continue
         # Behavior serving context (B01.5) — eligibility bookkeeping, never
         # a learned feature.

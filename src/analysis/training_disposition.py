@@ -74,6 +74,7 @@ from typing import Any
 import pandas as pd
 
 from src.decode.accepted_baselines import AcceptedBaselines
+from src.preprocessing.resampler import is_flag_column
 
 #: Rows in a (channel, operating_mode) group below this count can't support
 #: a meaningful quantile band — treat every value in that group as Accept
@@ -684,7 +685,7 @@ def _numeric_channels(frame: pd.DataFrame) -> list[str]:
         str(col)
         for col in frame.columns
         if str(col) not in _STRUCTURAL_COLUMNS
-        and not str(col).endswith("__gap")
+        and not is_flag_column(col)
         and pd.api.types.is_numeric_dtype(frame[col])
     ]
 

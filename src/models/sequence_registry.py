@@ -199,6 +199,18 @@ class SequenceAutoencoderManifest:
     #: A02.1 — held-out sessions the post-retrain gate scored, disjoint from
     #: ``calibration_sessions``. Empty when no evaluation holdout was spared.
     evaluation_sessions: tuple[str, ...] = ()
+    #: A03.5 — which sessions validated (early stopping) and by what stated
+    #: rule (``sequence_training.VALIDATION_RULE``), the modes they cover, and
+    #: whether the scaler was fit without them (A03.4). ``None`` without a
+    #: validation split and on manifests written before this field.
+    validation_holdout: Mapping[str, Any] | None = None
+    #: A03.8 — per operating mode, the hours of data the model was fit on and
+    #: the baro / IAT / speed ranges it saw (``sequence_training.merge_envelopes``).
+    #: ``None`` when the caller had no unscaled frame to measure.
+    training_envelope: Mapping[str, Any] | None = None
+    #: The same record for the calibration sessions (A02.2 refuses one that does
+    #: not cover the training envelope).
+    calibration_envelope: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +246,9 @@ class SequenceAutoencoderManifest:
                 None if self.calibration_holdout is None else dict(self.calibration_holdout)
             ),
             "evaluation_sessions": list(self.evaluation_sessions),
+            "validation_holdout": _optional_dict(self.validation_holdout),
+            "training_envelope": _optional_dict(self.training_envelope),
+            "calibration_envelope": _optional_dict(self.calibration_envelope),
         }
 
     @classmethod
@@ -273,7 +288,14 @@ class SequenceAutoencoderManifest:
                 else dict(data["calibration_holdout"])
             ),
             evaluation_sessions=tuple(str(x) for x in data.get("evaluation_sessions", [])),
+            validation_holdout=_optional_dict(data.get("validation_holdout")),
+            training_envelope=_optional_dict(data.get("training_envelope")),
+            calibration_envelope=_optional_dict(data.get("calibration_envelope")),
         )
+
+
+def _optional_dict(value: Any) -> dict[str, Any] | None:
+    return None if value is None else dict(value)
 
 
 def _optional_float(value: Any) -> float | None:

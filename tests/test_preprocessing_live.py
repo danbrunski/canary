@@ -846,3 +846,93 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
         "derived:AVG_ECONOMY_L_PER_100KM",
     ):
         assert live[channel] == pytest.approx(batch_last[channel]), channel
+
+
+# ---------------------------------------------------------------------------
+# A03.1 — "a sample arrived this tick": offline/live parity
+# ---------------------------------------------------------------------------
+
+
+def test_arrival_flags_match_the_resampler_for_the_same_stream(config: CanaryConfig) -> None:
+    """The offline resampler and the live source emit the same per-channel
+    ``__arrived`` flag for the same input stream: off-grid samples, a channel
+    that goes quiet, a slow channel between polls, and a quality-gate reject
+    (which arrives on neither path)."""
+    from src.preprocessing.quality_gate import apply_quality_gate
+    from src.preprocessing.resampler import (
+        SESSION_COLUMN,
+        TIMESTAMP_COLUMN,
+        arrived_column,
+        resample_config_for,
+        resample_wide,
+    )
+
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    stream: list[tuple[float, str, float]] = []
+    for i in range(20):
+        stream.append((i, "SPEED", float(i)))  # on-grid, every tick
+        if i not in {5, 6, 7}:
+            # Off-grid by 0.3 s; i=10 is the PID 0x0C rollover the gate rejects.
+            stream.append((i + 0.3, "RPM", 16383.0 if i == 10 else 800.0 + i))
+    for t in (0.0, 7.5, 14.2):
+        stream.append((t, "COOLANT_TEMP", 85.0 + t))
+    stream.sort()
+
+    src = LiveFeatureSource(config=config)
+    live: dict[str, list[bool]] = {"RPM": [], "SPEED": [], "COOLANT_TEMP": []}
+    pending = list(stream)
+    ticks = 20
+    for k in range(ticks):
+        now = base + timedelta(seconds=k)
+        while pending and pending[0][0] <= k:
+            t, channel, value = pending.pop(0)
+            src.observe(
+                TelemetryRecord.obd((base + timedelta(seconds=t)).timestamp(), channel, value, "")
+            )
+        prepared = src.prepare_tick(now)
+        assert prepared is not None
+        row = prepared.wide.iloc[-1]
+        for channel in live:
+            flag = row.get(arrived_column(f"obd:{channel}"), False)
+            live[channel].append(bool(flag) if not pd.isna(flag) else False)
+
+    wide = pd.DataFrame(
+        [
+            {
+                SESSION_COLUMN: "s",
+                TIMESTAMP_COLUMN: base + timedelta(seconds=t),
+                f"obd:{channel}": value,
+            }
+            for t, channel, value in stream
+        ]
+    )
+    gated, _quality = apply_quality_gate(wide)
+    offline = resample_wide(gated, config=resample_config_for(config))
+    assert len(offline) >= ticks
+    for channel, flags in live.items():
+        expected = offline[arrived_column(f"obd:{channel}")].astype(bool).tolist()[:ticks]
+        assert flags == expected, channel
+
+    # Spot-check the semantics, not just the agreement.
+    assert live["RPM"][:3] == [False, True, True]  # 0.3 s arrives on the 1 s row
+    assert live["RPM"][11] is False  # the rejected 10.3 s sample
+    assert [k for k, flag in enumerate(live["COOLANT_TEMP"]) if flag] == [0, 8, 15]
+
+
+def test_arrival_flags_survive_the_live_feature_transform(config: CanaryConfig) -> None:
+    """The sequence engine reads ``__arrived`` off the feature row, so the
+    shared wide→features transform must carry it through untouched and never
+    grow rolling features from it."""
+    src = LiveFeatureSource(config=config)
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    row = None
+    for k in range(3):
+        now = base + timedelta(seconds=k)
+        src.observe(TelemetryRecord.obd(now.timestamp(), "SPEED", 10.0, "km/h"))
+        if k == 0:
+            src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 900.0, "rpm"))
+        row = src.tick(now)
+    assert row is not None
+    assert bool(row["obd:SPEED__arrived"].iloc[0]) is True
+    assert bool(row["obd:RPM__arrived"].iloc[0]) is False
+    assert not any(str(c).startswith("obd:SPEED__arrived__") for c in row.columns)

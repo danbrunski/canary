@@ -158,7 +158,9 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
 
         Args (all ``(B, F)`` except ``hidden`` which is ``(B, hidden)``):
           ``value``        — z-scored channel values (forward-filled allowed)
-          ``mask``         — 1 where freshly observed, 0 where stale
+          ``mask``         — 1 where freshly observed, 0 where stale (what
+                             "fresh" means is the artifact's
+                             ``observation_mask`` rule, A03.1)
           ``delta``        — seconds since each channel's last observation
           ``hidden``       — previous hidden state
           ``last_observed``— last freshly-observed value per channel

@@ -625,3 +625,40 @@ def test_injected_spike_amplifies_under_z_score_scaling():
     clean_z = scaled.loc[~labels, "obd:RPM"].abs()
     assert anomalous_z.min() > 100.0  # spike is way out of distribution
     assert clean_z.max() < 5.0  # clean data stays bounded
+
+
+def test_nothing_arrives_inside_an_injected_dropout():
+    """A03.1: an ``arrived_sample`` artifact must see a dropout as silence, not
+    as the held value arriving every tick (a stuck sensor). Derived channels
+    inherit it, since their arrival is built from their inputs'."""
+    from src.analysis.derived import compute_anomaly_signals
+    from src.preprocessing.resampler import arrived_column, gap_column
+
+    n = 12
+    frame = _clean_frame(
+        n,
+        channels={
+            "obd:LONG_FUEL_TRIM_1": [2.0] * n,
+            "obd:LONG_FUEL_TRIM_2": [1.0] * n,
+        },
+    )
+    for channel in ("obd:LONG_FUEL_TRIM_1", "obd:LONG_FUEL_TRIM_2"):
+        frame[gap_column(channel)] = False
+        frame[arrived_column(channel)] = True
+
+    inj = AnomalyInjector(frame)
+    for channel in ("obd:LONG_FUEL_TRIM_1", "obd:LONG_FUEL_TRIM_2"):
+        inj.dropout(
+            channel=channel,
+            start="2026-05-11T15:00:03Z",
+            end="2026-05-11T15:00:09Z",  # rows 3..8
+            max_gap_seconds=2.0,
+        )
+    arrived = inj.df[arrived_column("obd:LONG_FUEL_TRIM_1")].tolist()
+    assert arrived == [True] * 3 + [False] * 6 + [True] * 3
+    # Within the ceiling the held value is still there — it just never arrives.
+    assert inj.df["obd:LONG_FUEL_TRIM_1"].iloc[3] == 2.0
+
+    derived = compute_anomaly_signals(inj.df)
+    balance = derived[arrived_column("derived:LTFT_BANK_BALANCE")].tolist()
+    assert balance == [True] * 3 + [False] * 6 + [True] * 3

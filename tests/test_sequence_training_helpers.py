@@ -209,3 +209,143 @@ def test_sequence_manifest_round_trips_calibration_holdout_and_tolerates_its_abs
     holdout = {"sessions_used": ["a"], "below_recommended_minimum": True}
     manifest = SequenceAutoencoderManifest.from_dict({**payload, "calibration_holdout": holdout})
     assert manifest.to_dict()["calibration_holdout"] == holdout
+
+
+# ---------------------------------------------------------------------------
+# A03.5 — validation sessions by a stated rule
+# ---------------------------------------------------------------------------
+
+
+def _mode_session(session: str, start: str, modes: list[tuple[str, int]]) -> pd.DataFrame:
+    rows = sum(n for _mode, n in modes)
+    frame = _session_block(session, rows, start)
+    frame["operating_mode"] = [mode for mode, n in modes for _ in range(n)]
+    return frame
+
+
+def _mode_corpus() -> pd.DataFrame:
+    """Two tiny idle-only drives (what the old smallest-first split always
+    picked), and bigger drives carrying city and highway. ``C``/``C2`` are one
+    physical drive (restart one minute apart)."""
+    return pd.concat(
+        [
+            _mode_session("A", "2026-05-11T00:00:00Z", [("idle", 44)]),
+            _mode_session("B", "2026-05-11T01:00:00Z", [("idle", 48)]),
+            _mode_session("C", "2026-05-11T02:00:00Z", [("city", 120), ("idle", 40)]),
+            _mode_session("C2", "2026-05-11T02:03:40Z", [("city", 60)]),
+            _mode_session("D", "2026-05-11T03:00:00Z", [("highway", 160), ("city", 80)]),
+            _mode_session("E", "2026-05-11T04:00:00Z", [("highway", 200), ("city", 120)]),
+            _mode_session("F", "2026-05-11T05:00:00Z", [("idle", 120), ("highway", 60)]),
+        ],
+        ignore_index=True,
+    )
+
+
+def test_validation_spans_the_scored_modes_by_whole_drive() -> None:
+    from src.models.sequence_training import (
+        MIN_CALIBRATION_SAMPLES,
+        VALIDATION_RULE,
+        choose_validation_sessions,
+    )
+
+    frame = _mode_corpus()
+    choice = choose_validation_sessions(
+        frame, sequence_length=4, validation_fraction=0.25, random_state=7
+    )
+    record = choice.record
+    assert record["rule"] == VALIDATION_RULE
+    assert set(record["modes_scored"]) == {"idle", "city", "highway"}
+    assert set(record["modes_covered"]) == {"idle", "city", "highway"}
+    # Not the two smallest sessions (the old stable-sort outcome).
+    assert set(choice.sessions) != {"A", "B"}
+    # A drive is held out whole: C and C2 go together or not at all.
+    assert ("C" in choice.sessions) == ("C2" in choice.sessions)
+    # Every scored mode is still trainable.
+    train = frame[~frame["session"].isin(choice.sessions)]
+    for mode in record["modes_scored"]:
+        assert (train["operating_mode"] == mode).sum() // 4 >= MIN_CALIBRATION_SAMPLES
+    # Deterministic for a seed, and the record names what it held.
+    again = choose_validation_sessions(
+        frame, sequence_length=4, validation_fraction=0.25, random_state=7
+    )
+    assert again.sessions == choice.sessions
+    assert record["sessions"] == list(choice.sessions)
+    assert 0 < record["windows"] <= 2 * record["target_windows"] + 1
+
+
+def test_one_drive_falls_back_to_a_tail_block_and_says_so() -> None:
+    torch = pytest.importorskip("torch")
+    del torch
+    from src.models.sequence_training import validation_split
+
+    dataset = SequenceWindowDataset(
+        _single_session_frame(rows=60), sequence_length=4, feature_columns=("rpm", "speed")
+    )
+    split = validation_split(dataset, validation_fraction=0.2, random_state=7)
+    assert split.record is not None
+    assert split.record["fallback"] == "tail_block"
+    assert min(split.validation_indexes) > max(split.train_indexes)
+
+
+# ---------------------------------------------------------------------------
+# A03.8 — training envelope per mode
+# ---------------------------------------------------------------------------
+
+
+def _envelope_frame(session: str, baro: list[float], mode: str = "city") -> pd.DataFrame:
+    frame = _session_block(session, len(baro), "2026-05-11T00:00:00Z")
+    frame["operating_mode"] = mode
+    frame["obd:BAROMETRIC_PRESSURE"] = baro
+    frame["obd:SPEED"] = 40.0
+    return frame
+
+
+def test_envelope_records_hours_and_ranges_per_mode_and_merges_exactly() -> None:
+    from src.models.sequence_training import merge_envelopes, session_envelopes
+
+    frame = pd.concat(
+        [
+            _envelope_frame("home", [80.0] * 30 + [float("nan")] * 6),
+            _envelope_frame("trip", [63.5] * 12 + [72.0] * 24),
+            _envelope_frame("idle", [80.0] * 36, mode="idle"),
+        ],
+        ignore_index=True,
+    )
+    per_session = session_envelopes(frame, interval_seconds=1.0)
+    both = merge_envelopes(per_session, ["home", "trip"])
+    city = both["modes"]["city"]
+    assert city["rows"] == 72
+    assert city["hours"] == pytest.approx(72 / 3600, abs=1e-4)
+    baro = city["quantities"]["baro_kpa"]
+    assert (baro["min"], baro["max"], baro["rows"]) == (63.5, 80.0, 66)
+    assert baro["histogram"] == {"63": 12, "72": 24, "80": 30}
+    assert city["unmeasured"] == ["iat_c"]
+    assert set(both["modes"]) == {"city"}  # "idle" session not requested
+    assert merge_envelopes(per_session)["modes"]["idle"]["rows"] == 36
+
+
+def test_a_calibration_that_misses_the_training_envelope_is_a_violation() -> None:
+    """The 2026-09-20 shape: calibrated at 71–73 kPa, trained mostly at 80."""
+    from src.models.sequence_training import (
+        envelope_coverage,
+        envelope_coverage_violations,
+        merge_envelopes,
+        session_envelopes,
+    )
+
+    training = merge_envelopes(
+        session_envelopes(_envelope_frame("t", [80.0] * 90 + [72.0] * 10), interval_seconds=1.0)
+    )
+    thin = merge_envelopes(
+        session_envelopes(_envelope_frame("c", [71.0, 72.0, 73.0] * 10), interval_seconds=1.0)
+    )
+    wide = merge_envelopes(
+        session_envelopes(_envelope_frame("c", [72.0] * 5 + [80.0] * 25), interval_seconds=1.0)
+    )
+    assert envelope_coverage(training, thin, mode="city", quantity="baro_kpa") == pytest.approx(0.1)
+    violations = envelope_coverage_violations(training, thin, modes=["city"])
+    assert len(violations) == 1
+    assert "baro_kpa spans 71–73, covering 10%" in violations[0]
+    assert envelope_coverage_violations(training, wide, modes=["city"]) == []
+    # A mode the calibration never visited is the mode check's to report.
+    assert envelope_coverage_violations(training, wide, modes=["highway"]) == []

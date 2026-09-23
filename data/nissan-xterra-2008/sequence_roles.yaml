@@ -1,0 +1,74 @@
+# Roles of this vehicle's broadcast (decoded:) and Mode 22 (did:) channels for
+# the sequence detector's `engine_response` feature set (A03.2/A03.3,
+# src/models/sequence_feature_set.py). Generic J1979 PIDs and code-derived
+# channels are assigned in code; only what is specific to this vehicle is here.
+#
+#   inputs:  operator commands and environment the engine responds to. They
+#            condition the encoder and are never scored.
+#   targets: what the engine does in response. The only reconstruction loss and
+#            the only score.
+#   mirrors: a broadcast copy of a Mode 01 PID, dropped in favour of the PID
+#            (one source per physical quantity). A channel may be listed here
+#            only when tests/fixtures/ground_truth/expectations.yaml confirms it
+#            1:1 against that PID under `unit_agreement` — the ground-truth
+#            suite chooses, and tests/test_sequence_feature_set.py enforces it.
+#   excluded: logged but not an engine input or response.
+#
+# A channel in none of these lists is `unassigned`: kept out of the
+# engine_response set and named in the manifest record, never silently scored.
+# The `all_channels` set (the deployed default) ignores this file.
+inputs:
+  engine_speed:
+    - did:ECM_RPM              # Mode 22 rpm; no ground-truth pairing yet
+  pedal_voltage:
+    - decoded:ECM_ACCEL_PEDAL_POS_V
+  throttle_voltage:
+    - decoded:ECM_THROTTLE_SENSOR_V
+  throttle_position_sensor_1:
+    - did:ECM_THROTTLE_POS_SENSOR_1
+  throttle_position_sensor_2:
+    - did:ECM_THROTTLE_POS_SENSOR_2
+  ac_load:
+    - decoded:AC_COMPRESSOR_STATE
+  cooling_fan_load:
+    - decoded:COOLING_FAN_1F9_0
+  brake_pressure:
+    - decoded:BRAKE_PRESSURE_29E_3
+  brake_activity:
+    - decoded:BRAKE_ACTIVITY_29E_7
+
+targets:
+  air_charge:
+    - did:ECM_AIR_CHARGE
+  broadcast_airflow:
+    - decoded:ECM_AIRFLOW_233_B2   # scale not pinned; not a confirmed obd:MAF mirror
+  broadcast_calculated_load:
+    - decoded:ECM_CALC_LOAD_A
+  intake_vacuum_or_iac:
+    - decoded:ECM_INTAKE_VACUUM_OR_IAC
+  af_sensor_b1:
+    - did:ECM_AF_SENSOR_V_B1
+  af_sensor_b2:
+    - did:ECM_AF_SENSOR_V_B2
+  injector_pulse_1:
+    - did:ECM_INJECTOR_PULSE_1
+  injector_pulse_2:
+    - did:ECM_INJECTOR_PULSE_2
+
+mirrors:
+  obd:RPM:
+    channels: [decoded:ECM_RPM, decoded:ECM_RPM_23D]
+  obd:SPEED:
+    channels: [decoded:WHEEL_SPEED_6F7_A, decoded:WHEEL_SPEED_6F7_B, decoded:WHEEL_SPEED_6F7_C]
+  obd:COOLANT_TEMP:
+    channels: [decoded:ECM_COOLANT_TEMP, decoded:ECM_COOLANT_TEMP_233, decoded:ECM_COOLANT_TEMP_23D]
+
+excluded:
+  decoded:TPMS_FL_PRESSURE: tyre pressure; a driving condition the engine does not respond to
+  decoded:TPMS_FR_PRESSURE: tyre pressure; a driving condition the engine does not respond to
+  decoded:TPMS_RL_PRESSURE: tyre pressure; a driving condition the engine does not respond to
+  decoded:TPMS_RR_PRESSURE: tyre pressure; a driving condition the engine does not respond to
+  decoded:STEERING_ANGLE_002: steering; a driving condition the engine does not respond to
+  decoded:STEERING_RATE_002: steering; a driving condition the engine does not respond to
+  decoded:STEERING_002_LOW: steering; a driving condition the engine does not respond to
+  decoded:HVAC_BLOWER_LIGHTING_358_1: cabin HVAC/lighting; not an engine load the ECM sees directly

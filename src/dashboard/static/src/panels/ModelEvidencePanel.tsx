@@ -6,6 +6,7 @@ import {
   type ResidualEvidence,
   SOURCE_LABEL,
   SOURCES,
+  channelRankingCaption,
   extractChannelEvidence,
   extractHeatmap,
   extractOverlays,
@@ -147,6 +148,14 @@ function SourceEvidenceCard({
               {event.model_version}
             </dd>
           </dl>
+          {event.affected_channels.length > 0 && channelRankingCaption(event) && (
+            <p
+              className="mb-0 mt-2 text-[0.68rem] text-fg-faint"
+              title={channelRankingCaption(event)?.title}
+            >
+              {channelRankingCaption(event)?.caption} (not a cause)
+            </p>
+          )}
           {event.affected_channels.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {event.affected_channels.slice(0, 6).map((channel) => (

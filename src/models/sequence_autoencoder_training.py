@@ -38,7 +38,12 @@ from src.models.manifest import (
     validate_model_feature_spec,
     write_artifact,
 )
-from src.models.sequence_dataset import SequenceWindowDataset
+from src.models.sequence_dataset import (
+    OBSERVATION_MASK_SCHEMA_KEY,
+    SequenceWindowDataset,
+    observation_mask_record,
+)
+from src.models.sequence_feature_set import context_columns_from_schema
 from src.models.sequence_registry import (
     MIN_CALIBRATION_SESSIONS,
     SequenceAutoencoderManifest,
@@ -48,19 +53,22 @@ from src.models.sequence_registry import (
 from src.models.sequence_training import (
     MIN_CALIBRATION_SAMPLES,
     SequenceThresholdCalibration,
+    ValidationChoice,
     calibrate_sequence_thresholds,
     coerce_timestamp,
     cpu_state_dict,
     dataloader_kwargs_for_device,
+    envelope_coverage_violations,
     evaluate_loss,
     max_window_timestamp,
+    merge_envelopes,
     min_window_timestamp,
     observed_block_counts,
-    split_dataset,
     train_one_epoch,
     training_data_hash,
     training_sessions,
     validate_dataset_observations,
+    validation_split,
     window_blocks,
     window_modes,
 )
@@ -97,6 +105,9 @@ def calibration_coverage_violations(
     calibration: SequenceWindowDataset,
     *,
     held_out: bool,
+    training_envelope: Mapping[str, Any] | None = None,
+    calibration_envelope: Mapping[str, Any] | None = None,
+    context_columns: Sequence[str] = (),
 ) -> list[str]:
     """What a calibration fails to cover, before anything is trained.
 
@@ -106,7 +117,11 @@ def calibration_coverage_violations(
       :data:`MIN_CALIBRATION_SAMPLES` independent training windows) that the
       calibration gives no band of its own — held-out only;
     * a channel the model is trained to score that is never observed in any
-      calibration window.
+      calibration window (context inputs, A03.2, are not scored);
+    * (A03.8) a scored mode whose training envelope — baro, IAT, speed — the
+      calibration's range in that mode spans less than
+      ``sequence_training.MIN_ENVELOPE_COVERAGE`` of — held-out only, when the
+      training envelope was recorded.
 
     The 2026-09-20 artifact failed all three: one session, city and warmup
     only, and two injector-pulse channels with no calibration observations.
@@ -140,7 +155,23 @@ def calibration_coverage_violations(
                 f"{MIN_CALIBRATION_SAMPLES} independent calibration windows "
                 f"(calibration covers {sorted(calibrated_modes) or 'none'})"
             )
-    unobserved = sorted(c for c, n in observed_block_counts(calibration).items() if n == 0)
+        if training_envelope is not None:
+            if calibration_envelope is None:
+                violations.append(
+                    "calibration envelope not recorded, so its coverage of the training "
+                    "envelope cannot be checked (build the calibration dataset with "
+                    "session_envelopes)"
+                )
+            else:
+                violations.extend(
+                    envelope_coverage_violations(
+                        training_envelope, calibration_envelope, modes=sorted(trained_modes)
+                    )
+                )
+    context = set(context_columns)
+    unobserved = sorted(
+        c for c, n in observed_block_counts(calibration).items() if n == 0 and c not in context
+    )
     if unobserved:
         violations.append(f"channel(s) never observed in calibration: {unobserved}")
     return violations
@@ -207,6 +238,8 @@ def train_sequence_autoencoder(
     allow_in_sample_calibration: bool = False,
     calibration_sessions_requested: Sequence[str] | None = None,
     calibration_override: str | None = None,
+    validation_choice: ValidationChoice | None = None,
+    scaler_fit_sessions: Sequence[str] | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Train ``backend``'s autoencoder on clean sequence windows.
 
@@ -262,10 +295,61 @@ def train_sequence_autoencoder(
         context="training dataset",
     )
     calibration_source = calibration_dataset if calibration_dataset is not None else dataset
+    # A03.1 — thresholds are only comparable to serving scores when the
+    # calibration windows carry the mask the model was trained on.
+    if calibration_source.observation_mask != dataset.observation_mask:
+        raise ValueError(
+            f"calibration dataset uses observation mask {calibration_source.observation_mask!r} "
+            f"but the training dataset uses {dataset.observation_mask!r}"
+        )
+    # A03.2 — context inputs recorded in the feature spec condition the encoder
+    # and are kept out of the loss, the thresholds and the score.
+    context_columns = context_columns_from_schema(feature_spec or {})
+    unknown_context = sorted(set(context_columns) - set(dataset.feature_columns))
+    if unknown_context:
+        raise ValueError(f"feature spec context columns not in the dataset: {unknown_context}")
+    # A03.5 — validation drives by the stated rule, fixed before anything
+    # trains; A03.4 — the scaler the caller fit must not have seen them.
+    split = validation_split(
+        dataset,
+        validation_fraction=config.validation_fraction,
+        random_state=config.random_state,
+        choice=validation_choice,
+    )
+    validation_record = None if split.record is None else dict(split.record)
+    validation_session_names = {dataset.windows[i].session for i in split.validation_indexes}
+    train_session_names = sorted({dataset.windows[i].session for i in split.train_indexes})
+    if validation_record is not None:
+        if scaler_fit_sessions is not None:
+            leaked = sorted(validation_session_names & {str(x) for x in scaler_fit_sessions})
+            if leaked:
+                raise ValueError(
+                    f"the scaler was fit on validation session(s) {leaked}: fit it on the "
+                    "training sessions only (A03.4)"
+                )
+            validation_record["scaler_fit_excludes_validation"] = True
+        else:
+            validation_record["scaler_fit_excludes_validation"] = scaler is None
+    # A03.8 — the envelope of what the model is fit on (validation drives excluded).
+    training_envelope = (
+        merge_envelopes(dataset.session_envelopes, train_session_names)
+        if dataset.session_envelopes is not None
+        else None
+    )
+    calibration_envelope = (
+        merge_envelopes(calibration_dataset.session_envelopes)
+        if calibration_dataset is not None and calibration_dataset.session_envelopes is not None
+        else None
+    )
     override_record: dict[str, Any] | None = None
     if calibrate_thresholds:
         violations = calibration_coverage_violations(
-            dataset, calibration_source, held_out=calibration_dataset is not None
+            dataset,
+            calibration_source,
+            held_out=calibration_dataset is not None,
+            training_envelope=training_envelope,
+            calibration_envelope=calibration_envelope,
+            context_columns=context_columns,
         )
         if violations:
             if calibration_override is None or not calibration_override.strip():
@@ -298,11 +382,17 @@ def train_sequence_autoencoder(
         device=device,
         dtype=dtype,
     )
-    train_subset, validation_subset = split_dataset(
-        dataset,
-        validation_fraction=config.validation_fraction,
-        random_state=config.random_state,
+    train_subset = data.Subset(dataset, split.train_indexes)
+    validation_subset = (
+        data.Subset(dataset, split.validation_indexes) if split.validation_indexes else None
     )
+    loss_weights = None
+    if context_columns:
+        context_set = set(context_columns)
+        loss_weights = torch.tensor(
+            [0.0 if column in context_set else 1.0 for column in dataset.feature_columns],
+            device=device_obj,
+        )
     loader_kwargs = dataloader_kwargs_for_device(
         device, num_workers=getattr(config, "dataloader_workers", None)
     )
@@ -352,12 +442,17 @@ def train_sequence_autoencoder(
             device=device_obj,
             amp_dtype=amp_dtype,
             grad_scaler=grad_scaler,
+            loss_weights=loss_weights,
         )
         validation_loss = (
             None
             if validation_loader is None
             else evaluate_loss(
-                execution_model, validation_loader, device=device_obj, amp_dtype=amp_dtype
+                execution_model,
+                validation_loader,
+                device=device_obj,
+                amp_dtype=amp_dtype,
+                loss_weights=loss_weights,
             )
         )
         history.append(
@@ -400,6 +495,10 @@ def train_sequence_autoencoder(
     )
     validate_model_feature_spec(schema, context=f"{backend.model_type} training feature spec")
     schema["sequence_length"] = dataset.sequence_length
+    # A03.1 — the mask these windows carried; serving reads it back.
+    schema[OBSERVATION_MASK_SCHEMA_KEY] = observation_mask_record(
+        dataset.observation_mask, dataset.freshness_fallback_columns
+    )
     manifest = SequenceAutoencoderManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
         model_type=backend.model_type,
@@ -437,7 +536,10 @@ def train_sequence_autoencoder(
         },
         schema=schema,
         history=tuple(history),
-        scaler=_resolve_manifest_scaler(scaler, dataset).to_dict(),
+        scaler=_resolve_manifest_scaler(scaler, dataset, train_session_names).to_dict(),
+        validation_holdout=validation_record,
+        training_envelope=training_envelope,
+        calibration_envelope=calibration_envelope,
     )
     trained = TrainedSequenceAutoencoder(model=model, manifest=manifest)
     if not calibrate_thresholds:
@@ -451,6 +553,7 @@ def train_sequence_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
         training_observed_blocks=observed_block_counts(dataset),
+        context_columns=context_columns,
     )
     used_sessions = training_sessions(calibration_source)
     holdout = (
@@ -514,6 +617,7 @@ def calibrate_sequence_autoencoder_thresholds(
     calibrated_at: datetime | pd.Timestamp | str | None = None,
     threshold_quantile: float | None = None,
     training_observed_blocks: Mapping[str, int] | None = None,
+    context_columns: Sequence[str] = (),
 ) -> TrainedSequenceAutoencoder:
     """Attach masked reconstruction-error thresholds to a trained bundle.
 
@@ -531,6 +635,7 @@ def calibrate_sequence_autoencoder_thresholds(
         calibrated_at=calibrated_at,
         threshold_quantile=threshold_quantile,
         training_observed_blocks=training_observed_blocks,
+        context_columns=context_columns,
     )
     manifest = replace(trained.manifest, thresholds=calibration.to_dict())
     return TrainedSequenceAutoencoder(model=trained.model, manifest=manifest)
@@ -665,6 +770,7 @@ def _validate_loaded_manifest(
 def _resolve_manifest_scaler(
     scaler: ZScoreScaler | None,
     dataset: SequenceWindowDataset,
+    train_sessions: Sequence[str] | None = None,
 ) -> ZScoreScaler:
     """Pick the scaler to embed in the manifest.
 
@@ -680,7 +786,11 @@ def _resolve_manifest_scaler(
     """
     if scaler is not None:
         return scaler
-    return ZScoreScaler.fit(dataset.frame, columns=dataset.feature_columns)
+    frame = dataset.frame
+    if train_sessions:
+        # A03.4: validation rows never move the scaler.
+        frame = frame.loc[frame["session"].astype(str).isin(set(train_sessions))]
+    return ZScoreScaler.fit(frame, columns=dataset.feature_columns)
 
 
 def _validate_scaler(

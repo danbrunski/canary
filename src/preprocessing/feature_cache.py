@@ -39,7 +39,10 @@ DEFAULT_DIDS_PATH = Path("data/dids.yaml")
 #:     read 8x rpm / 16x km/h / degC + 40: on 2026-08-06T162657 (21% of rows on
 #:     the rpm fallback, 23% on speed) 15.9% of labels change — 500 rows move
 #:     highway -> city and 91 unknown -> idle_transient.
-FEATURE_FRAME_CACHE_VERSION = 4
+#: 5 — A03.1: the resampler (and derived channels) emit per-channel
+#:     ``__arrived`` flags. A cached frame without them would train a
+#:     sequence model whose "arrived" mask falls back to freshness everywhere.
+FEATURE_FRAME_CACHE_VERSION = 5
 
 
 def build_feature_frame_cache_key(

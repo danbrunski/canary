@@ -32,7 +32,12 @@ import pandas as pd
 
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.preprocessing.resampler import (
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    arrived_column,
+    gap_column,
+)
 
 if TYPE_CHECKING:
     # `src.analysis.afr` imports `fuel_properties` from this module, so the
@@ -126,16 +131,29 @@ def _append_dependency_gap(
     physical input used to compute it is stale or absent.
     """
     stale = pd.Series(False, index=frame.index, dtype=bool)
+    # A03.1 — the output's value is new on a row where any input it reads
+    # arrived (and none is stale). Only attached when every selected input
+    # carries an arrival flag; otherwise the sequence mask falls back to
+    # freshness for this output and the manifest names it.
+    arrived: pd.Series | None = pd.Series(False, index=frame.index, dtype=bool)
     for candidates in dependency_groups:
         selected = _selected_input(frame, candidates)
         if selected is None:
             stale |= True
+            arrived = None
             continue
         stale |= pd.to_numeric(frame[selected], errors="coerce").isna()
         source_gap = gap_column(selected)
         if source_gap in frame.columns:
             stale |= frame[source_gap].fillna(True).astype(bool)
+        source_arrived = arrived_column(selected)
+        if arrived is not None and source_arrived in frame.columns:
+            arrived |= frame[source_arrived].fillna(False).astype(bool)
+        else:
+            arrived = None
     frame[gap_column(output)] = stale
+    if arrived is not None:
+        frame[arrived_column(output)] = arrived & ~stale
 
 
 #: Inputs each derived channel needs, as the ordered fallback groups

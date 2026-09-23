@@ -23,7 +23,7 @@ import hashlib
 import json
 import os
 import platform
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from src.models.sequence_dataset import MissingSequenceDependencyError, SequenceWindowDataset
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -52,6 +53,8 @@ MIN_CALIBRATION_SAMPLES = 10
 #: every window of a small dataset is not rare, one present in 5 of 200 is.
 MIN_OBSERVED_BLOCKS = MIN_CALIBRATION_SAMPLES
 RARE_OBSERVED_FRACTION = 0.5
+#: Reason recorded for an ``engine_response`` context input (A03.2).
+CONTEXT_UNCALIBRATED_REASON = "context input: conditions the encoder, never scored (A03.2)"
 
 
 class SequenceModelLike(Protocol):
@@ -287,13 +290,21 @@ def uncalibrated_distribution() -> ReconstructionErrorDistribution:
     )
 
 
-def masked_mse_loss(reconstruction: Any, value: Any, mask: Any) -> Any:
+def masked_mse_loss(
+    reconstruction: Any, value: Any, mask: Any, loss_weights: Any | None = None
+) -> Any:
     """Masked MSE: ``sum(m ⊙ (recon − x)²) / sum(m)`` over the whole batch.
 
     Only observed cells (``mask == 1``) count, so the model is never trained to
     reconstruct a forward-filled fill. A degenerate all-stale batch (sum(m)==0)
     is clamped to a denominator of 1 so the loss is 0 rather than NaN.
+
+    ``loss_weights`` (``(F,)``, 0/1) restricts the loss to scored columns: the
+    context inputs of an ``engine_response`` feature set (A03.2) condition the
+    encoder through its input mask but are never reconstruction targets.
     """
+    if loss_weights is not None:
+        mask = mask * loss_weights
     squared = ((reconstruction - value) ** 2) * mask
     denominator = mask.sum().clamp(min=1.0)
     return squared.sum() / denominator
@@ -307,6 +318,7 @@ def train_one_epoch(
     device: Any,
     amp_dtype: Any | None = None,
     grad_scaler: Any | None = None,
+    loss_weights: Any | None = None,
 ) -> float:
     torch = torch_module()
     model.train()
@@ -320,7 +332,7 @@ def train_one_epoch(
             device_type=device.type, dtype=amp_dtype, enabled=amp_dtype is not None
         ):
             reconstruction = model(value, mask, delta)
-            loss = masked_mse_loss(reconstruction, value, mask)
+            loss = masked_mse_loss(reconstruction, value, mask, loss_weights)
         if grad_scaler is not None:
             grad_scaler.scale(loss).backward()
             grad_scaler.step(optimizer)
@@ -332,7 +344,14 @@ def train_one_epoch(
     return float(np.mean(losses))
 
 
-def evaluate_loss(model: Any, loader: Any, *, device: Any, amp_dtype: Any | None = None) -> float:
+def evaluate_loss(
+    model: Any,
+    loader: Any,
+    *,
+    device: Any,
+    amp_dtype: Any | None = None,
+    loss_weights: Any | None = None,
+) -> float:
     torch = torch_module()
     model.eval()
     losses: list[float] = []
@@ -345,7 +364,7 @@ def evaluate_loss(model: Any, loader: Any, *, device: Any, amp_dtype: Any | None
                 device_type=device.type, dtype=amp_dtype, enabled=amp_dtype is not None
             ):
                 reconstruction = model(value, mask, delta)
-                loss = masked_mse_loss(reconstruction, value, mask)
+                loss = masked_mse_loss(reconstruction, value, mask, loss_weights)
             losses.append(float(loss.detach().cpu().item()))
     return float(np.mean(losses))
 
@@ -354,77 +373,459 @@ def cpu_state_dict(model: Any) -> dict[str, Any]:
     return {key: value.detach().cpu().clone() for key, value in model.state_dict().items()}
 
 
+#: A03.5 — the stated rule validation sessions are chosen by, recorded in the
+#: manifest's ``validation_holdout``.
+VALIDATION_RULE = "mode_coverage_by_drive_v1"
+VALIDATION_RULE_STATEMENT = (
+    "Whole physical drives are held out (sessions grouped as "
+    "evaluation.group_into_drives groups them). Drives are taken in a seeded "
+    "random order: first, while an operating mode the model will score (at least "
+    "MIN_CALIBRATION_SAMPLES independent windows) is missing from validation, the "
+    "drive adding the most missing modes; then drives in order until validation "
+    "holds validation_fraction of the windows. A drive is skipped when taking it "
+    "would put more than twice that fraction in validation, leave no drive to "
+    "train on, or leave a scored mode with fewer than MIN_CALIBRATION_SAMPLES "
+    "independent training windows. With one drive (or none eligible) the "
+    "validation set is a contiguous tail block, gapped by one window length."
+)
+#: A drive is not taken when validation would then exceed this multiple of
+#: the requested fraction of windows.
+VALIDATION_MAX_OVERSHOOT = 2.0
+
+
+@dataclass(frozen=True)
+class ValidationChoice:
+    """Which sessions validate a sequence model, and why (A03.5)."""
+
+    sessions: tuple[str, ...]
+    record: Mapping[str, Any]
+
+
+def _frame_window_table(
+    frame: pd.DataFrame, *, sequence_length: int, stride: int = 1
+) -> pd.DataFrame:
+    """One row per window the frame yields: session, end-row block, end-row mode.
+
+    Mirrors ``build_sequence_windows`` (windows never cross a session or a
+    contiguous-segment break) without materializing mask/Δt, so a caller can
+    reason about the split before any scaling.
+    """
+    from src.models.sequence_dataset import contiguous_segments
+
+    ordered = frame.sort_values([SESSION_COLUMN, TIMESTAMP_COLUMN], kind="stable").reset_index(
+        drop=True
+    )
+    segments = contiguous_segments(ordered)
+    sessions = ordered[SESSION_COLUMN].astype(str).to_numpy()
+    modes = (
+        ordered[MODE_COLUMN].to_numpy()
+        if MODE_COLUMN in ordered.columns
+        else np.full(len(ordered), None, dtype=object)
+    )
+    length = max(1, int(sequence_length))
+    rows: list[tuple[str, int, Any]] = []
+    boundaries = np.flatnonzero(np.diff(segments) != 0) + 1
+    for run in np.split(np.arange(len(ordered)), boundaries):
+        if len(run) < length:
+            continue
+        for end in run[length - 1 :: max(1, int(stride))]:
+            rows.append((str(sessions[end]), int(end) // length, modes[end]))
+    return pd.DataFrame(rows, columns=["session", "block", "mode"])
+
+
+def _session_drives(frame: pd.DataFrame) -> list[tuple[str, ...]]:
+    from src.models.evaluation import SessionSpan, group_into_drives
+
+    stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
+    bounds = stamps.groupby(frame[SESSION_COLUMN].astype(str)).agg(["min", "max"])
+    spans = [
+        SessionSpan(str(name), row["min"].to_pydatetime(), row["max"].to_pydatetime())
+        for name, row in bounds.iterrows()
+    ]
+    return [drive.session_names for drive in group_into_drives(spans)]
+
+
+def choose_validation_sessions(
+    frame: pd.DataFrame,
+    *,
+    sequence_length: int,
+    validation_fraction: float,
+    random_state: int,
+    stride: int = 1,
+) -> ValidationChoice:
+    """Pick validation sessions by :data:`VALIDATION_RULE` (A03.5).
+
+    The old split shuffled sessions and then sorted them by window count, a
+    stable sort that left the shuffle only breaking ties — validation was
+    always the smallest sessions, whatever modes they held. This takes whole
+    drives, spans the scored modes first, and keeps every scored mode trainable.
+    Operates on the frame (scaled or not — only sessions, times and modes are
+    read), so a caller can fix the split before fitting its scaler (A03.4).
+    """
+    windows = _frame_window_table(frame, sequence_length=sequence_length, stride=stride)
+    total = len(windows)
+    target = 0
+    if validation_fraction > 0 and total > 1:
+        target = min(max(1, int(round(total * validation_fraction))), total - 1)
+    cap = max(target, int(np.floor(total * validation_fraction * VALIDATION_MAX_OVERSHOOT)))
+    blocks_by_mode = (
+        windows.dropna(subset=["mode"]).assign(mode=lambda w: w["mode"].astype(str)).groupby("mode")
+    )
+    scored_modes = sorted(
+        str(mode)
+        for mode, group in blocks_by_mode
+        if group[["session", "block"]].drop_duplicates().shape[0] >= MIN_CALIBRATION_SAMPLES
+    )
+    drives = _session_drives(frame) if total else []
+    record: dict[str, Any] = {
+        "rule": VALIDATION_RULE,
+        "statement": VALIDATION_RULE_STATEMENT,
+        "validation_fraction": validation_fraction,
+        "random_state": random_state,
+        "target_windows": target,
+        "total_windows": total,
+        "modes_scored": scored_modes,
+    }
+    if target == 0 or len(drives) < 2:
+        record.update(
+            sessions=[],
+            drives=[],
+            windows=0,
+            modes_covered=[],
+            fallback="tail_block"
+            if target > 0
+            else "no validation (validation_fraction 0 or one window)",
+        )
+        return ValidationChoice((), record)
+
+    def blocks(sessions: set[str]) -> dict[str, int]:
+        subset = windows[windows["session"].isin(sessions)].dropna(subset=["mode"])
+        counts = subset.assign(mode=subset["mode"].astype(str)).drop_duplicates(
+            ["session", "block", "mode"]
+        )
+        return {str(mode): int(n) for mode, n in counts.groupby("mode").size().items()}
+
+    window_count = windows.groupby("session").size().to_dict()
+    drive_windows = [sum(window_count.get(s, 0) for s in drive) for drive in drives]
+    drive_modes = [set(blocks(set(drive))) for drive in drives]
+    everything = {str(s) for drive in drives for s in drive}
+    order = [int(i) for i in np.random.default_rng(random_state).permutation(len(drives))]
+    chosen: list[int] = []
+    held = 0
+
+    def eligible(index: int) -> bool:
+        if index in chosen or not drive_windows[index] or held + drive_windows[index] > cap:
+            return False
+        if len(chosen) + 1 >= len(drives):
+            return False
+        remaining = everything - {s for i in (*chosen, index) for s in drives[i]}
+        left = blocks(remaining)
+        return all(left.get(mode, 0) >= MIN_CALIBRATION_SAMPLES for mode in scored_modes)
+
+    covered: set[str] = set()
+    while True:
+        missing = set(scored_modes) - covered
+        if not missing:
+            break
+        best: int | None = None
+        best_gain = 0
+        for index in order:
+            gain = len(drive_modes[index] & missing)
+            if gain > best_gain and eligible(index):
+                best, best_gain = index, gain
+        if best is None:
+            break
+        chosen.append(best)
+        held += drive_windows[best]
+        covered |= drive_modes[best] & set(scored_modes)
+    for index in order:
+        if held >= target:
+            break
+        if eligible(index):
+            chosen.append(index)
+            held += drive_windows[index]
+            covered |= drive_modes[index] & set(scored_modes)
+
+    sessions = tuple(sorted(s for i in chosen for s in drives[i]))
+    not_covered = {
+        mode: "no eligible drive carries it (taking one would breach the window cap, "
+        "empty the training side, or leave the mode untrainable)"
+        for mode in scored_modes
+        if mode not in covered
+    }
+    record.update(
+        sessions=list(sessions),
+        drives=[list(drives[i]) for i in sorted(chosen, key=lambda i: drives[i])],
+        windows=int(held),
+        modes_covered=sorted(covered),
+        modes_not_covered=not_covered,
+    )
+    if not sessions:
+        record["fallback"] = "tail_block"
+    return ValidationChoice(sessions, record)
+
+
+@dataclass(frozen=True)
+class ValidationSplit:
+    """Train/validation window indexes plus the manifest record of the choice."""
+
+    train_indexes: list[int]
+    validation_indexes: list[int]
+    record: Mapping[str, Any] | None
+
+
+def validation_split(
+    dataset: SequenceWindowDataset,
+    *,
+    validation_fraction: float,
+    random_state: int,
+    choice: ValidationChoice | None = None,
+) -> ValidationSplit:
+    """Split windows by :func:`choose_validation_sessions` (A03.5).
+
+    ``choice`` is a split the caller already fixed (``train_sequence`` fixes
+    it before fitting the scaler, A03.4); otherwise it is chosen here from the
+    dataset's frame. No eligible drive (one drive, say) falls back to a
+    contiguous tail block with a ``sequence_length`` gap of windows dropped
+    between train and validation so they share no rows.
+    """
+    n = len(dataset)
+    if validation_fraction <= 0 or n <= 1:
+        return ValidationSplit(list(range(n)), [], None)
+    if choice is None:
+        choice = choose_validation_sessions(
+            dataset.frame,
+            sequence_length=dataset.sequence_length,
+            validation_fraction=validation_fraction,
+            random_state=random_state,
+            stride=dataset.stride,
+        )
+    window_sessions = [window.session for window in dataset.windows]
+    unknown = sorted(set(choice.sessions) - set(window_sessions))
+    if unknown:
+        raise ValueError(f"validation sessions {unknown} have no windows in the training dataset")
+    held = set(choice.sessions)
+    if held:
+        train_indexes = [i for i, session in enumerate(window_sessions) if session not in held]
+        validation_indexes = [i for i, session in enumerate(window_sessions) if session in held]
+        if train_indexes and validation_indexes:
+            return ValidationSplit(train_indexes, validation_indexes, dict(choice.record))
+
+    validation_count = min(max(1, int(round(n * validation_fraction))), n - 1)
+    gap = int(dataset.sequence_length)
+    validation_start = n - validation_count
+    train_end = max(1, validation_start - gap)
+    record = dict(choice.record)
+    record["fallback"] = "tail_block"
+    record["tail_block"] = {
+        "validation_windows": validation_count,
+        "gap_windows": validation_start - train_end,
+    }
+    return ValidationSplit(list(range(train_end)), list(range(validation_start, n)), record)
+
+
 def split_dataset(
     dataset: SequenceWindowDataset,
     *,
     validation_fraction: float,
     random_state: int,
+    choice: ValidationChoice | None = None,
 ) -> tuple[Any, Any | None]:
     """Leakage-aware train/validation split into ``torch.utils.data.Subset`` views.
 
-    Windows are built at stride 1, so adjacent windows share T−1 of T rows.
-    A random window-level split therefore put each validation window between
-    two train windows containing ~97% of its content — validation loss
-    tracked train loss almost exactly, early stopping rarely stopped for the
-    right reason, and ``best_validation_loss`` was optimistic. (The same
-    mechanism inflated in-sample threshold calibration to FPR ≈ 1.0 on
-    unseen drives before calibration moved to held-out sessions.)
-
-    Strategy: hold out whole *sessions* (seeded shuffle, smallest-first so
-    one long drive can't swallow the entire validation budget) until
-    ``validation_fraction`` of windows is reached. A single-session corpus
-    falls back to a contiguous tail block with a ``sequence_length`` gap of
-    windows dropped between train and validation so they share no rows.
+    Windows are built at stride 1, so adjacent windows share T−1 of T rows; a
+    random window-level split put each validation window between two train
+    windows holding ~97 % of its content. Whole drives are held out instead,
+    chosen by :func:`choose_validation_sessions` (see :func:`validation_split`).
     """
-    torch, _nn, _optim, data = torch_training_modules()
-    n = len(dataset)
-    validation_count = 0
-    if validation_fraction > 0 and n > 1:
-        validation_count = int(round(n * validation_fraction))
-        validation_count = max(1, validation_count)
-        validation_count = min(validation_count, n - 1)
-    if validation_count == 0:
-        return data.Subset(dataset, list(range(n))), None
+    _torch, _nn, _optim, data = torch_training_modules()
+    split = validation_split(
+        dataset, validation_fraction=validation_fraction, random_state=random_state, choice=choice
+    )
+    if not split.validation_indexes:
+        return data.Subset(dataset, split.train_indexes), None
+    return data.Subset(dataset, split.train_indexes), data.Subset(dataset, split.validation_indexes)
 
-    window_sessions = [window.session for window in dataset.windows]
-    session_order = list(dict.fromkeys(window_sessions))
-    if len(session_order) > 1:
-        counts = {session: 0 for session in session_order}
-        for session in window_sessions:
-            counts[session] += 1
-        generator = torch.Generator().manual_seed(random_state)
-        shuffled = [
-            session_order[i]
-            for i in torch.randperm(len(session_order), generator=generator).tolist()
-        ]
-        # Smallest-first within the shuffle so the holdout lands near the
-        # requested fraction instead of jumping to one huge drive.
-        shuffled.sort(key=lambda session: counts[session])
-        validation_sessions: set[str] = set()
-        held = 0
-        for session in shuffled:
-            if held >= validation_count or len(validation_sessions) == len(session_order) - 1:
+
+# ---------------------------------------------------------------------------
+# A03.8 — training envelope per operating mode
+# ---------------------------------------------------------------------------
+
+#: The driving conditions the envelope records, as generic J1979 Mode 01
+#: channels (not a vehicle's catalog): name -> (column, histogram bin width in
+#: the channel's own units). Values are the resampler's bounded-ffill cells
+#: (NaN once stale), so hours at a condition count every fresh-held second.
+ENVELOPE_QUANTITIES: dict[str, tuple[str, float]] = {
+    "baro_kpa": ("obd:BAROMETRIC_PRESSURE", 1.0),
+    "iat_c": ("obd:INTAKE_TEMP", 2.0),
+    "speed_kph": ("obd:SPEED", 5.0),
+}
+#: A02.2 via A03.8: a calibration covers a mode's envelope on a quantity when
+#: its [min, max] in that mode spans at least this share of the mode's
+#: training rows. The 2026-09-20 calibration (71–73 kPa) would cover almost
+#: none of a corpus trained mostly near 80 kPa.
+MIN_ENVELOPE_COVERAGE = 0.8
+
+
+def session_envelopes(frame: pd.DataFrame, *, interval_seconds: float) -> dict[str, dict[str, Any]]:
+    """Per-session, per-mode envelope summaries of an *unscaled* frame.
+
+    ``{session: {mode: {"rows": n, "quantities": {q: {"channel", "rows",
+    "min", "max", "bin_width", "histogram": {bin_start: rows}}}}}}``. Kept
+    per session so any subset (training minus validation, a calibration
+    holdout) merges exactly: rows and histograms add, min/max combine.
+    """
+    if frame.empty or MODE_COLUMN not in frame.columns:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    keys = [frame[SESSION_COLUMN].astype(str), frame[MODE_COLUMN].astype(str)]
+    for (session, mode), group in frame.groupby(keys, sort=True):
+        quantities: dict[str, Any] = {}
+        for name, (column, width) in ENVELOPE_QUANTITIES.items():
+            if column not in group.columns:
+                continue
+            values = pd.to_numeric(group[column], errors="coerce").to_numpy(dtype=np.float64)
+            values = values[np.isfinite(values)]
+            if values.size == 0:
+                continue
+            bins = np.floor(values / width) * width
+            labels, counts = np.unique(bins, return_counts=True)
+            quantities[name] = {
+                "channel": column,
+                "rows": int(values.size),
+                "min": float(values.min()),
+                "max": float(values.max()),
+                "bin_width": width,
+                "histogram": {
+                    f"{label:g}": int(count) for label, count in zip(labels, counts, strict=True)
+                },
+            }
+        out.setdefault(str(session), {})[str(mode)] = {
+            "rows": int(len(group)),
+            "seconds": float(len(group)) * float(interval_seconds),
+            "quantities": quantities,
+        }
+    return out
+
+
+def merge_envelopes(
+    per_session: Mapping[str, Mapping[str, Any]],
+    sessions: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """The envelope of ``sessions`` (all when ``None``): per mode, the hours of
+    data and each quantity's range, 5th/95th percentile and histogram. A
+    quantity never measured in a mode is listed under ``unmeasured``."""
+    names = sorted(per_session) if sessions is None else sorted(set(sessions) & set(per_session))
+    modes: dict[str, dict[str, Any]] = {}
+    for session in names:
+        for mode, summary in per_session[session].items():
+            merged = modes.setdefault(mode, {"rows": 0, "seconds": 0.0, "quantities": {}})
+            merged["rows"] += int(summary["rows"])
+            merged["seconds"] += float(summary["seconds"])
+            for name, stats in summary["quantities"].items():
+                into = merged["quantities"].setdefault(
+                    name,
+                    {
+                        "channel": stats["channel"],
+                        "rows": 0,
+                        "min": float("inf"),
+                        "max": float("-inf"),
+                        "bin_width": stats["bin_width"],
+                        "histogram": {},
+                    },
+                )
+                into["rows"] += int(stats["rows"])
+                into["min"] = min(into["min"], float(stats["min"]))
+                into["max"] = max(into["max"], float(stats["max"]))
+                for label, count in stats["histogram"].items():
+                    into["histogram"][label] = into["histogram"].get(label, 0) + int(count)
+    for merged in modes.values():
+        merged["hours"] = round(merged.pop("seconds") / 3600.0, 4)
+        for stats in merged["quantities"].values():
+            stats["p05"], stats["p95"] = _histogram_quantiles(stats, (0.05, 0.95))
+            stats["histogram"] = dict(
+                sorted(stats["histogram"].items(), key=lambda item: float(item[0]))
+            )
+        merged["unmeasured"] = sorted(set(ENVELOPE_QUANTITIES) - set(merged["quantities"]))
+    return {
+        "sessions": names,
+        "quantities": {name: column for name, (column, _w) in ENVELOPE_QUANTITIES.items()},
+        "modes": dict(sorted(modes.items())),
+    }
+
+
+def _histogram_quantiles(stats: Mapping[str, Any], quantiles: Sequence[float]) -> list[float]:
+    """Bin-start quantiles of a merged histogram (resolution: one bin)."""
+    items = sorted((float(label), int(count)) for label, count in stats["histogram"].items())
+    total = sum(count for _label, count in items)
+    out: list[float] = []
+    for q in quantiles:
+        running = 0
+        value = items[-1][0] if items else float("nan")
+        for label, count in items:
+            running += count
+            if running >= q * total:
+                value = label
                 break
-            validation_sessions.add(session)
-            held += counts[session]
-        train_indexes = [
-            i for i, session in enumerate(window_sessions) if session not in validation_sessions
-        ]
-        validation_indexes = [
-            i for i, session in enumerate(window_sessions) if session in validation_sessions
-        ]
-        if train_indexes and validation_indexes:
-            return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
+        out.append(value)
+    return out
 
-    # Single session (or degenerate multi-session split): contiguous tail
-    # block, with a sequence_length-window gap so train and validation
-    # windows share no underlying rows.
-    gap = int(dataset.sequence_length)
-    validation_start = n - validation_count
-    train_end = max(1, validation_start - gap)
-    train_indexes = list(range(train_end))
-    validation_indexes = list(range(validation_start, n))
-    return data.Subset(dataset, train_indexes), data.Subset(dataset, validation_indexes)
+
+def envelope_coverage(
+    training: Mapping[str, Any], calibration: Mapping[str, Any], *, mode: str, quantity: str
+) -> float | None:
+    """Share of ``mode``'s training rows (for ``quantity``) inside the
+    calibration's [min, max] in that mode; ``None`` when training never
+    measured it there. ``0.0`` when calibration has no such rows."""
+    trained = training.get("modes", {}).get(mode, {}).get("quantities", {}).get(quantity)
+    if not trained or not trained["rows"]:
+        return None
+    calibrated = calibration.get("modes", {}).get(mode, {}).get("quantities", {}).get(quantity)
+    if not calibrated or not calibrated["rows"]:
+        return 0.0
+    width = float(trained["bin_width"])
+    low = np.floor(float(calibrated["min"]) / width) * width
+    high = float(calibrated["max"])
+    inside = sum(
+        int(count) for label, count in trained["histogram"].items() if low <= float(label) <= high
+    )
+    return inside / float(trained["rows"])
+
+
+def envelope_coverage_violations(
+    training: Mapping[str, Any],
+    calibration: Mapping[str, Any],
+    *,
+    modes: Sequence[str],
+    minimum: float = MIN_ENVELOPE_COVERAGE,
+) -> list[str]:
+    """A02.2's envelope refusal: for each scored mode and recorded quantity,
+    the calibration must span :data:`MIN_ENVELOPE_COVERAGE` of the training
+    rows. A mode the calibration never visited is the mode-coverage
+    violation's to report, not this one's."""
+    violations: list[str] = []
+    for mode in sorted(modes):
+        if mode not in calibration.get("modes", {}):
+            continue
+        trained_mode = training.get("modes", {}).get(mode, {})
+        for quantity in ENVELOPE_QUANTITIES:
+            share = envelope_coverage(training, calibration, mode=mode, quantity=quantity)
+            if share is None or share >= minimum:
+                continue
+            trained = trained_mode["quantities"][quantity]
+            calibrated = calibration["modes"][mode]["quantities"].get(quantity)
+            span = (
+                "never measured it"
+                if not calibrated
+                else f"spans {calibrated['min']:g}–{calibrated['max']:g}"
+            )
+            violations.append(
+                f"mode {mode!r}: calibration {quantity} {span}, covering {share:.0%} of "
+                f"{trained_mode.get('hours', 0):g} training hours "
+                f"(training {trained['min']:g}–{trained['max']:g}; "
+                f"{minimum:.0%} required)"
+            )
+    return violations
 
 
 def calibrate_sequence_thresholds(
@@ -438,8 +839,13 @@ def calibrate_sequence_thresholds(
     calibrated_at: datetime | pd.Timestamp | str | None = None,
     threshold_quantile: float | None = None,
     training_observed_blocks: Mapping[str, int] | None = None,
+    context_columns: Sequence[str] = (),
 ) -> SequenceThresholdCalibration:
     """Compute global / per-channel / per-family / per-mode thresholds.
+
+    ``context_columns`` (A03.2) are encoder inputs that are never scored: they
+    are recorded as uncalibrated with that reason and kept out of every
+    distribution, as the serving engine keeps them out of the score.
 
     Per window: each channel's masked MAE over the timesteps where it was
     observed, and the global masked MAE over the *calibrated* channels' cells.
@@ -507,7 +913,11 @@ def calibrate_sequence_thresholds(
         max(training_observed_blocks.values(), default=0) if training_observed_blocks else 0
     )
     uncalibrated: dict[str, str] = {}
+    context = set(context_columns)
     for index, column in enumerate(columns):
+        if column in context:
+            uncalibrated[column] = CONTEXT_UNCALIBRATED_REASON
+            continue
         seen = int(calibration_blocks[index])
         trained = None if training_observed_blocks is None else training_observed_blocks.get(column)
         if seen == 0:
@@ -926,6 +1336,18 @@ def configure_torch_threads(thread_count: int | None = None) -> None:
 
 
 __all__ = [
+    "CONTEXT_UNCALIBRATED_REASON",
+    "ENVELOPE_QUANTITIES",
+    "MIN_ENVELOPE_COVERAGE",
+    "VALIDATION_RULE",
+    "ValidationChoice",
+    "ValidationSplit",
+    "choose_validation_sessions",
+    "envelope_coverage",
+    "envelope_coverage_violations",
+    "merge_envelopes",
+    "session_envelopes",
+    "validation_split",
     "MIN_CALIBRATION_SAMPLES",
     "MIN_OBSERVED_BLOCKS",
     "RARE_OBSERVED_FRACTION",

@@ -21,9 +21,9 @@ from src.preprocessing.imu_decimation import (
     decimate_imu_wide,
 )
 from src.preprocessing.resampler import (
-    GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
+    is_flag_column,
     resample_config_for,
     resample_long,
     resample_wide,
@@ -345,7 +345,7 @@ def numeric_value_columns(frame: pd.DataFrame) -> list[str]:
         str(column)
         for column in frame.columns
         if str(column) not in skip
-        and not str(column).endswith(GAP_SUFFIX)
+        and not is_flag_column(column)
         and pd.api.types.is_numeric_dtype(frame[column])
     ]
 

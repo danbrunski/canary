@@ -18,7 +18,13 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.models.sequence_dataset import WINDOW_MAX_GAP_SECONDS
+from src.models.sequence_dataset import (
+    MASK_ARRIVED_SAMPLE,
+    MASK_FRESH_WITHIN_MAX_GAP,
+    WINDOW_MAX_GAP_SECONDS,
+    arrival_column_for,
+    observation_mask_from_schema,
+)
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -73,6 +79,10 @@ class SequenceInferenceResult:
     window_rows: int | None = None
     window_span_seconds: float | None = None
     window_max_step_seconds: float | None = None
+    #: A03.7 — what ``top_channels`` ranks over: ``"all_channels"`` (driving
+    #: conditions included) or ``"engine_response_targets"`` (an artifact whose
+    #: context inputs are kept out of the score, A03.2).
+    ranking_scope: str = "all_channels"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +105,7 @@ class SequenceInferenceResult:
             "window_rows": self.window_rows,
             "window_span_seconds": self.window_span_seconds,
             "window_max_step_seconds": self.window_max_step_seconds,
+            "ranking_scope": self.ranking_scope,
             "reconstruction_overlays": {
                 k: {sub: list(seq) for sub, seq in overlay.items()}
                 for k, overlay in self.reconstruction_overlays.items()
@@ -209,9 +220,10 @@ class SequenceWindowBuffer:
     """Fixed-length buffer for sequence-detector feature rows (value + mask + Δt).
 
     Each appended row is split into a value vector, an observed-mask vector
-    (``1`` where the channel was freshly observed this tick, derived from
-    ``¬<channel>__gap``), and a Δt vector (seconds since each channel was last
-    observed). Δt is accumulated **inside the buffer** exactly as
+    (what ``1`` means is the artifact's ``observation_mask`` rule, A03.1:
+    ``<channel>__arrived`` — a sample arrived this tick — for artifacts trained
+    on it, ``¬<channel>__gap`` for the legacy ones), and a Δt vector (seconds
+    since each channel was last observed). Δt is accumulated **inside the buffer** exactly as
     ``sequence_dataset`` accumulates it offline — reset to 0 on an observed tick,
     otherwise incremented by the inter-tick second delta — so train and serve
     feed the encoder identical Δt for the same observation history.
@@ -227,6 +239,8 @@ class SequenceWindowBuffer:
         mode_column: str = "operating_mode",
         dtype: str = "float32",
         max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS,
+        observation_mask: str = MASK_FRESH_WITHIN_MAX_GAP,
+        freshness_fallback_columns: frozenset[str] = frozenset(),
     ) -> None:
         if sequence_length <= 0:
             raise ValueError("sequence_length must be positive")
@@ -243,6 +257,16 @@ class SequenceWindowBuffer:
         self.max_gap_seconds = float(max_gap_seconds)
         self._gap_columns = tuple(
             f"{_base_channel(column)}{GAP_SUFFIX}" for column in feature_columns
+        )
+        #: A03.1 — the mask the artifact was trained on. Under the arrival rule
+        #: a column reads its ``__arrived`` flag (absent ⇒ not arrived), except
+        #: the columns training itself had to mask by freshness.
+        self.observation_mask = observation_mask
+        self._arrival_columns: tuple[str | None, ...] = tuple(
+            None
+            if observation_mask != MASK_ARRIVED_SAMPLE or column in freshness_fallback_columns
+            else arrival_column_for(column)
+            for column in feature_columns
         )
         self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._masks: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
@@ -339,9 +363,20 @@ class SequenceWindowBuffer:
     def _row_mask(
         self, row: Mapping[str, Any] | pd.Series
     ) -> np.ndarray[Any, np.dtype[np.float32]]:
-        """Per-channel observed mask: ``¬<channel>__gap`` (absent ⇒ observed)."""
+        """Per-channel observed mask under the artifact's rule.
+
+        Arrival rule: ``<channel>__arrived`` (absent or NaN ⇒ 0 — nothing is
+        known to have arrived). Freshness rule, and arrival-rule fallback
+        columns: ``¬<channel>__gap`` (absent ⇒ observed).
+        """
         mask = np.ones(len(self.feature_columns), dtype=self.dtype)
         for index, gap_column in enumerate(self._gap_columns):
+            arrival = self._arrival_columns[index]
+            if arrival is not None:
+                raw = row[arrival] if arrival in row else None
+                arrived = raw is not None and not _is_nan(raw) and bool(raw)
+                mask[index] = 1.0 if arrived else 0.0
+                continue
             if gap_column in row:
                 raw = row[gap_column]
                 stale = bool(raw) if raw is not None and not _is_nan(raw) else True
@@ -444,10 +479,17 @@ class SequenceInferenceEngine:
         self.calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
         self.feature_columns = trained.feature_columns
         self.sequence_length = int(trained.manifest.schema["sequence_length"])
+        # A03.1: feed the mask the artifact was trained on — the 2026-09-20
+        # artifact has no record and keeps ``¬__gap``; a retrained one reads
+        # ``__arrived``.
+        mask_rule, fallback_columns = observation_mask_from_schema(trained.manifest.schema)
+        self.observation_mask = mask_rule
         self.buffer = SequenceWindowBuffer(
             feature_columns=self.feature_columns,
             sequence_length=self.sequence_length,
             dtype=dtype,
+            observation_mask=mask_rule,
+            freshness_fallback_columns=fallback_columns,
         )
         # Resolve suppress_channels (config-driven; base names auto-expand to
         # rolling-derivative siblings) into integer indices into
@@ -478,6 +520,17 @@ class SequenceInferenceEngine:
                 ", ".join(suppressed),
             )
         column_index = {col: idx for idx, col in enumerate(self.feature_columns)}
+        # A03.2: an ``engine_response`` artifact conditions on context inputs
+        # (rpm, baro, speed, ...) that it was never trained to reconstruct or
+        # calibrated on. They reach the encoder and never the score.
+        from src.models.sequence_feature_set import context_columns_from_schema
+
+        self.context_columns: tuple[str, ...] = tuple(
+            column
+            for column in context_columns_from_schema(trained.manifest.schema)
+            if column in column_index
+        )
+        context = set(self.context_columns)
         # A02.12: a channel whose calibrated threshold is not positive was
         # masked in every calibration window — never observed — so the global,
         # per-mode and family thresholds were all computed without it. Score it
@@ -488,7 +541,7 @@ class SequenceInferenceEngine:
         self.uncalibrated_channels: tuple[str, ...] = tuple(
             column
             for column in self.feature_columns
-            if not self.calibration.channel_errors[column].threshold > 0
+            if column not in context and not self.calibration.channel_errors[column].threshold > 0
         )
         if self.uncalibrated_channels:
             log.warning(
@@ -498,7 +551,7 @@ class SequenceInferenceEngine:
                 len(self.uncalibrated_channels),
                 ", ".join(self.uncalibrated_channels),
             )
-        excluded = set(suppressed) | set(self.uncalibrated_channels)
+        excluded = set(suppressed) | set(self.uncalibrated_channels) | context
         #: Columns kept out of the score, family path and evidence (suppressed
         #: by config or uncalibrated). The encoder still receives them.
         self._score_excluded: frozenset[str] = frozenset(excluded)
@@ -743,6 +796,7 @@ class SequenceInferenceEngine:
             reconstruction_overlays=reconstruction_overlays,
             family_scores=family_scores,
             family_threshold=family_threshold,
+            ranking_scope="engine_response_targets" if self.context_columns else "all_channels",
         )
 
 

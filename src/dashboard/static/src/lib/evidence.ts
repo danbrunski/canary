@@ -23,6 +23,38 @@ export const SOURCE_LABEL: Record<EvidenceSource, string> = {
   lstm_autoencoder: "LSTM",
 };
 
+/** A03.7 — what a sequence-detector channel ranking is. It ranks each
+ *  channel's reconstruction error against its own calibrated band over every
+ *  column, driving conditions included (it named barometric pressure on every
+ *  altitude-trip event), so it is the largest deviation from the training
+ *  envelope — never presented as the event's cause. */
+export const SEQUENCE_RANKING_CAPTION = "largest deviation from training envelope";
+/** Fallback title for events recorded before the API carried
+ *  `detail.channel_ranking_note`; every artifact of that era ranked all
+ *  channels, driving conditions included. The note, when present, says which
+ *  scope this artifact ranks (engine-response artifacts never rank context). */
+export const SEQUENCE_RANKING_TITLE =
+  "Channels whose reconstruction error sits furthest above their calibrated band, " +
+  "driving conditions (baro, speed, intake temperature, ...) included. This says where " +
+  "the window is furthest from what the model trained on, not what caused the event.";
+
+export function channelRankingCaption(
+  event: AnomalyEvent,
+): { caption: string; title: string } | null {
+  const ranking = event.detail?.channel_ranking;
+  if (
+    event.source === "lstm_autoencoder" ||
+    ranking === "largest_deviation_from_training_envelope"
+  ) {
+    const note = event.detail?.channel_ranking_note;
+    return {
+      caption: SEQUENCE_RANKING_CAPTION,
+      title: typeof note === "string" && note ? note : SEQUENCE_RANKING_TITLE,
+    };
+  }
+  return null;
+}
+
 export interface ChannelEvidence {
   channel: string;
   score: number;

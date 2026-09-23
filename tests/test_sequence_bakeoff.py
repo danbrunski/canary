@@ -276,3 +276,13 @@ def test_bakeoff_holdouts_take_their_whole_drive(tmp_path: Path) -> None:
     )
     with pytest.raises(ValueError, match="both the calibration and the evaluation"):
         _resolve_training_sessions(overlapping)
+
+    # A03.6: holding out every given session is refused with the cause.
+    everything_held = Namespace(
+        sessions=[calib, restart],
+        sessions_root=root,
+        evaluate=[held_out],
+        calibration_sessions=[calib],
+    )
+    with pytest.raises(ValueError, match="nothing left to train on"):
+        _resolve_training_sessions(everything_held)

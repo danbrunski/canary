@@ -61,13 +61,32 @@ from src.models.sequence_autoencoder_training import (
     default_sequence_manifest_path,
     train_sequence_autoencoder,
 )
-from src.models.sequence_dataset import DEFAULT_SEQUENCE_STRIDE, SequenceWindowDataset
+from src.models.sequence_dataset import (
+    DEFAULT_SEQUENCE_STRIDE,
+    DEFAULT_TRAINING_MASK_RULE,
+    SequenceWindowDataset,
+    observation_mask_from_schema,
+)
+from src.models.sequence_feature_set import (
+    ALL_CHANNELS,
+    FEATURE_SET_SCHEMA_KEY,
+    FEATURE_SETS,
+    load_vehicle_sequence_roles,
+    resolve_feature_set,
+    sequence_roles_path,
+)
 from src.models.sequence_registry import (
     LSTM_TRAINING_BACKEND,
     TCN_TRAINING_BACKEND,
     SequenceTrainingBackend,
 )
-from src.models.sequence_training import configure_torch_threads, default_training_device
+from src.models.sequence_training import (
+    ValidationChoice,
+    choose_validation_sessions,
+    configure_torch_threads,
+    default_training_device,
+    session_envelopes,
+)
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
@@ -80,7 +99,7 @@ from src.preprocessing.feature_pipeline import (
     sequence_feature_columns,
 )
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
@@ -109,8 +128,15 @@ def build_dataset(
     feature_columns: Sequence[str] | None = None,
     stride: int = DEFAULT_SEQUENCE_STRIDE,
     scaler: ZScoreScaler | None = None,
+    observation_mask: str | None = None,
 ) -> SequenceWindowDataset:
     """Build a sliding-window dataset from recorded sessions via the shared pipeline.
+
+    ``observation_mask`` (A03.1) is what the per-cell mask means. Building for
+    a trained model's schema (``feature_columns`` given) requires the model's
+    own rule (``observation_mask_from_schema``), so an artifact is never
+    scored with a mask it was not trained on; a fresh training build defaults
+    to :data:`DEFAULT_TRAINING_MASK_RULE`.
 
     When ``feature_columns`` is given (e.g. a trained model's schema), they must
     all be present and numeric; otherwise the trainable numeric columns are
@@ -150,7 +176,17 @@ def build_dataset(
     # (e.g. no GPS fix). Add those columns as all-NaN so they're scored as
     # masked-missing rather than crashing the scaler / window slice.
     if feature_columns is not None:
+        if observation_mask is None:
+            raise ValueError(
+                "build_dataset for an existing schema needs that model's observation_mask "
+                "(sequence_dataset.observation_mask_from_schema(manifest.schema)[0])"
+            )
         features = align_features_to_schema(features, columns)
+    rule = DEFAULT_TRAINING_MASK_RULE if observation_mask is None else observation_mask
+    # A03.8 — the envelope is measured on raw values, before any scaling.
+    envelopes = session_envelopes(
+        features, interval_seconds=1.0 / float(config.preprocessing.resample_hz)
+    )
     if scaler is not None:
         # Keep only columns sequence construction/metadata needs and scale the
         # numeric matrix as float32. ZScoreScaler.transform copies the entire
@@ -160,8 +196,9 @@ def build_dataset(
             for column in (SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN)
             if column in features.columns
         ]
-        gaps = [column for column in features.columns if str(column).endswith(GAP_SUFFIX)]
-        keep = list(dict.fromkeys([*structural, *columns, *gaps]))
+        # Both flag families: ``__gap`` and (A03.1) ``__arrived`` drive the mask.
+        flags = [column for column in features.columns if is_flag_column(column)]
+        keep = list(dict.fromkeys([*structural, *columns, *flags]))
         compact = features.loc[:, keep].copy()
         values = compact.loc[:, columns].to_numpy(dtype="float32", copy=True)
         for index, column in enumerate(columns):
@@ -176,6 +213,8 @@ def build_dataset(
         sequence_length=length,
         stride=stride,
         feature_columns=columns,
+        observation_mask=rule,
+        session_envelopes=envelopes,
     )
 
 
@@ -198,6 +237,7 @@ def train(
     feature_policy: FeaturePolicy | None = None,
     calibration_override: str | None = None,
     evaluation_sessions: Sequence[Path] | None = None,
+    feature_set: str = ALL_CHANNELS,
 ) -> TrainedSequenceAutoencoder:
     """Build windows, train + calibrate ``backend``'s autoencoder, write artifact + manifest.
 
@@ -219,6 +259,14 @@ def train(
     the operator's stated reason to publish anyway, stamped into the manifest.
     ``evaluation_sessions`` (A02.1) — the held-out sessions the retrain gate
     scores, disjoint from calibration — are recorded in the manifest too.
+
+    ``feature_set`` (A03.2/A03.3) picks what the model conditions on and what
+    it scores; the default :data:`ALL_CHANNELS` is the deployed shape. The
+    resolution is recorded in the feature spec.
+
+    The validation drives are chosen by the stated rule before the scaler is
+    fit (A03.5), and the scaler is fit on the remaining training rows only, so
+    validation statistics never leak into the scaling (A03.4).
     """
     policy = (
         feature_policy
@@ -269,6 +317,16 @@ def train(
         columns = [c for c in columns if c not in set(suppressed)]
         if not columns:
             raise ValueError("suppress_channels excludes every trainable column")
+    resolution = resolve_feature_set(
+        feature_set,
+        columns,
+        vehicle_roles=(
+            load_vehicle_sequence_roles(sequence_roles_path(config))
+            if feature_set != ALL_CHANNELS
+            else None
+        ),
+    )
+    columns = list(resolution.feature_columns)
     # GRU-D (and the TCN's delta-decay channels) handle missing values via the
     # observed-mask, so keep EVERY row and let masking ignore the gaps.
     # Dropping rows with any NaN here (as the IF path does — the IF can't
@@ -279,7 +337,20 @@ def train(
     # blank rows are already removed upstream (``_drop_fully_stale_rows``). The
     # scaler is fit skipna, so per-column means/stds use each channel's real
     # observations regardless of other channels' gaps.
-    scaler = ZScoreScaler.fit(features, columns=columns)
+    #
+    # A03.4/A03.5: fix the validation drives first, then fit the scaler on the
+    # rows that train. Validation rows never move it.
+    length = config_block.sequence_length if sequence_length is None else int(sequence_length)
+    validation_choice = choose_validation_sessions(
+        features,
+        sequence_length=length,
+        validation_fraction=float(config_block.validation_fraction),
+        random_state=int(config_block.random_state),
+        stride=training_stride,
+    )
+    scaler_rows = _rows_outside(features, validation_choice)
+    scaler = ZScoreScaler.fit(scaler_rows, columns=columns)
+    scaler_fit_sessions = sorted(scaler_rows[SESSION_COLUMN].astype(str).unique())
 
     dataset = build_dataset(
         backend,
@@ -293,6 +364,7 @@ def train(
         stride=training_stride,
         feature_columns=columns,
         scaler=scaler,
+        observation_mask=DEFAULT_TRAINING_MASK_RULE,
     )
     if len(dataset) == 0:
         raise ValueError(
@@ -314,6 +386,7 @@ def train(
             stride=int(getattr(config_block, "calibration_stride", DEFAULT_SEQUENCE_STRIDE)),
             feature_columns=columns,
             scaler=scaler,
+            observation_mask=dataset.observation_mask,
         )
         if len(calibration_ds) == 0:
             raise ValueError(
@@ -348,6 +421,8 @@ def train(
     feature_spec[TRAINING_SUPPRESS_SCHEMA_KEY] = training_suppress_record(
         tuple(config_block.suppress_channels), suppressed
     )
+    # A03.2/A03.3 — what this model conditions on and what it scores.
+    feature_spec[FEATURE_SET_SCHEMA_KEY] = dict(resolution.record)
     trained = train_sequence_autoencoder(
         backend,
         dataset,
@@ -368,6 +443,8 @@ def train(
         # not the accidental-bypass 3.1 targets at the library level.
         allow_in_sample_calibration=calibration_ds is None,
         calibration_override=calibration_override,
+        validation_choice=validation_choice,
+        scaler_fit_sessions=scaler_fit_sessions,
     )
     if evaluation_sessions:
         trained = replace(
@@ -394,6 +471,14 @@ def train(
         },
     )
     return trained
+
+
+def _rows_outside(features: pd.DataFrame, choice: ValidationChoice) -> pd.DataFrame:
+    """The feature rows of sessions outside the validation choice (A03.4)."""
+    if not choice.sessions:
+        return features
+    held = set(choice.sessions)
+    return features.loc[~features[SESSION_COLUMN].astype(str).isin(held)]
 
 
 def evaluate(
@@ -425,6 +510,7 @@ def evaluate(
         feature_columns=trained.feature_columns,
         stride=stride,
         scaler=scaler,
+        observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
     )
     if len(dataset) == 0:
         log.warning("held-out sessions produced no sequence windows; skipping evaluation")
@@ -575,6 +661,16 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
         "violations are stamped into the manifest.",
     )
     parser.add_argument(
+        "--feature-set",
+        choices=FEATURE_SETS,
+        default=ALL_CHANNELS,
+        help="What the model conditions on and scores (A03.2/A03.3). all_channels "
+        "(default, the deployed shape) scores every trainable column; "
+        "engine_response conditions on driving inputs and scores only engine "
+        "responses, one source per quantity, using the profile's sequence_roles.yaml. "
+        "Recorded in the manifest's feature spec.",
+    )
+    parser.add_argument(
         "--evaluate-k",
         type=float,
         nargs="+",
@@ -624,6 +720,22 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
     return list(holdout.training) or None
 
 
+def nothing_left_to_train(holdout: DriveHoldout) -> str:
+    """Why a holdout left no training session (A03.6), naming both sides.
+
+    Held-out sessions take their whole physical drive with them, so naming one
+    session of a drive can empty an explicit list that looked disjoint.
+    """
+    calibration = ", ".join(p.name for p in holdout.calibration) or "none"
+    evaluation = ", ".join(p.name for p in holdout.evaluation) or "none"
+    return (
+        "nothing left to train on: every session is held out (with its whole "
+        f"physical drive) by --calibration-sessions [{calibration}] or --evaluate "
+        f"[{evaluation}]. Training on held-out drives would make their numbers "
+        "in-sample; pass more sessions or hold out fewer."
+    )
+
+
 def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
@@ -639,6 +751,9 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     if holdout is not None:
         args.calibration_sessions = list(holdout.calibration) or None
         args.evaluate = list(holdout.evaluation) or None
+    if holdout is not None and not sessions:
+        print(f"error: {nothing_left_to_train(holdout)}", file=sys.stderr)
+        return 2
     if not sessions:
         print(
             f"error: no sessions given and none found under {args.sessions_root}. "
@@ -660,6 +775,7 @@ def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
             calibration_sessions=args.calibration_sessions,
             model_version=args.model_version,
             calibration_override=args.accept_thin_calibration,
+            feature_set=args.feature_set,
         )
     except backend.missing_dependency_error_cls() as e:
         print(f"error: {e}", file=sys.stderr)

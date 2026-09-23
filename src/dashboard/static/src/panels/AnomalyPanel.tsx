@@ -10,7 +10,7 @@ import { badgeClass, cn, inputClass, placeholderClass, selectClass } from "../st
 import type { AnomalyEvent } from "../types";
 import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
-import { relatedEventsFor } from "../lib/evidence";
+import { channelRankingCaption, relatedEventsFor } from "../lib/evidence";
 import { ModelEvidencePanel } from "./ModelEvidencePanel";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
@@ -338,9 +338,14 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 {e.affected_channels.length > 0 && (
                   <span
                     className="text-[0.78rem] text-fg-dim"
-                    title={`Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`}
+                    title={
+                      channelRankingCaption(e)?.title ??
+                      `Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`
+                    }
                   >
-                    {e.affected_channels.length} chan over band ·{" "}
+                    {channelRankingCaption(e)?.caption ??
+                      `${e.affected_channels.length} chan over band`}{" "}
+                    ·{" "}
                     {e.affected_channels.slice(0, 2).join(", ")}
                     {e.affected_channels.length > 2 &&
                       ` +${e.affected_channels.length - 2}`}

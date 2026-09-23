@@ -39,6 +39,7 @@ import retrain  # noqa: E402 — reuse its auto-holdout picker (Task 3.3)
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
 from _cli import add_common_args, load_config  # noqa: E402
+from train_sequence import nothing_left_to_train  # noqa: E402
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
@@ -47,6 +48,7 @@ from src.models.false_positive_benchmark import (  # noqa: E402
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
 )
+from src.models.sequence_dataset import observation_mask_from_schema  # noqa: E402
 from src.models.sequence_training import (  # noqa: E402
     configure_torch_threads,
     default_training_device,
@@ -199,6 +201,7 @@ def run_backbone(
         sequence_length=int(trained.manifest.schema["sequence_length"]),
         feature_columns=trained.feature_columns,
         scaler=scaler,
+        observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
     )
     report = benchmark_false_positives(trained, eval_dataset, k_grid=k_grid, device=device)
     return BackboneResult(
@@ -413,7 +416,10 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
     )
     args.calibration_sessions = list(holdout.calibration) or None
     args.evaluate = list(holdout.evaluation)
-    return list(holdout.training) or None
+    if not holdout.training:
+        # A03.6: every session held out is a refusal that names why, not "none found".
+        raise ValueError(nothing_left_to_train(holdout))
+    return list(holdout.training)
 
 
 def _auto_carve_calibration_sessions(sessions: Sequence[Path]) -> list[Path]:
@@ -478,6 +484,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         calibration_sessions = list(carved.calibration)
         sessions = list(carved.training)
+        if not sessions:
+            print(f"error: {nothing_left_to_train(carved)}", file=sys.stderr)
+            return 1
         log.info(
             "auto-carved calibration holdout sessions",
             extra={"calibration_sessions": [str(s) for s in calibration_sessions]},

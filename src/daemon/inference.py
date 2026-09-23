@@ -47,6 +47,7 @@ from src.preprocessing.feature_pipeline import (
     reconcile_feature_frame_to_spec,
 )
 from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
+from src.preprocessing.resampler import is_flag_column
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
@@ -1377,10 +1378,11 @@ def _sequence_observe(engine: Any, row: Any) -> Any:
     return value is ``SequenceInferenceResult`` once a full window is ready,
     ``None`` otherwise.
 
-    The GRU-D backbone needs each value column's ``<channel>__gap`` flag to
-    derive the observed-mask. ``reconcile_feature_frame_to_spec`` only keeps
-    structural + value columns (it's shared with the IF path), so re-attach the
-    gap columns from the original live row after reconciling.
+    The GRU-D backbone needs each value column's ``<channel>__gap`` flag, and
+    (A03.1) its ``<channel>__arrived`` flag, to derive the observed-mask.
+    ``reconcile_feature_frame_to_spec`` only keeps structural + value columns
+    (it's shared with the IF path), so re-attach the flag columns from the
+    original live row after reconciling.
     """
     schema = _schema_for_engine(engine)
     aligned, report = reconcile_feature_frame_to_spec(row, schema)
@@ -1392,7 +1394,7 @@ def _sequence_observe(engine: Any, row: Any) -> Any:
     observed = aligned.iloc[0].to_dict()
     for column in row.columns:
         name = str(column)
-        if name.endswith("__gap") and name not in observed:
+        if is_flag_column(name) and name not in observed:
             observed[name] = row.iloc[0][column]
     return engine.observe(observed)
 

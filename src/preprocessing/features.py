@@ -25,9 +25,9 @@ import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
 from src.preprocessing.resampler import (
-    GAP_SUFFIX,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
+    is_flag_column,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
 
@@ -306,7 +306,7 @@ def _value_columns(
         # per-start bookkeeping for behavior eligibility, not telemetry.
         if col.startswith(CONTEXT_COLUMN_PREFIX):
             continue
-        if any(col.endswith(suffix) for suffix in (GAP_SUFFIX, *_FEATURE_SUFFIXES)):
+        if is_flag_column(col) or col.endswith(_FEATURE_SUFFIXES):
             continue
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue

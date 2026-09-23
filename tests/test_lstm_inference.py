@@ -583,3 +583,37 @@ def test_the_engine_names_a_suppress_list_that_differs_from_training() -> None:
     assert engine.suppression.differs is True
     assert engine.suppression.trained_columns_suppressed_at_serve == ("speed",)
     assert SequenceInferenceEngine(_trained()).suppression.differs is False
+
+
+def test_context_inputs_are_never_scored_or_ranked() -> None:
+    """A03.2/A03.7: an ``engine_response`` artifact's recorded context inputs
+    reach the encoder but never the score or the ranking, and the result says
+    its ranking covers engine-response targets only."""
+    import numpy as np
+
+    from src.models.sequence_feature_set import FEATURE_SET_SCHEMA_KEY
+
+    trained = _trained()
+    plain = SequenceInferenceEngine(trained)
+    schema = dict(trained.manifest.schema)
+    schema[FEATURE_SET_SCHEMA_KEY] = {"name": "engine_response", "context_columns": ["speed"]}
+    scoped = SequenceInferenceEngine(
+        replace(trained, manifest=replace(trained.manifest, schema=schema))
+    )
+    window = np.zeros((4, 2), dtype=np.float32)
+    window[:, 1] = 50.0  # a huge error on the context input
+    kwargs = {
+        "timestamp": "t",
+        "session": "s",
+        "window_start_timestamp": "a",
+        "window_end_timestamp": "b",
+    }
+    a = plain.score_window(window, **kwargs)
+    b = scoped.score_window(window, **kwargs)
+    assert a.ranking_scope == "all_channels" and "speed" in a.top_channels
+    assert b.ranking_scope == "engine_response_targets"
+    assert b.top_channels == ("rpm",)
+    # Only the target is in the score: the global error is rpm's alone.
+    assert b.global_score == pytest.approx(b.channel_scores["rpm"])
+    assert a.global_score != pytest.approx(a.channel_scores["rpm"])
+    assert scoped.uncalibrated_channels == ()
