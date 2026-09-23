@@ -108,6 +108,9 @@ def _config() -> CanaryConfig:
     # production min_samples_per_mode floor (Task 2.2). Lower it so the
     # fixtures still exercise a real trained model rather than sparsity.
     config.models.isolation_forest.min_samples_per_mode = 5
+    # ...and the per-mode drive floors (A04.4): one synthetic drive.
+    config.models.isolation_forest.min_training_drives_per_mode = 1
+    config.models.isolation_forest.min_calibration_drives_per_mode = 1
     return config
 
 
@@ -470,6 +473,46 @@ def test_train_raises_when_no_trainable_columns(tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
+def _one_drive_config(tmp_path: Path) -> str:
+    """canary.example.yaml with the per-mode drive floors (A04.4) at 1: these
+    CLI tests train on one synthetic session."""
+    import yaml
+
+    raw = yaml.safe_load(Path("canary.example.yaml").read_text())
+    block = raw["models"]["isolation_forest"]
+    block["min_training_drives_per_mode"] = 1
+    block["min_calibration_drives_per_mode"] = 1
+    path = tmp_path / "one-drive.yaml"
+    path.write_text(yaml.safe_dump(raw))
+    return str(path)
+
+
+def test_main_refuses_a_single_drive_corpus_and_says_why(tmp_path: Path, capsys):
+    """A04.4: the shipped config refuses a mode resting on fewer than three
+    independent drives, naming the reason."""
+    pytest.importorskip("joblib")
+    pytest.importorskip("sklearn")
+    session = _write_can_session(tmp_path, "sess1", n_frames=650)
+    bindings = tmp_path / "bindings.yaml"
+    _write_bindings(bindings)
+    rc = main(
+        [
+            str(session),
+            "--config",
+            "canary.example.yaml",
+            "--bindings",
+            str(bindings),
+            "--out",
+            str(tmp_path / "model"),
+            "--log-level",
+            "ERROR",
+        ]
+    )
+    assert rc == 1
+    assert "too_few_training_drives" in capsys.readouterr().err
+    assert not (tmp_path / "model" / "model.joblib").exists()
+
+
 def test_main_errors_when_no_sessions(tmp_path: Path, capsys):
     rc = main(
         [
@@ -499,7 +542,7 @@ def test_main_trains_and_reports(tmp_path: Path, capsys):
         [
             str(session),
             "--config",
-            "canary.example.yaml",
+            _one_drive_config(tmp_path),
             "--bindings",
             str(bindings),
             "--out",
@@ -529,7 +572,7 @@ def test_main_with_evaluate(tmp_path: Path, capsys):
         [
             str(session),
             "--config",
-            "canary.example.yaml",
+            _one_drive_config(tmp_path),
             "--bindings",
             str(bindings),
             "--out",

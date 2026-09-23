@@ -1683,14 +1683,16 @@ async def test_score_and_emit_calibrated_mode_still_emits(
     assert result.threshold == 0.5
 
 
-async def test_score_and_emit_attaches_feature_contributors_from_scaler(
+async def test_score_and_emit_attaches_the_scoring_models_occlusion_contributors(
     tmp_path: Path,
     config: CanaryConfig,
 ) -> None:
-    """7.2a: when the IF tick is trustworthy (no missing features), the
-    daemon ranks features by ``|scaled z|`` from the model's own scaler
-    and surfaces the top-K on the emitted event as ``feature_contributors``
-    + ``affected_channels`` — cheap first-pass IF attribution."""
+    """A04.2: an emitting IF tick carries the *scoring mode model's* own
+    contributors, ranked by effect on the score
+    (``TrainedIsolationForest.feature_contributions``) — not a |z| ranking of
+    the artifact's feature union through its scaler. The fake scaler would
+    rank ``obd:SPEED`` (a column the scoring model lacks) first; it must not
+    appear."""
     import pandas as pd
 
     from src.alerts.emitter import AnomalyEventEmitter
@@ -1700,23 +1702,16 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
-    class _FakeScaler:
-        """Scales the trained columns to (x - mean) / std on a per-row frame."""
-
-        def __init__(self) -> None:
-            self.means = {"obd:RPM": 800.0, "obd:SPEED": 5.0, "obd:LOAD": 30.0}
-            self.stds = {"obd:RPM": 50.0, "obd:SPEED": 5.0, "obd:LOAD": 5.0}
-
+    class _UnionScaler:
         def transform(self, frame: pd.DataFrame) -> pd.DataFrame:
             out = frame.copy()
-            for column, mean in self.means.items():
-                out[column] = (frame[column] - mean) / self.stds[column]
+            out["obd:SPEED"] = 1e6
             return out
 
     class _FakeTrained:
         feature_columns = ("obd:RPM", "obd:SPEED", "obd:LOAD")
         mode_column = "operating_mode"
-        scaler = _FakeScaler()
+        scaler = _UnionScaler()
         manifest = type(
             "M",
             (),
@@ -1731,6 +1726,7 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
                 },
             },
         )()
+        calls: list[int] = []
 
         def score(self, frame: Any) -> Any:
             out = frame.copy()
@@ -1738,15 +1734,22 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
             out["isolation_forest_label"] = -1
             out["isolation_forest_model_mode"] = "all"
             out["isolation_forest_missing_features"] = False
-            # 2.3: uncalibrated modes are non-emitting at serve, so this
-            # contributor-ranking test needs a calibrated verdict to still
-            # reach the emitter.
+            # 2.3: uncalibrated modes are non-emitting at serve.
             out["isolation_forest_calibrated_threshold"] = 0.5
             out["isolation_forest_calibrated_anomaly"] = True
             return out
 
+        def feature_contributions(self, frame: Any, *, top_k: int) -> dict[str, float]:
+            self.calls.append(top_k)
+            return {"obd:LOAD": 0.3, "obd:RPM": 0.1}
+
+        def contribution_reference(self, mode: object) -> str:
+            # The 2026-09-20 artifact recorded no per-mode medians.
+            return "pooled_mean"
+
+    artifact = _FakeTrained()
     loaded = LoadedModel(
-        artifact=_FakeTrained(),
+        artifact=artifact,
         manifest=ModelManifestCommon(
             artifact_format_version=1,
             model_type="isolation_forest",
@@ -1760,18 +1763,15 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
         manifest_path=Path("/tmp/x.manifest.json"),
         manifest_mtime=0.0,
     )
-    # Build a row where obd:LOAD is the farthest from baseline (4 std out),
-    # then obd:RPM (2 std), then obd:SPEED (1 std). The top-K ranking must
-    # reflect that order regardless of the input dict's column order.
     row = pd.DataFrame(
         [
             {
                 "timestamp": "2026-05-13T12:00:00Z",
                 "session": "live",
                 "operating_mode": "all",
-                "obd:SPEED": 10.0,  # |z|=1.0
-                "obd:RPM": 900.0,  # |z|=2.0
-                "obd:LOAD": 50.0,  # |z|=4.0
+                "obd:SPEED": 10.0,
+                "obd:RPM": 900.0,
+                "obd:LOAD": 50.0,
             }
         ]
     )
@@ -1781,14 +1781,11 @@ async def test_score_and_emit_attaches_feature_contributors_from_scaler(
 
     events = read_events_dir(tmp_path)
     assert len(events) == 1
-    contributors = events[0].detail["feature_contributors"]
-    # All three trained features make it into top-5 here (K=5, only 3 features).
-    assert set(contributors) == {"obd:RPM", "obd:SPEED", "obd:LOAD"}
-    # Ranking: LOAD > RPM > SPEED by |scaled z|.
-    ordered = sorted(contributors.items(), key=lambda kv: kv[1], reverse=True)
-    assert [name for name, _ in ordered] == ["obd:LOAD", "obd:RPM", "obd:SPEED"]
-    # affected_channels echoes the ranked top order.
-    assert events[0].affected_channels == ("obd:LOAD", "obd:RPM", "obd:SPEED")
+    assert events[0].detail["feature_contributors"] == {"obd:LOAD": 0.3, "obd:RPM": 0.1}
+    assert events[0].affected_channels == ("obd:LOAD", "obd:RPM")
+    # What occlusion replaced each feature with is stated, not implied.
+    assert events[0].detail["feature_contributors_reference"] == "pooled_mean"
+    assert artifact.calls == [5]
 
 
 def test_persistence_sustained_tuner_override_replaces_not_stacks_with_gate() -> None:

@@ -331,3 +331,116 @@ def test_strata_use_freshly_observed_values_only() -> None:
 
     assert band_of(72.5, BARO_BANDS_KPA) == "70-77 kPa"
     assert band_of(None, BARO_BANDS_KPA) == UNMEASURED
+
+
+# ---------------------------------------------------------------------------
+# A04.1 — single-quantity shift known answer
+# ---------------------------------------------------------------------------
+
+
+def _shift_frame(n: int = 200, channels: int = 40) -> pd.DataFrame:
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    rng = np.random.default_rng(0)
+    frame = pd.DataFrame({MODE_COLUMN: ["city"] * (n // 2) + ["idle"] * (n // 2)})
+    for index in range(channels):
+        frame[f"obd:C{index:02d}"] = rng.normal(0.0, 1.0, n)
+        frame[f"obd:C{index:02d}__mean"] = rng.normal(0.0, 0.3, n)
+    return frame
+
+
+def _z_detector(reduce: str, limit: float):  # type: ignore[no-untyped-def]
+    """Row z-scores against the clean frame's own spread, reduced by max
+    (sees one channel) or mean (dilutes it across all of them)."""
+    base = _shift_frame()
+    columns = [c for c in base.columns if c.startswith("obd:")]
+    center, spread = base[columns].mean(), base[columns].std()
+
+    def score(frame: pd.DataFrame) -> dict[str, list[bool]]:
+        z = ((frame[columns] - center) / spread).abs()
+        value = z.max(axis=1) if reduce == "max" else z.mean(axis=1)
+        return {reduce: list((value > limit).to_numpy())}
+
+    return score
+
+
+def test_a_max_z_detector_passes_the_single_quantity_shift() -> None:
+    from src.models.evaluation import single_quantity_shift
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    report = single_quantity_shift(
+        _z_detector("max", 6.0),
+        _shift_frame(),
+        {"trim_b1": ["obd:C03"], "coolant": ["obd:C07", "obd:C08"]},
+        mode_column=MODE_COLUMN,
+    )["max"]
+    assert report.verdict == "pass", report.note
+    at_ten = {o.quantity: o.flag_rate for o in report.outcomes if o.sigma == 10.0}
+    assert at_ten == {"trim_b1": 1.0, "coolant": 1.0}
+    assert report.control is not None and report.control.flag_rate == 1.0
+
+
+def test_a_detector_that_dilutes_one_quantity_is_recorded_as_failing() -> None:
+    """The deployed IF's shape: every feature moved 3 sigma flags all rows,
+    one quantity moved 100 sigma flags none. That is a failure, recorded."""
+    from src.models.evaluation import single_quantity_shift
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    report = single_quantity_shift(
+        _z_detector("mean", 2.0),
+        _shift_frame(),
+        {"trim_b1": ["obd:C03"]},
+        mode_column=MODE_COLUMN,
+        sigmas=(3.0, 10.0),
+    )["mean"]
+    assert report.verdict == "fail"
+    assert "trim_b1" in report.note
+    assert report.control is not None and report.control.flag_rate == 1.0
+    assert all(o.flag_rate == 0.0 for o in report.outcomes)
+
+
+def test_a_detector_the_shift_never_reaches_is_invalid_not_failing() -> None:
+    from src.models.evaluation import single_quantity_shift
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    def constant(frame: pd.DataFrame) -> dict[str, list[bool]]:
+        return {"constant": [False] * len(frame)}
+
+    report = single_quantity_shift(
+        constant, _shift_frame(), {"trim_b1": ["obd:C03"]}, mode_column=MODE_COLUMN
+    )["constant"]
+    assert report.verdict == "invalid"
+
+    def withholding(frame: pd.DataFrame) -> dict[str, list[None]]:
+        return {"blind": [None] * len(frame)}
+
+    assert (
+        single_quantity_shift(
+            withholding, _shift_frame(), {"trim_b1": ["obd:C03"]}, mode_column=MODE_COLUMN
+        )["blind"].verdict
+        == "withheld"
+    )
+
+
+def test_the_shift_is_graded_only_where_the_quantity_was_observed() -> None:
+    """A trim polled every few seconds: rows between samples carry a
+    forward-filled value (``__gap`` set). A detector reading only arrived
+    samples cannot see a fault there, and is not graded there."""
+    from src.models.evaluation import single_quantity_shift
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    frame = _shift_frame(n=200, channels=4)
+    fresh = np.arange(len(frame)) % 4 == 0
+    frame["obd:C01__gap"] = ~fresh
+    base = frame.copy()
+
+    def observed_only(f: pd.DataFrame) -> dict[str, list[bool]]:
+        z = (f["obd:C01"] - base["obd:C01"].mean()) / base["obd:C01"].std()
+        return {"observed_only": list((z.abs() > 6.0) & ~f["obd:C01__gap"])}
+
+    report = single_quantity_shift(
+        observed_only, frame, {"trim": ["obd:C01"]}, mode_column=MODE_COLUMN, sigmas=(10.0,)
+    )["observed_only"]
+    (cell,) = report.outcomes
+    assert cell.rows == int(fresh.sum())
+    assert cell.flag_rate == 1.0

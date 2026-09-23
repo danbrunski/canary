@@ -38,6 +38,11 @@ from src.alerts.fusion import FusionScorer
 from src.config import CanaryConfig
 from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import SCORE_COLUMN, TrainedIsolationForest
+from src.models.sequence_dataset import (
+    MASK_ARRIVED_SAMPLE,
+    arrival_column_for,
+    observation_mask_from_schema,
+)
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.models.synthetic_fault_eval import (
@@ -151,7 +156,17 @@ class BatchedSequenceScorer:
         self.batch_size = batch_size
         self.device = device
         self.use_family_path = use_family_path
-        excluded = set(self.engine.suppressed_channels) | set(self.engine.uncalibrated_channels)
+        # The engine's own exclusions: suppressed, uncalibrated, and (A03.2)
+        # the context inputs an engine_response artifact never scores.
+        excluded = (
+            set(self.engine.suppressed_channels)
+            | set(self.engine.uncalibrated_channels)
+            | set(getattr(self.engine, "context_columns", ()))
+        )
+        # A03.1: the observation mask the artifact was trained with.
+        self.mask_rule, self._freshness_fallback = observation_mask_from_schema(
+            trained.manifest.schema
+        )
         keep = np.array([column not in excluded for column in self.feature_columns], dtype=bool)
         self._score_keep = keep.astype(np.float32)
         scaler_block = trained.manifest.scaler
@@ -196,7 +211,18 @@ class BatchedSequenceScorer:
         )
         finite = np.isfinite(values)
         mask = finite.astype(np.float32)
+        arrival_rule = self.mask_rule == MASK_ARRIVED_SAMPLE
         for index, column in enumerate(self.feature_columns):
+            if arrival_rule and column not in self._freshness_fallback:
+                # ``__arrived`` absent or NaN: nothing is known to have arrived.
+                arrived_column = arrival_column_for(column)
+                if arrived_column in aligned.columns:
+                    raw = aligned[arrived_column]
+                    arrived = ~raw.isna().to_numpy() & raw.fillna(False).astype(bool).to_numpy()
+                    mask[~arrived, index] = 0.0
+                else:
+                    mask[:, index] = 0.0
+                continue
             gap = f"{_base_channel(column)}{GAP_SUFFIX}"
             if gap in aligned.columns:
                 raw = aligned[gap]
@@ -673,6 +699,120 @@ def _standardize(
 
 
 @dataclass
+class MahalanobisBaseline:
+    """Per-mode Ledoit-Wolf Mahalanobis distance over a *curated* channel set
+    (A04.13 — a candidate for the multivariate-outlier role, not a detector
+    anyone serves).
+
+    Each mode's channels are standardized by that mode's median/MAD over
+    freshly observed samples (MAD 0 -> the channel is left out of the mode),
+    and the shrunk covariance is fit on rows with at least half the channels
+    observed. At scoring, an unobserved cell sits at the mode's centre (it adds
+    nothing), and a row with fewer than half its channels observed is withheld.
+    Score = squared distance / channels used, so modes of different width share
+    one scale for the budget threshold.
+
+    The review's naive max-|robust z| over 249 raw columns needed a threshold of
+    ~80 and caught only a +20 sigma trim shift: the gain is expected from
+    curating inputs, not from the algorithm, which is what this measures.
+    """
+
+    channels: tuple[str, ...]
+    stats: dict[str, tuple[list[int], Any, Any, Any]] = field(default_factory=dict)
+    name: str = "mahalanobis_curated"
+
+    @classmethod
+    def fit(
+        cls,
+        frames: Sequence[pd.DataFrame],
+        channels: Sequence[str],
+        *,
+        name: str = "mahalanobis_curated",
+    ) -> MahalanobisBaseline:
+        from sklearn.covariance import LedoitWolf
+
+        model = cls(channels=tuple(channels), name=name)
+        frame = pd.concat(frames, ignore_index=True)
+        values = np.column_stack(
+            [
+                _observed(frame, c) if c in frame.columns else np.full(len(frame), np.nan)
+                for c in model.channels
+            ]
+        )
+        modes = (
+            frame[MODE_COLUMN].astype(str).to_numpy()
+            if MODE_COLUMN in frame.columns
+            else np.full(len(frame), "all", dtype=object)
+        )
+        for mode in np.unique(modes):
+            subset = values[modes == mode]
+            keep: list[int] = []
+            centers: list[float] = []
+            spreads: list[float] = []
+            for index in range(subset.shape[1]):
+                column = subset[:, index]
+                if np.isfinite(column).sum() < MIN_MODE_ROWS:
+                    continue
+                center, spread = _median_mad(column)
+                if spread > 0:
+                    keep.append(index)
+                    centers.append(center)
+                    spreads.append(spread)
+            if len(keep) < 2:
+                continue
+            z = (subset[:, keep] - np.asarray(centers)) / np.asarray(spreads)
+            observed = np.isfinite(z)
+            rows = observed.mean(axis=1) >= 0.5
+            if int(rows.sum()) < MIN_MODE_ROWS:
+                continue
+            filled = np.where(observed, z, 0.0)[rows]
+            precision = LedoitWolf().fit(filled).precision_
+            model.stats[str(mode)] = (keep, np.asarray(centers), np.asarray(spreads), precision)
+        if not model.stats:
+            raise ValueError("no mode had two curated channels with spread and enough rows")
+        return model
+
+    def scores(self, features: pd.DataFrame) -> np.ndarray[Any, np.dtype[np.float64]]:
+        n = len(features)
+        values = np.column_stack(
+            [
+                _observed(features, c) if c in features.columns else np.full(n, np.nan)
+                for c in self.channels
+            ]
+        )
+        modes = (
+            features[MODE_COLUMN].astype(str).to_numpy()
+            if MODE_COLUMN in features.columns
+            else np.full(n, "all", dtype=object)
+        )
+        out: np.ndarray[Any, np.dtype[np.float64]] = np.full(n, np.nan)
+        for mode in np.unique(modes):
+            stats = self.stats.get(str(mode))
+            if stats is None:
+                continue
+            keep, centers, spreads, precision = stats
+            rows = modes == mode
+            z = (values[rows][:, keep] - centers) / spreads
+            observed = np.isfinite(z)
+            filled = np.where(observed, z, 0.0)
+            distance = np.einsum("ij,jk,ik->i", filled, precision, filled) / len(keep)
+            distance[observed.mean(axis=1) < 0.5] = np.nan
+            out[rows] = distance
+        return out
+
+
+def load_curated_channels(path: Path) -> tuple[str, ...]:
+    """A profile's curated outlier channels (``channels: [...]``), A04.13."""
+    import yaml
+
+    raw = yaml.safe_load(path.read_text()) or {}
+    channels = raw.get("channels")
+    if not isinstance(channels, list) or not channels:
+        raise ValueError(f"{path}: 'channels' must be a non-empty list")
+    return tuple(str(c) for c in channels)
+
+
+@dataclass
 class UntrainedAutoencoder:
     """The deployed sequence architecture with random weights, scored through
     the same windows and masked global error as the trained model.
@@ -900,6 +1040,7 @@ __all__ = [
     "DeployedStack",
     "Detector",
     "DetectorOutput",
+    "MahalanobisBaseline",
     "PCABaseline",
     "PlausibilityDetector",
     "RawStreamDetector",
@@ -910,6 +1051,7 @@ __all__ = [
     "ThresholdedScore",
     "UntrainedAutoencoder",
     "detector_roles",
+    "load_curated_channels",
     "raw_channels",
     "sequence_parity",
     "suppressed_for",

@@ -184,6 +184,15 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     assert any("no role channel" in s["reason"] for s in report["skipped_injections"])
     # No IF calibration sessions to set a baseline threshold on: no baseline.
     assert report["detectors"] == ["isolation_forest"]
+    # A04.1's known answer runs on every in-era drive, and — with no role
+    # channel to shift in this fixture — says it rests on the control alone.
+    shift = report["known_answers"]["single_quantity_shift"]
+    (run,) = shift["per_drive"]
+    assert run["drive"] == report["drives"][0]["drive"]
+    verdict = run["detectors"]["isolation_forest"]
+    assert verdict["outcomes"] == []
+    assert verdict["control"]["quantity"] == "_control_all_features"
+    assert verdict["verdict"] in ("withheld", "invalid")
     assert (tmp_path / "report.md").read_text().startswith("# Detector evaluation")
     assert list((tmp_path / "cache").glob("*-resampled.pkl"))
 
@@ -194,6 +203,7 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     assert main(argv) == 0
     report2 = json.loads(out2.read_text())
     assert "plausibility" in report2["detectors"]
+    assert "plausibility" in report2["known_answers"]["single_quantity_shift"]["not_applicable"]
     (drive,) = report2["drives"]
     assert drive["detectors"]["plausibility"]["scored_rows"] > 0
     assert list((tmp_path / "cache" / "plausibility").glob("*.parquet"))

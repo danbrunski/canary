@@ -8,8 +8,11 @@ its z-score scaler, and writes a joblib artifact + JSON manifest.
 
 Without `--evaluate` it just trains and saves. With `--evaluate <session>`
 it additionally splices synthetic anomalies into a held-out session and
-prints per-mode precision / recall / score-distribution so `contamination`
-can be tuned.
+prints per-mode precision / recall / score distribution at the *served*
+calibrated threshold, with withheld rows counted apart (A04.9). It no longer
+recommends `contamination`: that knob only sets sklearn's `offset_`, which no
+served decision reads. Held-out, drive-grouped evaluation is
+`scripts/evaluate_detectors.py`.
 
 Usage:
   scripts/train_anomaly_model.py --sessions-root data/sessions --out models/if
@@ -26,10 +29,11 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -92,6 +96,9 @@ def train(
     calibration_frame: pd.DataFrame | None = None,
     feature_policy: FeaturePolicy | None = None,
     evaluation_sessions: Sequence[Path] | None = None,
+    quarantined_cells: Mapping[str, pd.Index] | None = None,
+    calibration_policy: Mapping[str, Any] | None = None,
+    calibration_override: str | None = None,
 ) -> TrainedIsolationForest:
     """Build features, fit the per-mode IF + scaler, write artifact + manifest.
 
@@ -100,6 +107,8 @@ def train(
     omitted it is built here from ``calibration_sessions``.
     ``evaluation_sessions`` (A02.1) are the held-out sessions the retrain gate
     scores — disjoint from calibration — recorded in the manifest.
+    ``quarantined_cells`` / ``calibration_policy`` / ``calibration_override``
+    pass through to :func:`fit_isolation_forest` (A04.3, A04.4).
     """
     policy = (
         feature_policy
@@ -174,6 +183,9 @@ def train(
                 force_rebuild=rebuild_feature_cache,
             )
         ),
+        quarantined_cells=quarantined_cells,
+        calibration_policy=calibration_policy,
+        calibration_override=calibration_override,
     )
 
     if evaluation_sessions:
@@ -276,7 +288,8 @@ def evaluate(
     print("=" * 78)
     o = report.overall
     print(
-        f"  overall  rows={report.rows}  "
+        f"  overall  rows={report.rows}  withheld={report.withheld_rows} "
+        f"({report.withheld_positive_rows} labelled)  "
         f"precision={_fmt(o.precision)}  recall={_fmt(o.recall)}  f1={_fmt(o.f1)}  "
         f"fpr={_fmt(o.false_positive_rate)}"
     )
@@ -284,18 +297,13 @@ def evaluate(
         m = mode_eval.metrics
         sd = mode_eval.score_distribution
         print(
-            f"  mode={mode:<12}  rows={m.rows:<6}  "
+            f"  mode={mode:<12}  scored={m.rows:<6} withheld={mode_eval.withheld_rows:<5} "
             f"precision={_fmt(m.precision)}  recall={_fmt(m.recall)}  f1={_fmt(m.f1)}"
         )
-        rec = mode_eval.contamination
-        line = (
-            f"      score dist: min={_fmt(sd.minimum)} p50={_fmt(sd.median)} max={_fmt(sd.maximum)}"
+        print(
+            f"      threshold={_fmt(mode_eval.threshold)}  score dist: "
+            f"min={_fmt(sd.minimum)} p50={_fmt(sd.median)} max={_fmt(sd.maximum)}"
         )
-        if rec.recommended_contamination is not None:
-            line += f"  → recommend contamination ≈ {rec.recommended_contamination:.4f}"
-        else:
-            line += f"  ({rec.reason})"
-        print(line)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

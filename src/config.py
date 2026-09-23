@@ -497,6 +497,18 @@ class IsolationForestConfig(_Strict):
     n_jobs: int = 4
     max_dropped_row_fraction: float = Field(default=0.75, ge=0.0, lt=1.0)
     allow_unknown_only: bool = False
+    #: A04.4 — a mode model resting on fewer independent physical drives than
+    #: this (training rows) is refused, and so is one whose threshold would
+    #: rest on fewer calibration drives (``retrain.py --accept-thin-calibration
+    #: REASON`` publishes it anyway and stamps the reason). The 2026-09-20
+    #: city/highway models came from one day; idle/warmup thresholds from one
+    #: session.
+    min_training_drives_per_mode: int = Field(default=3, ge=0)
+    min_calibration_drives_per_mode: int = Field(default=3, ge=0)
+    #: A04.10 — extra seeds refit per mode to measure which calibration rows
+    #: the threshold flags seed-to-seed (pairwise Jaccard, in the manifest).
+    #: 0 disables the measurement.
+    stability_seeds: int = Field(default=4, ge=0)
 
     @field_validator("n_jobs")
     @classmethod

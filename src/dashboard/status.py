@@ -27,7 +27,7 @@ from src.dashboard.ups import (
     read_watchdog_status,
 )
 from src.decode.engineering import physical_value
-from src.models.feature_spec_health import structural_blindness_snapshot
+from src.models.feature_spec_health import load_audit_snapshot, structural_blindness_snapshot
 from src.models.health import HealthMonitor
 from src.timefmt import parse_iso_utc
 
@@ -886,6 +886,9 @@ def build_status(
                 "missing_feature_rate_by_mode": dict(
                     health_monitor.if_missing_feature_rate_by_mode
                 ),
+                # A04.6/A04.8 — mode models refused at load and trained
+                # features the feature policy forbids, named.
+                "load_audit": load_audit_snapshot().get("isolation_forest"),
             },
             # D02.5 — `blind_modes` says a detector is scoring nothing;
             # this says *why*, when the reason is that its feature spec

@@ -181,8 +181,14 @@ class AnomalyEventEmitter:
         calibrated_threshold_column: str | None = None,
         mode_column: str = "operating_mode",
         feature_contributors: Mapping[str, float] | None = None,
+        feature_contributors_reference: str | None = None,
     ) -> AnomalyEvent | None:
         """Emit an event from one row of a scored Isolation Forest frame.
+
+        ``feature_contributors_reference`` (A04.2) says what the occlusion
+        attribution replaced each feature with — ``mode_median`` or, on an
+        artifact without recorded medians, ``pooled_mean`` — and is written
+        beside the contributors as ``detail.feature_contributors_reference``.
 
         Anomaly rule (Phase 7.2): prefer the per-mode *calibrated* verdict
         (``isolation_forest_calibrated_anomaly``) when the row's mode was
@@ -229,6 +235,10 @@ class AnomalyEventEmitter:
             threshold=threshold,
             feature_contributors=feature_contributors,
         )
+        if feature_contributors and feature_contributors_reference is not None:
+            detail = dict(event.detail)
+            detail["feature_contributors_reference"] = feature_contributors_reference
+            event = event.model_copy(update={"detail": detail})
         if missing:
             # tag dropout vs ordinary outlier so the dashboard can render
             # the two cases differently — same source/model, different reason.
@@ -574,6 +584,27 @@ class IsolationForestInferenceEngine:
         scored = self.trained.score(frame)
         out: pd.Series = scored.iloc[0]
         return out
+
+    def feature_contributions(
+        self, row: Mapping[str, Any] | pd.Series, *, top_k: int
+    ) -> dict[str, float]:
+        """The scoring mode model's own features, ranked by how much each
+        raised this row's score (A04.2, occlusion — see
+        ``TrainedIsolationForest.feature_contributions``). Never the
+        ``feature_columns`` union: most of those are not features of the
+        model that scored the row."""
+        if isinstance(row, pd.Series):
+            frame = row.to_frame().T
+        else:
+            frame = pd.DataFrame([dict(row)])
+        contributions: dict[str, float] = self.trained.feature_contributions(frame, top_k=top_k)
+        return contributions
+
+    def contribution_reference(self, row: Mapping[str, Any] | pd.Series) -> str | None:
+        """``mode_median`` / ``pooled_mean``: what occlusion replaced features
+        with for this row's mode (A04.2)."""
+        reference: str | None = self.trained.contribution_reference(row.get(self.mode_column))
+        return reference
 
 
 __all__ = [

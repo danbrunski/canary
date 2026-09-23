@@ -92,6 +92,29 @@ DEFAULT_BASELINE_SIGMA = 6.0
 #: normal distribution — the standard scaling factor.
 _MAD_TO_SIGMA = 1.4826
 
+#: sqrt(pi/2): makes the mean absolute deviation a consistent estimator of
+#: the standard deviation for a normal distribution (the MAD = 0 fallback of
+#: Iglewicz & Hoaglin's modified z-score).
+_MEANAD_TO_SIGMA = 1.2533
+
+
+def robust_spread(values: pd.Series, median: float) -> float:
+    """Scaled MAD, or — when MAD is 0 — the scaled mean absolute deviation.
+
+    A04.3: MAD is 0 whenever more than half the values sit at one level
+    (accelerator pedal at rest, a fan off, a trim clamped at 0). A band of
+    ``median ± 6 × 0`` then quarantined *every* non-median value: 4.5 % of
+    cells, but 71.6 % of the IF's training rows, leaving it only the moments
+    when everything sits at its median. The mean absolute deviation is 0 only
+    when every value is identical, and then there is nothing to quarantine.
+    """
+    deviation = (values.astype(float) - median).abs()
+    scaled_mad = _MAD_TO_SIGMA * float(deviation.median())
+    if scaled_mad > 0:
+        return scaled_mad
+    return _MEANAD_TO_SIGMA * float(deviation.mean())
+
+
 _STRUCTURAL_COLUMNS = frozenset({"session", "timestamp", "operating_mode"})
 
 #: A (channel, mode) group with at most this many distinct values is
@@ -465,7 +488,7 @@ def compute_golden_baselines(
                 )
             else:
                 median = float(values.median())
-                scaled_mad = _MAD_TO_SIGMA * float((values - median).abs().median())
+                scaled_mad = robust_spread(values, median)
                 baselines.append(
                     ChannelBaseline(
                         channel=channel,
@@ -539,8 +562,12 @@ def _screen_group(
                 baseline_values=None,
             )
         if scaled_mad <= 0:
-            outside = values != median
-            low = high = median
+            # A04.3: a frozen zero spread cannot say what legitimately varies
+            # (sidecars frozen before ``robust_spread`` recorded MAD = 0 for
+            # any channel sitting at one value more than half the time).
+            # Exempt the group rather than quarantine every non-median value.
+            outside = pd.Series(False, index=values.index)
+            low = high = None
         else:
             low = median - baseline_sigma * scaled_mad
             high = median + baseline_sigma * scaled_mad
@@ -586,13 +613,10 @@ def _screen_group(
         )
 
     median = float(values.median())
-    scaled_mad = _MAD_TO_SIGMA * float((values - median).abs().median())
+    scaled_mad = robust_spread(values, median)
     if scaled_mad <= 0:
-        # Quantization-flat data (every surviving value identical, or a
-        # single-LSB stair-step) — same degenerate case DeviationConfig's
-        # sigma_floor guards against. Nothing legitimately varies, so any
-        # different value is unambiguously outside, without a divide.
-        outside = values != median
+        # Every surviving value identical: nothing is outside the band.
+        outside = pd.Series(False, index=values.index)
         low = high = median
     else:
         low = median - baseline_sigma * scaled_mad

@@ -78,8 +78,15 @@ def test_bearing_wear_fires_before_a_dtc_would() -> None:
     fr_clean = base + _RNG.normal(0, 0.15, n)
     clean = _frame("clean", fl_clean, fr_clean)
 
+    # One synthetic drive: the per-mode drive floors (A04.4) are relaxed so
+    # the fixture still exercises a trained model.
     config = IsolationForestConfig(
-        enabled=True, n_estimators=200, contamination=0.01, random_state=7
+        enabled=True,
+        n_estimators=200,
+        contamination=0.01,
+        random_state=7,
+        min_training_drives_per_mode=1,
+        min_calibration_drives_per_mode=1,
     )
     trained = fit_isolation_forest(clean, config)
 

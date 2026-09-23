@@ -631,6 +631,7 @@ def test_sparse_mode_is_skipped_and_listed_in_manifest() -> None:
             "fit_rows": 5,
             "min_samples_required": 30,
             "reason": "too_few_fit_rows",
+            "detail": None,
         }
     ]
 
@@ -833,14 +834,16 @@ def test_missing_feature_fraction_recorded_for_complete_rows_too() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _frame_with_modes(rows_per_mode: dict[str, int], *, seed: int = 7) -> pd.DataFrame:
+def _frame_with_modes(
+    rows_per_mode: dict[str, int], *, seed: int = 7, freq: str = "1s"
+) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     total = sum(rows_per_mode.values())
     modes = [mode for mode, rows in rows_per_mode.items() for _ in range(rows)]
     return pd.DataFrame(
         {
             SESSION_COLUMN: ["session-a"] * total,
-            TIMESTAMP_COLUMN: pd.date_range("2026-09-20T00:00:00Z", periods=total, freq="1s"),
+            TIMESTAMP_COLUMN: pd.date_range("2026-09-20T00:00:00Z", periods=total, freq=freq),
             MODE_COLUMN: modes,
             "obd:RPM": rng.normal(loc=1500.0, scale=60.0, size=total),
             "obd:SPEED": rng.normal(loc=30.0, scale=3.0, size=total),
@@ -934,7 +937,9 @@ def test_small_holdout_calibrates_at_a_resolvable_rate_and_says_so(
 ) -> None:
     """The 2026-09-20 manifest claimed target_flag_rate 0.001 on 91-328 row
     holdouts, where one flagged row is 0.3-1.1 %."""
-    frame = _frame_with_modes({"city": 2000})  # 20 % holdout -> 400 rows
+    # Rows a minute apart: every exceedance is its own episode (A04.11), so
+    # this isolates the row-count rule.
+    frame = _frame_with_modes({"city": 2000}, freq="60s")  # 20 % holdout -> 400 rows
     with caplog.at_level(logging.WARNING, logger="src.models.isolation_forest"):
         trained = fit_isolation_forest(
             frame,

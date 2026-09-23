@@ -1,0 +1,32 @@
+# A04.13 — the curated channel set a candidate multivariate-outlier detector
+# (per-mode robust z, Ledoit-Wolf Mahalanobis) is evaluated over on the
+# detector harness (`scripts/evaluate_detectors.py --baselines
+# robust_z_curated mahalanobis_curated`). An experiment feeding A06.1, not a
+# served detector.
+#
+# The 2026-09-20 IF used 173-255 columns per mode, most of them driving
+# conditions or `model_feature: false` bindings; a single-quantity fault was
+# invisible in any of them (A04.1). This set is the engine's fuelling and air
+# response — trims, the bank balances and totals derived from them, lambda,
+# airflow, load, timing — plus coolant and intake temperature as the two
+# context channels a fuelling residual depends on. No `deviation:*` behaviour
+# residual is listed: none is produced in the evaluation frames today
+# (the reviewed artifact had `behavior_model_columns: []`); add them here when
+# they are.
+channels:
+  - obd:SHORT_FUEL_TRIM_1
+  - obd:SHORT_FUEL_TRIM_2
+  - obd:LONG_FUEL_TRIM_1
+  - obd:LONG_FUEL_TRIM_2
+  - derived:TOTAL_TRIM_B1
+  - derived:TOTAL_TRIM_B2
+  - derived:STFT_BANK_BALANCE
+  - derived:LTFT_BANK_BALANCE
+  - obd:O2_WR_LAMBDA_S1
+  - obd:MAF
+  - derived:AIR_MASS_PER_CYCLE
+  - derived:VE_PERCENT
+  - obd:ENGINE_LOAD
+  - obd:TIMING_ADVANCE
+  - obd:COOLANT_TEMP
+  - obd:INTAKE_TEMP

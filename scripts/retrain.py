@@ -437,8 +437,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         metavar="REASON",
         help="Publish a sequence model whose calibration does not cover what it will "
         "score (fewer than three drives, a scored mode without its own band, a "
-        "channel never observed). Refused without this (A02.2); the reason and the "
-        "violations are stamped into the manifest.",
+        "channel never observed), or an IF mode whose threshold rests on fewer than "
+        "min_calibration_drives_per_mode drives (A04.4). Refused without this (A02.2); "
+        "the reason and the violations are stamped into the manifest.",
     )
     parser.add_argument(
         "--no-calibration-holdout",
@@ -849,8 +850,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
 
     quarantine_excluded: dict[str, int] | None = None
+    quarantined_cells: dict[str, pd.Index] | None = None
     if shared_feature_frame is not None and not args.skip_quarantine_exclusion:
-        shared_feature_frame, quarantine_excluded = _apply_quarantine_exclusion(
+        shared_feature_frame, quarantine_excluded, quarantined_cells = _apply_quarantine_exclusion(
             shared_feature_frame, config, ledger_path=args.ledger
         )
 
@@ -876,6 +878,43 @@ def main(argv: Sequence[str] | None = None) -> int:
             "applied feedback retraining policy",
             extra=feedback_report.to_dict(),
         )
+
+    # A04.3: the IF's calibration rows go through the same feedback-label
+    # policy as training — an operator-labelled anomaly is not nominal, and a
+    # threshold cut over it is too high. Quarantine is deliberately NOT
+    # applied: serve-time scoring never quarantines, and a threshold must be
+    # cut on the population the served detector actually scores. Both facts
+    # are recorded in the IF manifest (``calibration.policy``). The filtered
+    # frame goes to the IF only: the sequence trainer keeps the frame it had,
+    # because its manifest has nowhere to record the policy (yet).
+    if_calibration_kwargs = dict(calibration_kwargs)
+    calibration_policy: dict[str, Any] = {
+        "quarantine": {
+            "applied": False,
+            "reason": "serve-time scoring does not quarantine; thresholds are cut on the "
+            "population the served detector scores",
+        },
+        "feedback_labels": {"applied": False, "reason": "no feedback labels"},
+    }
+    if calibration_kwargs.get("calibration_frame") is not None and feedback_labels:
+        try:
+            if_calibration_kwargs["calibration_frame"], calibration_feedback = (
+                apply_retraining_feedback_policy(
+                    calibration_kwargs["calibration_frame"],
+                    feedback_labels,
+                    fallback_margin_seconds=args.feedback_window_seconds,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - label policy is a retrain gate
+            log.exception("calibration feedback label policy failed", extra={"error": str(exc)})
+            _mark_requested_failures(results, args, f"failed: calibration feedback policy: {exc}")
+            _print_report(sessions, results, args, feedback_report=feedback_report)
+            return 1
+        calibration_policy["feedback_labels"] = {
+            "applied": True,
+            "excluded_rows": calibration_feedback.excluded_rows,
+            "excluded_labels": calibration_feedback.excluded_labels,
+        }
 
     feature_kwargs = (
         {"feature_frame": shared_feature_frame}
@@ -919,7 +958,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 calibration_sessions=calibration_sessions or None,
                 feature_policy=feature_policy,
                 evaluation_sessions=evaluation_sessions or None,
-                **calibration_kwargs,
+                quarantined_cells=quarantined_cells,
+                calibration_policy=calibration_policy,
+                calibration_override=args.accept_thin_calibration,
+                **if_calibration_kwargs,
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
@@ -1025,7 +1067,7 @@ def _apply_quarantine_exclusion(
     config: CanaryConfig,
     *,
     ledger_path: Path,
-) -> tuple[pd.DataFrame, dict[str, int]]:
+) -> tuple[pd.DataFrame, dict[str, int], dict[str, pd.Index]]:
     """Mask Quarantine-tier cells out of the actual training matrix (Task 3.6,
     online-training-strategy.md).
 
@@ -1073,10 +1115,12 @@ def _apply_quarantine_exclusion(
                 "quarantine exclusion applied to training matrix",
                 extra={"excluded_counts": result.reject_counts},
             )
-        return masked_frame, dict(result.reject_counts)
+        # A04.3: which cells, so the IF can count the rows they cost per mode.
+        cells = {str(c): mask.index[mask[c].to_numpy()] for c in mask.columns if mask[c].any()}
+        return masked_frame, dict(result.reject_counts), cells
     except Exception as exc:  # noqa: BLE001 — best-effort, see docstring
         log.warning("quarantine exclusion skipped: %s", exc)
-        return feature_frame, {}
+        return feature_frame, {}, {}
 
 
 def _compute_disposition_summary(

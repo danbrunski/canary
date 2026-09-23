@@ -301,3 +301,126 @@ def test_plausibility_confirmations_land_on_the_shared_row_grid(tmp_path: Path) 
     )
     assert set(window.samples["channel"]) <= {"obd:RPM", "obd:SPEED", "obd:COOLANT_TEMP"}
     assert window.samples["t"].min() >= grid2.iloc[30].timestamp()
+
+
+def test_curated_mahalanobis_sees_a_broken_correlation_per_mode(tmp_path: Path) -> None:
+    """A04.13: two trims that move together, each in its normal range, but
+    against each other — invisible per channel, plain to the per-mode shrunk
+    covariance. A row observing under half its channels is withheld."""
+    from src.models.evaluation_detectors import MahalanobisBaseline, load_curated_channels
+
+    rng = np.random.default_rng(3)
+    n = 400
+    common = rng.normal(0.0, 3.0, n)
+    frame = pd.DataFrame(
+        {
+            MODE_COLUMN: ["city"] * n,
+            "obd:STFT1": common + rng.normal(0, 0.3, n),
+            "obd:STFT2": common + rng.normal(0, 0.3, n),
+            "obd:MAF": rng.normal(20.0, 2.0, n),
+        }
+    )
+    channels_file = tmp_path / "curated.yaml"
+    channels_file.write_text("channels: [obd:STFT1, obd:STFT2, obd:MAF]\n")
+    channels = load_curated_channels(channels_file)
+    model = MahalanobisBaseline.fit([frame], channels)
+    probe = pd.DataFrame(
+        {
+            MODE_COLUMN: ["city", "city", "city", "idle"],
+            "obd:STFT1": [3.0, 3.0, 3.0, 3.0],
+            "obd:STFT2": [3.0, -3.0, np.nan, 3.0],
+            "obd:MAF": [20.0, 20.0, np.nan, 20.0],
+        }
+    )
+    scores = model.scores(probe)
+    assert scores[1] > 10 * scores[0]  # the anti-correlated row
+    assert np.isnan(scores[2])  # 1 of 3 channels observed: withheld
+    assert np.isnan(scores[3])  # no model for this mode
+
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("channels: []\n")
+    with pytest.raises(ValueError, match="non-empty"):
+        load_curated_channels(empty)
+
+
+def test_batched_scoring_follows_the_artifacts_mask_rule_and_context_columns() -> None:
+    """A03.1/A03.2 on the harness: an artifact recording the arrival mask and
+    context columns is scored by the batched rule exactly as the served
+    engine scores it — ``__arrived`` (absent -> not arrived) for the mask, and
+    context columns out of the score."""
+    pytest.importorskip("torch")
+    from dataclasses import replace as dc_replace
+
+    from src.models.evaluation_detectors import BatchedSequenceScorer, sequence_parity
+    from src.models.lstm_training import train_lstm_autoencoder
+    from src.models.sequence_dataset import (
+        MASK_ARRIVED_SAMPLE,
+        OBSERVATION_MASK_SCHEMA_KEY,
+        SequenceWindowDataset,
+    )
+    from src.models.sequence_feature_set import FEATURE_SET_SCHEMA_KEY
+    from src.preprocessing.feature_pipeline import sequence_feature_columns
+    from src.preprocessing.normalization import ZScoreScaler
+
+    config = _config()
+    features = featurize_wide_frame(_resampled(gap_after=100), config).features
+    columns = sequence_feature_columns(features)
+    lstm_config = config.models.lstm_autoencoder.model_copy(
+        update={
+            "sequence_length": 4,
+            "hidden_size": 6,
+            "num_layers": 1,
+            "latent_dim": 2,
+            "batch_size": 8,
+            "max_epochs": 1,
+            "validation_fraction": 0.0,
+            "random_state": 3,
+            "threshold_quantile": 0.5,
+        }
+    )
+    scaler = ZScoreScaler.fit(features, columns=columns)
+    trained = train_lstm_autoencoder(
+        SequenceWindowDataset(
+            scaler.transform(features), sequence_length=4, feature_columns=columns
+        ),
+        lstm_config,
+        trained_at="2026-05-12T00:00:00Z",
+        allow_in_sample_calibration=True,
+        scaler=scaler,
+    )
+    context = [c for c in columns if c.startswith("obd:SPEED")]
+    schema = {
+        **dict(trained.manifest.schema),
+        OBSERVATION_MASK_SCHEMA_KEY: {
+            "rule": MASK_ARRIVED_SAMPLE,
+            "freshness_fallback_columns": ["obd:COOLANT_TEMP"],
+        },
+        FEATURE_SET_SCHEMA_KEY: {"context_columns": context},
+    }
+    trained = dc_replace(trained, manifest=dc_replace(trained.manifest, schema=schema))
+    frame = features.copy()
+    for channel in ("obd:RPM", "obd:THROTTLE_POS", "obd:SPEED"):
+        frame[f"{channel}__arrived"] = (np.arange(len(frame)) % 3) != 0
+    frame["obd:RPM__arrived"] = frame["obd:RPM__arrived"].astype(object)
+    frame.loc[frame.index[::7], "obd:RPM__arrived"] = np.nan  # unknown -> not arrived
+
+    scorer = BatchedSequenceScorer(trained, batch_size=7)
+    assert set(context) <= set(scorer.engine.context_columns)
+    parity = sequence_parity(scorer, frame, rows=len(frame))
+    assert parity.windows > 100
+    assert parity.agrees, parity
+    assert parity.max_score_difference < 1e-4
+    # The rule really changed the input: freshness masking scores differently.
+    legacy = BatchedSequenceScorer(
+        dc_replace(
+            trained,
+            manifest=dc_replace(
+                trained.manifest,
+                schema={k: v for k, v in schema.items() if k != OBSERVATION_MASK_SCHEMA_KEY},
+            ),
+        ),
+        batch_size=7,
+    )
+    arrival_scores = scorer.score(frame).global_score
+    freshness_scores = legacy.score(frame).global_score
+    assert not np.allclose(np.nan_to_num(arrival_scores), np.nan_to_num(freshness_scores))

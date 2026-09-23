@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import sys
@@ -291,7 +292,10 @@ def _load_model_managers(
     if config.models.isolation_forest.enabled:
         if_path = config.daemon.models_dir / config.daemon.isolation_forest_artifact
         managers["isolation_forest"] = manager_for_artifact(
-            if_path, _load_isolation_forest, model_type="isolation_forest", load=load
+            if_path,
+            functools.partial(_load_isolation_forest, config=config),
+            model_type="isolation_forest",
+            load=load,
         )
 
     backend = resolve_sequence_backend(config)
@@ -313,7 +317,7 @@ def _load_model_managers(
     return managers
 
 
-def _load_isolation_forest(artifact_path: Path) -> Any:
+def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None = None) -> Any:
     """:func:`src.models.isolation_forest.load_isolation_forest_model`, imported
     when an artifact is first loaded.
 
@@ -321,10 +325,28 @@ def _load_isolation_forest(artifact_path: Path) -> Any:
     FSM limits, pdfplumber (192 modules). ``build_components`` runs on the main
     thread before any collector (S01.3); with ``load=False`` the first load is
     the model poller's, in a thread, and so is this import.
+
+    A04.6: with ``config`` (already profile-scoped by ``main``), the trained
+    features are checked against the same feature policy training applies —
+    the bindings catalog and the serving capture profile's DIDs — and the
+    violations are named on ``/status``.
     """
     from src.models.isolation_forest import load_isolation_forest_model
 
-    return load_isolation_forest_model(artifact_path)
+    policy = None
+    if config is not None:
+        try:
+            from src.collection.capture_profiles import serving_mode22_dids
+            from src.decode.engineering import repo_bindings
+            from src.preprocessing.feature_pipeline import FeaturePolicy
+
+            policy = FeaturePolicy(
+                bindings=repo_bindings(),
+                serving_dids=serving_mode22_dids(config.daemon.capture_profiles, config.collection),
+            )
+        except Exception:  # noqa: BLE001 — the audit is advisory; the model still loads
+            log.exception("isolation_forest feature-policy audit unavailable")
+    return load_isolation_forest_model(artifact_path, feature_policy=policy)
 
 
 def _sequence_model_type(config: CanaryConfig) -> str | None:

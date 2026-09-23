@@ -1484,45 +1484,28 @@ def _log_structural_verdict(
     verdict: dict[str, Any],
     transition: str,
 ) -> None:
+    """Log a structural-blindness verdict. Not the same event as "schema
+    reconciled": an ERROR means the model cannot score a single row until it
+    is retrained, and the only prior symptom was a `missing_feature_rate` of
+    1.0 with no cause attached (D02.5). For a per-mode model the wording is
+    about which mode models are blind (A04.5), from
+    :func:`src.models.feature_spec_health.describe_structural_verdict`."""
+    from src.models.feature_spec_health import describe_structural_verdict
+
     extra = {
         "model_type": model_type,
         "model_version": model_version,
         "structural_blindness": verdict,
         "transition": transition,
     }
-    if verdict["scores_nothing"]:
-        # Not the same event as "schema reconciled": this model cannot score a
-        # single row until it is retrained, and the only prior symptom was a
-        # `missing_feature_rate` of 1.0 with no cause attached (D02.5).
-        log.error(
-            "model feature spec is unsatisfiable (%s): %d of %d features absent "
-            "from every reconciliation over %.0f s / %d reports (%.1f%% > %.1f%% "
-            "ceiling), so this detector will withhold every row until retrained; "
-            "absent: %s",
-            transition,
-            verdict["absent_count"],
-            verdict["expected_count"],
-            verdict["observed_seconds"],
-            verdict["reports"],
-            verdict["absent_fraction"] * 100.0,
-            verdict["withhold_ceiling"] * 100.0,
-            ", ".join(verdict["absent_feature_columns"][:12]),
-            extra=extra,
-        )
-        return
-    log.warning(
-        "model feature spec structural absence %s: %d of %d features absent from "
-        "every reconciliation over %.0f s (under the %.1f%% withhold ceiling)",
-        transition,
-        verdict["absent_count"],
-        verdict["expected_count"],
-        verdict["observed_seconds"],
-        verdict["withhold_ceiling"] * 100.0,
-        extra=extra,
-    )
+    level, message = describe_structural_verdict(verdict, transition)
+    if level == "error":
+        log.error("%s", message, extra=extra)
+    else:
+        log.warning("%s", message, extra=extra)
 
 
-#: Phase 7.2a — how many top IF feature contributors (by ``|scaled z|``) the
+#: Phase 7.2a — how many top IF feature contributors (by score effect, A04.2) the
 #: emitter attaches as ``detail.feature_contributors``. Keeps the per-event
 #: payload bounded for IF models with dozens of features.
 _IF_TOP_FEATURES = 5
@@ -1677,31 +1660,24 @@ def _record_if_health(
 
 
 def _rank_feature_contributors(
-    loaded: Any, engine: IsolationForestInferenceEngine, aligned: Any
-) -> tuple[dict[str, float], tuple[str, ...]]:
-    """Task 3.1 / Phase 7.2a: cheap first-pass IF attribution, split out of
-    ``_score_and_emit`` as its own best-effort, side-effect-free step — rank
-    features by their distance from the scaler's training baseline (``|z|``),
-    keep the top :data:`_IF_TOP_FEATURES`. The scaled row is a one-row
-    transform; the scaler is already loaded on the artifact.
+    engine: IsolationForestInferenceEngine, aligned: Any
+) -> tuple[dict[str, float], tuple[str, ...], str | None]:
+    """A04.2 — IF attribution over the *scoring mode model's own* features, by
+    their effect on the score (occlusion, one batched ``decision_function``).
+    The earlier |z| ranking over the artifact's feature union named a feature
+    the scoring model did not have on 60 of 62 city rows. Best-effort and
+    side-effect-free; keeps the top :data:`_IF_TOP_FEATURES`. The third value
+    says what each feature was replaced with: ``mode_median``, or
+    ``pooled_mean`` on an artifact that recorded no per-mode medians.
     """
-    import pandas as pd
-
     try:
-        scaled = loaded.artifact.scaler.transform(aligned).iloc[0]
-        ranked = sorted(
-            (
-                (str(column), abs(float(scaled[column])))
-                for column in engine.feature_columns
-                if column in scaled.index and pd.notna(scaled[column])
-            ),
-            key=lambda item: item[1],
-            reverse=True,
-        )[:_IF_TOP_FEATURES]
+        row = aligned.iloc[0]
+        contributions = engine.feature_contributions(row, top_k=_IF_TOP_FEATURES)
+        reference = engine.contribution_reference(row)
     except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
         log.exception("isolation_forest feature_contributors ranking failed")
-        return {}, ()
-    return {name: value for name, value in ranked}, tuple(name for name, _ in ranked)
+        return {}, (), None
+    return contributions, tuple(contributions), reference
 
 
 @dataclass(frozen=True)
@@ -1726,6 +1702,8 @@ class _IFComputed:
     score_val: Any
     feature_contributors: dict[str, float]
     affected_channels: tuple[str, ...]
+    #: A04.2 — ``mode_median`` / ``pooled_mean`` (see _rank_feature_contributors).
+    feature_contributors_reference: str | None = None
 
 
 def _if_compute(loaded: Any, row: Any) -> _IFComputed:
@@ -1760,15 +1738,24 @@ def _if_compute(loaded: Any, row: Any) -> _IFComputed:
         if model_mode is not None and pd.notna(model_mode)
         else None
     )
-    # Phase 7.2a — cheap first-pass IF attribution: rank features by their
-    # distance from the scaler's training baseline (|z|), keep the top K.
-    # Skipped for a missing-feature row: its verdict is suppressed below.
-    if missing:
+    # A04.2 — occlusion attribution, only for a row that can emit (calibrated
+    # and at/over its threshold): the persistence gate and emitter only ever
+    # read it there, and it costs one batched forward pass. Skipped for a
+    # missing-feature row: its verdict is suppressed below.
+    score_now = scored.get(SCORE_COLUMN)
+    over_threshold = (
+        calibrated_threshold is not None
+        and score_now is not None
+        and pd.notna(score_now)
+        and float(score_now) >= calibrated_threshold
+    )
+    reference: str | None = None
+    if missing or not over_threshold:
         feature_contributors: dict[str, float] = {}
         affected_channels: tuple[str, ...] = ()
     else:
-        feature_contributors, affected_channels = _rank_feature_contributors(
-            loaded, engine, aligned
+        feature_contributors, affected_channels, reference = _rank_feature_contributors(
+            engine, aligned
         )
     return _IFComputed(
         model_version=engine.model_version,
@@ -1783,6 +1770,7 @@ def _if_compute(loaded: Any, row: Any) -> _IFComputed:
         score_val=scored.get(SCORE_COLUMN),
         feature_contributors=feature_contributors,
         affected_channels=affected_channels,
+        feature_contributors_reference=reference,
     )
 
 
@@ -1875,6 +1863,7 @@ def _if_apply(
             timestamp=format_timestamp(computed.timestamp),
             affected_channels=computed.affected_channels,
             feature_contributors=computed.feature_contributors or None,
+            feature_contributors_reference=computed.feature_contributors_reference,
         )
     if score_val is None or pd.isna(score_val):
         return None

@@ -33,7 +33,7 @@ import logging
 import sys
 from collections.abc import Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -83,6 +83,7 @@ from src.models.evaluation import (
     group_into_drives,
     observed_median,
     session_span,
+    single_quantity_shift,
     sustained_alerts,
     vus_pr,
 )
@@ -90,6 +91,7 @@ from src.models.evaluation_detectors import (
     DeployedStack,
     Detector,
     DetectorOutput,
+    MahalanobisBaseline,
     PCABaseline,
     PlausibilityDetector,
     RawStreamDetector,
@@ -98,6 +100,7 @@ from src.models.evaluation_detectors import (
     ThresholdedScore,
     UntrainedAutoencoder,
     detector_roles,
+    load_curated_channels,
     raw_channels,
     sequence_parity,
     suppressed_for,
@@ -119,6 +122,7 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
 
@@ -587,6 +591,56 @@ def injection_sweep(
     return outcomes, skipped, slices
 
 
+def shift_slice(features: pd.DataFrame, rows: int) -> pd.DataFrame:
+    """``rows`` contiguous rows centred on the session's engine-running rows
+    (empty when the engine never ran)."""
+    running = np.flatnonzero(engine_running(features))
+    if running.size == 0:
+        return features.iloc[0:0]
+    centre = int(running[running.size // 2])
+    start = max(0, centre - rows // 2)
+    return features.iloc[start : start + rows].reset_index(drop=True)
+
+
+def shift_known_answer(
+    detectors: Sequence[Detector],
+    features: pd.DataFrame,
+    quantities: Mapping[str, Sequence[str]],
+) -> dict[str, Any]:
+    """A04.1 on one slice: every detector's single-quantity-shift report."""
+
+    def score(frame: pd.DataFrame) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for detector in detectors:
+            out.update({n: o.verdict for n, o in detector.score(frame).items()})
+        return out
+
+    reports = single_quantity_shift(score, features, quantities, mode_column=MODE_COLUMN)
+    return {name: report.to_dict() for name, report in reports.items()}
+
+
+def summarize_shift(per_drive: Sequence[Mapping[str, Any]], names: Sequence[str]) -> dict[str, Any]:
+    """Per detector: how many drives passed, failed, were invalid or withheld,
+    and per (quantity, size) the flag rate on each drive (never pooled)."""
+    out: dict[str, Any] = {}
+    for name in names:
+        verdicts: dict[str, int] = {}
+        cells: dict[str, dict[str, list[float | None]]] = {}
+        for entry in per_drive:
+            report = entry["detectors"].get(name)
+            if report is None:
+                continue
+            verdicts[report["verdict"]] = verdicts.get(report["verdict"], 0) + 1
+            for outcome in [*report["outcomes"], report.get("control") or {}]:
+                if not outcome:
+                    continue
+                cells.setdefault(outcome["quantity"], {}).setdefault(
+                    f"{outcome['sigma']:g}", []
+                ).append(outcome["flag_rate"])
+        out[name] = {"verdicts": verdicts, "flag_rate_per_drive": cells}
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Summaries
 # ---------------------------------------------------------------------------
@@ -1025,6 +1079,38 @@ def render_markdown(report: Mapping[str, Any]) -> str:
             + " |"
         )
         lines.append("")
+    shift = (report.get("known_answers") or {}).get("single_quantity_shift") or {}
+    if shift.get("per_drive"):
+        lines += [
+            "## Known answer: single-quantity shift (A04.1)",
+            "",
+            "One quantity (every channel carrying it, raw and rolling mean) shifted by k "
+            "standard deviations of its operating mode, on rows the detector scored quiet; "
+            "row-level verdicts, no persistence gate. Pass: +10 sigma in any single "
+            "quantity flags at least half of them. Control: every numeric column shifted "
+            "by the largest size. Verdicts count drives; cells list each drive's flag rate.",
+            "",
+            "| detector | pass | fail | invalid | withheld |",
+            "|---|---|---|---|---|",
+        ]
+        for name, block in shift["summary"].items():
+            v = block["verdicts"]
+            lines.append(
+                f"| {name} | {v.get('pass', 0)} | {v.get('fail', 0)} | "
+                f"{v.get('invalid', 0)} | {v.get('withheld', 0)} |"
+            )
+        lines.append("")
+        for name, block in shift["summary"].items():
+            lines.append(f"- **{name}**")
+            for quantity, sizes in block["flag_rate_per_drive"].items():
+                cells = "; ".join(
+                    f"+{sigma}σ: " + ", ".join(_fmt(rate) for rate in rates)
+                    for sigma, rates in sizes.items()
+                )
+                lines.append(f"  - {quantity}: {cells}")
+        for name, reason in (shift.get("not_applicable") or {}).items():
+            lines.append(f"- {name}: not applicable ({reason})")
+        lines.append("")
     lines += ["## Labelled real events", ""]
     for event in report["events"]:
         status = event.get("status")
@@ -1075,9 +1161,25 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--baselines",
         nargs="*",
         default=["robust_z", "pca", "untrained_autoencoder", "plausibility"],
-        choices=["robust_z", "pca", "untrained_autoencoder", "plausibility"],
+        choices=[
+            "robust_z",
+            "pca",
+            "untrained_autoencoder",
+            "plausibility",
+            "robust_z_curated",
+            "mahalanobis_curated",
+        ],
         help="Baselines scored beside the served detectors. `plausibility` is A05's "
-        "deterministic checks over arrived samples (needs the profile's plausibility.yaml).",
+        "deterministic checks over arrived samples (needs the profile's plausibility.yaml). "
+        "`robust_z_curated` / `mahalanobis_curated` (A04.13) read the profile's "
+        "curated_outlier_channels.yaml (--curated-channels).",
+    )
+    parser.add_argument(
+        "--curated-channels",
+        type=Path,
+        default=None,
+        help="Curated channel list for the *_curated baselines "
+        "(default: data/<profile>/curated_outlier_channels.yaml).",
     )
     parser.add_argument(
         "--baseline-fit-sessions",
@@ -1129,6 +1231,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Print which drives would be evaluated or skipped (and why) and which "
         "sessions would be loaded, then exit without loading anything.",
+    )
+    parser.add_argument(
+        "--no-shift-test",
+        action="store_true",
+        help="Skip the A04.1 known answer (a single quantity shifted by 3-100 sigma).",
+    )
+    parser.add_argument(
+        "--shift-rows",
+        type=int,
+        default=900,
+        help="Rows per drive the single-quantity shift is scored on (default 900).",
     )
     parser.add_argument("--log-level", default="WARNING")
     return parser.parse_args(argv)
@@ -1323,6 +1436,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             models.append(RobustZBaseline.fit(fit_frames, channels))
         if "pca" in args.baselines:
             models.append(PCABaseline.fit(fit_frames, channels))
+        if {"robust_z_curated", "mahalanobis_curated"} & set(args.baselines):
+            curated = load_curated_channels(
+                args.curated_channels or data_dir / "curated_outlier_channels.yaml"
+            )
+            if "robust_z_curated" in args.baselines:
+                models.append(
+                    replace(RobustZBaseline.fit(fit_frames, curated), name="robust_z_curated")
+                )
+            if "mahalanobis_curated" in args.baselines:
+                models.append(MahalanobisBaseline.fit(fit_frames, curated))
         if "untrained_autoencoder" in args.baselines and trained_seq is not None:
             models.append(
                 UntrainedAutoencoder.like(
@@ -1394,6 +1517,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     skipped_injections: list[dict[str, Any]] = []
     slices: list[dict[str, Any]] = []
     roles = load_fault_channel_roles(args.fault_roles or data_dir / "fault_injection.yaml")
+    shift_runs: list[dict[str, Any]] = []
     for drive in evaluation:
         present = {n: frames[n] for n in drive.session_names if n in features}
         if not present:
@@ -1418,6 +1542,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         record = clean_drive_record(drive, present, scores, names, registry.events)
         record.cross_era = bool(training_eras) and drive.era not in training_eras
         records.append(record)
+        if not args.no_shift_test and not record.cross_era:
+            longest = max(present, key=lambda n: int(engine_running(present[n]).sum()))
+            piece = shift_slice(features[longest], args.shift_rows)
+            if len(piece):
+                shift_runs.append(
+                    {
+                        "drive": drive.drive_id,
+                        "session": longest,
+                        "rows": len(piece),
+                        "detectors": shift_known_answer(detectors, piece, roles),
+                    }
+                )
         if record.cross_era:
             skipped_injections.append(
                 {
@@ -1499,6 +1635,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         "events": summarize_events(registry.events, scores, names),
         "fault_events": len(registry.of_kind("fault")),
+        "known_answers": {
+            "single_quantity_shift": {
+                "quantities": {role: list(channels) for role, channels in roles.items()},
+                "not_applicable": {
+                    r.names[0]: "reads arrived samples, not the featurized rows"
+                    for r in raw_detectors
+                },
+                "per_drive": shift_runs,
+                "summary": summarize_shift(shift_runs, [n for d in detectors for n in d.names]),
+            }
+        },
         "injections": compact_injections(outcomes),
         "skipped_injections": skipped_injections,
         "load_errors": load_errors,

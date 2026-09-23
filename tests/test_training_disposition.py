@@ -395,3 +395,37 @@ def test_quarantine_mask_respects_active_override() -> None:
     overrides = AcceptedBaselines(schema_version=1, overrides=[_override()])
     mask = compute_quarantine_mask(frame, channels=["obd:SHORT_FUEL_TRIM_1"], overrides=overrides)
     assert not mask["obd:SHORT_FUEL_TRIM_1"].any()  # covered -> Accept-recenter, not Quarantine
+
+
+def test_mad_zero_does_not_quarantine_every_non_median_value() -> None:
+    """A04.3: accelerator pedal at rest 70 % of the time has MAD = 0, and the
+    old band (median ± 6 x 0) quarantined every press. The fallback spread
+    (scaled mean absolute deviation) keeps ordinary presses and still
+    quarantines a value far outside them."""
+    from src.analysis.training_disposition import compute_quarantine_mask, robust_spread
+
+    rng = np.random.default_rng(4)
+    n = 400
+    pedal = np.zeros(n)
+    pressed = rng.random(n) < 0.3
+    pedal[pressed] = rng.uniform(1.0, 30.0, int(pressed.sum())) + rng.normal(0, 0.01, 1)
+    pedal[0] = 5000.0  # not a pedal position
+    frame = pd.DataFrame(
+        {"session": ["s0"] * n, "operating_mode": ["city"] * n, "obd:ACCEL_PEDAL": pedal}
+    )
+    series = frame["obd:ACCEL_PEDAL"]
+    assert float((series - series.median()).abs().median()) == 0.0  # MAD is zero
+    assert robust_spread(series, float(series.median())) > 0.0
+
+    mask = compute_quarantine_mask(frame, channels=["obd:ACCEL_PEDAL"])
+    assert bool(mask["obd:ACCEL_PEDAL"].iloc[0])
+    assert int(mask["obd:ACCEL_PEDAL"].sum()) == 1  # only the impossible value
+
+
+def test_all_identical_values_quarantine_nothing() -> None:
+    from src.analysis.training_disposition import compute_quarantine_mask
+
+    frame = pd.DataFrame(
+        {"session": ["s0"] * 50, "operating_mode": ["idle"] * 50, "obd:FLAT": [3.5] * 50}
+    )
+    assert not compute_quarantine_mask(frame, channels=["obd:FLAT"])["obd:FLAT"].any()

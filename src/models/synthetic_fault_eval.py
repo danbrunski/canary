@@ -79,13 +79,12 @@ from src.decode.engineering import (
 )
 from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult
 from src.models.isolation_forest import (
-    CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
-    LABEL_COLUMN,
     MISSING_FEATURES_COLUMN,
     MODEL_MODE_COLUMN,
     SCORE_COLUMN,
     TrainedIsolationForest,
+    served_verdicts,
 )
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
@@ -154,18 +153,11 @@ class _DetectorMetrics:
 
 
 def _if_anomalous(scored: pd.DataFrame) -> pd.Series:
-    """Boolean per-row IF verdict mirroring ``emitter.emit_isolation_forest_row``:
-    calibrated when present and legacy ``-1`` fallback otherwise. Missing-
-    feature rows are ``None`` (no trustworthy verdict), matching the daemon's
-    fail-safe suppression rather than manufacturing a dropout anomaly."""
-    missing = scored[MISSING_FEATURES_COLUMN].astype(bool)
-    calib = scored[CALIBRATED_ANOMALY_COLUMN]
-    if calib.notna().any():
-        verdict = calib.fillna(False).astype(bool).astype(object)
-    else:
-        verdict = (scored[LABEL_COLUMN].fillna(1).astype(int) == -1).astype(object)
-    verdict.loc[missing] = None
-    return verdict
+    """Boolean per-row IF verdict as served — one definition,
+    :func:`src.models.isolation_forest.served_verdicts` (A04.9): the
+    calibrated verdict, uncalibrated modes non-emitting, missing-feature rows
+    ``None`` (no trustworthy verdict, matching the daemon's fail-safe)."""
+    return served_verdicts(scored)
 
 
 #: Persistence-gate key the daemon uses for the sequence detector's fusion

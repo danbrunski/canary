@@ -10,11 +10,17 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.models.isolation_forest import LABEL_COLUMN, SCORE_COLUMN
+import src.models.isolation_forest_evaluation as evaluation_module
+from src.models.isolation_forest import (
+    CALIBRATED_ANOMALY_COLUMN,
+    CALIBRATED_THRESHOLD_COLUMN,
+    LABEL_COLUMN,
+    MISSING_FEATURES_COLUMN,
+    SCORE_COLUMN,
+)
 from src.models.isolation_forest_evaluation import (
     classification_metrics,
     evaluate_isolation_forest,
-    recommend_contamination,
     score_distribution,
 )
 from src.preprocessing.anomaly_injection import AnomalyInjector
@@ -24,8 +30,13 @@ from src.preprocessing.segmenter import MODE_COLUMN
 
 @dataclass(frozen=True)
 class _FakeTrainedIsolationForest:
+    """Scores as ``TrainedIsolationForest.score`` shapes them: a calibrated
+    threshold of 0.5, sklearn's label, and withheld rows at ``inf``."""
+
     scores: tuple[float, ...]
     labels: tuple[int, ...]
+    withheld: tuple[bool, ...] = (False,) * 6
+    threshold: float = 0.5
     mode_column: str = MODE_COLUMN
     manifest: SimpleNamespace = field(
         default_factory=lambda: SimpleNamespace(model_version="iforest-eval-test")
@@ -33,8 +44,16 @@ class _FakeTrainedIsolationForest:
 
     def score(self, frame: pd.DataFrame) -> pd.DataFrame:
         out = frame.copy()
-        out[SCORE_COLUMN] = list(self.scores)
-        out[LABEL_COLUMN] = list(self.labels)
+        scores = [np.inf if w else s for s, w in zip(self.scores, self.withheld, strict=True)]
+        out[SCORE_COLUMN] = scores
+        out[LABEL_COLUMN] = [
+            -1 if w else lab for lab, w in zip(self.labels, self.withheld, strict=True)
+        ]
+        out[MISSING_FEATURES_COLUMN] = list(self.withheld)
+        out[CALIBRATED_THRESHOLD_COLUMN] = self.threshold
+        out[CALIBRATED_ANOMALY_COLUMN] = pd.array(
+            [s >= self.threshold for s in scores], dtype="boolean"
+        )
         return out
 
 
@@ -79,31 +98,35 @@ def test_score_distribution_counts_nonfinite_scores_separately() -> None:
     assert distribution.median == pytest.approx(0.15)
 
 
-def test_recommend_contamination_chooses_best_f1_threshold() -> None:
-    recommendation = recommend_contamination(
-        "idle",
-        scores=[0.1, 0.2, 0.8, 0.9],
-        labels=[False, False, True, True],
+def test_no_contamination_recommendation_is_offered() -> None:
+    """A04.9: ``contamination`` only sets sklearn's ``offset_``; nothing served
+    reads it, so the evaluator no longer tunes or recommends it."""
+    assert not hasattr(evaluation_module, "recommend_contamination")
+    assert not hasattr(evaluation_module, "ContaminationRecommendation")
+
+
+def test_evaluation_grades_the_served_threshold_and_counts_withheld_rows_apart() -> None:
+    """A04.9: sklearn's ``-1`` label is not a served verdict, and a withheld
+    row (label ``-1``, score ``inf``) is neither a detection nor a miss."""
+    frame = _frame()
+    labels = pd.Series([False, True, True, False, False, True], index=frame.index)
+    trained = _FakeTrainedIsolationForest(
+        # served: rows 1 (0.9) and 3 (0.8) are over 0.5; sklearn says row 4 too
+        scores=(0.1, 0.9, 0.4, 0.8, 0.2, 0.3),
+        labels=(1, 1, 1, -1, -1, 1),
+        withheld=(False, False, False, False, False, True),
     )
+    report = evaluate_isolation_forest(trained, frame, labels).report
 
-    assert recommendation.reason == "best_f1_threshold"
-    assert recommendation.threshold == pytest.approx(0.8)
-    assert recommendation.precision == pytest.approx(1.0)
-    assert recommendation.recall == pytest.approx(1.0)
-    assert recommendation.f1 == pytest.approx(1.0)
-    assert recommendation.false_positive_rate == pytest.approx(0.0)
-    assert recommendation.recommended_contamination == pytest.approx(0.001)
-
-
-def test_recommend_contamination_reports_untunable_modes() -> None:
-    recommendation = recommend_contamination(
-        "highway",
-        scores=[0.1, 0.2, 0.3],
-        labels=[False, False, False],
-    )
-
-    assert recommendation.recommended_contamination is None
-    assert recommendation.reason == "no_labeled_finite_anomalies"
+    assert report.withheld_rows == 1
+    assert report.withheld_positive_rows == 1
+    assert report.overall.rows == 5
+    assert report.overall.true_positives == 1  # row 1
+    assert report.overall.false_negatives == 1  # row 2 (0.4 < 0.5)
+    assert report.overall.false_positives == 1  # row 3; row 4's sklearn -1 is not a verdict
+    assert report.modes["city"].withheld_rows == 1
+    assert report.modes["city"].threshold == pytest.approx(0.5)
+    json.dumps(report.to_dict())
 
 
 def test_evaluate_isolation_forest_reports_overall_and_per_mode_results() -> None:
@@ -137,9 +160,6 @@ def test_evaluate_isolation_forest_reports_overall_and_per_mode_results() -> Non
     assert report.modes["idle"].metrics.positives == 2
     assert report.modes["idle"].metrics.recall == pytest.approx(0.5)
     assert report.modes["city"].metrics.false_positives == 1
-    assert report.modes["city"].contamination.reason == "no_labeled_finite_anomalies"
-    assert report.modes["idle"].contamination.recommended_contamination == pytest.approx(0.001)
-    assert report.recommended_per_mode_contamination == {"idle": pytest.approx(0.001)}
     assert len(report.windows) == 1
 
     # The report is intended to be persisted as plain JSON.

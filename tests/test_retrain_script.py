@@ -695,6 +695,9 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     # min_samples_per_mode floor (Task 2.2). Lower it so the gate still
     # trains a real model instead of skipping the only mode present.
     config.models.isolation_forest.min_samples_per_mode = 5
+    # ...and the per-mode drive floors (A04.4): one synthetic drive.
+    config.models.isolation_forest.min_training_drives_per_mode = 1
+    config.models.isolation_forest.min_calibration_drives_per_mode = 1
 
     session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     long = retrain.detector_benchmark.load_resampled_session(session, config)
@@ -1331,3 +1334,117 @@ def test_calibration_picker_takes_one_session_per_physical_drive(
     # Three drives, not three sessions — and whole drives: the restart comes
     # with its drive rather than staying behind to train.
     assert sorted(picked) == sorted(sessions)
+
+
+def test_retrain_hands_the_if_trainer_its_calibration_policy_and_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A04.3/A04.4: the IF manifest records what the calibration rows went
+    through (quarantine deliberately not applied, and why) and the thin-
+    calibration override reason reaches the IF trainer, not only the sequence
+    trainer; the quarantine screen's cells reach it so rows lost per mode are
+    counted."""
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
+    seen: dict[str, object] = {}
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.update(k))
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--accept-thin-calibration",
+            "bench only",
+        ]
+    )
+    assert rc == 0
+    assert seen["calibration_override"] == "bench only"
+    policy = seen["calibration_policy"]
+    assert isinstance(policy, dict)
+    assert policy["quarantine"]["applied"] is False
+    assert "serve-time scoring does not quarantine" in policy["quarantine"]["reason"]
+    assert "quarantined_cells" in seen
+
+
+def test_feedback_filtered_calibration_frame_goes_to_the_if_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A04.3 verifier finding: the feedback-label policy on the calibration
+    rows is recorded in the IF manifest only, so only the IF gets the filtered
+    frame; the sequence trainer keeps the unfiltered one it always had."""
+    from types import SimpleNamespace
+
+    names = [f"2026-09-{day:02d}T120000" for day in range(1, 8)]
+    sessions = _healthy_corpus(tmp_path, monkeypatch, names)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
+    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+    built: list[pd.DataFrame] = []
+
+    def _build(positional: list[Path], *_a: object, **_k: object) -> pd.DataFrame:
+        frame = pd.DataFrame({"row": range(4)})
+        built.append(frame)
+        return frame
+
+    monkeypatch.setattr(retrain, "build_feature_frame", _build)
+
+    class _Labels:
+        def __init__(self, *_a: object) -> None:
+            pass
+
+        def labels(self) -> dict[str, str]:
+            return {"event": "true_positive"}
+
+    monkeypatch.setattr(retrain, "FeedbackStore", _Labels)
+    report = SimpleNamespace(
+        excluded_rows=3,
+        excluded_labels=1,
+        to_dict=lambda: {},
+        clean_baseline_labels=0,
+        enriched_labels=0,
+    )
+    monkeypatch.setattr(
+        retrain,
+        "apply_retraining_feedback_policy",
+        lambda frame, *_a, **_k: (frame.iloc[1:], report),
+    )
+    seen: dict[str, dict[str, object]] = {}
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.__setitem__("if", k))
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.__setitem__("seq", k))
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-ledger",
+            "--skip-benchmark",
+        ]
+    )
+    assert rc == 0
+    calibration = built[1]  # training frame first, then the holdout frame
+    assert seen["seq"]["calibration_frame"] is calibration
+    assert len(calibration) == 4
+    filtered = seen["if"]["calibration_frame"]
+    assert isinstance(filtered, pd.DataFrame) and filtered["row"].tolist() == [1, 2, 3]
+    policy = seen["if"]["calibration_policy"]
+    assert isinstance(policy, dict)
+    assert policy["feedback_labels"] == {"applied": True, "excluded_rows": 3, "excluded_labels": 1}
+    assert "calibration_policy" not in seen["seq"]
