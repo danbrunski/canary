@@ -193,7 +193,7 @@ describe("DataSourcesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
 
     expect(
-      await screen.findByText("1/1 polled DIDs responding (2 catalogued)"),
+      await screen.findByText("1/1 default DIDs responding (2 catalogued)"),
     ).toBeInTheDocument();
     // An unpolled DID can never have a value, so it counts as unavailable
     // and the default filter hides it.
@@ -202,7 +202,65 @@ describe("DataSourcesPanel", () => {
     // Unfiltered, it says why it is blank instead of reading as silent.
     fireEvent.click(screen.getByRole("button", { name: /hide unavailable/ }));
     expect(screen.getByText("COOLANT")).toBeInTheDocument();
-    expect(screen.getByText("not polled")).toBeInTheDocument();
+    expect(screen.getByText("not selected")).toBeInTheDocument();
+  });
+
+  it("uses the current capture profile for DID selection", async () => {
+    mocks.getDids.mockResolvedValue({
+      ...EMPTY_DIDS,
+      polled: [],
+      dids: [{
+        did: 0x1206,
+        name: "INJECTOR_PULSE",
+        unit: "ms",
+        confidence: "high",
+        scale: 0.01,
+        offset: 0,
+        plausible_min: null,
+        plausible_max: null,
+        notes: null,
+      }],
+    });
+    const status = {
+      capture_profile: {
+        active: true,
+        mode22_enabled: true,
+        mode22: ["INJECTOR_PULSE"],
+        memory: [],
+      },
+    } as unknown as StatusResponse;
+    const channels = new Map([channel("did:INJECTOR_PULSE", 2.5, "ms")]);
+    render(createElement(DataSourcesPanel, { channels, status }));
+    fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
+    expect(await screen.findByText("1/1 capture DIDs responding (1 catalogued)")).toBeInTheDocument();
+    expect(screen.getByText("2.5 ms")).toBeInTheDocument();
+  });
+
+  it("lists RAM channels and overlays the current service-0x23 value", async () => {
+    mocks.getDids.mockResolvedValue({
+      ...EMPTY_DIDS,
+      memory: [{
+        name: "ECM_TARGET_EQUIV_RATIO",
+        address: 0xffff26be,
+        unit: "phi",
+        confidence: "high",
+        window: "fuel_target",
+      }],
+    });
+    const status = {
+      capture_profile: {
+        active: true,
+        mode22_enabled: true,
+        mode22: [],
+        memory: ["ECM_TARGET_EQUIV_RATIO"],
+      },
+    } as unknown as StatusResponse;
+    const channels = new Map([channel("obd:mem:ECM_TARGET_EQUIV_RATIO", 1.2, "phi")]);
+    render(createElement(DataSourcesPanel, { channels, status }));
+    fireEvent.click(screen.getByRole("button", { name: "ECU RAM (service 0x23)" }));
+    expect(await screen.findByText("ECM_TARGET_EQUIV_RATIO")).toBeInTheDocument();
+    expect(screen.getByText("0xFFFF26BE")).toBeInTheDocument();
+    expect(screen.getByText("1.2 phi")).toBeInTheDocument();
   });
 
   it("GPS tab renders fix state from status", () => {

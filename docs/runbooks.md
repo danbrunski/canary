@@ -69,8 +69,8 @@ confirmation step, and no automatic rescan. Task 6.5 is what adds those.
   issues Mode 22 diagnostic requests over the Canable into `pids.jsonl`.
   `tools/scan_constant_dids.py --session C0` sweeps the `10 C0` DID space;
   `data/dids.yaml` + `src/decode/dids.py` decode known DIDs.
-- **First-class live DID telemetry profiles + dashboard switching:** available
-  in the Capture Profiles panel. Profiles are data: `data/capture_profiles.yaml`
+- **First-class live DID and RAM telemetry profiles + dashboard switching:** available
+  under Engine Tuning → Capture Profiles. Profiles are data: `data/capture_profiles.yaml`
   holds the starters a new vehicle is seeded with (`fuel-map`, `tuning-did`),
   and each vehicle's own catalog is authoritative from then on. The Xterra runs
   `tuning`, a hybrid that uses the confirmed `10 81` fast exit to alternate

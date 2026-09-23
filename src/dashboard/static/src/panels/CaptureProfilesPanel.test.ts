@@ -189,6 +189,10 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
       { name: "ECM_AF_SENSOR_V_B1" },
       { name: "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" },
     ],
+    memory: [
+      { name: "ECM_TARGET_EQUIV_RATIO" },
+      { name: "ECM_ENGINE_PERIOD" },
+    ],
   });
   // The daemon returns the new snapshot from every capture mutation and the
   // panel applies it immediately — /status only polls every 5 s, which is what
@@ -237,6 +241,17 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     await waitFor(() => expect(mocks.startProfileCapture).toHaveBeenCalled());
     expect(mocks.startProfileCapture.mock.calls[0][1]).toBe("fuel-map");
+  });
+
+  it("shows RAM reads in the editor and saves them with the profile", async () => {
+    renderPanel();
+    fireEvent.change(await screen.findByRole("combobox"), { target: { value: "fuel-map" } });
+    const target = screen.getByRole("checkbox", { name: "ECM_TARGET_EQUIV_RATIO" });
+    fireEvent.click(target);
+    expect(target).toBeChecked();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mocks.saveCaptureProfile).toHaveBeenCalled());
+    expect(mocks.saveCaptureProfile.mock.calls.at(-1)?.[1].memory).toEqual(["ECM_TARGET_EQUIV_RATIO"]);
   });
 
   it("shows resolved batched and fallback demand as distinct units", async () => {

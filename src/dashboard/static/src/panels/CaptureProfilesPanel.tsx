@@ -73,6 +73,7 @@ const blankProfile = (): CaptureProfile => {
     experimental: false,
     mode01: {},
     mode22: [],
+    memory: [],
     mode22_rate_weights: {},
     mode01_enabled: true,
     mode22_enabled: true,
@@ -114,6 +115,7 @@ export function CaptureProfilesPanel({
   const [originalName, setOriginalName] = useState<string | undefined>();
   const [pids, setPids] = useState<string[]>([]);
   const [dids, setDids] = useState<string[]>([]);
+  const [memoryChannels, setMemoryChannels] = useState<string[]>([]);
   const [warnings, setWarnings] = useState<CaptureProfileWarning[]>([]);
   const [tuneRevision, setTuneRevision] = useState("");
   const [showWeights, setShowWeights] = useState(false);
@@ -141,6 +143,7 @@ export function CaptureProfilesPanel({
         .sort(),
     );
     setDids(didMap.dids.map((entry) => entry.name).sort());
+    setMemoryChannels((didMap.memory ?? []).map((entry) => entry.name).sort());
   }, [token]);
 
   useEffect(() => {
@@ -228,7 +231,7 @@ export function CaptureProfilesPanel({
   const mode01Count = plan.mode01_enabled ? Object.keys(plan.mode01).length : 0;
   const mode22Count = plan.mode22_enabled ? plan.mode22.length : 0;
   const memoryCount = plan.mode22_enabled ? (plan.memory?.length ?? 0) : 0;
-  const sessionPolicy = mode22Count === 0
+  const sessionPolicy = mode22Count + memoryCount === 0
     ? "Mode 01 only"
     : plan.did_continuous
       ? "Mode 22 session held open"
@@ -270,11 +273,16 @@ export function CaptureProfilesPanel({
     [draft.mode01, pids],
   );
   const mode22Set = useMemo(() => new Set(draft.mode22), [draft.mode22]);
+  const memorySet = useMemo(() => new Set(draft.memory ?? []), [draft.memory]);
 
   /** Latest value of each channel the *running* capture selected. */
   const liveValues = useMemo(() => {
     if (!active?.active || !channels) return [];
-    const wanted = [...Object.keys(active.mode01), ...active.mode22];
+    const wanted = [
+      ...Object.keys(active.mode01),
+      ...active.mode22,
+      ...(active.memory ?? []).map((name) => `mem:${name}`),
+    ];
     return wanted.flatMap((channel) => {
       const snapshot =
         channels.get(channel) ?? channels.get(`obd:${channel}`) ?? channels.get(`did:${channel}`);
@@ -286,7 +294,7 @@ export function CaptureProfilesPanel({
         unit: snapshot.latest.unit ?? "",
       }];
     });
-  }, [active?.active, active?.mode01, active?.mode22, channels]);
+  }, [active?.active, active?.mode01, active?.mode22, active?.memory, channels]);
 
   const togglePid = (channel: string) => {
     const next = "AUTO" in draft.mode01
@@ -306,6 +314,14 @@ export function CaptureProfilesPanel({
         ? draft.mode22.filter((item) => item !== name)
         : [...draft.mode22, name],
       mode22_rate_weights: weights,
+    });
+  };
+  const toggleMemory = (name: string) => {
+    setDraft({
+      ...draft,
+      memory: memorySet.has(name)
+        ? (draft.memory ?? []).filter((item) => item !== name)
+        : [...(draft.memory ?? []), name],
     });
   };
 
@@ -491,6 +507,11 @@ export function CaptureProfilesPanel({
               <span>{plan.behavior_model_recipes.length} behavior-model recipes allowed</span>
             )}
           </div>
+          {memoryCount > 0 && (
+            <p className="mt-2 text-xs text-fg-dim">
+              RAM reads (service 0x23): {(plan.memory ?? []).join(", ")}
+            </p>
+          )}
           {resolvedPlan && (
             <div className={`mt-2 rounded border p-2 text-xs ${resolvedPlan.best_case_feasible ? "border-border" : "border-danger/60 text-danger"}`}>
               <span>{resolvedPlan.channel_reads_per_second} channel reads/s</span>
@@ -706,7 +727,7 @@ export function CaptureProfilesPanel({
       <div className="flex flex-wrap gap-5 text-sm">
         <label><input type="checkbox" checked={draft.broadcast_decode} onChange={(event) => setDraft({ ...draft, broadcast_decode: event.target.checked })} /> decode broadcast CAN</label>
         <label><input type="checkbox" checked={draft.experimental} onChange={(event) => setDraft({ ...draft, experimental: event.target.checked })} /> experimental / needs validation</label>
-        <label title="Keep the manufacturer diagnostic session open for the whole capture. This requires Mode 01 to be disabled."><input type="checkbox" checked={draft.did_continuous} disabled={!draft.mode22_enabled || draft.mode22.length === 0} onChange={(event) => setDraft({ ...draft, did_continuous: event.target.checked })} /> hold Mode 22 session continuously</label>
+        <label title="Keep the manufacturer diagnostic session open for the whole capture. This requires Mode 01 to be disabled."><input type="checkbox" checked={draft.did_continuous} disabled={!draft.mode22_enabled || draft.mode22.length + (draft.memory?.length ?? 0) === 0} onChange={(event) => setDraft({ ...draft, did_continuous: event.target.checked })} /> hold diagnostic session continuously</label>
         <label title="Every channel selected here is sampled together and shares the round's timestamp, so a capture reads as one row per sample. The true arrival instant of each value is kept alongside."><input type="checkbox" checked={draft.round_timestamps} onChange={(event) => setDraft({ ...draft, round_timestamps: event.target.checked })} /> one timestamp per round (synchronous rows)</label>
         <label title="Off by default: every selected channel is sampled each round, so a capture reads as synchronous rows. Uneven rates suit background monitoring, not tuning."><input type="checkbox" checked={showWeights} onChange={(event) => {
           setShowWeights(event.target.checked);
@@ -726,9 +747,10 @@ export function CaptureProfilesPanel({
       <div className="grid grid-cols-2 gap-4 max-[900px]:grid-cols-1">
         <ChannelPicker title="OBD PIDs (Mode 01)" hint="Standard SAE J1979 parameters. Polled 6 per request; a selection larger than that spans more than one request." showWeights={showWeights} items={pids} selected={mode01Set} onToggle={togglePid} weights={draft.mode01} onWeight={(channel, weight) => setDraft({ ...draft, mode01: { ...draft.mode01, [channel]: weight } })} enabled={draft.mode01_enabled} onEnabled={(value) => setDraft({ ...draft, mode01_enabled: value })} />
         <ChannelPicker title="Manufacturer DIDs (Mode 22)" hint="UDS ReadDataByIdentifier, from this vehicle's DID map." showWeights={showWeights} items={dids} selected={mode22Set} onToggle={toggleDid} weights={draft.mode22_rate_weights} onWeight={(channel, weight) => setDraft({ ...draft, mode22_rate_weights: { ...draft.mode22_rate_weights, [channel]: weight } })} enabled={draft.mode22_enabled} onEnabled={(value) => setDraft({ ...draft, mode22_enabled: value })} />
+        <ChannelPicker title="ECU RAM (service 0x23)" hint="ReadMemoryByAddress channels from this vehicle's memory map; uses the Mode 22 diagnostic session." items={memoryChannels} selected={memorySet} onToggle={toggleMemory} enabled={draft.mode22_enabled} />
       </div>
 
-      {draft.mode22_enabled && draft.mode22.length > 0 && (
+      {draft.mode22_enabled && draft.mode22.length + (draft.memory?.length ?? 0) > 0 && (
         <p className="text-sm text-warn">
           {draft.did_continuous
             ? "This profile holds the manufacturer diagnostic session open. Mode 01 must be disabled because it cannot answer until the session exits."
@@ -763,7 +785,7 @@ function ChannelPicker({
   /** Whole-service switch. Disabling greys the list but keeps the ticks, so
    *  re-enabling doesn't mean rebuilding the selection from scratch. */
   enabled: boolean;
-  onEnabled: (value: boolean) => void;
+  onEnabled?: (value: boolean) => void;
   hint?: string;
   /** Per-channel rate weights. Off by default: a capture normally wants every
    *  selected channel sampled together, and uneven rates only make sense for
@@ -773,7 +795,7 @@ function ChannelPicker({
   return <fieldset className={`max-h-80 overflow-y-auto rounded border border-border p-2 ${enabled ? "" : "opacity-50"}`}>
     <legend className="px-1 text-sm font-semibold">
       <label className="flex items-center gap-2">
-        <input aria-label={`enable ${title}`} type="checkbox" checked={enabled} onChange={(event) => onEnabled(event.target.checked)} />
+        {onEnabled && <input aria-label={`enable ${title}`} type="checkbox" checked={enabled} onChange={(event) => onEnabled(event.target.checked)} />}
         {title}
       </label>
     </legend>

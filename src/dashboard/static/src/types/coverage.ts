@@ -170,11 +170,22 @@ export interface DidEntry {
   notes: string | null;
 }
 
+export interface MemoryEntry {
+  name: string;
+  address: number;
+  unit: string;
+  confidence: "confirmed" | "high" | "medium" | "low" | "hypothesized";
+  window?: string | null;
+  sentinel_meaning?: string | null;
+}
+
 export interface DidMapResponse {
   schema_version: number | null;
   vehicle: Record<string, unknown>;
   access: Record<string, unknown> | null;
   dids: DidEntry[];
+  /** Service-0x23 channels from the same vehicle catalog. */
+  memory?: MemoryEntry[];
   /** Catalog names the daemon actually polls (`collection.obd_dids`). The
    *  catalog is the whole RE record, so most entries are characterized but
    *  never requested — without this an unpolled DID is indistinguishable

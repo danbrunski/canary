@@ -91,9 +91,9 @@ export function LoggingPage({
       <button
         type="button"
         className={`${buttonClass} self-start`}
-        onClick={() => onNavigate("system-capture-profiles")}
+        onClick={() => onNavigate("tuning-capture-profiles")}
       >
-        Edit capture profiles in System
+        Edit capture profiles
       </button>
     </div>
   );

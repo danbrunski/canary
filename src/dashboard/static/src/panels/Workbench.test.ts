@@ -40,6 +40,12 @@ describe("Workbench navigation", () => {
     }
   });
 
+  it("places Capture Profiles under Engine Tuning", () => {
+    renderAt("observe-charts");
+    expect(screen.getByRole("button", { name: "Capture Profiles" }).closest("div"))
+      .toHaveTextContent("Engine Tuning");
+  });
+
   it("renders the active item's panel and switches on navigate", () => {
     let active: WorkbenchItem = "observe-charts";
     const { rerender } = render(

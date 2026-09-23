@@ -11,16 +11,18 @@ import type {
   CanCoverageResponse,
   DidEntry,
   DidMapResponse,
+  MemoryEntry,
   ObdCoverageResponse,
   ObdCoverageRow,
   StatusResponse,
 } from "../types";
 
-type TabId = "obd" | "did" | "can" | "gps";
+type TabId = "obd" | "did" | "memory" | "can" | "gps";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "obd", label: "OBD PIDs (Mode 01)" },
   { id: "did", label: "Manufacturer DIDs (Mode 22)" },
+  { id: "memory", label: "ECU RAM (service 0x23)" },
   { id: "can", label: "CAN broadcast (passive)" },
   { id: "gps", label: "GPS" },
 ];
@@ -30,10 +32,9 @@ interface DataSourcesPanelProps {
   status: StatusResponse | null;
 }
 
-/** One combined view of every intake stream, one tab per source (OBD PIDs /
- *  Mode 01, manufacturer DIDs / Mode 22, broadcast CAN, GPS). Each tab is a
- *  table of *all* known
- *  entries for that source; the live "value" column is overlaid from the
+/** One combined view of every intake stream, one tab per source: OBD PIDs,
+ *  manufacturer DIDs, ECU RAM, broadcast CAN, and GPS. Each tab lists all
+ *  known entries for that source; the live "value" column is overlaid from the
  *  telemetry stream (`channels`, keyed `<source>:<channel>`). View controls
  *  hide entries the vehicle doesn't support/isn't sending and float the
  *  active ones to the top. */
@@ -64,7 +65,7 @@ export function DataSourcesPanel({ channels, status }: DataSourcesPanelProps) {
         ))}
       </div>
 
-      {tab !== "gps" && (
+      {tab !== "gps" && tab !== "memory" && (
         <div className="mb-2 flex flex-wrap items-center gap-3 text-[0.74rem] text-fg-dim">
           <Toggle
             label="hide unavailable"
@@ -80,7 +81,8 @@ export function DataSourcesPanel({ channels, status }: DataSourcesPanelProps) {
       )}
 
       {tab === "obd" && <ObdTab channels={channels} view={view} />}
-      {tab === "did" && <DidTab channels={channels} view={view} />}
+      {tab === "did" && <DidTab channels={channels} status={status} view={view} />}
+      {tab === "memory" && <MemoryTab channels={channels} status={status} view={{ ...view, hideUnavailable: false }} />}
       {tab === "can" && <CanTab channels={channels} view={view} />}
       {tab === "gps" && <GpsTab status={status} />}
     </Panel>
@@ -277,7 +279,7 @@ function ObdTab({
 }
 
 // ---------------------------------------------------------------------------
-// Nissan DIDs
+// Manufacturer DIDs
 // ---------------------------------------------------------------------------
 
 /** The catalog unit is what the DID *would* read once its scale constant is
@@ -301,9 +303,11 @@ function unitCell(channels: Map<string, ChannelSnapshot>, d: DidEntry) {
 
 function DidTab({
   channels,
+  status,
   view,
 }: {
   channels: Map<string, ChannelSnapshot>;
+  status: StatusResponse | null;
   view: ViewOpts;
 }) {
   const fetcher = useCallback((s: AbortSignal) => getDids(s), []);
@@ -311,10 +315,16 @@ function DidTab({
     intervalMs: 30000,
   });
 
-  // Only the DIDs in `collection.obd_dids` are ever requested; the rest of
-  // the catalog is RE record-keeping. Counting those as "not responding"
-  // reads as a fault when nothing is wrong.
-  const polled = useMemo(() => new Set(data?.polled ?? []), [data]);
+  // A capture replaces the default poll selection. The catalog is still the
+  // full vehicle inventory, including channels currently not requested.
+  const capture = status?.capture_profile;
+  const capturing = Boolean(capture?.active);
+  const polled = useMemo(
+    () => new Set(capture
+      ? (capture?.mode22_enabled ? capture.mode22 : [])
+      : (data?.polled ?? [])),
+    [capture, data],
+  );
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -335,8 +345,8 @@ function DidTab({
             <Summary
               text={
                 polled.size === 0
-                  ? `no DIDs polled (${data.dids.length} catalogued)`
-                  : `${responding}/${polled.size} polled DIDs responding` +
+                  ? `no DIDs selected (${data.dids.length} catalogued)`
+                  : `${responding}/${polled.size} ${capturing ? "capture" : "default"} DIDs responding` +
                     ` (${data.dids.length} catalogued)`
               }
             />
@@ -372,9 +382,9 @@ function DidTab({
                             ) : (
                               <span
                                 className="text-fg-faint italic"
-                                title="characterized but not in collection.obd_dids — never requested"
+                                title={capturing ? "not selected by the active capture" : "not selected by default collection"}
                               >
-                                not polled
+                                not selected
                               </span>
                             )}
                           </td>
@@ -392,6 +402,75 @@ function DidTab({
           </>
         );
       }}
+    </ResourceGate>
+  );
+}
+
+function MemoryTab({
+  channels,
+  status,
+  view,
+}: {
+  channels: Map<string, ChannelSnapshot>;
+  status: StatusResponse | null;
+  view: ViewOpts;
+}) {
+  const fetcher = useCallback((s: AbortSignal) => getDids(s), []);
+  const { data, error, loading } = useControlResource<DidMapResponse>(fetcher, {
+    intervalMs: 30000,
+  });
+  const capture = status?.capture_profile;
+  const selected = useMemo(
+    () => new Set(capture?.mode22_enabled ? (capture.memory ?? []) : []),
+    [capture],
+  );
+  const rows = useMemo(
+    () => arrange(data?.memory ?? [], view, (entry) => ({
+      available: selected.has(entry.name),
+      active: liveValue(channels, `obd:mem:${entry.name}`).active,
+    })),
+    [data, view, selected, channels],
+  );
+
+  return (
+    <ResourceGate loading={loading} loadingMessage="loading RAM catalog…" error={error} data={data}>
+      {(catalog) => <>
+        <Summary text={`${selected.size} selected by current profile (${(catalog.memory ?? []).length} catalogued)`} />
+        {(catalog.memory ?? []).length === 0 ? (
+          <p className={placeholderClass}>No RAM channels catalogued for this vehicle.</p>
+        ) : (
+          <div className={SCROLL}>
+            <table className={TABLE}>
+              <thead className={THEAD}>
+                <tr>
+                  <th className={TD}>Address</th>
+                  <th className={TD}>Name</th>
+                  <th className={TD}>Value</th>
+                  <th className={TD}>Unit</th>
+                  <th className={TD}>Window</th>
+                  <th className={TD}>Conf.</th>
+                </tr>
+              </thead>
+              <tbody className="font-num tabular-nums">
+                {rows.map((entry: MemoryEntry) => {
+                  const live = liveValue(channels, `obd:mem:${entry.name}`);
+                  const isSelected = selected.has(entry.name);
+                  return (
+                    <tr key={entry.name} className={ROW}>
+                      <td className={cn(TD, "text-fg-dim")}>0x{entry.address.toString(16).toUpperCase().padStart(8, "0")}</td>
+                      <td className={cn(TD, !isSelected && "text-fg-dim")}>{entry.name}</td>
+                      <td className={TD}>{isSelected ? valueCell(live.active, live.text) : <span className="text-fg-faint italic">not selected</span>}</td>
+                      <td className={cn(TD, "text-fg-dim")}>{entry.unit || "—"}</td>
+                      <td className={cn(TD, "text-fg-dim")}>{entry.window ?? "—"}</td>
+                      <td className={cn(TD, "text-fg-faint")}>{entry.confidence}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </>}
     </ResourceGate>
   );
 }
