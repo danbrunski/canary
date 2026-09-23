@@ -15,7 +15,8 @@ from src.models.tcn import (  # noqa: E402 — after importorskip guard
     receptive_field,
 )
 
-pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+# Torch training: not a commit gate (see the pyproject test tiers).
+pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
 
 def _model(

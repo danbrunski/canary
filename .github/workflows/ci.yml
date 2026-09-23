@@ -41,6 +41,53 @@ jobs:
       - name: Pytest
         run: pytest -v
 
+  # The torch training suites are not a commit gate (operator, 2026-09-23):
+  # bare pytest above excludes `ml_training`; this job runs it only when the
+  # push or PR touches a path in scripts/ml_paths.txt.
+  # CI installs no torch, so most of this tier importorskips here: read the
+  # skip count, a green run is not proof of the ML path. Whether CI installs
+  # CPU torch is an operator decision; until then the local
+  # scripts/ci_gate.sh run (venv has torch) is where this tier really runs.
+  ml-training:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Did ML code change?
+        id: ml
+        env:
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="${PR_BASE:-$BEFORE}"
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "no usable base; running the tier"; echo "run=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if scripts/ml_changed.sh "$base" HEAD; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.ml.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            constraints-dev.txt
+
+      - name: Install project with dev extras
+        if: steps.ml.outputs.run == 'true'
+        run: pip install -e '.[dev]' -c constraints-dev.txt
+
+      - name: Pytest (ml_training)
+        if: steps.ml.outputs.run == 'true'
+        run: pytest -v -m ml_training
+
   frontend:
     runs-on: ubuntu-latest
     defaults:

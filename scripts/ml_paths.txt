@@ -1,0 +1,26 @@
+# Paths whose change makes the `ml_training` test tier run (pyproject test
+# tiers; operator, 2026-09-23: torch training suites are not a commit gate).
+# One git pathspec per line; a changed file under any of them selects the
+# tier in scripts/ci_gate.sh and in CI. Serving code is listed too: the
+# ml_training suites train a small model as a fixture and then exercise the
+# live engine (tests/test_lstm_inference.py), so a serving change needs them.
+src/models/
+src/preprocessing/
+scripts/train_sequence.py
+scripts/train_anomaly_model.py
+scripts/retrain.py
+scripts/sequence_bakeoff.py
+scripts/fp_benchmark.py
+scripts/detector_benchmark.py
+tests/test_lstm_inference.py
+tests/test_lstm_training.py
+tests/test_tcn_training.py
+tests/test_train_lstm.py
+tests/test_false_positive_benchmark.py
+tests/test_sequence_autoencoder_training.py
+tests/test_tcn.py
+tests/test_train_tcn.py
+tests/test_sequence_bakeoff.py
+scripts/ml_paths.txt
+pyproject.toml
+constraints-dev.txt

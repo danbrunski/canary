@@ -141,12 +141,17 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 # Test tiers (see the gate discipline in AGENTS.md):
-#   * default (bare pytest)      -> everything except `integration`; this is
-#     the COMMIT/verify gate, full coverage. Runs in parallel via -n auto.
+#   * default (bare pytest)      -> everything except `integration` and
+#     `ml_training`; this is the COMMIT/verify gate. Runs in parallel.
+#   * `ml_training` (torch training / bake-off / FP-benchmark suites) is NOT
+#     a commit gate (operator, 2026-09-23): it runs only when a change touches
+#     ML code -- scripts/ci_gate.sh and CI select it by path
+#     (scripts/ml_paths.txt). Run it by hand with `-m ml_training`.
 #   * inner loop while iterating -> add `and not slow`:
 #         .venv/bin/python -m pytest -m "not integration and not slow"
-#     drops the heavy ML training/bakeoff tests; stays well under ~30 s.
-#   * `-m integration` / `-m slow` run those tiers explicitly.
+#     also drops the remaining multi-second collector/replay tests.
+#   * `-m integration` / `-m slow` / `-m ml_training` run those tiers
+#     explicitly (a command-line -m replaces this default one).
 # `-n auto` (pytest-xdist) fans the suite across all cores -- the full suite
 # is dominated by a couple of ~150 s torch-training tests, so parallelism is
 # the main lever. Debugging a single test? Add `-n0` to force serial output.
@@ -154,8 +159,9 @@ pythonpath = ["."]
 # Codex/sandbox note: do not wrap API tests in GNU `timeout`. Starlette's
 # TestClient uses AnyIO's blocking portal, and `timeout ... pytest` can make
 # those in-process requests appear hung even when direct pytest finishes.
-addopts = "-n auto -m 'not integration'"
+addopts = "-n auto -m 'not integration and not ml_training'"
 markers = [
     "integration: real-hardware-equivalent tests (e.g. ELM327-emulator); slow.",
-    "slow: heavy ML training / bake-off / benchmark tests (multi-second to minutes); excluded from the inner loop via `-m 'not slow'`, always run at the commit gate.",
+    "slow: multi-second tests (collector/replay/decode, and every ml_training test); excluded from the inner loop via `-m 'not slow'`.",
+    "ml_training: torch training / bake-off / FP-benchmark suites; not a commit gate -- run when ML code changes (scripts/ml_paths.txt), or with `-m ml_training`.",
 ]

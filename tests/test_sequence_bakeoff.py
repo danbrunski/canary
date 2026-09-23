@@ -25,7 +25,8 @@ from src.telemetry import TelemetryRecord
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import retrain  # noqa: E402
 
-pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+# Torch training: not a commit gate (see the pyproject test tiers).
+pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"

@@ -153,10 +153,11 @@ to direct HTTP.
   upgrade a tool, follow `scripts/lock_dev_constraints.sh` and commit the new
   lock with whatever fixes it needs, never a lock the gate has not passed on.
 - **Push with `scripts/push.sh`.** It runs `scripts/ci_gate.sh`: ruff,
-  format, mypy and the full pytest (~7 min) on the exact commit being pushed,
+  format, mypy and the default pytest on the exact commit being pushed,
   in a throwaway worktree, so another session's uncommitted edits cannot
-  decide the verdict. When the push touches `src/dashboard/static` it also
-  runs pnpm typecheck, vitest and e2e. A green run stamps that commit, and
+  decide the verdict. It adds the `ml_training` tier only when the push
+  touches `scripts/ml_paths.txt` (see "Test tiers"). When the push touches
+  `src/dashboard/static` it also runs pnpm typecheck, vitest and e2e. A green run stamps that commit, and
   the tracked `pre-push` hook (`git config core.hooksPath scripts/git-hooks`)
   refuses any unstamped, non-documentation push. The gate cannot run inside
   the hook itself: git opens the connection first, and GitHub closed it during
@@ -168,13 +169,19 @@ to direct HTTP.
   before anything else is pushed. If a pushed test flaked, re-run it alone
   before calling it a flake, and open a task for the flake either way.
 - **Test tiers** (pytest runs in parallel via `-n auto`, needs
-  `pytest-xdist` from the `dev` extra): bare `pytest` is the full
-  **commit gate** — everything except `integration`, incl. the `slow`
-  ML training/bake-off tests. While *iterating* on a task, run the
-  inner-loop tier `pytest -m "not integration and not slow"` (~35 s;
-  drops the heavy torch-training tests) and reserve the full run for the
-  commit gate. `-m integration` / `-m slow` run those tiers explicitly;
-  add `-n0` to force serial output when debugging one test.
+  `pytest-xdist` from the `dev` extra): bare `pytest` is the
+  **commit gate** — everything except `integration` and `ml_training`.
+  **The torch training / bake-off / FP-benchmark suites (`ml_training`)
+  are not a commit gate** (operator, 2026-09-23): `scripts/ci_gate.sh` and
+  CI run them only when a change touches a path in `scripts/ml_paths.txt`
+  (`scripts/ml_changed.sh <base>` decides). Run them by hand with
+  `pytest -m ml_training` when you change model or preprocessing code.
+  While *iterating*, run the inner-loop tier
+  `pytest -m "not integration and not slow"` (~35 s; also drops the
+  multi-second collector/replay tests). `-m integration` / `-m slow` /
+  `-m ml_training` run those tiers explicitly (a command-line `-m`
+  replaces the default); add `-n0` to force serial output when debugging
+  one test.
 - **Pi deployment path**: `ssh canary@192.168.137.2` (or
   `canary.local`); install via `sudo bash scripts/install_pi.sh`; data
   lives under `/data/canary/`; control token at

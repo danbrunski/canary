@@ -28,7 +28,8 @@ from src.models.tcn_training import (  # noqa: E402
 from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 
-pytestmark = pytest.mark.slow  # heavy ML training/bake-off; see pyproject test tiers
+# Torch training: not a commit gate (see the pyproject test tiers).
+pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
 
 
 @dataclass(frozen=True)

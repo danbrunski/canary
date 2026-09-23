@@ -10,7 +10,9 @@
 # - The venv must match constraints-dev.txt (scripts/check_dev_env.py), because
 #   that file is what CI installs. Green on other versions proves nothing.
 # - Python: ruff check, ruff format --check, mypy, pytest (ci.yml `test`).
-#   Parallel-run failures are re-run serially once (see T01).
+#   Parallel-run failures are re-run serially once (see T01). The
+#   `ml_training` tier runs only when <base>..<commit> touches
+#   scripts/ml_paths.txt (scripts/ml_changed.sh).
 # - Frontend, only when <base>..<commit> touches src/dashboard/static: pnpm
 #   typecheck, vitest, playwright e2e (ci.yml `frontend`).
 #
@@ -68,6 +70,15 @@ start=$(date +%s)
       printf '    %s\n' "${failed[@]}" >&2
       echo "  Stamping green anyway. Record them in docs/roadmap/tasks/T01-test-suite-reliability.md." >&2
       printf '%s\n' "${failed[@]}" >"$wt/.flaky"
+    fi
+
+    # The torch training suites are not a commit gate (operator, 2026-09-23):
+    # bare pytest excludes `ml_training`, and it runs here only when the range
+    # touches a path in scripts/ml_paths.txt (or there is no base to diff).
+    if [[ "$range" != *..* ]] || "$wt/scripts/ml_changed.sh" "${range%%..*}" "$sha"; then
+      echo "==> pytest -m ml_training"
+      "$venv/pytest" -q -rf -p no:cacheprovider -m ml_training 2>&1 | tail -6
+      [[ ${PIPESTATUS[0]} -ne 0 ]] && { echo "✗ ml_training tier failed" >&2; exit 1; }
     fi
 
     if git -C "$wt" diff --name-only "${range%%..*}" "$sha" 2>/dev/null | grep -q '^src/dashboard/static/' \
