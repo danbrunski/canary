@@ -202,11 +202,16 @@ code.
     decision: whether a cross-channel check (committee) owns RPM/THROTTLE faults at
     idle and stuck-at-cruise, and whether the scheduler's 30 s miss backoff for the
     priority PIDs (which bounds dropout detection at 99 s + 33 s) should shrink.
-    (2) **A02's harness itself was not used**: its `Detector.score(features)`
-    receives resampled feature rows, and these
-    checks need each drive's raw long frame; the adapter is a raw-sample detector
-    hook in `src/models/evaluation_detectors.py` plus `scripts/evaluate_detectors.py`
-    passing `read_session` frames (A02's files, owned by the concurrent A02 work).
+    (2) ~~A02's harness itself was not used~~ — **closed in `b037a51`**: A02
+    added a `RawStreamDetector` protocol and `PlausibilityDetector`
+    (`src/models/evaluation_detectors.py`), and `plausibility` is a default
+    baseline in `scripts/evaluate_detectors.py`, scored on the same rows as
+    every other detector. The A02.11 table reads plausibility 0 FA/eh (0 %
+    withheld) on 13 in-era held-out drives, and 0 recall on the five
+    realistic (sub-range) faults, as designed
+    ([baseline](../../../data/analyses/2026-09-23-a02-detector-baseline.md)).
+    Those drives predate this rule set, so they are not unseen by it and (3)
+    stands.
     (3) **Zero confirmed on unseen drives** — re-run
     `scripts/evaluate_plausibility.py --clean` on drives recorded after this rule
     set was frozen.

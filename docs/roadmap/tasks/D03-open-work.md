@@ -1377,6 +1377,11 @@ live here now, so the documents could be archived
     and `test_recent_since_survives_an_unreadable_old_file`.
   - [ ] Verify on the Pi while collecting: a `since`-bounded request answers in
     < 1 s and the poller shows no missed ticks around it.
+    *Idle half, 2026-09-23 17:48Z (Pi at `0d4b32b`, deployed by bundle,
+    `vehicle_state` `no_data`, bench):* three `GET /anomalies?since=<now-30 min>`
+    answered 200 in 0.048–0.049 s; inference 85 ticks scheduled / 85 completed /
+    1 overrun (startup model load, before the requests). **Still owed:** the
+    same with the engine running and a capture recording.
 
 - [~] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
   never ends a trip and the trip-end digest never runs.** *(Fix landed; the
