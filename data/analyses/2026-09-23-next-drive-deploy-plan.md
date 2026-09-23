@@ -31,8 +31,9 @@ from `cdd355e`, `POST /control/capture/autostart {"profile":"tuning","coolant_mi
    three gears; its 3rd-gear segment began at 3,890 rpm. To get a pull that starts low,
    the driver settles in 3rd at ~2,000–2,500 rpm (≈ 40–50 km/h on this truck) before
    going to the floor.
-2. **WOT delivery, per pull** — 09-23 gave −0.8 % in 3rd gear on one pull, against +3 %
-   on three earlier drives. Report each pull separately. Two or more pulls outside
+2. **WOT delivery, per pull** — the 09-23 morning pull read −0.8 % in 3rd gear, and the
+   afternoon read +2.3..+4.1 % on four events (+3.6 % on a 2nd-gear pull), so the ~3 %
+   lean still holds. Report each pull separately. Two or more pulls outside
    +1..+5 % is a finding under the frozen rule; the lean question itself stays closed
    without fuel pressure (NA2).
 3. **Hygiene** — health line each wake-up; no `/anomalies` reads until D03.28 is deployed
@@ -53,14 +54,18 @@ from `cdd355e`, `POST /control/capture/autostart {"profile":"tuning","coolant_mi
 - Delivery on 0x24, load ≥ 85 %, first second dropped: +2..+4 % lean, flat 2,500–5,500.
 - WOT timing medians 8–14° BTDC, rising above 4,500.
 - VE 0.85–0.91 over 3,000–5,000 rpm with measured baro and IAT.
-- Warm STFT: cruise negative on both banks. **Idle: negative while LTFT reads 0.00 %**
-  (changed from "positive" after 09-22 and 09-23 both read negative).
+- Warm STFT: cruise (15–70 g/s) negative on both banks. **Idle: no prediction.** It read
+  negative on 09-22 and 09-23 AM and positive on 09-23 PM, all with LTFT at 0.00 %.
 - **Pass for NA1:** ≥ 3 pulls, each continuous at load ≥ 85 % in 3rd from ≤ 2,500 to
   ≥ 5,500 rpm.
 
 ## Still open (do not re-derive)
 
 - WOT ~3 % lean is closed to drives without fuel pressure (NA2).
-- D03.29: trip end depends on GPS alone. Not fixed yet.
+- D03.29: trip end depends on GPS alone, and the digest picked the post-capture session
+  on 09-23 PM. canary-a2 owns both.
+- **D05.1 (new, 09-23 PM):** six of eight `tuning` DIDs were silent for 37.5 s after the
+  capture started. At every `tuning` start, read each DID's first-row time from the
+  capture and log it. A repeat gives the desk its reproduction.
 - D03.18 note: a 2.5 s Mode-01-only gap with one timeout on 09-23; different from the
   fixed session-control path. Look at it only if it recurs.

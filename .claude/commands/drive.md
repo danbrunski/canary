@@ -299,10 +299,11 @@ its own criteria frozen before its data.
   drives put WOT ~3 % lean of target on λ and both banks' volts, flat
   2,000–5,800 rpm and independent of settle time, while warm part-throttle
   STFT is negative and idle positive: airflow-dependent, so neither a supply
-  offset nor anything K fixes. (Idle positive held through 09-21; on 09-22 and
-  09-23, with LTFT still 0.00 % since the 09-20 flash, idle STFT was negative
-  too, and one 09-23 3rd-gear WOT run delivered −0.8 %, not +3 %. One pull is
-  not a finding. Record each pull's delivery, don't re-derive the question.) Only fuel pressure through a pull (NA2)
+  offset nor anything K fixes. (Idle STFT's sign is not stable between drives:
+  negative on 09-22 and the morning of 09-23, positive that afternoon, all with
+  LTFT at 0.00 %. Don't cite either sign. The +3 % held again on 09-23 PM,
+  +2.3..+4.1 % on four events, after one AM pull read −0.8 %. One pull is not a
+  finding. Record each pull's delivery, don't re-derive the question.) Only fuel pressure through a pull (NA2)
   separates the MAF curve from delivery sag. Don't re-derive this, and never
   recommend a calibration change from a drive.
 - **Desk analysis of data already on the laptop is the best use of warm-up

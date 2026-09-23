@@ -32,8 +32,28 @@ rpm × MAF cell, `_capture-tuning-2026-09-22T170459` against
 | cruise, 2,000–3,000 rpm, 5–70 g/s | 12 | within ±1.56 points on both banks (two STFT quanta of 0.78 %) |
 | idle, ~725 rpm, < 5 g/s | 1 | +6.25 bank 1, +3.12 bank 2 |
 
-So a cruise-region edit of **≥ 4 %** is 2.5× the floor, and idle is too noisy
-for an edit that small.
+**Third same-ROM drive (2026-09-23 afternoon, `_capture-tuning-2026-09-23T164007`,
+no flash recorded) — the ±1.6 floor holds only at 15–70 g/s.** The frozen
+prediction was "every cruise cell within ±1.6 of the morning". It failed in the
+light-load cells:
+
+| cell (rpm, g/s) | bank 1 Δ | bank 2 Δ |
+|---|---|---|
+| 2,000, 5–10 | +4.30 | +5.08 |
+| 2,000, 10–15 | +2.34 | +1.56 |
+| 2,500, 5–10 | +3.52 | +2.73 |
+| 2,500, 10–15 | +7.42 | +5.86 |
+| 2,000–2,500, 15–45 (five cells) | −1.17 … +1.95 | −1.56 … +1.56 |
+| 2,000–2,500, 45–70 | 0.00 / +1.17 | 0.00 / +2.34 |
+| idle | +3.91 | +6.25 (idle read **positive** this drive) |
+
+The mid-load cells stayed put, so the light-load moves are not an unrecorded
+fuel-compensation edit, which would shift the whole block. Light-load cells
+hold tip-outs and closed-loop re-entry after fuel cut, and their n was 24–34
+against 43–86 in the morning. **So judge N01.1 on the 15–70 g/s cells only**,
+where three drives agree within ±1.6 (one 2,000 rpm / 45–70 bank-2 cell at
++2.34). A ≥ 4 % edit is still 2.5× that floor. Cells below 15 g/s, and idle,
+are reported but never scored.
 
 **The pattern that repeats on both drives.** At 2,500 rpm and 10–30 g/s,
 bank 1 STFT sits at −6 to −8 % and bank 2 at −4 to −5 %. Both shrink to about
@@ -84,8 +104,9 @@ block wider than where the truck operates, not by knowing which cell it sits in.
 - [ ] **The drive:** an ordinary drive on `tuning`, warm, with plenty of cruise
   and some idle. No pulls needed.
 - [ ] **Predictions (freeze these in the plan before the drive):**
-  - STFT in the edited cells rises **+2.5 to +5.5 points** on both banks,
-    against the 2026-09-22/23 medians. Expected: bank 1 about −7 → −3, bank 2
+  - STFT in the edited cells **at 15–70 g/s** rises **+2.5 to +5.5 points** on
+    both banks, against the medians of the three 2026-09-22/23 same-ROM drives.
+    Cells below 15 g/s are too noisy between drives to score (see above). Expected: bank 1 about −7 → −3, bank 2
     about −4 → 0.
   - Closed-loop delivery stays within ±0.5 % of target in those cells.
   - Control cells (idle, ≥ 45 g/s if outside the block, full throttle) move by
