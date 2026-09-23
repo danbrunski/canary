@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Tracked pre-push hook: runs the full CI gate on the exact commit being pushed,
+# in a throwaway worktree, before anything reaches origin.
+#
+# - A worktree, not the working tree: several agent sessions share this checkout,
+#   and their uncommitted edits must not decide whether *your* commits pass.
+# - The venv must match constraints-dev.txt (scripts/check_dev_env.py), because
+#   that file is what CI installs. Green on other versions proves nothing.
+# - Python: ruff check, ruff format --check, mypy, pytest (what ci.yml `test` runs).
+# - Frontend (only when the push touches src/dashboard/static): pnpm typecheck,
+#   vitest, playwright e2e (what ci.yml `frontend` runs).
+#
+# Enable once per clone:   git config core.hooksPath scripts/git-hooks
+# Bypass (emergencies):    git push --no-verify   -- then watch CI: gh run watch
+# Full pytest takes ~6.5 min on the laptop.
+set -uo pipefail
+repo_root="$(git rev-parse --show-toplevel)"
+venv="$repo_root/.venv/bin"
+zero=0000000000000000000000000000000000000000
+
+targets=()
+ranges=()
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ "$local_sha" == "$zero" ]] && continue            # branch deletion
+  targets+=("$local_sha")
+  if [[ "$remote_sha" == "$zero" ]]; then
+    ranges+=("$local_sha")
+  else
+    ranges+=("$remote_sha..$local_sha")
+  fi
+done
+[[ ${#targets[@]} -eq 0 ]] && exit 0
+
+# Only the newest commit per ref needs the gate; CI only runs on the pushed head.
+fail=0
+for i in "${!targets[@]}"; do
+  sha="${targets[$i]}"
+  range="${ranges[$i]}"
+  # Docs-only pushes skip the gate, matching the pre-commit hook's rule.
+  if ! git diff --name-only "${range%%..*}" "$sha" 2>/dev/null \
+       | grep -qvE '(\.mdx?$|^docs/|^README|^CHANGELOG|^LICENSE)'; then
+    if [[ "$range" == *..* ]]; then
+      echo "pre-push: ${sha:0:7} changes documentation only -- skipping gate"
+      continue
+    fi
+  fi
+
+  wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-prepush-XXXXXX")"
+  cleanup() { git -C "$repo_root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; }
+  trap cleanup EXIT
+  git -C "$repo_root" worktree add --detach --force "$wt" "$sha" >/dev/null 2>&1 || {
+    echo "pre-push: could not create a worktree for $sha" >&2; exit 1; }
+  echo "pre-push: gating ${sha:0:7} in $wt"
+
+  (
+    cd "$wt" || exit 1
+    export PYTHONPATH="$wt"     # import this commit's src/, not the editable install's
+    rc=0
+    echo "==> venv matches constraints-dev.txt"
+    "$venv/python" "$wt/scripts/check_dev_env.py" "$wt/constraints-dev.txt" || exit 1
+    echo "==> ruff check .";          "$venv/ruff" check . || rc=1
+    echo "==> ruff format --check ."; "$venv/ruff" format --check . >/dev/null || { "$venv/ruff" format --check . | tail -5; rc=1; }
+    echo "==> mypy";                  "$venv/mypy" || rc=1
+    [[ $rc -ne 0 ]] && exit 1
+    echo "==> pytest"
+    "$venv/pytest" -q -p no:cacheprovider 2>&1 | tail -25
+    [[ ${PIPESTATUS[0]} -ne 0 ]] && exit 1
+
+    if git -C "$wt" diff --name-only "${range%%..*}" "$sha" 2>/dev/null | grep -q '^src/dashboard/static/' \
+       || [[ "$range" != *..* ]]; then
+      cd src/dashboard/static || exit 1
+      echo "==> pnpm install --frozen-lockfile"; pnpm install --frozen-lockfile --prefer-offline >/dev/null || exit 1
+      echo "==> pnpm typecheck"; pnpm typecheck || exit 1
+      echo "==> pnpm test";      pnpm test || exit 1
+      echo "==> pnpm e2e";       pnpm e2e || exit 1
+    fi
+  ) || fail=1
+
+  cleanup; trap - EXIT
+  [[ $fail -ne 0 ]] && break
+done
+
+if [[ $fail -ne 0 ]]; then
+  echo "✗ pre-push: the CI gate failed on the commit being pushed -- not pushing." >&2
+  echo "  Fix it and push again. (--no-verify skips this; then run: gh run watch)" >&2
+  exit 1
+fi
+echo "✓ pre-push: CI gate green"

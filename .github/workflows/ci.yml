@@ -19,10 +19,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: |
+            pyproject.toml
+            constraints-dev.txt
 
+      # constraints-dev.txt is the exact toolchain scripts/check.sh gates on
+      # locally. Without it CI installed the newest mypy/numpy/ruff and failed
+      # on code the laptop passed (2026-09-19, 2026-09-23).
       - name: Install project with dev extras
-        run: pip install -e '.[dev]'
+        run: pip install -e '.[dev]' -c constraints-dev.txt
 
       - name: Ruff lint
         run: ruff check .

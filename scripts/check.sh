@@ -6,6 +6,11 @@
 #   scripts/check.sh          # full gate: ruff -> ruff format -> mypy -> pytest
 #   scripts/check.sh --fast   # skip pytest (what the pre-commit hook runs)
 #   scripts/check.sh --fix    # auto-apply `ruff format` + `ruff check --fix`, then gate
+#   scripts/check.sh --no-env-check   # skip the venv-vs-constraints check (upgrading only)
+#
+# First it checks that the venv matches constraints-dev.txt, the exact versions
+# CI installs. A gate run on other versions proves nothing about CI (2026-09-23:
+# mypy 2.x + numpy 2.5 stubs failed CI on code the laptop's mypy 1.20 passed).
 #
 # CI order (ci.yml): ruff check .  ->  ruff format --check .  ->  mypy  ->  pytest -v
 set -uo pipefail
@@ -14,13 +19,20 @@ VENV=".venv/bin"
 
 fix=0
 fast=0
+env_check=1
 for arg in "$@"; do
   case "$arg" in
     --fix) fix=1 ;;
     --fast) fast=1 ;;
-    *) echo "usage: scripts/check.sh [--fix] [--fast]" >&2; exit 2 ;;
+    --no-env-check) env_check=0 ;;
+    *) echo "usage: scripts/check.sh [--fix] [--fast] [--no-env-check]" >&2; exit 2 ;;
   esac
 done
+
+if [[ $env_check -eq 1 ]]; then
+  echo "==> venv matches constraints-dev.txt"
+  "$VENV/python" "$(dirname -- "${BASH_SOURCE[0]}")/check_dev_env.py" constraints-dev.txt || exit 1
+fi
 
 if [[ $fix -eq 1 ]]; then
   echo "==> ruff format ."        ; "$VENV/ruff" format .

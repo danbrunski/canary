@@ -144,6 +144,24 @@ to direct HTTP.
   `TuningFeedback.test.ts` once on flake before treating it as a
   regression). A pre-commit hook runs the fast gate (ruff + mypy)
   automatically.
+- **CI is the same gate, on the same versions.** CI installs
+  `constraints-dev.txt`, the exact dev toolchain, and `scripts/check.sh`
+  refuses to run on a venv that has drifted from it (`scripts/check_dev_env.py`
+  names the packages). Unpinned CI failed twice on code the laptop passed:
+  pandas-stubs on 2026-09-19, mypy 2.x + numpy 2.5 stubs on 2026-09-23. To
+  upgrade a tool, follow `scripts/lock_dev_constraints.sh` and commit the new
+  lock with whatever fixes it needs, never a lock the gate has not passed on.
+- **Pushing runs the full CI gate first.** The tracked `pre-push` hook
+  (`scripts/git-hooks`, enabled by `git config core.hooksPath
+  scripts/git-hooks`) runs ruff, format, mypy and the full pytest (~6.5 min)
+  on the exact commit being pushed, in a throwaway worktree, so another
+  session's uncommitted edits cannot decide the verdict. When the push touches
+  `src/dashboard/static` it also runs pnpm typecheck, vitest and e2e.
+  Documentation-only pushes skip it.
+- **After pushing, confirm CI.** `gh run watch` (or `gh run list --limit 3`),
+  and on a red run `gh run view <id> --log-failed`. A red `main` is fixed
+  before anything else is pushed. If a pushed test flaked, re-run it alone
+  before calling it a flake, and open a task for the flake either way.
 - **Test tiers** (pytest runs in parallel via `-n auto`, needs
   `pytest-xdist` from the `dev` extra): bare `pytest` is the full
   **commit gate** — everything except `integration`, incl. the `slow`
