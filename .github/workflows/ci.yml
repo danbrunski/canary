@@ -45,8 +45,8 @@ jobs:
   # bare pytest above excludes `ml_training`; this job runs it only when the
   # push or PR touches a path in scripts/ml_paths.txt.
   # CI installs no torch, so most of this tier importorskips here: read the
-  # skip count, a green run is not proof of the ML path. Whether CI installs
-  # CPU torch is an operator decision; until then the local
+  # skip count, a green run is not proof of the ML path.
+  # CI does not install torch, by operator decision (2026-09-23): the local
   # scripts/ci_gate.sh run (venv has torch) is where this tier really runs.
   ml-training:
     runs-on: ubuntu-latest

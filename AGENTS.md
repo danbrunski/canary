@@ -152,6 +152,11 @@ to direct HTTP.
   pandas-stubs on 2026-09-19, mypy 2.x + numpy 2.5 stubs on 2026-09-23. To
   upgrade a tool, follow `scripts/lock_dev_constraints.sh` and commit the new
   lock with whatever fixes it needs, never a lock the gate has not passed on.
+  **CI does not install torch** (operator decision, 2026-09-23). Torch tests
+  `importorskip` there and run only in the local `scripts/ci_gate.sh`, whose
+  venv has torch. So a test must skip cleanly without torch, and a
+  torch-dependent verdict comes from the local gate, never from CI. Don't
+  propose adding torch to CI.
 - **Push with `scripts/push.sh`.** It runs `scripts/ci_gate.sh`: ruff,
   format, mypy and the default pytest on the exact commit being pushed,
   in a throwaway worktree, so another session's uncommitted edits cannot
