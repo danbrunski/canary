@@ -142,7 +142,7 @@ This checklist builds the yardstick.
   - Record the artifact hashes, and verify them against the Pi rather than
     assuming the laptop copy matches (Pi item).
 
-- [ ] **A02.12 — A family or channel with no calibration data must not
+- [~] **A02.12 — A family or channel with no calibration data must not
   score.** In the 2026-09-20 sequence artifact, `did:ECM_INJECTOR_PULSE_1`
   and `_2` had no observations in the calibration session (1,056 windows,
   maximum error 0.0). So their family threshold is **0.0**, and any nonzero
@@ -160,6 +160,23 @@ This checklist builds the yardstick.
     the two 2026-09-22 drives, injector pulse the top global channel).
   - **Test:** a calibration frame with an all-unobserved family yields no
     threshold for it and no flags from it.
+
+  *Serving half done 2026-09-22.* `SequenceInferenceEngine`
+  (`src/models/inference.py`) treats a channel whose calibrated threshold is
+  not positive as never observed. It leaves the score mask, the family path
+  and the evidence, exactly as a suppressed channel does; the encoder still
+  receives it. The engine names such channels at load in a WARNING
+  (`uncalibrated_channels`). This makes the deployed 2026-09-20 artifact
+  score the two injector-pulse families as calibration did (masked), rather
+  than flagging them on any nonzero error.
+  - Test: `test_a_channel_never_observed_in_calibration_is_not_scored`.
+  - `test_inference_flags_anomaly_against_low_thresholds` used zero
+    thresholds to force a flag; it now uses 1e-9.
+
+  *Remaining:* the calibration half. Compute each channel's and family's
+  distribution only over windows where it was observed. Record never-observed
+  ones as uncalibrated in the manifest, and refuse a publish in which a
+  channel the model was trained to score has no calibration observations.
 
 ## Acceptance
 

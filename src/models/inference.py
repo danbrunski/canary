@@ -8,6 +8,7 @@ fixed-length sequence, and the engine emits one result per full window.
 from __future__ import annotations
 
 import importlib
+import logging
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -23,6 +24,8 @@ from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
+
+log = logging.getLogger(__name__)
 
 LSTM_SCORE_COLUMN = "lstm_reconstruction_error"
 LSTM_THRESHOLD_COLUMN = "lstm_reconstruction_threshold"
@@ -336,8 +339,32 @@ class SequenceInferenceEngine:
         suppressed = expand_suppress_channels(tuple(suppress_channels), self.feature_columns)
         self.suppressed_channels: tuple[str, ...] = suppressed
         column_index = {col: idx for idx, col in enumerate(self.feature_columns)}
-        self._suppressed_indices: np.ndarray[Any, np.dtype[np.intp]] = np.array(
-            [column_index[col] for col in suppressed if col in column_index],
+        # A02.12: a channel whose calibrated threshold is not positive was
+        # masked in every calibration window — never observed — so the global,
+        # per-mode and family thresholds were all computed without it. Score it
+        # the same way: out of the score mask, the family path and the
+        # evidence, until a calibration covers it. Before this, a threshold of
+        # 0.0 flagged it on any nonzero error (ECM_INJECTOR_PULSE_1/2 in the
+        # 2026-09-20 artifact, once those DIDs joined the default profile).
+        self.uncalibrated_channels: tuple[str, ...] = tuple(
+            column
+            for column in self.feature_columns
+            if not self.calibration.channel_errors[column].threshold > 0
+        )
+        if self.uncalibrated_channels:
+            log.warning(
+                "sequence model %s: %d channel(s) were never observed in calibration "
+                "and are not scored until a calibration covers them: %s",
+                trained.manifest.model_version,
+                len(self.uncalibrated_channels),
+                ", ".join(self.uncalibrated_channels),
+            )
+        excluded = set(suppressed) | set(self.uncalibrated_channels)
+        #: Columns kept out of the score, family path and evidence (suppressed
+        #: by config or uncalibrated). The encoder still receives them.
+        self._score_excluded: frozenset[str] = frozenset(excluded)
+        self._score_excluded_indices: np.ndarray[Any, np.dtype[np.intp]] = np.array(
+            sorted(column_index[col] for col in excluded if col in column_index),
             dtype=np.intp,
         )
         self._torch = _torch_module()
@@ -423,9 +450,9 @@ class SequenceInferenceEngine:
         # the mask it was trained on; ``score_mask`` zeroes the suppressed
         # columns for the error, the global score and the top-channel evidence.
         score_mask = mask
-        if self._suppressed_indices.size:
+        if self._score_excluded_indices.size:
             score_mask = mask.copy()
-            score_mask[:, self._suppressed_indices] = 0.0
+            score_mask[:, self._score_excluded_indices] = 0.0
         started = self.time_fn()
         # z-score the *values* against the training-time scaler so reconstruction
         # error is in the same scale as the calibrated threshold. Mask and Δt are
@@ -497,8 +524,9 @@ class SequenceInferenceEngine:
             score = channel_scores[column]
             return score / threshold if threshold > 0 else score
 
+        rankable = [c for c in self.feature_columns if c not in self._score_excluded]
         top_channels = tuple(
-            sorted(self.feature_columns, key=_ratio, reverse=True)[:LSTM_TOP_CHANNELS]
+            sorted(rankable or self.feature_columns, key=_ratio, reverse=True)[:LSTM_TOP_CHANNELS]
         )
         column_index = {column: index for index, column in enumerate(self.feature_columns)}
         reconstruction_series = {
@@ -531,7 +559,8 @@ class SequenceInferenceEngine:
                 family_channels.setdefault(_base_channel(column), []).append(column)
             for family, columns in family_channels.items():
                 distribution = self.calibration.family_errors.get(family)
-                if distribution is None:
+                if distribution is None or not distribution.threshold > 0:
+                    # Never observed in calibration (A02.12): no band to compare.
                     continue
                 raw_score = max(channel_scores[column] for column in columns)
                 family_scores[family] = raw_score / max(

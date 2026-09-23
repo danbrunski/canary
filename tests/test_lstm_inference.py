@@ -139,12 +139,14 @@ def test_score_window_populates_top_channel_evidence(tmp_path: Path) -> None:
 
 
 def test_inference_flags_anomaly_against_low_thresholds() -> None:
+    # Tiny *positive* bands: a threshold of 0.0 now means "never observed in
+    # calibration" and takes the channel out of the score (A02.12).
     trained = _trained(threshold_k=100.0)
     thresholds = dict(trained.manifest.thresholds or {})
     thresholds["global_error"] = dict(thresholds["global_error"])
-    thresholds["global_error"]["threshold"] = 0.0
+    thresholds["global_error"]["threshold"] = 1e-9
     thresholds["channel_errors"] = {
-        channel: {**distribution, "threshold": 0.0}
+        channel: {**distribution, "threshold": 1e-9}
         for channel, distribution in dict(thresholds["channel_errors"]).items()
     }
     trained = replace(trained, manifest=replace(trained.manifest, thresholds=thresholds))
@@ -473,6 +475,40 @@ def test_sequence_inference_suppress_channels_silences_alert_from_noise_channel(
     assert r_plain.global_score > r_supp.global_score
     assert r_plain.is_anomaly is True
     assert r_supp.is_anomaly is False
+
+
+def test_a_channel_never_observed_in_calibration_is_not_scored() -> None:
+    """A02.12: a zero calibrated threshold means the channel was masked in
+    every calibration window, so every band was computed without it. It must
+    be scored the same way — out of the score, the evidence and the ranking —
+    not flagged on any nonzero error, which is what a threshold of 0.0 did."""
+    import numpy as np
+
+    _torch()
+    trained = _trained()
+    thresholds = dict(trained.manifest.thresholds or {})
+    channel_errors = {k: dict(v) for k, v in dict(thresholds["channel_errors"]).items()}
+    channel_errors["speed"]["threshold"] = 0.0
+    channel_errors["speed"]["maximum"] = 0.0
+    thresholds["channel_errors"] = channel_errors
+    never_seen = replace(trained, manifest=replace(trained.manifest, thresholds=thresholds))
+
+    engine = SequenceInferenceEngine(never_seen)
+    assert engine.uncalibrated_channels == ("speed",)
+
+    window = np.array([[700.0, 9999.0]] * engine.sequence_length, dtype=np.float32)
+    common = dict(
+        timestamp="t", session="s", window_start_timestamp="t0", window_end_timestamp="t1"
+    )
+    result = engine.score_window(window, **common)
+
+    assert result.channel_scores["speed"] == 0.0
+    assert "speed" not in result.anomalous_channels
+    assert "speed" not in result.top_channels
+    # Scored exactly as if the channel were suppressed: same encoder input,
+    # same score mask.
+    suppressed = SequenceInferenceEngine(_trained(), suppress_channels=("speed",))
+    assert result.global_score == suppressed.score_window(window, **common).global_score
 
 
 def test_suppressing_a_channel_does_not_change_what_the_encoder_sees() -> None:
