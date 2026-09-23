@@ -96,6 +96,23 @@ async def test_get_recent_anomalies_forwards_since_param() -> None:
     assert "since=2026-05-17T00%3A00%3A00Z" in captured["url"]
 
 
+async def test_get_recent_anomalies_forwards_limit_source_and_mode() -> None:
+    """D03.28: ``limit`` reaches the daemon so it stops reading the daily log
+    early, and ``source``/``mode`` go with it so the daemon's newest N are the
+    newest N *matching* events rather than N the client then filters down."""
+    seen: list[dict[str, str]] = []
+
+    def handler(request: httpx.Request) -> dict[str, Any]:
+        seen.append(dict(request.url.params))
+        return {"events": [], "count": 0}
+
+    client = await _fake_daemon({"GET /anomalies": handler})
+    await anomalies_tool.get_recent_anomalies(client, source="behavior", mode="city")
+    await anomalies_tool.get_recent_anomalies(client, limit=0)
+    await client.aclose()
+    assert seen == [{"source": "behavior", "mode": "city", "limit": "100"}, {}]
+
+
 async def test_get_recent_telemetry_filters_channel() -> None:
     """Channel filter is applied after fetch."""
     rows = [

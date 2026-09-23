@@ -47,7 +47,7 @@ Endpoint summary:
 | `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02); `startup` — when this daemon started recording (S01.1, below). `?view=compact` is the pollable projection and carries `startup` too |
 | `GET /config` | JSON view of the loaded `canary.yaml` |
 | `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk |
-| `GET /anomalies?since=...` | persisted anomaly events from JSONL |
+| `GET /anomalies?since=...&limit=N` | persisted anomaly events from JSONL; `since` and `limit` skip whole daily files, so pass one — with neither, the daemon parses the entire history |
 | `GET /bindings` | decoded CAN binding metadata for display |
 | `GET /dids` | Mode 22 DID catalog metadata |
 | `GET /models/behavior` | behavior-model surfaces for dashboard panels; per model `serving_status` (`state`, `reasons`, `lifecycle` validated/unvalidated/exploratory/demoted/quarantined, typed `permitted_uses`, governing `policy` entry), `artifact` identity (version, fingerprint, fitted_at, tune) and `validation_scope`; top-level `policy` names the profile `behavior_policy.yaml` |

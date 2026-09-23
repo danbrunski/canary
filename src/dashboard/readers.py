@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from src.alerts.event_logger import read_events_dir
+from src.alerts.events import AnomalyEvent
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.dashboard.status import _resolve_latest_session
@@ -205,27 +206,24 @@ def read_anomalies_since(
     compare silently dropped every space-separated event for any ``since``
     containing a ``T``. ``limit`` keeps the newest N (events stay
     oldest-first in the response).
+
+    Every bound is pushed into :func:`read_events_dir`, which skips whole
+    daily files outside it: this runs inside the collecting daemon, and
+    parsing the full history before filtering stalled collection for ~30 s
+    mid-drive (D03.28). With neither ``since`` nor ``limit`` it still reads
+    everything.
     """
     if not anomalies_dir.exists():
         return []
-    events = read_events_dir(anomalies_dir)
-    if since is not None:
-        since_ts = parse_iso_utc(since)  # fail loudly on garbage (400 upstream)
-        kept = []
-        for event in events:
-            try:
-                ts = parse_iso_utc(event.timestamp)
-            except ValueError:
-                continue
-            if ts >= since_ts:
-                kept.append(event)
-        events = kept
-    if source is not None:
-        events = [e for e in events if e.source == source]
-    if mode is not None:
-        events = [e for e in events if e.operating_mode == mode]
-    if limit is not None and limit > 0:
-        events = events[-limit:]
+    since_ts = parse_iso_utc(since) if since is not None else None  # 400 upstream
+
+    def matches(event: AnomalyEvent) -> bool:
+        if source is not None and event.source != source:
+            return False
+        return mode is None or event.operating_mode == mode
+
+    keep = None if source is None and mode is None else matches
+    events = read_events_dir(anomalies_dir, since=since_ts, limit=limit, keep=keep)
     return [e.to_dict() for e in events]
 
 

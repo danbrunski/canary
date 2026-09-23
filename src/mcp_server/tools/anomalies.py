@@ -15,33 +15,46 @@ async def get_recent_anomalies(
     source: str | None = None,
     mode: str | None = None,
 ) -> dict[str, Any]:
-    """Anomaly events from the JSONL log.
+    """Anomaly events from the JSONL log, newest ``limit`` returned oldest-first.
 
     Parameters
     ----------
     since:
-        ISO-8601 timestamp; the daemon returns events with timestamp >= since.
-        ``None`` returns the daemon default (today, typically).
+        ISO-8601 timestamp; the daemon returns events with timestamp >= since
+        and skips daily log files dated more than a day before it. ``None``
+        applies no time bound: the daemon walks the log newest-day-first
+        until it has ``limit`` events.
     limit:
-        Client-side cap. The daemon doesn't paginate; we slice after fetch.
+        Newest N events, sent to the daemon so it stops reading early. ``0``
+        or less removes the cap, and with no ``since`` that parses the whole
+        anomaly history inside the collecting daemon.
     source:
         ``"isolation_forest"`` or ``"lstm_autoencoder"`` to filter by detector.
+        Applied by the daemon before ``limit`` counts.
     mode:
         Operating mode (``idle``, ``city``, ``highway``, ``wot``, ``off_road``)
         to filter by — useful when a problem only appears in one regime.
+        Applied by the daemon before ``limit`` counts.
     """
     params: dict[str, Any] = {}
     if since is not None:
         params["since"] = since
+    if source is not None:
+        params["source"] = source
+    if mode is not None:
+        params["mode"] = mode
+    if limit > 0:
+        params["limit"] = limit
     payload = await client.get_json("/anomalies", params=params or None)
     events: list[dict[str, Any]] = list(payload.get("events", []))
+    # The daemon applied all four already; re-applying them is idempotent and
+    # keeps the documented shape if it ever ignores one.
     if source is not None:
         events = [e for e in events if e.get("source") == source]
     if mode is not None:
         events = [e for e in events if e.get("operating_mode") == mode]
     if limit > 0:
-        # Newest-first slice so the most recent N survive truncation. The
-        # daemon orders oldest-first; reverse, slice, then restore order.
+        # Newest-first slice: the daemon orders oldest-first.
         events = list(reversed(list(reversed(events))[:limit]))
     return {"events": events, "count": len(events)}
 

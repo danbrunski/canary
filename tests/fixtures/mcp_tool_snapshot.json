@@ -777,7 +777,7 @@
     }
   },
   "get_recent_anomalies": {
-    "description": "Anomaly events from the JSONL log.\n\n    Parameters\n    ----------\n    since:\n        ISO-8601 timestamp; the daemon returns events with timestamp >= since.\n        ``None`` returns the daemon default (today, typically).\n    limit:\n        Client-side cap. The daemon doesn't paginate; we slice after fetch.\n    source:\n        ``\"isolation_forest\"`` or ``\"lstm_autoencoder\"`` to filter by detector.\n    mode:\n        Operating mode (``idle``, ``city``, ``highway``, ``wot``, ``off_road``)\n        to filter by \u2014 useful when a problem only appears in one regime.\n    ",
+    "description": "Anomaly events from the JSONL log, newest ``limit`` returned oldest-first.\n\n    Parameters\n    ----------\n    since:\n        ISO-8601 timestamp; the daemon returns events with timestamp >= since\n        and skips daily log files dated more than a day before it. ``None``\n        applies no time bound: the daemon walks the log newest-day-first\n        until it has ``limit`` events.\n    limit:\n        Newest N events, sent to the daemon so it stops reading early. ``0``\n        or less removes the cap, and with no ``since`` that parses the whole\n        anomaly history inside the collecting daemon.\n    source:\n        ``\"isolation_forest\"`` or ``\"lstm_autoencoder\"`` to filter by detector.\n        Applied by the daemon before ``limit`` counts.\n    mode:\n        Operating mode (``idle``, ``city``, ``highway``, ``wot``, ``off_road``)\n        to filter by \u2014 useful when a problem only appears in one regime.\n        Applied by the daemon before ``limit`` counts.\n    ",
     "inputSchema": {
       "properties": {
         "limit": {

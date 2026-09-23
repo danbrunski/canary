@@ -5,21 +5,30 @@ so a crash loses at most one in-flight event) and trivially tailable. Files are
 named ``anomalies-YYYY-MM-DD.jsonl`` under the configured directory; "daily
 rotation" is just a new file when the UTC date rolls over (no rename, so it
 stays crash-safe). The dashboard's ``GET /anomalies?since=...`` reads across the
-matching files.
+matching files — bounded by filename date, because the history is unbounded
+(169 MB on the Pi by 2026-09-23) and the reader runs inside the collecting
+daemon (D03.28).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
-from datetime import UTC, datetime
+from collections.abc import Callable, Iterator
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import IO
 
 from src.alerts.events import AnomalyEvent
+from src.timefmt import parse_iso_utc
 
 FILENAME_PREFIX = "anomalies-"
 FILENAME_SUFFIX = ".jsonl"
+
+# A daily file's name is the UTC date of the events in it, but an event whose
+# timestamp carries a non-UTC offset, or failed to parse and was filed under
+# "now", can sit a day off. Bounded reads keep one extra day either side of
+# the boundary rather than trusting it (D03.28).
+FILE_DATE_MARGIN = timedelta(days=1)
 
 
 def _event_date(event: AnomalyEvent) -> str:
@@ -135,10 +144,97 @@ def read_events(path: Path) -> Iterator[AnomalyEvent]:
                 continue
 
 
-def read_events_dir(directory: Path) -> list[AnomalyEvent]:
-    """Read every ``anomalies-*.jsonl`` under ``directory``, sorted by timestamp."""
-    events: list[AnomalyEvent] = []
+def event_log_file_date(path: Path) -> date | None:
+    """The UTC date in an ``anomalies-YYYY-MM-DD.jsonl`` name, else ``None``.
+
+    ``None`` means "cannot be placed in time": bounded reads still open such a
+    file rather than silently dropping whatever it holds.
+    """
+    name = Path(path).name
+    if not (name.startswith(FILENAME_PREFIX) and name.endswith(FILENAME_SUFFIX)):
+        return None
+    stem = name[len(FILENAME_PREFIX) : -len(FILENAME_SUFFIX)]
+    try:
+        return datetime.strptime(stem, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def read_events_dir(
+    directory: Path,
+    *,
+    since: datetime | None = None,
+    limit: int | None = None,
+    keep: Callable[[AnomalyEvent], bool] | None = None,
+) -> list[AnomalyEvent]:
+    """Read ``anomalies-*.jsonl`` under ``directory``, sorted by timestamp.
+
+    With no arguments every file is read. The bounds exist because the log is
+    unbounded history and this runs inside the collecting daemon: one
+    ``GET /anomalies?since=`` that parsed all 37 files (169 MB) stalled
+    collection for ~30 s on 2026-09-23 (D03.28). Both bounds skip whole files
+    by their filename date; a file whose name is not a date is always read.
+
+    ``since``
+        Keep events whose *parsed* timestamp is ``>= since`` (naive = UTC;
+        unparseable timestamps are dropped). Daily files dated more than
+        :data:`FILE_DATE_MARGIN` before ``since``'s UTC date are never opened.
+    ``keep``
+        Extra per-event predicate, applied before ``limit`` counts, so the
+        newest N are the newest N *matching* events.
+    ``limit``
+        Return only the newest ``limit`` events (still oldest-first). Daily
+        files are read newest-first and reading stops once ``limit`` events
+        are in hand and one further day of margin has been read.
+    """
+    since_utc: datetime | None = None
+    oldest_file_date: date | None = None
+    if since is not None:
+        since_utc = since.replace(tzinfo=UTC) if since.tzinfo is None else since.astimezone(UTC)
+        oldest_file_date = since_utc.date() - FILE_DATE_MARGIN
+
+    def accept(event: AnomalyEvent) -> bool:
+        if since_utc is not None:
+            try:
+                if parse_iso_utc(event.timestamp) < since_utc:
+                    return False
+            except ValueError:
+                return False
+        return keep is None or keep(event)
+
+    dated: list[tuple[date, Path]] = []
+    undated: list[Path] = []
     for path in sorted(Path(directory).glob(f"{FILENAME_PREFIX}*{FILENAME_SUFFIX}")):
-        events.extend(read_events(path))
+        file_date = event_log_file_date(path)
+        if file_date is None:
+            undated.append(path)
+        elif oldest_file_date is None or file_date >= oldest_file_date:
+            dated.append((file_date, path))
+
+    events: list[AnomalyEvent] = []
+    for path in undated:
+        events.extend(e for e in read_events(path) if accept(e))
+
+    if limit is not None and limit > 0:
+        # Newest day first. Only dated-file events count toward the stop: an
+        # undated file's events could be from any time, so they can never
+        # stand in for a day not yet read.
+        dated.sort(key=lambda item: item[0], reverse=True)
+        from_dated = 0
+        filled_on: date | None = None
+        for file_date, path in dated:
+            if filled_on is not None and file_date < filled_on - FILE_DATE_MARGIN:
+                break
+            batch = [e for e in read_events(path) if accept(e)]
+            events.extend(batch)
+            from_dated += len(batch)
+            if filled_on is None and from_dated >= limit:
+                filled_on = file_date
+    else:
+        for _file_date, path in dated:
+            events.extend(e for e in read_events(path) if accept(e))
+
     events.sort(key=lambda e: e.timestamp)
+    if limit is not None and limit > 0:
+        events = events[-limit:]
     return events
