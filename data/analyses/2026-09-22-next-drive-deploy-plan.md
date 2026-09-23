@@ -22,8 +22,9 @@ build`, restart) because `sudo canary-update` needs a password over ssh.
    `POST /control/capture {"profile":"tuning"}` → **200**,
    `superseded_capture_window.capture_id == 6c09a386` (the drive window);
    `DELETE /control/capture` → `resumed_capture_window` = session
-   `2026-09-23T022847`. `GET /control/captures/current` → 404 afterwards, so
-   nothing was left open.
+   `2026-09-23T022847` — that resumed window stayed open (I misread a 404
+   on the plural route as "none"); closed it with
+   `POST /control/captures/current/stop` before key-off.
 2. ✓ First Mode 22 row **0.16 s** after capture start, read from the capture's
    parquet (`_capture-tuning-2026-09-23T022831`: 223 DID rows over 8 DIDs in
    13 s; first Mode 01 row also 0.16 s). Was 27.6 s.
