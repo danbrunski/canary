@@ -41,6 +41,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -167,6 +168,10 @@ class LiveFeatureSource:
     dbc_database: Any | None = None
     did_map: DidMap | None = None
     session: str = "live"
+    #: A05 — called with every arrived value (``channel, value, observed_at``)
+    #: *before* the quality gate, so a plausibility check sees the raw sample
+    #: the gate would drop. ``None`` (the default) costs one attribute test.
+    sample_observer: Callable[[str, float, datetime], None] | None = None
 
     _current_values: dict[str, float] = field(default_factory=dict)
     #: Per-channel wall-clock timestamp of the last fresh ``observe()``. GRU-D
@@ -310,6 +315,8 @@ class LiveFeatureSource:
         the exact same staleness path (``_last_observed_at`` / ``_gap_flags``)
         a channel that stopped transmitting would. Counted, never swallowed.
         """
+        if self.sample_observer is not None:
+            self.sample_observer(channel, value, observed_at)
         if not is_physically_valid(channel, value):
             self._reject_counts[channel] = self._reject_counts.get(channel, 0) + 1
             log.debug(

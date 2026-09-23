@@ -1,0 +1,207 @@
+# Plausibility checks for the 2008 Nissan Xterra (VQ40DE, manual) — A05.
+#
+# Loaded by src/plausibility/limits.py (strict schema). The catalogs already
+# carry most physical limits: bindings.yaml / dids.yaml `plausible_min/max`,
+# the J1979 encoding range of every Mode 01 PID, and fsm.PHYSICAL_LIMITS. This
+# file adds only what is a fact about THIS vehicle and its collection:
+#
+#   * tier intervals — how often each poll tier really arrives here;
+#   * tighter ranges where the same sensor already has a catalog bound;
+#   * slew limits, stuck rules and the modes they run in;
+#   * the confirmation policy (pending -> confirmed).
+#
+# Every number was measured on the calibration drives
+#   ~/canary-data/sessions/nissan-xterra-2008/2026-07-18 .. 2026-08-07
+#   (plain drives plus the _capture-*/_tuning-* captures of the same span)
+# over *arrived* samples (no resampling). The drives meant as held-out
+# (2026-08-07 pm onward, 2026-09-18/20/22) are NOT held-out for this rule set:
+# its first pass on them removed rules (the RPM/SPEED stuck rules, the
+# crank-period counter's ungated range; they cite those drives below) and
+# prompted the stuck duration floor and freshness arrival minimum. A05.8's
+# zero-confirmed result is a second pass on the same drives; the false-alarm
+# check owed is drives recorded after this file was frozen. Engineering units throughout —
+# decoded (broadcast) channels are converted through their binding's scale by
+# the resolver.
+#
+# Modes are the segmenter's (canary.example.yaml preprocessing.operating_modes);
+# a mode name the segmenter cannot produce is a load error.
+
+schema_version: 1
+
+# Freshness: a channel is stale once its answer group has been ANSWERING for
+# interval_seconds x freshness_k without it (time the group was suspended — a
+# Mode 22 window, the session lapse, key-off — does not count; see `groups`).
+freshness_k: 3
+
+tiers:
+  fast:
+    interval_seconds: 33.0
+    reason: >-
+      Longest ROUTINE interval, not the typical one: fast PIDs arrive every
+      1.0-2.7 s (median per drive), but a PID that misses a poll sits out the
+      scheduler's 30 s miss backoff while its Mode 01 peers keep answering.
+      On the calibration drives the priority PIDs' answering-time gaps reached
+      64.8 s (RPM, 2026-07-27T152444) and 69.1 s (THROTTLE_POS,
+      2026-07-31T145209) — two backoffs back to back. 33 s x 3 = 99 s.
+  # Only `fast` is stated. Freshness runs only on Mode 01 PIDs in
+  # collection.obd_priority_channels (RPM and THROTTLE_POS by default, both
+  # fast): the scheduler degrades every other PID under bus-budget pressure,
+  # and they were measured absent for 176 s (COOLANT_TEMP) to 1,912 s
+  # (BAROMETRIC_PRESSURE) of answering time on clean calibration drives, so
+  # their absence is not evidence. No `did` / `memory` / `broadcast` tiers
+  # either — those channels report freshness `unchecked`:
+  #   * DIDs and RAM reads answer or refuse depending on engine state (the cam
+  #     and VVT DIDs go quiet at KOEO while the rest of the window answers) and
+  #     the scheduler backs a refused DID off: at a 60 s x 3 threshold, five
+  #     cam/VVT/coolant DIDs each confirmed "stale" on 3 clean calibration
+  #     drives.
+  #   * Broadcast frames have no poll tier, and at key-off the ECM's frames
+  #     stop while other modules keep talking.
+
+groups:
+  obd:
+    silence_seconds: 4.0
+    reason: >-
+      Gaps between consecutive Mode 01 arrivals are bimodal on the calibration
+      drives: 503,776 under 3 s (routine polling), 29 in 3-4 s, 2 in 4-5 s,
+      then 671 of 5 s and longer (Mode 22 windows plus the 5 s session lapse,
+      and key-off). A longer gap means Mode 01 was suspended, and it counts
+      toward no PID's freshness age.
+
+confirm:
+  range:
+    repeats: 2
+    window_seconds: 60
+    min_separation_seconds: 1.0
+  slew:
+    repeats: 2
+    window_seconds: 60
+    min_separation_seconds: 1.0
+  stuck:
+    repeats: 2
+    window_seconds: 600
+  freshness:
+    repeats: 2
+    window_seconds: 600
+
+channels:
+  obd:RPM:
+    range:
+      max: 7000
+      reason: >-
+        Same engine-speed sensor as the broadcast ECM_RPM binding
+        (bindings.yaml plausible_max 7000)
+    slew:
+      per_second: 4500
+      allowance: 12.5
+      update_interval_seconds: 0.2
+      reason: >-
+        Twice the fastest measured change (2,248 rpm/s: 1,050 rpm in 0.47 s,
+        city). Reads closer than 0.2 s apart saw steps of up to 450 rpm (one
+        ECM refresh straddled), so dt is floored at 0.2 s. Allowance is the
+        ECM's 12.5 rpm step.
+  obd:SPEED:
+    range:
+      max: 250
+      reason: Same bound as the broadcast VEHICLE_SPEED_2D1 / WHEEL_SPEED_6F7 bindings
+    slew:
+      per_second: 40
+      allowance: 2
+      update_interval_seconds: 0.2
+      reason: >-
+        ~1.1 g of deceleration; the fastest measured change was 15.9 km/h/s
+        (10 km/h in 0.63 s). Reads under 0.2 s apart stepped up to 4 km/h (one
+        refresh straddled). Allowance is the 2 km/h step this ECM reports.
+  obd:COOLANT_TEMP:
+    range:
+      max: 130
+      reason: Same sensor as the broadcast ECM_COOLANT_TEMP binding (plausible_max 130)
+    slew:
+      per_second: 2.0
+      allowance: 1.0
+      reason: >-
+        Thermal mass: fastest measured change 0.93 degC/s (one 1 degC step in
+        1.08 s), 2 degC in 2.8 s. Allowance is the 1 degC step. Coolant
+        legitimately holds at warm idle, so there is no stuck rule.
+  obd:INTAKE_TEMP:
+    slew:
+      per_second: 5.0
+      allowance: 1.0
+      reason: >-
+        Intake air tracks airflow (stagnation); fastest measured changes
+        7 degC in 3.0 s (2.3 degC/s) and 11 degC in 6.7 s. Allowance is the
+        1 degC step.
+  obd:BAROMETRIC_PRESSURE:
+    slew:
+      per_second: 0.5
+      allowance: 1.0
+      reason: >-
+        Altitude: the steepest trips here change ~17 kPa over ~20 min; fastest
+        measured change 2 kPa in 16.7 s. Allowance is the 1 kPa step.
+  # Stuck rules only where the channel cannot hold while the rule runs.
+  # Engine speed and road speed are deliberately NOT here: at a steady cruise
+  # both hold exactly at the ECM's resolution for as long as the speed holds
+  # (RPM held 2,412.5 rpm for 20 samples / 19.6 s on the highway, SPEED 72
+  # km/h for 160 samples / 162 s in `city` on 2026-09-18 drives), so a stuck
+  # sensor there is indistinguishable from a cruise by one channel alone —
+  # that needs a cross-channel check (a committee), not this file. Coolant
+  # holds at warm idle. Measured holds below are the longest runs of identical
+  # arrived samples on the calibration drives, as (samples, seconds); every
+  # rule needs both its count and its duration, because a count alone depends
+  # on the poll rate.
+  obd:THROTTLE_POS:
+    stuck:
+      samples: 30
+      min_seconds: 40
+      modes: [city, highway]
+      reason: >-
+        Longest measured holds while moving: city (11, 19.5 s), highway
+        (6, 11.6 s). Closed throttle holds at idle, so idle modes are excluded.
+  obd:ENGINE_LOAD:
+    stuck:
+      samples: 30
+      min_seconds: 80
+      modes: [city, highway]
+      reason: >-
+        Longest measured holds while moving: city (9, 38.2 s), highway
+        (6, 8.8 s).
+  obd:MAF:
+    stuck:
+      samples: 30
+      min_seconds: 160
+      modes: [warmup, idle_transient, idle, idle_high, city, highway]
+      reason: >-
+        A 0.01 g/s airflow reading barely holds while the engine runs:
+        longest measured holds idle (11, 77.0 s), warmup (8, 13.2 s),
+        idle_transient (6, 9.3 s), city (3, 7.9 s), highway (3, 6.1 s).
+  # Key-on states on the broadcast bus, not readings. The catalog bounds stay
+  # (they are right for a running engine); these rules only say which modes
+  # they run in.
+  #   * The ECM broadcasts -40 degC on all three coolant frames at key-on,
+  #     before its first coolant read (raw 0 on 0x551, raw 10 on 0x233/0x23D):
+  #     19 range detections per frame on the calibration drives, all in
+  #     `unknown`/`koeo`. No slew rule on these either — the jump from -40 to
+  #     the first real read is 131 degC.
+  #   * The ABS module broadcasts 253.9 km/h (raw 4063, its no-speed value) on
+  #     the 0x6F7 wheel speeds with the engine off: 15 detections per wheel,
+  #     all in `koeo`/`unknown`.
+  decoded:ECM_COOLANT_TEMP:
+    range: &engine_running
+      modes: [warmup, idle_transient, idle, idle_high, city, highway, launch, hard_brake, cornering]
+      reason: key-on value broadcast before the module's first real read
+  decoded:ECM_COOLANT_TEMP_233:
+    range: *engine_running
+  decoded:ECM_COOLANT_TEMP_23D:
+    range: *engine_running
+  decoded:WHEEL_SPEED_6F7_A:
+    range: *engine_running
+  decoded:WHEEL_SPEED_6F7_B:
+    range: *engine_running
+  decoded:WHEEL_SPEED_6F7_C:
+    range: *engine_running
+  # ECM_ENGINE_PERIOD is a crank-period counter: it grows without bound as
+  # the engine stops (6,312 -> 62,539 counts in the last 2 s of the
+  # 2026-09-21T232153 tuning capture, rpm falling from ~900), so the
+  # catalog's 800-20,000 counts is a running-engine range.
+  obd:mem:ECM_ENGINE_PERIOD:
+    range: *engine_running

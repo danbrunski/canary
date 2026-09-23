@@ -996,6 +996,21 @@ class LLMAssistConfig(_Strict):
     cards_path: Path = Path("data/analyses/llm_assist_cards.jsonl")
 
 
+class PlausibilityConfig(_Strict):
+    """Deterministic plausibility checks in the live tick (A05.9).
+
+    Off by default: the per-tick cost has not been measured on the Pi
+    against the missed-tick budget yet. When on, the vehicle's
+    ``plausibility.yaml`` (profile data directory) is required — without it
+    the evaluator is withheld and ``/status`` says why, rather than running on
+    guessed tier intervals and confirmation policy. Detections are evidence
+    records in ``<anomalies_dir>/plausibility-evidence.jsonl`` (replays:
+    ``<anomalies_dir>/_replay/<id>.plausibility-evidence.jsonl``).
+    """
+
+    enabled: bool = False
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -1013,6 +1028,7 @@ class CanaryConfig(_Strict):
     tuning_readiness: TuningReadinessConfig = TuningReadinessConfig()
     autotag: AutoTagConfig = AutoTagConfig()
     llm_assist: LLMAssistConfig = LLMAssistConfig()
+    plausibility: PlausibilityConfig = PlausibilityConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

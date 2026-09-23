@@ -160,6 +160,11 @@ class InferenceTiming:
     lateness: StageSummary
     stages: Mapping[str, StageSummary]
     window: int
+    #: A05.9 — the plausibility evaluator's live block (counters, open
+    #: pending/confirmed detections, coverage, per-tick cost), or ``None``
+    #: when ``plausibility.enabled`` is off. Its per-tick cost is also the
+    #: ``stages["plausibility"]`` occupancy.
+    plausibility: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -178,6 +183,7 @@ class InferenceTiming:
             "lateness": self.lateness.to_dict(),
             "stages": {name: summary.to_dict() for name, summary in self.stages.items()},
             "window": self.window,
+            "plausibility": dict(self.plausibility) if self.plausibility is not None else None,
         }
 
 
@@ -208,6 +214,7 @@ class InferenceTimingRecorder:
     _windows_scored: int = field(default=0, repr=False)
     _windows_stretched: int = field(default=0, repr=False)
     _windows_unmeasured: int = field(default=0, repr=False)
+    _plausibility: Mapping[str, Any] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
@@ -265,6 +272,10 @@ class InferenceTimingRecorder:
     def set_worker_swaps(self, swaps: Mapping[str, Any]) -> None:
         """Publish the scoring worker's model-load record (A01.6)."""
         self._worker_swaps = dict(swaps)
+
+    def set_plausibility(self, block: Mapping[str, Any] | None) -> None:
+        """Publish the plausibility evaluator's live block (A05.9)."""
+        self._plausibility = dict(block) if block is not None else None
 
     def note_sequence_window(
         self,
@@ -330,6 +341,7 @@ class InferenceTimingRecorder:
                 for name, samples in sorted(self._stages.items())
             },
             window=self.window,
+            plausibility=self._plausibility,
         )
 
 

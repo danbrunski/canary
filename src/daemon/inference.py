@@ -9,7 +9,7 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.alerts.emitter import AnomalyEventEmitter, EmitterCounters, IsolationForestInferenceEngine
 from src.alerts.fusion import (
@@ -62,6 +62,10 @@ from .inference_worker import (
     InferenceWorker,
     WorkerTick,
 )
+
+if TYPE_CHECKING:
+    # Annotation only: loaded on demand when ``plausibility.enabled``.
+    from .plausibility_live import LivePlausibility
 
 log = logging.getLogger(__name__)
 
@@ -743,6 +747,9 @@ class LiveInferencePipeline:
             ),
             _tick_seconds=interval_seconds,
         )
+        #: A05.9 — deterministic plausibility checks over arrived samples.
+        #: ``None`` unless ``plausibility.enabled`` (default off).
+        self._plausibility = _build_plausibility(components, source, recorder)
         #: Tick period, for naming a compute that outran it (D02.3).
         self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
@@ -917,6 +924,12 @@ class LiveInferencePipeline:
             # shipped default); reads the same raw operating point the
             # behavior overlay reads, not the engineered feature row.
             self._autotag_hook.tick(source.latest_operating_point, now)
+
+        if self._plausibility is not None:
+            try:
+                self._plausibility.tick_live(components, now, operating_mode)
+            except Exception:  # noqa: BLE001 — plausibility is best-effort
+                log.exception("plausibility tick failed")
 
         # 4.7 — the segmenter falling back to constant "all" mode means
         # every mode-gated behavior surface silently never fires; make
@@ -1150,6 +1163,31 @@ class LiveInferencePipeline:
                 process.terminate()
             except Exception:  # noqa: BLE001 — already gone is the goal
                 log.debug("feature worker already exited", exc_info=True)
+
+
+def _build_plausibility(
+    components: DaemonComponents,
+    source: LiveFeatureSource,
+    recorder: InferenceTimingRecorder,
+) -> LivePlausibility | None:
+    """The live plausibility evaluator (A05.9), or ``None``.
+
+    Imported only when enabled, so a daemon with the checks off loads none of
+    it.
+    """
+    if not components.config.plausibility.enabled:
+        return None
+    from src.daemon.plausibility_live import LivePlausibility
+
+    try:
+        return LivePlausibility.build(components, source, recorder)
+    except Exception as exc:  # noqa: BLE001 — a broken catalog must not stop scoring
+        log.exception("plausibility evaluator failed to start; checks are off")
+        # Enabled-but-broken must not read like ``enabled: false`` (null).
+        recorder.set_plausibility(
+            {"enabled": True, "withheld": f"evaluator failed to start: {exc!r}"}
+        )
+        return None
 
 
 def _utc_now() -> datetime:

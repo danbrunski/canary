@@ -466,3 +466,12 @@ dashboard:
 #   min_severity: 0.8
 #   max_pushes_per_session: 3
 #   digest_enabled: false
+
+# Deterministic plausibility checks (A05): per-channel range, stuck, freshness
+# and slew checks over every arrived sample, confirmed on repeat, written as
+# evidence to <anomalies_dir>/plausibility-evidence.jsonl and summarised in
+# /status detectors.inference.plausibility (cost: stages.plausibility). Needs
+# the vehicle's data/<profile>/plausibility.yaml; off until its per-tick cost
+# is measured on the Pi.
+# plausibility:
+#   enabled: false
