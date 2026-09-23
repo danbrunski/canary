@@ -13,6 +13,25 @@ Healthy within 3 min or revert. The Pi was at `a870887` at 17:53Z on 2026-09-22.
 2. First Mode 22 row within ~6 s of that start (was 27.6 s). Read it from the capture,
    not from `/status`.
 
+**Deployed and verified 2026-09-22 20:26 MDT, KOEO (`ignition_only`, coolant
+62 °C), by the checklist session:** `source: a870887 -> 5691cbc` (18 commits;
+includes `cdd355e`), dashboard rebuilt in 4.9 s, `restart_canary.sh`, both
+services active, `/status` 200. Deployed by hand as `canary` (pull, `pnpm
+build`, restart) because `sudo canary-update` needs a password over ssh.
+1. ✓ `POST /control/captures {"protocol":"drive"}` → window `6c09a386`;
+   `POST /control/capture {"profile":"tuning"}` → **200**,
+   `superseded_capture_window.capture_id == 6c09a386` (the drive window);
+   `DELETE /control/capture` → `resumed_capture_window` = session
+   `2026-09-23T022847`. `GET /control/captures/current` → 404 afterwards, so
+   nothing was left open.
+2. ✓ First Mode 22 row **0.16 s** after capture start, read from the capture's
+   parquet (`_capture-tuning-2026-09-23T022831`: 223 DID rows over 8 DIDs in
+   13 s; first Mode 01 row also 0.16 s). Was 27.6 s.
+Also on this build: `health.system.memory_limits_enforced: true` (6 GiB, swap
+off — D03.21 closed), and the calibration id read `1ZS44A00000` from the DID
+window 61 s after restart. Not on the Pi: `f15ec38` (A01 scoring fixes) was
+unpushed at deploy time and needs its own pull + restart.
+
 ## The drive itself
 
 **This is a tuning run: arm the autostart before leaving and let it run the drive.**

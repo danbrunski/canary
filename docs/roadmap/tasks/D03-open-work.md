@@ -1163,12 +1163,22 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   2026-09-22 "don't retrain yet". The IF/sequence side of this item is
   untouched. [B04/B05 measurements](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
 
-- [ ] **D03.21 The Pi's memory limits are not enforced.** The kernel cmdline
+- [x] **D03.21 The Pi's memory limits are not enforced.** The kernel cmdline
   has `cgroup_disable=memory`, so `MemoryMax=6G` / `MemorySwapMax=0` exist only in
   `systemctl show`, and 2 GB of swap is live. **Operator decision:**
   `cgroup_enable=memory` + reboot (or swap off). Until then D03.6's digest guards
   (child + RLIMIT_AS + row budget) are the only protection. Also verify with
   `/sys/fs/cgroup/.../memory.max`, not `systemctl show`. [September 18 drive log](../../../data/analyses/2026-09-18-drive-log.md).
+  **Resolved on the Pi, read 2026-09-22 20:30 MDT (uptime 2 h 51 m, i.e. the
+  reboot after the daemon-startup session's `cgroup_enable=memory`):**
+  `/sys/fs/cgroup/system.slice/canary.service/memory.max` = 6442450944,
+  `memory.swap.max` = 0, `memory.current` ≈ 824 MB, `cgroup.controllers`
+  lists `memory`, `/proc/cmdline` carries both `cgroup_disable=memory` and
+  `cgroup_enable=memory` (the later flag wins), and `swapon --show` is empty —
+  swap is off outright, not merely capped. `/status.health.system.
+  memory_limits_enforced` (S02.8, `0c753a5`) reports `true` with the same
+  path, so a drive's health line now shows it. The cgroup file was the check,
+  as this item asked; `systemctl show` was never consulted.
 
 ## Carried from archived roadmaps — 2026-09-21
 
