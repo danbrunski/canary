@@ -104,3 +104,7 @@ A02 — partial — held-out evaluation harness, drive-grouped holdouts, block-m
 A03 — partial — arrived-sample mask (legacy artifact served unchanged), engine_response feature set, scaler/validation/holdout fixes, training envelope + refusal; retrain and ablation owed (361acb5)
 A04 — partial — single-quantity known answer (IF blind on every drive), occlusion attribution, unknown mode refused at load, per-mode provenance/imputation/episodes code-complete for the retrain (a3b4ca3)
 D03.29 — partial — trip ends from vehicle speed (declared road_speed binding / Mode 01), digest lands on the drive's own session incl. captures, blind sessions named; receiver no-fix question owed (0d4b32b). Deployed 0d4b32b to the Pi by bundle (GitHub pull still refused there); D03.28 idle half measured
+D05.1 — partial — a profile switch re-plans every selected member (default's 60 s DID grid no longer carries into tuning; desk repro 38.0 s vs truck 37.5 s); ProfileStartLedger names what is withheld at a start; truck check owed (ab6676b, deployed to the Pi)
+D05.2 — partial — desk fix landed with D03.29; one real capture drive owed (145e223)
+test tiers — done — torch training suites (`ml_training`, 121 tests) out of the commit gate, run when scripts/ml_paths.txt paths change; operator decision 2026-09-23 (4892f20)
+T01 — partial — load-flaky daemon/collector tests wait for conditions or run on FakeClock; 0 failures beside 12–24 CPU burners; T01.7's 0.52 s live-source startup gap is an operator decision (6ca6d85, a5a6d65)
