@@ -155,7 +155,7 @@ measurement in hand.
   asserted channel is read (`StopWhen`, hang-guard deadline). 0 failures in 8
   post-fix burner runs.
 
-- [ ] **T01.7 `test_live_replay_live_does_not_cross_contaminate_state` fails at
+- [~] **T01.7 `test_live_replay_live_does_not_cross_contaminate_state` fails at
   `145e223`, and it is not load.** In `tests/test_replay_isolation.py`
   (`integration` tier, so it is not in the gate). It fails as a `TimeoutError`
   at shutdown, which hides the real assertion: a scratch copy that sets
@@ -165,7 +165,50 @@ measurement in hand.
   stored but never scored, and the test's collector never waits for the source.
   Decide whether that is a test assumption to update or a live-path gap:
   records stored but never seen by inference. Found while doing T01.1.
-- [ ] **T01.8 Audit the remaining short wall-clock `deadline_monotonic` collector
+  - [x] **Cause: the test's assumption was stale.** Probe at `6ca6d85` (quiet
+    laptop, timeline stages): `collector_tasks_created` 1.55 s,
+    `live_source_ready` 2.05 s. The collector's 15 fixed records ended 0.46 s
+    after the daemon task started, 0.15 s before the source existed, so no
+    record was ever observed and `buffer_size` stayed 0. The live sink joins
+    the fanout only when the source resolves, which is S01's intended order.
+  - [x] **The test now waits for conditions and fails on the real assertion.**
+    Each live phase feeds records, stamped when sent, until the state it
+    asserts is reached (`wait_until`: buffer filled, gate active, emitter
+    fired). Live A's records are drained before the boundary
+    (`health_monitor.wait_for_queues_idle(("ingest", "live"))`). Every
+    collector wait also ends on `stop`, and the shutdown join is `settle`.
+    "Pre-replay" emitter state is now captured inside
+    `emitter.enter_replay_mode` by a spy. A snapshot taken before `start()` raced
+    a live tick that could emit while `start()` awaited the writer's switch.
+    That failed 2 of 5 loaded runs as `assert 2 == 1`, a live emission that is
+    correctly kept. Mutation checks: skipping `live_source.reset()` in
+    `ReplayController._reset_in_memory_state` fails with `assert 5 == 0` in
+    3.7 s, and skipping the counter restore in `exit_replay_mode` fails with
+    `assert 0 == 1`. Neither hangs. Loaded: 10 of 10 alone (`-n 4`, 12
+    burners, load 6.0–15.3) and 5 of 5 alongside the six T01.8 files
+    (`-n auto`, load 15.3–22.3). No production code changed.
+  - [~] **Live-path gap: real, measured, and not fixed (judged not worth it).**
+    Records that arrive before the live source is built are stored but never
+    observed by it. On the Pi on 2026-09-23 (`/status.startup` after the 17:46Z
+    restart at `0d4b32b`: `first_record_stored` 5.078 s, `live_source_ready`
+    5.598 s) that was 5.08 s → 5.6 s, a 0.52 s
+    gap. The first 0.52 s of 18 stored sessions from 2026-09-18/19 held
+    764–1,263 records across 35–67 channels. `LiveFeatureSource` keeps one
+    current value per channel, and its ring buffer holds *tick* rows stamped
+    `now`, not records. So no replay of held records could score those
+    0.52 s: nothing ticks before the source exists. The only loss is the last
+    value of a channel sampled only in the gap. In 12 of the 18 sessions that
+    was 1–15 channels (slow/medium-tier Mode 01, GPS, DIDs). Their next
+    sample came 1.5–15 s later (DIDs about 61 s, one outlier 197 s), and
+    until then they read as gaps. Those sessions start at rollover or arming,
+    not always at a daemon start, so the cadence figure is what transfers.
+    A fix would hold the newest record per `(source, channel)` in the fanout
+    while the source builds, then feed those records to the live sink when it
+    joins: about 40 lines on the drain's hot path. It would buy a few seconds
+    of slow-channel coverage after a daemon start, which rarely coincides
+    with driving. Left open for that call; the drain docstring already states
+    the behaviour.
+- [x] **T01.8 Audit the remaining short wall-clock `deadline_monotonic` collector
   tests.** About 46 tests still end on one. They are in
   `test_can_obd_collector.py`, `test_multi_pid_batching.py`,
   `test_multi_did_batching.py`, `test_tx_gate.py`, `test_tuning_profile.py` and
@@ -173,3 +216,71 @@ measurement in hand.
   shape is a deadline that must cover several request timeouts before the thing
   asserted. Move those to `FakeClock` + `StopWhen`, as T01.3, T01.4 and T01.6
   were, before they surface in a gate.
+  Measured, not guessed: a scratch plugin wrapped every `run_can_obd_loop` call
+  in the six files (quiet laptop, `-n0`). For each call it recorded the
+  wall-clock budget, whether the loop ended on its stop condition or on the
+  deadline, the first read of each channel, and the first send of each
+  service/PID. The *margin* is the budget divided by the time at which the
+  asserted state was reached. The rule: convert when the margin is under 10x,
+  or when the claim compares or covers the work done inside a wall-clock
+  window. T01.2–T01.6 failed at margins of 1.06–1.6x.
+  - [x] **Converted to `FakeClock`** (the fakes gained an optional `clock`:
+    `_BatchingEcu` and subclasses, `_SchedulerDidEcu`/`_SleepyDidEcu`, new
+    `_ClockedFreezeFrameBus`. A receive with nothing pending costs its timeout
+    in simulated time, as in `ScriptedEcu`):
+    `test_batch_silence_from_a_sleeping_ecu_does_not_narrow` (0.41 s needed of
+    1.2 s, 14 timeouts first), `test_an_awake_ecu_that_ignores_batches_still_disables_batching`
+    (0.35 of 1.0, 9 whole-batch timeouts), `test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless`
+    (0.13 of 0.6, 4 timeouts), `test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches`
+    ×2 (0.08 of 1.0, 3 timeouts) and `test_a_desync_followed_by_silence_does_not_storm`
+    (shares `_run_capture`), `test_batching_beats_single_pid_on_round_trips`
+    (compared two wall-clock-bounded runs), `test_rejected_did_batches_fall_back_without_backing_off_members`
+    (0.31 of 0.5), `test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching`
+    (0.44 of 0.8, 9 timeouts), `test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant`
+    (sweep behind a 0.1 s timeout; its claim is about the rest of the second).
+    Also `test_accounting_reconciles_over_a_whole_run_with_failing_batches`: the
+    single-PID recovery it claims to reconcile came at 0.73 s of 0.8 s, so a
+    loaded run silently skipped it. It now runs the 2.0 s simulated
+    `_BATCH_REFUSAL_WINDOW_SECONDS` and asserts the recovery happened.
+  - [x] **Converted to `hang_guard_deadline()`** (they already stop on their
+    condition): `test_scheduler_polls_fast_tier_more_often_than_slow_tier`
+    (0.25 of 1.0, 4 timeouts), `test_scheduler_metrics_report_rates_and_backoff_state`
+    (0.056 of 0.4), `test_custom_pid_response_decodes_through_evaluator_into_custom_channel`
+    (0.20 of 1.0, behind a 0.2 s timeout).
+  - [x] **Left as safe, with the reason:**
+    `test_query_with_tap_*` ×4 and D02's `test_failed_batch_names_every_send_it_swallowed` /
+    `test_failed_batch_does_not_back_off_its_members`: one request whose own
+    timeout is shorter than the deadline, with an instant answer or an
+    assertion about the frame sent. `test_force_poll_trigger_ignores_unknown_channel_names`:
+    asserts only that the loop returns. `test_mode06_discovery_retries_after_successful_obd_contact`
+    (stops at 0.14 of 2.0), `test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo`
+    (0.026 of 2.0), `test_run_loop_emits_can_frames_pid_readings_and_did_readings`
+    (0.007 of 1.0), `test_did_session_windows_read_gated_dids_and_resume_mode_01`
+    and `test_failed_session_entry_skips_window_and_keeps_mode_01_alive` (0.35
+    of 5.0), `test_did_requests_stay_quiet_outside_windows` (0.11 of 2.0,
+    negative assertion): all stop on their condition, at 14x or more.
+    `test_dtc_poll_skips_cleanly_when_bus_never_answers`: the Mode 03 send it
+    needs is at 0.02 of 0.5, and the rest is lower bounds.
+    `test_loop_batches_and_emits_one_reading_per_channel`,
+    `test_every_pid_in_a_batch_lands_on_one_timestamp`,
+    `test_a_capture_round_puts_every_channel_on_one_row`,
+    `test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicity`,
+    `test_a_capture_round_with_baro_walks_every_member` ×3: the asserted state
+    is reached in under 3 ms with no timeout before it, and the per-reading
+    properties do not depend on how many rounds ran.
+    `test_active_scheduler_batches_known_width_dids_with_full_provenance`
+    (4.6 ms of 0.2 s), `test_known_answer_decode_matches_single_and_batched_scheduler_paths`
+    (12.8 ms of 0.2 s, no timeout first), `test_physical_did_batch_rejects_a_different_ecu_responder`
+    (about 0.01 of 0.15, then a negative assertion). tx_gate's three loop tests
+    and `test_tuning_mode_does_not_defeat_passive_mode`: negative assertions,
+    or the first send at 0.3 ms. `test_poll_loop_only_requests_tuning_channels_when_active`
+    and `test_poll_loop_polls_everything_when_inactive`: the last channel they
+    need is sent at about 0.02 of 0.6 s.
+  - [x] Mutation checks on the conversions. Counting every silent batch
+    failure toward narrowing (`if not counts:` → `if False:`) fails both
+    sleeping-ECU tests. A `FreezeFrameTrigger.take()` that never clears fails
+    the dormancy test.
+  - [x] Acceptance: 5 of 5 under `-n auto` beside 12 busy-loop burners (one
+    per core, killed by a trap and checked gone afterwards): 194 passed each
+    run of the six files (1-min load 8.6–20.3 at end of run), and 195 passed
+    each run with `tests/test_replay_isolation.py` added (15.3–22.3).

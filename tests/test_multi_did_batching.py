@@ -31,6 +31,7 @@ from src.collection.isotp import (
 )
 from src.collection.obd_scheduler import CanObdSpec
 from src.config import CanBusConfig
+from tests.capture_round_fakes import FakeClock, install_clock
 
 # Widths as MEASURED payload lengths, which is what the splitter needs.
 WIDTHS = {0x1101: 1, 0x1219: 2, 0x1208: 2, 0x1100: 4, 0x1103: 1}
@@ -221,9 +222,24 @@ def _frames(body: bytes) -> list[bytes]:
 
 
 class _SchedulerDidEcu:
+    """Answers Mode 22 singles and batches (and RPM) instantly.
+
+    With ``clock`` (a :class:`FakeClock` the test has installed), a receive
+    with nothing pending costs its timeout in simulated time, so a run bounded
+    by a ``clock.monotonic()`` deadline does not depend on machine load
+    (T01.8).
+    """
+
     values = {0x1101: b"\x8e", 0x1219: b"\x02\xee", 0x1208: b"\x16\xac"}
 
-    def __init__(self, *, reject_batches: bool = False, responder_id: int = 0x7E8) -> None:
+    def __init__(
+        self,
+        *,
+        reject_batches: bool = False,
+        responder_id: int = 0x7E8,
+        clock: FakeClock | None = None,
+    ) -> None:
+        self.clock = clock
         self.channel_info = "test"
         self.reject_batches = reject_batches
         self.sent: list[can.Message] = []
@@ -252,6 +268,8 @@ class _SchedulerDidEcu:
 
     def recv(self, timeout: float | None = None) -> can.Message | None:
         if not self.pending:
+            if self.clock is not None and timeout:
+                self.clock.advance(timeout)
             return None
         return can.Message(
             arbitration_id=self.responder_id, data=self.pending.pop(0), is_extended_id=False
@@ -315,8 +333,15 @@ def test_known_answer_decode_matches_single_and_batched_scheduler_paths() -> Non
     assert set(decoded[0]) == {"DID_1101", "DID_1219", "DID_1208"}
 
 
-def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
-    bus = _SchedulerDidEcu(reject_batches=True)
+def test_rejected_did_batches_fall_back_without_backing_off_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a fake clock (T01.8): the last DID's first single read lands at
+    # 0.31 s, after the rejected batches and the DTC polls time out; 0.5 s of
+    # wall clock was 1.6x that.
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _SchedulerDidEcu(reject_batches=True, clock=clock)
     readings: list = []
     snapshots: list = []
     stats = run_can_obd_loop(
@@ -325,7 +350,7 @@ def test_rejected_did_batches_fall_back_without_backing_off_members() -> None:
         on_frame=lambda _message: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
         on_scheduler_metrics=snapshots.append,
         scheduler_metrics_interval_seconds=0.02,
     )
@@ -364,8 +389,8 @@ def test_physical_did_batch_rejects_a_different_ecu_responder() -> None:
 class _SleepyDidEcu(_SchedulerDidEcu):
     """Silent to every request until ``wake_after`` sends (key off at boot)."""
 
-    def __init__(self, wake_after: int) -> None:
-        super().__init__()
+    def __init__(self, wake_after: int, *, clock: FakeClock | None = None) -> None:
+        super().__init__(clock=clock)
         self.wake_after = wake_after
         self.sends = 0
         self.awake_did_batches = 0
@@ -380,8 +405,14 @@ class _SleepyDidEcu(_SchedulerDidEcu):
         self.awake_did_batches += self.did_batches - before
 
 
-def test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching() -> None:
-    bus = _SleepyDidEcu(wake_after=14)
+def test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a fake clock (T01.8): 14 silent sends (nine timeouts) come before the
+    # first awake DID batch at 0.44 s; 0.8 s of wall clock was 1.8x that.
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _SleepyDidEcu(wake_after=14, clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -389,7 +420,7 @@ def test_did_batch_silence_from_a_sleeping_ecu_does_not_disable_batching() -> No
         on_frame=lambda _message: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.8,
+        deadline_monotonic=clock.monotonic() + 0.8,
     )
     assert stats.did_batch_failures >= 3
     assert stats.did_batch_failures_ecu_silent == stats.did_batch_failures

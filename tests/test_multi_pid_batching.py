@@ -230,7 +230,15 @@ from tests.waits import StopWhen, hang_guard_deadline  # noqa: E402
 
 
 class _BatchingEcu:
-    """Answers Mode 01 requests, single or batched, from a fixed value table."""
+    """Answers Mode 01 requests, single or batched, from a fixed value table.
+
+    Answers are instant. With ``clock`` (a :class:`FakeClock` the test has
+    installed), a receive with nothing pending costs its timeout in simulated
+    time, as :class:`ScriptedEcu`'s does, so a run bounded by a
+    ``clock.monotonic()`` deadline is the same run however loaded the machine
+    is (T01.8). Without one it returns at once and the loop spins on the real
+    clock until its request deadline.
+    """
 
     #: pid -> payload the fake ECU returns. 0x2F is deliberately absent so
     #: the "ECU omits an unsupported PID" path gets exercised.
@@ -247,11 +255,12 @@ class _BatchingEcu:
         0x10: b"\x01\x00",
     }
 
-    def __init__(self, *, answer_batches: bool = True) -> None:
+    def __init__(self, *, answer_batches: bool = True, clock: FakeClock | None = None) -> None:
         self.sent: list[can.Message] = []
         self._pending: list[bytes] = []
         self.answer_batches = answer_batches
         self.batch_requests = 0
+        self.clock = clock
 
     def send(self, msg: can.Message, timeout: float | None = None) -> None:
         self.sent.append(msg)
@@ -272,6 +281,8 @@ class _BatchingEcu:
 
     def recv(self, timeout: float | None = None) -> can.Message | None:
         if not self._pending:
+            if self.clock is not None and timeout:
+                self.clock.advance(timeout)
             return None
         return can.Message(arbitration_id=0x7E8, data=self._pending.pop(0), is_extended_id=False)
 
@@ -411,12 +422,20 @@ def test_loop_batches_and_emits_one_reading_per_channel() -> None:
     assert by_channel["SPEED"] == 50.0  # 0x32
 
 
-def test_batching_beats_single_pid_on_round_trips() -> None:
-    """Same channels, same wall clock — count the requests each way."""
+def test_batching_beats_single_pid_on_round_trips(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same channels, same clock — count the requests each way.
+
+    The same *simulated* 0.4 s each way (T01.8): the two runs used to get
+    0.4 s of wall clock each, so a load spike during one of them compared a
+    starved run with a healthy one, and the unanswered DTC polls (a fixed
+    0.05 s each, whatever the load) weighed more in the starved one.
+    """
     pids = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS")
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
 
     def run(batch_max: int) -> tuple[int, int]:
-        bus = _BatchingEcu()
+        bus = _BatchingEcu(clock=clock)
         got: list = []
         run_can_obd_loop(
             bus,  # type: ignore[arg-type]
@@ -424,7 +443,7 @@ def test_batching_beats_single_pid_on_round_trips() -> None:
             on_frame=lambda _m: None,
             on_reading=got.append,
             stop_event=threading.Event(),
-            deadline_monotonic=time.monotonic() + 0.4,
+            deadline_monotonic=clock.monotonic() + 0.4,
         )
         return len(bus.sent), len(got)
 
@@ -703,8 +722,8 @@ class _SleepyEcu(_BatchingEcu):
     """Silent to every request until ``wake_after`` sends, then a healthy
     batching ECU — the Pi booting with the key off, then the engine starting."""
 
-    def __init__(self, wake_after: int) -> None:
-        super().__init__()
+    def __init__(self, wake_after: int, *, clock: FakeClock | None = None) -> None:
+        super().__init__(clock=clock)
         self.wake_after = wake_after
         self.sends = 0
         self.awake_batch_sizes: list[int] = []
@@ -741,10 +760,18 @@ def _mode01_sizes(bus: _BatchingEcu) -> list[int]:
     return [len(bytes(m.data)[2 : 1 + m.data[0]]) for m in bus.sent if bytes(m.data)[1] == 0x01]
 
 
-def test_batch_silence_from_a_sleeping_ecu_does_not_narrow() -> None:
+def test_batch_silence_from_a_sleeping_ecu_does_not_narrow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Key off at boot: every request times out. That silence must not cost the
-    drive its batching — before the fix it narrowed 6 -> 4 -> 2 -> off."""
-    bus = _SleepyEcu(wake_after=3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2)
+    drive its batching — before the fix it narrowed 6 -> 4 -> 2 -> off.
+
+    On a fake clock (T01.8): the ECU wakes after 20 sends, 14 of them timeouts,
+    so the first awake batch lands at 0.41 s; 1.2 s of wall clock was 3x that.
+    """
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _SleepyEcu(wake_after=3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2, clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -752,7 +779,7 @@ def test_batch_silence_from_a_sleeping_ecu_does_not_narrow() -> None:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 1.2,
+        deadline_monotonic=clock.monotonic() + 1.2,
     )
 
     assert stats.batch_failures >= 3 * MAX_CONSECUTIVE_BATCH_FAILURES
@@ -763,10 +790,18 @@ def test_batch_silence_from_a_sleeping_ecu_does_not_narrow() -> None:
     assert {r.pid for r in readings} >= set(_SIX_FAST)
 
 
-def test_an_awake_ecu_that_ignores_batches_still_disables_batching() -> None:
+def test_an_awake_ecu_that_ignores_batches_still_disables_batching(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The protection the gate must keep: singles answer, batches are silent,
-    so each silent batch is bracketed by proof of life and counts."""
-    bus = _BatchingEcu(answer_batches=False)
+    so each silent batch is bracketed by proof of life and counts.
+
+    On a fake clock (T01.8): nine whole-batch timeouts come before the last
+    channel's first single read at 0.35 s; 1.0 s of wall clock was 2.9x that.
+    """
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _BatchingEcu(answer_batches=False, clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -774,7 +809,7 @@ def test_an_awake_ecu_that_ignores_batches_still_disables_batching() -> None:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 1.0,
+        deadline_monotonic=clock.monotonic() + 1.0,
     )
 
     assert stats.batch_size_narrowings == 3  # 6 -> 4 -> 2 -> off
@@ -785,10 +820,18 @@ def test_an_awake_ecu_that_ignores_batches_still_disables_batching() -> None:
     assert {r.pid for r in readings} >= set(_SIX_FAST)
 
 
-def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless() -> None:
+def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A negative response is an answer from an awake ECU, so it is evidence
-    about batching even with no other contact in between."""
-    bus = _NrcBatchEcu()
+    about batching even with no other contact in between.
+
+    On a fake clock (T01.8): four unanswered DTC/Mode 06 polls come before the
+    first single reads at 0.12-0.13 s; 0.6 s of wall clock was 4.6x that.
+    """
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _NrcBatchEcu(clock=clock)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -796,7 +839,7 @@ def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless() -> None:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.6,
+        deadline_monotonic=clock.monotonic() + 0.6,
     )
 
     assert stats.batch_size_narrowings == 3
@@ -819,8 +862,8 @@ class _BaroEcu(_BatchingEcu):
 
     VALUES = {**_BatchingEcu.VALUES, 0x33: b"\x51", 0x44: b"\x80\x00"}
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, *, clock: FakeClock | None = None) -> None:
+        super().__init__(clock=clock)
         self.batch_orders: list[tuple[int, ...]] = []
 
     def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
@@ -911,8 +954,10 @@ class _OneBankEcu(_BaroEcu):
 
     VALUES = {**_BaroEcu.VALUES, 0x06: b"\x90\x80"}
 
-    def __init__(self, *, silent_after_desync: bool = False) -> None:
-        super().__init__()
+    def __init__(
+        self, *, silent_after_desync: bool = False, clock: FakeClock | None = None
+    ) -> None:
+        super().__init__(clock=clock)
         self.silent_after_desync = silent_after_desync
         self.silent = False
         self.single_pids: list[int] = []
@@ -931,6 +976,14 @@ class _OneBankEcu(_BaroEcu):
 
 
 def _run_capture(bus: _BatchingEcu, channels: tuple[str, ...], seconds: float):  # type: ignore[no-untyped-def]
+    """Run ``bus`` for ``seconds`` of its fake clock under a capture round.
+
+    Simulated time (T01.8): the mismatch tests need three unanswered DTC polls,
+    the desync, the single re-measure and a later batch before they can pass
+    (~0.08 s), which a loaded machine could spend a good part of a 1.0 s wall
+    window on.
+    """
+    assert bus.clock is not None, "_run_capture runs on the bus's fake clock"
     from src.collection import tuning_profile
     from src.collection.capture_profiles import CaptureProfile
 
@@ -954,7 +1007,7 @@ def _run_capture(bus: _BatchingEcu, channels: tuple[str, ...], seconds: float): 
             on_frame=lambda _m: None,
             on_reading=readings.append,
             stop_event=threading.Event(),
-            deadline_monotonic=time.monotonic() + seconds,
+            deadline_monotonic=bus.clock.monotonic() + seconds,
         )
     finally:
         tuning_profile.set_active(False, source="test")
@@ -970,7 +1023,7 @@ def _run_capture(bus: _BatchingEcu, channels: tuple[str, ...], seconds: float): 
     ids=["mismatch-middle", "mismatch-last"],
 )
 def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
-    channels: tuple[str, ...], caplog: pytest.LogCaptureFixture
+    channels: tuple[str, ...], caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """One desync, then 0x06 is read single, measured at 2 bytes, and never
     batched again; the members the desync cost are re-read, not timed out."""
@@ -978,7 +1031,9 @@ def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
 
     from src.collection.obd_scheduler import _batching_metrics
 
-    bus = _OneBankEcu()
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _OneBankEcu(clock=clock)
     with caplog.at_level(logging.WARNING, logger="src.collection.obd_scheduler"):
         spec, stats, readings = _run_capture(bus, channels, 1.0)
 
@@ -1000,7 +1055,7 @@ def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
     assert by_channel["RPM"] == {750.0} and by_channel["SPEED"] == {50.0}
     assert by_channel["SHORT_FUEL_TRIM_1"] == {12.5}, "a mis-sliced 0x06 value leaked"
 
-    block = _batching_metrics(spec, stats, time.monotonic())
+    block = _batching_metrics(spec, stats, clock.monotonic())
     assert block is not None
     assert block["width_mismatches"] == {"0x06": {"registry": 1, "observed": 2}}
     assert block["desync_blame"] == {"0x06": 1}
@@ -1010,11 +1065,13 @@ def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
     assert len(warnings) == 1, [r.getMessage() for r in warnings]
 
 
-def test_a_desync_followed_by_silence_does_not_storm() -> None:
+def test_a_desync_followed_by_silence_does_not_storm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Re-measures ride each member's own next slot: an ECU that goes quiet
     after the desync sees no more than one request per member per round."""
     channels = ("RPM", "SHORT_FUEL_TRIM_1", "SPEED", "ENGINE_LOAD")
-    bus = _OneBankEcu(silent_after_desync=True)
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _OneBankEcu(silent_after_desync=True, clock=clock)
     _spec_, stats, _readings = _run_capture(bus, channels, 0.8)
 
     assert stats.batch_desyncs == 1

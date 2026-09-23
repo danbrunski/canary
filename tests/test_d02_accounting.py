@@ -27,7 +27,8 @@ from src.collection.obd_scheduler import (
 )
 from src.config import CanBusConfig
 from src.daemon.inference_metrics import InferenceTimingRecorder
-from tests.test_multi_pid_batching import _BatchingEcu
+from tests.capture_round_fakes import FakeClock, install_clock
+from tests.test_multi_pid_batching import _BATCH_REFUSAL_WINDOW_SECONDS, _BatchingEcu
 
 
 def _spec(**kw) -> CanObdSpec:
@@ -112,25 +113,40 @@ def test_failed_batch_does_not_back_off_its_members() -> None:
         assert state.suppressed_until == 0.0
 
 
-def test_accounting_reconciles_over_a_whole_run_with_failing_batches() -> None:
+def test_accounting_reconciles_over_a_whole_run_with_failing_batches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """End to end: every request in the published status payload reconciles
     after a real run in which batching fails and the loop recovers to
     single-PID polling. This is the assertion that would have caught the
-    drive's defect at the point it is read, not at the point it is written."""
-    bus = _BatchingEcu(answer_batches=False)
+    drive's defect at the point it is read, not at the point it is written.
+
+    On a fake clock (T01.8). The recovery this claims to cover — the first
+    single SPEED read — came at 0.73 s of a 0.8 s *wall-clock* run, so a
+    loaded machine ended the run before it and the test still passed, having
+    reconciled only the failing half. It now runs the simulated window the
+    batch-refusal tests use and asserts the recovery happened.
+    """
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _BatchingEcu(answer_batches=False, clock=clock)
     seen: list = []
+    readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
         on_frame=lambda _m: None,
-        on_reading=lambda _r: None,
+        on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.8,
+        deadline_monotonic=clock.monotonic() + _BATCH_REFUSAL_WINDOW_SECONDS,
         on_scheduler_metrics=seen.append,
         scheduler_metrics_interval_seconds=0.05,
     )
 
     assert stats.batch_failures > 0, "this run is only meaningful if batches failed"
+    assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}, (
+        "the run must reach the single-PID recovery it claims to reconcile"
+    )
     assert seen, "expected at least one scheduler metrics publication"
     entries = [entry for metrics in seen for entry in metrics.to_dict()["requests"]]
     assert entries

@@ -938,10 +938,34 @@ def test_response_to_reading_freeze_frame_strips_the_frame_number_byte() -> None
     assert readings[0].value == pytest.approx(700.0)
 
 
-def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant() -> None:
+class _ClockedFreezeFrameBus(_FreezeFrameCapableBus):
+    """:class:`_FreezeFrameCapableBus` on a :class:`FakeClock` (T01.8)."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            self.clock.advance(timeout)
+        return None
+
+
+def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Task 3.3 — the trigger fires exactly one Mode 02 sweep; it doesn't
-    re-poll every tick afterward (on_demand rate is 0)."""
-    bus = _FreezeFrameCapableBus()
+    re-poll every tick afterward (on_demand rate is 0).
+
+    On a fake clock (T01.8): the sweep starts after the unanswered RPM read's
+    0.1 s timeout, and the claim is about the rest of the second, so both the
+    sweep and the dormant window after it must fit. On a real clock a loaded
+    machine spent that window for it."""
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _ClockedFreezeFrameBus(clock)
     stop = threading.Event()
     readings: list[Any] = []
     trigger = FreezeFrameTrigger()
@@ -964,7 +988,7 @@ def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 1.0,
+        deadline_monotonic=clock.monotonic() + 1.0,
     )
 
     ff_readings = [r for r in readings if r.pid.startswith("FREEZE_FRAME_")]
@@ -1201,13 +1225,16 @@ def test_scheduler_polls_fast_tier_more_often_than_slow_tier() -> None:
         request_timeout_seconds=0.02,
     )
 
+    # Stops on its condition; the deadline only turns a hang into a failure
+    # (T01.8: the condition came at 0.25 s, after four unanswered DTC/Mode 06
+    # polls, against a 1.0 s wall-clock deadline).
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 1.0,
+        deadline_monotonic=hang_guard_deadline(),
     )
 
     sent_pids = [bytes(msg.data)[2] for msg in bus.sent if bytes(msg.data)[:2] == b"\x02\x01"]
@@ -1237,7 +1264,9 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 0.4,
+        # Stops on its condition (T01.8: reached at 0.06 s, after a timeout,
+        # against a 0.4 s wall-clock deadline).
+        deadline_monotonic=hang_guard_deadline(),
         on_scheduler_metrics=snapshots.append,
         scheduler_metrics_interval_seconds=0.01,
     )
@@ -1364,13 +1393,15 @@ def test_custom_pid_response_decodes_through_evaluator_into_custom_channel() -> 
         request_timeout_seconds=0.2,
     )
 
+    # Stops on the first reading (T01.8: reached at 0.20 s, after the
+    # unanswered RPM read's 0.2 s timeout, against a 1.0 s wall-clock deadline).
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 1.0,
+        deadline_monotonic=hang_guard_deadline(),
     )
 
     assert len(readings) == 1
