@@ -550,3 +550,36 @@ def test_sequence_inference_suppress_channels_silently_ignores_unknown() -> None
     _torch()
     engine = SequenceInferenceEngine(_trained(), suppress_channels=("not_a_real_channel",))
     assert engine.suppressed_channels == ()
+
+
+def test_a_scored_window_carries_its_wall_span() -> None:
+    """A01.7: the result says how much wall time its rows cover, so a window
+    that lost ticks under load is countable on ``/status``."""
+    _torch()
+    engine = SequenceInferenceEngine(_trained())
+    frame = _frame()
+    frame[TIMESTAMP_COLUMN] = [
+        pd.Timestamp("2026-05-12T00:00:00Z") + pd.Timedelta(seconds=s)
+        for s in (0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12)
+    ]
+    result = None
+    for _, row in frame.iloc[:4].iterrows():
+        result = engine.observe(row)
+
+    assert result is not None
+    assert result.window_rows == 4
+    assert result.window_span_seconds == 4.0
+    assert result.window_max_step_seconds == 2.0
+    assert result.to_dict()["window_span_seconds"] == 4.0
+
+
+def test_the_engine_names_a_suppress_list_that_differs_from_training() -> None:
+    """A01.5: a column serving suppresses that is still in the schema was
+    trained and calibrated with. The engine says so at load."""
+    _torch()
+    engine = SequenceInferenceEngine(_trained(), suppress_channels=("speed",))
+
+    assert engine.suppression.training is None  # this artifact did not record one
+    assert engine.suppression.differs is True
+    assert engine.suppression.trained_columns_suppressed_at_serve == ("speed",)
+    assert SequenceInferenceEngine(_trained()).suppression.differs is False

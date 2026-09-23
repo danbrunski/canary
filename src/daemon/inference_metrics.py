@@ -40,6 +40,11 @@ MISSED_COMPUTE_BUSY = "compute_busy"
 #: Default rolling-window length per stage. At 1 Hz this is five minutes.
 DEFAULT_WINDOW = 300
 
+#: A01.7 — a scored sequence window whose rows cover more than this multiple
+#: of their nominal duration (``(rows - 1) x tick``) lost ticks inside it. The
+#: model reads one tick per row, so such a window is time-compressed.
+STRETCHED_WINDOW_RATIO = 1.5
+
 
 @dataclass(frozen=True)
 class StageSummary:
@@ -76,6 +81,46 @@ class StageSummary:
 
 
 @dataclass(frozen=True)
+class WindowSpanSummary:
+    """How much wall time scored sequence windows covered (A01.7).
+
+    ``span_ratio`` is a window's wall span over its nominal duration, so a
+    window of consecutive ticks reads 1.0. ``stretched`` counts windows above
+    :data:`STRETCHED_WINDOW_RATIO` since start; the ratio and step
+    percentiles are over the recorder's rolling window. ``unmeasured`` counts
+    scored windows whose rows carried no timestamps, or scored before the
+    tick period was known — never folded into ``scored``.
+    """
+
+    scored: int
+    stretched: int
+    unmeasured: int
+    stretch_threshold: float
+    span_ratio_median: float | None
+    span_ratio_p95: float | None
+    span_ratio_max: float | None
+    max_step_seconds_p95: float | None
+    max_step_seconds_max: float | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scored": self.scored,
+            "stretched": self.stretched,
+            "unmeasured": self.unmeasured,
+            "stretch_threshold": self.stretch_threshold,
+            "span_ratio": {
+                "median": self.span_ratio_median,
+                "p95": self.span_ratio_p95,
+                "max": self.span_ratio_max,
+            },
+            "max_step_seconds": {
+                "p95": self.max_step_seconds_p95,
+                "max": self.max_step_seconds_max,
+            },
+        }
+
+
+@dataclass(frozen=True)
 class InferenceTiming:
     """Point-in-time snapshot of the recorder, JSON-safe via :meth:`to_dict`.
 
@@ -101,6 +146,13 @@ class InferenceTiming:
     #: the tick being waited on (A01.1). Non-zero means the child answered
     #: after a timeout at least once.
     worker_stale_replies: int
+    #: Model loads in the scoring child — startup and hot-swaps — and the
+    #: ticks the sequence detector was not ready for while they ran (A01.6).
+    #: Empty when no worker is configured.
+    worker_swaps: Mapping[str, Any]
+    #: Wall span of scored sequence windows against their nominal length
+    #: (A01.7).
+    sequence_windows: WindowSpanSummary
     #: Ticks whose compute ran past the tick period (D02.3). Not a miss — the
     #: result is still applied — but the loop cannot start the next tick, so
     #: this is the count behind `missed_by_reason.compute_busy`.
@@ -120,6 +172,8 @@ class InferenceTiming:
             "compute_failures": self.compute_failures,
             "worker_fallbacks": dict(self.worker_fallbacks),
             "worker_stale_replies": self.worker_stale_replies,
+            "worker_swaps": dict(self.worker_swaps),
+            "sequence_windows": self.sequence_windows.to_dict(),
             "slow_computes": self.slow_computes,
             "lateness": self.lateness.to_dict(),
             "stages": {name: summary.to_dict() for name, summary in self.stages.items()},
@@ -148,11 +202,19 @@ class InferenceTimingRecorder:
     slow_computes: int = 0
     _worker_fallbacks: Mapping[str, int] = field(default_factory=dict, repr=False)
     _worker_stale_replies: int = field(default=0, repr=False)
+    _worker_swaps: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    _window_ratios: deque[float] = field(default_factory=deque, repr=False)
+    _window_max_steps: deque[float] = field(default_factory=deque, repr=False)
+    _windows_scored: int = field(default=0, repr=False)
+    _windows_stretched: int = field(default=0, repr=False)
+    _windows_unmeasured: int = field(default=0, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
             raise ValueError(f"window must be >= 1, got {self.window}")
         self._lateness = deque(maxlen=self.window)
+        self._window_ratios = deque(maxlen=self.window)
+        self._window_max_steps = deque(maxlen=self.window)
 
     def record_stage(self, name: str, seconds: float) -> None:
         """Record one occupancy sample for ``name`` (seconds)."""
@@ -200,6 +262,50 @@ class InferenceTimingRecorder:
         """Publish how many late worker replies were discarded (A01.1)."""
         self._worker_stale_replies = int(count)
 
+    def set_worker_swaps(self, swaps: Mapping[str, Any]) -> None:
+        """Publish the scoring worker's model-load record (A01.6)."""
+        self._worker_swaps = dict(swaps)
+
+    def note_sequence_window(
+        self,
+        *,
+        rows: int | None,
+        span_seconds: float | None,
+        max_step_seconds: float | None,
+    ) -> None:
+        """Record one scored sequence window's wall span (A01.7).
+
+        The nominal duration is ``(rows - 1)`` tick periods. A window that
+        cannot be measured — no timestamps, or no tick period yet — is counted
+        as ``unmeasured`` rather than as a clean one.
+        """
+        interval = self.interval_seconds
+        if not rows or rows < 2 or span_seconds is None or not interval or interval <= 0:
+            self._windows_unmeasured += 1
+            return
+        ratio = span_seconds / ((rows - 1) * interval)
+        self._windows_scored += 1
+        if ratio > STRETCHED_WINDOW_RATIO:
+            self._windows_stretched += 1
+        self._window_ratios.append(ratio)
+        if max_step_seconds is not None:
+            self._window_max_steps.append(max_step_seconds)
+
+    def _window_span_summary(self) -> WindowSpanSummary:
+        ratios = sorted(self._window_ratios)
+        steps = sorted(self._window_max_steps)
+        return WindowSpanSummary(
+            scored=self._windows_scored,
+            stretched=self._windows_stretched,
+            unmeasured=self._windows_unmeasured,
+            stretch_threshold=STRETCHED_WINDOW_RATIO,
+            span_ratio_median=_round(_percentile(ratios, 0.5)) if ratios else None,
+            span_ratio_p95=_round(_percentile(ratios, 0.95)) if ratios else None,
+            span_ratio_max=_round(ratios[-1]) if ratios else None,
+            max_step_seconds_p95=_round(_percentile(steps, 0.95)) if steps else None,
+            max_step_seconds_max=_round(steps[-1]) if steps else None,
+        )
+
     @property
     def missed_ticks(self) -> int:
         return sum(self._missed.values())
@@ -215,6 +321,8 @@ class InferenceTimingRecorder:
             compute_failures=self.compute_failures,
             worker_fallbacks=dict(self._worker_fallbacks),
             worker_stale_replies=self._worker_stale_replies,
+            worker_swaps=dict(self._worker_swaps),
+            sequence_windows=self._window_span_summary(),
             slow_computes=self.slow_computes,
             lateness=StageSummary.from_samples(tuple(self._lateness)),
             stages={
@@ -235,11 +343,17 @@ def _ms(seconds: float) -> float:
     return round(seconds * 1000.0, 3)
 
 
+def _round(value: float) -> float:
+    return round(value, 3)
+
+
 __all__ = [
     "DEFAULT_WINDOW",
     "MISSED_COMPUTE_BUSY",
     "MISSED_OVERRUN",
+    "STRETCHED_WINDOW_RATIO",
     "InferenceTiming",
     "InferenceTimingRecorder",
     "StageSummary",
+    "WindowSpanSummary",
 ]

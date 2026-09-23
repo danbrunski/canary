@@ -6,7 +6,7 @@ import math
 import time
 from collections.abc import Callable, Mapping
 from concurrent.futures import Executor, ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
@@ -429,6 +429,7 @@ class SequenceDetector:
                 loaded, suppress_channels=_suppress_channels_for(self._components, loaded)
             )
             self._engine_version = self.model_version if self._engine is not None else None
+            _publish_sequence_suppression(self._components, self._engine)
         if self._engine is None:
             return None
         reset = (
@@ -640,6 +641,21 @@ class _TickResult:
 
 
 _EMPTY_RESULT = _TickResult(if_computed=None, sequence_result=None, durations={})
+
+
+def _without_sequence(request: _TickRequest) -> _TickRequest:
+    """``request`` with its sequence job dropped: the detector is not ready.
+
+    A reset the job carried still applies to this process's engine — the
+    window must not span the rows that were never scored. The child clears its
+    own window when it acknowledges the load.
+    """
+    job = request.sequence_job
+    if job is None:
+        return request
+    if job.reset:
+        job.engine.reset()
+    return replace(request, sequence_job=None)
 
 
 def _compute_tick(request: _TickRequest) -> _TickResult:
@@ -988,6 +1004,7 @@ class LiveInferencePipeline:
         if self._worker is not None:
             self._recorder.set_worker_fallbacks(self._worker.fallbacks)
             self._recorder.set_worker_stale_replies(self._worker.stale_replies)
+            self._recorder.set_worker_swaps(self._worker.swaps)
         try:
             self._apply(request, result)
         except Exception:  # noqa: BLE001 — live inference is best-effort
@@ -1012,10 +1029,18 @@ class LiveInferencePipeline:
         timeout it has nothing to score, and it scores again only once a run
         of consecutive fallback ticks refills it — never a window stitched from
         rows hours apart.
+
+        A child that is loading models — at startup or for a hot-swap — is not
+        a timeout (A01.6). Nothing is sent to it; the Isolation Forest scores
+        here and the sequence detector is *not ready* for the tick, exactly as
+        while its window refills.
         """
         worker = self._worker
         if worker is not None:
-            result = worker.compute(self._worker_tick(request))
+            worker_tick = self._worker_tick(request)
+            if not worker.ready_for(worker_tick):
+                return _compute_tick(_without_sequence(request))
+            result = worker.compute(worker_tick)
             if result is not None:
                 return result
         return _compute_tick(request)
@@ -1039,7 +1064,13 @@ class LiveInferencePipeline:
         if result.if_computed is not None:
             sources.extend(self._if.apply(result.if_computed, ctx))
         if result.sequence_result is not None:
-            sources.extend(self._sequence.apply(result.sequence_result, ctx))
+            sequence_result = result.sequence_result
+            recorder.note_sequence_window(
+                rows=getattr(sequence_result, "window_rows", None),
+                span_seconds=getattr(sequence_result, "window_span_seconds", None),
+                max_step_seconds=getattr(sequence_result, "window_max_step_seconds", None),
+            )
+            sources.extend(self._sequence.apply(sequence_result, ctx))
         sources.extend(self._behavior.apply(list(request.behavior_residuals), ctx))
         self._fuse(sources, ctx)
         finished = time.perf_counter()
@@ -1271,6 +1302,18 @@ def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = 
     except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
         log.exception("failed to build SequenceInferenceEngine; will retry next tick")
         return None
+
+
+def _publish_sequence_suppression(components: Any, engine: Any) -> None:
+    """Put the engine's training-vs-serving suppress comparison on ``/status``
+    (A01.5, ``health.sequence_suppression``). The parent builds its engine
+    from the same artifact and config the scoring child does, so its
+    comparison stands for both."""
+    health = getattr(components, "health_monitor", None)
+    if health is None:
+        return
+    comparison = getattr(engine, "suppression", None)
+    health.observe_sequence_suppression(comparison.to_dict() if comparison is not None else None)
 
 
 def _suppress_channels_for(components: Any, loaded: Any) -> tuple[str, ...]:

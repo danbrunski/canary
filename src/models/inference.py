@@ -12,7 +12,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 import numpy as np
@@ -67,6 +67,13 @@ class SequenceInferenceResult:
     )
     family_scores: Mapping[str, float] = field(default_factory=dict)
     family_threshold: float | None = None
+    #: A01.7 — how much wall time the window's rows cover, and its longest
+    #: step between consecutive rows. The model assumes one tick per row; a
+    #: tick dropped under load leaves a longer step inside the window.
+    #: ``None`` when the rows carry no timestamps.
+    window_rows: int | None = None
+    window_span_seconds: float | None = None
+    window_max_step_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -86,11 +93,109 @@ class SequenceInferenceResult:
             "reconstruction_series": {k: list(v) for k, v in self.reconstruction_series.items()},
             "family_scores": dict(self.family_scores),
             "family_threshold": self.family_threshold,
+            "window_rows": self.window_rows,
+            "window_span_seconds": self.window_span_seconds,
+            "window_max_step_seconds": self.window_max_step_seconds,
             "reconstruction_overlays": {
                 k: {sub: list(seq) for sub, seq in overlay.items()}
                 for k, overlay in self.reconstruction_overlays.items()
             },
         }
+
+
+#: Manifest ``schema`` key recording the ``suppress_channels`` training ran
+#: with (A01.5): ``{"configured": [...], "excluded_columns": [...]}``.
+#: Training drops suppressed columns from the schema, so serving with a
+#: different list either scores without columns the thresholds were
+#: calibrated on, or has nothing to suppress. Absent on artifacts trained
+#: before it was recorded.
+TRAINING_SUPPRESS_SCHEMA_KEY = "suppress_channels"
+
+
+def training_suppress_record(
+    configured: Sequence[str], excluded_columns: Sequence[str]
+) -> dict[str, list[str]]:
+    """The schema entry a trainer writes under :data:`TRAINING_SUPPRESS_SCHEMA_KEY`."""
+    return {
+        "configured": [str(name) for name in configured],
+        "excluded_columns": [str(column) for column in excluded_columns],
+    }
+
+
+@dataclass(frozen=True)
+class SuppressionComparison:
+    """Training-time against serve-time ``suppress_channels`` (A01.5).
+
+    ``trained_columns_suppressed_at_serve`` is the difference that matters:
+    columns the encoder was trained and calibrated with that serving keeps out
+    of the score. It is known even for an artifact that did not record its
+    list, because training drops every column it suppresses — a suppressed
+    column still in the schema was not suppressed when it was trained.
+    ``training`` is ``None`` when the manifest predates the record, so
+    ``added_at_serve`` / ``dropped_at_serve`` are unknown rather than empty.
+    """
+
+    model_version: str
+    training: tuple[str, ...] | None
+    serving: tuple[str, ...]
+    trained_columns_suppressed_at_serve: tuple[str, ...]
+
+    @property
+    def added_at_serve(self) -> tuple[str, ...] | None:
+        if self.training is None:
+            return None
+        return tuple(name for name in self.serving if name not in set(self.training))
+
+    @property
+    def dropped_at_serve(self) -> tuple[str, ...] | None:
+        if self.training is None:
+            return None
+        return tuple(name for name in self.training if name not in set(self.serving))
+
+    @property
+    def differs(self) -> bool:
+        return bool(self.trained_columns_suppressed_at_serve) or (
+            self.training is not None and set(self.training) != set(self.serving)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        added = self.added_at_serve
+        dropped = self.dropped_at_serve
+        return {
+            "model_version": self.model_version,
+            "recorded_at_training": self.training is not None,
+            "training": None if self.training is None else list(self.training),
+            "serving": list(self.serving),
+            "differs": self.differs,
+            "added_at_serve": None if added is None else list(added),
+            "dropped_at_serve": None if dropped is None else list(dropped),
+            "trained_columns_suppressed_at_serve": list(self.trained_columns_suppressed_at_serve),
+        }
+
+
+def compare_suppression(
+    trained: TrainedSequenceModel,
+    *,
+    serving: Sequence[str],
+    suppressed_columns: Sequence[str],
+) -> SuppressionComparison:
+    """Compare the manifest's training-time suppress list with ``serving``.
+
+    ``suppressed_columns`` is ``serving`` already expanded against the
+    trained schema (what the engine keeps out of the score).
+    """
+    record = trained.manifest.schema.get(TRAINING_SUPPRESS_SCHEMA_KEY)
+    training: tuple[str, ...] | None = None
+    if isinstance(record, Mapping):
+        configured = record.get("configured")
+        if isinstance(configured, Sequence) and not isinstance(configured, str):
+            training = tuple(str(name) for name in configured)
+    return SuppressionComparison(
+        model_version=str(trained.manifest.model_version),
+        training=training,
+        serving=tuple(str(name) for name in serving),
+        trained_columns_suppressed_at_serve=tuple(suppressed_columns),
+    )
 
 
 def _base_channel(column: str) -> str:
@@ -144,6 +249,8 @@ class SequenceWindowBuffer:
         self._masks: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._deltas: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._metadata: deque[tuple[str, str]] = deque(maxlen=sequence_length)
+        #: Parsed row timestamps, for the window's wall span (A01.7).
+        self._stamps: deque[pd.Timestamp | None] = deque(maxlen=sequence_length)
         self._session: str | None = None
         #: Running per-channel Δt (seconds since last observed) carried across
         #: ticks so it survives the deque's bounded length, mirroring the
@@ -225,6 +332,7 @@ class SequenceWindowBuffer:
         self._masks.append(mask)
         self._deltas.append(delta.astype(self.dtype))
         self._metadata.append((timestamp_str, session))
+        self._stamps.append(timestamp)
         raw_mode = row.get(self.mode_column)
         self._last_mode = raw_mode if isinstance(raw_mode, str) else None
         return self.ready
@@ -268,6 +376,7 @@ class SequenceWindowBuffer:
         self._masks.clear()
         self._deltas.clear()
         self._metadata.clear()
+        self._stamps.clear()
         self._session = None
         self._last_mode = None
         self._delta_accumulator = np.zeros(len(self.feature_columns), dtype=np.float64)
@@ -292,6 +401,19 @@ class SequenceWindowBuffer:
         if not self.ready:
             raise ValueError("sequence buffer is not ready")
         return np.stack(tuple(self._deltas), axis=0)
+
+    def span(self) -> tuple[float | None, float | None]:
+        """Wall seconds from the first row to the last, and the longest step
+        between consecutive rows (A01.7). ``(None, None)`` when any row lacks
+        a timestamp."""
+        stamps = tuple(self._stamps)
+        if len(stamps) < 2 or any(stamp is None for stamp in stamps):
+            return None, None
+        steps = [
+            (later - earlier).total_seconds()  # type: ignore[operator]
+            for earlier, later in zip(stamps, stamps[1:], strict=False)
+        ]
+        return sum(steps), max(steps)
 
     def metadata(self) -> tuple[str, str, str]:
         """Return start timestamp, end timestamp, and current session."""
@@ -338,6 +460,24 @@ class SequenceInferenceEngine:
 
         suppressed = expand_suppress_channels(tuple(suppress_channels), self.feature_columns)
         self.suppressed_channels: tuple[str, ...] = suppressed
+        #: A01.5 — serving's suppress list against the one training ran with.
+        #: Surfaced on ``/status`` (``health.sequence_suppression``).
+        self.suppression = compare_suppression(
+            trained, serving=tuple(suppress_channels), suppressed_columns=suppressed
+        )
+        if self.suppression.differs:
+            log.warning(
+                "sequence model %s: serving suppress_channels differ from training "
+                "(training=%s, serving=%s); %d trained column(s) are calibrated in "
+                "the thresholds but kept out of the score: %s",
+                trained.manifest.model_version,
+                "unrecorded"
+                if self.suppression.training is None
+                else list(self.suppression.training),
+                list(self.suppression.serving),
+                len(suppressed),
+                ", ".join(suppressed),
+            )
         column_index = {col: idx for idx, col in enumerate(self.feature_columns)}
         # A02.12: a channel whose calibrated threshold is not positive was
         # masked in every calibration window — never observed — so the global,
@@ -401,7 +541,7 @@ class SequenceInferenceEngine:
         if not self.buffer.append(row):
             return None
         start_timestamp, end_timestamp, session = self.buffer.metadata()
-        return self.score_window(
+        result = self.score_window(
             self.buffer.window_array(),
             mask=self.buffer.mask_array(),
             delta=self.buffer.delta_array(),
@@ -410,6 +550,13 @@ class SequenceInferenceEngine:
             window_start_timestamp=start_timestamp,
             window_end_timestamp=end_timestamp,
             operating_mode=self.buffer.last_mode,
+        )
+        span_seconds, max_step_seconds = self.buffer.span()
+        return replace(
+            result,
+            window_rows=self.sequence_length,
+            window_span_seconds=span_seconds,
+            window_max_step_seconds=max_step_seconds,
         )
 
     def score_window(

@@ -125,7 +125,7 @@ on the current code.
   `replay_control` having to reach into either engine.
   - Test: `test_a_generation_change_asks_for_a_window_reset` walks
     start → stop.
-- [~] **A01.5 — Suppressing a channel must not change the encoder's input.**
+- [x] **A01.5 — Suppressing a channel must not change the encoder's input.**
   `score_window` sets the mask to 0 for suppressed columns. The mask is also an
   encoder input (GRU-D and TCN), and Δt stays 0, a combination never seen in
   training. The 2026-09-20 artifact contains all 12 columns that `canary.yaml`
@@ -146,20 +146,77 @@ on the current code.
     `test_sequence_inference_suppress_channels_silences_alert_from_noise_channel`
     still passes.
 
-  *Remaining:* the manifest half. Training drops config-suppressed channels
-  from the schema (`scripts/train_sequence.py`). So a trained column that
-  serving suppresses means training and serving ran with different
-  `suppress_channels`; the 2026-09-20 artifact holds all 12 that the Pi's
-  `canary.yaml` suppresses. Calibration counted those channels and serving
-  does not, a small shift that predates this fix. Record the training list in
-  the manifest and name the difference at load.
-- [ ] **A01.6 — A model hot-swap is not a scoring timeout.** Loading a new
+  *Manifest half done 2026-09-22.* Training drops config-suppressed channels
+  from the schema (`scripts/train_sequence.py`), so a trained column that
+  serving suppresses means the two ran with different `suppress_channels`;
+  the 2026-09-20 artifact holds all 12 that the Pi's `canary.yaml` suppresses.
+  - `scripts/train_sequence.py` writes `schema.suppress_channels =
+    {configured, excluded_columns}` into the manifest
+    (`training_suppress_record`, `src/models/inference.py`).
+  - `SequenceInferenceEngine` builds a `SuppressionComparison` at load and
+    logs a warning when it differs. `SequenceDetector.prepare` publishes it
+    at the first scorable tick after the engine is built (so it is absent
+    while the truck stays engine-off) as
+    `/status.health.sequence_suppression`: `training`, `serving`,
+    `added_at_serve`, `dropped_at_serve`, `differs`, and
+    `trained_columns_suppressed_at_serve`.
+  - An artifact that predates the record shows `recorded_at_training: false`,
+    with added/dropped `null` (unknown). The trained columns that serving
+    suppresses are still named, because a suppressed column left in the
+    schema was not suppressed at training. For the 2026-09-20 artifact that
+    names the 12 columns.
+  - Tests: `test_train_records_the_suppress_list_it_ran_with`
+    (`tests/test_train_lstm.py`),
+    `test_the_engine_names_a_suppress_list_that_differs_from_training`
+    (`tests/test_lstm_inference.py`),
+    `test_an_unrecorded_suppress_list_still_names_the_trained_columns_serving_drops`,
+    `test_a_recorded_suppress_list_names_what_serving_added_and_dropped`,
+    `test_the_suppress_comparison_reaches_status_when_the_engine_loads`
+    (`tests/test_scoring_continuity.py`). All 5 fail against `606e4ab`.
+  - The thresholds of the 2026-09-20 artifact still count those 12 columns.
+    Only a retrain with a matching list removes that (D03.25), and it is not
+    a code item.
+- [~] **A01.6 — A model hot-swap is not a scoring timeout.** Loading a new
   artifact in the child takes about 2–7 s against a 3 s reply timeout, which
   is the likely origin of A01.1's lag.
   - Have the child acknowledge readiness after a swap, and have the parent
     treat the swap window as "sequence not ready", not as a timeout.
   - Measure the swap time on the Pi (Pi item).
-- [ ] **A01.7 — Check dropped ticks inside a window.** *Suspected.* The
+
+  *Code done 2026-09-22.* The protocol lives in
+  `src/daemon/inference_worker.py`.
+  - When a tick needs a model version the child has not acknowledged,
+    `InferenceWorker.ready_for` sends a `WorkerSwap` instead of the tick.
+  - The child (`_WorkerState.swap`) loads, rebuilds its engine, clears the
+    window, and answers `WorkerReady`. Startup is the same: the child sends
+    `WorkerReady(0)` once its models are loaded.
+  - Until the child answers, `LiveInferencePipeline._compute` scores the
+    Isolation Forest in-process and drops the sequence job
+    (`_without_sequence`). Nothing is sent to the child in that window, so
+    no reply can arrive late.
+  - A load longer than `SWAP_TIMEOUT_SECONDS` (30 s) counts as
+    `worker_fallbacks.swap_timeout`. An acknowledgement of other versions (a
+    manifest landing between the two processes' polls) is re-asked after
+    `SWAP_RETRY_SECONDS` (5 s) and counted in `version_mismatches`.
+  - `/status.detectors.inference.worker_swaps` reports `startup_seconds`,
+    `last_swap_seconds`, `max_swap_seconds`, `last_load_seconds` (the
+    child's own time), `completed`, `in_progress`, `not_ready_ticks` and
+    `version_mismatches`.
+  - Tests (`tests/test_scoring_continuity.py`):
+    `test_a_hot_swap_holds_ticks_back_instead_of_timing_out` (asserts
+    `fallbacks == {}`),
+    `test_a_child_that_loaded_another_version_is_asked_again_later`,
+    `test_a_late_load_acknowledgement_is_not_a_bad_reply`,
+    `test_the_pipeline_scores_the_forest_but_not_the_sequence_while_the_child_loads`,
+    `test_the_child_loads_then_acknowledges_a_swap`,
+    `test_a_started_child_acknowledges_readiness` (a real spawned child),
+    `test_swap_counters_reach_the_timing_snapshot`. All 7 fail against
+    `606e4ab`.
+
+  *Remaining (Pi):* deploy, then hot-swap one artifact and read
+  `worker_swaps.last_swap_seconds` and `last_load_seconds` from `/status`.
+  `startup_seconds` is available from the first boot.
+- [~] **A01.7 — Check dropped ticks inside a window.** *Suspected.* The
   depth-1 queue (`src/daemon/inference.py`) drops ticks under load, so a
   30-tick window can span more than 30 s of wall time while Δt accounting
   assumes one tick per row.
@@ -167,6 +224,58 @@ on the current code.
     a real drive.
   - If it matters, carry the real interval into Δt or reset the window.
   - Close with the measurement, whichever way it goes.
+
+  *Instrumentation done 2026-09-22.*
+  - Every `SequenceInferenceResult` carries `window_rows`,
+    `window_span_seconds` and `window_max_step_seconds`
+    (`SequenceWindowBuffer.span`).
+  - `LiveInferencePipeline._apply` feeds each scored window to
+    `InferenceTimingRecorder.note_sequence_window`. The ratio is span over
+    `(rows − 1) × tick`, so consecutive ticks read 1.0.
+  - `/status.detectors.inference.sequence_windows` reports `scored`,
+    `stretched` (ratio > `STRETCHED_WINDOW_RATIO`, 1.5), `unmeasured`, and
+    the rolling median, p95 and max of the ratio, and the p95 and max of the
+    longest step.
+  - Tests: `test_a_window_with_a_dropped_tick_reports_its_real_span`,
+    `test_stretched_windows_are_counted_against_the_tick_period`,
+    `test_applying_a_sequence_result_records_its_window_span`
+    (`tests/test_scoring_continuity.py`), and
+    `test_a_scored_window_carries_its_wall_span`
+    (`tests/test_lstm_inference.py`). All 4 fail against `606e4ab`.
+
+  *Offline measurements, from what is stored:*
+  - **Current scheduler, one real drive.**
+    `~/canary-data/poll-20260922.jsonl` holds 400 compact `/status` polls
+    about 5 s apart.
+    - While `engine_running` (16:54:02–17:18:34 UTC), 1,473 ticks were
+      scheduled over 293 intervals. 2 were missed, both `compute_busy` in one
+      interval (16:54:12–17).
+    - `skipped_vehicle_state` did not move while running.
+    - So no 30-row window lost more than 2 rows. Its ratio was at most
+      31/29 = 1.07, and none can have exceeded 1.5×. Over the whole log, 3 of
+      3,184 ticks were missed.
+    - This is a bound from counters, not a per-window count.
+  - **Pre-scheduler pipeline.** Source: the Pi's anomaly logs,
+    `~/canary-data/anomalies/nissan-xterra-2008/`, 2026-05-25 to 2026-08-06.
+    That is 9,425 *flagged* sequence windows, all 30 rows. Every one predates
+    the C08 deadline scheduler (`a690044`, 2026-09-07).
+    - Per day, 89.6–100 % of them spanned more than 1.5×. The per-day median
+      ratio was 1.61–2.30.
+    - 0–6.7 % per day spanned more than 5×. Those windows contained a hole
+      longer than 5 s, which A01.3 now resets.
+    - The old loop slept a full interval *after* each tick's work, so a
+      nominal 1 s tick ran at about 1.6 s. This set is flagged windows only
+      and says nothing about the current loop.
+    - Script:
+      `a017_spans.py` (scratch, not committed): span =
+      `window_end − window_start`, rows = length of `reconstruction_series`.
+  - **Decision on the evidence so far:** no Δt or reset change. With at most
+    2 lost rows per window on the current scheduler, the effect does not
+    matter.
+
+  *Remaining (truck):* one drive with this code deployed, then read
+  `detectors.inference.sequence_windows` (`stretched` / `scored`) to replace
+  the counter bound with a per-window count and close.
 
 ## Acceptance
 

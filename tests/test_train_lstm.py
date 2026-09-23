@@ -131,6 +131,31 @@ def test_train_writes_checkpoint_and_manifest(tmp_path: Path) -> None:
     assert payload["thresholds"]["threshold_k"] == _TINY_LSTM["threshold_k"]
 
 
+def test_train_records_the_suppress_list_it_ran_with(tmp_path: Path) -> None:
+    """A01.5: the manifest carries the suppress list the schema was cut with,
+    so the daemon can name a serve-time list that differs."""
+    _torch()
+    config = _config(tmp_path, suppress_channels=["obd:THROTTLE_POS"])
+    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    out_dir = tmp_path / "models" / "lstm"
+
+    trained = train([session], config, out_dir, bindings_path=_no_bindings(tmp_path))
+
+    payload = json.loads((out_dir / "model.manifest.json").read_text())
+    record = payload["schema"]["suppress_channels"]
+    assert record["configured"] == ["obd:THROTTLE_POS"]
+    assert "obd:THROTTLE_POS" in record["excluded_columns"]
+    assert not set(record["excluded_columns"]) & set(trained.feature_columns)
+
+    from src.models.inference import SequenceInferenceEngine
+
+    same = SequenceInferenceEngine(trained, suppress_channels=("obd:THROTTLE_POS",))
+    none = SequenceInferenceEngine(trained, suppress_channels=())
+    assert same.suppression.differs is False
+    assert none.suppression.differs is True
+    assert none.suppression.dropped_at_serve == ("obd:THROTTLE_POS",)
+
+
 def test_evaluate_runs_false_positive_benchmark(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

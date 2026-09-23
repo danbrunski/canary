@@ -54,6 +54,7 @@ from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
 )
+from src.models.inference import TRAINING_SUPPRESS_SCHEMA_KEY, training_suppress_record
 from src.models.sequence_autoencoder_training import (
     TrainedSequenceAutoencoder,
     default_sequence_manifest_path,
@@ -315,6 +316,28 @@ def train(
             "threshold calibration (cross-session FPR likely inflated)"
         )
 
+    feature_spec = build_feature_spec(
+        dataset.frame,
+        dataset.feature_columns,
+        config=config,
+        sequence_length=dataset.sequence_length,
+        sequence_stride=dataset.stride,
+        policy=policy,
+        # B03.4 — record the behavior artifact set the frame was built
+        # against (the sequence trainer consumes no deviation column, so
+        # this pins "none", not "unknown").
+        behavior_models=(
+            load_behavior_models(config.daemon.behavior_models)
+            if config.daemon.behavior_models.exists()
+            else None
+        ),
+    )
+    # A01.5 — the suppress list this schema was cut with, so the daemon can
+    # name a serve-time list that differs (its thresholds would then count
+    # channels serving leaves out, or the other way round).
+    feature_spec[TRAINING_SUPPRESS_SCHEMA_KEY] = training_suppress_record(
+        tuple(config_block.suppress_channels), suppressed
+    )
     trained = train_sequence_autoencoder(
         backend,
         dataset,
@@ -323,22 +346,7 @@ def train(
         model_version=model_version,
         trained_at=datetime.now(UTC),
         calibration_dataset=calibration_ds,
-        feature_spec=build_feature_spec(
-            dataset.frame,
-            dataset.feature_columns,
-            config=config,
-            sequence_length=dataset.sequence_length,
-            sequence_stride=dataset.stride,
-            policy=policy,
-            # B03.4 — record the behavior artifact set the frame was built
-            # against (the sequence trainer consumes no deviation column, so
-            # this pins "none", not "unknown").
-            behavior_models=(
-                load_behavior_models(config.daemon.behavior_models)
-                if config.daemon.behavior_models.exists()
-                else None
-            ),
-        ),
+        feature_spec=feature_spec,
         scaler=scaler,
         calibration_sessions_requested=(
             [Path(session).name for session in calibration_sessions]

@@ -429,6 +429,9 @@ class HealthMonitor:
         self._swaps: dict[str, int] = {"swapped": 0, "rejected": 0, "unchanged": 0, "error": 0}
         self._last_swap_version: str | None = None
         self._model_version_mismatches: dict[str, dict[str, str]] = {}
+        #: A01.5 — the serving sequence engine's suppress list against the one
+        #: its artifact was trained with; ``None`` until an engine is built.
+        self._sequence_suppression: dict[str, Any] | None = None
         self._obd_scheduler: dict[str, Any] | None = None
         self._telemetry_sinks: dict[str, dict[str, Any]] = {}
         self._cpu_prev: tuple[float, float] | None = None
@@ -575,6 +578,12 @@ class HealthMonitor:
             self._model_version_mismatches.pop(name, None)
         else:
             self._model_version_mismatches[name] = {"serving": serving, "manifest": manifest}
+
+    def observe_sequence_suppression(self, comparison: Mapping[str, Any] | None) -> None:
+        """Record the loaded sequence engine's training-vs-serving suppress
+        lists (A01.5), so a difference is on ``/status`` and not only in the
+        load-time log line. ``None`` clears it (no engine loaded)."""
+        self._sequence_suppression = None if comparison is None else dict(comparison)
 
     def observe_obd_scheduler(self, metrics: Any) -> None:
         """Record the latest adaptive OBD scheduler snapshot for ``/status``."""
@@ -857,6 +866,11 @@ class HealthMonitor:
                     }
                 }
                 if self._model_version_mismatches
+                else {}
+            ),
+            **(
+                {"sequence_suppression": dict(self._sequence_suppression)}
+                if self._sequence_suppression is not None
                 else {}
             ),
             "system": {**system_metrics(), **memory_limit_status()},

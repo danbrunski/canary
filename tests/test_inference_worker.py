@@ -211,6 +211,9 @@ class _StubWorker:
     def __init__(self) -> None:
         self.calls = 0
 
+    def ready_for(self, _tick: WorkerTick) -> bool:
+        return True
+
     def compute(self, _tick: WorkerTick) -> None:
         self.calls += 1
         return None
@@ -262,6 +265,9 @@ def test_pipeline_uses_the_worker_result_when_it_answers(monkeypatch) -> None:
     from_child = _TickResult(if_computed="scored-in-child", sequence_result=None, durations={})
 
     class _AnsweringWorker:
+        def ready_for(self, _tick: WorkerTick) -> bool:
+            return True
+
         def compute(self, _tick: WorkerTick) -> _TickResult:
             return from_child
 
