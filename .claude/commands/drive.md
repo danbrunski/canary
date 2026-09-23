@@ -175,11 +175,13 @@ its own criteria frozen before its data.
    — `false` means the kernel is enforcing no ceiling (the digest wedged the
    daemon for 38 min once), `null` means unknown, and neither is a pass. Flag
    counter resets. Log it.
-   **Never `GET /anomalies` (or MCP `get_recent_anomalies`) mid-drive until D03.28
-   is deployed:** it parsed 169 MB of history in the daemon and stalled
-   collection for ~30 s on 2026-09-23. Tail today's `anomalies-<date>.jsonl`
-   over ssh instead. Any other whole-history daemon read is suspect too: watch
-   the poller's latency after the first one.
+   **`GET /anomalies` mid-drive only with `since`** (or MCP
+   `get_recent_anomalies` with `since` or a `limit`). Unbounded, it parsed 169 MB
+   of history inside the daemon and stalled collection for ~30 s on 2026-09-23;
+   D03.28 (deployed in `0d4b32b`) bounds it, 0.048 s at idle. Until D03.28's
+   engine-running check is ticked, prefer tailing today's
+   `anomalies-<date>.jsonl` over ssh. Any other whole-history daemon read is
+   suspect too: watch the poller's latency after the first one.
 3. A regression is diagnosed before anything else. Read `vehicle_state`
    before concluding anything about detectors; a burst of anomalies at an
    altitude or condition outside the corpus is out-of-distribution, not a

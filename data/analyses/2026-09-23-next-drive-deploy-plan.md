@@ -1,16 +1,20 @@
 # Next drive — deploy plan (written 2026-09-23 after the morning drive)
 
-## Pending for the Pi (deploy before the drive, not from the road)
+## Pi state (updated 2026-09-23 evening)
 
-- **D03.28** — bounded anomaly-log reads (`src/alerts/event_logger.py`,
-  `src/dashboard/readers.py`, `src/mcp_server/tools/anomalies.py`). Committed on
-  2026-09-23; the Pi was at `606e4ab` at 15:10Z. Pull, restart through
-  `scripts/restart_canary.sh`, read the hash by prefix.
-  **Verify in the driveway (idle bus is enough), with the 5 s poller running:**
-  `GET /anomalies?since=<now − 30 min>` answers in < 1 s, and the poller shows no
-  missed tick and no `/status` latency spike around it. Then tick D03.28's last box.
-- Anything else canary-a2 has committed since `606e4ab`: read `git log 606e4ab..main`
-  before deploying and say what went.
+**Deployed, nothing pending.** canary-a2 deployed `0d4b32b` by bundle (GitHub pull
+fails on the Pi again), restarted through `scripts/restart_canary.sh`. It carries
+A01–A06, S01, D03.28 and D03.29. Healthy: both services active, memory limits
+enforced, first record stored 5.08 s after process start. D03.29 changes trip end:
+read its commit before trusting or doubting a digest. D05.1 (the 37 s DID start-up
+gap) is canary-a2's next deploy. Check `git log 0d4b32b..main` at the first wake-up.
+
+**D03.28 is half verified.** At idle, three `since`-bounded `/anomalies` calls took
+0.048 s each, with 85/85 ticks. **Owed from this drive, with the engine running and
+the 5 s poller on:** one `GET /anomalies?since=<now − 30 min>` mid-drive. It passes if
+it answers in < 1 s and the poller shows no missed tick, no `/status` latency spike and
+no storage-queue spike in the two polls around it. Then tick D03.28's last box. Never
+call it without `since`.
 
 ## First wake-up checks added by this drive
 
@@ -36,8 +40,8 @@ from `cdd355e`, `POST /control/capture/autostart {"profile":"tuning","coolant_mi
    lean still holds. Report each pull separately. Two or more pulls outside
    +1..+5 % is a finding under the frozen rule; the lean question itself stays closed
    without fuel pressure (NA2).
-3. **Hygiene** — health line each wake-up; no `/anomalies` reads until D03.28 is deployed
-   and verified.
+3. **Hygiene** — health line each wake-up; exactly one `since`-bounded `/anomalies` read
+   for D03.28's engine-running check (above), and tail the JSONL over ssh otherwise.
 4. **If the operator flashed N01.1 or N01.2 before this drive**
    ([`docs/roadmap/tasks/N01-na-rom-response-experiments.md`](../../docs/roadmap/tasks/N01-na-rom-response-experiments.md)):
    first confirm the flash has its own entry in `tune_revisions.yaml` with its flash
