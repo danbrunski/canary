@@ -93,10 +93,17 @@ Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md)
   - [ ] Verify on the truck: three `tuning` starts from a running `default`, every
     DID's first row within 1 s.
 
-- [ ] **D05.2 The trip-end digest summarised the wrong session.** Handed to the
+- [~] **D05.2 The trip-end digest summarised the wrong session.** Handed to the
   D03.29 owner on 2026-09-23, who folded it into D03.29 as a sub-item; tracked
   there, listed here only so the finding is not lost. The GPS trip end fired at
   16:57:33Z, 300 s after the last movement, and wrote `digest.json` for
   `2026-09-23T165316`. That is the 257 s parked `default` session the writer
   rotated to when the capture stopped. The drive itself, in
   `_capture-tuning-2026-09-23T164007`, was never digested.
+  *Desk fix landed in `0d4b32b` (D03.29, deployed to the Pi 2026-09-23):* a
+  trip's digest now goes to the session its stop was seen in, captures
+  included, with a `trip` block naming every spanned session, and neither the
+  edge nor the shutdown fallback digests a parked session the trip never
+  touched. `tests/test_trip_speed_sources.py::test_a_capture_stopped_after_the_stop_digests_the_capture_not_the_parked_session`
+  replays this exact sequence (`ended == [capture]`). **Still owed:** one real
+  capture drive whose `digest.json` lands in the `_capture-*` directory.
