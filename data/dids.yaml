@@ -36,15 +36,22 @@ access:
   # (`1ZS44A00000` on ZS44A). W02.1: it has only ever been sent inside
   # session 0xC0 (tools/probe_local_identifier.py, 2026-09-20 KOEO), so
   # whether it answers in the default session is not known. `unverified`
-  # rides the Mode-22 session window exactly like `extended`; a KOEO probe
-  # outside 0xC0 that answers flips this to `default` (read at connect).
+  # `extended`: the read rides the Mode-22 session window. Measured, not
+  # assumed — see the evidence below and data/analyses/2026-09-22-w02-1-koeo-probe.md.
   calibration_id:
     local_identifier: 0x10
-    session: unverified
+    session: extended
     evidence: >-
-      Answered 61 10 <ASCII> inside session 0xC0 on 2026-09-20 KOEO
-      (tools/probe_local_identifier.py sweep). Never sent in the default
-      session; the W02.1 probe is still owed.
+      W02.1 KOEO probe, 2026-09-22 20:02 MDT, vehicle_state ignition_only
+      (rpm 0, coolant 68 C), collector in phase mode01 (default session,
+      next 0xC0 window 33 s away). Sent `02 21 10` to 0x7E0 with no session
+      entered; ECM replied `03 7F 21 80` in 377 us — NRC 0x80,
+      serviceNotSupportedInActiveDiagnosticSession. Positive controls in the
+      same second: 01 0C @7E0 -> 41 0C 00 00, 01 05 @7DF -> 6C. In-session
+      control: the daemon's own window read (W02.2) returned 1ZS44A00000 and
+      /status showed calibration_matches_registry true. Earlier: answered
+      61 10 <ASCII> inside 0xC0 on 2026-09-20 KOEO (probe_local_identifier
+      sweep). candump in data/analyses/2026-09-22-w02-1-koeo-probe.md.
   notes: |
     The 2008 Nissan ECM refuses service 0x22 in the default session
     (7F 22 80). Sub-functions 0x81/0x85/0xC0 all return positive 50 xx

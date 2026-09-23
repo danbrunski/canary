@@ -18,23 +18,31 @@ share a subject without sharing a sequence.
 
 ## Measure before designing
 
-- [~] **W02.1 — Does `21 10` answer outside session `0xC0`?** The calibration
+- [x] **W02.1 — Does `21 10` answer outside session `0xC0`?** The calibration
   id read (`0x21 10` → ASCII `1ZS44A00000`) was only ever sent inside the
   Mode-22 session. Whether it also answers in the default session decides the
   whole design of W02.2: if it does, the daemon can read it at start-up and on
   every reconnect for free; if not, it has to ride the DID window. One KOEO
   probe with `tools/probe_local_identifier.py`, engine off, no session entered.
   Record the result in `data/dids.yaml` beside the `access` block.
-  *Partial (2026-09-21, Pi unreachable):* the answer is now data rather than
-  code — `access.calibration_id` in `data/dids.yaml` (`CalibrationIdAccess`
-  in `src/decode/dids.py`, `session: default | extended | unverified`, a
-  required `evidence` string) records `session: unverified`, and W02.2 reads
-  per that field (`unverified`/`extended` ride the Mode-22 window; `default`
-  reads at connect). **Remaining:** run the KOEO probe with
-  `tools/probe_local_identifier.py` (engine off, no session entered, send
-  `21 10`), then flip `session:` to `default` (answers) or `extended` (NRC),
-  update `evidence:`, and update the pinned value in
-  `tests/test_ecu_calibration_id.py::test_committed_catalog_records_the_session_requirement_as_unverified`.
+  **Measured 2026-09-22 20:02 MDT, KOEO (`ignition_only`, rpm 0, coolant
+  68 °C), collector in phase `mode01` (default session, next 0xC0 window 33 s
+  away): `21 10` sent to 0x7E0 with no session entered → `7F 21 80`, NRC 0x80
+  (serviceNotSupportedInActiveDiagnosticSession), in 377 µs.** So the id
+  rides the DID window — the design W02.2 already ships for `extended`. The
+  probe went through `POST /control/obd_request` (the daemon's own bus,
+  no session opened) rather than `tools/probe_local_identifier.py`, which
+  always enters a session; candump confirmed the wire bytes. Positive
+  controls in the same second: `01 0C` @7E0 → `41 0C 00 00`, `01 05` @7DF →
+  `6C`; in-session control: the daemon's W02.2 window read on the Pi
+  (`a870887`) reported `ecu_calibration_id 1ZS44A00000`,
+  `calibration_matches_registry true`. Recorded as `session: extended` in
+  `data/dids.yaml` `access.calibration_id` with the evidence string; pinned by
+  `tests/test_ecu_calibration_id.py::test_committed_catalog_records_the_measured_session_requirement`.
+  Evidence: [`2026-09-22-w02-1-koeo-probe.md`](../../../data/analyses/2026-09-22-w02-1-koeo-probe.md).
+  *Found on the way:* `/control/obd_request` reported `responded: false` for
+  the NRC — the ECM answered and the endpoint called it silence. Fixed in the
+  same commit (see the evidence file).
 
 ## Backend
 

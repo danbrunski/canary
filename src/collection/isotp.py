@@ -343,6 +343,10 @@ NRC_NAMES: dict[int, str] = {
     0x31: "requestOutOfRange",
     0x33: "securityAccessDenied",
     0x78: "requestCorrectlyReceived-ResponsePending",
+    # UDS and KWP2000 spell "wrong session" differently; this ECM answers the
+    # KWP form (7F 21 80 to a default-session `21 10`, measured 2026-09-22).
+    0x7F: "serviceNotSupportedInActiveSession",
+    0x80: "serviceNotSupportedInActiveDiagnosticSession",
 }
 
 

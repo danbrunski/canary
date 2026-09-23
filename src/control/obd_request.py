@@ -40,6 +40,7 @@ from src.collection.can_obd_client import (
     CanObdClient,
     parse_dtc_payload,
 )
+from src.collection.isotp import nrc_name
 from src.config import CanBusConfig
 from src.decode.dids import DidMap, apply_scaling, decode_did_raw, did_entries_by_hex, load_did_map
 
@@ -86,16 +87,30 @@ class AdHocRequestResult:
     service: int
     identifier: int | None
     request_id: int
+    #: The ECU answered — positively *or* with a negative response. Silence
+    #: and an unsent request are the only ``False``. A refusal is an answer
+    #: ("an empty result must say which kind of empty it is"): before
+    #: 2026-09-22 an NRC was reported as ``responded: False`` and the W02.1
+    #: probe could not tell "refused in this session" from "nothing on the
+    #: bus".
     responded: bool
     responder_id: int | None = None
-    #: Response payload (bytes after the service/PID echo), hex-encoded.
+    #: Response payload (bytes after the service/PID echo), hex-encoded. For
+    #: a negative response this is the whole ``7F <service> <nrc>`` reply.
     raw_hex: str | None = None
     #: Best-effort decode when a decoder/catalog entry exists for
     #: ``(service, identifier)``; ``None`` when nothing recognizes it — the
     #: raw bytes are still there for the caller to interpret.
     decoded: dict[str, Any] | None = None
+    #: Set when the ECU refused: the NRC byte. ``responded`` is ``True``.
+    negative_response_code: int | None = None
+
+    @property
+    def refused(self) -> bool:
+        return self.negative_response_code is not None
 
     def to_dict(self) -> dict[str, Any]:
+        nrc = self.negative_response_code
         return {
             "service": f"0x{self.service:02X}",
             "identifier": f"0x{self.identifier:04X}" if self.identifier is not None else None,
@@ -106,6 +121,8 @@ class AdHocRequestResult:
             ),
             "raw_hex": self.raw_hex,
             "decoded": self.decoded,
+            "negative_response_code": f"0x{nrc:02X}" if nrc is not None else None,
+            "negative_response": nrc_name(nrc) if nrc is not None else None,
         }
 
 
@@ -136,10 +153,22 @@ def execute_ad_hoc_request(
     effective_request_id = DEFAULT_REQUEST_ID if request_id is None else request_id
     try:
         client = CanObdClient(bus, timeout_seconds=effective_timeout)
-        response = client.query(service=service, identifier=identifier, request_id=request_id)
+        response, nrc = client.query_or_nrc(
+            service=service, identifier=identifier, request_id=request_id
+        )
     finally:
         bus.shutdown()
 
+    if response is None and nrc is not None:
+        # Refused, not silent: the reply was ``7F <service> <nrc>``.
+        return AdHocRequestResult(
+            service=service,
+            identifier=identifier,
+            request_id=effective_request_id,
+            responded=True,
+            raw_hex=bytes([0x7F, service & 0xFF, nrc]).hex(),
+            negative_response_code=nrc,
+        )
     if response is None:
         return AdHocRequestResult(
             service=service,

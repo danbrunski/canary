@@ -202,15 +202,18 @@ def _registry(calibration_id: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
-def test_committed_catalog_records_the_session_requirement_as_unverified() -> None:
-    """The W02.1 probe has not run; the catalog must say so, not guess ``default``.
+def test_committed_catalog_records_the_measured_session_requirement() -> None:
+    """W02.1 was measured 2026-09-22 KOEO: ``21 10`` outside 0xC0 draws NRC 0x80.
 
-    When the KOEO probe records its answer, update this assertion with it.
+    So the calibration id rides the Mode-22 window (``extended``), never a
+    connect-time read. This pins the measured answer; a change here needs a
+    new probe, not a guess.
     """
     access = load_did_map(REPO / "data" / "dids.yaml").access
     assert access.calibration_id is not None
     assert access.calibration_id.local_identifier == 0x10
-    assert access.calibration_id.session == "unverified"
+    assert access.calibration_id.session == "extended"
+    assert "7F 21 80" in access.calibration_id.evidence
     spec = resolve_calibration_id_spec(access)
     assert spec is not None and spec.needs_session is True
     assert spec.request_id == access.ecu_request_id

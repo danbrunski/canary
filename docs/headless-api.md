@@ -412,14 +412,20 @@ Response shape:
   "obd_request": {
     "service": "0x09", "identifier": "0x0004", "request_id": "0x7DF",
     "responded": true, "responder_id": "0x7E8",
-    "raw_hex": "...", "decoded": {"ascii": "..."}
+    "raw_hex": "...", "decoded": {"ascii": "..."},
+    "negative_response_code": null, "negative_response": null
   }
 }
 ```
 
 `responded: false` means no answer arrived within `timeout_seconds`
-(default 2 s, capped at 10 s) — indistinguishable on the wire from "this ECU
-doesn't support it," so treat it as "no answer," not an error. `decoded` is
+(default 2 s, capped at 10 s) — silence, which on the wire is the same as
+"this ECU doesn't support it." A **refusal is not silence**: when the ECU
+answers `7F <service> <nrc>`, `responded` is `true`, `raw_hex` holds that
+reply, and `negative_response_code` / `negative_response` name the code
+(e.g. `0x80` `serviceNotSupportedInActiveDiagnosticSession` — what `21 10`
+draws outside session 0xC0 on the Xterra ECM). The two demand opposite next
+steps, so they are reported differently (since 2026-09-22). `decoded` is
 populated when a Mode 01/02 PID, Mode 03/07/0A DTC list, Mode 09 ASCII
 payload, or catalogued (`data/dids.yaml`) Mode 22 DID matches; otherwise only
 `raw_hex` is set. MCP equivalent: `obd_request(service, identifier, header,

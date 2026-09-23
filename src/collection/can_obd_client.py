@@ -436,7 +436,22 @@ class CanObdClient:
         matches the no-PID services (Mode 03/07/0A); anything else is passed
         through as the request's PID/DID/MID byte(s).
         """
-        return self._request(
+        return self.query_or_nrc(service=service, identifier=identifier, request_id=request_id)[0]
+
+    def query_or_nrc(
+        self,
+        *,
+        service: int,
+        identifier: int | None = None,
+        request_id: int | None = None,
+    ) -> tuple[ObdResponse | None, int | None]:
+        """:meth:`query`, but a refusal comes back as its NRC instead of ``None``.
+
+        ``(None, None)`` is silence; ``(None, 0x80)`` is the ECU saying the
+        service is not available in the active session — a measured
+        answer (2026-09-22: ``21 10`` in the default session), not a timeout.
+        """
+        return self._request_or_nrc(
             service=service,
             pid=identifier,
             expect_pid_echo=identifier is not None,
@@ -530,7 +545,29 @@ class CanObdClient:
         expect_pid_echo: bool,
         request_id: int | None = None,
     ) -> ObdResponse | None:
-        """Send a single-frame request and reassemble the response."""
+        """Send a single-frame request and reassemble the response.
+
+        A negative response reads as ``None`` here, the same as silence —
+        fine for the polling paths, which retry either way. A caller that
+        must tell "refused" from "silent" uses :meth:`_request_or_nrc`.
+        """
+        return self._request_or_nrc(
+            service=service, pid=pid, expect_pid_echo=expect_pid_echo, request_id=request_id
+        )[0]
+
+    def _request_or_nrc(
+        self,
+        *,
+        service: int,
+        pid: int | None,
+        expect_pid_echo: bool,
+        request_id: int | None = None,
+    ) -> tuple[ObdResponse | None, int | None]:
+        """The one send path: ``(response, negative_response_code)``.
+
+        ``(None, None)`` is silence or an unsent request; ``(None, nrc)`` is
+        the ECU refusing — an answer, not an absence.
+        """
         request_payload = self._build_request(service=service, pid=pid)
         message = can.Message(
             arbitration_id=self._request_id if request_id is None else request_id,
@@ -539,12 +576,12 @@ class CanObdClient:
         )
         try:
             if not tx_gate.send(self._bus, message, what=f"request service=0x{service:02X}"):
-                return None
+                return None, None
         except can.CanError:
             log.warning("CAN send failed", extra={"service": service, "pid": pid})
-            return None
+            return None, None
 
-        return self._collect_response(
+        return self._collect_response_or_nrc(
             service=service,
             pid_echo=pid if expect_pid_echo else None,
         )

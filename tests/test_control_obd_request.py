@@ -143,3 +143,52 @@ def test_obd_request_accepts_a_header_override(tmp_path: Path) -> None:
     assert resp.status_code == 200
     body = resp.json()["obd_request"]
     assert body["request_id"] == "0x7E1"
+
+
+def _run_refusing_ecu(channel: str, *, nrc: int, stop: threading.Event) -> None:
+    """An ECU that answers every request with ``7F <service> <nrc>``."""
+    ecu = can.interface.Bus(interface="virtual", channel=channel)
+    try:
+        while not stop.is_set():
+            frame = ecu.recv(timeout=0.1)
+            if frame is None:
+                continue
+            service = bytes(frame.data)[1]
+            reply = bytes([0x03, 0x7F, service, nrc]) + bytes(4)
+            ecu.send(can.Message(arbitration_id=0x7E8, data=reply, is_extended_id=False))
+    finally:
+        ecu.shutdown()
+
+
+def test_obd_request_reports_a_refusal_as_answered_not_silent(tmp_path: Path) -> None:
+    """A negative response is an answer, not a timeout.
+
+    W02.1, 2026-09-22 KOEO: ``21 10`` in the default session drew ``7F 21 80``
+    from the ECM and this endpoint reported ``responded: false`` — the same
+    as nothing on the bus. The two demand opposite responses from whoever
+    reads them, so they must not look the same.
+    """
+    channel = "obdreq-refused"
+    client = _api(tmp_path, channel=channel)
+    stop = threading.Event()
+    t = threading.Thread(
+        target=_run_refusing_ecu, args=(channel,), kwargs={"nrc": 0x80, "stop": stop}, daemon=True
+    )
+    t.start()
+    try:
+        resp = client.post(
+            "/control/obd_request",
+            json={"service": 0x21, "identifier": 0x10, "header": 0x7E0, "timeout_seconds": 2.0},
+            headers=_auth(),
+        )
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+
+    assert resp.status_code == 200
+    body = resp.json()["obd_request"]
+    assert body["responded"] is True
+    assert body["negative_response_code"] == "0x80"
+    assert body["negative_response"] == "serviceNotSupportedInActiveDiagnosticSession"
+    assert body["raw_hex"] == "7f2180"
+    assert body["decoded"] is None

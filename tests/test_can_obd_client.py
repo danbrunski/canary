@@ -973,3 +973,51 @@ def test_query_handles_isotp_multi_frame_reassembly() -> None:
     # payload = count byte + VIN (response_body's `49 02` header is stripped
     # by _extract_service_payload because we passed pid=0x02 echo).
     assert resp.payload == bytes([0x01]) + vin_bytes
+
+
+def test_query_or_nrc_tells_a_refusal_from_silence() -> None:
+    """``(None, nrc)`` is the ECU refusing; ``(None, None)`` is nothing on the bus.
+
+    Measured 2026-09-22 KOEO: ``21 10`` outside session 0xC0 → ``7F 21 80``
+    (serviceNotSupportedInActiveDiagnosticSession). ``query()`` keeps
+    returning ``None`` for both, as its polling callers expect.
+    """
+    tester, ecu = _make_pair()
+    stop = threading.Event()
+
+    def ecu_loop() -> None:
+        while not stop.is_set():
+            f = ecu.recv(timeout=0.1)
+            if f is None:
+                continue
+            d = bytes(f.data)
+            if len(d) >= 3 and d[1] == 0x21:  # local-identifier read in the wrong session
+                ecu.send(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x03, 0x7F, 0x21, 0x80, 0, 0, 0, 0]),
+                        is_extended_id=False,
+                    )
+                )
+            # anything else: silence
+
+    t = threading.Thread(target=ecu_loop, daemon=True)
+    t.start()
+    try:
+        client = CanObdClient(
+            tester,
+            request_id=0x7E0,
+            response_id_min=0x7E8,
+            response_id_max=0x7E8,
+            timeout_seconds=2.0,
+        )
+        t0 = time.monotonic()
+        assert client.query_or_nrc(service=0x21, identifier=0x10) == (None, 0x80)
+        assert time.monotonic() - t0 < 1.0  # returned on the NRC, not at 2 s
+        assert client.query_or_nrc(service=0x3E, identifier=None) == (None, None)
+        assert client.query(service=0x21, identifier=0x10) is None
+    finally:
+        stop.set()
+        t.join(timeout=1.0)
+        tester.shutdown()
+        ecu.shutdown()
