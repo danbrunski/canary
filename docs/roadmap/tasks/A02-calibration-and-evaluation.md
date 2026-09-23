@@ -43,7 +43,10 @@ This checklist builds the yardstick.
   | calibration session | — | 0.47 % |
 
   All of those flags came through the per-family path, none through the
-  global score.
+  global score. The same path flags **16–100 % of windows on the model's own
+  training sessions** (14 sessions); only the calibration session is quiet.
+  The thresholds are one session's maxima, not a model of normal (27-session
+  table in the review).
   - Find out why the two requested sessions produced no windows, and fix or
     name the cause.
   - Refuse to publish (not warn) when the calibration sessions do not cover
@@ -72,7 +75,10 @@ This checklist builds the yardstick.
   - metrics: event-level recall, time to detect, and false alarms per
     engine-hour at the deployed threshold. No point-adjust scoring. VUS-PR
     only for threshold-free comparisons;
-  - a per-drive table in the report, not pooled totals.
+  - a per-drive table in the report, not pooled totals;
+  - operating modes labelled by the same segmenter the daemon runs, not by
+    sidecars. Sessions without a mode sidecar, such as captures, cannot be
+    scored offline today, while live serving labels them itself.
 
   Reuse `src/models/false_positive_benchmark.py` and
   `src/models/synthetic_fault_eval.py` where they fit; do not build a second
@@ -136,9 +142,28 @@ This checklist builds the yardstick.
   - Record the artifact hashes, and verify them against the Pi rather than
     assuming the laptop copy matches (Pi item).
 
+- [ ] **A02.12 — A family or channel with no calibration data must not
+  score.** In the 2026-09-20 sequence artifact, `did:ECM_INJECTOR_PULSE_1`
+  and `_2` had no observations in the calibration session (1,056 windows,
+  maximum error 0.0). So their family threshold is **0.0**, and any nonzero
+  error flags.
+  - Those DIDs joined the default profile on 2026-09-21. On the tuning
+    capture `_capture-tuning-2026-09-21T232153` they produced 1,525 of the
+    1,554 family flags.
+  - A threshold computed from zero observations must be recorded as
+    *uncalibrated*, and the family excluded from scoring and attribution
+    until a calibration covers it.
+  - Refuse to publish an artifact in which a scored family or channel has no
+    calibration observations.
+  - Apply the same rule to channels rarely observed in training: they drive
+    the global score on the newest drives (28.6 % and 15.8 % of windows on
+    the two 2026-09-22 drives, injector pulse the top global channel).
+  - **Test:** a calibration frame with an all-unobserved family yields no
+    threshold for it and no flags from it.
+
 ## Acceptance
 
-A02.1–A02.5 and A02.9–A02.11 are desk work. A02.8 needs the truck and the
+A02.1–A02.5, A02.9–A02.12 are desk work. A02.8 needs the truck and the
 operator's choice of faults. Nothing here changes a deployed threshold until
 the operator lifts the retrain deferral. A02.11's table plus A02.4's harness
 are what A06's decisions cite.

@@ -43,9 +43,12 @@ refusal (checked).
    - corrected bindings, which blinded the IF twice (D02.5).
 2. **The Isolation Forest cannot see a single-quantity fault of any size**
    (measured, below).
-3. **The sequence thresholds flood on drives they have not seen**, because
-   they rest on one session. The retrain's own false-alarm check scored the
-   calibration sessions, so it could not notice (measured and checked).
+3. **The sequence thresholds flood on drives they have not seen, and on
+   drives the model trained on**, because they rest on one session. Across
+   the 14 sessions it trained on, the family path flags 16–100 % of
+   windows. Two families have a threshold of zero. The retrain's own
+   false-alarm check scored the calibration sessions, so it could not
+   notice (measured and checked).
 4. **Four serve-time defects** mix rows or results that do not belong
    together (checked in code, reproduced).
 5. **Both detectors' scores are dominated by driving conditions and
@@ -179,6 +182,72 @@ reproduced the manifest's threshold (1.2133), maximum (1.2267) and mean
   - offline versus live Δt;
   - masked MAE the same in calibration and serving;
   - per-mode threshold keyed on the last row on both sides.
+
+## Both detectors across 27 local sessions (measured)
+
+**How this was produced.** A review agent scored 27 local sessions with the
+two artifacts above, then stopped at an account spend limit before writing
+its own summary. The reviewing session aggregated the per-session outputs
+with the agent's own analysis script. The session roles come from each
+manifest's `training_sessions`/`calibration_sessions`.
+
+**Harness checks.**
+- The IF's calibration was reproduced exactly: every mode's held-out row
+  count and achieved flag rate match the manifest.
+- `tools/check_manifest_producibility.py` reports 0/295 (IF) and 0/361
+  (sequence) features unproducible from the catalog.
+
+**Unit.** Window-level flags, not live events. Live alerts also pass the 3-of-5
+persistence gate and de-duplication, so live event counts would be lower.
+Live behavior was not observed.
+
+| Session | IF role | Sequence role | IF rows scored | IF flag rate | Seq. windows | Global flags | Family flags | Family flags without the two zero-threshold families |
+|---|---|---|---|---|---|---|---|---|
+| `2026-08-06T002019` | train | train | 220 | 2.3 % | 227 | 8.4 % | 100 % | 100 % |
+| `2026-08-07T161543` | train | train | 1,156 | 4.6 % | 1,337 | 0 % | 58.9 % | 58.9 % |
+| `2026-09-18T180630` | train | train | 1,208 | 0.2 % | 1,277 | 0 % | 76.6 % | 76.5 % |
+| `2026-09-18T200256` | train | train | 149 | 3.4 % | 150 | 0 % | 94.0 % | 94.0 % |
+| `2026-09-18T231144` | train | train | 996 | 0 % | 1,005 | 0 % | 32.0 % | 32.0 % |
+| `2026-09-18T134345` | cal | cal | 512 | 0.4 % | 1,056 | 0.2 % | 0.2 % | — |
+| `2026-09-18T213818` | cal | held out | 4,407 | 0.1 % | 4,464 | 0 % | 53.1 % | 53.1 % |
+| `2026-08-07T164617` | held out | held out | 1,233 | 0 % | 1,307 | 0 % | 54.6 % | 54.6 % |
+| `2026-09-18T160921` | held out | held out | 1,468 | 1.8 % | 4,186 | 0 % | 7.2 % | 7.2 % |
+| `2026-09-20T205117` | held out | held out | 55 of 1,506 | 0 % | 1,477 | 0.7 % | 75.6 % | 75.6 % |
+| `2026-09-20T225927` | held out | held out | 1,134 | 0.1 % | 1,464 | 0 % | 71.9 % | — |
+| `2026-09-21T010459` | held out | held out | 100 of 1,642 | 29.0 % | 1,613 | 0 % | 29.9 % | 4.3 % |
+| `2026-09-22T163415` | held out | held out | 610 of 1,771 | 9.0 % | 1,742 | 28.6 % | 36.9 % | — |
+| `2026-09-22T171544` | held out | held out | 227 of 699 | 0 % | 670 | 15.8 % | 26.4 % | 26.4 % |
+| `_capture-tuning-2026-09-21T232153` | held out | held out | 0 (no mode labels) | — | 1,601 | 1.2 % | 97.1 % | 69.5 % |
+
+A dash in the last column means the agent's script did not produce it for
+that session. The full 27-session table lives only in the review's scratch
+output. The rows above are chosen to show every pattern:
+
+- **The family path fires on the model's own training data.** Across all 14
+  training sessions it flags 16.3–100 % of windows; only the one
+  calibration session is quiet (0.2 %). The thresholds are that single
+  session's maxima, not a model of normal.
+- **Two families have a threshold of zero.** `did:ECM_INJECTOR_PULSE_1` and
+  `_2` had no observations in the calibration session (1,056 windows,
+  maximum error 0.0), so their threshold is 0.0 and any nonzero error flags.
+  These DIDs joined the default profile on 2026-09-21, so they drive most
+  family flags on the newest drives (1,525 of 1,554 on the tuning capture)
+  and part of the global flags there (injector pulse is the top global
+  channel).
+- **The global score starts firing on the newest drives.** It flags 28.6 %
+  and 15.8 % of windows on the two 2026-09-22 drives, against ≤ 0.7 % on
+  older ones. That is consistent with the polling-profile change D03.25
+  lists as its fourth reason (inference).
+- **The IF mostly withholds on unseen drives.** On held-out drives it scores
+  as little as 3.7 % of rows, because required features are missing under
+  the drive's polling (A04.5).
+  - Where it does score, its flags come from `model_feature: false`
+    channels: POWER_STATE, STEERING_RATE, BRAKE_PRESSURE and MOTION
+    (A04.6).
+  - Sessions without a mode-label sidecar (the capture,
+    `2026-09-20T211925`) cannot be scored offline at all. Live, the
+    segmenter labels modes itself, so the harness must do the same
+    (A02.4).
 
 ## Literature
 

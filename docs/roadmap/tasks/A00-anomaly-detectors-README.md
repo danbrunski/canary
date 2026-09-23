@@ -38,9 +38,12 @@ Findings to carry forward, not re-derive:
 - **The IF cannot see a single-quantity fault of any size** (A04.1). Its
   "top feature" is usually not even one of the scoring model's features
   (A04.2).
-- **The deployed sequence thresholds rest on one session** and flag 38–75 %
-  of windows on unseen drives. The retrain's false-alarm check scored the
-  calibration sessions, so it could not see this (A02.1, A02.2).
+- **The deployed sequence thresholds rest on one session.** They flag
+  38–75 % of windows on unseen drives, and 16–100 % on the model's own
+  training sessions. Two families have a threshold of zero because they
+  were never observed in calibration (A02.12). The retrain's false-alarm
+  check scored the calibration sessions, so it could not see any of this
+  (A02.1, A02.2).
 - **The calibration is a fixed holdout, not leave-one-out** (A02.10).
 - **The supercharger build invalidates every learned normal within weeks**,
   so retraining the naturally aspirated engine is a scoped decision (A06.3),
