@@ -1,0 +1,334 @@
+"""Offline tests for ``scripts/install_pi.sh`` (S02.4, S02.6).
+
+The installer is run for real, unprivileged, against a scratch filesystem:
+``CANARY_INSTALL_ROOT`` puts every system path it writes (``/etc/...``,
+``/data/canary``, ``/usr/local/sbin``, ``/var/log/journal``) under
+``tmp_path``, and ``CANARY_INSTALL_ALLOW_UNPRIVILEGED=1`` lifts the root check.
+Everything that would touch the host — ``systemctl``, ``udevadm``,
+``apt-get``, ``chown``, ``visudo``, ``runuser`` and friends — is a shim on
+``PATH`` that logs its argv. The checkout is a scratch directory holding a copy
+of the real installer and the real files it installs; ``src`` is a symlink to
+this repo's, so the GPS-source read goes through the project's own config
+loader, as it does on the Pi.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+INSTALL_SCRIPT = REPO_ROOT / "scripts" / "install_pi.sh"
+VENV_PYTHON = REPO_ROOT / ".venv" / "bin" / "python"
+EXAMPLE_CONFIG = REPO_ROOT / "canary.pi.example.yaml"
+
+GPS_DEVICE = "/dev/serial/by-id/usb-test-gps-if00-port0"
+
+pytestmark = [
+    pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash"),
+    pytest.mark.skipif(not VENV_PYTHON.exists(), reason="needs the project .venv"),
+]
+
+
+def _write_exec(path: Path, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body)
+    path.chmod(0o755)
+
+
+_LOG_PRELUDE = 'printf \'%s %s\\n\' "$(basename "$0")" "$*" >>"${SHIM_LOG}"\n'
+_LOGGING_SHIM = "#!/usr/bin/env bash\n" + _LOG_PRELUDE + "exit 0\n"
+
+# runuser -u <user> -- <cmd...>
+_RUNUSER_SHIM = (
+    "#!/usr/bin/env bash\n"
+    + _LOG_PRELUDE
+    + """
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -u) shift 2 ;;
+    --) shift; break ;;
+    *) break ;;
+  esac
+done
+exec "$@"
+"""
+)
+
+# Stands in for scripts/install_deps.py: the venv is not rebuilt here.
+_INSTALL_DEPS_STUB = (
+    "import os, sys\n"
+    "with open(os.environ['SHIM_LOG'], 'a') as log:\n"
+    "    log.write('install_deps.py ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+)
+
+_HOST_COMMANDS = (
+    "systemctl",
+    "udevadm",
+    "apt-get",
+    "chown",
+    "visudo",
+    "modprobe",
+    "systemd-tmpfiles",
+    "journalctl",
+    "groupadd",
+    "useradd",
+    # The canary user/group "exist", so groupadd/useradd are not reached.
+    "getent",
+    "id",
+)
+
+_INSTALLED_UNIT_FILES = (
+    "canary.service",
+    "canary-mcp.service",
+    "ups-shutdown.service",
+    "canary-modules.conf",
+    "tmpfiles-canary.conf",
+    "canary-gpsd@.service",
+)
+
+
+@dataclass
+class Installer:
+    checkout: Path
+    root: Path
+    shim_log: Path
+    env: dict[str, str]
+
+    @property
+    def config(self) -> Path:
+        return self.root / "etc" / "canary" / "canary.yaml"
+
+    def run(self, **env: str) -> subprocess.CompletedProcess[str]:
+        self.shim_log.write_text("")
+        # The installer leaves the sudoers drop-in 0440 and rewrites it on the
+        # next run; root writes through that mode, this unprivileged run cannot.
+        sudoers = self.root / "etc" / "sudoers.d" / "canary-restart"
+        if sudoers.exists():
+            sudoers.chmod(0o640)
+        result = subprocess.run(
+            ["bash", str(self.checkout / "scripts" / "install_pi.sh")],
+            capture_output=True,
+            text=True,
+            env={**self.env, **env},
+            timeout=120,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    def calls(self, prefix: str) -> list[str]:
+        return [line for line in self.shim_log.read_text().splitlines() if line.startswith(prefix)]
+
+    def restarts(self) -> list[str]:
+        return self.calls("systemctl restart")
+
+
+@pytest.fixture
+def installer(tmp_path: Path) -> Installer:
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts").mkdir(parents=True)
+    shutil.copy(INSTALL_SCRIPT, checkout / "scripts" / "install_pi.sh")
+    shutil.copy(REPO_ROOT / "scripts" / "update_canary.sh", checkout / "scripts")
+    (checkout / "scripts" / "install_deps.py").write_text(_INSTALL_DEPS_STUB)
+    shutil.copy(EXAMPLE_CONFIG, checkout / "canary.pi.example.yaml")
+    (checkout / "systemd").mkdir()
+    for name in _INSTALLED_UNIT_FILES:
+        shutil.copy(REPO_ROOT / "systemd" / name, checkout / "systemd" / name)
+    (checkout / "src").symlink_to(REPO_ROOT / "src")
+    # A wrapper, not a symlink: the venv is found relative to the interpreter
+    # path, so a symlinked copy would run without the venv's site-packages.
+    _write_exec(checkout / ".venv" / "bin" / "python", f'#!/bin/sh\nexec "{VENV_PYTHON}" "$@"\n')
+
+    root = tmp_path / "root"
+    for rel in (
+        "etc/default",
+        "etc/udev/rules.d",
+        "etc/modules-load.d",
+        "etc/tmpfiles.d",
+        "etc/sudoers.d",
+        "etc/systemd/system",
+        "etc/chrony",
+        "usr/local/sbin",
+    ):
+        (root / rel).mkdir(parents=True)
+    (root / "etc" / "chrony" / "chrony.conf").write_text(
+        "pool 2.debian.pool.ntp.org iburst\nconfdir /etc/chrony/conf.d\n"
+    )
+
+    bin_dir = tmp_path / "bin"
+    for name in _HOST_COMMANDS:
+        _write_exec(bin_dir / name, _LOGGING_SHIM)
+    _write_exec(bin_dir / "runuser", _RUNUSER_SHIM)
+
+    shim_log = tmp_path / "shim.log"
+    scratch = tmp_path / "tmpdir"
+    scratch.mkdir()
+    env = {
+        "PATH": f"{bin_dir}:{os.environ.get('PATH', '')}",
+        "HOME": str(tmp_path),
+        "TMPDIR": str(scratch),
+        "CANARY_INSTALL_ALLOW_UNPRIVILEGED": "1",
+        "CANARY_INSTALL_ROOT": str(root),
+        "CANARY_HOME": str(checkout),
+        "CANARY_PYTHON": sys.executable,
+        "CANARY_GPS_DEVICE": GPS_DEVICE,
+        "SHIM_LOG": str(shim_log),
+    }
+    return Installer(checkout=checkout, root=root, shim_log=shim_log, env=env)
+
+
+# ---------------------------------------------------------------------------
+# S02.4 — restart a service only when the file written for it changed
+# ---------------------------------------------------------------------------
+
+
+def test_first_install_restarts_gpsd_chrony_and_journald(installer: Installer) -> None:
+    result = installer.run()
+
+    assert installer.restarts() == [
+        "systemctl restart gpsd.socket gpsd.service",
+        "systemctl restart chrony",
+        "systemctl restart systemd-journald",
+    ]
+    assert installer.calls("udevadm trigger"), "first install must replay the tty add events"
+    assert "unchanged:" not in result.stdout
+    gpsd_defaults = (installer.root / "etc" / "default" / "gpsd").read_text()
+    assert 'GPSD_OPTIONS="-n"' in gpsd_defaults
+    rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-gps.rules").read_text()
+    assert 'SYMLINK=="serial/by-id/usb-test-gps-if00-port0"' in rule
+    for path in (
+        installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf",
+        installer.root / "etc" / "systemd" / "journald.conf.d" / "90-canary-persistent.conf",
+        installer.root / "etc" / "systemd" / "system" / "canary-gpsd@.service",
+    ):
+        assert path.is_file(), path
+        assert oct(path.stat().st_mode & 0o777) == "0o644", path
+
+
+def test_second_run_on_an_unchanged_system_restarts_nothing(installer: Installer) -> None:
+    installer.run()
+    result = installer.run()
+
+    assert installer.restarts() == []
+    for service in ("gpsd", "chrony", "systemd-journald"):
+        assert f"unchanged: {service} not restarted" in result.stdout, result.stdout
+    assert not installer.calls("udevadm trigger")
+    # daemon-reload stays unconditional: it is cheap and restarts nothing.
+    assert installer.calls("systemctl daemon-reload")
+    # An unchanged service is still started, which is a no-op if it is running.
+    assert "systemctl start gpsd.socket gpsd.service" in installer.calls("systemctl start")
+
+
+@pytest.mark.parametrize(
+    ("rel_path", "service", "restart"),
+    [
+        ("etc/default/gpsd", "gpsd", "systemctl restart gpsd.socket gpsd.service"),
+        (
+            "etc/udev/rules.d/70-canary-gps.rules",
+            "gpsd",
+            "systemctl restart gpsd.socket gpsd.service",
+        ),
+        (
+            "etc/systemd/system/canary-gpsd@.service",
+            "gpsd",
+            "systemctl restart gpsd.socket gpsd.service",
+        ),
+        ("etc/chrony/conf.d/canary-gps.conf", "chrony", "systemctl restart chrony"),
+        (
+            "etc/systemd/journald.conf.d/90-canary-persistent.conf",
+            "systemd-journald",
+            "systemctl restart systemd-journald",
+        ),
+    ],
+)
+def test_a_changed_file_restarts_only_its_own_service(
+    installer: Installer, rel_path: str, service: str, restart: str
+) -> None:
+    installer.run()
+    target = installer.root / rel_path
+    managed = target.read_text()
+    target.write_text(managed + "# an older revision\n")
+
+    result = installer.run()
+
+    assert installer.restarts() == [restart]
+    assert target.read_text() == managed, "the managed content is restored"
+    assert f"unchanged: {service} not restarted" not in result.stdout
+    others = {"gpsd", "chrony", "systemd-journald"} - {service}
+    for other in others:
+        assert f"unchanged: {other} not restarted" in result.stdout
+
+
+def test_a_new_gps_device_rewrites_the_rule_and_restarts_gpsd(installer: Installer) -> None:
+    installer.run()
+    result = installer.run(CANARY_GPS_DEVICE="/dev/serial/by-id/usb-other-gps")
+
+    assert installer.restarts() == ["systemctl restart gpsd.socket gpsd.service"]
+    assert installer.calls("udevadm trigger")
+    rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-gps.rules").read_text()
+    assert 'SYMLINK=="serial/by-id/usb-other-gps"' in rule
+    assert "unchanged: chrony not restarted" in result.stdout
+
+
+def test_adding_the_chrony_confdir_include_restarts_chrony(installer: Installer) -> None:
+    installer.run()
+    chrony_conf = installer.root / "etc" / "chrony" / "chrony.conf"
+    chrony_conf.write_text("pool 2.debian.pool.ntp.org iburst\n")
+
+    installer.run()
+
+    assert installer.restarts() == ["systemctl restart chrony"]
+    assert "confdir /etc/chrony/conf.d" in chrony_conf.read_text()
+
+
+# ---------------------------------------------------------------------------
+# S02.6 — say only what is true about GPS
+# ---------------------------------------------------------------------------
+
+_GPS_HINT = "hardware.gps.source: gpsd"
+
+
+def test_no_gps_hint_when_the_config_already_says_gpsd(installer: Installer) -> None:
+    # First install copies canary.pi.example.yaml, which says `source: gpsd`.
+    result = installer.run()
+
+    assert "source: gpsd" in installer.config.read_text()
+    assert _GPS_HINT not in result.stdout
+    assert "hardware.gps.source" not in result.stdout + result.stderr
+
+
+def test_gps_hint_when_the_config_says_serial(installer: Installer) -> None:
+    installer.config.parent.mkdir(parents=True)
+    installer.config.write_text(
+        EXAMPLE_CONFIG.read_text().replace("source: gpsd", "source: serial", 1)
+    )
+
+    result = installer.run()
+
+    assert "Keeping existing" in result.stdout
+    assert _GPS_HINT in result.stdout
+    assert "is 'serial'" in result.stdout
+
+
+def test_gps_hint_when_the_config_cannot_be_read(installer: Installer) -> None:
+    installer.config.parent.mkdir(parents=True)
+    installer.config.write_text("hardware: [not, a, mapping\n")
+
+    result = installer.run()
+
+    assert f"could not read hardware.gps.source from {installer.config}" in result.stdout
+    assert _GPS_HINT in result.stdout
+
+
+def test_no_gps_lines_when_the_gps_stack_is_skipped(installer: Installer) -> None:
+    result = installer.run(CANARY_INSTALL_GPS_STACK="0")
+
+    assert "hardware.gps.source" not in result.stdout
+    assert "unchanged: gpsd" not in result.stdout
+    assert installer.restarts() == ["systemctl restart systemd-journald"]

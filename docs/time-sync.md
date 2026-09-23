@@ -56,6 +56,14 @@ GPS receiver ──serial──> gpsd ──SHM unit 0──> chrony ──> sys
 `CANARY_INSTALL_GPS_STACK=0` to skip it, or `CANARY_GPS_DEVICE=/dev/serial/by-id/...`
 to name the receiver when autodetection can't (more than one serial device).
 
+Re-running the installer (every `canary-update` that touches it does) restarts
+gpsd only when `/etc/default/gpsd`, `70-canary-gps.rules` or
+`canary-gpsd@.service` changed, and chrony only when its drop-in changed or the `confdir` include was added —
+otherwise it prints `unchanged: gpsd not restarted`, so an update no longer
+costs the daemon a GPS reconnect. It reads `hardware.gps.source` from the
+config through the project's own loader and prints the "set
+`hardware.gps.source: gpsd`" hint only when the config says something else.
+
 ### Why canary had to change
 
 A serial device has exactly one owner. Once gpsd holds the port, canary cannot

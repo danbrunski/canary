@@ -88,6 +88,15 @@ Torch for LSTM inference:
 sudo CANARY_TORCH=cpu scripts/install_pi.sh
 ```
 
+Re-running the installer is safe and is what `canary-update` does when the
+installer or the files it installs change. It rewrites a managed config file
+only when its content differs, and restarts gpsd, chrony and journald only
+when the file it writes for that service changed (or did not exist yet, as on
+a fresh card); otherwise it prints `unchanged: <service> not restarted`.
+`systemctl daemon-reload` always runs — it restarts nothing. The GPS hint
+("set `hardware.gps.source: gpsd`") appears only when the config's
+`hardware.gps.source` is not already `gpsd`.
+
 The installer copies `canary.pi.example.yaml` to `/etc/canary/canary.yaml` if
 the config does not already exist. Edit that file before first start:
 

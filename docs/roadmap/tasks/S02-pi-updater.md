@@ -141,14 +141,29 @@ What 2026-09-22 showed is still rough:
   restarts nothing and says so; on the Pi, no `gpsd collector failed;
   reconnecting` line in the daemon log across an update that did not touch
   the GPS config.
-  **Remaining (all of it):** needs `scripts/install_pi.sh`, held by the
-  concurrent S01/cold-start agent on 2026-09-22; not edited. Shape when it is
-  free: write each generated file (`/etc/default/gpsd`,
-  `70-canary-gps.rules`, `chrony/conf.d/canary-gps.conf`,
-  `journald.conf.d/90-canary-persistent.conf`) to a temp path, `cmp` against
-  the installed one, restart that service only on difference or first
-  install, print `unchanged: <service> not restarted` otherwise; test it in
-  `tests/test_update_canary_script.py` by pointing the paths at `tmp_path`.
+  **Evidence (desk, 2026-09-22):** `install_pi.sh` writes each managed file
+  through `write_managed <service> <dest>` (stage to a temp file, `cmp`
+  against the installed one, `install -m 0644` only on a difference; an absent
+  file — first install — counts as one) and restarts through
+  `restart_if_changed`: gpsd on `/etc/default/gpsd`, `70-canary-gps.rules` or
+  `canary-gpsd@.service`; chrony on `conf.d/canary-gps.conf` or an added
+  `confdir` include; `systemd-journald` on `90-canary-persistent.conf`.
+  Otherwise it prints `unchanged: <service> not restarted` and runs `systemctl
+  start` (a no-op for a running unit). `udevadm trigger` runs only with a gpsd
+  restart; `daemon-reload` and `journalctl --flush` stay unconditional. Tests
+  in `tests/test_install_pi_script.py` run the real installer unprivileged
+  against a scratch root (`CANARY_INSTALL_ROOT`,
+  `CANARY_INSTALL_ALLOW_UNPRIVILEGED=1`, test-only) with host commands shimmed:
+  `test_first_install_restarts_gpsd_chrony_and_journald`,
+  `test_second_run_on_an_unchanged_system_restarts_nothing` (no `systemctl
+  restart`, three `unchanged:` lines, daemon-reload still called, no udev
+  trigger), `test_a_changed_file_restarts_only_its_own_service` (5 cases),
+  `test_a_new_gps_device_rewrites_the_rule_and_restarts_gpsd`,
+  `test_adding_the_chrony_confdir_include_restarts_chrony`. 13 passed; before
+  the change all 13 failed, and making `restart_if_changed` unconditional
+  fails 8 of them. **Remaining:** on the Pi, no `gpsd collector failed;
+  reconnecting` in the daemon log across an update that did not touch the GPS
+  config (needs the Pi).
 
 - [~] **S02.5 Roll back when the new code does not come up.** Record
   `<before>` before the fetch. If the health check fails, or the restart
@@ -187,12 +202,20 @@ What 2026-09-22 showed is still rough:
   loader, not a `grep`), and print the hint only when it is not already
   `gpsd`. **Accept:** a test for both cases; the Pi's update output no longer
   shows it.
-  **Remaining (all of it):** needs `scripts/install_pi.sh`, held by the
-  concurrent S01/cold-start agent on 2026-09-22; not edited. Shape: replace
-  the unconditional echo with
-  `"${CANARY_HOME}/.venv/bin/python" -c 'from src.config import load_config; ...'`
-  reading `hardware.gps.source` from `${CANARY_CONFIG}` and printing the hint
-  only when it is not `gpsd`; two tests with a `tmp_path` config.
+  **Evidence (desk, 2026-09-22):** after `install_deps.py` (so the venv
+  exists on a fresh card), when the GPS stack was installed, `install_pi.sh`
+  runs `runuser -u canary -- env PYTHONDONTWRITEBYTECODE=1
+  .venv/bin/python -c '...CanaryConfig.from_yaml(...).hardware.gps.source'`
+  on `${CANARY_CONFIG}` and prints the `hardware.gps.source: gpsd` hint only
+  when the value is not `gpsd`, naming the value; an unreadable config prints
+  `could not read hardware.gps.source from <path> (<error>)` instead. Tests
+  (real loader via a `src` symlink): `test_no_gps_hint_when_the_config_already_says_gpsd`
+  (first install copies `canary.pi.example.yaml`, `source: gpsd`),
+  `test_gps_hint_when_the_config_says_serial`,
+  `test_gps_hint_when_the_config_cannot_be_read`,
+  `test_no_gps_lines_when_the_gps_stack_is_skipped`. Making the hint
+  unconditional fails the first. **Remaining:** the Pi's update output no
+  longer shows it (needs the Pi, on the next update that runs `install_pi.sh`).
 
 - [x] **S02.7 One summary, and exit codes that say what happened.** End every
   run with one block: `<before> -> <after>`, each step's `ran`/`skipped`, the

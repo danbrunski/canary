@@ -5,11 +5,23 @@ set -euo pipefail
 #
 # Defaults are intentionally runtime-light: base Python dependencies only and
 # no Torch. Set CANARY_TORCH=cpu if you want LSTM inference on the Pi.
+#
+# Re-running it is the normal update path (canary-update calls it), so it
+# restarts gpsd, chrony and journald only when the file it writes for that
+# service changed — a restart of gpsd drops the daemon's GPS for a reconnect
+# cycle, on every update, for nothing (S02.4).
+#
+# Test hooks only (tests/test_install_pi_script.py): CANARY_INSTALL_ROOT puts
+# every system path this script writes under a scratch directory, and
+# CANARY_INSTALL_ALLOW_UNPRIVILEGED=1 lifts the root check. Neither is for use
+# on a Pi.
 
-if [[ "${EUID}" -ne 0 ]]; then
+if [[ "${EUID}" -ne 0 && "${CANARY_INSTALL_ALLOW_UNPRIVILEGED:-0}" != "1" ]]; then
   echo "Run with sudo: sudo scripts/install_pi.sh" >&2
   exit 1
 fi
+
+ROOT="${CANARY_INSTALL_ROOT:-}"
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
@@ -17,15 +29,52 @@ REPO_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 CANARY_USER="canary"
 CANARY_GROUP="canary"
 CANARY_HOME="${CANARY_HOME:-${REPO_ROOT}}"
-CANARY_CONFIG_DIR="${CANARY_CONFIG_DIR:-/etc/canary}"
+CANARY_CONFIG_DIR="${CANARY_CONFIG_DIR:-${ROOT}/etc/canary}"
 CANARY_CONFIG="${CANARY_CONFIG:-${CANARY_CONFIG_DIR}/canary.yaml}"
 CANARY_ENV="${CANARY_ENV:-${CANARY_CONFIG_DIR}/canary.env}"
 CANARY_CONTROL_TOKEN_FILE="${CANARY_CONTROL_TOKEN_FILE:-${CANARY_CONFIG_DIR}/control.token}"
-CANARY_DATA_DIR="${CANARY_DATA_DIR:-/data/canary}"
+CANARY_DATA_DIR="${CANARY_DATA_DIR:-${ROOT}/data/canary}"
 CANARY_PYTHON="${CANARY_PYTHON:-python3}"
 CANARY_EXTRAS="${CANARY_EXTRAS:-none}"
 CANARY_TORCH="${CANARY_TORCH:-none}"
-CANARY_SERVICE="${CANARY_SERVICE:-/etc/systemd/system/canary.service}"
+CANARY_SERVICE="${CANARY_SERVICE:-${ROOT}/etc/systemd/system/canary.service}"
+
+# Services whose managed config this run wrote (new or different content).
+declare -A CONFIG_CHANGED=()
+
+# write_managed <service> <dest>: install stdin at <dest> (mode 0644) only when
+# it differs from what is already there, and mark <service> for a restart. An
+# absent <dest> — the first install — counts as a change.
+write_managed() {
+  local service="$1" dest="$2" staged
+  staged="$(mktemp)"
+  cat >"${staged}"
+  if [[ -f "${dest}" ]] && cmp -s "${staged}" "${dest}"; then
+    rm -f "${staged}"
+    return 0
+  fi
+  install -m 0644 "${staged}" "${dest}"
+  rm -f "${staged}"
+  echo "  wrote ${dest}"
+  CONFIG_CHANGED["${service}"]=1
+}
+
+# restart_if_changed <service> <unit...>: restart the units only when
+# write_managed changed <service>'s config; otherwise say so, and `start` them
+# (a no-op for a running unit) so a stopped service still comes up. Returns 1
+# when nothing was restarted, so callers can skip follow-up work.
+restart_if_changed() {
+  local service="$1"
+  shift
+  if [[ -n "${CONFIG_CHANGED[${service}]:-}" ]]; then
+    echo "changed: ${service} config; restarting ${service}"
+    systemctl restart "$@" || true
+    return 0
+  fi
+  echo "unchanged: ${service} not restarted"
+  systemctl start "$@" || true
+  return 1
+}
 
 if [[ "${CANARY_HOME}" != "${REPO_ROOT}" ]]; then
   echo "CANARY_HOME must point at this clone for the in-place install." >&2
@@ -93,19 +142,19 @@ install -m 0644 "${CANARY_HOME}/systemd/ups-shutdown.service" \
   "$(dirname "${CANARY_SERVICE}")/ups-shutdown.service"
 # Load i2c-dev at boot so /dev/i2c-1 (X1202 fuel gauge at 0x36) exists.
 install -m 0644 "${CANARY_HOME}/systemd/canary-modules.conf" \
-  /etc/modules-load.d/canary.conf
+  "${ROOT}/etc/modules-load.d/canary.conf"
 modprobe i2c-dev 2>/dev/null || true
 
 # /run/canary — shared runtime dir between the canary daemon and the root
 # ups-shutdown watchdog (UPS keep-alive request + status heartbeat). tmpfs
 # (/run), so systemd-tmpfiles must recreate it every boot.
 install -m 0644 "${CANARY_HOME}/systemd/tmpfiles-canary.conf" \
-  /etc/tmpfiles.d/canary.conf
-systemd-tmpfiles --create /etc/tmpfiles.d/canary.conf
+  "${ROOT}/etc/tmpfiles.d/canary.conf"
+systemd-tmpfiles --create "${ROOT}/etc/tmpfiles.d/canary.conf"
 
 # Stable operator command. It discovers the active checkout through
 # /etc/canary/canary.env, so callers do not need to cd into the repository.
-install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" /usr/local/sbin/canary-update
+install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" "${ROOT}/usr/local/sbin/canary-update"
 
 # Let the canary user restart the services without a password, so model/code
 # deploys (and the MCP control plane) can roll the daemon without an interactive
@@ -113,7 +162,7 @@ install -m 0755 "${CANARY_HOME}/scripts/update_canary.sh" /usr/local/sbin/canary
 # nothing else. Validated with `visudo -c`; a malformed sudoers file would lock
 # out sudo, so we discard it on failure.
 SYSTEMCTL="$(command -v systemctl)"
-CANARY_SUDOERS="/etc/sudoers.d/canary-restart"
+CANARY_SUDOERS="${ROOT}/etc/sudoers.d/canary-restart"
 cat >"${CANARY_SUDOERS}" <<EOF
 ${CANARY_USER} ALL=(root) NOPASSWD: ${SYSTEMCTL} restart canary.service, ${SYSTEMCTL} restart canary, ${SYSTEMCTL} restart canary-mcp.service, ${SYSTEMCTL} restart canary-mcp, ${SYSTEMCTL} try-restart canary.service, ${SYSTEMCTL} try-restart canary-mcp.service
 EOF
@@ -137,9 +186,11 @@ fi
 # Set CANARY_INSTALL_GPS_STACK=0 to skip (e.g. a Pi with no GPS attached).
 CANARY_INSTALL_GPS_STACK="${CANARY_INSTALL_GPS_STACK:-1}"
 CANARY_GPS_DEVICE="${CANARY_GPS_DEVICE:-}"
+GPS_STACK_INSTALLED=0
 
 if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2>&1; then
   echo "Installing GPS + time-sync stack (gpsd, chrony)..."
+  GPS_STACK_INSTALLED=1
   DEBIAN_FRONTEND=noninteractive apt-get install -y gpsd gpsd-clients chrony
 
   # Autodetect the receiver when not told. The by-id symlink is stable across
@@ -177,7 +228,7 @@ if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2
     #   /dev/ttyUSB0: device activation failed, freeing device.
     # Which side lost varied per plug event, so GPS came up intermittently.
     # One device, one owner.
-    cat >/etc/default/gpsd <<EOF
+    write_managed gpsd "${ROOT}/etc/default/gpsd" <<EOF
 # Managed by canary scripts/install_pi.sh
 # DEVICES intentionally empty — 70-canary-gps.rules owns device attachment.
 START_DAEMON="true"
@@ -200,9 +251,9 @@ EOF
     # here — works even when the receiver is absent at install time, which is
     # precisely the case this rule exists to cover. 70- runs after 60-serial's
     # by-id symlink is in place.
-    install -m 0644 "${CANARY_HOME}/systemd/canary-gpsd@.service" \
-      "$(dirname "${CANARY_SERVICE}")/canary-gpsd@.service"
-    cat >/etc/udev/rules.d/70-canary-gps.rules <<EOF
+    write_managed gpsd "$(dirname "${CANARY_SERVICE}")/canary-gpsd@.service" \
+      <"${CANARY_HOME}/systemd/canary-gpsd@.service"
+    write_managed gpsd "${ROOT}/etc/udev/rules.d/70-canary-gps.rules" <<EOF
 # Managed by canary scripts/install_pi.sh — see systemd/canary-gpsd@.service
 ACTION=="add", SUBSYSTEM=="tty", SYMLINK=="${CANARY_GPS_DEVICE#/dev/}", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd@%k.service"
 EOF
@@ -210,16 +261,19 @@ EOF
     udevadm control --reload || true
 
     systemctl enable gpsd.socket gpsd.service >/dev/null 2>&1 || true
-    systemctl restart gpsd.socket gpsd.service || true
-    # Catch the already-plugged-in case: replay the add event so the rule runs
-    # for a receiver that was attached before the rule existed.
-    udevadm trigger --subsystem-match=tty --action=add || true
+    # Only when one of the three files above changed (or this is the first
+    # install): a gpsd restart costs the daemon a GPS reconnect cycle.
+    if restart_if_changed gpsd gpsd.socket gpsd.service; then
+      # Catch the already-plugged-in case: replay the add event so the rule
+      # runs for a receiver that was attached before the rule existed.
+      udevadm trigger --subsystem-match=tty --action=add || true
+    fi
   fi
 
   # chrony config goes in a drop-in, never by rewriting chrony.conf — that file
   # is the admin's and may carry local NTP policy we shouldn't clobber.
-  install -d -m 0755 /etc/chrony/conf.d
-  cat >/etc/chrony/conf.d/canary-gps.conf <<'EOF'
+  install -d -m 0755 "${ROOT}/etc/chrony/conf.d"
+  write_managed chrony "${ROOT}/etc/chrony/conf.d/canary-gps.conf" <<'EOF'
 # Managed by canary scripts/install_pi.sh — GPS-disciplined offline time.
 #
 # gpsd publishes GPS time to SHM unit 0. NMEA time has no PPS pulse to align
@@ -239,14 +293,15 @@ makestep 1 -1
 EOF
 
   # Debian's chrony.conf pulls in conf.d by default; older configs may not.
-  if [[ -f /etc/chrony/chrony.conf ]] && ! grep -qE '^\s*confdir\s+.*conf\.d' /etc/chrony/chrony.conf; then
-    echo "confdir /etc/chrony/conf.d" >>/etc/chrony/chrony.conf
-    echo "  Added confdir include to /etc/chrony/chrony.conf"
+  CHRONY_CONF="${ROOT}/etc/chrony/chrony.conf"
+  if [[ -f "${CHRONY_CONF}" ]] && ! grep -qE '^\s*confdir\s+.*conf\.d' "${CHRONY_CONF}"; then
+    echo "confdir /etc/chrony/conf.d" >>"${CHRONY_CONF}"
+    echo "  Added confdir include to ${CHRONY_CONF}"
+    CONFIG_CHANGED[chrony]=1
   fi
 
   systemctl enable chrony >/dev/null 2>&1 || true
-  systemctl restart chrony || true
-  echo "  Set 'hardware.gps.source: gpsd' in ${CANARY_CONFIG} to use it."
+  restart_if_changed chrony chrony || true
 fi
 
 # ---------------------------------------------------------------------------
@@ -268,8 +323,8 @@ fi
 # `40-`, not of living in /etc. This deliberately trades a bounded amount of
 # card wear for being able to read what happened during a drive; the size
 # caps below are what keep that trade small.
-install -d -m 0755 /etc/systemd/journald.conf.d
-cat >/etc/systemd/journald.conf.d/90-canary-persistent.conf <<'EOF'
+install -d -m 0755 "${ROOT}/etc/systemd/journald.conf.d"
+write_managed systemd-journald "${ROOT}/etc/systemd/journald.conf.d/90-canary-persistent.conf" <<'EOF'
 # Managed by canary scripts/install_pi.sh — survive the key-off power cycle.
 [Journal]
 Storage=persistent
@@ -282,13 +337,14 @@ EOF
 
 # systemd creates /var/log/journal itself on restart, but doing it through
 # tmpfiles gets the root:systemd-journal 2755 ownership right up front.
-install -d -m 0755 /var/log/journal
-systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
-systemctl restart systemd-journald || true
+install -d -m 0755 "${ROOT}/var/log/journal"
+systemd-tmpfiles --create --prefix "${ROOT}/var/log/journal" >/dev/null 2>&1 || true
+restart_if_changed systemd-journald systemd-journald || true
 # Restarting journald is not enough: it keeps writing to /run until told to
 # migrate. That handoff is systemd-journal-flush's job and normally only
 # happens at boot — i.e. before this config existed — so trigger it here or
-# persistence silently waits for the next reboot.
+# persistence silently waits for the next reboot. A no-op once the journal is
+# already persistent, so it runs whether or not journald was restarted.
 journalctl --flush >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
@@ -298,9 +354,9 @@ journalctl --flush >/dev/null 2>&1 || true
 # (user, hostname, first network). By the time this script runs that is done,
 # and the network connections are NetworkManager's own keyfiles, so cloud-init
 # only costs ~4.5 s on every later boot's critical path (2026-09-22).
-if [[ -d /etc/cloud && ! -e /etc/cloud/cloud-init.disabled ]]; then
-  touch /etc/cloud/cloud-init.disabled
-  echo "Disabled cloud-init for later boots (/etc/cloud/cloud-init.disabled)."
+if [[ -d "${ROOT}/etc/cloud" && ! -e "${ROOT}/etc/cloud/cloud-init.disabled" ]]; then
+  touch "${ROOT}/etc/cloud/cloud-init.disabled"
+  echo "Disabled cloud-init for later boots (${ROOT}/etc/cloud/cloud-init.disabled)."
 fi
 
 # ---------------------------------------------------------------------------
@@ -312,7 +368,7 @@ fi
 # 2026-09-18, after the limits had been "installed" for a day. The Pi kernel
 # honours a later cgroup_enable=memory over the firmware's disable. Takes
 # effect on the next boot; canary-update checks for it and says so.
-CMDLINE="${CANARY_CMDLINE:-/boot/firmware/cmdline.txt}"
+CMDLINE="${CANARY_CMDLINE:-${ROOT}/boot/firmware/cmdline.txt}"
 CGROUP_REBOOT_NEEDED=0
 if [[ -f "${CMDLINE}" ]] && ! grep -qw 'cgroup_enable=memory' "${CMDLINE}"; then
   backup="${CMDLINE}.canary-$(date +%Y%m%dT%H%M%S)"
@@ -329,8 +385,8 @@ if [[ -f "${CMDLINE}" ]] && ! grep -qw 'cgroup_enable=memory' "${CMDLINE}"; then
     CGROUP_REBOOT_NEEDED=1
   fi
 fi
-if [[ ! -f /sys/fs/cgroup/cgroup.controllers ]] \
-    || ! grep -qw memory /sys/fs/cgroup/cgroup.controllers; then
+if [[ ! -f "${ROOT}/sys/fs/cgroup/cgroup.controllers" ]] \
+    || ! grep -qw memory "${ROOT}/sys/fs/cgroup/cgroup.controllers"; then
   CGROUP_REBOOT_NEEDED=1
 fi
 
@@ -344,6 +400,31 @@ systemctl daemon-reload
 systemctl enable canary.service
 systemctl enable canary-mcp.service
 systemctl enable ups-shutdown.service
+
+# The hint is only worth printing when it is true: read hardware.gps.source
+# through the project's own config loader (not a grep, which a comment or a
+# nested key would fool), as the daemon's user, with the venv just installed.
+if [[ "${GPS_STACK_INSTALLED}" -eq 1 ]]; then
+  if gps_source="$(runuser -u "${CANARY_USER}" -- env PYTHONDONTWRITEBYTECODE=1 \
+      "${CANARY_HOME}/.venv/bin/python" -c '
+import sys
+from pathlib import Path
+
+try:
+    from src.config import CanaryConfig
+
+    print(CanaryConfig.from_yaml(Path(sys.argv[1])).hardware.gps.source)
+except Exception as exc:  # noqa: BLE001 - reported, not raised
+    print(f"{type(exc).__name__}: {exc}".splitlines()[0])
+    sys.exit(1)
+' "${CANARY_CONFIG}")"; then
+    if [[ "${gps_source}" != "gpsd" ]]; then
+      echo "GPS: hardware.gps.source is '${gps_source}' in ${CANARY_CONFIG}; set 'hardware.gps.source: gpsd' to read GPS through gpsd."
+    fi
+  else
+    echo "GPS: could not read hardware.gps.source from ${CANARY_CONFIG} (${gps_source:-see the error above}); it must be 'hardware.gps.source: gpsd' to read GPS through gpsd."
+  fi
+fi
 
 cat <<EOF
 CANary Pi install complete.
