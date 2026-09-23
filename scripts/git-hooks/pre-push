@@ -1,109 +1,32 @@
 #!/usr/bin/env bash
-# Tracked pre-push hook: runs the full CI gate on the exact commit being pushed,
-# in a throwaway worktree, before anything reaches origin.
-#
-# - A worktree, not the working tree: several agent sessions share this checkout,
-#   and their uncommitted edits must not decide whether *your* commits pass.
-# - The venv must match constraints-dev.txt (scripts/check_dev_env.py), because
-#   that file is what CI installs. Green on other versions proves nothing.
-# - Python: ruff check, ruff format --check, mypy, pytest (what ci.yml `test` runs).
-# - Frontend (only when the push touches src/dashboard/static): pnpm typecheck,
-#   vitest, playwright e2e (what ci.yml `frontend` runs).
+# Tracked pre-push hook: refuses to push a commit the full CI gate has not
+# passed on. The gate itself runs in scripts/ci_gate.sh (usually via
+# scripts/push.sh) BEFORE the push, because git opens the connection to GitHub
+# before this hook runs and GitHub closed it during a ~7 min in-hook gate
+# (2026-09-23). This hook only checks for the green stamp that ci_gate.sh
+# writes for the exact commit, so it takes milliseconds.
 #
 # Enable once per clone:   git config core.hooksPath scripts/git-hooks
-# Bypass (emergencies):    git push --no-verify   -- then watch CI: gh run watch
-# Full pytest takes ~6.5 min on the laptop.
+# Push:                    scripts/push.sh        (gates, then pushes)
+# Bypass (emergencies):    git push --no-verify   -- then: gh run watch
 set -uo pipefail
-repo_root="$(git rev-parse --show-toplevel)"
-venv="$repo_root/.venv/bin"
+stamp_dir="$(git rev-parse --git-common-dir)/ci-gate"
 zero=0000000000000000000000000000000000000000
-
-targets=()
-ranges=()
+refuse=0
 while read -r local_ref local_sha remote_ref remote_sha; do
-  [[ "$local_sha" == "$zero" ]] && continue            # branch deletion
-  targets+=("$local_sha")
-  if [[ "$remote_sha" == "$zero" ]]; then
-    ranges+=("$local_sha")
-  else
-    ranges+=("$remote_sha..$local_sha")
+  [[ "$local_sha" == "$zero" ]] && continue                       # deletion
+  [[ -f "$stamp_dir/$local_sha" ]] && continue                     # gated green
+  if [[ "$remote_sha" != "$zero" ]] \
+     && ! git diff --name-only "$remote_sha" "$local_sha" \
+          | grep -qvE '(\.mdx?$|^docs/|^README|^CHANGELOG|^LICENSE)'; then
+    continue                                                       # docs only
   fi
+  echo "✗ pre-push: ${local_sha:0:7} ($local_ref) has not passed the CI gate." >&2
+  refuse=1
 done
-[[ ${#targets[@]} -eq 0 ]] && exit 0
-
-# Only the newest commit per ref needs the gate; CI only runs on the pushed head.
-fail=0
-for i in "${!targets[@]}"; do
-  sha="${targets[$i]}"
-  range="${ranges[$i]}"
-  # Docs-only pushes skip the gate, matching the pre-commit hook's rule.
-  if ! git diff --name-only "${range%%..*}" "$sha" 2>/dev/null \
-       | grep -qvE '(\.mdx?$|^docs/|^README|^CHANGELOG|^LICENSE)'; then
-    if [[ "$range" == *..* ]]; then
-      echo "pre-push: ${sha:0:7} changes documentation only -- skipping gate"
-      continue
-    fi
-  fi
-
-  wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-prepush-XXXXXX")"
-  cleanup() { git -C "$repo_root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; }
-  trap cleanup EXIT
-  git -C "$repo_root" worktree add --detach --force "$wt" "$sha" >/dev/null 2>&1 || {
-    echo "pre-push: could not create a worktree for $sha" >&2; exit 1; }
-  echo "pre-push: gating ${sha:0:7} in $wt"
-
-  (
-    cd "$wt" || exit 1
-    export PYTHONPATH="$wt"     # import this commit's src/, not the editable install's
-    rc=0
-    echo "==> venv matches constraints-dev.txt"
-    "$venv/python" "$wt/scripts/check_dev_env.py" "$wt/constraints-dev.txt" || exit 1
-    echo "==> ruff check .";          "$venv/ruff" check . || rc=1
-    echo "==> ruff format --check ."; "$venv/ruff" format --check . >/dev/null || { "$venv/ruff" format --check . | tail -5; rc=1; }
-    echo "==> mypy";                  "$venv/mypy" || rc=1
-    [[ $rc -ne 0 ]] && exit 1
-    echo "==> pytest"
-    log="$wt/.prepush-pytest.log"
-    "$venv/pytest" -q -rf -p no:cacheprovider >"$log" 2>&1
-    prc=$?
-    tail -4 "$log"
-    if [[ $prc -ne 0 ]]; then
-      # Several agent sessions share this laptop, and a parallel run under
-      # someone else's load has failed tests that pass alone (tests/test_daemon.py
-      # starts a real daemon and allows 1-5 s of wall clock; 2026-09-23 at load
-      # average ~12). Re-run only the failures, serially, once. A regression
-      # fails again and blocks the push; a flake passes and is named below.
-      mapfile -t failed < <(sed -nE 's/^FAILED ([^ ]+).*/\1/p' "$log" | sort -u)
-      if [[ ${#failed[@]} -eq 0 ]]; then
-        tail -40 "$log"; exit 1          # errors/collection failures: no re-run
-      fi
-      echo "==> re-running ${#failed[@]} failed test(s) serially (load average: $(cut -d' ' -f1-3 /proc/loadavg))"
-      if "$venv/pytest" -q -n0 -p no:cacheprovider "${failed[@]}" 2>&1 | tail -15; [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-        echo "✗ failed again serially: a real failure, not load" >&2
-        exit 1
-      fi
-      echo "⚠ FLAKY UNDER LOAD -- failed in the parallel run, passed serially:" >&2
-      printf '    %s\n' "${failed[@]}" >&2
-      echo "  Pushing anyway. Record these in the flaky-test task (docs/roadmap/tasks)." >&2
-    fi
-
-    if git -C "$wt" diff --name-only "${range%%..*}" "$sha" 2>/dev/null | grep -q '^src/dashboard/static/' \
-       || [[ "$range" != *..* ]]; then
-      cd src/dashboard/static || exit 1
-      echo "==> pnpm install --frozen-lockfile"; pnpm install --frozen-lockfile --prefer-offline >/dev/null || exit 1
-      echo "==> pnpm typecheck"; pnpm typecheck || exit 1
-      echo "==> pnpm test";      pnpm test || exit 1
-      echo "==> pnpm e2e";       pnpm e2e || exit 1
-    fi
-  ) || fail=1
-
-  cleanup; trap - EXIT
-  [[ $fail -ne 0 ]] && break
-done
-
-if [[ $fail -ne 0 ]]; then
-  echo "✗ pre-push: the CI gate failed on the commit being pushed -- not pushing." >&2
-  echo "  Fix it and push again. (--no-verify skips this; then run: gh run watch)" >&2
+if [[ $refuse -ne 0 ]]; then
+  echo "  Run scripts/push.sh (gates in a worktree, ~7 min, then pushes)," >&2
+  echo "  or scripts/ci_gate.sh <commit> and push again." >&2
   exit 1
 fi
-echo "✓ pre-push: CI gate green"
+exit 0

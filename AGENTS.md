@@ -137,7 +137,8 @@ to direct HTTP.
 ## Project conventions
 
 - **Python**: always `.venv/bin/python` (3.12), never system `python3`.
-- **Branching**: work directly on `main`, no feature branches or PRs.
+- **Branching**: work directly on `main`, no feature branches or PRs; push
+  with `scripts/push.sh` (see "Push with" below).
 - **Lint/test gate**: whole-repo `ruff check . && ruff format --check .
   && mypy src && pytest` before commit; dashboard changes additionally
   `pnpm test` and `pnpm typecheck` in `src/dashboard/static` (re-run
@@ -151,15 +152,17 @@ to direct HTTP.
   pandas-stubs on 2026-09-19, mypy 2.x + numpy 2.5 stubs on 2026-09-23. To
   upgrade a tool, follow `scripts/lock_dev_constraints.sh` and commit the new
   lock with whatever fixes it needs, never a lock the gate has not passed on.
-- **Pushing runs the full CI gate first.** The tracked `pre-push` hook
-  (`scripts/git-hooks`, enabled by `git config core.hooksPath
-  scripts/git-hooks`) runs ruff, format, mypy and the full pytest (~6.5 min)
-  on the exact commit being pushed, in a throwaway worktree, so another
-  session's uncommitted edits cannot decide the verdict. When the push touches
-  `src/dashboard/static` it also runs pnpm typecheck, vitest and e2e.
-  Documentation-only pushes skip it. Tests that fail in the parallel run are
-  re-run once serially: failing again blocks the push, and passing is printed
-  as "FLAKY UNDER LOAD" and belongs in `docs/roadmap/tasks/T01-test-suite-reliability.md`.
+- **Push with `scripts/push.sh`.** It runs `scripts/ci_gate.sh`: ruff,
+  format, mypy and the full pytest (~7 min) on the exact commit being pushed,
+  in a throwaway worktree, so another session's uncommitted edits cannot
+  decide the verdict. When the push touches `src/dashboard/static` it also
+  runs pnpm typecheck, vitest and e2e. A green run stamps that commit, and
+  the tracked `pre-push` hook (`git config core.hooksPath scripts/git-hooks`)
+  refuses any unstamped, non-documentation push. The gate cannot run inside
+  the hook itself: git opens the connection first, and GitHub closed it during
+  the gate on 2026-09-23. Tests that fail in the parallel run are re-run once
+  serially. Failing again blocks the push. Passing is printed as "FLAKY UNDER
+  LOAD" and belongs in `docs/roadmap/tasks/T01-test-suite-reliability.md`.
 - **After pushing, confirm CI.** `gh run watch` (or `gh run list --limit 3`),
   and on a red run `gh run view <id> --log-failed`. A red `main` is fixed
   before anything else is pushed. If a pushed test flaked, re-run it alone
