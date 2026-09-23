@@ -1,5 +1,10 @@
 # Implementation task index
 
+**Status 2026-09-23 — T01: test-suite reliability.**
+[`T01-test-suite-reliability.md`](T01-test-suite-reliability.md) opened when the
+new pre-push gate first ran: `tests/test_daemon.py` gives a real daemon 1–5 s
+of wall clock and fails under another session's load, then passes alone.
+
 **Status 2026-09-23 — N01: ROM-response experiments before the supercharger.**
 [`N01-na-rom-response-experiments.md`](N01-na-rom-response-experiments.md) is
 the operator's goal of learning how the NA engine responds to ROM edits while

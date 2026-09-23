@@ -157,7 +157,9 @@ to direct HTTP.
   on the exact commit being pushed, in a throwaway worktree, so another
   session's uncommitted edits cannot decide the verdict. When the push touches
   `src/dashboard/static` it also runs pnpm typecheck, vitest and e2e.
-  Documentation-only pushes skip it.
+  Documentation-only pushes skip it. Tests that fail in the parallel run are
+  re-run once serially: failing again blocks the push, and passing is printed
+  as "FLAKY UNDER LOAD" and belongs in `docs/roadmap/tasks/T01-test-suite-reliability.md`.
 - **After pushing, confirm CI.** `gh run watch` (or `gh run list --limit 3`),
   and on a red run `gh run view <id> --log-failed`. A red `main` is fixed
   before anything else is pushed. If a pushed test flaked, re-run it alone
