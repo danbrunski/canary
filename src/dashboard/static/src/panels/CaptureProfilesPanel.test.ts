@@ -528,6 +528,44 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(screen.getByText("19.60")).toBeInTheDocument();
   });
 
+  it("lists selected diagnostic channels while waiting for this log's first sample", async () => {
+    const captureStatus = status("fuel-map");
+    captureStatus.capture_profile = {
+      ...captureStatus.capture_profile!,
+      mode22: ["ECM_AF_SENSOR_V_B1"],
+      memory: ["ECM_TARGET_EQUIV_RATIO"],
+    };
+    const channels = new Map([
+      ["did:ECM_AF_SENSOR_V_B1", {
+        latest: { value: 2.5, unit: "V", timestamp: "2026-07-30T10:00:00+00:00" },
+        history: [],
+      }],
+    ]);
+    renderPanel("fuel-map", { status: captureStatus, channels });
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    expect(screen.getByText("did:ECM_AF_SENSOR_V_B1").closest("tr"))
+      .toHaveTextContent("Waiting for sample");
+    expect(screen.getByText("mem:ECM_TARGET_EQUIV_RATIO").closest("tr"))
+      .toHaveTextContent("Waiting for sample");
+  });
+
+  it("shows only channels from enabled polling services", async () => {
+    const captureStatus = status("fuel-map");
+    captureStatus.capture_profile = {
+      ...captureStatus.capture_profile!,
+      mode22: ["ECM_AF_SENSOR_V_B1"],
+      memory: ["ECM_TARGET_EQUIV_RATIO"],
+      mode22_enabled: false,
+    };
+    renderPanel("fuel-map", { status: captureStatus, channels: liveChannels() });
+    await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
+
+    expect(screen.getAllByText("RPM").length).toBeGreaterThan(0);
+    expect(screen.queryByText("did:ECM_AF_SENSOR_V_B1")).not.toBeInTheDocument();
+    expect(screen.queryByText("mem:ECM_TARGET_EQUIV_RATIO")).not.toBeInTheDocument();
+  });
+
   it("shows the capture state without waiting for the next status poll", async () => {
     // /status polls every 5 s. Before this, a capture that had already started
     // still read "Not capturing" for up to five seconds, which is the whole
@@ -535,7 +573,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     // was not. The mutation response carries the new snapshot; use it.
     renderPanel();
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
-    expect(screen.getByTestId("capture-phase")).toHaveTextContent("Not capturing");
+    expect(screen.getByTestId("capture-phase")).toHaveTextContent("Collection status unavailable");
 
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "fuel-map" } });
     fireEvent.click(screen.getByRole("button", { name: "Start" }));

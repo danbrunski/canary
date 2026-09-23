@@ -188,8 +188,8 @@ function renderItem(
       return <TestSessionPanel token={d.token} />;
     case "system-profiles":
       return <ProfilesPanel token={d.token} />;
-    case "tuning-capture-profiles":
-      return <CaptureProfilesPanel token={d.token} status={d.status} channels={d.channels} />;
+    case "system-capture-profiles":
+      return <CaptureProfilesPanel token={d.token} status={d.status} authoring showRunner={false} />;
     case "system-power":
       return <PowerPanel token={d.token} />;
     case "observe-charts":

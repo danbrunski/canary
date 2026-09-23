@@ -100,6 +100,7 @@ export function CaptureProfilesPanel({
   status,
   channels,
   authoring = true,
+  showRunner = true,
 }: {
   token: string;
   status: StatusResponse | null;
@@ -107,6 +108,8 @@ export function CaptureProfilesPanel({
   channels?: Map<string, ChannelSnapshot>;
   /** Logging reuses the runner/readout without exposing profile editing. */
   authoring?: boolean;
+  /** System edits profiles; Logging owns starting and stopping captures. */
+  showRunner?: boolean;
 }) {
   const [profiles, setProfiles] = useState<CaptureProfile[]>([]);
   const [resolvedPlans, setResolvedPlans] = useState<Record<string, ResolvedPollingPlan>>({});
@@ -201,7 +204,7 @@ export function CaptureProfilesPanel({
   // Starting is intentionally name-only: the daemon reloads the authoritative
   // profile from disk.  Never present an edited draft as the plan that request
   // will launch, and require a save before the button becomes actionable.
-  const plan = active?.active ? active : (selectedProfile ?? draft);
+  const plan = showRunner && active?.active ? active : (selectedProfile ?? draft);
   const hasUnsavedChanges = selectedProfile == null
     || JSON.stringify(draft) !== JSON.stringify(selectedProfile);
   // The daemon refuses these outright, and it is the only moment the value can
@@ -243,17 +246,18 @@ export function CaptureProfilesPanel({
     : resolvedPlans[plan.name];
 
   const togglePause = useCallback(() => {
-    if (!token || !active?.active) return;
+    if (!showRunner || !token || !active?.active) return;
     void run(paused ? "capture resume" : "capture pause", async () => {
       const result = await pauseProfileCapture(token, !paused);
       setOptimistic(result.capture_profile);
     }, { okText: null });
-  }, [token, active?.active, paused, run]);
+  }, [showRunner, token, active?.active, paused, run]);
 
   const togglePauseRef = useRef(togglePause);
   togglePauseRef.current = togglePause;
 
   useEffect(() => {
+    if (!showRunner) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.code !== "Space" || event.repeat) return;
       const target = event.target as HTMLElement | null;
@@ -267,7 +271,7 @@ export function CaptureProfilesPanel({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [showRunner]);
   const mode01Set = useMemo(
     () => new Set("AUTO" in draft.mode01 ? pids : Object.keys(draft.mode01)),
     [draft.mode01, pids],
@@ -277,24 +281,33 @@ export function CaptureProfilesPanel({
 
   /** Latest value of each channel the *running* capture selected. */
   const liveValues = useMemo(() => {
-    if (!active?.active || !channels) return [];
+    if (!showRunner || !active?.active) return [];
     const wanted = [
-      ...Object.keys(active.mode01),
-      ...active.mode22,
-      ...(active.memory ?? []).map((name) => `mem:${name}`),
+      ...(active.mode01_enabled
+        ? Object.keys(active.mode01).map((name) => ({ label: name, key: `obd:${name}` })) : []),
+      ...(active.mode22_enabled
+        ? active.mode22.map((name) => ({ label: `did:${name}`, key: `did:${name}` })) : []),
+      ...(active.mode22_enabled
+        ? (active.memory ?? []).map((name) => ({ label: `mem:${name}`, key: `obd:mem:${name}` })) : []),
     ];
-    return wanted.flatMap((channel) => {
-      const snapshot =
-        channels.get(channel) ?? channels.get(`obd:${channel}`) ?? channels.get(`did:${channel}`);
-      if (!snapshot) return [];
-      const value = snapshot.latest.value;
-      return [{
-        channel,
-        value: typeof value === "number" ? value.toFixed(2) : String(value ?? "—"),
-        unit: snapshot.latest.unit ?? "",
-      }];
+    const startedAt = active.started_at ? Date.parse(active.started_at) : NaN;
+    return wanted.map(({ label, key }) => {
+      const snapshot = channels?.get(key) ?? channels?.get(label);
+      const sampleAt = snapshot?.latest.timestamp ? Date.parse(snapshot.latest.timestamp) : NaN;
+      const current = snapshot && (
+        !Number.isFinite(startedAt) || !Number.isFinite(sampleAt) || sampleAt >= startedAt
+      );
+      const value = current ? snapshot.latest.value : null;
+      return {
+        channel: label,
+        value: current
+          ? (typeof value === "number" ? value.toFixed(2) : String(value ?? "—"))
+          : "Waiting for sample",
+        unit: current ? (snapshot.latest.unit ?? "") : "",
+      };
     });
-  }, [active?.active, active?.mode01, active?.mode22, active?.memory, channels]);
+  }, [showRunner, active?.active, active?.started_at, active?.mode01_enabled, active?.mode01,
+    active?.mode22_enabled, active?.mode22, active?.memory, channels]);
 
   const togglePid = (channel: string) => {
     const next = "AUTO" in draft.mode01
@@ -332,12 +345,30 @@ export function CaptureProfilesPanel({
       setSelectedName(result.profile.name);
     }, { then: refresh });
 
+  const profilePicker = (
+    <Field
+      label="Profile"
+      hint={authoring && showRunner ? "picks what runs — and what the editor below shows"
+        : authoring ? "choose a profile to edit" : "choose the saved schema for this log"}
+    >
+      <select
+        className={`${inputClass} mt-1 w-56`}
+        value={selectedName}
+        disabled={transitioning}
+        onChange={(event) => setSelectedName(event.target.value)}
+      >
+        {profiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}
+      </select>
+    </Field>
+  );
+
   return (
     <section className={`${panelClass} flex flex-col gap-4`}>
       <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Capture profiles</h2>
+        <h2 className={panelTitleClass}>{authoring ? "Capture profiles" : "Logging"}</h2>
         <span className={active?.active ? "text-warn" : "text-fg-dim"}>
-          {active?.active ? `active: ${active.name}` : "default collection"}
+          {active?.active ? `active: ${active.name}`
+            : active?.name === "default" ? "default collection" : "status unavailable"}
         </span>
       </header>
       <Notice notice={notice} />
@@ -346,12 +377,22 @@ export function CaptureProfilesPanel({
         <p className="text-sm text-bad">No capture profiles — the catalog failed to load.</p>
       )}
 
+      {authoring && !showRunner && (
+        <>
+          <p className="text-sm text-fg-dim">
+            Define the default collection and temporary logging schemas here. Start a log from Engine Tuning → Logging.
+          </p>
+          <div className="flex flex-wrap gap-2">{profilePicker}</div>
+        </>
+      )}
+
       {/* Running a capture and authoring a profile are different jobs that
           shared one button row, which is what made "New" ambiguous. They are
           now separate blocks with the relationship stated once. */}
+      {showRunner && (
       <div className="rounded border border-border p-3" data-testid="capture-controls">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold">Run a capture</span>
+          <span className="text-sm font-semibold">Run a log</span>
           <span
             className={
               phase === "recording" ? "rounded bg-ok/15 px-2 py-0.5 text-xs font-semibold text-ok"
@@ -369,26 +410,13 @@ export function CaptureProfilesPanel({
               : phase === "resuming" ? "Resuming…"
               : phase === "recording" ? "Recording"
               : phase === "paused" ? "Paused"
-              : "Not capturing"}
+              : active?.name === "default" ? "Default collection active" : "Collection status unavailable"}
           </span>
           {active?.active && <span className="text-xs text-fg-dim">{active.name}</span>}
         </div>
 
         <div className="mt-2 flex flex-wrap items-end gap-2">
-          <Field label="Profile" hint="picks what runs — and what the editor below shows">
-            {/* Left usable during a capture: it also drives the editor below,
-                and locking it would stop the operator preparing the next
-                profile while one runs. What is *running* is the badge above,
-                which names the active profile independently. */}
-            <select
-              className={`${inputClass} mt-1 w-56`}
-              value={selectedName}
-              disabled={transitioning}
-              onChange={(event) => setSelectedName(event.target.value)}
-            >
-              {profiles.map((profile) => <option key={profile.name}>{profile.name}</option>)}
-            </select>
-          </Field>
+          {profilePicker}
           <Field
             label="Tune revision"
             hint={selectedProfile?.requires_tune_revision ? "required by this profile" : "optional"}
@@ -433,10 +461,11 @@ export function CaptureProfilesPanel({
           )}
         </div>
       </div>
+      )}
 
       {/* The contract verdict for the capture that just ended. Absent means no
           sidecar was written — unknown, never a pass. */}
-      {lastVerdict && (
+      {showRunner && lastVerdict && (
         <div
           className={`rounded border p-3 text-sm ${
             lastVerdict.verdict === "pass"
@@ -507,6 +536,8 @@ export function CaptureProfilesPanel({
               <span>{plan.behavior_model_recipes.length} behavior-model recipes allowed</span>
             )}
           </div>
+          {mode01Count > 0 && <p className="mt-2 text-xs text-fg-dim">Mode 01: {Object.keys(plan.mode01).join(", ")}</p>}
+          {mode22Count > 0 && <p className="mt-2 text-xs text-fg-dim">Mode 22: {plan.mode22.join(", ")}</p>}
           {memoryCount > 0 && (
             <p className="mt-2 text-xs text-fg-dim">
               RAM reads (service 0x23): {(plan.memory ?? []).join(", ")}
@@ -537,12 +568,12 @@ export function CaptureProfilesPanel({
         </div>
       )}
 
-      {!active?.active && hasUnsavedChanges && draft.name !== "default" && (
+      {showRunner && !active?.active && hasUnsavedChanges && draft.name !== "default" && (
         <p className="text-xs text-warn">Save this profile before starting it.</p>
       )}
       {/* Advisory, never a gate (operator decision 2026-08-10). The capture
           runs either way; this only says what is lost by leaving it blank. */}
-      {!active?.active && needsTuneRevision && (
+      {showRunner && !active?.active && needsTuneRevision && (
         <p className="text-xs text-fg-dim">
           No tune revision entered. {selectedProfile?.name} records fuelling or timing, which is
           only interpretable against the calibration in force — the capture will run, but it
@@ -550,7 +581,7 @@ export function CaptureProfilesPanel({
         </p>
       )}
 
-      {active?.active && (
+      {showRunner && active?.active && (
         <div className="rounded border border-border p-2">
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-sm">
             <span className={paused ? "font-semibold text-warn" : "font-semibold text-ok"}>

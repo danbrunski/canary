@@ -31,8 +31,8 @@ const OLD_ITEM_ROUTES = {
   "control-main": "system-control",
   "control-test": "system-test",
   "control-profiles": "system-profiles",
-  "control-capture": "tuning-capture-profiles",
-  "system-capture-profiles": "tuning-capture-profiles",
+  "control-capture": "system-capture-profiles",
+  "tuning-capture-profiles": "system-capture-profiles",
   "control-power": "system-power",
 } as const;
 

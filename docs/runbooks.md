@@ -70,7 +70,8 @@ confirmation step, and no automatic rescan. Task 6.5 is what adds those.
   `tools/scan_constant_dids.py --session C0` sweeps the `10 C0` DID space;
   `data/dids.yaml` + `src/decode/dids.py` decode known DIDs.
 - **First-class live DID and RAM telemetry profiles + dashboard switching:** available
-  under Engine Tuning → Capture Profiles. Profiles are data: `data/capture_profiles.yaml`
+  under System → Capture Profiles. Start and stop a selected profile under
+  Engine Tuning → Logging. Profiles are data: `data/capture_profiles.yaml`
   holds the starters a new vehicle is seeded with (`fuel-map`, `tuning-did`),
   and each vehicle's own catalog is authoritative from then on. The Xterra runs
   `tuning`, a hybrid that uses the confirmed `10 81` fast exit to alternate

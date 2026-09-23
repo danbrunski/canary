@@ -40,10 +40,24 @@ describe("Workbench navigation", () => {
     }
   });
 
-  it("places Capture Profiles under Engine Tuning", () => {
+  it("places Capture Profiles under System", () => {
     renderAt("observe-charts");
     expect(screen.getByRole("button", { name: "Capture Profiles" }).closest("div"))
-      .toHaveTextContent("Engine Tuning");
+      .toHaveTextContent("System");
+  });
+
+  it("separates profile editing from the Logging run controls", () => {
+    const editor = renderAt("system-capture-profiles");
+    expect(screen.getByText(/Define the default collection and temporary logging schemas/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
+    editor.unmount();
+
+    renderAt("tuning-logging");
+    expect(screen.getByText(/records default telemetry continuously/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "View logs" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
   });
 
   it("renders the active item's panel and switches on navigate", () => {

@@ -34,7 +34,7 @@ Two specific confusions are worth naming:
 | **Engine Tuning** | How is it fuelled and sparked, and what should change? | Logging, Logs, Analysis, ROM Maps, Calibration — see below |
 | **Diagnose** | Is something wrong? | Anomalies, Trouble Codes, Monitors, Drift Trends, TPMS, LLM Assist |
 | **Model** | How are the detectors doing? | Overview, Behavior, Training, **Alert Thresholds**, Drift / Health, Dataset Health |
-| **System** | Plumbing | Data Sources, Sessions, Export, Custom PIDs, Vehicle Profiles, Power / UPS, Control Plane, System |
+| **System** | Plumbing and reusable configuration | Data Sources, Sessions, Export, Custom PIDs, Vehicle Profiles, Capture Profiles, Power / UPS, Control Plane, System |
 
 `Models › Tuning` is renamed **Alert Thresholds** so the word *tuning* means
 one thing in this product.
@@ -72,6 +72,10 @@ One strip across the top of every Engine Tuning page:
 **Logging** — start and stop a capture. Profile picker with each profile's
 channel list and requested rates; once running, per-channel achieved rate,
 timeouts and NRCs.
+The daemon records with the configurable `default` profile between captures.
+Capture Profiles under System owns profile creation and editing; Logging only
+selects and runs a saved profile. Stopping a capture closes its isolated log
+and restores `default` collection.
 Tap-to-tag for physical actions (pull start/end, steady hold). Arming the UPS
 keepalive is a control on this page rather than a trip to Power / UPS.
 A capture ending for any reason other than the operator stopping it — a daemon

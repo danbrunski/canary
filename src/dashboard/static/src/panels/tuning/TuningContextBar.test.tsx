@@ -262,7 +262,6 @@ describe("Workbench renders the bar on Engine Tuning pages", () => {
   it("shows the bar on every tuning-* route loaded directly, and nowhere else", () => {
     for (const item of [
       "tuning-logging",
-      "tuning-capture-profiles",
       "tuning-logs",
       "tuning-analysis",
       "tuning-rom-maps",

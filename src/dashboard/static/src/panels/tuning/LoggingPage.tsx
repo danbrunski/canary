@@ -42,11 +42,16 @@ export function LoggingPage({
 
   return (
     <div className="flex flex-col gap-4">
+      <p className="text-sm text-fg-dim">
+        CANary records default telemetry continuously. Starting a log switches to the selected
+        profile and opens a separate capture. Stop closes that log and restores default collection.
+      </p>
       <CaptureProfilesPanel
         token={token}
         status={status}
         channels={channels}
         authoring={false}
+        showRunner
       />
       {status?.vehicle_state?.state === "ignition_only" && (
         <p className="text-sm text-fg-dim">
@@ -88,13 +93,10 @@ export function LoggingPage({
 
       <PowerPanel token={token} />
 
-      <button
-        type="button"
-        className={`${buttonClass} self-start`}
-        onClick={() => onNavigate("tuning-capture-profiles")}
-      >
-        Edit capture profiles
-      </button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} onClick={() => onNavigate("tuning-logs")}>View logs</button>
+        <button type="button" className={buttonClass} onClick={() => onNavigate("system-capture-profiles")}>Edit profiles in System</button>
+      </div>
     </div>
   );
 }
