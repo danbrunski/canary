@@ -83,6 +83,13 @@ REASON_CHILD_FAILED = "child_failed"
 #: multi-gigabyte work a second time inside the unit's stop deadline, and so
 #: the next start can tell "interrupted" from "never attempted".
 REASON_INTERRUPTED_AT_SHUTDOWN = "interrupted_at_shutdown"
+#: No usable speed source could see the drive end (D03.29): speed was lost
+#: while moving for the whole trip-end window, or the session ended with no
+#: trip edge and a blind stretch at least that long. The trip-end hook never
+#: fired, so nothing was attempted; this says why. The detail names each
+#: source and how many readings it gave. A digest requested later still
+#: computes, and clears this.
+REASON_NO_SPEED_SOURCE = "no_speed_source"
 
 #: How many entries to keep in the compact "top movers" / "top deviations"
 #: lists — a digest is meant to be skimmed (and pushed through a
@@ -123,6 +130,13 @@ class SessionDigest:
     #: evidence and never alerts. Kept apart so no reader can add them to the
     #: alert count.
     evidence_counts_by_source: dict[str, int] = field(default_factory=dict)
+    #: D03.29 — the trip this digest closes, when the trip-end edge produced
+    #: it: start/stop times and every session the trip spanned, ordered by
+    #: parsed start time (``src.control.trip_end.trip_block``). The digest's
+    #: statistics cover *this* session only; the block is what keeps a
+    #: capture started mid-drive, or a restart, from silently dropping the
+    #: rest of the drive. ``None`` for an on-demand or shutdown-less digest.
+    trip: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +152,7 @@ class SessionDigest:
             "new_dtcs": list(self.new_dtcs),
             "new_ledger_events": list(self.new_ledger_events),
             "tuning": self.tuning,
+            "trip": self.trip,
         }
 
 
@@ -589,6 +604,7 @@ __all__ = [
     "REASON_CHILD_OUT_OF_MEMORY",
     "REASON_CHILD_TIMED_OUT",
     "REASON_NOT_A_SESSION",
+    "REASON_NO_SPEED_SOURCE",
     "REASON_OVER_ROW_BUDGET",
     "SCHEMA_VERSION",
     "SKIP_SCHEMA_VERSION",

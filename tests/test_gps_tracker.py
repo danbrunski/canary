@@ -95,12 +95,13 @@ def test_trip_ended_edge_fires_after_sustained_stationary() -> None:
     """Task 5.4: moving -> stationary sustained for the configured window
     fires the edge exactly once."""
     tracker = GpsTracker(trip_end_stationary_seconds=60.0)
-    assert tracker.observe(_speed(0.0, 40.0)) is False  # start moving
-    assert tracker.observe(_speed(10.0, 0.0)) is False  # stop — sustain clock starts
-    assert tracker.observe(_speed(30.0, 0.0)) is False  # only 20s stationary so far
-    assert tracker.observe(_speed(71.0, 0.0)) is True  # 61s stationary -> edge fires
+    assert tracker.observe(_speed(0.0, 40.0)) is None  # start moving
+    assert tracker.observe(_speed(10.0, 0.0)) is None  # stop — sustain clock starts
+    assert tracker.observe(_speed(30.0, 0.0)) is None  # only 20s stationary so far
+    end = tracker.observe(_speed(71.0, 0.0))  # 61s stationary -> edge fires
+    assert end is not None and end.observed and end.speed_source == "gps:speed"
     # The edge fires exactly once; further stationary ticks don't re-fire.
-    assert tracker.observe(_speed(200.0, 0.0)) is False
+    assert tracker.observe(_speed(200.0, 0.0)) is None
 
 
 def test_trip_ended_edge_requires_prior_motion() -> None:
@@ -108,7 +109,7 @@ def test_trip_ended_edge_requires_prior_motion() -> None:
     (there was no trip to end — e.g. daemon started while parked)."""
     tracker = GpsTracker(trip_end_stationary_seconds=60.0)
     for epoch in (0.0, 30.0, 70.0, 400.0):
-        assert tracker.observe(_speed(epoch, 0.0)) is False
+        assert tracker.observe(_speed(epoch, 0.0)) is None
 
 
 def test_trip_ended_edge_resets_on_renewed_motion() -> None:
@@ -116,10 +117,10 @@ def test_trip_ended_edge_resets_on_renewed_motion() -> None:
     tracker = GpsTracker(trip_end_stationary_seconds=60.0)
     tracker.observe(_speed(0.0, 40.0))
     tracker.observe(_speed(10.0, 0.0))
-    assert tracker.observe(_speed(80.0, 0.0)) is True  # first trip ends
+    assert tracker.observe(_speed(80.0, 0.0)) is not None  # first trip ends
     tracker.observe(_speed(200.0, 40.0))  # moving again — new trip starts
     tracker.observe(_speed(210.0, 0.0))
-    assert tracker.observe(_speed(280.0, 0.0)) is True  # second trip ends
+    assert tracker.observe(_speed(280.0, 0.0)) is not None  # second trip ends
 
 
 def test_brief_stop_does_not_end_trip() -> None:
@@ -127,5 +128,5 @@ def test_brief_stop_does_not_end_trip() -> None:
     tracker = GpsTracker(trip_end_stationary_seconds=60.0)
     tracker.observe(_speed(0.0, 40.0))
     tracker.observe(_speed(10.0, 0.0))
-    assert tracker.observe(_speed(20.0, 0.0)) is False  # only 10s stopped
-    assert tracker.observe(_speed(25.0, 40.0)) is False  # moving again
+    assert tracker.observe(_speed(20.0, 0.0)) is None  # only 10s stopped
+    assert tracker.observe(_speed(25.0, 40.0)) is None  # moving again

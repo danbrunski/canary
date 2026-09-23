@@ -171,7 +171,14 @@ def test_build_status_surfaces_gps_and_trip(config: CanaryConfig) -> None:
     tracker.observe(TelemetryRecord.gps(base, "speed", 36.0, "km/h"))
     tracker.observe(TelemetryRecord.gps(base + 1.0, "speed", 36.0, "km/h"))
 
-    snap = build_status(config, gps_tracker=tracker)
+    with_gps = config.model_copy(
+        update={
+            "hardware": config.hardware.model_copy(
+                update={"gps": config.hardware.gps.model_copy(update={"enabled": True})}
+            )
+        }
+    )
+    snap = build_status(with_gps, gps_tracker=tracker)
     assert snap.gps is not None
     assert snap.gps["fix_quality"] == 1
     assert snap.gps["num_satellites"] == 7
@@ -180,6 +187,24 @@ def test_build_status_surfaces_gps_and_trip(config: CanaryConfig) -> None:
     payload = snap.to_dict()
     assert payload["gps"]["fix_quality"] == 1
     assert payload["trip"]["distance_km"] == pytest.approx(0.01, abs=1e-6)
+
+
+def test_build_status_hides_gps_and_trip_when_gps_is_disabled(config: CanaryConfig) -> None:
+    """D03.29: a GPS-less install still has a tracker (trip ends come from
+    vehicle speed), but its GPS-integrated odometer means nothing there --
+    /status reports it absent, not as 0 km."""
+    from src.analysis.gps_tracker import GpsTracker
+
+    no_gps = config.model_copy(
+        update={
+            "hardware": config.hardware.model_copy(
+                update={"gps": config.hardware.gps.model_copy(update={"enabled": False})}
+            )
+        }
+    )
+    snap = build_status(no_gps, gps_tracker=GpsTracker())
+    assert snap.gps is None
+    assert snap.trip is None
 
 
 def test_read_bindings_for_display_returns_empty_when_file_missing(tmp_path: Path) -> None:

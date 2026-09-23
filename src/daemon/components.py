@@ -203,7 +203,9 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
         capture_controller=None,
         job_controller=_make_job_controller(config),
         gps_tracker=(
-            GpsTracker(state_path=config.daemon.trip_state) if config.hardware.gps.enabled else None
+            # D03.29: built whether or not GPS is enabled -- trip ends come
+            # from vehicle speed first, so a GPS-less install still digests.
+            GpsTracker(state_path=config.daemon.trip_state)
         ),
         idle_shutdown=(
             IdleShutdownMonitor.from_config(config.collection.idle_shutdown)

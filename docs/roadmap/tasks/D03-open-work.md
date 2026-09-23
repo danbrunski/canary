@@ -1378,23 +1378,150 @@ live here now, so the documents could be archived
   - [ ] Verify on the Pi while collecting: a `since`-bounded request answers in
     < 1 s and the poller shows no missed ticks around it.
 
-- [ ] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
-  never ends a trip and the trip-end digest never runs.** On 2026-09-23 the GPS
+- [~] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
+  never ends a trip and the trip-end digest never runs.** *(Fix landed; the
+  no-fix investigation remains; it needs the truck.)* On 2026-09-23 the GPS
   reported `fix_quality` 0 on all 3,278 samples of a 27-min drive (14:29–14:56Z),
   then had a fix (8 satellites, HDOP 1.16) parked at 15:05Z. `drain_gps` feeds
   `GpsTracker.observe`, which only acts on `gps:speed` rows, so no trip started,
   none ended, and no `digest.json` or `digest_skipped.json` was written. Road speed
   was on the bus the whole time: `decoded:WHEEL_SPEED_6F7_A` is persisted with a
   pinned km/h scale. Trip distance is GPS-integrated too, so it was also lost.
-  - [ ] Detect the moving → stationary edge from a vehicle speed source that does
+  - [x] Detect the moving → stationary edge from a vehicle speed source that does
     not depend on sky view. Keep it vehicle-agnostic: take the source from the
     profile/bindings (Mode 01 PID 0x0D, or a binding declared as road speed), not
     a hard-coded Xterra CAN id. GPS stays a fallback, not the only input.
-  - [ ] A drive that ends with no usable speed source writes `digest_skipped.json`
+    **Done for every install with a tracker:** `Signal.quantity: road_speed` in
+    `src/decode/bindings.py` (schema refuses an unscaled/non-km/h declaration and
+    two declarations); `data/bindings.yaml` declares it on `WHEEL_SPEED_6F7_A` (the
+    field pinned 1:1 to `obd:SPEED` in the ground-truth fixture). `GpsTracker`
+    reads fresh vehicle speed (`obd:SPEED`, or the declared binding decoded from
+    its raw frame, decimated to 2 Hz in `GpsTracker.accepts`) before GPS; silence
+    after a stop (key-off) still ends the trip. No CAN id in shared code.
+    The edge lands on the session the stop was seen in: `run_gps_sink` follows
+    `active_session_path` before every record and idle tick and tells the tracker
+    (`GpsTracker.enter_session`); the tracker stamps the stop with its session and
+    `TripEnd.session` routes the digest there, whenever the edge fires (verifier
+    repro: stop, total silence, key cycle, one 0 km/h frame — pre-fix semantics
+    digested the *new* session, now the first). A rotation no longer ends a trip
+    (see the multi-session sub-box below). An idle queue calls `GpsTracker.tick`, so key-off silence ends a
+    stopped trip on time with no rows at all (GPS-less, or a receiver that emits
+    nothing). The tick never compares `time.time()` with collector timestamps: its
+    time is the last live record's timestamp plus *monotonic* seconds since that
+    record arrived, so a wall-clock step (chrony, a GPS time fix) cannot end or
+    split a trip (`::test_a_record_clock_far_from_the_wall_clock_cannot_end_a_trip_by_tick`;
+    `::test_key_off_silence_ends_the_trip_on_the_idle_tick`). Residual: a trip
+    end still rests on collector timestamps between *records*, so a ≥300 s step
+    inside the record stream while stopped could end a trip early. A digest
+    computed later clears any refusal, but an early digest makes that session's
+    real trip end return "already handled". Replay output (`_replay-*`) suspends the live
+    trip and resumes it after; nothing is reported for a replay directory, and a
+    replay cut off mid-drive leaves no "moving" state behind for the live
+    session. Tests: `::test_a_stop_then_silence_is_digested_on_its_own_session_not_the_next`,
+    `::test_a_stopped_trip_ends_on_the_session_its_stop_was_seen_in`,
+    `::test_close_session_leaves_a_moving_trip_open`,
+    `::test_tick_ends_a_stopped_trip_through_silence`,
+    `::test_a_replay_is_isolated_from_the_live_trip`,
+    `::test_the_sink_reports_nothing_for_a_replay_and_resumes_the_live_trip`. Tests:
+    `tests/test_trip_speed_sources.py::test_wheel_speed_with_no_gps_fix_ends_the_trip`,
+    `::test_mode01_vehicle_speed_alone_ends_the_trip`,
+    `::test_fresh_vehicle_speed_outranks_gps`,
+    `::test_gps_still_ends_a_trip_when_there_is_no_vehicle_speed`,
+    `::test_the_repo_declares_exactly_one_road_speed_binding_with_a_pinned_scale`,
+    `::test_a_road_speed_declaration_that_cannot_read_km_h_is_refused`,
+    `::test_two_bindings_cannot_both_be_the_road_speed`. Offline on stored drives
+    with every `gps:speed` row removed: `2026-09-18T134345` ends at +1051 s and
+    `2026-09-18T160921` at +880 s / +1673 s on `can:WHEEL_SPEED_6F7_A`, the same
+    edges as with GPS present; the HEAD tracker sees 0 edges on the test's no-fix
+    drive. The tracker is now built whether or not `hardware.gps.enabled`
+    (`src/daemon/components.py`;
+    `tests/test_daemon.py::test_build_components_builds_a_trip_tracker_without_gps`),
+    and `/status` reports `gps`/`trip` as absent on a GPS-less install rather than
+    a 0 km GPS odometer
+    (`tests/test_dashboard_api.py::test_build_status_hides_gps_and_trip_when_gps_is_disabled`).
+    Trip distance deliberately stays GPS-only
+    (`::test_vehicle_speed_never_reaches_the_gps_odometer`): the 0x6F7 binding's
+    own notes forbid absolute distance from it (~8 % under-read vs GPS), and
+    `obd:SPEED` shares the under-read.
+  - [x] A drive that ends with no usable speed source writes `digest_skipped.json`
     naming that cause, rather than nothing. An empty result says which kind of
-    empty it is.
-  - [ ] Test: a session with wheel speed and no GPS fix ends a trip and runs the
+    empty it is. New reason `no_speed_source` (`src/analysis/digest.py`), written by
+    `src.control.trip_end.record_trip_end_unobservable` in two cases: speed lost
+    while moving for the whole trip-end window, and a session that rotates away
+    (key cycle, capture boundary) with no trip edge and a blind stretch that long
+    — the 2026-09-23 shape. *Blind* means no usable speed from session start, or
+    none since a reading of motion; silence after a stationary reading is "no trip
+    happened", not blind, and idle ticks are not records. So a quiet driveway or
+    garage session is never reported as "could not see"
+    (`::test_a_quiet_session_that_never_moved_is_not_reported_as_blind`,
+    `::test_close_session_after_ticks_on_a_parked_session_is_none`,
+    `::test_silence_after_motion_is_still_blind_at_rotation`). The detail inventories every source (`obd:SPEED`,
+    `gps:speed`, the declared binding or "no binding declares quantity:
+    road_speed", fix-quality rows with a fix). Never replaces a digest or a more
+    specific refusal, never writes into `_replay-*`; a later digest clears it.
+    Tests: `::test_speed_lost_while_moving_ends_the_trip_as_unobservable`,
+    `::test_a_session_blind_for_the_window_closes_as_unobservable`,
+    `::test_a_session_whose_trip_ended_or_that_was_watched_closes_quietly`,
+    `::test_record_trip_end_unobservable_writes_the_refusal_once`,
+    `::test_record_trip_end_unobservable_never_shadows_a_digest_or_a_replay`,
+    `::test_a_rotated_session_nobody_could_see_reports_no_speed_source` (real
+    drain + writer rotation).
+  - [x] Test: a session with wheel speed and no GPS fix ends a trip and runs the
     digest.
+    `tests/test_trip_speed_sources.py::test_a_session_with_wheel_speed_and_no_gps_fix_ends_a_trip_and_runs_the_digest`
+    — raw road-speed frames plus `fix_quality` 0 rows through the real
+    `drain_queue_with_broadcast` and `ParquetTelemetryWriter`; `on_trip_ended`
+    fires once for the session, `handle_trip_end_off_loop` writes `digest.json`,
+    no `digest_skipped.json`.
+  - [x] A trip can span several sessions (a capture started or stopped mid-drive,
+    a daemon restart), and the digest must land on the drive, never on a parked
+    session the trip never touched. Live finding (canary-17, 2026-09-23): with a
+    tuning capture open through the drive, the GPS edge fired at 16:57:33Z, 300 s
+    after the stop, and digested `2026-09-23T165316`, the 257 s parked `default`
+    session the writer rotated to when the capture stopped at ~16:53:16; the drive
+    in `_capture-tuning-2026-09-23T164007` got no digest.
+    **Decision: digest the session the trip ended in, and name every session it
+    spanned.** The tracker records each session it sees the trip moving in, plus
+    the stop's session; `TripEnd.session` is where the stop was seen (or where the
+    vehicle was last seen moving, if speed was lost). `handle_trip_end_off_loop(...,
+    trip=)` writes a `trip` block into `digest.json` with `started_at`, `stopped_at`,
+    `speed_source`, `end_session`, and `sessions`, captures included, ordered by
+    `src.control.sessions.session_started_at`, never by name. `coverage` is
+    `end_session_only` when the trip spanned more than one session: the digest's
+    statistics cover the end session only, and the block keeps the rest from being
+    silently dropped. A multi-session digest (statistics over every spanned
+    session) was not built; it would need `compute_digest` to load several
+    sessions. The shutdown fallback is trip-aware too (`runtime.shutdown_trip_target`):
+    an open trip is digested on its own session with its block. With no open
+    trip, a session that showed no motion gets no fallback digest once the
+    tracker has read speed at any point since start (process-lifetime, replays
+    excluded). That covers the no-fix variant the round-3 verifier found:
+    edge fired on wheel speed in the capture, then a parked session with only
+    no-fix `fix_quality` rows, or nothing at all, then shutdown. Before the fix
+    that session got a near-empty `digest.json`, the live finding again. It
+    gets no refusal either: once speed has been readable since start, a session
+    that never produced a usable reading is a key-off parked session ("no trip
+    happened"), not a blind one, so `close_session` files nothing for it at a
+    rotation or at shutdown (`::test_a_key_off_parked_session_is_no_trip_not_a_blind_one`).
+    A `no_speed_source` refusal stays for a session blind after motion and for
+    an install that has never read speed. Only an install that has
+    never read speed keeps the old digest-the-active-session behaviour. `_capture-*` directories
+    digest normally (`is_session_dir_name` includes captures).
+    Tests: `::test_a_capture_stopped_after_the_stop_digests_the_capture_not_the_parked_session`
+    (the live sequence through `run_gps_sink`: `ended == [capture]`),
+    `::test_a_trip_spanning_a_capture_boundary_names_every_session`,
+    `::test_the_trip_block_orders_sessions_by_start_time_not_name`,
+    `::test_a_capture_session_digests_with_its_trip_block` (real digest on a
+    `_capture-tuning-*` dir, `trip` block written),
+    `::test_the_shutdown_fallback_digests_the_open_trip_not_the_active_session`,
+    `::test_the_shutdown_fallback_skips_a_parked_session_the_trip_never_touched`,
+    `::test_the_shutdown_fallback_keeps_digesting_what_it_cannot_read`,
+    `::test_the_shutdown_fallback_skips_a_parked_session_with_no_fix_after_the_trip_ended`,
+    `::test_the_shutdown_fallback_skips_a_silent_parked_session_after_the_trip_ended`,
+    `::test_the_shutdown_fallback_still_digests_a_session_that_moved`,
+    `::test_replayed_speed_does_not_make_an_install_readable`.
+    Known limit: a session holds one `digest.json`, so a second trip ending in a
+    session that already has one is still skipped as "already handled".
   - [ ] Unexplained, separate from the fix: why the receiver held no fix for the
     whole drive after being powered all night. Check the next drive's first
     minutes; if it repeats, it is a hardware or antenna question for the operator.

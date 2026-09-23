@@ -35,6 +35,10 @@ class Evidence(_Strict):
     finding: str
 
 
+#: Engineering unit each declarable :attr:`Signal.quantity` is read in.
+QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
+
+
 class Signal(_Strict):
     """A signal binding: where in a CAN frame the value lives + how to decode it.
 
@@ -112,8 +116,49 @@ class Signal(_Strict):
     #: it should be. The name is validated against the file, so a rename or
     #: a typo cannot leave a dangling pointer.
     superseded_by: str | None = None
+    #: The physical quantity shared code may read this binding *as*, when a
+    #: consumer needs "the vehicle's X" without naming a vehicle's CAN id.
+    #:
+    #: ``road_speed`` (D03.29): the source the trip tracker uses to see the
+    #: moving -> stationary edge without sky view. On 2026-09-23 the GPS had no
+    #: fix for a whole 27-minute drive and, because trip end was read from
+    #: ``gps:speed`` alone, no trip started, none ended and no digest was
+    #: written, while road speed sat on the bus the entire time. Declaring it
+    #: here — rather than a CAN id in :mod:`src.analysis.gps_tracker` — keeps the
+    #: shared code vehicle-agnostic. Motion edges only: a road-speed binding
+    #: that under-reads true ground speed (tyre size, final drive) is fine for
+    #: "is it moving" and wrong for distance, so nothing integrates it.
+    #:
+    #: A declared quantity must decode to engineering units (pinned ``scale``,
+    #: the unit the quantity is read in) and may be declared by one live
+    #: binding only — see :class:`Bindings`.
+    quantity: Literal["road_speed"] | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
+
+    @model_validator(mode="after")
+    def _check_quantity_is_readable(self) -> Signal:
+        """A declared quantity must be readable as that quantity.
+
+        Refused rather than skipped at read time: a ``road_speed`` binding
+        with no pinned scale would hand the trip tracker raw counts (16 per
+        km/h on the Xterra's 0x6F7), which read as moving at walking pace.
+        """
+        if self.quantity is None:
+            return self
+        expected_unit = QUANTITY_UNITS[self.quantity]
+        problems: list[str] = []
+        if self.scale is None:
+            problems.append("no pinned scale")
+        if self.unit != expected_unit:
+            problems.append(f"unit {self.unit!r} is not {expected_unit!r}")
+        if self.superseded_by is not None:
+            problems.append(f"superseded by {self.superseded_by}")
+        if problems:
+            raise ValueError(
+                f"{self.name} declares quantity {self.quantity!r} but " + ", ".join(problems)
+            )
+        return self
 
 
 class Bindings(_Strict):
@@ -143,6 +188,31 @@ class Bindings(_Strict):
             rendered = ", ".join(f"{k} -> {v}" for k, v in sorted(dangling.items()))
             raise ValueError(f"superseded_by names no such signal: {rendered}")
         return self
+
+    @model_validator(mode="after")
+    def _check_one_binding_per_quantity(self) -> Bindings:
+        """Each declared ``quantity`` names exactly one binding.
+
+        Three wheel-speed fields and an aggregate speed all read road speed on
+        the Xterra; a consumer asking for "the road speed" must get one answer,
+        chosen in the data file, not whichever the loader met first.
+        """
+        claimed: dict[str, list[str]] = {}
+        for signal in self.signals:
+            if signal.quantity is not None:
+                claimed.setdefault(signal.quantity, []).append(signal.name)
+        doubled = {quantity: names for quantity, names in claimed.items() if len(names) > 1}
+        if doubled:
+            rendered = "; ".join(f"{q}: {', '.join(n)}" for q, n in sorted(doubled.items()))
+            raise ValueError(f"more than one binding declares the same quantity — {rendered}")
+        return self
+
+    def quantity_binding(self, quantity: str) -> Signal | None:
+        """The one binding declared as ``quantity``, or ``None`` if none is."""
+        for signal in self.signals:
+            if signal.quantity == quantity:
+                return signal
+        return None
 
 
 #: Binding confidences a model may train on. `medium` and below are working

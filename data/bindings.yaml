@@ -1321,6 +1321,11 @@ signals:
     # obd:SPEED by ~7% in slope. See `persist` on Signal for why this is not
     # a confidence promotion.
     persist: true
+    # D03.29: the trip tracker's sky-view-independent motion source (the
+    # moving -> stationary trip-end edge). Motion edges only — never distance,
+    # per the under-read noted below. This field is the one pinned 1:1 against
+    # obd:SPEED in tests/fixtures/ground_truth/expectations.yaml.
+    quantity: road_speed
     can_id: 0x6F7
     byte_start: 0
     byte_length: 2

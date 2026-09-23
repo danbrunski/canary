@@ -105,6 +105,20 @@ def test_build_components_creates_anomalies_dir(config: CanaryConfig) -> None:
     assert components.event_logger.directory == config.daemon.anomalies_dir
 
 
+def test_build_components_builds_a_trip_tracker_without_gps(config: CanaryConfig) -> None:
+    """D03.29: trip ends come from vehicle speed first, so a GPS-less install
+    still gets a tracker and still digests its drives."""
+    no_gps = config.model_copy(
+        update={
+            "hardware": config.hardware.model_copy(
+                update={"gps": config.hardware.gps.model_copy(update={"enabled": False})}
+            )
+        }
+    )
+    components = build_components(no_gps, load_models=False)
+    assert components.gps_tracker is not None
+
+
 def test_build_components_constructs_two_broadcasters(config: CanaryConfig) -> None:
     components = build_components(config)
     assert components.telemetry_broadcaster is not components.anomalies_broadcaster

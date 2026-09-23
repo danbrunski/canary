@@ -6,10 +6,10 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.analysis.gps_tracker import GpsTracker
+from src.analysis.gps_tracker import GpsTracker, TripEnd
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
@@ -69,6 +69,24 @@ def accepts_source(source: str) -> Callable[[TelemetryRecord], bool]:
         return record.source == source
 
     return _accepts
+
+
+#: Replay output (``src.control.replay_control``); the trip sink suspends the
+#: live trip while the writer records here.
+_REPLAY_DIR_PREFIX = "_replay-"
+
+
+def _trip_sink_filter(gps_tracker: GpsTracker) -> Callable[[TelemetryRecord], bool]:
+    """The trip sink's subscription: whatever the tracker says it reads.
+
+    The tracker owns the filter because it owns the road-speed binding and
+    the decimation. A stand-in without ``accepts`` gets the pre-D03.29
+    ``gps``-only subscription rather than every record on the bus.
+    """
+    accepts = getattr(gps_tracker, "accepts", None)
+    if callable(accepts):
+        return cast(Callable[[TelemetryRecord], bool], accepts)
+    return accepts_source("gps")
 
 
 def _resolved_live_source(
@@ -350,7 +368,7 @@ async def run_live_source_sink(
             _observe_queue(health_monitor, "live", queue)
 
 
-async def run_gps_sink(
+async def run_gps_sink(  # noqa: PLR0915 — one loop, three event kinds
     queue: asyncio.Queue[TelemetryRecord],
     gps_tracker: GpsTracker,
     stop_event: asyncio.Event,
@@ -358,16 +376,104 @@ async def run_gps_sink(
     poll_interval: float = 0.5,
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
-    on_trip_ended: Callable[[], None] | None = None,
+    on_trip_ended: Callable[[Path | None, TripEnd], None] | None = None,
+    active_session_path: Callable[[], Path] | None = None,
+    on_trip_unobservable: Callable[[Path, TripEnd], None] | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> None:
-    """Feed GPS trip state from its own best-effort queue.
+    """Feed GPS and vehicle-speed trip state from its own best-effort queue.
 
     ``on_trip_ended`` (Task 5.4) fires exactly once per drive, the tick
     ``gps_tracker.observe`` reports the sustained moving->stationary edge —
     best-effort like every other callback here, a broken digest/notifier
-    path must never take down the GPS sink.
+    path must never take down the GPS sink. It is called with the session the
+    trip ended in — :attr:`TripEnd.session`, where the stop was seen, which is
+    often *not* the session active when the edge fires 300 s later — and the
+    end itself (its ``sessions`` name every session the trip spanned).
+    ``None`` only when no ``active_session_path`` is wired.
+
+    Sessions are followed, not looked up at fire time (D03.29).
+    ``active_session_path`` is read before every record and every idle tick;
+    on a rotation the tracker's :meth:`~GpsTracker.close_session` runs first
+    and its answer goes to the session that *ended*. Looking the session up
+    when the edge fired digested whichever session was active by then: a stop
+    followed by silence ended the trip on the next key-on's first record, gave
+    the finished drive no digest, and gave the new session a near-empty one.
+
+    ``on_trip_unobservable`` (D03.29) receives the session and the
+    :class:`~src.analysis.gps_tracker.TripEnd` whenever the tracker could not
+    see a drive end: speed lost while moving for the whole window, or a
+    session that rotated away with no edge and a blind stretch that long. The
+    caller records it as the reason there is no digest, so an absent digest is
+    never silent.
+
+    An idle queue (``poll_interval`` with no record) advances the edge's clock
+    via ``GpsTracker.tick``, so key-off silence ends a stopped trip on time even
+    when nothing at all arrives. The tick's time is the last live record's
+    timestamp plus ``clock()`` (monotonic) elapsed since it arrived — never the
+    wall clock, whose steps (chrony, a GPS time fix) would otherwise end or
+    split a trip; there is no tick before the first live record. Replay output (``_replay-*``)
+    suspends the live trip and resumes it afterwards; nothing is reported for
+    a replay directory.
     """
     queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
+    session_dir: Path | None = None
+    # Stand-ins without the D03.29 surface (tests' sink-filter fakes) still run.
+    tick = getattr(gps_tracker, "tick", None)
+    enter_session = getattr(gps_tracker, "enter_session", None)
+    #: (last live record's timestamp, ``clock()`` when it arrived).
+    anchor: tuple[float, float] | None = None
+
+    def _is_replay(path: Path | None) -> bool:
+        return path is not None and path.name.startswith(_REPLAY_DIR_PREFIX)
+
+    def _route(end: TripEnd | None, current: Path | None) -> None:
+        if not end:
+            return
+        # The end names its own session; "current" is only the fallback.
+        path = end.session if end.session is not None else current
+        if _is_replay(path):
+            return
+        if end.observed:
+            if on_trip_ended is None:
+                return
+            try:
+                on_trip_ended(path, end)
+            except Exception:  # noqa: BLE001 — digest/notify is best-effort
+                log.exception("on_trip_ended failed")
+        elif path is not None and on_trip_unobservable is not None:
+            try:
+                on_trip_unobservable(path, end)
+            except Exception:  # noqa: BLE001 — the refusal record is best-effort
+                log.exception("on_trip_unobservable failed")
+
+    def _follow_session() -> None:
+        nonlocal session_dir
+        if active_session_path is None:
+            return
+        current = active_session_path()
+        previous = session_dir
+        session_dir = current
+        if previous is None:
+            if callable(enter_session):
+                enter_session(current)
+            return
+        if current == previous:
+            return
+        if _is_replay(previous):
+            # Leaving a replay: its trip state is another drive's; drop it.
+            if not _is_replay(current):
+                gps_tracker.resume()
+        else:
+            # A real session ended (the writer never returns to it — a replay
+            # exits into a fresh live session too). Explain it if it was blind;
+            # an open trip carries on and names its own session when it ends.
+            _route(gps_tracker.close_session(), previous)
+            if _is_replay(current):
+                gps_tracker.suspend()
+        if callable(enter_session):
+            enter_session(current)
+
     try:
         while not stop_event.is_set() or not queue.empty():
             queue_monitor.observe(queue)
@@ -375,19 +481,25 @@ async def run_gps_sink(
             try:
                 record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
             except TimeoutError:
+                if callable(tick) and anchor is not None:
+                    try:
+                        _follow_session()
+                        _route(tick(anchor[0] + (clock() - anchor[1])), session_dir)
+                    except Exception as exc:  # noqa: BLE001 — trip state is best-effort
+                        _note_error(health_monitor, "gps", exc)
+                        log.exception("gps_tracker.tick failed")
                 continue
 
             try:
-                trip_ended = gps_tracker.observe(record)
+                _follow_session()
+                if not _is_replay(session_dir):
+                    anchor = (record.timestamp.timestamp(), clock())
+                trip_end = gps_tracker.observe(record)
             except Exception as exc:  # noqa: BLE001 — odometer is best-effort
                 _note_error(health_monitor, "gps", exc)
                 log.exception("gps_tracker.observe failed; skipping record")
             else:
-                if trip_ended and on_trip_ended is not None:
-                    try:
-                        on_trip_ended()
-                    except Exception:  # noqa: BLE001 — digest/notify is best-effort
-                        log.exception("on_trip_ended failed")
+                _route(trip_end, session_dir)
             finally:
                 queue.task_done()
                 queue_monitor.observe(queue)
@@ -506,6 +618,8 @@ async def drain_queue_with_broadcast(
     vehicle_ledger: VehicleLedgerStore | None = None,
     active_session_path: Callable[[], Path] | None = None,
     on_trip_ended: Callable[[Path], None] | None = None,
+    on_trip_complete: Callable[[Path, TripEnd], None] | None = None,
+    on_trip_unobservable: Callable[[Path, TripEnd], None] | None = None,
     poll_interval: float = 0.5,
     storage_path: Path | None = None,
     storage_warning_mb: int | None = None,
@@ -519,12 +633,18 @@ async def drain_queue_with_broadcast(
     recording sink, but it is no longer the dispatcher for live inference.
 
     Sink subscriptions (C07.6): storage, broadcast and live receive every
-    record. The GPS sink only receives ``gps`` records (``GpsTracker.observe``
-    returns on any other source), and the DTC and monitor sinks only ``obd``
+    record. The GPS (trip) sink only receives what ``GpsTracker.accepts``
+    names — ``gps`` records, Mode 01 vehicle speed, and the declared
+    road-speed frame decimated to 2 Hz (D03.29) — and the DTC and monitor sinks only ``obd``
     records (``DtcState.observe`` / ``MonitorState.observe`` return on any
     other source) — so raw CAN frames, the bulk of ingest on a live bus, are
     not enqueued to three queues that would discard them unread. Loss
     semantics are unchanged: the storage sink still drops newest and counts.
+
+    Trip ends (D03.29): ``on_trip_complete(session_dir, trip_end)`` receives
+    the session the trip ended in plus the :class:`TripEnd` (spanned sessions,
+    start and stop times) and is what the daemon wires; ``on_trip_ended``
+    (session only) is used when ``on_trip_complete`` is not given.
 
     ``live_source_ready`` stands in for ``live_source`` when the source is
     still being built: storage and the other sinks run at once, and the live
@@ -613,11 +733,19 @@ async def drain_queue_with_broadcast(
 
     if gps_tracker is not None:
         gps_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("gps", gps_queue, "drop_oldest", accepts=accepts_source("gps")))
+        sinks.append(
+            TelemetrySink("gps", gps_queue, "drop_oldest", accepts=_trip_sink_filter(gps_tracker))
+        )
 
-        def _trip_ended() -> None:
-            if on_trip_ended is not None and active_session_path is not None:
-                on_trip_ended(active_session_path())
+        def _trip_ended(session_dir: Path | None, end: TripEnd) -> None:
+            if session_dir is None:
+                if active_session_path is None:
+                    return
+                session_dir = active_session_path()
+            if on_trip_complete is not None:
+                on_trip_complete(session_dir, end)
+            elif on_trip_ended is not None:
+                on_trip_ended(session_dir)
 
         sink_tasks.append(
             asyncio.create_task(
@@ -629,6 +757,8 @@ async def drain_queue_with_broadcast(
                     queue_warning_fraction=queue_warning_fraction,
                     health_monitor=health_monitor,
                     on_trip_ended=_trip_ended,
+                    active_session_path=active_session_path,
+                    on_trip_unobservable=on_trip_unobservable,
                 )
             )
         )

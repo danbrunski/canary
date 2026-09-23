@@ -12,6 +12,11 @@ view:
 * Daemon shutdown (the fallback — the drive ends because the Pi lost power
   or was shut down mid-trip, with no clean GPS-detected stop first).
 
+The tracker's edge reads vehicle speed before GPS (D03.29). When no usable
+speed source could see a drive end at all, :func:`record_trip_end_unobservable`
+writes a ``no_speed_source`` refusal instead, so the session says why it has
+no digest rather than looking like one nobody got round to.
+
 Idempotent either way: a session that already has a ``digest.json`` is
 treated as already handled, so the fallback firing after the GPS edge
 already ran (or vice versa) never double-computes or double-notifies.
@@ -49,6 +54,7 @@ from a session nobody got round to.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import functools
 import logging
 import os
@@ -64,6 +70,7 @@ from src.analysis.digest import (
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
     REASON_INTERRUPTED_AT_SHUTDOWN,
+    REASON_NO_SPEED_SOURCE,
     SKIP_SCHEMA_VERSION,
     DigestSkipped,
     SessionDigest,
@@ -72,6 +79,7 @@ from src.analysis.digest import (
     get_or_compute_digest,
     persist_digest,
     read_digest,
+    read_digest_skipped,
     write_digest_skipped,
 )
 from src.config import CanaryConfig
@@ -82,6 +90,7 @@ from src.timefmt import format_timestamp
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.notifier import Notifier
+    from src.analysis.gps_tracker import TripEnd
 
 log = logging.getLogger(__name__)
 
@@ -323,10 +332,45 @@ def any_digest_in_flight() -> bool:
     return bool(_IN_FLIGHT)
 
 
+def trip_block(trip: TripEnd, session_dir: Path) -> dict[str, Any]:
+    """The digest's ``trip`` block (D03.29): what the trip spanned.
+
+    Decision: a trip that spans several sessions (a capture started or
+    stopped mid-drive, a daemon restart) is digested **on the session it
+    ended in** — where the stop was seen — and this block names every session
+    it touched, captures included, ordered by
+    :func:`src.control.sessions.session_started_at` (never by directory name:
+    ``_capture-…`` sorts before every live session by string). The digest's
+    statistics (modes, anomalies, fingerprint) cover that one session;
+    ``coverage`` says so, so no reader mistakes them for the whole drive.
+    """
+    from src.control.sessions import session_started_at
+
+    never = datetime.max.replace(tzinfo=UTC)
+    spanned = sorted(
+        {*trip.sessions, session_dir},
+        key=lambda path: (session_started_at(path) or never, path.name),
+    )
+
+    def _stamp(epoch: float | None) -> str | None:
+        return None if epoch is None else format_timestamp(datetime.fromtimestamp(epoch, tz=UTC))
+
+    return {
+        "started_at": _stamp(trip.started_epoch),
+        "stopped_at": _stamp(trip.stopped_epoch),
+        "speed_source": trip.speed_source,
+        "end_session": session_dir.name,
+        "sessions": [path.name for path in spanned],
+        "coverage": "end_session_only" if len(spanned) > 1 else "whole_trip",
+        "detail": trip.detail,
+    }
+
+
 async def handle_trip_end_off_loop(  # noqa: PLR0913
     session_dir: Path,
     config: CanaryConfig,
     *,
+    trip: TripEnd | None = None,
     emitter: AnomalyEventEmitter | None = None,
     notifier: Notifier | None = None,
     now: datetime | None = None,
@@ -337,7 +381,8 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
     """Assemble + persist the digest for one completed trip, off the loop.
 
     Never raises — a drive that recorded good data must not take the daemon
-    down because its report card could not be written. Returns the digest
+    down because its report card could not be written. ``trip`` (the tracker's
+    :class:`~src.analysis.gps_tracker.TripEnd`) adds the :func:`trip_block`. Returns the digest
     dict on a freshly-computed trip end, or ``None`` when the trip has no
     telemetry, was already handled, was refused by
     :func:`~src.analysis.digest.digest_preflight`, or failed in the child.
@@ -434,6 +479,8 @@ async def handle_trip_end_off_loop(  # noqa: PLR0913
         if _IN_FLIGHT.get(session_dir) is current_task:
             _IN_FLIGHT.pop(session_dir, None)
 
+    if trip is not None:
+        digest = dataclasses.replace(digest, trip=trip_block(trip, session_dir))
     payload = persist_digest(session_dir, digest, catalog_db=catalog_db)
     if payload is None:
         return None
@@ -465,6 +512,47 @@ def _child_failure(
         row_count=count_session_rows(session_dir),
         row_budget=digest_row_budget(config) or None,
     )
+
+
+def record_trip_end_unobservable(
+    session_dir: Path,
+    config: CanaryConfig,
+    detail: str,
+    *,
+    now: datetime | None = None,
+) -> DigestSkipped | None:
+    """Record that no usable speed source could see this session's drive end.
+
+    The trip-end hook runs on the tracker's edge; with no speed source there
+    is no edge, and before D03.29 that left a session with neither
+    ``digest.json`` nor ``digest_skipped.json`` — indistinguishable from one
+    nobody got round to. This writes the ``no_speed_source`` refusal naming
+    the sources (``detail`` is the tracker's inventory). Cheap: no data read
+    beyond Parquet footers. Blocking file I/O, so the daemon calls it in a
+    thread.
+
+    Never replaces an answer already on disk — a computed digest, or a more
+    specific refusal (a row budget, a failed child) — and never writes into a
+    directory that is not a session (replay output describes no drive).
+    Returns what it wrote, or ``None``.
+    """
+    from src.control.sessions import is_session_dir_name
+
+    if not is_session_dir_name(session_dir.name) or not session_dir.is_dir():
+        return None
+    if read_digest(session_dir) is not None or read_digest_skipped(session_dir) is not None:
+        return None
+    skipped = DigestSkipped(
+        schema_version=SKIP_SCHEMA_VERSION,
+        session_id=session_dir.name,
+        reason=REASON_NO_SPEED_SOURCE,
+        detail=detail,
+        recorded_at=format_timestamp(datetime.now(UTC) if now is None else now),
+        row_count=count_session_rows(session_dir),
+        row_budget=digest_row_budget(config) or None,
+    )
+    write_digest_skipped(session_dir, skipped)
+    return skipped
 
 
 def handle_trip_end(
@@ -513,4 +601,6 @@ __all__ = [
     "handle_trip_end",
     "handle_trip_end_off_loop",
     "limit_address_space",
+    "record_trip_end_unobservable",
+    "trip_block",
 ]

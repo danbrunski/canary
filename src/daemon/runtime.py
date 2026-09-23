@@ -21,6 +21,7 @@ from src.control.capture_manifest import (
 )
 from src.control.replay_control import ReplayController
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
+from src.decode.bindings import load_bindings
 from src.decode.frame_decoder import FrameDecoder
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -40,6 +41,7 @@ from .retention import _active_replay_dir, run_retention_sweeper
 from .server import serve_in_background
 
 if TYPE_CHECKING:
+    from src.analysis.gps_tracker import TripEnd
     from src.collection.can_collector import CanReceiveStats
     from src.collection.queueing import CollectorHandoffStats
     from src.models.health import HealthMonitor
@@ -117,10 +119,15 @@ _TRIP_END_TASKS: set[asyncio.Task[Any]] = set()
 
 
 def _run_trip_end_hook(
-    session_dir: Path, config: CanaryConfig, components: DaemonComponents
+    session_dir: Path,
+    config: CanaryConfig,
+    components: DaemonComponents,
+    trip: TripEnd | None = None,
 ) -> None:
-    """``on_trip_ended`` callback shape (``Callable[[Path], None]``) around
-    :func:`handle_trip_end_off_loop`.
+    """``on_trip_complete`` callback around :func:`handle_trip_end_off_loop`.
+
+    ``session_dir`` is the session the trip *ended* in (the tracker names it;
+    D03.29), and ``trip`` becomes the digest's ``trip`` block.
 
     Returns as soon as the digest is *scheduled*, not when it finishes. This
     callback runs inside the GPS sink, and a digest is a full-session load —
@@ -135,11 +142,66 @@ def _run_trip_end_hook(
         handle_trip_end_off_loop(
             session_dir,
             config,
+            trip=trip,
             emitter=components.emitter,
             notifier=components.notifier,
             catalog_db=config.daemon.catalog_db,
         )
     )
+    _TRIP_END_TASKS.add(task)
+    task.add_done_callback(_TRIP_END_TASKS.discard)
+
+
+def shutdown_trip_target(
+    components: DaemonComponents, active_session: Path
+) -> tuple[Path | None, TripEnd | None]:
+    """Where the shutdown fallback digests, and for which trip (D03.29).
+
+    * a trip still open: the session it is in (its stop's session, or where
+      it was last seen moving) with its spanned sessions — not the session
+      that happens to be active, which after a capture stops is a parked one;
+    * no open trip, the active session showed no motion, and the tracker has
+      read speed at some point since start: nothing — a digest there describes
+      no drive (2026-09-23: the edge digested a 257 s parked session and the
+      drive got none). That includes a parked session with no usable reading
+      at all (key-off, GPS without a fix, or silence); the caller records a
+      ``no_speed_source`` refusal instead if that session was blind for the
+      trip-end window;
+    * otherwise the active session, as before: an install that has never read
+      speed, or a session that did show motion, still gets its report card.
+    """
+    tracker = components.gps_tracker
+    if tracker is None:
+        return active_session, None
+    pending = tracker.pending_trip()
+    if pending is not None:
+        return (pending.session or active_session), pending
+    if tracker.session_never_moved():
+        return None, None
+    return active_session, None
+
+
+async def record_trip_end_unobservable(
+    session_dir: Path, config: CanaryConfig, detail: str
+) -> None:
+    """:func:`src.control.trip_end.record_trip_end_unobservable` in a thread.
+
+    Imported the same lazy way as :func:`handle_trip_end_off_loop`; the write
+    is small but it is file I/O plus Parquet footer reads, so it stays off the
+    loop. Never raises: a refusal record is a report, not a gate.
+    """
+    try:
+        trip_end = await asyncio.to_thread(importlib.import_module, "src.control.trip_end")
+        await asyncio.to_thread(trip_end.record_trip_end_unobservable, session_dir, config, detail)
+    except Exception:  # noqa: BLE001 — best-effort, like the digest itself
+        log.exception("recording the unobservable trip end for %s failed", session_dir.name)
+
+
+def _run_trip_unobservable_hook(session_dir: Path, detail: str, config: CanaryConfig) -> None:
+    """``on_trip_unobservable`` callback (D03.29): schedule the
+    ``no_speed_source`` refusal for ``session_dir`` as a tracked task, like
+    :func:`_run_trip_end_hook`, so the trip sink never waits on the write."""
+    task = asyncio.create_task(record_trip_end_unobservable(session_dir, config, detail))
     _TRIP_END_TASKS.add(task)
     task.add_done_callback(_TRIP_END_TASKS.discard)
 
@@ -352,12 +414,24 @@ async def run_daemon(
     # configured confidence levels are stored as queryable ``decoded:*`` rows
     # next to their raw frames. Absent bindings file → decoder is None and
     # only raw frames are persisted, exactly as before.
+    #
+    # Loaded once and shared with the trip tracker (D03.29), which reads the
+    # binding declared ``quantity: road_speed`` so a drive with no GPS fix
+    # still ends a trip. Same file, same moment as the decoder always loaded.
+    bindings = (
+        load_bindings(DEFAULT_BINDINGS_PATH)
+        if DEFAULT_BINDINGS_PATH.exists()
+        and (config.collection.persist_decoded_confidence or components.gps_tracker is not None)
+        else None
+    )
+    if components.gps_tracker is not None:
+        components.gps_tracker.use_bindings(bindings)
     storage_frame_decoder = (
-        FrameDecoder.from_path(
-            DEFAULT_BINDINGS_PATH,
+        FrameDecoder.from_bindings(
+            bindings,
             confidence_levels=config.collection.persist_decoded_confidence,
         )
-        if config.collection.persist_decoded_confidence
+        if config.collection.persist_decoded_confidence and bindings is not None
         else None
     )
     if storage_frame_decoder is not None:
@@ -388,7 +462,12 @@ async def run_daemon(
             monitor_emitter=components.emitter,
             vehicle_ledger=components.vehicle_ledger,
             active_session_path=lambda: storage_writer.paths.root,
-            on_trip_ended=lambda session_dir: _run_trip_end_hook(session_dir, config, components),
+            on_trip_complete=lambda session_dir, end: _run_trip_end_hook(
+                session_dir, config, components, end
+            ),
+            on_trip_unobservable=lambda session_dir, end: _run_trip_unobservable_hook(
+                session_dir, end.detail, config
+            ),
             storage_path=config.collection.storage_path,
             storage_warning_mb=config.collection.storage_warning_mb,
             queue_warning_fraction=config.collection.queue_warning_fraction,
@@ -557,12 +636,24 @@ async def run_daemon(
             # multi-gigabyte load inside the shutdown sequence itself.
             try:
                 await _settle_trip_end_tasks()
-                await handle_trip_end_off_loop(
-                    storage_writer.paths.root,
-                    config,
-                    emitter=components.emitter,
-                    notifier=components.notifier,
-                )
+                target, open_trip = shutdown_trip_target(components, storage_writer.paths.root)
+                if target is not None:
+                    await handle_trip_end_off_loop(
+                        target,
+                        config,
+                        trip=open_trip,
+                        emitter=components.emitter,
+                        notifier=components.notifier,
+                    )
+                elif components.gps_tracker is not None:
+                    # No digest: say so if the session was blind long enough
+                    # that a drive could have gone unseen, exactly as a
+                    # rotation would have (D03.29).
+                    closed = components.gps_tracker.close_session()
+                    if closed is not None and not closed.observed:
+                        await record_trip_end_unobservable(
+                            storage_writer.paths.root, config, closed.detail
+                        )
             except Exception:  # noqa: BLE001 — shutdown must never fail on this
                 log.exception("trip-end fallback (shutdown) failed")
             poll_task.cancel()

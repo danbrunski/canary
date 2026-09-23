@@ -918,6 +918,7 @@ def build_status(
         calibration=calibration,
         vehicle_state=sources.vehicle_state.state,
     )
+    gps_on = config.hardware.gps.enabled
     return StatusSnapshot(
         storage_path=str(storage),
         free_mb=sources.free_mb,
@@ -929,8 +930,11 @@ def build_status(
         emitter_counters=sources.emitter_counters,
         health=sources.health,
         vehicle_state=sources.vehicle_state,
-        gps=gps_tracker.gps_status() if gps_tracker is not None else None,
-        trip=gps_tracker.trip_status() if gps_tracker is not None else None,
+        # D03.29: the tracker exists on a GPS-less install too (it ends trips
+        # from vehicle speed), but its fix snapshot and GPS-integrated
+        # odometer mean nothing there — report them as absent, not as 0 km.
+        gps=gps_tracker.gps_status() if gps_tracker is not None and gps_on else None,
+        trip=gps_tracker.trip_status() if gps_tracker is not None and gps_on else None,
         profile=_active_profile(config),
         detectors=detectors,
         model_provenance=model_provenance if models_dir is not None else None,
