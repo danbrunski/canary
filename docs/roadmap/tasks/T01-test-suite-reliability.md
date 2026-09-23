@@ -18,6 +18,7 @@ measurement in hand.
   | pre-push gate, `-n auto` | `c7756f9` | 8.9–12.9 on 12 cores | six: `wires_retention_sweeper_task`, `does_not_start_online_training_scheduler_by_default`, `wires_online_training_scheduler_when_enabled`, `end_to_end_inference_emits_anomaly`, `disable_live_inference_skips_inference_task`, `end_to_end_telemetry_published_to_ws` |
   | `tests/test_daemon.py` alone, `-n auto` | `c7756f9` | 8.9–10.8 | 0 of 68 |
   | pre-push gate, `-n auto` | `9073929` | 9.1–9.7 (1/5-min) | `tests/test_can_obd_collector.py::test_negative_pid_response_does_not_block_following_pids`, passed serially |
+  | `scripts/ci_gate.sh`, `-n auto` | `80fde31` | 7.6–11.7 | `test_run_daemon_end_to_end_telemetry_published_to_ws` again, passed serially in 4.5 s (third time in one day) |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is

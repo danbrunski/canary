@@ -59,6 +59,12 @@ def _modules_loaded_by(imports: str) -> set[str]:
 
 @pytest.fixture(scope="module")
 def recording_path_modules(tmp_path_factory: pytest.TempPathFactory) -> set[str]:
+    # The property under test is "torch is installed and still not imported".
+    # Without torch, build_components skips the sequence detector ("enabled but
+    # torch unavailable"), so the both-managers premise cannot hold and the
+    # import check proves nothing. CI does not install the `ml` extra; this
+    # errored all 18 dependent tests there on 2026-09-23.
+    pytest.importorskip("torch")
     from tests.test_daemon import _config_yaml
 
     tmp = tmp_path_factory.mktemp("cold_start")
