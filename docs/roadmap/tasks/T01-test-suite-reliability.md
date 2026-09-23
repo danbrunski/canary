@@ -19,6 +19,7 @@ measurement in hand.
   | `tests/test_daemon.py` alone, `-n auto` | `c7756f9` | 8.9–10.8 | 0 of 68 |
   | pre-push gate, `-n auto` | `9073929` | 9.1–9.7 (1/5-min) | `tests/test_can_obd_collector.py::test_negative_pid_response_does_not_block_following_pids`, passed serially |
   | `scripts/ci_gate.sh`, `-n auto` | `80fde31` | 7.6–11.7 | `test_run_daemon_end_to_end_telemetry_published_to_ws` again, passed serially in 4.5 s (third time in one day) |
+  | `scripts/ci_gate.sh`, `-n auto` | `f0b578c` | not recorded | `test_run_daemon_end_to_end_telemetry_published_to_ws` (fourth time); `tests/test_multi_pid_batching.py::test_healthy_channels_are_not_backed_off_by_a_failed_batch`, both passed serially |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -41,3 +42,13 @@ measurement in hand.
   load.** In `tests/test_can_obd_collector.py`. It failed once in the parallel
   gate on `9073929` and passed serially in 1.8 s. Not investigated yet: find
   what it waits on in wall-clock time, and apply T01.1's remedy.
+
+- [ ] **T01.3 `test_force_poll_trigger_forces_a_channel_due_immediately` fails under
+  load.** In `tests/test_can_obd_collector.py`, with a 0.5 s wall-clock deadline.
+  It failed in canary-a2's non-slow gate before `ab6676b` and passed 3 of 3
+  serially. Same remedy as T01.1.
+
+- [ ] **T01.4 `test_healthy_channels_are_not_backed_off_by_a_failed_batch` fails
+  under load.** In `tests/test_multi_pid_batching.py`. It failed once in the
+  parallel gate on `f0b578c` and passed serially. Not investigated yet.
+
