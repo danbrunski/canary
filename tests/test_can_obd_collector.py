@@ -2151,7 +2151,7 @@ def test_a_capture_armed_mid_window_does_not_wait_out_the_old_interval() -> None
             controller.advance(states, now=now)
             assert controller.phase == "lapse"
 
-        controller.on_generation_change(now)
+        controller.on_generation_change(now, profile="tuning", members={1: "DID_1208"})
 
         elapsed = 0.0
         while elapsed < 120.0 and not controller.session_control_due(states, now + elapsed):

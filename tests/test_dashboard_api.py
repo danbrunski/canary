@@ -1524,6 +1524,16 @@ def test_status_compact_view_omits_the_per_channel_bulk(
         assert "achieved_hz_60s_total" in scheduler
 
 
+def test_compact_scheduler_carries_profile_start_withheld() -> None:
+    """D05.1: DIDs withheld at a capture start are counted by reason, and the
+    compact view a drive poller reads carries that count."""
+    from src.dashboard.status import _compact_scheduler
+
+    counts = {"backoff": 1, "cadence": 0, "no_window": 0, "budget": 0}
+    compact = _compact_scheduler({"profile_start_withheld": counts, "achieved_hz_60s": {}})
+    assert compact["profile_start_withheld"] == counts
+
+
 def test_status_compact_and_full_agree_on_shared_fields(
     config: CanaryConfig, anomalies_dir: Path
 ) -> None:

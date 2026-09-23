@@ -641,6 +641,8 @@ _COMPACT_SCHEDULER_FIELDS: tuple[str, ...] = (
     "negative_responses",
     "bus_errors",
     "response_rate",
+    # D05.1: profile DIDs withheld at a capture start, by reason.
+    "profile_start_withheld",
 )
 
 #: Inference-clock fields the compact view carries (C08) — deadline health,

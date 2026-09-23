@@ -870,6 +870,11 @@ class _PollRequestState:
     last_negative_response_code: int | None = None
     backoffs: int = 0
     bus_errors: int = 0
+    #: When the miss that set ``suppressed_until`` happened. A back-off is a
+    #: function of (misses, the policy in force), so a profile change can
+    #: re-derive it under the new policy instead of serving out the old one
+    #: (D05.1, :func:`replan_for_generation`).
+    missed_at: float | None = None
 
 
 #: Eligibility predicate the DID-window controller injects into request
@@ -1114,6 +1119,147 @@ def round_members(
     )
 
 
+#: Why a session-window member was not requested within one cycle of its
+#: profile's start (D05.1). ``backoff``: a miss back-off still stands;
+#: ``cadence``: its own due time had not come; ``no_window``: no Mode-22
+#: window opened (entries failing, or the ECU silent); ``budget``: due and a
+#: window opened, but the window or bus budget ran out before it.
+WithheldReason = Literal["backoff", "cadence", "no_window", "budget"]
+WITHHELD_REASONS: tuple[WithheldReason, ...] = ("backoff", "cadence", "no_window", "budget")
+
+
+class ProfileStartLedger:
+    """First request of every session-window member after a profile starts (D05.1).
+
+    On 2026-09-23 six of eight `tuning` DIDs recorded nothing for 37.5 s and
+    nothing said so: the journal was silent, and ``/status.deferred`` lists
+    only requests that are *due*, so a DID held back by a stale due time was
+    not in it. An empty channel must say which kind of empty.
+
+    A start is any new capture generation within a running loop (a capture
+    starting or stopping, pause/resume, the passive gate lifting, a replay
+    transition). A collector reconnect is not one: it builds a new loop whose
+    requests all start due, and its ledger starts resolved. The
+    ledger is resolved one cycle (``window_max_seconds`` for an interval
+    profile) after the first window *may* open — an ECU session lapse in
+    progress is a protocol wait, not a withholding. Every member not requested
+    by then is logged once, with its reason, and counted by reason.
+    """
+
+    def __init__(self) -> None:
+        #: Members withheld at a start, by reason, since the loop started.
+        self.withheld_total: dict[str, int] = dict.fromkeys(WITHHELD_REASONS, 0)
+        self.starts = 0
+        self._profile: str | None = None
+        self._started_at = 0.0
+        self._ready_at: float | None = None
+        self._grace = 0.0
+        self._windows_at_start = 0
+        self._members: dict[int, str] = {}
+        self._first: dict[int, float] = {}
+        self._withheld: list[dict[str, Any]] = []
+        self._resolved = True
+
+    def begin(
+        self,
+        *,
+        profile: str,
+        members: Mapping[int, str],
+        now: float,
+        in_lapse: bool,
+        grace: float,
+        windows_opened: int,
+    ) -> None:
+        self.starts += 1
+        self._profile = profile
+        self._started_at = now
+        self._ready_at = None if in_lapse else now
+        self._grace = grace
+        self._windows_at_start = windows_opened
+        self._members = dict(members)
+        self._first = {}
+        self._withheld = []
+        self._resolved = not self._members
+
+    @property
+    def profile(self) -> str | None:
+        return self._profile
+
+    @property
+    def member_count(self) -> int:
+        return len(self._members)
+
+    def observe(
+        self,
+        states: Sequence[_PollRequestState],
+        now: float,
+        *,
+        in_lapse: bool,
+        windows_opened: int,
+    ) -> list[dict[str, Any]]:
+        """Record first requests; return the withheld rows once, when resolved."""
+        for index in self._members:
+            if index in self._first:
+                continue
+            sent = states[index].last_requested_at
+            if sent is not None and sent >= self._started_at:
+                self._first[index] = sent
+        if self._resolved:
+            return []
+        if self._ready_at is None:
+            if in_lapse:
+                return []
+            self._ready_at = now
+        if now < self._ready_at + self._grace:
+            return []
+        self._resolved = True
+        opened = windows_opened > self._windows_at_start
+        for index, channel in sorted(self._members.items(), key=lambda item: item[1]):
+            if index in self._first:
+                continue
+            state = states[index]
+            row: dict[str, Any] = {"channel": channel}
+            if state.suppressed_until > now:
+                row["reason"] = "backoff"
+                row["for_s"] = (
+                    None
+                    if state.suppressed_until == float("inf")
+                    else round(state.suppressed_until - now, 3)
+                )
+                row["missed_responses"] = state.missed_responses
+            elif state.next_due_at > now:
+                row["reason"] = "cadence"
+                row["due_in_s"] = round(state.next_due_at - now, 3)
+            elif not opened:
+                row["reason"] = "no_window"
+            else:
+                row["reason"] = "budget"
+            self._withheld.append(row)
+            self.withheld_total[row["reason"]] += 1
+        return list(self._withheld)
+
+    def snapshot(self, now: float) -> dict[str, Any]:
+        """``/status.health.obd_scheduler.did_profile.profile_start``."""
+        return {
+            "profile": self._profile,
+            "starts": self.starts,
+            "age_s": round(max(0.0, now - self._started_at), 3) if self.starts else None,
+            "resolved": self._resolved,
+            #: Seconds from the start to each member's first request; ``None``
+            #: until it has gone out, then filled in however late it is.
+            "first_request_s": {
+                channel: (
+                    round(self._first[index] - self._started_at, 3)
+                    if index in self._first
+                    else None
+                )
+                for index, channel in sorted(self._members.items(), key=lambda item: item[1])
+            },
+            "withheld": list(self._withheld),
+            "withheld_total": dict(self.withheld_total),
+        }
+
+
 class DidWindowController:
     """Mutually-exclusive Mode-22 window scheduler (risk R8 / Task 6.15).
 
@@ -1197,9 +1343,30 @@ class DidWindowController:
         self._plan: CyclePlan | None = None
         self._infeasible_logged: CyclePlan | None = None
         self.cycle = CycleAccounting()
+        #: First requests after each profile start, and what withheld any (D05.1).
+        self.start_ledger = ProfileStartLedger()
 
     def advance(self, states: Sequence[_PollRequestState], now: float) -> None:
         """Apply phase transitions that don't require bus I/O."""
+        self._advance_phase(states, now)
+        self._observe_start(states, now)
+
+    def _observe_start(self, states: Sequence[_PollRequestState], now: float) -> None:
+        withheld = self.start_ledger.observe(
+            states, now, in_lapse=self.phase == "lapse", windows_opened=self.windows_opened
+        )
+        if not withheld:
+            return
+        log.warning(
+            "profile %s: %d of %d Mode-22 window members withheld at profile start: %s",
+            self.start_ledger.profile,
+            len(withheld),
+            self.start_ledger.member_count,
+            ", ".join(f"{row['channel']} ({row['reason']})" for row in withheld),
+            extra={"withheld": withheld},
+        )
+
+    def _advance_phase(self, states: Sequence[_PollRequestState], now: float) -> None:
         if self.phase == "window":
             if self._continuous():
                 # Nothing to hand the bus back to, so the window never closes:
@@ -1284,8 +1451,17 @@ class DidWindowController:
         cycles — never issued late as a catch-up burst (C04.5).
         """
         cycle = self._cycle()
-        if cycle is None or self._cycle_anchor is None:
+        if cycle is None:
             self._next_window_at = max(now + self._interval(), earliest)
+            return
+        if self._cycle_anchor is None:
+            # No grid yet: the first entry anchors one (``on_entry_sent``), so
+            # the first window is due as soon as it may open. Falling through
+            # to the interval policy here charged a cycle-mode profile the
+            # config's ``window_interval_seconds`` — 60 s on the Xterra — for
+            # its first window whenever a switch landed inside a `default`
+            # window or its exit grace (D05.1).
+            self._next_window_at = max(now, earliest)
             return
         k_next = max(self._next_cycle_k, self._cycle_k + 1)
         boundary = self._cycle_anchor + k_next * cycle
@@ -1573,8 +1749,13 @@ class DidWindowController:
         if self.phase == "window":
             self._close_window(now)
 
-    def on_generation_change(self, now: float) -> None:
+    def on_generation_change(self, now: float, *, profile: str, members: Mapping[int, str]) -> None:
         """New capture generation: finish any transition and re-plan promptly.
+
+        ``members`` (request index -> channel) are the session-window requests
+        the profile now in force selects; the start ledger reports any of them
+        not requested within one cycle, with why (D05.1). Required, so a
+        generation change cannot be applied without being accounted.
 
         The next window is due now (not ``interval`` after the previous
         close), so a DID profile armed mid-drive starts within a budget slot
@@ -1597,6 +1778,17 @@ class DidWindowController:
         self._infeasible_logged = None
         self._cycle_anchor = None
         self._next_window_at = max(now, self._lapse_until) if self.phase == "lapse" else now
+        unknown = set(members) - self._did_indices
+        if unknown:
+            raise ValueError(f"not Mode-22 window requests: {sorted(unknown)}")
+        self.start_ledger.begin(
+            profile=profile,
+            members=members,
+            now=now,
+            in_lapse=self.phase == "lapse",
+            grace=self._cycle() or self._spec.window_max_seconds,
+            windows_opened=self.windows_opened,
+        )
 
     def _close_window(self, now: float) -> None:
         self.cycle.on_window_closed(unattempted=len(self._pending))
@@ -1648,6 +1840,9 @@ class DidWindowController:
             "windows_completed": self.windows_completed,
             "session_failures": self.session_failures,
             "keepalives_sent": self.keepalives_sent,
+            #: D05.1: when each member of the profile now in force was first
+            #: requested, and which were withheld at its start and why.
+            "profile_start": self.start_ledger.snapshot(now),
             # Hybrid cycle (C04.8): the target and the achieved values share
             # one definition — start-to-start between session entries.
             "cycle": {
@@ -1736,9 +1931,14 @@ class ObdSchedulerMetrics:
     #: the ``can_receive`` sink, is never registered. ``None`` for a metrics
     #: object built without a loop.
     receive: dict[str, Any] | None = None
+    #: Mode-22 window members withheld at a profile start, by reason, since the
+    #: loop started (D05.1). A scalar map so the compact ``/status`` can carry
+    #: it; the per-start detail is ``did_profile.profile_start``.
+    profile_start_withheld: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "profile_start_withheld": self.profile_start_withheld,
             "rounds": self.rounds,
             "session_control": self.session_control,
             "discovery": self.discovery,
@@ -2065,8 +2265,10 @@ def _update_response_state(
     if emitted:
         state.missed_responses = 0
         state.suppressed_until = 0.0
+        state.missed_at = None
         return
     state.missed_responses += 1
+    state.missed_at = now
     state.suppressed_until = now + _miss_backoff_seconds(state, focused_capture=focused_capture)
     state.backoffs += 1
 
@@ -2099,6 +2301,65 @@ def _miss_backoff_seconds(state: _PollRequestState, *, focused_capture: bool = F
     # Clamped before the exponentiation: float ** big raises OverflowError.
     exponent = min(max(state.missed_responses - 1, 0), 20)
     return min(AUTO_MISS_BACKOFF_SECONDS * (2.0**exponent), MAX_MISS_BACKOFF_SECONDS)
+
+
+#: Request kinds whose cadence and miss back-off the active capture profile
+#: sets (``_request_rate_hz``). DTC and Mode 06 polls run on fixed intervals of
+#: their own; freeze frames and identification are one-shots.
+PROFILE_CADENCE_KINDS: frozenset[str] = frozenset({"pid", "did", "memory"})
+
+
+def replan_for_generation(
+    requests: Sequence[_PollRequest],
+    states: Sequence[_PollRequestState],
+    spec: CanObdSpec,
+    now: float,
+    *,
+    profile_gated: bool,
+) -> int:
+    """Re-plan every selected request under the profile now in force (D05.1).
+
+    A request's ``next_due_at`` and ``suppressed_until`` were computed under the
+    *previous* generation's profile. Carried across a switch, they hold a
+    member back by a schedule nobody asked for any more: on 2026-09-23 six of
+    the eight `tuning` DIDs waited 37.5 s, because `default` reads a DID once
+    per 60 s window and their next `default` window was still 37.5 s off. A
+    DID `default` does not poll (0x1209) had no stale due time and started at
+    once. Reproduced on the fake clock in ``tests/test_capture_start_latency.py``.
+
+    So a new generation starts every selected member now, exactly as a loop
+    start does, and re-derives a miss back-off under the new policy (a
+    `default` 30 s bench becomes a capture's 1 s retry). Neither is ever
+    lengthened. A back-off still standing on its own evidence (a channel
+    that has never answered) is kept, and a request whose rate was zero when
+    planned (``suppressed_until`` is infinite) is not revived here.
+
+    "Selected" is the active profile's selection when ``profile_gated`` (the
+    same gate the loop applies), else every request.
+
+    Returns how many requests were brought forward.
+    """
+    from src.collection import tuning_profile
+
+    moved = 0
+    for index, (request, state) in enumerate(zip(requests, states, strict=True)):
+        if request.kind not in PROFILE_CADENCE_KINDS:
+            continue
+        member = tuning_profile.request_eligible(index, request)
+        if profile_gated and not member:
+            continue
+        if state.suppressed_until == float("inf") or _request_rate_hz(request, spec) <= 0.0:
+            continue
+        before = (state.next_due_at, state.suppressed_until)
+        state.next_due_at = min(state.next_due_at, now)
+        if state.suppressed_until > now and state.missed_at is not None:
+            # The same policy the loop applies to the next miss.
+            focused = tuning_profile.is_active() and member
+            rederived = state.missed_at + _miss_backoff_seconds(state, focused_capture=focused)
+            state.suppressed_until = min(state.suppressed_until, rederived)
+        if (state.next_due_at, state.suppressed_until) != before:
+            moved += 1
+    return moved
 
 
 def _initial_request_states(
@@ -2790,6 +3051,9 @@ def _scheduler_metrics(
         receive=_receive_metrics(stats),
         discovery=discovery,
         deferred=list(deferred or []),
+        profile_start_withheld=dict(
+            ((did_profile or {}).get("profile_start") or {}).get("withheld_total") or {}
+        ),
         resolved_plan=_resolved_polling_plan(
             requests,
             spec,

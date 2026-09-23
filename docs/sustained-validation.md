@@ -324,7 +324,11 @@ source fix in their owning task.
    first capture observation is up to 3 s late and C03 names
    `acquisition_gap` (`COMMANDED_EQUIV_RATIO`: `missing_initial_s: 2.4`).
    Nothing in the generation-change path re-dues requests whose rate rose.
-   Owner: C02/C09.
+   Owner: C02/C09. **Fixed 2026-09-23 (D05.1):** the same defect held six
+   `tuning` DIDs out for 37.5 s on the truck; `replan_for_generation` now
+   makes every selected member due at a generation change
+   (`tests/test_capture_start_latency.py`, incl. a slow-tier PID case).
+   `ARMED_WARMUP_S` in `src/validation/scenarios.py` was not changed.
 4. **The required-tuple preference does not resolve DID names.**
    `tuning_profile.required_tuple()` returns profile names (`ECM_RPM`) while
    DID requests are `DID_1219`, so `_preferred_members` never matches a DID

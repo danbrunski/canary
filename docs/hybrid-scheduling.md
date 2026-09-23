@@ -150,7 +150,7 @@ pending flag through 30 s of miss backoff until Mode 01 actually answers.
 | event | what happens now |
 |---|---|
 | profile switch out of continuous DID mode (or to any profile without DIDs) | `controller.release()` closes the window; the exit is sent and the grace honoured before Mode 01 is polled |
-| capture generation change (profile, pause/resume, passive toggle, replay) | `on_generation_change`: release, cycle accounting reset, next window due *now* — a DID profile armed mid-drive opens its first window within a slot, not up to a config interval later (the 26.56 s first-DID delay of 2026-08-07) |
+| capture generation change (profile, pause/resume, passive toggle, replay) | `on_generation_change`: release, cycle accounting reset, next window due *now* — a DID profile armed mid-drive opens its first window within a slot, not up to a config interval later (the 26.56 s first-DID delay of 2026-08-07). A cycle-mode profile with no grid yet opens its first window the moment the lapse allows, not a config interval later. `replan_for_generation` makes every selected Mode 01 / Mode 22 / memory member due *now* and re-derives a miss back-off under the new profile's policy (never lengthening either): the per-request due times of the old profile are not carried in (D05.1: on 2026-09-23 six `tuning` DIDs sat out 37.5 s on `default`'s 60 s window grid) |
 | paused | owed exit sent, no window opened, raw CAN received; resume opens the next window immediately |
 | passive TX gating lifted | the held window is released, exit first, then both services |
 | exit failure | transient: re-sent once at the next budget slot (D03.18: a lost `50 81` cost the whole 5 s lapse); a second failure lapses this window and the next window retries; permanent ×2: lapse path until the re-probe |
@@ -178,6 +178,17 @@ phase is ever polled through.
 | `transition_latency_s.entry_to_did` | entry request → first DID *response*, summary |
 | `cross_mode_separation_s` | per cycle, the widest gap between a Mode 01 and a Mode 22 `acquired_at` — the honest bound on any cross-mode pairing inside that cycle |
 | `mode01_recovery_pending`, `mode01_recovered_age_s` | see above |
+
+`did_profile.profile_start` (D05.1) — the start of the profile now in force
+(any generation change):
+
+| key | meaning |
+|---|---|
+| `profile`, `starts`, `age_s` | which profile, how many starts since the loop began, seconds since this one |
+| `first_request_s` | per Mode-22 window member, seconds from the start to its first request; `null` until sent, filled in however late |
+| `resolved` | the ledger closes one cycle (`window_max_seconds` on the interval policy) after the first window *may* open; a session lapse in progress is not counted against a member |
+| `withheld` | members not requested by then: `reason` is `backoff` (with `for_s`, `missed_responses`), `cadence` (`due_in_s`), `no_window` (no window opened: entries failing or the ECU silent) or `budget` (due, a window opened, the budget ran out). Logged once per start as `profile <name>: N of M Mode-22 window members withheld at profile start: …` |
+| `withheld_total` | the same, counted by reason since the loop started; also top-level `obd_scheduler.profile_start_withheld` |
 
 Top-level `session_control` separates UDS 0x10 traffic from channel-read
 throughput: `sent`, `responses`, `timeouts`, `negative_responses`, `seconds`,

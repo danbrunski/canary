@@ -178,6 +178,12 @@ def active_profile() -> CaptureProfile:
         return _profile.model_copy(deep=True)
 
 
+def active_profile_name() -> str:
+    """The active profile's name, without :func:`active_profile`'s deep copy."""
+    with _lock:
+        return _profile.name
+
+
 def activate(
     profile: CaptureProfile,
     *,

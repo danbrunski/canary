@@ -122,6 +122,7 @@ from src.collection.obd_scheduler import (
     mode06_requests,
     parse_did_token,
     parse_pid_token,
+    replan_for_generation,
     resolve_did_session_spec,
     round_members,
     round_period_seconds,
@@ -400,11 +401,23 @@ def run_can_obd_loop(
             # Profile change, pause/resume, passive toggle or replay
             # transition: rounds restart from zero under the new generation.
             rounds.reset(generation, now)
+            # Every selected member starts now, under the new profile's
+            # cadence and back-off policy, not the old one's (D05.1).
+            gated = spec.capture_profiles_enabled or tuning_profile.is_active()
+            replan_for_generation(requests, request_states, spec, now, profile_gated=gated)
             if controller is not None:
                 # ...and any session transition in flight is completed rather
                 # than left as a stale phase the new profile polls through
                 # (C04.7); the next window is due now, not an interval later.
-                controller.on_generation_change(now)
+                controller.on_generation_change(
+                    now,
+                    profile=tuning_profile.active_profile_name(),
+                    members={
+                        index: requests[index].channel
+                        for index in did_indices
+                        if not gated or tuning_profile.request_eligible(index, requests[index])
+                    },
+                )
         if (
             freeze_frame_indices
             and spec.freeze_frame_trigger is not None
