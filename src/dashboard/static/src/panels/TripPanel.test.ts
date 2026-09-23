@@ -146,6 +146,42 @@ describe("TripPanel", () => {
     expect(screen.getByText("idle_rpm_mean")).toBeInTheDocument();
   });
 
+  it("keeps evidence-role events out of the gated anomaly count (A06.5)", async () => {
+    mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    mocks.getSessionDigest.mockResolvedValue({
+      ...DIGEST,
+      schema_version: 2,
+      anomaly_counts_by_source: { fused: 1 },
+      evidence_counts_by_source: { lstm_autoencoder: 4 },
+    });
+    render(
+      createElement(TripPanel, {
+        channels: new Map(),
+        status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
+      }),
+    );
+    expect(await screen.findByText(/fused=1/)).toBeInTheDocument();
+    expect(screen.getByText("gated anomalies").nextElementSibling).toHaveTextContent(/^1/);
+    expect(screen.getByText("evidence (not alerts)").nextElementSibling).toHaveTextContent(
+      "4 (lstm_autoencoder=4)",
+    );
+  });
+
+  it("omits the evidence row for a schema-1 digest", async () => {
+    mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
+    mocks.getSessionDigest.mockResolvedValue(DIGEST);
+    render(
+      createElement(TripPanel, {
+        channels: new Map(),
+        status: { latest_session: "2026-07-19T110000" } as unknown as StatusResponse,
+        token: "secret",
+      }),
+    );
+    expect(await screen.findByText(/fused=2/)).toBeInTheDocument();
+    expect(screen.queryByText("evidence (not alerts)")).toBeNull();
+  });
+
   it("shows an error state when the digest fetch fails", async () => {
     mocks.getTripSummary.mockReturnValue(new Promise(() => {}));
     mocks.getSessionDigest.mockRejectedValue(new Error("digest boom"));

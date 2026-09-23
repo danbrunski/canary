@@ -123,6 +123,21 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - Each anomaly event SHALL include: timestamp, affected PID(s) / CAN ID(s), model used, anomaly score, operating mode at time of detection
 - The system SHALL persist all anomaly events to a separate log file for post-hoc analysis
 
+> **Detector roles — current state, decision pending (A06, 2026-09-23).**
+> Each learned detector has a configured role (`models.roles`:
+> `isolation_forest`, `sequence`), either `alert` or `evidence`. An
+> `evidence`-role detector still scores and stores its events, flagged
+> `role: evidence`, and still counts toward fusion agreement. It never sends
+> an ntfy push, never shows as an active anomaly on the dashboard, and cannot
+> be the reason a fused event fires: that needs an `alert`-role source among
+> the agreeing voices. The `agreement >= 2` gate is unchanged. Both detectors
+> are still `alert`, because which role each gets is an open operator
+> decision ([A06.1/A06.2](roadmap/tasks/A06-detector-roles.md)). The
+> evidence for it is A02.11's held-out baseline table
+> (`data/analyses/2026-09-23-a02-detector-baseline.md`, provisional until
+> its re-run) and A05's deterministic plausibility checks. The FR-05/FR-06
+> text above describes what the detectors compute, not whether they alert.
+
 #### FR-08 — Dashboard
 - The system SHALL expose a local HTTP/WebSocket API (FastAPI) serving real-time telemetry and anomaly events
 - The system SHALL provide a web-based dashboard accessible over the vehicle's local network (hotspot or onboard AP)
@@ -353,6 +368,9 @@ models:
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
     min_agreement: 2                    # 6.2: fused is_anomaly needs >=2 independent sources
+  roles:                                # A06.5: alert | evidence (operator decision, A06.1/A06.2)
+    isolation_forest: alert
+    sequence: alert
 
 alerts:                                 # 6.1: M-of-N persistence, e.g. 3-of-5
   min_consecutive_ticks: 3

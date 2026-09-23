@@ -73,6 +73,11 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
           <span title="anomaly events emitted to the logger + ws">
             emitted: <b className="text-fg">{counters.emitted}</b>
           </span>
+          {(counters.emitted_evidence ?? 0) > 0 && (
+            <span title="events stored from evidence-role detectors (A06.5) — not alerts">
+              evidence: <b className="text-fg">{counters.emitted_evidence}</b>
+            </span>
+          )}
           <span title="inference results that didn't cross the threshold">
             ok: <b className="text-fg">{counters.suppressed_not_anomaly}</b>
           </span>

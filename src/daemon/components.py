@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,7 +17,7 @@ from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
-from src.config import CanaryConfig
+from src.config import CanaryConfig, DetectorRole
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.dtc_state import DEFAULT_STALE_AFTER_SECONDS as DEFAULT_DTC_STALE_AFTER_SECONDS
@@ -155,6 +156,7 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
         notifier=notifier,
         notify_min_severity=config.notifications.min_severity,
         notify_max_pushes_per_session=config.notifications.max_pushes_per_session,
+        roles=config.models.roles.by_source(),
     )
     model_managers = _load_model_managers(config, load=load_models)
     alerts_cfg = config.alerts
@@ -238,6 +240,7 @@ def _make_broadcasting_emitter(
     notifier: Notifier | None = None,
     notify_min_severity: float = 0.8,
     notify_max_pushes_per_session: int = 3,
+    roles: Mapping[str, DetectorRole] | None = None,
 ) -> AnomalyEventEmitter:
     """Wrap ``AnomalyEventLogger`` so every persisted event is also published
     on the broadcaster — keeps the logger-as-source-of-truth + the live-push
@@ -266,6 +269,7 @@ def _make_broadcasting_emitter(
         notifier=notifier,
         notify_min_severity=notify_min_severity,
         notify_max_pushes_per_session=notify_max_pushes_per_session,
+        roles=roles,
     )
 
 

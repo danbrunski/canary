@@ -36,6 +36,10 @@ export interface AnomalyEvent {
   window_end_timestamp: string | null;
   latency_ms: number | null;
   detail: Record<string, unknown>;
+  /** A06.5 — `evidence` marks an event from a detector configured as
+   *  non-alerting (`models.roles`): stored and listed, never an active
+   *  alert. Absent on records written before A06.5, which are alerts. */
+  role?: "alert" | "evidence";
 }
 
 /** One `/ws/scores` frame. Emitted every inference tick for *both* models
@@ -84,6 +88,8 @@ export interface StatusResponse {
   vehicle: string;
   emitter_counters: {
     emitted: number;
+    /** A06.5 — events stored from evidence-role detectors (not alerts). */
+    emitted_evidence?: number;
     suppressed_not_anomaly: number;
     suppressed_dedupe: number;
     suppressed_tuning: number;

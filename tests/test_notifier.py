@@ -76,6 +76,40 @@ def test_format_digest_message_compact_rendering() -> None:
     assert "idle_rpm_mean" in body
 
 
+def test_format_digest_message_omits_evidence_line_when_zero() -> None:
+    digest = {
+        "session_id": "s",
+        "duration_seconds": 60.0,
+        "anomaly_counts_by_source": {"fused": 1},
+        "evidence_counts_by_source": {},
+    }
+    _, body = format_digest_message(digest)
+    assert "evidence" not in body
+
+
+def test_format_digest_message_reads_a_pre_a06_sidecar() -> None:
+    """A schema-1 digest has no evidence key; every event it counted was an
+    alert, because roles did not exist yet."""
+    _, body = format_digest_message(
+        {"session_id": "s", "duration_seconds": 60.0, "anomaly_counts_by_source": {"fused": 2}}
+    )
+    assert "2 gated anomaly event(s)" in body
+    assert "evidence" not in body
+
+
+def test_format_digest_message_never_counts_evidence_as_gated() -> None:
+    digest = {
+        "session_id": "s",
+        "duration_seconds": 60.0,
+        "anomaly_counts_by_source": {},
+        "evidence_counts_by_source": {"isolation_forest": 3, "lstm_autoencoder": 2},
+    }
+    _, body = format_digest_message(digest)
+    assert "0 gated anomaly event(s)" in body
+    assert "by source" not in body
+    assert "5 evidence event(s) (not alerts): isolation_forest=3, lstm_autoencoder=2" in body
+
+
 # ---------------------------------------------------------------------------
 # Transport — mocked, fire-and-forget
 # ---------------------------------------------------------------------------

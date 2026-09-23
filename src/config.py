@@ -580,6 +580,43 @@ class FusionConfig(_Strict):
     behavior_critical_severity: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
+#: A06.5 — what a detector's events are allowed to do. ``alert``: the
+#: historical behaviour (stored, shown as an active anomaly, eligible for an
+#: ntfy push, and able to carry a fused event). ``evidence``: still scored and
+#: stored, flagged ``role: evidence`` on the event record, and still counted
+#: toward fusion agreement — but never pushed, never shown as an active
+#: alert, and never the reason a fused event fires.
+DetectorRole = Literal["alert", "evidence"]
+
+
+class DetectorRolesConfig(_Strict):
+    """A06.5 — per-detector role, the mechanism behind A06.1/A06.2.
+
+    Which role each detector should have is an **operator decision**
+    (A06.1 for the Isolation Forest, A06.2 for the sequence detector). Both
+    default to ``alert`` so an unchanged config behaves exactly as before;
+    this block only makes the decision expressible once it is made.
+
+    Enforced in two shared places, not by each detector: the
+    ``AnomalyEventEmitter`` stamps the role on every event it stores and
+    withholds pushes for ``evidence``, and ``FusionScorer`` lets an
+    ``evidence`` source vote in agreement but requires an ``alert`` source
+    before the fused verdict can fire. Behavior residuals and the
+    deterministic sources (DTC, misfire, trend) are always ``alert``.
+    """
+
+    isolation_forest: DetectorRole = "alert"
+    #: The single sequence-detector slot, whichever backbone
+    #: (``sequence_detector: lstm | tcn``) fills it — both publish the
+    #: ``lstm_autoencoder`` event source.
+    sequence: DetectorRole = "alert"
+
+    def by_source(self) -> dict[str, DetectorRole]:
+        """Role keyed by the ``AnomalyEvent.source`` / fusion-source name the
+        detector publishes under — the only form the emitter and fusion need."""
+        return {"isolation_forest": self.isolation_forest, "lstm_autoencoder": self.sequence}
+
+
 class LSTMAutoencoderConfig(_Strict):
     enabled: bool
     sequence_length: int
@@ -675,6 +712,9 @@ class ModelsConfig(_Strict):
     lstm_autoencoder: LSTMAutoencoderConfig
     tcn_autoencoder: TCNAutoencoderConfig = Field(default_factory=TCNAutoencoderConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
+    #: A06.5 — ``alert`` (default) or ``evidence`` per detector. The choice
+    #: is the operator's (A06.1/A06.2); see :class:`DetectorRolesConfig`.
+    roles: DetectorRolesConfig = Field(default_factory=DetectorRolesConfig)
     #: Which backbone fills the single sequence-detector slot. The selected
     #: backend's own ``enabled`` flag still gates whether it loads (so an
     #: existing ``lstm_autoencoder.enabled: false`` keeps the slot off, and

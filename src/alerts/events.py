@@ -74,6 +74,13 @@ class AnomalyEvent(BaseModel):
     #: that into the dedupe key meant any IF/LSTM hot-swap changed the key
     #: and let a duplicate fused alert burst through right at the swap.
     dedupe_key: str | None = None
+    #: A06.5 — ``evidence`` marks an event from a detector configured as
+    #: non-alerting (``models.roles``): stored and queryable as low-weight
+    #: evidence, but never pushed and never shown as an active alert. Stamped
+    #: by ``AnomalyEventEmitter`` from config, never promoted back to
+    #: ``alert``. Records written before A06.5 load as ``alert``, which is
+    #: what they were.
+    role: Literal["alert", "evidence"] = "alert"
 
     def to_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")

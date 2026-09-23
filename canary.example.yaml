@@ -376,6 +376,16 @@ models:
     # agreement gate, not OR-with-boost. One detector firing alone, however
     # severe, never sets the fused verdict by itself.
     min_agreement: 2
+  # A06.5: what each detector's events may do. `alert` (default) is the
+  # historical behaviour. `evidence` still scores, stores and fuses, but the
+  # events are flagged `role: evidence`, never pushed to ntfy, never shown as
+  # an active dashboard alert, and a fused event needs an `alert` source among
+  # its agreeing voices. Which role each gets is an OPERATOR DECISION
+  # (docs/roadmap/tasks/A06-detector-roles.md, A06.1 / A06.2) — undecided, so
+  # both stay `alert`. `sequence` covers whichever backbone fills the slot.
+  roles:
+    isolation_forest: alert
+    sequence: alert
 
 # Phase 7.5 / 6.1: shared emission policy. A detector must be over threshold
 # for at least min_consecutive_ticks (M) ticks within the trailing

@@ -10,6 +10,7 @@ import pytest
 
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
+from src.alerts.notifier import format_digest_message
 from src.analysis.digest import (
     DIGEST_FILENAME,
     SessionDigest,
@@ -123,6 +124,44 @@ def test_compute_digest_gated_anomaly_counts_by_source_windowed(tmp_path: Path) 
 
     digest = compute_digest(session, config, now=SESSION_END)
     assert digest.anomaly_counts_by_source == {"fused": 1, "behavior": 1}
+
+
+def test_compute_digest_separates_evidence_role_events_from_alerts(tmp_path: Path) -> None:
+    """A06.5: an evidence-role detector's events are not alerts. The digest
+    counts them apart, so "gated anomaly events" means alerts only."""
+    session = _session(tmp_path)
+    config = _config(tmp_path)
+    logger = AnomalyEventLogger(config.daemon.anomalies_dir)
+    logger.log(
+        AnomalyEvent(
+            timestamp="2026-05-20T18:01:00+00:00",
+            source="fused",
+            model_version="v1",
+            score=0.9,
+        )
+    )
+    logger.log(
+        AnomalyEvent(
+            timestamp="2026-05-20T18:01:30+00:00",
+            source="lstm_autoencoder",
+            model_version="lstm_v1",
+            score=5.0,
+            role="evidence",
+        )
+    )
+    logger.close()
+
+    digest = compute_digest(session, config, now=SESSION_END)
+    assert digest.anomaly_counts_by_source == {"fused": 1}
+    assert digest.evidence_counts_by_source == {"lstm_autoencoder": 1}
+    assert digest.schema_version == 2
+    payload = digest.to_dict()
+    assert payload["evidence_counts_by_source"] == {"lstm_autoencoder": 1}
+
+    _, body = format_digest_message(payload)
+    assert "1 gated anomaly event(s)" in body
+    assert "by source: fused=1" in body
+    assert "1 evidence event(s) (not alerts): lstm_autoencoder=1" in body
 
 
 def test_capture_prefixed_digest_uses_its_timestamp_for_all_windows(tmp_path: Path) -> None:

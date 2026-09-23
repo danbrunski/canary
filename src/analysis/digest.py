@@ -28,7 +28,7 @@ import json
 import logging
 import math
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from datetime import timedelta as _timedelta
 from pathlib import Path
@@ -49,7 +49,14 @@ from src.timefmt import parse_iso_utc
 log = logging.getLogger(__name__)
 
 DIGEST_FILENAME = "digest.json"
-SCHEMA_VERSION = 1
+#: 2 (A06.5): ``anomaly_counts_by_source`` counts alert-role events only and
+#: ``evidence_counts_by_source`` counts the rest. A schema-1 sidecar is still
+#: accurate as written — detector roles did not exist when it was computed,
+#: so every event it counted was an alert — and readers treat its missing
+#: evidence block as empty. It is deliberately *not* recomputed: the digest
+#: window ends at "now" when computed after the fact, so a late recompute
+#: would count events from long after the trip.
+SCHEMA_VERSION = 2
 
 #: Refusal sidecar (D03.6). A digest that did not run leaves this instead of
 #: nothing, so a reader can tell the three states apart: ``digest.json``
@@ -102,6 +109,7 @@ class SessionDigest:
     session_id: str
     duration_seconds: float
     mode_seconds: dict[str, float]
+    #: Alert-role events only (A06.5) — what "gated anomaly events" means.
     anomaly_counts_by_source: dict[str, int]
     top_behavior_deviations: list[dict[str, Any]]
     fingerprint_top_movers: list[dict[str, Any]]
@@ -111,6 +119,10 @@ class SessionDigest:
     #: ordinary drive rather than an empty block, so a reader can tell "not a
     #: tuning capture" from "a capture that found nothing".
     tuning: dict[str, Any] | None = None
+    #: A06.5 — events from ``evidence``-role detectors, stored as low-weight
+    #: evidence and never alerts. Kept apart so no reader can add them to the
+    #: alert count.
+    evidence_counts_by_source: dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -120,6 +132,7 @@ class SessionDigest:
             "duration_seconds": self.duration_seconds,
             "mode_seconds": dict(self.mode_seconds),
             "anomaly_counts_by_source": dict(self.anomaly_counts_by_source),
+            "evidence_counts_by_source": dict(self.evidence_counts_by_source),
             "top_behavior_deviations": list(self.top_behavior_deviations),
             "fingerprint_top_movers": list(self.fingerprint_top_movers),
             "new_dtcs": list(self.new_dtcs),
@@ -282,14 +295,19 @@ def _session_start(session_dir: Path) -> datetime | None:
 
 def _anomaly_counts_by_source(
     anomalies_dir: Path, start: datetime, end: datetime
-) -> dict[str, int]:
-    """Count gated anomaly events whose timestamp falls in ``[start, end]``.
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Count gated anomaly events whose timestamp falls in ``[start, end]``,
+    as ``(alerts, evidence)`` by source.
+
+    A06.5: an event from an ``evidence``-role detector is not an alert, so it
+    is counted in the second mapping and never in the first.
 
     Only reads the specific per-day files the window can possibly span
     (daily rotation, see ``event_log_path``) rather than every file the
     anomalies directory has ever accumulated.
     """
     counts: dict[str, int] = {}
+    evidence: dict[str, int] = {}
     day = start.date()
     last_day = end.date()
     while day <= last_day:
@@ -301,9 +319,10 @@ def _anomaly_counts_by_source(
                 except ValueError:
                     continue
                 if start <= ts <= end:
-                    counts[event.source] = counts.get(event.source, 0) + 1
+                    bucket = evidence if event.role == "evidence" else counts
+                    bucket[event.source] = bucket.get(event.source, 0) + 1
         day += _ONE_DAY
-    return counts
+    return counts, evidence
 
 
 def _read_dtc_sidecar(session_dir: Path) -> dict[str, Any] | None:
@@ -441,7 +460,9 @@ def compute_digest(
     reference = read_reference_epoch(config.daemon.reference_epoch)
     reference_stats = dict(reference.stats) if reference is not None else {}
 
-    anomaly_counts = _anomaly_counts_by_source(config.daemon.anomalies_dir, start, end)
+    anomaly_counts, evidence_counts = _anomaly_counts_by_source(
+        config.daemon.anomalies_dir, start, end
+    )
     ledger = VehicleLedgerStore(config.daemon.vehicle_ledger)
 
     return SessionDigest(
@@ -451,6 +472,7 @@ def compute_digest(
         duration_seconds=duration_seconds,
         mode_seconds=mode_seconds,
         anomaly_counts_by_source=anomaly_counts,
+        evidence_counts_by_source=evidence_counts,
         top_behavior_deviations=_top_behavior_deviations(stats),
         fingerprint_top_movers=_fingerprint_top_movers(stats, reference_stats),
         new_dtcs=_new_dtcs(session_dir),

@@ -310,6 +310,14 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 >
                   {e.source.replace("_", " ")}
                 </span>
+                {e.role === "evidence" && (
+                  <span
+                    className="rounded border border-border px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-fg-dim"
+                    title="From a detector configured as non-alerting (models.roles, A06.5): stored as low-weight evidence, never pushed or shown as an active alert."
+                  >
+                    evidence
+                  </span>
+                )}
                 {e.operating_mode && (
                   <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
                 )}

@@ -2,7 +2,11 @@ import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { AcceptedBaselineOverrideSummary, StatusResponse } from "../types";
+import type {
+  AcceptedBaselineOverrideSummary,
+  AnomalyEvent,
+  StatusResponse,
+} from "../types";
 import { StatusStrip } from "./StatusStrip";
 
 function status(
@@ -156,5 +160,77 @@ describe("StatusStrip — accepted-baseline overrides (2.3)", () => {
     expect(screen.getByText(/expired/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("0 active"));
     expect(screen.getByText("needs re-confirmation")).toBeInTheDocument();
+  });
+});
+
+function anomaly(overrides: Partial<AnomalyEvent>): AnomalyEvent {
+  return {
+    timestamp: new Date().toISOString(),
+    source: "lstm_autoencoder",
+    model_version: "v1",
+    score: 5,
+    threshold: 3,
+    affected_channels: [],
+    operating_mode: "city",
+    session: null,
+    window_start_timestamp: null,
+    window_end_timestamp: null,
+    latency_ms: null,
+    detail: {},
+    ...overrides,
+  };
+}
+
+describe("StatusStrip — detector roles (A06.5)", () => {
+  it("shows an alert-role event as an active anomaly", () => {
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [anomaly({ role: "alert" })],
+      }),
+    );
+    expect(screen.getByText(/active · LSTM \(city\)/)).toBeInTheDocument();
+  });
+
+  it("never shows an evidence-role event as an active anomaly", () => {
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [anomaly({ role: "evidence" })],
+      }),
+    );
+    expect(screen.getByText("nominal")).toBeInTheDocument();
+  });
+
+  it("reports the freshest alert behind a newer evidence event", () => {
+    const now = Date.now();
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [
+          anomaly({ role: "evidence", timestamp: new Date(now).toISOString() }),
+          anomaly({
+            role: "alert",
+            source: "fused",
+            timestamp: new Date(now - 10_000).toISOString(),
+          }),
+        ],
+      }),
+    );
+    expect(screen.getByText(/active · Fused \(city\)/)).toBeInTheDocument();
+  });
+
+  it("treats a record without a role (pre-A06.5) as an alert", () => {
+    render(
+      createElement(StatusStrip, {
+        status: status({ active: 0, overrides: [] }),
+        channels: new Map(),
+        events: [anomaly({})],
+      }),
+    );
+    expect(screen.getByText(/active · LSTM/)).toBeInTheDocument();
   });
 });

@@ -188,15 +188,21 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
   );
 }
 
+function countsSummary(counts: Record<string, number>): { total: number; bySource: string } {
+  return {
+    total: Object.values(counts).reduce((sum, count) => sum + count, 0),
+    bySource: Object.entries(counts)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([source, count]) => `${source}=${count}`)
+      .join(", "),
+  };
+}
+
 function DigestSummary({ digest }: { digest: SessionDigestResponse }) {
-  const totalAnomalies = Object.values(digest.anomaly_counts_by_source).reduce(
-    (sum, count) => sum + count,
-    0,
-  );
-  const bySource = Object.entries(digest.anomaly_counts_by_source)
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([source, count]) => `${source}=${count}`)
-    .join(", ");
+  const { total: totalAnomalies, bySource } = countsSummary(digest.anomaly_counts_by_source);
+  // A06.5: evidence-role detector events are not alerts — their own row,
+  // never added to the gated count; absent on schema-1 digests.
+  const evidence = countsSummary(digest.evidence_counts_by_source ?? {});
   const topMover = digest.fingerprint_top_movers[0];
 
   return (
@@ -208,6 +214,15 @@ function DigestSummary({ digest }: { digest: SessionDigestResponse }) {
           {bySource && <span className="text-fg-dim"> ({bySource})</span>}
         </dd>
       </div>
+      {evidence.total > 0 && (
+        <div className={definitionRowClass}>
+          <dt className={definitionTermClass}>evidence (not alerts)</dt>
+          <dd className={definitionValueClass}>
+            {evidence.total}
+            <span className="text-fg-dim"> ({evidence.bySource})</span>
+          </dd>
+        </div>
+      )}
       <div className={definitionRowClass}>
         <dt className={definitionTermClass}>new DTCs</dt>
         <dd className={definitionValueClass}>

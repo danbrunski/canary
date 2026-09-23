@@ -134,6 +134,13 @@ def format_digest_message(digest: dict[str, Any]) -> tuple[str, str]:
     if counts:
         by_source = ", ".join(f"{source}={count}" for source, count in sorted(counts.items()))
         lines.append(f"by source: {by_source}")
+    # A06.5: evidence-role events are not alerts. Their own line, never added
+    # to the total above; absent on a schema-1 digest (no roles then).
+    evidence = digest.get("evidence_counts_by_source") or {}
+    total_evidence = sum(int(v) for v in evidence.values())
+    if total_evidence:
+        by_source = ", ".join(f"{source}={count}" for source, count in sorted(evidence.items()))
+        lines.append(f"{total_evidence} evidence event(s) (not alerts): {by_source}")
     if new_dtcs:
         codes = ", ".join(str(entry.get("code", "?")) for entry in new_dtcs)
         lines.append(f"new DTCs: {codes}")

@@ -729,7 +729,9 @@ class LiveInferencePipeline:
         self._source = source
         self._components = components
         self._recorder = recorder
-        self._fusion = FusionScorer(components.config.models.fusion)
+        self._fusion = FusionScorer(
+            components.config.models.fusion, roles=components.config.models.roles.by_source()
+        )
         self._severity_threshold = components.config.models.fusion.severity_threshold
         self._if = IsolationForestDetector(components)
         self._sequence = SequenceDetector(components)

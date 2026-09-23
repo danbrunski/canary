@@ -144,6 +144,7 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
     snap = build_status(config, emitter=emitter)
     assert snap.emitter_counters == {
         "emitted": 4,
+        "emitted_evidence": 0,
         "suppressed_not_anomaly": 12,
         "suppressed_dedupe": 1,
         "suppressed_tuning": 0,

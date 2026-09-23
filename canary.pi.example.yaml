@@ -180,6 +180,11 @@ models:
     agreement_boost: 0.25
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
+  # A06.5 detector roles (alert | evidence) — an operator decision, still
+  # open; see canary.example.yaml and docs/roadmap/tasks/A06-detector-roles.md.
+  roles:
+    isolation_forest: alert
+    sequence: alert
 
 dashboard:
   # LAN-only. There is no auth in v1; keep this behind the vehicle hotspot or

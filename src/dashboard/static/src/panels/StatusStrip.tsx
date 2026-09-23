@@ -283,7 +283,8 @@ const ANOMALY_ACTIVE_MS = 60_000;
 //: quiet (and, on a fresh page load, a day-old event from the log history).
 const ANOMALY_RECENT_MS = 5 * 60_000;
 
-/** The freshest anomaly + whether it's "active" (last 60 s) vs just recent.
+/** The freshest *alert* + whether it's "active" (last 60 s) vs just recent.
+ *  Evidence-role events (A06.5) are skipped.
  *  Returns null once the freshest event is older than the recent window, so the
  *  strip clears to "nominal". Event timestamps are ISO-8601; unparseable ones
  *  are skipped rather than treated as "now". */
@@ -292,6 +293,9 @@ function mostRecentEvent(
   now: number,
 ): RecentAnomaly | null {
   for (const e of events) {
+    // A06.5: an evidence-role detector's event is stored and listed in the
+    // Anomalies panel, but it is not an alert — it never lights this spine.
+    if (e.role === "evidence") continue;
     const t = Date.parse(e.timestamp);
     if (Number.isNaN(t)) continue;
     const ageMs = now - t;

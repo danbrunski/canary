@@ -36,6 +36,15 @@ false "agreement" from a single voice). Sibling surfaces sharing a
 ``group`` still collapse to one independent voice for both the boost and
 the gate, same as before.
 
+**A06.5 — detector roles.** A source whose detector is configured
+``evidence`` (``models.roles``) still fires, still counts as an independent
+voice for ``agreement`` and the boost, and is recorded as such in the fused
+event's detail — but it sets no magnitude of its own and cannot carry the
+verdict: the fused severity's base is the strongest *alert-role* firing
+source, and ``is_anomaly`` additionally requires at least one such source.
+Two evidence detectors agreeing is recorded (``agreement`` 2, severity 0),
+never alerted. With every role ``alert`` (the default) nothing changes.
+
 Kept narrow and dependency-light (no sklearn / torch / pandas) so the daemon
 can fuse without touching the model layers — same discipline as the emitter.
 """
@@ -44,10 +53,11 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any
 
-from src.config import FusionConfig
+from src.config import DetectorRole, FusionConfig
 
 _EPS = 1e-9
 #: Severity for a fired source that has neither a calibrated scale nor a
@@ -78,6 +88,10 @@ class FusionSource:
     fired: bool
     severity: float
     group: str | None = None
+    #: A06.5 — ``evidence`` sources vote in agreement but cannot carry the
+    #: fused verdict. Resolved by :meth:`FusionScorer.fuse` from its
+    #: configured roles; a builder never needs to set it.
+    role: DetectorRole = "alert"
 
 
 class PersistenceGate:
@@ -264,8 +278,13 @@ def lstm_source(
 class FusionScorer:
     """Combine per-tick detector outputs into one calibrated severity."""
 
-    def __init__(self, config: FusionConfig) -> None:
+    def __init__(
+        self, config: FusionConfig, *, roles: Mapping[str, DetectorRole] | None = None
+    ) -> None:
         self._config = config
+        #: A06.5 — role per source name (``DetectorRolesConfig.by_source``);
+        #: an unnamed source (behavior residuals) is ``alert``.
+        self._roles: dict[str, DetectorRole] = dict(roles or {})
 
     @property
     def enabled(self) -> bool:
@@ -307,11 +326,14 @@ class FusionScorer:
         ``is_anomaly=False``. 6.2: ``is_anomaly`` additionally requires
         ``min_agreement`` independent firing sources — see module docstring.
         """
-        present = tuple(sources)
+        present = tuple(self._with_role(s) for s in sources)
         firing = [s for s in present if s.fired]
         if not firing:
             return FusedResult(0.0, False, operating_mode, timestamp, present, ())
-        base = max(s.severity for s in firing)
+        # A06.5: only an alert-role source sets the magnitude or can carry
+        # the verdict; evidence sources join the agreement count below.
+        alerting = [s for s in firing if s.role == "alert"]
+        base = max((s.severity for s in alerting), default=0.0)
         # Agreement counts *independent* voices: sources sharing a ``group``
         # (sibling surfaces grading the same output channel) collapse to one
         # before the boost — two timing surfaces over the same excursion are
@@ -320,9 +342,10 @@ class FusionScorer:
         # as "agreement" any more than a single detector can.
         independent_groups = {s.group or s.name for s in firing}
         boost = self._config.agreement_boost * (len(independent_groups) - 1)
-        severity = _bounded(base + boost)
+        severity = _bounded(base + boost) if alerting else 0.0
         is_anomaly = (
-            severity >= self._config.severity_threshold
+            bool(alerting)
+            and severity >= self._config.severity_threshold
             and len(independent_groups) >= self._config.min_agreement
         )
         return FusedResult(
@@ -333,6 +356,12 @@ class FusionScorer:
             sources=present,
             contributing=tuple(s.name for s in firing),
         )
+
+    def _with_role(self, source: FusionSource) -> FusionSource:
+        """Apply the configured role; never promotes an evidence source."""
+        if source.role == "evidence" or self._roles.get(source.name, "alert") == "alert":
+            return source
+        return replace(source, role="evidence")
 
 
 @dataclass(frozen=True)
@@ -363,6 +392,7 @@ class FusedResult:
                     "threshold": s.threshold,
                     "fired": s.fired,
                     "severity": s.severity,
+                    "role": s.role,
                 }
                 for s in self.sources
             },

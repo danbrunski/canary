@@ -14,6 +14,9 @@ module turns each into the unified ``AnomalyEvent`` and persists it through
   ``min_seconds_between_events=0`` for tests / replay.
 * **counter accounting** — ``emitted`` / ``suppressed`` are observable so
   the daemon's `/status` endpoint (5.3) can surface them.
+* **detector role** (A06.5) — an event from an ``evidence``-role detector
+  (``models.roles``) is stored flagged ``role: evidence``, counted in
+  ``emitted_evidence`` rather than ``emitted``, and never pushed.
 
 Pure wiring; no torch / sklearn imports — kept narrow on purpose so the
 daemon can construct one without touching the model layers.
@@ -37,6 +40,7 @@ from src.alerts.tuning import AlertTuner
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
     from src.alerts.notifier import Notifier
+    from src.config import DetectorRole
     from src.models.inference import SequenceInferenceResult
 
 log = logging.getLogger(__name__)
@@ -59,9 +63,14 @@ class EmitterCounters:
     #: engine wasn't running (Phase 1.5) — e.g. key-out, KOEO, no data.
     #: Behavior surfaces are unaffected; they keep their own mode-gating.
     skipped_vehicle_state: int = 0
+    #: A06.5 — events stored from an ``evidence``-role detector. Counted
+    #: apart from ``emitted`` because they are not alerts: the dashboard's
+    #: "N emitted" and the alert budget both mean alerts.
+    emitted_evidence: int = 0
 
     def reset(self) -> None:
         self.emitted = 0
+        self.emitted_evidence = 0
         self.suppressed_not_anomaly = 0
         self.suppressed_dedupe = 0
         self.suppressed_tuning = 0
@@ -77,6 +86,7 @@ class EmitterCounters:
         (other code may hold a reference to this exact instance, e.g.
         ``GET /status``)."""
         self.emitted = snapshot.emitted
+        self.emitted_evidence = snapshot.emitted_evidence
         self.suppressed_not_anomaly = snapshot.suppressed_not_anomaly
         self.suppressed_dedupe = snapshot.suppressed_dedupe
         self.suppressed_tuning = snapshot.suppressed_tuning
@@ -87,6 +97,7 @@ class EmitterCounters:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
         return {
             "emitted": self.emitted,
+            "emitted_evidence": self.emitted_evidence,
             "suppressed_not_anomaly": self.suppressed_not_anomaly,
             "suppressed_dedupe": self.suppressed_dedupe,
             "suppressed_tuning": self.suppressed_tuning,
@@ -113,8 +124,13 @@ class AnomalyEventEmitter:
         notifier: Notifier | None = None,
         notify_min_severity: float = 0.8,
         notify_max_pushes_per_session: int = 3,
+        roles: Mapping[str, DetectorRole] | None = None,
     ) -> None:
         self._logger = logger
+        #: A06.5 — role per event source (``DetectorRolesConfig.by_source``).
+        #: A source not named here is ``alert``. Applied in :meth:`_emit`, the
+        #: one path every event takes, so no emit method can forget it.
+        self._roles: dict[str, DetectorRole] = dict(roles or {})
         self._min_seconds_between_events = min_seconds_between_events
         self._tuner = tuner
         self._last_emit: dict[tuple[str, str], float] = {}
@@ -411,13 +427,26 @@ class AnomalyEventEmitter:
         if self._is_deduped(event):
             self.counters.suppressed_dedupe += 1
             return None
+        event = self._apply_role(event)
         self._logger.log(event)
-        self.counters.emitted += 1
+        if event.role == "evidence":
+            self.counters.emitted_evidence += 1
+        else:
+            self.counters.emitted += 1
         self._last_emit[_dedupe_identity(event)] = _seconds(event.timestamp)
         if self._tuner is not None:
             self._tuner.notify_emitted(event, now=_seconds(event.timestamp))
-        self._maybe_push_notification(event)
+        if event.role == "alert":
+            self._maybe_push_notification(event)
         return event
+
+    def _apply_role(self, event: AnomalyEvent) -> AnomalyEvent:
+        """A06.5 — stamp the configured role. The stricter of the event's own
+        role and the configured one wins: nothing promotes evidence to an
+        alert."""
+        if event.role == "evidence" or self._roles.get(event.source, "alert") == "alert":
+            return event
+        return event.model_copy(update={"role": "evidence"})
 
     def _maybe_push_notification(self, event: AnomalyEvent) -> None:
         """Task 5.3: fire-and-forget critical-alert push, AFTER dedupe/tuning
