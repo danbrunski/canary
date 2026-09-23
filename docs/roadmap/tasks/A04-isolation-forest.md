@@ -373,10 +373,12 @@ confirms which artifact the Pi runs.
   - **Serve cost.** One-row `decision_function` on the laptop over 255
     features takes 15 ms at 200 trees and 55-64 ms at 1,000 (`n_jobs` 4/1).
     The Pi is slower, and the IF sits in the out-of-process tick budget.
-  - **Remaining (operator decision):** the ensemble size, recommended 1,000.
-    City plateaus at 500 but highway is still improving at 1,000, against
-    3.5-4x the per-tick IF cost on the Pi. `max_samples`/`max_features` are
-    not swept. Everything takes effect at the next retrain.
+  - **Decided by the operator, 2026-09-23: 600 trees**, a middle ground
+    between stability (city plateaus at 500) and per-tick cost (1,000 trees
+    was 3.5-4x the IF cost). `n_estimators: 600` is set in all three example
+    configs. It takes effect at the A06.3 retrain.
+  - **Remaining:** the retrain's `seed_agreement` at 600 trees, and the Pi's
+    per-tick IF cost at 600. `max_samples`/`max_features` are not swept.
 - [~] **A04.11 — Count exceedance episodes, not rows.** The rule of at least
   10 exceedances per calibration treats 1 Hz rows as independent, despite
   30 s rolling windows. On `134345` the warmup top 1 % was 4 rows forming 1

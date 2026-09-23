@@ -155,7 +155,7 @@ measurement in hand.
   asserted channel is read (`StopWhen`, hang-guard deadline). 0 failures in 8
   post-fix burner runs.
 
-- [~] **T01.7 `test_live_replay_live_does_not_cross_contaminate_state` fails at
+- [x] **T01.7 `test_live_replay_live_does_not_cross_contaminate_state` fails at
   `145e223`, and it is not load.** In `tests/test_replay_isolation.py`
   (`integration` tier, so it is not in the gate). It fails as a `TimeoutError`
   at shutdown, which hides the real assertion: a scratch copy that sets
@@ -187,7 +187,8 @@ measurement in hand.
     `assert 0 == 1`. Neither hangs. Loaded: 10 of 10 alone (`-n 4`, 12
     burners, load 6.0–15.3) and 5 of 5 alongside the six T01.8 files
     (`-n auto`, load 15.3–22.3). No production code changed.
-  - [~] **Live-path gap: real, measured, and not fixed (judged not worth it).**
+  - [x] **Live-path gap: real, measured, and accepted.** *Operator,
+    2026-09-23: losing the first 0.5–1 s after a daemon start is fine; no fix.*
     Records that arrive before the live source is built are stored but never
     observed by it. On the Pi on 2026-09-23 (`/status.startup` after the 17:46Z
     restart at `0d4b32b`: `first_record_stored` 5.078 s, `live_source_ready`

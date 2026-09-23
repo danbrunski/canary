@@ -293,6 +293,7 @@ def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
     from src.models.evaluation_detectors import detector_roles
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config.models.roles.isolation_forest = "alert"  # one of each role
     config.models.roles.sequence = "evidence"
     roles = detector_roles(config, ["isolation_forest", "sequence", "sequence_global", "fused"])
     assert roles == {

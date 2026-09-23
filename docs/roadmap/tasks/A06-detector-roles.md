@@ -30,10 +30,15 @@ training envelope". That is useful to know. It is not a diagnosis.
 
 ## Checklist
 
-- [~] **A06.1 — Decision: does the Isolation Forest alert?** *Open:
-  operator decision. Option (b) is now one config line,
-  `models.roles.isolation_forest: evidence` (A06.5); the default is still
-  `alert`.*
+- [x] **A06.1 — Decision: does the Isolation Forest alert?** **Decided by
+  the operator, 2026-09-23: (b) evidence only.** `DetectorRolesConfig`
+  now defaults `isolation_forest` to `evidence`, and the three example
+  configs agree (`tests/test_detector_roles.py::test_roles_default_to_the_operators_decision`,
+  `::test_shipped_example_configs_carry_the_operators_roles`). The decision
+  rests on the A02.11 table: 1.2 [0, 3.9] false alarms per engine-hour with
+  81 % of rows withheld, and A04.1 (the IF is blind to a single-quantity
+  shift of any size). A05's plausibility checks own the gross single-channel
+  faults.
   - Options:
     - (a) keep alerting after A04's fixes;
     - (b) score and store as low-weight evidence, but never alert;
@@ -51,10 +56,13 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.2 — Decision: what the sequence detector is for.** *Open:
-  operator decision. The non-alerting half of option (b) is
-  `models.roles.sequence: evidence` (A06.5). The novelty-screen report
-  against A03.8's envelope is not built.*
+- [~] **A06.2 — Decision: what the sequence detector is for.** **Decided
+  by the operator, 2026-09-23: (b) a non-alerting novelty screen.** The
+  non-alerting half is in force: `sequence` now defaults to `evidence`. It
+  rests on the A02.11 table: 45.4 false alarms per engine-hour as served,
+  3.0 on the global score. **Remaining:** the novelty-screen report ("outside
+  the learned envelope on X, Y") against A03.8's envelope. The deployed
+  artifact records no envelope, so the report needs the A06.3 retrain.
   - Options:
     - (a) keep alerting after A01–A03 and A02's recalibration;
     - (b) a non-alerting *novelty screen* reporting "outside the learned
@@ -75,8 +83,11 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.3 — Decision: scope of the owed retrain (D03.25).** *Open:
-  operator decision.* It is owed
+- [~] **A06.3 — Decision: scope of the owed retrain (D03.25).** **Decided
+  by the operator, 2026-09-23: (a) a full naturally aspirated retrain now**,
+  with the A02–A04 fixes and the A04.10 tree count (600). **Remaining:** run
+  the retrain, score it on A02's harness against the A02.11 baseline on the
+  same drives, then deploy. It is owed
   for three reasons: the binding retraction, the mode labels, and the new
   default-profile DIDs. The supercharger build will make the result obsolete
   within weeks.
@@ -97,8 +108,11 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.4 — Decision: where the primary detector lives.** *Open:
-  operator decision.* The literature
+- [x] **A06.4 — Decision: where the primary detector lives.** **Decided by
+  the operator, 2026-09-23: (a) the behavior models and the second brain's
+  deterministic layer**, with A05 for gross faults. The IF and the sequence
+  model are evidence (A06.1, A06.2). The work to grow the behavior models is
+  the B-series (B03–B07). The literature
   (A02.5) and production OBD practice both point at per-quantity residuals:
   engine responses predicted from operating inputs, with per-regime bands,
   change detection and confirmation. That is what the behavior models

@@ -78,7 +78,9 @@ preprocessing:
 models:
   isolation_forest:
     enabled: true
-    n_estimators: 200
+    # A04.10 (operator, 2026-09-23): 600 trees -- between 200 (seed-agreement
+    # Jaccard city 0.62) and 1000 (0.79 city / 0.88 highway at ~4x the score cost).
+    n_estimators: 600
     contamination: 0.01
     per_mode_contamination: {}
     random_state: 42

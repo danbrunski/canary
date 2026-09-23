@@ -604,10 +604,12 @@ DetectorRole = Literal["alert", "evidence"]
 class DetectorRolesConfig(_Strict):
     """A06.5 — per-detector role, the mechanism behind A06.1/A06.2.
 
-    Which role each detector should have is an **operator decision**
-    (A06.1 for the Isolation Forest, A06.2 for the sequence detector). Both
-    default to ``alert`` so an unchanged config behaves exactly as before;
-    this block only makes the decision expressible once it is made.
+    **Decided by the operator 2026-09-23** (A06.1, A06.2): both detectors
+    are ``evidence``. The Isolation Forest scores and stores but never alerts
+    on its own (A05's plausibility checks own gross single-channel faults);
+    the sequence detector is a non-alerting novelty screen. The primary
+    detector is the behavior models plus the deterministic layer (A06.4).
+    Set a role to ``alert`` to restore the old behaviour for one detector.
 
     Enforced in two shared places, not by each detector: the
     ``AnomalyEventEmitter`` stamps the role on every event it stores and
@@ -617,11 +619,11 @@ class DetectorRolesConfig(_Strict):
     deterministic sources (DTC, misfire, trend) are always ``alert``.
     """
 
-    isolation_forest: DetectorRole = "alert"
+    isolation_forest: DetectorRole = "evidence"
     #: The single sequence-detector slot, whichever backbone
     #: (``sequence_detector: lstm | tcn``) fills it — both publish the
     #: ``lstm_autoencoder`` event source.
-    sequence: DetectorRole = "alert"
+    sequence: DetectorRole = "evidence"
 
     def by_source(self) -> dict[str, DetectorRole]:
         """Role keyed by the ``AnomalyEvent.source`` / fusion-source name the

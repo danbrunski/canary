@@ -91,24 +91,25 @@ def _emitter(
 # ---------------------------------------------------------------------------
 
 
-def test_roles_default_to_alert_so_behaviour_is_unchanged() -> None:
+def test_roles_default_to_the_operators_decision() -> None:
+    """A06.1/A06.2 (operator, 2026-09-23): neither detector alerts on its own."""
     roles = DetectorRolesConfig()
-    assert roles.isolation_forest == "alert"
-    assert roles.sequence == "alert"
+    assert roles.isolation_forest == "evidence"
+    assert roles.sequence == "evidence"
     assert roles.by_source() == {
-        "isolation_forest": "alert",
-        "lstm_autoencoder": "alert",
+        "isolation_forest": "evidence",
+        "lstm_autoencoder": "evidence",
     }
 
 
 @pytest.mark.parametrize(
     "example", ["canary.example.yaml", "canary.pi.example.yaml", "canary.dev.example.yaml"]
 )
-def test_shipped_example_configs_leave_both_detectors_alerting(example: str) -> None:
+def test_shipped_example_configs_carry_the_operators_roles(example: str) -> None:
     config = CanaryConfig.from_yaml(REPO_ROOT / example)
     assert config.models.roles.by_source() == {
-        "isolation_forest": "alert",
-        "lstm_autoencoder": "alert",
+        "isolation_forest": "evidence",
+        "lstm_autoencoder": "evidence",
     }
 
 
@@ -301,6 +302,7 @@ preprocessing:
 models:
   out_of_process_feature_build: false
   roles:
+    isolation_forest: alert
     sequence: {sequence_role}
   isolation_forest:
     enabled: false
