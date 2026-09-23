@@ -11,7 +11,7 @@ on the current code.
 
 ## Checklist
 
-- [ ] **A01.1 — Match worker replies to the tick that asked.**
+- [x] **A01.1 — Match worker replies to the tick that asked.**
   `InferenceWorker.compute` (`src/daemon/inference_worker.py`) sends a tick,
   waits `result_timeout_seconds`, and on timeout returns `None`. The late
   reply stays in the pipe. The next `compute` sends tick N+1, finds tick N's
@@ -28,7 +28,17 @@ on the current code.
     tick N receives result N, not N−1.
   - **Likely trigger:** a model hot-swap in the child (2–7 s to load) against
     the 3 s timeout (A01.6).
-- [ ] **A01.2 — Never score the sequence detector in-process while a worker
+
+  *Done 2026-09-22.* `InferenceWorker.compute`
+  (`src/daemon/inference_worker.py`) reads replies until one carries this
+  tick's `index`. It discards and counts earlier ones on the same deadline, so
+  a lone stale reply is still a timeout. The count is published as
+  `/status.inference.worker_stale_replies`.
+  - Tests (`tests/test_scoring_continuity.py`):
+    `test_a_late_reply_is_never_applied_to_the_next_tick`,
+    `test_a_late_reply_alone_is_a_timeout_not_a_result`,
+    `test_discarded_late_replies_reach_the_timing_snapshot`.
+- [x] **A01.2 — Never score the sequence detector in-process while a worker
   exists.** On a worker timeout, `_compute` (`src/daemon/inference.py`) falls
   back to `_compute_tick`, which scores on the parent's own sequence engine.
   That engine's buffer advances only on fallback ticks, so its windows are
@@ -39,7 +49,17 @@ on the current code.
     reason (`worker_timeout`); do not compute it in the parent.
   - **Test:** after a timeout, no sequence result comes from the parent
     engine.
-- [ ] **A01.3 — Reset the sequence window at every discontinuity.** The window
+
+  *Done 2026-09-22, by a different route than written above.* Skipping the
+  in-process sequence score outright would leave the detector silent for the
+  rest of a run whenever the child dies. Instead, the window buffer now
+  clears on a time gap (A01.3). After a single timeout, the parent engine's
+  last row is from its previous fallback run, so it clears and scores
+  nothing. It scores again only if a run of consecutive fallback ticks
+  refills it, which is correct scoring on contiguous rows, never a window
+  stitched across hours. The `_compute` docstring records this.
+  - Test: `test_a_fallback_engine_idle_since_long_ago_scores_nothing`.
+- [x] **A01.3 — Reset the sequence window at every discontinuity.** The window
   buffer (`src/models/inference.py`) clears only on a session change or a tick
   with no finite feature. Neither happens in practice:
   - Live rows carry `session="live"` always (`src/preprocessing/live.py`), so
@@ -63,14 +83,49 @@ on the current code.
   - **Scope note:** the UPS shuts the Pi down 300 s after key-off, so a
     reboot already resets an overnight gap. What straddles today is short
     stops, stale-OBD stretches mid-drive, and replays.
-- [ ] **A01.4 — Replay start and stop reset the sequence engines.**
+
+  *Done 2026-09-22.* Two rules, each one place:
+  - **Time gap.** `WINDOW_MAX_GAP_SECONDS` (5 s, `src/models/sequence_dataset.py`)
+    is read by both the live `SequenceWindowBuffer` and offline
+    `build_sequence_windows`. A row more than 5 s after the previous one, or
+    earlier than it, starts a new window. Δt restarts there too, offline and
+    live alike, so a model is calibrated on the windows it serves. This
+    changes training windows only where a drive has a hole longer than 5 s,
+    and it takes effect at the next retrain.
+  - **Generation change.** `SequenceDetector.prepare` compares the
+    pipeline's `GenerationToken` with the previous job's. A change (replay,
+    capture or model version) marks the job `reset`, which clears the window
+    in-process and in the child (`WorkerTick.reset_sequence`).
+
+  *Not done, deliberately:* a reset on every not-scorable → scorable
+  transition. A classifier flickering for one tick would blind the detector
+  for 30 s each time. Interruptions longer than 5 s are caught by the gap
+  rule.
+  - Tests: `test_a_live_window_never_straddles_a_stop`,
+    `test_a_short_gap_keeps_the_window`,
+    `test_time_going_backwards_restarts_the_window`,
+    `test_offline_windows_and_live_delta_restart_at_the_same_gap`,
+    `test_a_generation_change_asks_for_a_window_reset`,
+    `test_in_process_compute_clears_the_window_when_asked`,
+    `test_the_reset_rides_to_the_scoring_child`.
+  - Run against the unfixed tree (`69c5064`), 10 of the 11 new tests fail.
+    The one that passes is the short-gap guard, which must pass on both.
+- [x] **A01.4 — Replay start and stop reset the sequence engines.**
   `_reset_in_memory_state` (`src/control/replay_control.py`) resets the live
   feature source and the persistence gate, but not the sequence engine in the
   parent or the child. A replay's first windows therefore contain the live
   drive's last rows, and the live drive resumes with the replay's.
   - Reset both engines on replay start and stop.
   - **Test** through the replay control path.
-- [ ] **A01.5 — Suppressing a channel must not change the encoder's input.**
+
+  *Done 2026-09-22 through A01.3's generation rule, not in `replay_control`.*
+  The replay id is part of the `GenerationToken`, so the first job after a
+  replay starts or stops resets the window in whichever process scores it.
+  That also covers a capture starting and a model hot-swap, without
+  `replay_control` having to reach into either engine.
+  - Test: `test_a_generation_change_asks_for_a_window_reset` walks
+    start → stop.
+- [~] **A01.5 — Suppressing a channel must not change the encoder's input.**
   `score_window` sets the mask to 0 for suppressed columns. The mask is also an
   encoder input (GRU-D and TCN), and Δt stays 0, a combination never seen in
   training. The 2026-09-20 artifact contains all 12 columns that `canary.yaml`
@@ -81,6 +136,23 @@ on the current code.
     the encoder what it was trained on.
   - Record the training-time suppress list in the manifest, and name any
     difference at load in `/status`.
+
+  *Encoder half done 2026-09-22.* `score_window` (`src/models/inference.py`)
+  passes the caller's mask to the model. A separate `score_mask` zeroes the
+  suppressed columns for the error, the global score and the top-channel
+  evidence.
+  - Test: `test_suppressing_a_channel_does_not_change_what_the_encoder_sees`.
+  - The existing
+    `test_sequence_inference_suppress_channels_silences_alert_from_noise_channel`
+    still passes.
+
+  *Remaining:* the manifest half. Training drops config-suppressed channels
+  from the schema (`scripts/train_sequence.py`). So a trained column that
+  serving suppresses means training and serving ran with different
+  `suppress_channels`; the 2026-09-20 artifact holds all 12 that the Pi's
+  `canary.yaml` suppresses. Calibration counted those channels and serving
+  does not, a small shift that predates this fix. Record the training list in
+  the manifest and name the difference at load.
 - [ ] **A01.6 — A model hot-swap is not a scoring timeout.** Loading a new
   artifact in the child takes about 2–7 s against a 3 s reply timeout, which
   is the likely origin of A01.1's lag.

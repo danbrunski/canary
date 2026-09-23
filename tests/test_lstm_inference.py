@@ -475,6 +475,38 @@ def test_sequence_inference_suppress_channels_silences_alert_from_noise_channel(
     assert r_supp.is_anomaly is False
 
 
+def test_suppressing_a_channel_does_not_change_what_the_encoder_sees() -> None:
+    """A01.5: suppression is a scoring decision, not an input change. The mask
+    is also an encoder input, so zeroing it there fed the model mask=0 with
+    Δt=0 — a state training never produced — and shifted every other
+    channel's reconstruction. The encoder must receive the caller's mask."""
+    import numpy as np
+
+    _torch()
+    engine = SequenceInferenceEngine(_trained(), suppress_channels=("speed",))
+    seen: list[np.ndarray] = []
+    forward = engine.trained.model.forward
+
+    def recording_forward(value, mask, delta):  # type: ignore[no-untyped-def]
+        seen.append(mask.detach().cpu().numpy()[0].copy())
+        return forward(value, mask, delta)
+
+    engine.trained.model.forward = recording_forward  # type: ignore[method-assign]
+    window = np.array([[700.0, 1.0]] * engine.sequence_length, dtype=np.float32)
+
+    result = engine.score_window(
+        window,
+        mask=np.ones_like(window),
+        timestamp="t",
+        session="s",
+        window_start_timestamp="t0",
+        window_end_timestamp="t1",
+    )
+
+    assert seen and seen[0][:, 1].tolist() == [1.0] * engine.sequence_length
+    assert result.channel_scores["speed"] == 0.0  # still excluded from the score
+
+
 def test_sequence_inference_suppress_channels_silently_ignores_unknown() -> None:
     """An entry that doesn't match any trained feature column is a no-op,
     not a hard failure — typo-resistance and renamed-channel resilience.

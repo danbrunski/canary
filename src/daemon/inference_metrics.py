@@ -97,6 +97,10 @@ class InferenceTiming:
     #: when no worker is configured; a non-empty `timeout` or `pipe_error`
     #: means the child is wedged and every tick since has scored in-process.
     worker_fallbacks: Mapping[str, int]
+    #: Late worker replies to earlier ticks, discarded instead of applied to
+    #: the tick being waited on (A01.1). Non-zero means the child answered
+    #: after a timeout at least once.
+    worker_stale_replies: int
     #: Ticks whose compute ran past the tick period (D02.3). Not a miss — the
     #: result is still applied — but the loop cannot start the next tick, so
     #: this is the count behind `missed_by_reason.compute_busy`.
@@ -115,6 +119,7 @@ class InferenceTiming:
             "stale_results_discarded": self.stale_results_discarded,
             "compute_failures": self.compute_failures,
             "worker_fallbacks": dict(self.worker_fallbacks),
+            "worker_stale_replies": self.worker_stale_replies,
             "slow_computes": self.slow_computes,
             "lateness": self.lateness.to_dict(),
             "stages": {name: summary.to_dict() for name, summary in self.stages.items()},
@@ -142,6 +147,7 @@ class InferenceTimingRecorder:
     compute_failures: int = 0
     slow_computes: int = 0
     _worker_fallbacks: Mapping[str, int] = field(default_factory=dict, repr=False)
+    _worker_stale_replies: int = field(default=0, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
@@ -190,6 +196,10 @@ class InferenceTimingRecorder:
         """
         self._worker_fallbacks = dict(fallbacks)
 
+    def set_worker_stale_replies(self, count: int) -> None:
+        """Publish how many late worker replies were discarded (A01.1)."""
+        self._worker_stale_replies = int(count)
+
     @property
     def missed_ticks(self) -> int:
         return sum(self._missed.values())
@@ -204,6 +214,7 @@ class InferenceTimingRecorder:
             stale_results_discarded=self.stale_results_discarded,
             compute_failures=self.compute_failures,
             worker_fallbacks=dict(self._worker_fallbacks),
+            worker_stale_replies=self._worker_stale_replies,
             slow_computes=self.slow_computes,
             lateness=StageSummary.from_samples(tuple(self._lateness)),
             stages={

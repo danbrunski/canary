@@ -310,6 +310,9 @@ class _SequenceComputeJob:
 
     engine: Any
     row: Any
+    #: Clear the window before appending ``row`` (A01.3): the generation
+    #: changed since the last job, so nothing before this row belongs with it.
+    reset: bool = False
 
 
 class IsolationForestDetector:
@@ -396,15 +399,26 @@ class SequenceDetector:
         )
         self._engine: Any = None
         self._engine_version: str | None = None
+        #: Generation of the last job handed out; a different one on the next
+        #: job means a replay, capture or model change happened in between.
+        self._last_generation: GenerationToken | None = None
         #: Last-scored model version, read by ``run_live_inference`` for the
         #: fused event's ``lstm=...`` version tag.
         self.model_version: str | None = None
 
-    def prepare(self, row: Any, ctx: TickContext) -> _SequenceComputeJob | None:
+    def prepare(
+        self, row: Any, ctx: TickContext, *, generation: GenerationToken | None = None
+    ) -> _SequenceComputeJob | None:
         """Loop side (C08.4): version bookkeeping and the engine hot-swap.
         The engine is rebuilt *here*, on the loop, never while a worker
         pass over the old one could still be running (the pipeline only
-        snapshots when no compute job is in flight)."""
+        snapshots when no compute job is in flight).
+
+        ``generation`` is the pipeline's token for this tick. When it differs
+        from the last job's, the job asks for the window to be cleared first
+        (A01.3) — in this process and in the scoring child alike — so a replay
+        starting or stopping, a capture change or a model swap never shares a
+        window with what came before."""
         loaded = self._manager.current if self._manager is not None else None
         # serving_version — see IsolationForestDetector.prepare.
         self.model_version = loaded.serving_version if loaded is not None else None
@@ -417,13 +431,22 @@ class SequenceDetector:
             self._engine_version = self.model_version if self._engine is not None else None
         if self._engine is None:
             return None
-        return _SequenceComputeJob(engine=self._engine, row=row)
+        reset = (
+            generation is not None
+            and self._last_generation is not None
+            and generation != self._last_generation
+        )
+        if generation is not None:
+            self._last_generation = generation
+        return _SequenceComputeJob(engine=self._engine, row=row, reset=reset)
 
     @staticmethod
     def compute(job: _SequenceComputeJob) -> Any:
         """Worker side: window append + torch forward pass. The engine's
         window buffer is detector-owned and only ever advanced from here,
         one job at a time (C08.6 bounds in-flight jobs to one)."""
+        if job.reset:
+            job.engine.reset()
         return _sequence_observe(job.engine, job.row)
 
     def apply(self, result: Any, ctx: TickContext) -> list[FusionSource]:
@@ -738,6 +761,7 @@ class LiveInferencePipeline:
             want_sequence=request.sequence_job is not None,
             if_version=self._if.model_version,
             sequence_version=self._sequence.model_version,
+            reset_sequence=request.sequence_job is not None and request.sequence_job.reset,
         )
 
     @property
@@ -921,7 +945,7 @@ class LiveInferencePipeline:
         )
         token = _current_generation(components)
         if_job = self._if.prepare(row, ctx)
-        sequence_job = self._sequence.prepare(row, ctx)
+        sequence_job = self._sequence.prepare(row, ctx, generation=token)
         stage_started = time.perf_counter()
         residuals = tuple(self._behavior.prepare(row, ctx))
         recorder.record_stage("behavior", time.perf_counter() - stage_started)
@@ -963,6 +987,7 @@ class LiveInferencePipeline:
             self._recorder.note_slow_compute()
         if self._worker is not None:
             self._recorder.set_worker_fallbacks(self._worker.fallbacks)
+            self._recorder.set_worker_stale_replies(self._worker.stale_replies)
         try:
             self._apply(request, result)
         except Exception:  # noqa: BLE001 — live inference is best-effort
@@ -980,6 +1005,13 @@ class LiveInferencePipeline:
         returns ``None`` and we score in-process instead — a briefly slower
         detector costs far less than a stalled collector, which is the whole
         trade the worker exists to make.
+
+        The Isolation Forest scores one row, so its fallback is exact. The
+        sequence engine here only ever sees fallback ticks; its window clears
+        on the time gap since its last row (A01.2/A01.3), so after a single
+        timeout it has nothing to score, and it scores again only once a run
+        of consecutive fallback ticks refills it — never a window stitched from
+        rows hours apart.
         """
         worker = self._worker
         if worker is not None:

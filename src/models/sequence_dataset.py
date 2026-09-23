@@ -35,6 +35,14 @@ from src.timefmt import format_timestamp as _format_timestamp
 
 DEFAULT_SEQUENCE_STRIDE = 1
 
+#: A window never spans a hole in time longer than this (A01.3). Rows are on a
+#: 1 s grid, so this tolerates a few missing ticks (a dropped live tick, a
+#: dropped fully-stale row) and nothing longer: past it, the window no longer
+#: describes one stretch of continuous operation. Offline window building and
+#: the live ``SequenceWindowBuffer`` both read this one value, so a model is
+#: calibrated on exactly the windows it will be served.
+WINDOW_MAX_GAP_SECONDS = 5.0
+
 
 class MissingSequenceDependencyError(ImportError):
     """Raised when torch is required but the optional ml extra is not installed."""
@@ -196,8 +204,13 @@ def build_sequence_windows(
     stride: int = DEFAULT_SEQUENCE_STRIDE,
     feature_columns: Iterable[str] | None = None,
     gap_columns: Iterable[str] | None = None,
+    max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS,
 ) -> SequenceWindowBuildResult:
     """Return every window that stays inside a session, with per-cell mask/Δt.
+
+    A window also never spans a time gap longer than ``max_gap_seconds``: the
+    run of rows restarts there, Δt included, exactly as the live buffer clears
+    (see :func:`contiguous_segments`).
 
     GRU-D feeds missingness to the model, so this no longer rejects windows that
     touch a gap or contain forward-filled cells — every contiguous window inside
@@ -225,27 +238,30 @@ def build_sequence_windows(
         feature_bases = {_channel_base(column) for column in features}
         gaps = tuple(gap for gap in gaps if gap[: -len(GAP_SUFFIX)] in feature_bases)
 
-    mask, delta = _frame_mask_delta(ordered, features, gaps, gap_columns is not None)
+    segments = contiguous_segments(ordered, max_gap_seconds=max_gap_seconds)
+    mask, delta = _frame_mask_delta(ordered, features, gaps, gap_columns is not None, segments)
 
     windows: list[SequenceWindow] = []
     for session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
         positions = group.index.to_numpy(dtype=int)
-        if len(positions) < sequence_length:
-            continue
-        for local_start in range(0, len(positions) - sequence_length + 1, stride):
-            row_positions = positions[local_start : local_start + sequence_length]
-            start_row = int(row_positions[0])
-            end_row = int(row_positions[-1]) + 1
-            timestamps = pd.to_datetime(ordered.loc[row_positions, TIMESTAMP_COLUMN], utc=True)
-            windows.append(
-                SequenceWindow(
-                    session=str(session),
-                    start_row=start_row,
-                    end_row=end_row,
-                    start_timestamp=_format_timestamp(timestamps.iloc[0]),
-                    end_timestamp=_format_timestamp(timestamps.iloc[-1]),
+        runs = np.split(positions, np.flatnonzero(np.diff(segments[positions]) != 0) + 1)
+        for run in runs:
+            if len(run) < sequence_length:
+                continue
+            for local_start in range(0, len(run) - sequence_length + 1, stride):
+                row_positions = run[local_start : local_start + sequence_length]
+                start_row = int(row_positions[0])
+                end_row = int(row_positions[-1]) + 1
+                timestamps = pd.to_datetime(ordered.loc[row_positions, TIMESTAMP_COLUMN], utc=True)
+                windows.append(
+                    SequenceWindow(
+                        session=str(session),
+                        start_row=start_row,
+                        end_row=end_row,
+                        start_timestamp=_format_timestamp(timestamps.iloc[0]),
+                        end_timestamp=_format_timestamp(timestamps.iloc[-1]),
+                    )
                 )
-            )
 
     return SequenceWindowBuildResult(
         frame=ordered,
@@ -257,11 +273,37 @@ def build_sequence_windows(
     )
 
 
+def contiguous_segments(
+    ordered: pd.DataFrame, *, max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS
+) -> np.ndarray[Any, np.dtype[np.int64]]:
+    """Label each row of a session/time-ordered frame with its segment.
+
+    A new segment starts at a session change, or where the time since the
+    previous row is negative or exceeds ``max_gap_seconds``. Windows and Δt
+    never cross a segment boundary — the offline twin of the live buffer
+    clearing on the same gap (A01.3).
+    """
+    n_rows = len(ordered)
+    if n_rows == 0:
+        return np.zeros(0, dtype=np.int64)
+    session_codes = pd.factorize(ordered[SESSION_COLUMN], sort=False)[0]
+    times = pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True).to_numpy()
+    starts = np.zeros(n_rows, dtype=bool)
+    starts[0] = True
+    if n_rows > 1:
+        diffs = (times[1:] - times[:-1]) / np.timedelta64(1, "s")
+        starts[1:] = (
+            (session_codes[1:] != session_codes[:-1]) | (diffs > max_gap_seconds) | (diffs < 0)
+        )
+    return (np.cumsum(starts) - 1).astype(np.int64)
+
+
 def _frame_mask_delta(
     ordered: pd.DataFrame,
     features: Sequence[str],
     gaps: Sequence[str],
     explicit_gaps: bool,
+    segments: np.ndarray[Any, np.dtype[np.int64]] | None = None,
 ) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
     """Compute per-cell observed-mask and Δt over the full frame.
 
@@ -270,7 +312,8 @@ def _frame_mask_delta(
     ``mask = ¬gap`` AND the value is non-NaN. A channel with no gap column
     (slow / forward-filled, or an explicit gap-column caller) is observed
     wherever its value is non-NaN. Δt resets to 0 on every observed tick and
-    accumulates the inter-row second delta within a session otherwise.
+    accumulates the inter-row second delta within a segment otherwise
+    (``segments``; one segment per session when omitted).
     """
     n_rows = len(ordered)
     n_features = len(features)
@@ -292,8 +335,11 @@ def _frame_mask_delta(
                 fresh = fresh & not_gap
         mask[:, col_index] = fresh.astype(np.float64)
 
-    # Per-session cumulative Δt: seconds since the channel was last fresh.
-    session_codes = pd.factorize(ordered[SESSION_COLUMN], sort=False)[0]
+    # Per-segment cumulative Δt: seconds since the channel was last fresh,
+    # restarting where a window may not continue (session change or long gap).
+    session_codes = (
+        pd.factorize(ordered[SESSION_COLUMN], sort=False)[0] if segments is None else segments
+    )
     timestamps = pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True).to_numpy()
     for _code in np.unique(session_codes):
         rows = np.flatnonzero(session_codes == _code)

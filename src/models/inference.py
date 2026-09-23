@@ -18,6 +18,7 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
+from src.models.sequence_dataset import WINDOW_MAX_GAP_SECONDS
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -118,6 +119,7 @@ class SequenceWindowBuffer:
         session_column: str = SESSION_COLUMN,
         mode_column: str = "operating_mode",
         dtype: str = "float32",
+        max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS,
     ) -> None:
         if sequence_length <= 0:
             raise ValueError("sequence_length must be positive")
@@ -129,6 +131,9 @@ class SequenceWindowBuffer:
         self.session_column = session_column
         self.mode_column = mode_column
         self.dtype = dtype
+        #: A window never spans a hole longer than this (A01.3); the offline
+        #: builder splits on the same value.
+        self.max_gap_seconds = float(max_gap_seconds)
         self._gap_columns = tuple(
             f"{_base_channel(column)}{GAP_SUFFIX}" for column in feature_columns
         )
@@ -174,9 +179,12 @@ class SequenceWindowBuffer:
         a reason to drop the row. This mirrors the offline dataset, which masks
         all-NaN / leading-NaN cells rather than discarding them, so the model —
         trained on GPS-less sessions exactly this way — keeps scoring on the
-        channels it *does* have. Only a fully unobserved tick (no finite feature
-        at all) resets the buffer, as does a session change so windows never
-        span sessions.
+        channels it *does* have. A fully unobserved tick (no finite feature at
+        all) resets the buffer, as does a session change, and so does a row
+        more than ``max_gap_seconds`` after the previous one or earlier than it.
+        The live row's session label never changes (it is always ``"live"``),
+        so the time gap is what keeps a window from straddling a stop, a stale
+        stretch or a replay (A01.3).
 
         The mask is ``¬<channel>__gap`` AND value-is-finite; Δt is accumulated
         from the mask and the inter-tick interval.
@@ -186,6 +194,10 @@ class SequenceWindowBuffer:
         timestamp = _coerce_timestamp(row.get(self.timestamp_column))
         if self._session is not None and session != self._session:
             self.clear()
+        if timestamp is not None and self._last_timestamp is not None:
+            step = (timestamp - self._last_timestamp).total_seconds()
+            if step < 0 or step > self.max_gap_seconds:
+                self.clear()
         self._session = session
 
         values = np.array(
@@ -353,6 +365,10 @@ class SequenceInferenceEngine:
             self._scaler_means = None
             self._scaler_stds = None
 
+    def reset(self) -> None:
+        """Drop the current window; scoring resumes once it refills."""
+        self.buffer.clear()
+
     def observe(self, row: Mapping[str, Any] | pd.Series) -> SequenceInferenceResult | None:
         """Append one row and score the current window once enough rows exist."""
         if not self.buffer.append(row):
@@ -400,14 +416,16 @@ class SequenceInferenceEngine:
             delta = np.zeros(expected_shape, dtype=np.float32)
         if mask.shape != expected_shape or delta.shape != expected_shape:
             raise ValueError("mask and delta must match the value window shape")
-        # Suppress configured noise channels by forcing their mask column to 0
-        # for the whole window. Reconstruction error is masked downstream
-        # (``masked_mean``), so a 0 mask cleanly excludes them from the global
-        # score AND from the top-channel evidence — without touching weights.
-        # Copy first so test callers passing their own mask aren't mutated.
+        # Suppress configured noise channels from the *score* only (A01.5). The
+        # mask is also an encoder input (GRU-D and TCN), so zeroing it there fed
+        # the model mask=0 with Δt=0 — a combination training never produced —
+        # and shifted every other channel's reconstruction. The encoder gets
+        # the mask it was trained on; ``score_mask`` zeroes the suppressed
+        # columns for the error, the global score and the top-channel evidence.
+        score_mask = mask
         if self._suppressed_indices.size:
-            mask = mask.copy()
-            mask[:, self._suppressed_indices] = 0.0
+            score_mask = mask.copy()
+            score_mask[:, self._suppressed_indices] = 0.0
         started = self.time_fn()
         # z-score the *values* against the training-time scaler so reconstruction
         # error is in the same scale as the calibrated threshold. Mask and Δt are
@@ -427,6 +445,11 @@ class SequenceInferenceEngine:
             self._torch.as_tensor(scaled_window, dtype=torch_dtype).unsqueeze(0).to(self._device)
         )
         mask_t = self._torch.as_tensor(mask, dtype=torch_dtype).unsqueeze(0).to(self._device)
+        score_mask_t = (
+            mask_t
+            if score_mask is mask
+            else self._torch.as_tensor(score_mask, dtype=torch_dtype).unsqueeze(0).to(self._device)
+        )
         delta_t = self._torch.as_tensor(delta, dtype=torch_dtype).unsqueeze(0).to(self._device)
         with self._torch.no_grad():
             # Phase 7.2a: one forward → all reductions + the actual/recon
@@ -434,10 +457,12 @@ class SequenceInferenceEngine:
             # forward-filled (stale) cell never inflates the score, matching the
             # masked thresholds calibrated at training time.
             reconstructed = self.trained.model.forward(value_t, mask_t, delta_t)
-            error_tensor = (reconstructed - value_t).abs() * mask_t
-            denom = float(mask_t.sum().item())
+            error_tensor = (reconstructed - value_t).abs() * score_mask_t
+            denom = float(score_mask_t.sum().item())
             global_score = float(error_tensor.sum().item() / denom) if denom > 0 else 0.0
-            mask_per_channel = mask_t.sum(dim=1).detach().cpu().numpy()[0].astype(float)  # (F,)
+            mask_per_channel = (
+                score_mask_t.sum(dim=1).detach().cpu().numpy()[0].astype(float)
+            )  # (F,)
             channel_sums = error_tensor.sum(dim=1).detach().cpu().numpy()[0].astype(float)  # (F,)
             channel_values = np.divide(
                 channel_sums,

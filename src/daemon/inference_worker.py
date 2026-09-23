@@ -101,6 +101,11 @@ class WorkerTick:
     want_sequence: bool
     if_version: str | None
     sequence_version: str | None
+    #: Clear the child's sequence window before appending this row (A01.3):
+    #: set when the pipeline's generation changed since the last scored tick,
+    #: so a replay, capture or model change never shares a window with what
+    #: came before it.
+    reset_sequence: bool = False
 
 
 @dataclass(frozen=True)
@@ -205,6 +210,8 @@ def _serve(conn: Connection, config: Any) -> None:  # pragma: no cover - child
                             suppress_channels=_suppress_channels_for(config_holder, loaded_seq),
                         )
                         engine_version = version if engine is not None else None
+                    if engine is not None and msg.reset_sequence:
+                        engine.reset()
                     if engine is not None:
                         stage = time.perf_counter()
                         sequence_result = _sequence_observe(engine, msg.row)
@@ -252,6 +259,11 @@ class InferenceWorker:
         #: as a large `compute_wait` max, which is how a 63 s stall on
         #: 2026-09-10 recorded `compute_failures: 0`.
         self._fallbacks: Counter[str] = Counter()
+        #: Replies that arrived for an earlier tick and were discarded (A01.1).
+        #: A reply to a tick that timed out stays in the pipe; before this
+        #: count existed it was handed to the *next* tick, and every tick after
+        #: a timeout silently applied its predecessor's result.
+        self._stale_replies = 0
 
     @property
     def fallbacks(self) -> dict[str, int]:
@@ -261,6 +273,11 @@ class InferenceWorker:
     @property
     def fallback_count(self) -> int:
         return sum(self._fallbacks.values())
+
+    @property
+    def stale_replies(self) -> int:
+        """Late replies to earlier ticks, discarded rather than applied."""
+        return self._stale_replies
 
     @property
     def result_timeout_seconds(self) -> float:
@@ -306,18 +323,35 @@ class InferenceWorker:
             self._fallbacks["worker_down"] += 1
             return None
         timeout = self.result_timeout_seconds
+        deadline = time.monotonic() + timeout
         try:
             conn.send(tick)
-            if not conn.poll(timeout):
-                log.warning(
-                    "inference worker did not answer tick %d within %.1fs; falling back in-process",
-                    tick.index,
-                    timeout,
-                )
-                self._failures += 1
-                self._fallbacks["timeout"] += 1
-                return None
-            reply = conn.recv()
+            # The child answers in order, so anything ahead of this tick's reply
+            # is a late answer to a tick that already timed out. Discard those
+            # and keep waiting on the same deadline; never apply another tick's
+            # result (A01.1).
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not conn.poll(remaining):
+                    log.warning(
+                        "inference worker did not answer tick %d within %.1fs; "
+                        "falling back in-process",
+                        tick.index,
+                        timeout,
+                    )
+                    self._failures += 1
+                    self._fallbacks["timeout"] += 1
+                    return None
+                reply = conn.recv()
+                if isinstance(reply, WorkerReply) and reply.index != tick.index:
+                    self._stale_replies += 1
+                    log.debug(
+                        "discarding late inference reply for tick %d while waiting on tick %d",
+                        reply.index,
+                        tick.index,
+                    )
+                    continue
+                break
         except (EOFError, BrokenPipeError, OSError):
             log.warning("inference worker pipe broke; falling back in-process")
             self._failures += 1
