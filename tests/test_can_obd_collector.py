@@ -49,6 +49,8 @@ from src.collection.obd_scheduler import (
 )
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
+from tests.capture_round_fakes import FakeClock, install_clock
+from tests.waits import StopWhen, hang_guard_deadline
 
 
 class _StaticDiscovery:
@@ -986,12 +988,36 @@ def test_force_poll_trigger_take_is_atomic_and_normalizes_case() -> None:
     assert trigger.take() == frozenset({"A", "B"})
 
 
-def test_force_poll_trigger_forces_a_channel_due_immediately() -> None:
-    """trigger_poll: DTC_STORED normally sits on a slow interval; forcing it
-    should produce a reading well before that interval would ever fire."""
-    bus = _DtcCapableBus()
-    stop = threading.Event()
-    readings: list[Any] = []
+class _ClockedDtcBus(_DtcCapableBus):
+    """:class:`_DtcCapableBus` on a :class:`FakeClock`: a receive with nothing
+    due costs its timeout in simulated time instead of sleeping."""
+
+    def __init__(self, clock: FakeClock) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        if self._responses:
+            return self._responses.pop(0)
+        if timeout:
+            self.clock.advance(timeout)
+        return None
+
+
+def test_force_poll_trigger_forces_a_channel_due_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """trigger_poll: DTC_STORED normally waits its turn; forcing it should
+    produce a reading well before it would ever fire on its own.
+
+    On a fake clock (T01.3). The forced read lands at 0.31 s, after three
+    0.1 s support-probe timeouts; unforced, the first DTC_STORED read comes
+    at ~4.9 s (measured 2026-09-23). The test used to give it 0.5 s of *wall*
+    clock, which a loaded machine spent before the probes were done."""
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _ClockedDtcBus(clock)
+    sink: StopWhen[Any] = StopWhen(lambda got: any(r.pid == "DTC_STORED" for r in got))
     trigger = ForcePollTrigger()
     trigger.request(["dtc_stored"])  # lowercase on purpose — matching is case-insensitive
 
@@ -1009,12 +1035,12 @@ def test_force_poll_trigger_forces_a_channel_due_immediately() -> None:
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
-        on_reading=lambda r: readings.append(r),
-        stop_event=stop,
-        deadline_monotonic=time.monotonic() + 0.5,
+        on_reading=sink,
+        stop_event=sink.stop,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
-    assert any(r.pid == "DTC_STORED" for r in readings)
+    assert sink.met, "the forced DTC_STORED read did not happen inside 0.5 s"
 
 
 def test_force_poll_trigger_ignores_unknown_channel_names() -> None:
@@ -1114,35 +1140,46 @@ def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
 
 
 def test_negative_pid_response_does_not_block_following_pids() -> None:
+    """ENGINE_LOAD is refused (``7F 01 12``); the RPM read *after* that refusal
+    is what proves the refusal did not block the loop.
+
+    T01.2: this used to stop on "RPM read and two requests sent", which the
+    first RPM read (priority lane, one request sent) never met, so the test
+    only ever ended at its 0.4 s deadline, inside the 1 s timeout of the
+    Mode 03 poll that followed the refusal. A loop slower than 0.4 s to its
+    first read failed it. It now stops on the RPM read that follows the
+    refusal, and the DTC/Mode 06 polls (unanswered here, 1 s timeouts each)
+    are off so nothing but the two PIDs is on the bus."""
     bus = _NegativeThenPositiveBus()
-    stop = threading.Event()
-    readings: list[Any] = []
+    engine_load_request = bytes([0x02, 0x01, 0x04])
 
-    def on_reading(reading: Any) -> None:
-        readings.append(reading)
-        # RPM holds the priority lane, so inside a capture round it is read
-        # before ENGINE_LOAD's refusal is even seen; stop once both were asked.
-        if reading.pid == "RPM" and len(bus.sent) >= 2:
-            stop.set()
+    def _refusal_sent() -> bool:
+        return any(bytes(msg.data)[:3] == engine_load_request for msg in bus.sent)
 
+    sink: StopWhen[Any] = StopWhen(lambda got: got[-1].pid == "RPM" and _refusal_sent())
     spec = CanObdSpec(
         can=CanBusConfig(interface="virtual", channel="test", bitrate=500000),
         poll_rate_hz=100.0,
         pids=("ENGINE_LOAD", "RPM"),
         request_timeout_seconds=1.0,
+        dtc_poll_interval_seconds=0,
+        service_poll_interval_seconds=0,
     )
 
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
-        on_reading=on_reading,
-        stop_event=stop,
-        deadline_monotonic=time.monotonic() + 0.4,
+        on_reading=sink,
+        stop_event=sink.stop,
+        deadline_monotonic=hang_guard_deadline(),
     )
 
-    assert [reading.pid for reading in readings] == ["RPM"]
-    assert len(bus.sent) >= 2
+    assert sink.met, "no RPM reading followed ENGINE_LOAD's refusal"
+    assert "ENGINE_LOAD" not in {reading.pid for reading in sink.items}
+    # The refusal was read as a refusal, not waited out as a timeout.
+    assert stats.negative_responses == 1
+    assert stats.request_timeouts == 0
     assert stats.requests_sent >= 2
 
 

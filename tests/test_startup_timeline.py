@@ -25,6 +25,10 @@ from src.startup import STAGES, StartupTimeline, process_age_seconds
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 from tests.test_daemon import config  # noqa: F401 — the shared fixture
+from tests.waits import HANG_GUARD_SECONDS, settle, wait_until
+
+#: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
+pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
 
 # ---------------------------------------------------------------------------
 # The timeline itself
@@ -132,17 +136,11 @@ class _GatedWriter(ParquetTelemetryWriter):
         self.release = threading.Event()
 
     def write_many(self, records: Iterable[TelemetryRecord]) -> list[Path]:
-        self.release.wait(timeout=10.0)
+        # Only the test releases it; the timeout is the hang guard, and a
+        # shorter one would let a slow run store the record before the test
+        # looked.
+        self.release.wait(timeout=HANG_GUARD_SECONDS)
         return super().write_many(records)
-
-
-async def _wait_for(predicate: Any, timeout: float = 10.0) -> None:
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while not predicate():
-        if loop.time() > deadline:
-            raise AssertionError("condition not reached")
-        await asyncio.sleep(0.02)
 
 
 async def test_run_daemon_reports_every_stage_in_order(
@@ -178,18 +176,18 @@ async def test_run_daemon_reports_every_stage_in_order(
             )
         )
         try:
-            await asyncio.wait_for(pushed.wait(), timeout=10.0)
+            await settle(pushed.wait())
             await asyncio.sleep(0.3)
             # The collector has produced a record; the writer has not taken it.
             stages = startup.snapshot()["stages"]
             assert stages["collector_tasks_created"] is not None
             assert stages["first_record_stored"] is None
             writer.release.set()
-            await _wait_for(lambda: startup.snapshot()["complete"])
+            await wait_until(lambda: startup.snapshot()["complete"], what="startup completing")
         finally:
             writer.release.set()
             stop.set()
-            await asyncio.wait_for(daemon_task, timeout=10.0)
+            await settle(daemon_task)
 
     snap = startup.snapshot()
     stages = snap["stages"]

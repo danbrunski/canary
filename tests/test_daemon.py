@@ -31,6 +31,10 @@ from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
+from tests.waits import settle, wait_until
+
+#: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
+pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -94,6 +98,11 @@ def config(tmp_path: Path) -> CanaryConfig:
     return CanaryConfig.from_yaml(cfg_path)
 
 
+def _stage_reached(components: Any, stage: str) -> bool:
+    """Whether ``run_daemon`` has marked ``stage`` on its startup timeline."""
+    return components.health_monitor.startup.snapshot()["stages"][stage] is not None
+
+
 # ---------------------------------------------------------------------------
 # build_components
 # ---------------------------------------------------------------------------
@@ -142,7 +151,7 @@ def test_emitter_publishes_to_anomalies_broadcaster_when_logging(
         )
         # The emitter's logger is the wrapper; calling .log() drives both paths.
         components.emitter._logger.log(event)  # type: ignore[attr-defined]
-        return await asyncio.wait_for(sub.get(), timeout=1.0)
+        return await settle(sub.get())
 
     published = asyncio.run(_exercise())
     assert published["source"] == "lstm_autoencoder"
@@ -506,16 +515,17 @@ async def test_poll_swaps_when_new_manifest_appears(tmp_path: Path) -> None:
     _write_manifest_pair(artifact, version="v2", mtime=2_000_000.0)
 
     stop = asyncio.Event()
-
-    async def _stop_after_one_poll() -> None:
-        await asyncio.sleep(0.15)
-        stop.set()
-
     poll_task = asyncio.create_task(
         poll_model_managers({"if": manager}, stop, interval_seconds=0.05)
     )
-    await _stop_after_one_poll()
-    await asyncio.wait_for(poll_task, timeout=1.0)
+    try:
+        await wait_until(
+            lambda: manager.current is not None and manager.current.manifest.model_version == "v2",
+            what="the poller swapping in v2",
+        )
+    finally:
+        stop.set()
+        await settle(poll_task)
 
     assert manager.current is not None
     assert manager.current.manifest.model_version == "v2"
@@ -525,21 +535,24 @@ async def test_poll_swallows_manager_exceptions(tmp_path: Path) -> None:
     """A blowing-up manager.poll() must not kill the polling task."""
 
     class _BoomManager:
+        polls = 0
+
         def poll(self) -> Any:
+            self.polls += 1
             raise RuntimeError("kaboom")
 
+    boom = _BoomManager()
     stop = asyncio.Event()
-
-    async def _stop_soon() -> None:
-        await asyncio.sleep(0.15)
-        stop.set()
-
     poll_task = asyncio.create_task(
-        poll_model_managers({"if": _BoomManager()}, stop, interval_seconds=0.05)  # type: ignore[dict-item]
+        poll_model_managers({"if": boom}, stop, interval_seconds=0.05)  # type: ignore[dict-item]
     )
-    await _stop_soon()
+    try:
+        # A second poll proves the first exception did not end the task.
+        await wait_until(lambda: boom.polls >= 2, what="a poll after the first exception")
+    finally:
+        stop.set()
     # Task should still terminate cleanly via stop_event, despite the manager's exception.
-    await asyncio.wait_for(poll_task, timeout=1.0)
+    await settle(poll_task)
 
 
 # ---------------------------------------------------------------------------
@@ -557,14 +570,6 @@ async def test_retention_sweeper_deletes_expired_sessions_and_keeps_active(
     (old / "telemetry-00000.parquet").write_bytes(b"old")
     (active / "telemetry-00000.parquet").write_bytes(b"active")
     stop = asyncio.Event()
-
-    async def _wait_until_deleted() -> None:
-        for _ in range(20):
-            if not old.exists():
-                return
-            await asyncio.sleep(0.05)
-        raise AssertionError("retention sweeper did not delete expired session")
-
     task = asyncio.create_task(
         run_retention_sweeper(
             tmp_path,
@@ -575,10 +580,10 @@ async def test_retention_sweeper_deletes_expired_sessions_and_keeps_active(
         )
     )
     try:
-        await asyncio.wait_for(_wait_until_deleted(), timeout=2.0)
+        await wait_until(lambda: not old.exists(), what="the sweeper deleting the expired session")
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
     assert not old.exists()
     assert active.exists()
@@ -596,14 +601,6 @@ async def test_retention_sweeper_enforces_byte_cap_and_keeps_active(
     (old / "telemetry-00000.parquet").write_bytes(b"\0" * (2 * 1024 * 1024))
     (active / "telemetry-00000.parquet").write_bytes(b"\0" * (2 * 1024 * 1024))
     stop = asyncio.Event()
-
-    async def _wait_until_deleted() -> None:
-        for _ in range(40):
-            if not old.exists():
-                return
-            await asyncio.sleep(0.05)
-        raise AssertionError("retention sweeper did not enforce the byte cap")
-
     task = asyncio.create_task(
         run_retention_sweeper(
             tmp_path,
@@ -615,10 +612,10 @@ async def test_retention_sweeper_enforces_byte_cap_and_keeps_active(
         )
     )
     try:
-        await asyncio.wait_for(_wait_until_deleted(), timeout=2.0)
+        await wait_until(lambda: not old.exists(), what="the sweeper enforcing the byte cap")
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
     assert not old.exists()
     assert active.exists()
@@ -643,21 +640,21 @@ async def test_retention_sweeper_honors_interval(tmp_path: Path) -> None:
     )
     try:
         # The first sweep runs immediately on loop entry.
-        for _ in range(40):
-            if not expired1.exists():
-                break
-            await asyncio.sleep(0.02)
-        assert not expired1.exists(), "first (immediate) sweep should delete expired1"
+        await wait_until(
+            lambda: not expired1.exists(), what="the first (immediate) sweep deleting expired1"
+        )
 
         # A second expired dir created now must survive: the next sweep is
-        # 30 s out, far beyond this bounded wait.
+        # 30 s out, far beyond this bounded wait. (The subject here *is* a
+        # time bound; a loaded machine can only make this sleep longer, which
+        # still sits well inside the 30 s interval.)
         expired2 = tmp_path / "2000-01-02T000000"
         expired2.mkdir()
         await asyncio.sleep(0.4)
         assert expired2.exists(), "interval not honored: swept again before interval elapsed"
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
 
 async def test_retention_sweeper_runs_age_and_cap_in_one_tick(tmp_path: Path) -> None:
@@ -679,14 +676,6 @@ async def test_retention_sweeper_runs_age_and_cap_in_one_tick(tmp_path: Path) ->
     fresh_new = _session(_name(now - timedelta(seconds=10)), 1)
     active = _session(_name(now + timedelta(seconds=10)), 1)
     stop = asyncio.Event()
-
-    async def _wait() -> None:
-        for _ in range(80):
-            if not (expired.exists() or fresh_old.exists() or fresh_mid.exists()):
-                return
-            await asyncio.sleep(0.05)
-        raise AssertionError("age+cap sweep did not converge")
-
     task = asyncio.create_task(
         run_retention_sweeper(
             tmp_path,
@@ -698,10 +687,13 @@ async def test_retention_sweeper_runs_age_and_cap_in_one_tick(tmp_path: Path) ->
         )
     )
     try:
-        await asyncio.wait_for(_wait(), timeout=5.0)
+        await wait_until(
+            lambda: not (expired.exists() or fresh_old.exists() or fresh_mid.exists()),
+            what="the age+cap sweep converging",
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
     assert not expired.exists()  # removed by the age sweep
     assert not fresh_old.exists()  # evicted oldest-first by the byte cap
@@ -735,11 +727,7 @@ async def test_retention_sweeper_protects_active_across_rotation(tmp_path: Path)
     try:
         # Both dirs are age-expired, but `first` is the live session, so only
         # `other` is collectable while `first` is active.
-        for _ in range(60):
-            if not other.exists():
-                break
-            await asyncio.sleep(0.05)
-        assert not other.exists(), "expired non-active dir was not removed"
+        await wait_until(lambda: not other.exists(), what="the expired non-active dir removed")
         assert first.exists(), "active dir must never be deleted"
 
         # Emulate rotate_session(): the writer moved to a fresh dir. The
@@ -750,15 +738,13 @@ async def test_retention_sweeper_protects_active_across_rotation(tmp_path: Path)
         (rotated / "telemetry-00000.parquet").write_bytes(b"rotated")
         active_holder["path"] = rotated
 
-        for _ in range(60):
-            if not first.exists():
-                break
-            await asyncio.sleep(0.05)
-        assert not first.exists(), "formerly-active dir not collected after rotation"
+        await wait_until(
+            lambda: not first.exists(), what="the formerly-active dir collected after rotation"
+        )
         assert rotated.exists(), "the post-rotation active dir must be protected"
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
 
 async def test_retention_sweeper_emergency_evicts_below_warning(tmp_path: Path) -> None:
@@ -789,16 +775,14 @@ async def test_retention_sweeper_emergency_evicts_below_warning(tmp_path: Path) 
         )
     )
     try:
-        for _ in range(60):
-            if not old.exists():
-                break
-            await asyncio.sleep(0.05)
-        assert not old.exists(), "emergency guard did not evict below the warning threshold"
+        await wait_until(
+            lambda: not old.exists(), what="the emergency guard evicting below the warning line"
+        )
         assert pinned.exists(), "emergency guard must never evict a pinned dir"
         assert active.exists(), "emergency guard must never evict the active dir"
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
 
 # ---------------------------------------------------------------------------
@@ -858,19 +842,14 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
             enable_live_inference=False,
         )
 
-    async def _wait_until_deleted() -> None:
-        for _ in range(40):
-            if not old.exists():
-                return
-            await asyncio.sleep(0.05)
-        raise AssertionError("run_daemon retention sweeper did not delete expired session")
-
     daemon_task = asyncio.create_task(_run())
     try:
-        await asyncio.wait_for(_wait_until_deleted(), timeout=3.0)
+        await wait_until(
+            lambda: not old.exists(), what="run_daemon's sweeper deleting the expired session"
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
 
     assert not old.exists()
     assert active.exists()
@@ -878,7 +857,7 @@ async def test_run_daemon_starts_retention_sweeper_and_protects_active_session(
 
 async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
     config: CanaryConfig,
-    monkeypatch: pytest.MonkeyPatch,
+    no_trip_end_digest_child: list[Path],
 ) -> None:
     """Task 5.4's daemon-shutdown fallback trigger: run_daemon must call the
     trip-end hook for the active session when it stops, independent of
@@ -888,17 +867,6 @@ async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
     capped child process as the GPS-edge path, so a multi-gigabyte session
     cannot be loaded inside the shutdown sequence."""
     from src.daemon import runtime as runtime_mod
-
-    calls: list[Path] = []
-
-    async def _spy(
-        session_dir: Path,
-        cfg: CanaryConfig,
-        **kwargs: object,
-    ) -> None:
-        calls.append(session_dir)
-
-    monkeypatch.setattr(runtime_mod, "handle_trip_end_off_loop", _spy)
 
     components = build_components(config)
     writer = ParquetTelemetryWriter(config.collection.storage_path)
@@ -917,9 +885,9 @@ async def test_run_daemon_fires_trip_end_fallback_on_shutdown(
     daemon_task = asyncio.create_task(_run())
     await asyncio.sleep(0.05)
     stop.set()
-    await asyncio.wait_for(daemon_task, timeout=5.0)
+    await settle(daemon_task)
 
-    assert calls == [writer.paths.root]
+    assert no_trip_end_digest_child == [writer.paths.root]
 
 
 async def test_run_daemon_propagates_collector_failure_without_hanging(
@@ -940,15 +908,14 @@ async def test_run_daemon_propagates_collector_failure_without_hanging(
         raise RuntimeError("collector boom")
 
     with pytest.raises(RuntimeError, match="collector boom"):
-        await asyncio.wait_for(
+        await settle(
             run_daemon(
                 config,
                 stop,
                 collectors=[_boom],
                 components=components,
                 enable_live_inference=False,
-            ),
-            timeout=20.0,
+            )
         )
 
 
@@ -982,9 +949,9 @@ async def test_serve_in_background_force_exits_when_server_wont_stop(
         async with serve_in_background(components, server_factory=lambda config: wedged):
             pass
 
-    # Returns well inside the bound; if the force-exit path regresses this
-    # times out (fails) instead of hanging the suite.
-    await asyncio.wait_for(_use(), timeout=5.0)
+    # If the force-exit path regresses this fails on the hang guard instead
+    # of hanging the suite.
+    await settle(_use())
     assert wedged.force_exit is True
 
 
@@ -1050,14 +1017,10 @@ async def test_run_daemon_wires_retention_sweeper_task(
 
     daemon_task = asyncio.create_task(_run())
     try:
-        for _ in range(60):
-            if captured:
-                break
-            await asyncio.sleep(0.02)
-        assert captured, "run_daemon did not start the retention sweeper task"
+        await wait_until(lambda: bool(captured), what="run_daemon starting the retention sweeper")
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
 
     assert captured["storage_path"] == config.collection.storage_path
     assert captured["retention_days"] == 7
@@ -1106,10 +1069,15 @@ async def test_run_daemon_does_not_start_online_training_scheduler_by_default(
 
     daemon_task = asyncio.create_task(_run())
     try:
-        await asyncio.sleep(0.1)
+        # The scheduler task is created (or not) before the collectors start,
+        # so once they have, the decision has been made.
+        await wait_until(
+            lambda: _stage_reached(components, "collector_tasks_created"),
+            what="run_daemon starting its collectors",
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
     assert called is False
 
 
@@ -1160,14 +1128,12 @@ async def test_run_daemon_wires_online_training_scheduler_when_enabled(
 
     daemon_task = asyncio.create_task(_run())
     try:
-        for _ in range(60):
-            if captured:
-                break
-            await asyncio.sleep(0.02)
-        assert captured, "run_daemon did not start the online-training scheduler task"
+        await wait_until(
+            lambda: bool(captured), what="run_daemon starting the online-training scheduler"
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
 
     assert captured["job_controller"] is components.job_controller
     assert captured["interval_seconds"] == 42.0
@@ -1285,10 +1251,10 @@ async def test_run_live_inference_sequence_detector_emits_on_full_window(
         stop = asyncio.Event()
         task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
         try:
-            msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+            msg = await settle(sub.get())
         finally:
             stop.set()
-            await asyncio.wait_for(task, timeout=1.0)
+            await settle(task)
     finally:
         if original is not None:
             inf_mod.SequenceInferenceEngine = original  # type: ignore[assignment]
@@ -1937,7 +1903,7 @@ async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) ->
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
     await asyncio.sleep(0.1)
     stop.set()
-    await asyncio.wait_for(task, timeout=1.0)
+    await settle(task)
 
 
 async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig) -> None:
@@ -1999,10 +1965,10 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
 
     try:
-        msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+        msg = await settle(sub.get())
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
     assert msg["source"] == "isolation_forest"
     assert msg["model_version"] == "fake_if_v1"
@@ -2024,7 +1990,20 @@ async def test_run_live_inference_persists_derived_channels_to_storage(
     from src.storage.async_writer import AsyncParquetTelemetryWriter
 
     components = build_components(config)
-    storage_writer = AsyncParquetTelemetryWriter(ParquetTelemetryWriter(tmp_path / "storage"))
+
+    class _SeenWriter(ParquetTelemetryWriter):
+        """Notes which derived channels reached the writer, so the test waits
+        for them rather than for an amount of wall clock."""
+
+        derived: set[str] = set()
+
+        def write_many(self, records: Any) -> list[Path]:
+            records = list(records)
+            self.derived |= {r.channel for r in records if r.source == "derived"}
+            return super().write_many(records)
+
+    seen = _SeenWriter(tmp_path / "storage")
+    storage_writer = AsyncParquetTelemetryWriter(seen)
     components.storage_writer = storage_writer
 
     source = build_live_feature_source(components)
@@ -2040,10 +2019,13 @@ async def test_run_live_inference_persists_derived_channels_to_storage(
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
     try:
-        await asyncio.sleep(0.2)
+        await wait_until(
+            lambda: {"FUEL_RATE_LPH", "TRIP_DISTANCE_KM"} <= seen.derived,
+            what="a tick handing the derived channels to the storage writer",
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
     # flush_interval_seconds defaults to 5s — force the buffer to disk rather
     # than waiting for it, same as every other drain-shutdown path.
     await storage_writer.close()
@@ -2078,14 +2060,13 @@ async def test_run_live_inference_flags_segmenter_fallback_on_status(
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
     try:
-        for _ in range(20):
-            if components.health_monitor.segmenter_fallback_active:
-                break
-            await asyncio.sleep(0.05)
-        assert components.health_monitor.segmenter_fallback_active is True
+        await wait_until(
+            lambda: components.health_monitor.segmenter_fallback_active,
+            what="the segmenter fallback flag latching on /status",
+        )
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
 
 async def test_run_live_inference_does_not_flag_fallback_with_full_segmenter_inputs(
@@ -2106,14 +2087,25 @@ async def test_run_live_inference_does_not_flag_fallback_with_full_segmenter_inp
     ):
         source.observe(TelemetryRecord.obd(now.timestamp(), channel, value, unit))
 
+    # Count the ticks that reported a fallback state, so the negative below
+    # is read after the flag was actually evaluated, not after N ms.
+    observed: list[bool] = []
+    real_observe = components.health_monitor.observe_segmenter_fallback
+
+    def _observe(active: bool) -> bool:
+        observed.append(active)
+        return real_observe(active)
+
+    components.health_monitor.observe_segmenter_fallback = _observe  # type: ignore[method-assign]
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
     try:
-        await asyncio.sleep(0.2)
+        await wait_until(lambda: len(observed) >= 2, what="two inference ticks")
+        assert observed == [False] * len(observed)
         assert components.health_monitor.segmenter_fallback_active is False
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
 
 def test_live_vehicle_state_classifies_running_without_parquet_io(config: CanaryConfig) -> None:
@@ -2195,12 +2187,17 @@ async def test_run_live_inference_skips_if_scoring_when_engine_off(config: Canar
     sub = components.anomalies_broadcaster.subscribe()
     stop = asyncio.Event()
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
-    await asyncio.sleep(0.3)
-    stop.set()
-    await asyncio.wait_for(task, timeout=1.0)
+    try:
+        # A skipped tick is the positive evidence the gate ran; wait for it.
+        await wait_until(
+            lambda: components.emitter.counters.skipped_vehicle_state > 0,
+            what="a tick skipped on vehicle state",
+        )
+    finally:
+        stop.set()
+        await settle(task)
 
     assert sub.queue.empty(), "IF must not emit while the engine isn't running"
-    assert components.emitter.counters.skipped_vehicle_state > 0
 
 
 async def test_run_live_inference_scores_during_replay_despite_engine_off_reading(
@@ -2270,10 +2267,10 @@ async def test_run_live_inference_scores_during_replay_despite_engine_off_readin
     task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
 
     try:
-        msg = await asyncio.wait_for(sub.get(), timeout=2.0)
+        msg = await settle(sub.get())
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=1.0)
+        await settle(task)
 
     assert msg["source"] == "isolation_forest"
     assert components.emitter.counters.skipped_vehicle_state == 0
@@ -2492,10 +2489,10 @@ async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfi
 
     daemon_task = asyncio.create_task(_run())
     try:
-        msg = await asyncio.wait_for(sub.get(), timeout=5.0)
+        msg = await settle(sub.get())
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
 
     assert msg["source"] == "isolation_forest"
     assert msg["model_version"] == "fake_if_v1"
@@ -2530,10 +2527,15 @@ async def test_run_daemon_disable_live_inference_skips_inference_task(
         )
 
     daemon_task = asyncio.create_task(_run())
-    await asyncio.sleep(0.2)
-    stop.set()
-    await asyncio.wait_for(daemon_task, timeout=5.0)
-    # Producer ran, Parquet got the record, but no inference task means no
+    try:
+        await wait_until(
+            lambda: _stage_reached(components, "first_record_stored"),
+            what="the producer's record reaching storage",
+        )
+    finally:
+        stop.set()
+        await settle(daemon_task)
+    # Producer ran, storage got the record, but no inference task means no
     # AnomalyEvent emission could possibly have happened.
     assert len(records_pushed) == 1
     assert not list(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
@@ -2577,10 +2579,10 @@ async def test_run_daemon_end_to_end_telemetry_published_to_ws(
     try:
         received: list[dict[str, Any]] = []
         for _ in range(len(records_to_push)):
-            received.append(await asyncio.wait_for(sub.get(), timeout=3.0))
+            received.append(await settle(sub.get()))
     finally:
         stop.set()
-        await asyncio.wait_for(daemon_task, timeout=5.0)
+        await settle(daemon_task)
 
     assert [r["value"] for r in received] == [700.0, 701.0, 702.0]
     assert all(r["channel"] == "RPM" for r in received)

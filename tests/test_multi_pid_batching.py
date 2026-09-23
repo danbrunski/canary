@@ -217,6 +217,7 @@ from src.collection.can_obd_collector import (  # noqa: E402
     run_can_obd_loop,
 )
 from src.collection.obd_scheduler import (  # noqa: E402
+    AUTO_MISS_BACKOFF_SECONDS,
     CanObdSpec,
     _initial_request_states,
     build_poll_requests,
@@ -224,6 +225,8 @@ from src.collection.obd_scheduler import (  # noqa: E402
     select_batch_companions,
 )
 from src.config import CanBusConfig  # noqa: E402
+from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock  # noqa: E402
+from tests.waits import StopWhen, hang_guard_deadline  # noqa: E402
 
 
 class _BatchingEcu:
@@ -433,20 +436,39 @@ def test_batching_beats_single_pid_on_round_trips() -> None:
     assert (batch_readings / batch_requests) > (single_readings / single_requests)
 
 
-def test_loop_falls_back_when_the_ecu_refuses_batches() -> None:
-    """An ECU that ignores multi-PID requests must not stall the session. The
-    loop gives up after a few failures and keeps polling single-PID -- and
-    crucially must NOT back off the healthy channels on the way there."""
-    bus = _BatchingEcu(answer_batches=False)
+#: Simulated seconds the two batch-refusal tests below run for. Giving up on
+#: batching costs ten whole-batch timeouts (3 at each of sizes 6/4/2, 0.05 s
+#: each) plus the RPM reads between them: the first single SPEED read lands at
+#: 0.755 s of simulated time. The tests used to run 0.8 s of *wall* clock, so
+#: 45 ms of scheduling delay anywhere failed them (T01.4, 2026-09-23). On the
+#: fake clock that delay does not exist, and a channel wrongly backed off would
+#: stay silent for AUTO_MISS_BACKOFF_SECONDS, far past this window.
+_BATCH_REFUSAL_WINDOW_SECONDS = 2.0
+assert _BATCH_REFUSAL_WINDOW_SECONDS < AUTO_MISS_BACKOFF_SECONDS
+
+
+def _run_against_a_batch_refusing_ecu(monkeypatch: pytest.MonkeyPatch) -> tuple:
+    """RPM/SPEED/ENGINE_LOAD against an ECU that ignores every batch, on a fake clock."""
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    ecu = ScriptedEcu(clock, answer_batches=False)
     readings: list = []
-    run_can_obd_loop(
-        bus,  # type: ignore[arg-type]
+    stats = run_can_obd_loop(
+        ecu,  # type: ignore[arg-type]
         _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.8,
+        deadline_monotonic=clock.monotonic() + _BATCH_REFUSAL_WINDOW_SECONDS,
     )
+    return ecu, readings, stats
+
+
+def test_loop_falls_back_when_the_ecu_refuses_batches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An ECU that ignores multi-PID requests must not stall the session. The
+    loop gives up after a few failures and keeps polling single-PID -- and
+    crucially must NOT back off the healthy channels on the way there."""
+    bus, readings, _stats = _run_against_a_batch_refusing_ecu(monkeypatch)
 
     assert bus.batch_requests > 0, "should have tried batching"
     assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}, (
@@ -486,7 +508,9 @@ def test_batch_size_steps_down_instead_of_giving_up() -> None:
     assert [_next_batch_size(n) for n in (6, 4, 2)] == [4, 2, 1]
 
     bus = _SizeLimitedEcu(max_accepted=4)
-    readings: list = []
+    # Stops once every asserted channel has been read (T01): a 0.8 s wall-clock
+    # deadline had to cover three batch timeouts before the step-down.
+    sink: StopWhen = StopWhen(lambda got: {r.pid for r in got} >= {"RPM", "SPEED", "ENGINE_LOAD"})
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         _spec(
@@ -494,10 +518,11 @@ def test_batch_size_steps_down_instead_of_giving_up() -> None:
             batch_max_pids=6,
         ),
         on_frame=lambda _m: None,
-        on_reading=readings.append,
-        stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.8,
+        on_reading=sink,
+        stop_event=sink.stop,
+        deadline_monotonic=hang_guard_deadline(),
     )
+    readings = sink.items
 
     assert bus.rejected_sizes, "should have tried a too-large batch first"
     assert max(bus.rejected_sizes) > 4
@@ -506,20 +531,13 @@ def test_batch_size_steps_down_instead_of_giving_up() -> None:
     assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}
 
 
-def test_healthy_channels_are_not_backed_off_by_a_failed_batch() -> None:
+def test_healthy_channels_are_not_backed_off_by_a_failed_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """The subtle one. A whole-batch failure says nothing about any individual
     PID, so crediting six misses would wrongly suppress six healthy channels.
     After the fallback, every channel must still be polling."""
-    bus = _BatchingEcu(answer_batches=False)
-    readings: list = []
-    stats = run_can_obd_loop(
-        bus,  # type: ignore[arg-type]
-        _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6),
-        on_frame=lambda _m: None,
-        on_reading=readings.append,
-        stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.8,
-    )
+    _bus, readings, stats = _run_against_a_batch_refusing_ecu(monkeypatch)
 
     assert stats.batch_failures > 0
     counts = {c: sum(1 for r in readings if r.pid == c) for c in ("RPM", "SPEED", "ENGINE_LOAD")}

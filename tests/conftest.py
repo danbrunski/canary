@@ -75,3 +75,31 @@ def _refuse_writes_to_the_real_training_ledger(monkeypatch: pytest.MonkeyPatch) 
         return real_append(self, record, **kwargs)
 
     monkeypatch.setattr(JsonlStore, "_append_record", _guarded)
+
+
+@pytest.fixture
+def no_trip_end_digest_child(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
+    """Stand in for the trip-end digest ``run_daemon`` computes at shutdown.
+
+    ``run_daemon``'s shutdown fallback digests the active session in a fresh
+    ``spawn`` child (a new interpreter importing pandas and the analysis
+    stack). Under a parallel run beside other load that child alone outlived
+    the 5 s these tests gave the whole shutdown: every ``tests/test_daemon.py``
+    failure captured for T01 (2026-09-23, load average 12-20 on 12 cores) was
+    ``wait_for(daemon_task)`` expiring inside ``compute_digest_off_loop``. The
+    digest and its child are tested where they live
+    (``tests/test_trip_end_digest.py``); a test of the daemon's wiring only
+    needs to know the hook was called. Returns the sessions it was called with.
+
+    Opt in per module with ``pytestmark = pytest.mark.usefixtures(...)`` —
+    every module that starts ``run_daemon`` does.
+    """
+    from src.daemon import runtime
+
+    calls: list[Path] = []
+
+    async def _record(session_dir: Path, _config: Any, **_kwargs: Any) -> None:
+        calls.append(session_dir)
+
+    monkeypatch.setattr(runtime, "handle_trip_end_off_loop", _record)
+    return calls

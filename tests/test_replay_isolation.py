@@ -25,7 +25,8 @@ from src.config import CanaryConfig
 from src.daemon import build_components, run_daemon
 from src.telemetry import TelemetryRecord
 
-pytestmark = pytest.mark.integration
+#: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
+pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_trip_end_digest_child")]
 
 
 def _config_yaml(tmp_path: Path) -> str:
