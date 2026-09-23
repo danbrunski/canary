@@ -18,7 +18,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.sequence_dataset import WINDOW_MAX_GAP_SECONDS
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_training import SequenceThresholdCalibration
@@ -797,6 +796,11 @@ def _torch_module() -> Any:
     try:
         return importlib.import_module("torch")
     except ImportError as exc:
+        # Imported here, not at module level: ``lstm_autoencoder``'s class
+        # bases import ``torch.nn``, and this module is on the daemon's path
+        # to recording (S01.2).
+        from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
+
         raise MissingLSTMAutoencoderDependencyError(
             "torch is required for LSTM inference; run scripts/install_deps.py "
             "or install the 'ml' optional dependency"

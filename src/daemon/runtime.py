@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import logging
 import os
 from collections.abc import Callable, Sequence
@@ -19,7 +20,6 @@ from src.control.capture_manifest import (
     write_capture_quality,
 )
 from src.control.replay_control import ReplayController
-from src.control.trip_end import handle_trip_end_off_loop
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.frame_decoder import FrameDecoder
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
@@ -28,7 +28,6 @@ from src.telemetry import TelemetryRecord
 
 from .components import DaemonComponents, build_components
 from .drain import drain_queue_with_broadcast
-from .inference import build_live_feature_source, run_live_inference
 from .online_training import run_online_training_scheduler
 from .polling import (
     poll_behavior_models,
@@ -45,10 +44,57 @@ if TYPE_CHECKING:
     from src.collection.queueing import CollectorHandoffStats
     from src.models.health import HealthMonitor
     from src.preprocessing.live import LiveFeatureSource
+    from src.startup import StartupTimeline
 
 log = logging.getLogger(__name__)
 
 DRAIN_SHUTDOWN_SECONDS = 5.0
+
+
+def build_live_feature_source(components: DaemonComponents) -> LiveFeatureSource:
+    """:func:`src.daemon.inference.build_live_feature_source`, imported on first call.
+
+    ``src.daemon.inference`` pulls in the pandas feature pipeline, the decode
+    layer and the scoring worker. Imported at this module's top it loaded on
+    the main thread before any collector ran; called from
+    :func:`_build_live_source_off_loop` it loads in that thread (S01.3).
+    """
+    from .inference import build_live_feature_source as _build
+
+    return _build(components)
+
+
+async def run_live_inference(
+    live_source: LiveFeatureSource, components: DaemonComponents, stop_event: asyncio.Event
+) -> None:
+    """:func:`src.daemon.inference.run_live_inference`, imported on first call.
+
+    Only called once the live source exists, whose build (in a thread) has
+    already imported ``src.daemon.inference``; this import is then a lookup.
+    """
+    from .inference import run_live_inference as _run
+
+    await _run(live_source, components, stop_event)
+
+
+async def handle_trip_end_off_loop(
+    session_dir: Path, config: CanaryConfig, **kwargs: Any
+) -> dict[str, Any] | None:
+    """:func:`src.control.trip_end.handle_trip_end_off_loop`, imported in a thread.
+
+    ``trip_end`` imports the digest, and with it the fingerprint, surface and
+    session-classifier analysis modules: none of it is needed until a trip
+    ends, and at this module's top it loaded on the main thread before any
+    collector ran (S01.3). The first import is done off the loop so a trip
+    that ends early does not stall every sink on a cold read; after that the
+    thread hop returns the cached module.
+    """
+    trip_end = await asyncio.to_thread(importlib.import_module, "src.control.trip_end")
+    result: dict[str, Any] | None = await trip_end.handle_trip_end_off_loop(
+        session_dir, config, **kwargs
+    )
+    return result
+
 
 #: How long shutdown waits for a trip-end digest started at the GPS edge to
 #: finish before cancelling it (which terminates its child). Bounded so a
@@ -187,6 +233,7 @@ async def run_daemon(
     writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter | None = None,
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
+    startup: StartupTimeline | None = None,
 ) -> DaemonComponents:
     """Run the full daemon until ``stop_event`` fires.
 
@@ -218,10 +265,24 @@ async def run_daemon(
     come up when their inputs are ready; the records before that are stored,
     just not scored.
 
+    ``startup`` is the timeline ``src.main`` began at process start (S01.1);
+    without one the health monitor's own is used. Either way it is served as
+    ``/status``'s ``startup`` block and logs one summary line once every
+    stage this start will reach has been reached.
+
     Returns the components so a caller can inspect counters / model
     versions for diagnostics or tests.
     """
     components = components or build_components(config, load_models=False)
+    if startup is not None:
+        components.health_monitor.startup = startup
+    timeline = components.health_monitor.startup
+    timeline.mark("components_built")
+    timeline.expect(
+        "collector_tasks_created", "first_record_stored", "models_polled", "app_built", "http_bound"
+    )
+    if enable_live_inference:
+        timeline.expect("live_source_ready")
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
     arming_config = config.collection.record_arming
     # Task 8.6: config-gated, defaults off (RecordArmingConfig.enabled=False)
@@ -389,6 +450,7 @@ async def run_daemon(
         asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
     ]
     stop_task = asyncio.create_task(stop_event.wait())
+    timeline.mark("collector_tasks_created")
     log.info("collectors started; building live inference and the dashboard")
 
     behavior_models_task: asyncio.Task[Any] | None = None
@@ -406,6 +468,10 @@ async def run_daemon(
             components.live_source = live_source
             if live_source_ready is not None:
                 live_source_ready.set_result(live_source)
+                if live_source is not None:
+                    timeline.mark("live_source_ready")
+                else:
+                    timeline.skip("live_source_ready", "build failed; recording without it")
             # After the live source, so 7.1's in-memory reset can reach it (and
             # the shared persistence gate / emitter) on replay boundaries.
             components.replay_controller = ReplayController(

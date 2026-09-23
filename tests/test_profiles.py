@@ -105,8 +105,8 @@ def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, mon
     from src.collection.isotp import ObdResponse
 
     class _FakeClient:
-        def __init__(self, _bus, *, timeout_seconds: float) -> None:
-            del timeout_seconds
+        def __init__(self, _bus, *, timeout_seconds: float, on_frame: object = None) -> None:
+            del timeout_seconds, on_frame
 
         def query_mode_09(self, info_type: int) -> ObdResponse | None:
             payloads = {
@@ -131,6 +131,158 @@ def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, mon
     assert probe.vin == "5N1AN08U08C123456"
     assert probe.calibration_id == "CAL0001"
     assert probe.cvn == "DEADBEEF"
+
+
+class _ScriptedEcu:
+    """A CAN bus with one scripted engine ECU behind it (S01.4).
+
+    ``answers`` maps a Mode 09 InfoType to its response: ``bytes`` is the
+    payload after ``49 <infotype>`` (ISO-TP segmented when it doesn't fit a
+    single frame, with consecutive frames released by the tester's flow
+    control, as a real ECU does), an ``int`` is an NRC answered as
+    ``7F 09 <nrc>``, and an absent key is silence. ``sent`` records every
+    request frame, flow control excluded.
+    """
+
+    def __init__(self, answers: dict[int, bytes | int]) -> None:
+        self.answers = answers
+        self.sent: list[bytes] = []
+        self._rx: list[bytes] = []
+        self._pending_cf: list[bytes] = []
+
+    def send(self, msg: object) -> None:
+        data = bytes(msg.data)  # type: ignore[attr-defined]
+        if data[0] >> 4 == 0x3:  # flow control: release the consecutive frames
+            self._rx.extend(self._pending_cf)
+            self._pending_cf = []
+            return
+        self.sent.append(data)
+        if data[1] != 0x09:
+            return
+        answer = self.answers.get(data[2])
+        if answer is None:
+            return
+        if isinstance(answer, int):
+            self._rx.append(bytes([0x03, 0x7F, 0x09, answer, 0, 0, 0, 0]))
+            return
+        body = bytes([0x49, data[2]]) + answer
+        if len(body) <= 7:
+            self._rx.append(bytes([len(body)]) + body.ljust(7, b"\x00"))
+            return
+        self._rx.append(bytes([0x10 | (len(body) >> 8), len(body) & 0xFF]) + body[:6])
+        rest = body[6:]
+        for seq, start in enumerate(range(0, len(rest), 7), start=1):
+            chunk = rest[start : start + 7]
+            self._pending_cf.append(bytes([0x20 | (seq & 0xF)]) + chunk.ljust(7, b"\x00"))
+
+    def recv(self, timeout: float = 0.0) -> object | None:
+        import time
+
+        import can
+
+        if self._rx:
+            return can.Message(arbitration_id=0x7E8, data=self._rx.pop(0), is_extended_id=False)
+        time.sleep(min(timeout, 0.005))
+        return None
+
+    def shutdown(self) -> None:
+        pass
+
+    def mode_09_requests(self) -> list[int]:
+        return [frame[2] for frame in self.sent if frame[1] == 0x09]
+
+
+_VIN = b"5N1AN08U08C123456"
+_ANSWERING_ECU: dict[int, bytes | int] = {
+    0x02: b"\x01" + _VIN,
+    0x04: b"\x01" + b"CAL0001".ljust(16, b"\x00"),
+    0x06: b"\x01" + bytes.fromhex("0B4B7C60"),
+}
+
+
+def _probe_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, ecu: _ScriptedEcu, *, timeout: float = 0.3
+) -> tuple[VehicleInfoProbe, float]:
+    import time
+
+    config = _base_config(tmp_path, obd_source="canable")
+    config = config.model_copy(
+        update={
+            "profiles": config.profiles.model_copy(update={"vin_probe_timeout_seconds": timeout})
+        }
+    )
+    monkeypatch.setattr("src.collection.can_collector.bus_factory", lambda _can: ecu)
+    started = time.monotonic()
+    probe = profiles_mod.probe_vehicle_info(config)
+    return probe, time.monotonic() - started
+
+
+def test_probe_silent_ecu_costs_one_request_and_one_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """S01.4: an ECU asleep at key-off answers nothing. The calibration ID and
+    CVN come from the same module, so asking them too cost two more 2 s
+    timeouts on every key-off boot (6 s on the 2026-09-22 cold trace)."""
+    ecu = _ScriptedEcu({})
+    with caplog.at_level("INFO", logger="src.profiles"):
+        probe, elapsed = _probe_with(tmp_path, monkeypatch, ecu, timeout=0.3)
+    assert probe == VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
+    assert ecu.mode_09_requests() == [0x02]
+    assert elapsed < 2 * 0.3
+    assert "skipped" in caplog.text
+
+
+def test_probe_answering_ecu_reads_all_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ecu = _ScriptedEcu(dict(_ANSWERING_ECU))
+    probe, _ = _probe_with(tmp_path, monkeypatch, ecu)
+    assert ecu.mode_09_requests() == [0x02, 0x04, 0x06]
+    assert probe.vin == _VIN.decode()
+    assert probe.calibration_id == "CAL0001"
+    assert probe.cvn == "0B4B7C60"
+
+
+def test_probe_vin_nrc_still_asks_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A refusal is an answer: the module is awake, so each InfoType stays
+    independent (pre-2008 ECUs may refuse the VIN and still report a CVN)."""
+    ecu = _ScriptedEcu({**_ANSWERING_ECU, 0x02: 0x12})
+    probe, _ = _probe_with(tmp_path, monkeypatch, ecu)
+    assert ecu.mode_09_requests() == [0x02, 0x04, 0x06]
+    assert probe.vin is None
+    assert probe.calibration_id == "CAL0001"
+    assert probe.cvn == "0B4B7C60"
+
+
+def test_probe_implausible_vin_still_asks_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ecu = _ScriptedEcu({**_ANSWERING_ECU, 0x02: b"\x01NOTAVIN"})
+    probe, _ = _probe_with(tmp_path, monkeypatch, ecu)
+    assert ecu.mode_09_requests() == [0x02, 0x04, 0x06]
+    assert probe.vin is None
+    assert probe.cvn == "0B4B7C60"
+
+
+def test_probe_partial_vin_answer_still_asks_the_others(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A first frame whose consecutive frames never arrive times out like
+    silence at the client, but the module did answer: not skipped."""
+
+    class _DropsConsecutiveFrames(_ScriptedEcu):
+        def send(self, msg: object) -> None:
+            super().send(msg)
+            if bytes(msg.data)[0] >> 4 == 0x3:  # type: ignore[attr-defined]
+                self._rx = [frame for frame in self._rx if frame[0] >> 4 != 0x2]
+
+    ecu = _DropsConsecutiveFrames(dict(_ANSWERING_ECU))
+    probe, _ = _probe_with(tmp_path, monkeypatch, ecu)
+    assert ecu.mode_09_requests() == [0x02, 0x04, 0x06]
+    assert probe.vin is None
+    assert probe.cvn == "0B4B7C60"
 
 
 def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):

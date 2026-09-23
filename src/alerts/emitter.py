@@ -33,13 +33,6 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.notifier import format_event_message
 from src.alerts.tuning import AlertTuner
-from src.models.isolation_forest import (
-    CALIBRATED_ANOMALY_COLUMN,
-    CALIBRATED_THRESHOLD_COLUMN,
-    LABEL_COLUMN,
-    MISSING_FEATURES_COLUMN,
-    SCORE_COLUMN,
-)
 
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
@@ -165,11 +158,11 @@ class AnomalyEventEmitter:
         timestamp: str,
         affected_channels: tuple[str, ...] = (),
         session: str | None = None,
-        score_column: str = SCORE_COLUMN,
-        label_column: str = LABEL_COLUMN,
-        missing_features_column: str = MISSING_FEATURES_COLUMN,
-        calibrated_anomaly_column: str = CALIBRATED_ANOMALY_COLUMN,
-        calibrated_threshold_column: str = CALIBRATED_THRESHOLD_COLUMN,
+        score_column: str | None = None,
+        label_column: str | None = None,
+        missing_features_column: str | None = None,
+        calibrated_anomaly_column: str | None = None,
+        calibrated_threshold_column: str | None = None,
         mode_column: str = "operating_mode",
         feature_contributors: Mapping[str, float] | None = None,
     ) -> AnomalyEvent | None:
@@ -181,7 +174,20 @@ class AnomalyEventEmitter:
         (``-1``). The missing-features dropout flag forces anomalous in both
         cases. Rows that hit neither ``suppressed_not_anomaly`` and return
         ``None`` without persisting.
+
+        A column argument left ``None`` means the Isolation Forest's own
+        column name. They are resolved here rather than as default values
+        because importing ``src.models.isolation_forest`` pulls in the whole
+        feature pipeline, and this module is on the daemon's path to
+        recording (S01.3); by the time a scored row exists it is loaded.
         """
+        from src.models import isolation_forest as _if
+
+        score_column = score_column or _if.SCORE_COLUMN
+        label_column = label_column or _if.LABEL_COLUMN
+        missing_features_column = missing_features_column or _if.MISSING_FEATURES_COLUMN
+        calibrated_anomaly_column = calibrated_anomaly_column or _if.CALIBRATED_ANOMALY_COLUMN
+        calibrated_threshold_column = calibrated_threshold_column or _if.CALIBRATED_THRESHOLD_COLUMN
         missing = bool(row.get(missing_features_column, False))
         calibrated = row.get(calibrated_anomaly_column)
         if calibrated is not None and pd.notna(calibrated):

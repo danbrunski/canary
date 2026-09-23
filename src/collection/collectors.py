@@ -19,7 +19,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.analysis.tune_revisions import load_tune_revisions
 from src.collection import tuning_profile
@@ -36,7 +36,6 @@ from src.collection.custom_pids import load_custom_pids
 from src.collection.discovery import vehicle_key
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
-from src.collection.obd_collector import ObdSpec, collect_obd
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
@@ -46,13 +45,15 @@ from src.collection.obd_scheduler import (
     memory_channels,
     parse_did_token,
 )
-from src.collection.pids import REQUIRED_PIDS
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.config import CanaryConfig
 from src.control.calibration import active_registry_path
 from src.telemetry import TelemetryRecord
+
+if TYPE_CHECKING:
+    from src.collection.obd_collector import ObdSpec
 
 log = logging.getLogger(__name__)
 
@@ -228,6 +229,11 @@ def default_collectors(
     if config.collection.obd_source == "disabled":
         return [can, *aux_collectors]
 
+    # The ELM327 transport's own library (python-OBD, and pint through it,
+    # ~400 ms warm), imported only when that transport is configured (S01.3).
+    from src.collection.obd_collector import ObdSpec
+    from src.collection.pids import REQUIRED_PIDS
+
     obd_pids = (
         config.collection.obd_pids
         if config.collection.obd_pids
@@ -244,6 +250,23 @@ def default_collectors(
         await collect_obd(obd_spec, queue, stop, reconnect_policy=reconnect_policy)
 
     return [can, obd, *aux_collectors]
+
+
+async def collect_obd(
+    spec: ObdSpec,
+    queue: asyncio.Queue[TelemetryRecord],
+    stop_event: asyncio.Event,
+    *,
+    reconnect_policy: ReconnectPolicy | None,
+) -> None:
+    """:func:`src.collection.obd_collector.collect_obd`, imported on first call.
+
+    Only the ELM327 transport reaches this, and it has already imported the
+    module to build its :class:`ObdSpec`.
+    """
+    from src.collection.obd_collector import collect_obd as _collect_obd
+
+    await _collect_obd(spec, queue, stop_event, reconnect_policy=reconnect_policy)
 
 
 def _gps_collectors(

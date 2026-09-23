@@ -9,9 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
-from typing import Any
-
-import uvicorn
+from typing import TYPE_CHECKING, Any
 
 from src.config import CanaryConfig
 from src.storage.async_writer import AsyncParquetTelemetryWriter
@@ -30,18 +28,53 @@ from .drain import (
     run_telemetry_broadcast_sink,
     run_telemetry_fanout,
 )
-from .inference import (
-    _finite_or_none,
-    _observe_behavior,
-    _publish_score,
-    _score_and_emit,
-    _sequence_observe,
-    build_live_feature_source,
-    run_live_inference,
-)
 from .polling import poll_behavior_models, poll_config, poll_model_managers
 from .retention import run_retention_sweeper
 from .server import serve_in_background as _serve_in_background
+
+if TYPE_CHECKING:
+    import uvicorn
+
+    from src.startup import StartupTimeline
+
+    from .inference import (
+        _finite_or_none,
+        _observe_behavior,
+        _publish_score,
+        _score_and_emit,
+        _sequence_observe,
+        build_live_feature_source,
+        run_live_inference,
+    )
+
+#: Re-exported from :mod:`src.daemon.inference`, which is imported on first
+#: access rather than with this package: it pulls in the pandas feature
+#: pipeline, the decode layer and the scoring worker, and ``import src.daemon``
+#: runs on the main thread before any collector does (S01.3). The daemon
+#: itself reaches it through :func:`src.daemon.runtime.build_live_feature_source`,
+#: in the thread that builds the live source.
+_INFERENCE_EXPORTS = frozenset(
+    {
+        "_finite_or_none",
+        "_observe_behavior",
+        "_publish_score",
+        "_score_and_emit",
+        "_sequence_observe",
+        "build_live_feature_source",
+        "run_live_inference",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    if name in _INFERENCE_EXPORTS:
+        from . import inference as _inference
+
+        value = getattr(_inference, name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 DASHBOARD_SHUTDOWN_SECONDS = _server.DASHBOARD_SHUTDOWN_SECONDS
 DRAIN_SHUTDOWN_SECONDS = _runtime.DRAIN_SHUTDOWN_SECONDS
@@ -71,6 +104,7 @@ async def run_daemon(
     writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter | None = None,
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
+    startup: StartupTimeline | None = None,
 ) -> DaemonComponents:
     """Run the full daemon while preserving the historic ``src.daemon`` facade."""
     _runtime.run_retention_sweeper = run_retention_sweeper
@@ -83,6 +117,7 @@ async def run_daemon(
         writer=writer,
         components=components,
         enable_live_inference=enable_live_inference,
+        startup=startup,
     )
 
 

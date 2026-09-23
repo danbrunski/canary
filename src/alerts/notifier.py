@@ -17,11 +17,11 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any
 
-import httpx
-
 from src.config import NotificationsConfig
 
 if TYPE_CHECKING:
+    import httpx
+
     from src.alerts.events import AnomalyEvent
 
 log = logging.getLogger(__name__)
@@ -74,7 +74,10 @@ class Notifier:
         client = self._client
         owns_client = client is None
         if client is None:
-            client = httpx.AsyncClient(timeout=self._timeout)
+            # httpx is imported here, in a thread: pushes are rare, and at
+            # module level it loaded on the daemon's main thread before any
+            # collector ran (S01.3, ~42 ms warm).
+            client = await asyncio.to_thread(_new_client, self._timeout)
         try:
             url = f"{self._config.ntfy_url.rstrip('/')}/{self._config.topic}"
             await client.post(
@@ -87,6 +90,12 @@ class Notifier:
         finally:
             if owns_client:
                 await client.aclose()
+
+
+def _new_client(timeout: float) -> httpx.AsyncClient:
+    import httpx
+
+    return httpx.AsyncClient(timeout=timeout)
 
 
 def format_event_message(event: AnomalyEvent) -> tuple[str, str]:

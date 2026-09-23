@@ -191,7 +191,9 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     ``virtual``, the source isn't the CAN-native path, or the read fails.
     Opens its own short-lived bus and closes it before the main collectors
     start. A missing/failed calibration ID or CVN read doesn't invalidate a
-    successful VIN read (or vice versa) — each InfoType is independent.
+    successful VIN read (or vice versa) — each InfoType is independent —
+    except when the VIN request met silence (no frame at all from a
+    diagnostic responder): then the other two are not asked (S01.4).
     """
     coll = config.collection
     if coll.obd_source != "canable" or config.hardware.can.interface == "virtual":
@@ -199,8 +201,14 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
 
     # Imported lazily so this module (and config) stay importable without the
     # python-can collector deps present.
+    import can
+
     from src.collection.can_collector import bus_factory
-    from src.collection.can_obd_client import CanObdClient
+    from src.collection.can_obd_client import (
+        DEFAULT_RESPONSE_ID_MAX,
+        DEFAULT_RESPONSE_ID_MIN,
+        CanObdClient,
+    )
     from src.collection.obd_registry import decode_calibration_ids, decode_cvn, decode_vin
 
     try:
@@ -212,12 +220,33 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     vin: str | None = None
     calibration_id: str | None = None
     cvn: str | None = None
+    # Any frame from a diagnostic responder, positive, negative or the first
+    # frame of a transfer that never completes: the module is awake.
+    responder_frames: list[int] = []
+
+    def _tap(frame: can.Message) -> None:
+        if DEFAULT_RESPONSE_ID_MIN <= frame.arbitration_id <= DEFAULT_RESPONSE_ID_MAX:
+            responder_frames.append(frame.arbitration_id)
+
     try:
-        client = CanObdClient(bus, timeout_seconds=config.profiles.vin_probe_timeout_seconds)
+        client = CanObdClient(
+            bus, timeout_seconds=config.profiles.vin_probe_timeout_seconds, on_frame=_tap
+        )
 
         response = client.query_mode_09(0x02)
+        if response is None and not responder_frames:
+            # Silence, not a refusal: the ECU is asleep (key off), and the
+            # calibration ID and CVN come from the same module, so asking
+            # would cost two more full timeouts at every key-off boot (S01.4:
+            # 6 s of the 2026-09-22 cold trace). An NRC or a partial answer
+            # falls through to the independent reads below.
+            log.info(
+                "VIN probe: no Mode 09 response; calibration ID and CVN skipped "
+                "(no responder on the bus)"
+            )
+            return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
         if response is None:
-            log.info("VIN probe: no Mode 09 response")
+            log.info("VIN probe: Mode 09 VIN refused or incomplete; reading the others")
         else:
             decoded = decode_vin(response.payload)
             if decoded is not None:

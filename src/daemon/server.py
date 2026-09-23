@@ -4,42 +4,32 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
-
-import uvicorn
-
-from src.alerts.feedback import FeedbackStore
-from src.dashboard.api import create_app
+from typing import TYPE_CHECKING, Any
 
 from .components import DaemonComponents
+
+if TYPE_CHECKING:
+    import uvicorn
+
+    from src.startup import StartupTimeline
 
 log = logging.getLogger(__name__)
 
 DASHBOARD_SHUTDOWN_SECONDS = 5.0
 
 
-@asynccontextmanager
-async def serve_in_background(
-    components: DaemonComponents,
-    *,
-    server_factory: Callable[..., uvicorn.Server] | None = None,
-) -> AsyncIterator[uvicorn.Server]:
-    """Run the FastAPI dashboard inside the same event loop as the collectors.
+def _build_app(components: DaemonComponents) -> Any:
+    """Import the dashboard API and build the app; called in a thread.
 
-    The returned context manager runs the uvicorn server in a background
-    task; on exit, sends the graceful-shutdown signal and waits for the
-    task. ``server_factory`` is injectable for tests — pass a factory
-    that builds a server bound to a high local port, e.g.
-    ``lambda **kw: uvicorn.Server(uvicorn.Config(**kw, port=0))``.
-
-    Why uvicorn.Server.serve() rather than uvicorn.run(): the latter spins
-    its own event loop, which conflicts with the daemon's. ``Server.serve``
-    is the documented "I already have a loop" entry.
+    uvicorn is imported here too, off the loop, so the import in
+    :func:`serve_in_background` is a ``sys.modules`` lookup.
     """
-    # Building the app is ~11 s on a cold boot (2026-09-22). Collection is
-    # already running by now, so do it in a thread rather than stall the loop
-    # every sink runs on.
-    app = await asyncio.to_thread(
-        create_app,
+    import uvicorn  # noqa: F401
+
+    from src.alerts.feedback import FeedbackStore
+    from src.dashboard.api import create_app
+
+    return create_app(
         components.config,
         anomalies_dir=components.config.daemon.anomalies_dir,
         models_dir=components.config.daemon.models_dir,
@@ -68,11 +58,41 @@ async def serve_in_background(
         inference_timing=components.inference_timing,
         live_source=components.live_source,
     )
+
+
+@asynccontextmanager
+async def serve_in_background(
+    components: DaemonComponents,
+    *,
+    server_factory: Callable[..., uvicorn.Server] | None = None,
+) -> AsyncIterator[uvicorn.Server]:
+    """Run the FastAPI dashboard inside the same event loop as the collectors.
+
+    The returned context manager runs the uvicorn server in a background
+    task; on exit, sends the graceful-shutdown signal and waits for the
+    task. ``server_factory`` is injectable for tests — pass a factory
+    that builds a server bound to a high local port, e.g.
+    ``lambda **kw: uvicorn.Server(uvicorn.Config(**kw, port=0))``.
+
+    Why uvicorn.Server.serve() rather than uvicorn.run(): the latter spins
+    its own event loop, which conflicts with the daemon's. ``Server.serve``
+    is the documented "I already have a loop" entry.
+    """
+    # Building the app is ~11 s on a cold boot (2026-09-22). Collection is
+    # already running by now, so do it in a thread rather than stall the loop
+    # every sink runs on — including the import of the API module tree
+    # (FastAPI and every route's dependencies), which used to happen at this
+    # module's import, on the main thread, before any collector ran (S01.3).
+    app = await asyncio.to_thread(_build_app, components)
+    startup = components.health_monitor.startup
+    startup.mark("app_built")
     if components.job_controller is not None:
         loop = asyncio.get_running_loop()
         components.job_controller.set_event_callback(
             lambda event: components.control_broadcaster.publish_threadsafe(loop, event)
         )
+    import uvicorn  # already loaded by _build_app, in the thread
+
     if server_factory is None:
         server_factory = uvicorn.Server
     server_config = uvicorn.Config(
@@ -88,6 +108,7 @@ async def serve_in_background(
     )
     server = server_factory(config=server_config)
     serve_task = asyncio.create_task(server.serve())
+    bound_task = asyncio.create_task(_mark_http_bound(server, serve_task, startup))
     # uvicorn flips server.started True once the listening socket is open.
     for _ in range(100):
         if getattr(server, "started", False):
@@ -96,6 +117,9 @@ async def serve_in_background(
     try:
         yield server
     finally:
+        bound_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await bound_task
         server.should_exit = True
         # Belt-and-suspenders around timeout_graceful_shutdown: if uvicorn still
         # doesn't return (older versions, a wedged lifespan task), force it down
@@ -108,6 +132,21 @@ async def serve_in_background(
             serve_task.cancel()
             with suppress(asyncio.CancelledError):
                 await serve_task
+
+
+async def _mark_http_bound(
+    server: uvicorn.Server, serve_task: asyncio.Task[Any], startup: StartupTimeline
+) -> None:
+    """Mark ``http_bound`` (S01.1) when uvicorn has opened its socket.
+
+    Separate from the bounded wait above, which gives up after 5 s and
+    carries on: a slow cold start still gets its stage recorded.
+    """
+    while not serve_task.done():
+        if getattr(server, "started", False):
+            startup.mark("http_bound")
+            return
+        await asyncio.sleep(0.05)
 
 
 # ---------------------------------------------------------------------------

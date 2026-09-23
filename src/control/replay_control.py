@@ -39,16 +39,21 @@ import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
-from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
+
+if TYPE_CHECKING:
+    # Annotation only: importing it loads the feature pipeline, and this
+    # module is on the daemon's path to recording (S01.3).
+    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

@@ -77,7 +77,7 @@ from src.collection.isotp import (
     split_batched_did_response,
     walk_batched_response,
 )
-from src.collection.obd_collector import (
+from src.collection.obd_reading import (
     AcquiredClock,
     JsonlReadingWriter,
     ObdReading,

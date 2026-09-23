@@ -1,68 +1,64 @@
-"""Preprocessing utilities for model-ready telemetry frames."""
+"""Preprocessing utilities for model-ready telemetry frames, resolved lazily.
 
-from src.preprocessing.anomaly_injection import (
-    AnomalyInjector,
-    AnomalyKind,
-    InjectionWindow,
-    windows_to_records,
-)
-from src.preprocessing.decode import (
-    DECODED_SOURCE,
-    decode_can_rows,
-    decoded_channel,
-    read_session_decoded,
-)
-from src.preprocessing.features import (
-    FeatureConfig,
-    compute_features,
-    mean_column,
-    roc_column,
-    std_column,
-)
-from src.preprocessing.loader import (
-    channel_key,
-    discover_sessions,
-    read_session,
-    read_sessions,
-    to_wide,
-)
-from src.preprocessing.normalization import SchemaMismatchError, ZScoreScaler
-from src.preprocessing.resampler import ResampleConfig, gap_column, resample_wide
-from src.preprocessing.segmenter import (
-    MODE_COLUMN,
-    UNKNOWN_MODE,
-    SegmenterConfig,
-    mode_for_row,
-    segment_operating_modes,
-)
+This package imports nothing when it is imported: every
+``src.preprocessing.*`` import executes this file first, and the collection
+path imports ``src.preprocessing.resampler`` (for column names) through
+``src.analysis.derived``. When this file imported every submodule eagerly
+that pulled the loader, the feature builder, the segmenter and the anomaly
+injector onto the main thread before any collector ran (S01.3). The names
+below still resolve as ``src.preprocessing.<name>``; the module behind one is
+imported on first access.
+"""
 
-__all__ = [
-    "DECODED_SOURCE",
-    "MODE_COLUMN",
-    "AnomalyInjector",
-    "AnomalyKind",
-    "FeatureConfig",
-    "InjectionWindow",
-    "ResampleConfig",
-    "SchemaMismatchError",
-    "SegmenterConfig",
-    "UNKNOWN_MODE",
-    "ZScoreScaler",
-    "channel_key",
-    "compute_features",
-    "decode_can_rows",
-    "decoded_channel",
-    "discover_sessions",
-    "gap_column",
-    "mean_column",
-    "mode_for_row",
-    "read_session",
-    "read_session_decoded",
-    "read_sessions",
-    "resample_wide",
-    "roc_column",
-    "segment_operating_modes",
-    "std_column",
-    "to_wide",
-    "windows_to_records",
-]
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+#: Export name -> the module that defines it.
+_EXPORTS: dict[str, str] = {
+    "DECODED_SOURCE": "src.preprocessing.decode",
+    "MODE_COLUMN": "src.preprocessing.segmenter",
+    "AnomalyInjector": "src.preprocessing.anomaly_injection",
+    "AnomalyKind": "src.preprocessing.anomaly_injection",
+    "FeatureConfig": "src.preprocessing.features",
+    "InjectionWindow": "src.preprocessing.anomaly_injection",
+    "ResampleConfig": "src.preprocessing.resampler",
+    "SchemaMismatchError": "src.preprocessing.normalization",
+    "SegmenterConfig": "src.preprocessing.segmenter",
+    "UNKNOWN_MODE": "src.preprocessing.segmenter",
+    "ZScoreScaler": "src.preprocessing.normalization",
+    "channel_key": "src.preprocessing.loader",
+    "compute_features": "src.preprocessing.features",
+    "decode_can_rows": "src.preprocessing.decode",
+    "decoded_channel": "src.preprocessing.decode",
+    "discover_sessions": "src.preprocessing.loader",
+    "gap_column": "src.preprocessing.resampler",
+    "mean_column": "src.preprocessing.features",
+    "mode_for_row": "src.preprocessing.segmenter",
+    "read_session": "src.preprocessing.loader",
+    "read_session_decoded": "src.preprocessing.decode",
+    "read_sessions": "src.preprocessing.loader",
+    "resample_wide": "src.preprocessing.resampler",
+    "roc_column": "src.preprocessing.features",
+    "segment_operating_modes": "src.preprocessing.segmenter",
+    "std_column": "src.preprocessing.features",
+    "to_wide": "src.preprocessing.loader",
+    "windows_to_records": "src.preprocessing.anomaly_injection",
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals(), *_EXPORTS})
+
+
+__all__ = list(_EXPORTS)

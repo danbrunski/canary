@@ -15,6 +15,7 @@ from src.collection.queueing import QueueDepthMonitor
 from src.config import CanaryConfig
 from src.log import configure_logging
 from src.profiles import resolve_active_profile, scope_config
+from src.startup import StartupTimeline
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter, delete_expired_sessions
 from src.telemetry import TelemetryRecord
@@ -154,6 +155,7 @@ async def run(
     *,
     start_collectors: bool = True,
     full_daemon: bool = True,
+    startup: StartupTimeline | None = None,
 ) -> None:
     """Start the daemon and block until the stop event fires.
 
@@ -165,6 +167,9 @@ async def run(
     dashboard server. ``full_daemon=False`` falls back to the bare
     collection loop (``run_collection``), kept for the test paths that
     don't want the dashboard port bound.
+
+    ``startup`` (S01.1) is the timeline :func:`main` began at process start;
+    the full daemon serves it as ``/status``'s ``startup`` block.
     """
     if stop_event is None:
         stop_event = asyncio.Event()
@@ -181,6 +186,8 @@ async def run(
             "full_daemon": full_daemon,
         },
     )
+    if startup is not None:
+        startup.mark("canary_starting")
 
     if not start_collectors:
         await stop_event.wait()
@@ -190,13 +197,19 @@ async def run(
         # still works.
         from src.daemon import run_daemon
 
-        await run_daemon(config, stop_event)
+        if startup is not None:
+            startup.mark("daemon_imported")
+        await run_daemon(config, stop_event, startup=startup)
     else:
         await run_collection(config, stop_event)
     log.info("canary stopping")
 
 
 def main(argv: Sequence[str] | None = None) -> None:
+    # S01.1: measured from the process start (/proc/self/stat), so the
+    # interpreter and this module's imports are inside the first stage.
+    startup = StartupTimeline()
+    startup.mark("main_entered")
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = CanaryConfig.from_yaml(args.config)
@@ -213,7 +226,8 @@ def main(argv: Sequence[str] | None = None) -> None:
                 "vin": profile.vin or None,
             },
         )
-    asyncio.run(run(config, full_daemon=not args.collection_only))
+    startup.mark("profile_resolved")
+    asyncio.run(run(config, full_daemon=not args.collection_only, startup=startup))
 
 
 if __name__ == "__main__":

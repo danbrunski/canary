@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -44,13 +45,132 @@ def _is_truncated_parquet(path: Path) -> bool:
     """
     try:
         size = path.stat().st_size
-        if size < 8:
-            return True
-        with path.open("rb") as handle:
-            handle.seek(-4, os.SEEK_END)
-            return handle.read(4) != b"PAR1"
     except OSError:
         return False
+    return _footer_state(path, size) == "truncated"
+
+
+#: ``PAR1`` header + ``PAR1`` footer: anything shorter cannot be a complete file.
+_MIN_PARQUET_BYTES = 8
+
+
+def _footer_state(path: Path, size: int) -> str:
+    """``"ok"``, ``"truncated"`` or ``"unreadable"`` for a parquet of ``size`` bytes."""
+    if size < _MIN_PARQUET_BYTES:
+        return "truncated"
+    try:
+        with path.open("rb") as handle:
+            handle.seek(-4, os.SEEK_END)
+            return "ok" if handle.read(4) == b"PAR1" else "truncated"
+    except OSError:
+        return "unreadable"
+
+
+def _is_session_name(name: str) -> bool:
+    try:
+        datetime.strptime(name, "%Y-%m-%dT%H%M%S")
+    except ValueError:
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class SessionScan:
+    """One walk of one session directory: everything a retention tick needs.
+
+    S01.5: a tick used to walk each tree three times (reclaimed-bytes sizes,
+    the husk check, the byte cap) and read every parquet footer. The scan is
+    taken once per tick and shared.
+    """
+
+    path: Path
+    #: Every regular file under the tree, recursively.
+    total_bytes: int
+    #: The top-level ``*.parquet`` chunks, by path, with their sizes.
+    parquet_sizes: Mapping[Path, int]
+    #: ``(count, total bytes, newest mtime_ns)`` of those chunks. A closed
+    #: session's files never change, so an unchanged fingerprint means an
+    #: unchanged set of footers.
+    fingerprint: tuple[int, int, int]
+    #: How many files were stat'ed to build this scan.
+    files_stat: int
+
+
+def scan_session(session: Path) -> SessionScan:
+    """Walk ``session`` once, stat'ing each file once."""
+    total = 0
+    files = 0
+    parquet: dict[Path, int] = {}
+    newest = 0
+    pending = [(session, True)]
+    while pending:
+        directory, top_level = pending.pop()
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append((Path(entry.path), False))
+                    continue
+                if not entry.is_file():
+                    continue
+                stat = entry.stat()
+            except OSError:
+                continue
+            files += 1
+            total += stat.st_size
+            if top_level and entry.name.endswith(".parquet"):
+                parquet[Path(entry.path)] = stat.st_size
+                newest = max(newest, stat.st_mtime_ns)
+    return SessionScan(
+        path=session,
+        total_bytes=total,
+        parquet_sizes=parquet,
+        fingerprint=(len(parquet), sum(parquet.values()), newest),
+        files_stat=files,
+    )
+
+
+def scan_sessions(sessions_root: Path) -> dict[Path, SessionScan]:
+    """:func:`scan_session` for every timestamp-named session directory.
+
+    ``_archive``, ``_replay-*`` and anything else not named like a session is
+    not walked: nothing in a tick sizes or footer-checks it.
+    """
+    if not sessions_root.exists():
+        return {}
+    return {
+        child: scan_session(child)
+        for child in sorted(sessions_root.iterdir())
+        if child.is_dir() and _is_session_name(child.name)
+    }
+
+
+@dataclass
+class FooterLedger:
+    """Sessions whose parquet footers were all read and found intact.
+
+    Kept by the retention sweeper across ticks (S01.5). Keyed to the
+    session's :attr:`SessionScan.fingerprint` when it was verified: a session
+    that gains, loses or rewrites a chunk no longer matches and is read again,
+    so a truncated chunk that appears later is still caught.
+    """
+
+    _verified: dict[Path, tuple[int, int, int]] = field(default_factory=dict)
+
+    def is_verified(self, scan: SessionScan) -> bool:
+        return self._verified.get(scan.path) == scan.fingerprint
+
+    def mark_verified(self, path: Path, fingerprint: tuple[int, int, int]) -> None:
+        self._verified[path] = fingerprint
+
+    def forget_missing(self, present: Iterable[Path]) -> None:
+        """Drop sessions that no longer exist (deleted by this or another sweep)."""
+        keep = set(present)
+        for path in [path for path in self._verified if path not in keep]:
+            del self._verified[path]
 
 
 def delete_expired_sessions(
@@ -149,6 +269,9 @@ class EmptySessionSweep:
 
     removed_sessions: list[Path]  # husk dirs with no surviving data
     removed_files: list[Path]  # 0-byte parquet dropped from kept sessions
+    #: Parquet files opened to read their footer (S01.5: zero on a tick over
+    #: sessions already verified).
+    footers_read: int = 0
 
 
 def delete_empty_sessions(
@@ -158,6 +281,8 @@ def delete_empty_sessions(
     protect: Iterable[Path] | None = None,
     min_age_seconds: float = 120.0,
     catalog_db: Path | None = None,
+    scans: Mapping[Path, SessionScan] | None = None,
+    footers: FooterLedger | None = None,
 ) -> EmptySessionSweep:
     """Remove crash-loop / interrupted-write session husks.
 
@@ -171,6 +296,11 @@ def delete_empty_sessions(
     killed mid-write by a power loss, missing its ``PAR1`` footer), then removes
     the whole directory if no data survives anywhere in its tree. ``catalog_db``
     (Task 6.3) — see :func:`delete_expired_sessions`.
+
+    ``scans`` (this tick's :func:`scan_sessions`) replaces the per-session
+    glob and tree walk; ``footers`` skips sessions whose footers were all
+    read on an earlier tick and have not changed since (S01.5). Without them
+    every aged session is walked and every footer read, as before.
     """
     if not sessions_root.exists():
         return EmptySessionSweep([], [])
@@ -179,7 +309,9 @@ def delete_empty_sessions(
     now_dt = datetime.now(UTC) if now is None else now.astimezone(UTC)
     removed_sessions: list[Path] = []
     removed_files: list[Path] = []
-    for child in sorted(sessions_root.iterdir()):
+    footers_read = 0
+    children = list(scans) if scans is not None else sorted(sessions_root.iterdir())
+    for child in children:
         if not child.is_dir():
             continue
         try:
@@ -190,18 +322,47 @@ def delete_empty_sessions(
             continue
         if (now_dt - started_at).total_seconds() < min_age_seconds:
             continue
-        for parquet in child.glob("*.parquet"):
-            try:
-                if parquet.stat().st_size == 0 or _is_truncated_parquet(parquet):
-                    parquet.unlink()
-                    removed_files.append(parquet)
-            except OSError:
+        scan = scans[child] if scans is not None else scan_session(child)
+        if footers is not None and footers.is_verified(scan):
+            continue
+        removed_here: dict[Path, int] = {}
+        all_read = True
+        for parquet, size in scan.parquet_sizes.items():
+            state = _footer_state(parquet, size)
+            if size >= _MIN_PARQUET_BYTES:  # below it the footer is not read
+                footers_read += 1
+            if state == "unreadable":
+                all_read = False
                 continue
-        if _dir_tree_size(child) == 0:
+            if state == "truncated":
+                try:
+                    parquet.unlink()
+                except OSError:
+                    all_read = False
+                    continue
+                removed_files.append(parquet)
+                removed_here[parquet] = size
+        if scan.total_bytes - sum(removed_here.values()) == 0:
             shutil.rmtree(child)
             removed_sessions.append(child)
+            continue
+        if footers is not None and all_read:
+            # Verified as the next tick will scan it: without the chunks removed.
+            kept = {
+                path: size for path, size in scan.parquet_sizes.items() if path not in removed_here
+            }
+            newest = _newest_mtime_ns(kept) if removed_here else scan.fingerprint[2]
+            footers.mark_verified(child, (len(kept), sum(kept.values()), newest))
     _delete_catalog_rows(catalog_db, removed_sessions)
-    return EmptySessionSweep(removed_sessions, removed_files)
+    return EmptySessionSweep(removed_sessions, removed_files, footers_read)
+
+
+def _newest_mtime_ns(paths: Iterable[Path]) -> int:
+    newest = 0
+    for path in paths:
+        with suppress(OSError):
+            newest = max(newest, path.stat().st_mtime_ns)
+    return newest
 
 
 def _dir_tree_size(root: Path) -> int:
@@ -222,6 +383,7 @@ def enforce_storage_cap(
     *,
     protect: Iterable[Path] | None = None,
     catalog_db: Path | None = None,
+    sizes: Mapping[Path, int] | None = None,
 ) -> list[Path]:
     """Evict oldest session directories until total session bytes are under cap.
 
@@ -235,7 +397,9 @@ def enforce_storage_cap(
     A directory containing ``.canary-pin`` or listed in ``protect`` (the live
     session dir) is never deleted, even if that means staying over the cap.
     Returns the deleted directories, oldest first. ``catalog_db`` (Task 6.3) —
-    see :func:`delete_expired_sessions`.
+    see :func:`delete_expired_sessions`. ``sizes`` (bytes by session directory,
+    from this tick's :func:`scan_sessions`) saves walking every tree again;
+    a session missing from it is walked.
     """
     if max_mb <= 0:
         raise ValueError("max_mb must be positive")
@@ -253,7 +417,8 @@ def enforce_storage_cap(
             datetime.strptime(child.name, "%Y-%m-%dT%H%M%S")
         except ValueError:
             continue
-        sessions.append((child, _dir_tree_size(child)))
+        size = sizes.get(child) if sizes is not None else None
+        sessions.append((child, _dir_tree_size(child) if size is None else size))
 
     total = sum(size for _, size in sessions)
     deleted: list[Path] = []
@@ -323,9 +488,13 @@ def emergency_evict_for_free_space(
 
 __all__ = [
     "EmptySessionSweep",
+    "FooterLedger",
+    "SessionScan",
     "delete_empty_sessions",
     "delete_expired_replays",
     "delete_expired_sessions",
     "emergency_evict_for_free_space",
     "enforce_storage_cap",
+    "scan_session",
+    "scan_sessions",
 ]

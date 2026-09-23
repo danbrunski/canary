@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig
@@ -15,7 +15,11 @@ from src.decode.behavior_models import (
 )
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
-from src.preprocessing.live import LiveFeatureSource
+
+if TYPE_CHECKING:
+    # Annotation only: it loads the feature pipeline, and this module is on
+    # the daemon's path to recording (S01.3).
+    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 
@@ -83,6 +87,9 @@ async def poll_model_managers(
     Light task: the manager's mtime check makes each tick cheap when nothing
     changed. Cadence comes from ``daemon.model_poll_seconds`` — refits are
     minute-to-hour scale so 30s default is fine.
+
+    With ``health``, the first load of each model and the end of the first
+    pass over all of them are startup stages (S01.1).
     """
     while not stop_event.is_set():
         # Snapshot: a live sequence-detector swap (Phase 9.6) mutates this dict
@@ -107,6 +114,7 @@ async def poll_model_managers(
                 # swap) so it also clears once the binary lands.
                 current = manager.current
                 if current is not None:
+                    health.startup.mark_keyed("model_loaded", name)
                     health.observe_model_version_mismatch(
                         name,
                         serving=current.serving_version,
@@ -122,6 +130,8 @@ async def poll_model_managers(
                     "swap rejected",
                     extra={"manager": name, "reason": attempt.detail},
                 )
+        if health is not None:
+            health.startup.mark("models_polled")
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except TimeoutError:

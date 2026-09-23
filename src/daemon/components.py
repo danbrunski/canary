@@ -285,11 +285,9 @@ def _load_model_managers(
     managers: dict[str, ModelManager[Any]] = {}
 
     if config.models.isolation_forest.enabled:
-        from src.models.isolation_forest import load_isolation_forest_model
-
         if_path = config.daemon.models_dir / config.daemon.isolation_forest_artifact
         managers["isolation_forest"] = manager_for_artifact(
-            if_path, load_isolation_forest_model, model_type="isolation_forest", load=load
+            if_path, _load_isolation_forest, model_type="isolation_forest", load=load
         )
 
     backend = resolve_sequence_backend(config)
@@ -309,6 +307,20 @@ def _load_model_managers(
                 load=load,
             )
     return managers
+
+
+def _load_isolation_forest(artifact_path: Path) -> Any:
+    """:func:`src.models.isolation_forest.load_isolation_forest_model`, imported
+    when an artifact is first loaded.
+
+    The module pulls in the feature pipeline, normalization and, through the
+    FSM limits, pdfplumber (192 modules). ``build_components`` runs on the main
+    thread before any collector (S01.3); with ``load=False`` the first load is
+    the model poller's, in a thread, and so is this import.
+    """
+    from src.models.isolation_forest import load_isolation_forest_model
+
+    return load_isolation_forest_model(artifact_path)
 
 
 def _sequence_model_type(config: CanaryConfig) -> str | None:

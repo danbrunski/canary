@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
@@ -17,11 +17,15 @@ from src.control.monitor_state import MonitorState
 from src.dashboard.broadcast import Broadcaster
 from src.decode.dids import DID_SOURCE, DecodedDid
 from src.models.health import HealthMonitor
-from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
+
+if TYPE_CHECKING:
+    # Annotation only: it loads the feature pipeline, and this module is on
+    # the daemon's path to recording (S01.3).
+    from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 
@@ -247,6 +251,9 @@ async def run_storage_sink(
                             elapsed_seconds=time.perf_counter() - started_at,
                             flushes=len(files),
                         )
+                        # S01.1: the writer has accepted these, so this, not
+                        # a collector, is when recording began.
+                        health_monitor.startup.note_stored(records)
             finally:
                 for _ in records:
                     queue.task_done()

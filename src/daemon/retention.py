@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable
-from contextlib import suppress
 from pathlib import Path
 
 from src.storage.monitor import free_space_mb
@@ -14,6 +14,7 @@ from src.storage.parquet_writer import (
     emergency_evict_for_free_space,
     enforce_storage_cap,
 )
+from src.storage.retention import FooterLedger, scan_sessions
 
 from .components import DaemonComponents
 
@@ -49,6 +50,9 @@ async def run_retention_sweeper(
     if interval_seconds <= 0:
         raise ValueError("interval_seconds must be positive")
 
+    # Across ticks: sessions whose footers were read once and have not changed
+    # since are not read again (S01.5).
+    footers = FooterLedger()
     while not stop_event.is_set():
         # Read on the loop: both callables reach loop-owned state (the
         # writer's current session, the replay controller).
@@ -72,6 +76,7 @@ async def run_retention_sweeper(
                 storage_warning_mb=storage_warning_mb,
                 replay_retention_days=replay_retention_days,
                 catalog_db=catalog_db,
+                footers=footers,
             )
         except Exception:  # noqa: BLE001 — cleanup must not kill capture
             log.exception("retention sweep failed", extra={"storage_path": str(storage_path)})
@@ -91,9 +96,19 @@ def _sweep_once(
     storage_warning_mb: int | None,
     replay_retention_days: int | None,
     catalog_db: Path | None,
+    footers: FooterLedger | None = None,
 ) -> None:
-    """One retention tick; blocking filesystem work, run in a thread."""
-    sizes_before = _session_sizes(storage_path)
+    """One retention tick; blocking filesystem work, run in a thread.
+
+    One walk per tick (S01.5): the scan taken first supplies the reclaimed
+    bytes of whatever is deleted, the husk check's file list, and the byte
+    cap's session sizes. ``footers`` carries the sessions already verified
+    by earlier ticks, whose footers are not read again. Every tick logs its
+    duration and how many files it stat'ed and opened.
+    """
+    started = time.monotonic()
+    scans = scan_sessions(storage_path)
+    sizes_before = {path: scan.total_bytes for path, scan in scans.items()}
     deleted = delete_expired_sessions(
         storage_path,
         retention_days,
@@ -110,7 +125,9 @@ def _sweep_once(
                 "active_session": str(active),
             },
         )
-    husks = delete_empty_sessions(storage_path, protect={active}, catalog_db=catalog_db)
+    husks = delete_empty_sessions(
+        storage_path, protect={active}, catalog_db=catalog_db, scans=scans, footers=footers
+    )
     if husks.removed_sessions or husks.removed_files:
         log.info(
             "empty session husks cleaned",
@@ -121,11 +138,18 @@ def _sweep_once(
             },
         )
     if storage_max_mb is not None:
+        removed_files = set(husks.removed_files)
+        sizes_now = {
+            path: scan.total_bytes
+            - sum(size for chunk, size in scan.parquet_sizes.items() if chunk in removed_files)
+            for path, scan in scans.items()
+        }
         evicted = enforce_storage_cap(
             storage_path,
             storage_max_mb,
             protect={active},
             catalog_db=catalog_db,
+            sizes=sizes_now,
         )
         if evicted:
             log.info(
@@ -178,6 +202,18 @@ def _sweep_once(
                     },
                 )
 
+    if footers is not None:
+        footers.forget_missing(path for path in scans if path.exists())
+    log.info(
+        "retention tick",
+        extra={
+            "duration_ms": round((time.monotonic() - started) * 1000.0, 1),
+            "sessions": len(scans),
+            "files_stat": sum(scan.files_stat for scan in scans.values()),
+            "footers_read": husks.footers_read,
+        },
+    )
+
 
 def _active_replay_dir(components: DaemonComponents) -> Path | None:
     """Return the in-flight replay's session directory, or ``None`` if idle.
@@ -192,26 +228,6 @@ def _active_replay_dir(components: DaemonComponents) -> Path | None:
     if not status.running or status.output_session_dir is None:
         return None
     return Path(status.output_session_dir)
-
-
-def _session_sizes(sessions_root: Path) -> dict[Path, int]:
-    if not sessions_root.exists():
-        return {}
-    sizes: dict[Path, int] = {}
-    for child in sessions_root.iterdir():
-        if child.is_dir():
-            sizes[child] = _tree_size(child)
-    return sizes
-
-
-def _tree_size(root: Path) -> int:
-    total = 0
-    with suppress(OSError):
-        for child in root.rglob("*"):
-            with suppress(OSError):
-                if child.is_file():
-                    total += child.stat().st_size
-    return total
 
 
 __all__ = [

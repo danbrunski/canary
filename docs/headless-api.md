@@ -44,7 +44,7 @@ Endpoint summary:
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02) |
+| `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02); `startup` — when this daemon started recording (S01.1, below). `?view=compact` is the pollable projection and carries `startup` too |
 | `GET /config` | JSON view of the loaded `canary.yaml` |
 | `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk |
 | `GET /anomalies?since=...` | persisted anomaly events from JSONL |
@@ -59,6 +59,43 @@ Endpoint summary:
 | `GET /obd/monitors` | cached Mode 06 on-board monitor sweep — per-cylinder misfire counts, raw monitor test results (value/min/max, pass/fail), staleness |
 | `GET /sessions/{id}/trip-summary` | trip-summary sidecar (duration, distance, fuel/economy/CO2, idle time/fraction, max/avg speed, 0-60, 1/4-mile) — computed on demand from the stored session on first request, cached to `trip_summary.json` after |
 | `GET /analysis/binned?value=&x=&y=&x_bins=&y_bins=&agg=&session=&since=&until=&units=` | ad-hoc binned aggregation over the DuckDB parquet layer ("trims by rpm×load") — `agg` is `mean`\|`median`\|`p95`\|`count`; `y`/`y_bins` optional (1D when omitted); `units` is `stored` (default) or `engineering`, the latter rescaling `decoded:` channels via `bindings.yaml` (they are stored raw on purpose — `decoded:ECM_RPM` is 8 counts/rpm) |
+
+### `/status.startup` — when recording began (S01.1)
+
+Seconds from the **process start** (read from `/proc/self/stat`: the unit's
+own start timestamp is not readable as the `canary` user, and its `ExecStart`
+is this process) to each startup stage. Each stage is recorded once; `null`
+means not reached (yet).
+
+```json
+"startup": {
+  "clock": "seconds from the process start in /proc/self/stat; ...",
+  "process_start": {"at": "2026-09-22T16:32:05.120000+00:00", "source": "proc_self_stat"},
+  "stages": {
+    "main_entered": 9.8, "profile_resolved": 11.9, "canary_starting": 11.9,
+    "daemon_imported": 13.1, "components_built": 14.0,
+    "collector_tasks_created": 14.2, "first_record_stored": 14.9,
+    "live_source_ready": 28.3, "models_polled": 51.0,
+    "app_built": 25.7, "http_bound": 25.9
+  },
+  "first_record_stored_by_source": {"can": 14.9, "obd": 16.2},
+  "first_record_timestamp_by_source": {"can": "2026-09-22T16:32:20.01+00:00", "obd": "..."},
+  "model_loaded": {"isolation_forest": 50.8},
+  "skipped": {},
+  "pending": [],
+  "complete": true
+}
+```
+
+(Numbers illustrative.) `first_record_stored` is marked by the storage sink
+after the writer accepted the record, never by a collector — a log line saying
+"collectors started" once ran 25 s ahead of any recording. It is the time the
+record was handed to the Parquet writer, so the session's first parquet row
+lands within one flush interval of it. `process_start.source` is
+`timeline_created` where there is no procfs. A live source whose build failed
+appears under `skipped`, not `pending`. When `pending` empties the daemon logs
+one `startup complete: first record stored N s after process start` line.
+
 
 ## Control API
 

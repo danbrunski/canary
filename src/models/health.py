@@ -37,6 +37,7 @@ from typing import Any
 
 from src.collection import capture_lifetime
 from src.collection.capture_losses import CAN0_LOSS_FIELDS, LOSS_FIELDS, LossEpoch
+from src.startup import StartupTimeline
 
 log = logging.getLogger(__name__)
 
@@ -454,6 +455,10 @@ class HealthMonitor:
         #: for the ingest and storage queues to drain (C03.8) without a
         #: second plumbing path to the daemon's queues.
         self._queues: dict[str, Any] = {}
+        #: S01.1 — when each startup stage was reached, served as ``/status``'s
+        #: ``startup`` block. Replaced by ``run_daemon(startup=...)`` with the
+        #: timeline ``src.main`` began before the daemon existed.
+        self.startup = StartupTimeline()
 
     #: How long a cached power_status() reading stays fresh (seconds).
     _POWER_TTL_SECONDS = 5.0

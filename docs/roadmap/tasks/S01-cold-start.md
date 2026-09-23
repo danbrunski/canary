@@ -78,7 +78,7 @@ system starting beside it.
 
 ## Desk
 
-- [ ] **S01.1 Make startup timing a first-class, measured thing.** Today the
+- [~] **S01.1 Make startup timing a first-class, measured thing.** Today the
   only way to know when recording began is to query the session's parquet or
   run `py-spy`. That is how a log line claiming "collectors started" hid a 25 s
   stall behind it. **Do:** record monotonic and wall timestamps for: process
@@ -95,8 +95,28 @@ system starting beside it.
   Pi, one cold reboot reports every stage, and the `first_record_stored` value
   agrees with the session's first parquet timestamp to within one flush
   interval. Record the numbers here.
+  **2026-09-22 (desk half done):** `src/startup.py` `StartupTimeline` —
+  stages `main_entered`, `profile_resolved`, `canary_starting`,
+  `daemon_imported`, `components_built`, `collector_tasks_created`,
+  `first_record_stored` (plus per source, with each source's earliest record
+  timestamp), `live_source_ready`, `models_polled` (plus `model_loaded` per
+  model), `app_built`, `http_bound`; seconds from the process start read from
+  `/proc/self/stat` (the block's `clock` field says why, and
+  `process_start.source` falls back to `timeline_created` without procfs).
+  `first_record_stored` is marked by `run_storage_sink` after a successful
+  write. Carried on `HealthMonitor.startup`, served as `startup` in the full
+  and compact `/status`; one `startup complete: first record stored N s after
+  process start` line when every expected stage is reached (a failed live
+  source build is `skipped`, not pending). Tests:
+  `tests/test_startup_timeline.py` (9), including
+  `test_run_daemon_reports_every_stage_in_order` (a writer held shut shows
+  `first_record_stored` null while the collector's record waits, then every
+  stage in order and one summary line) and
+  `test_status_serves_the_startup_block_in_both_views`. **Still owed:** one
+  cold reboot on the Pi reporting every stage, `first_record_stored` checked
+  against the session's first parquet timestamp, numbers recorded here.
 
-- [ ] **S01.2 Don't import torch until a sequence model loads.** Chain, found
+- [~] **S01.2 Don't import torch until a sequence model loads.** Chain, found
   with a `sys.meta_path` finder on the Pi: `src/daemon/runtime.py` →
   `src/control/replay_control.py` → `src/alerts/emitter.py` (imports
   `src.models.isolation_forest`, which executes the package `__init__`) →
@@ -118,8 +138,26 @@ system starting beside it.
   sys.modules` — it fails today. The LSTM still loads and scores (existing
   sequence-detector tests), and a cold reboot shows collectors running earlier
   by about the torch share (report the before/after with S01.1's block).
+  **2026-09-22 (desk half done):** `src/models/__init__.py` imports nothing;
+  its names resolve lazily through a module `__getattr__` (re-checked: no
+  `from src.models import` anywhere in src/tests/scripts/tools).
+  `models/inference.py` imports `MissingLSTMAutoencoderDependencyError` only
+  inside `_torch_module`'s `except ImportError`. The emitter no longer imports
+  `isolation_forest` at all (S01.3). `tests/test_cold_start_imports.py`:
+  `test_recording_path_does_not_import_torch` (fresh interpreter: `import
+  src.main; import src.daemon; import src.daemon.runtime; from
+  src.collection.collectors import default_collectors` → no `torch`; failed at
+  HEAD), `test_models_package_imports_nothing_eagerly`,
+  `test_sequence_inference_module_does_not_import_torch`,
+  `test_models_package_lazy_reexports_still_resolve`. LSTM load/score:
+  `test_lstm_inference.py`, `test_lstm_autoencoder.py`,
+  `test_sequence_detector_control.py`, `test_scoring_continuity.py`,
+  `test_inference_worker.py` green. Laptop, warm, min of 7: `import
+  src.daemon` after `import src.main` 2,746 ms / 2,198 modules → 165 ms /
+  1,064 modules. **Still owed:** the Pi cold reboot before/after from S01.1's
+  block.
 
-- [ ] **S01.3 Nothing on the path to recording imports what recording doesn't
+- [~] **S01.3 Nothing on the path to recording imports what recording doesn't
   need.** After S01.2, repeat the cold trace and list every heavy import still
   on the main thread before the collector tasks run. Known candidates:
   `src/daemon/server.py` imports `src.dashboard.api.create_app` at module top,
@@ -133,8 +171,47 @@ system starting beside it.
   only (`TYPE_CHECKING`). **Accept:** a cold trace with no non-collection
   imports before `first_record_stored`, and a test in the style of S01.2's
   for each module moved, so it cannot creep back.
+  **2026-09-22 (desk half done), laptop `-X importtime` + a `sys.meta_path`
+  tracer, warm, incremental cost after the collection imports:**
+  `src.dashboard.api` 601 ms → built in `server._build_app`'s thread (with
+  FastAPI and uvicorn); `src.daemon.inference` 328 ms → imported by
+  `runtime.build_live_feature_source` in the live-source thread (the
+  `src.daemon` facade re-exports it through a module `__getattr__`);
+  `src.models.isolation_forest` 167 ms (feature pipeline, FSM limits,
+  pdfplumber) → the emitter resolves its five column names at the first IF
+  row, `build_components`' IF manager gets `components._load_isolation_forest`,
+  which imports the loader at the poller's first (threaded) load, and
+  `replay_control`, `polling` and `drain` import `LiveFeatureSource` under
+  `TYPE_CHECKING` only; `src.control.trip_end` 155 ms (digest, fingerprint,
+  surfaces, session classifier) → `runtime.handle_trip_end_off_loop` imports
+  it in a thread when a trip ends; `src.preprocessing/__init__.py` no longer
+  imports every submodule (lazy `__getattr__`); python-OBD + pint (~400 ms
+  warm) → `ObdReading`, `AcquiredClock`, `JsonlReadingWriter`,
+  `reading_to_record` (+ `acquisition_metadata`, `TS_SCHEMA_VERSION`) moved to
+  `src/collection/obd_reading.py`, which imports neither (`obd_collector`
+  re-exports them), and `collectors.py` imports `ObdSpec`/`REQUIRED_PIDS`/
+  `collect_obd` only in its ELM327 branch; httpx (~42 ms) → the notifier
+  builds its client in a thread at the first push. sklearn was already off
+  the path. Guards: `tests/test_cold_start_imports.py::test_recording_path_does_not_import`
+  (18 parametrized cases, including `obd`, `pint`, `httpx`, `pdfminer`); the
+  subprocess also runs `build_components(<IF + LSTM enabled>,
+  load_models=False)` and `default_collectors(config)` exactly as
+  `run_daemon` does (restoring the eager IF import fails 5 of them); plus
+  lazy-re-export tests for both packages. Laptop, warm: `import src.main` +
+  `src.daemon` + `build_components` + `default_collectors` loads 921 modules
+  (1,064 before this round, 2,198 at HEAD). **Still on the path, not moved:**
+  `sequence_training`/`sequence_dataset` via `components` →
+  `sequence_detector` → `sequence_registry` (~14 ms incremental; those files
+  belong to the concurrent A02 work), and pandas/numpy, which the recording
+  path's own modules import at top level (`src.timefmt`, `decode.dids`,
+  `collection.replay`, `preprocessing.loader` via `control.sessions`,
+  `analysis.derived` via `capture_profiles`: 17 modules). Moving pandas is a
+  refactor of collection and storage code, not a lazy import, and was not
+  attempted. `build_components` and the `FrameDecoder.from_path` bindings
+  read still run before the collector tasks and are not broken down.
+  **Still owed:** the Pi cold trace.
 
-- [ ] **S01.4 One silent Mode 09 answer is enough.** `probe_vehicle_info`
+- [~] **S01.4 One silent Mode 09 answer is enough.** `probe_vehicle_info`
   (`src/profiles.py`) asks for the VIN, the calibration ID and the CVN in
   sequence, each with `vin_probe_timeout_seconds` (2 s). With the ECU asleep
   all three time out: 6 s on the cold trace (socket opened at 25.86 s,
@@ -145,8 +222,23 @@ system starting beside it.
   InfoType independent). **Accept:** tests with a scripted ECU: silent → one
   request and one timeout; answering → all three read; VIN NRC → the others
   still asked. On the Pi, a key-off boot's probe takes ~2 s.
+  **2026-09-22 (desk half done):** `probe_vehicle_info` taps every frame the
+  client receives (`CanObdClient(on_frame=...)`); a VIN request that returns
+  nothing *and* heard no frame in `0x7E8–0x7EF` skips the calibration ID and
+  CVN and logs "calibration ID and CVN skipped (no responder on the bus)". An
+  NRC, an implausible payload or a first frame whose transfer never
+  completes all count as heard. No timeout changed. Scripted-ECU tests in
+  `tests/test_profiles.py` (a real `CanObdClient` against an ECU that
+  segments ISO-TP and waits for flow control):
+  `test_probe_silent_ecu_costs_one_request_and_one_timeout` (one request,
+  elapsed < 2 × timeout; failed at HEAD with three requests),
+  `test_probe_answering_ecu_reads_all_three`,
+  `test_probe_vin_nrc_still_asks_the_others`,
+  `test_probe_implausible_vin_still_asks_the_others`,
+  `test_probe_partial_vin_answer_still_asks_the_others`. **Still owed:** a
+  key-off boot on the Pi showing the probe at ~2 s.
 
-- [ ] **S01.5 Make a retention tick cheap, not just off the loop.** `a870887`
+- [~] **S01.5 Make a retention tick cheap, not just off the loop.** `a870887`
   moved the tick into a thread, but it still stats every session file and
   opens every parquet to read its last four bytes (`_is_truncated_parquet`),
   every hour: 62,091 files on the Pi today, growing with the corpus. Off the
@@ -162,6 +254,29 @@ system starting beside it.
   never needs its footers read again. **Accept:** a test that a second tick
   over an unchanged tree opens no parquet files; the tick duration on the Pi
   before and after, recorded here.
+  **2026-09-22 (desk half done):** every tick logs `retention tick` with
+  `duration_ms`, `sessions`, `files_stat` and `footers_read`. One walk per
+  tick (`src.storage.retention.scan_sessions`, timestamp-named sessions only:
+  `_archive`, `_capture-*` and `_replay-*` are no longer walked for nothing)
+  feeds the reclaimed-bytes figures, the husk check and the byte cap
+  (`enforce_storage_cap(sizes=...)`). `FooterLedger`, kept by the sweeper
+  across ticks, holds each session verified with its parquet fingerprint
+  (count, bytes, newest mtime); a session that gains, loses or rewrites a
+  chunk is read again. Implemented without waiting for the Pi measurement
+  because the laptop already put a tick over the "one or two seconds" bar.
+  Tests: `tests/test_retention_tick.py` (6) —
+  `test_second_tick_over_an_unchanged_tree_opens_no_parquet`,
+  `test_a_tick_lists_each_session_once`, `test_a_changed_session_is_verified_again`,
+  `test_tick_logs_its_duration_and_the_files_it_touched`,
+  `test_scan_sizes_match_a_full_walk`,
+  `test_byte_cap_still_evicts_oldest_first_from_the_scan`; the existing
+  `test_parquet_writer.py` retention tests and `test_daemon.py` sweeper tests
+  green. Laptop, a hard-linked copy of `~/canary-data/sessions/nissan-xterra-2008`
+  (73 sessions, 18,074 session files, ~31k more under `_`-prefixed dirs),
+  warm, host load ~16: HEAD 3,314 / 3,044 ms per tick (7,724 ms the first);
+  now 1,290 ms for the first tick (17,768 footers read), then 588 and
+  1,066 ms with `footers_read: 0`. **Still owed:** the tick duration on the
+  Pi, parked and during a drive, before and after, recorded here.
 
 ## Needs the truck
 

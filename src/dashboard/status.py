@@ -260,6 +260,10 @@ class StatusSnapshot:
     #: Engine Tuning readiness chips (W02.4), ``{name: {ok, value, detail,
     #: fix}}``. Status only; nothing refuses an action on it.
     tuning_readiness: dict[str, dict[str, Any]] | None = None
+    #: S01.1 — seconds from process start to each startup stage, above all
+    #: ``first_record_stored`` (marked by the storage sink). ``None`` when no
+    #: health monitor is wired.
+    startup: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         calibration = self.calibration or {}
@@ -293,6 +297,7 @@ class StatusSnapshot:
             "calibration_alert": bool(calibration.get("calibration_alert")),
             "calibration_alert_reason": calibration.get("calibration_alert_reason"),
             "tuning_readiness": self.tuning_readiness,
+            "startup": self.startup,
         }
 
 
@@ -677,6 +682,9 @@ class StatusSources:
     passive: dict[str, Any]
     capture_profile: dict[str, Any]
     bus_budget: dict[str, Any]
+    #: S01.1 — ``StartupTimeline.snapshot()`` (seconds from process start per
+    #: startup stage), or ``None`` when no monitor is wired.
+    startup: dict[str, Any] | None = None
 
 
 def gather_status_sources(
@@ -720,6 +728,7 @@ def gather_status_sources(
         passive=tx_gate.snapshot(),
         capture_profile=_capture_snapshot(storage_writer),
         bus_budget=bus_budget_gate.snapshot(),
+        startup=health_monitor.startup.snapshot() if health_monitor is not None else None,
     )
 
 
@@ -806,6 +815,8 @@ def compact_status(sources: StatusSources) -> dict[str, Any]:
             "active": sources.capture_profile.get("active"),
         },
         "health": None if health is None else _compact_health(health),
+        # A dozen scalars, and the answer to "when did recording start".
+        "startup": sources.startup,
         "detectors": (
             None
             if sources.inference is None
@@ -927,6 +938,7 @@ def build_status(
         last_capture=latest_capture_summary(storage),
         calibration=calibration,
         tuning_readiness=tuning_readiness,
+        startup=sources.startup,
     )
 
 
