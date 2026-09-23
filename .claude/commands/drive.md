@@ -175,6 +175,11 @@ its own criteria frozen before its data.
    — `false` means the kernel is enforcing no ceiling (the digest wedged the
    daemon for 38 min once), `null` means unknown, and neither is a pass. Flag
    counter resets. Log it.
+   **Never `GET /anomalies` (or MCP `get_recent_anomalies`) mid-drive until D03.28
+   is deployed:** it parsed 169 MB of history in the daemon and stalled
+   collection for ~30 s on 2026-09-23. Tail today's `anomalies-<date>.jsonl`
+   over ssh instead. Any other whole-history daemon read is suspect too: watch
+   the poller's latency after the first one.
 3. A regression is diagnosed before anything else. Read `vehicle_state`
    before concluding anything about detectors; a burst of anomalies at an
    altitude or condition outside the corpus is out-of-distribution, not a
@@ -294,7 +299,10 @@ its own criteria frozen before its data.
   drives put WOT ~3 % lean of target on λ and both banks' volts, flat
   2,000–5,800 rpm and independent of settle time, while warm part-throttle
   STFT is negative and idle positive: airflow-dependent, so neither a supply
-  offset nor anything K fixes. Only fuel pressure through a pull (NA2)
+  offset nor anything K fixes. (Idle positive held through 09-21; on 09-22 and
+  09-23, with LTFT still 0.00 % since the 09-20 flash, idle STFT was negative
+  too, and one 09-23 3rd-gear WOT run delivered −0.8 %, not +3 %. One pull is
+  not a finding. Record each pull's delivery, don't re-derive the question.) Only fuel pressure through a pull (NA2)
   separates the MAF curve from delivery sag. Don't re-derive this, and never
   recommend a calibration change from a drive.
 - **Desk analysis of data already on the laptop is the best use of warm-up
@@ -359,7 +367,9 @@ today — the Pi may be powered off without warning.
 
 Stop on: `engine_off` for 20+ min (gas stops of 10–15 min are normal), the
 operator saying so or powering the Pi off, or the Pi unreachable 30+ min.
-**The final stop is the trip-end test.** Ask the operator to leave the Pi
+**The final stop is the trip-end test.** Until D03.29 lands, trip end is
+detected from GPS speed only: check `/status` `gps.has_fix` at the first wake-up,
+and with no fix say up front that the digest will not run (2026-09-23). Ask the operator to leave the Pi
 powered for ≥ 5 min stationary — on 2026-09-18 a shutdown 8 min after the
 pre-parking restart pre-empted the digest. Then verify `digest.json`, or a
 `digest_skipped.json` that names its reason, and that collection and HTTP

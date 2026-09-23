@@ -1135,6 +1135,12 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   - **Still open:** the exit-retry path didn't fire live (`fast_exit_failures`
     0), so it's verified by sims and tests only. The "0x1208 benched" symptom
     was never reproduced. Close this after one live exit retry is observed.
+  **2026-09-23 `tuning` capture, a different shape (not investigated):** one
+  2.5 s gap at 14:51:01Z on every Mode 01 channel only; the eight DIDs and the
+  RAM windows kept their cadence (max gap 2.03 s). The poller counted exactly one
+  request timeout between 14:51:03 and 14:51:08Z and nothing in the journal. A
+  Mode 01 batch timeout that costs ~2.5 s of Mode 01 while Mode 22 continues is
+  not the session-control path fixed above. `fast_exit_failures` was not read.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in
@@ -1332,6 +1338,66 @@ live here now, so the documents could be archived
   its default cover health, export, replay, detector benchmark, disposition
   report, `train_anomaly_model.evaluate`, the synthetic dropout ceiling, the
   live source and the manifest's `max_gap_seconds`.
+
+## Opened 2026-09-23 on the drive
+
+- [ ] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
+  daemon, and two requests degraded collection mid-drive.** On 2026-09-23 at
+  14:53:15Z and ~14:53:40Z, during a `tuning` capture, one curl and one MCP
+  `get_recent_anomalies` call, both with `since=14:20Z`, timed out at 20 s. The Pi
+  poller shows the cost landing on collection. `/status` latency went from ~20 ms
+  to 1.74 s, the storage queue spiked to 567, inference missed 3 ticks (2 → 5,
+  "overran 1 deadline" ×3), and achieved reads/s fell 55 → 45. It recovered by
+  14:54:12Z with no dropped records. Cause: `read_anomalies_since` calls
+  `read_events_dir`, which parses every `anomalies-*.jsonl` (37 files, 169 MB back
+  to May) into events *before* applying `since`, inside the daemon process. The
+  same reader backs `/control/tuning/estimate` and the companion route.
+  - [x] Skip whole daily files that cannot hold an event at or after `since`. The
+    file date is the UTC date: `anomalies-2026-09-19.jsonl` was last written at
+    00:17Z on 09-19. Keep a one-day margin rather than trusting the boundary.
+    *Done in the shared layer:* `event_logger.read_events_dir(since=, limit=,
+    keep=)` skips files dated > `FILE_DATE_MARGIN` (1 day) before `since`,
+    reads undated names always; `read_anomalies_since` (all three callers:
+    `/anomalies`, `/control/tuning/estimate`, companion) passes every bound
+    down. `test_since_keeps_exactly_one_day_of_margin`,
+    `test_unparseable_filename_is_always_read`,
+    `test_since_still_filters_events_inside_kept_files`.
+  - [x] Decide the no-`since` behaviour: the MCP tool's docstring says the daemon
+    returns "today, typically", but the route reads everything. Either default the
+    route to a bounded window or correct the docstring, and name which.
+    *Corrected the docstring, no default window:* `limit` without `since` now
+    reads days newest-first and stops (plus one day of margin); the MCP tool
+    forwards `limit`/`source`/`mode` to the daemon. Neither bound = full read,
+    unchanged. `test_limit_without_since_matches_full_read`,
+    `test_limit_counts_matching_events_through_the_route_reader`,
+    `test_get_recent_anomalies_forwards_limit_source_and_mode`.
+  - [x] A test that proves a request with a recent `since` never opens an old file.
+    `tests/test_anomaly_log_bounds.py::test_recent_since_never_opens_an_older_daily_file`
+    (spies the per-file reader: only 09-22 and 09-23 opened for since=09-23T14:20Z)
+    and `test_recent_since_survives_an_unreadable_old_file`.
+  - [ ] Verify on the Pi while collecting: a `since`-bounded request answers in
+    < 1 s and the poller shows no missed ticks around it.
+
+- [ ] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
+  never ends a trip and the trip-end digest never runs.** On 2026-09-23 the GPS
+  reported `fix_quality` 0 on all 3,278 samples of a 27-min drive (14:29–14:56Z),
+  then had a fix (8 satellites, HDOP 1.16) parked at 15:05Z. `drain_gps` feeds
+  `GpsTracker.observe`, which only acts on `gps:speed` rows, so no trip started,
+  none ended, and no `digest.json` or `digest_skipped.json` was written. Road speed
+  was on the bus the whole time: `decoded:WHEEL_SPEED_6F7_A` is persisted with a
+  pinned km/h scale. Trip distance is GPS-integrated too, so it was also lost.
+  - [ ] Detect the moving → stationary edge from a vehicle speed source that does
+    not depend on sky view. Keep it vehicle-agnostic: take the source from the
+    profile/bindings (Mode 01 PID 0x0D, or a binding declared as road speed), not
+    a hard-coded Xterra CAN id. GPS stays a fallback, not the only input.
+  - [ ] A drive that ends with no usable speed source writes `digest_skipped.json`
+    naming that cause, rather than nothing. An empty result says which kind of
+    empty it is.
+  - [ ] Test: a session with wheel speed and no GPS fix ends a trip and runs the
+    digest.
+  - [ ] Unexplained, separate from the fix: why the receiver held no fix for the
+    whole drive after being powered all night. Check the next drive's first
+    minutes; if it repeats, it is a hardware or antenna question for the operator.
 
 ## Deferred by decision, not blocked
 
