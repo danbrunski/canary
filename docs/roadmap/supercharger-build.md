@@ -121,6 +121,12 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
 - [ ] **NA8 — Write the baseline down.** One document with the NA curves (λ error,
   timing, VE, g/cyl by rpm band; trim map; idle; acceleration) and the sessions
   they came from — the thing every post-build comparison cites.
+- [ ] **NA9 — How the engine responds to ROM edits.** Before the build, learn
+  what a fuel-table and a spark-table edit actually do on this ECM, one
+  category per flash, predictions frozen before each drive. The plan, the
+  measured noise floor it rests on and the first two flashes are in
+  [`tasks/N01-na-rom-response-experiments.md`](tasks/N01-na-rom-response-experiments.md)
+  (operator's goal, 2026-09-23).
 
 ## Phase 2 — Prepare CANary for the new engine (desk, before first start)
 

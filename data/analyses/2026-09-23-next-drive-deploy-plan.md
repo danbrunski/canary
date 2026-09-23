@@ -37,6 +37,14 @@ from `cdd355e`, `POST /control/capture/autostart {"profile":"tuning","coolant_mi
    without fuel pressure (NA2).
 3. **Hygiene** — health line each wake-up; no `/anomalies` reads until D03.28 is deployed
    and verified.
+4. **If the operator flashed N01.1 or N01.2 before this drive**
+   ([`docs/roadmap/tasks/N01-na-rom-response-experiments.md`](../../docs/roadmap/tasks/N01-na-rom-response-experiments.md)):
+   first confirm the flash has its own entry in `tune_revisions.yaml` with its flash
+   time. `calibration_matches_registry` cannot show it: UpRev flashes on this truck keep
+   calibration id `1ZS44A00000`, so an unrecorded flash still reads as a match. Then copy that item's predictions into the
+   log, unchanged, before the capture starts, and measure them per cell against the
+   2026-09-22/23 medians. That comparison outranks NA1 on a drive after a flash,
+   because it needs no maneuver.
 
 ### Predictions (frozen; unchanged from 2026-09-22 except the idle STFT line)
 

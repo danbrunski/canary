@@ -1,5 +1,14 @@
 # Implementation task index
 
+**Status 2026-09-23 — N01: ROM-response experiments before the supercharger.**
+[`N01-na-rom-response-experiments.md`](N01-na-rom-response-experiments.md) is
+the operator's goal of learning how the NA engine responds to ROM edits while
+it is still NA. It records the same-ROM noise floor for STFT (±1.6 points per
+cruise cell), then two flashes: a −4 % Fuel Compensation block over cruise,
+then a spark-trim retard over the same block. The operator flashes; CANary
+freezes predictions and measures. It is Phase 1 item NA9 in
+[`../supercharger-build.md`](../supercharger-build.md).
+
 **Status 2026-09-22 — anomaly detector checklists (A-series).**
 [`A00-anomaly-detectors-README.md`](A00-anomaly-detectors-README.md) indexes
 A01–A06, written from the
