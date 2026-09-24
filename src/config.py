@@ -7,7 +7,7 @@ silently dropped, so typos in config don't become silent drift at runtime.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -51,13 +51,53 @@ class VehicleParameters(_Strict):
     thermal_efficiency: float = 0.30
     #: Rolling tire diameter in metres (optional; speed cross-checks only).
     tire_diameter_m: float | None = None
-    #: Combined gearbox × final-drive ratio per gear, lowest gear first
-    #: (Task 4.6, ``derived:GEAR_ESTIMATE``: rpm/speed ratio clustered to the
-    #: nearest entry). Empty by default — deliberately not baked in for any
-    #: particular vehicle; a profile without a captured ratio table (e.g. no
-    #: dyno/logged 1:1 gear runs yet) just never gets the gear channel, same
-    #: as any other absent-input case elsewhere in ``derived.py``.
-    gear_ratios: tuple[float, ...] = ()
+    #: Driveline, as three separate unitless/SI facts (H07.1). They replace
+    #: ``gear_ratios``, which was documented as gearbox × final drive but
+    #: compared as rpm per km/h, with an example in the wrong units for a
+    #: six-speed. Expected rpm per km/h is *computed* from these
+    #: (:meth:`rpm_per_kph`), so the two readings cannot be confused again.
+    #: Axle (final-drive) ratio.
+    final_drive: float | None = Field(default=None, gt=0.0)
+    #: Gearbox ratio of every forward gear, first gear first (e.g. 3.79 for
+    #: first). All of them or none: a gear estimate against a partial table
+    #: would name the wrong gear whenever the driver is in a missing one.
+    gearbox_ratios: tuple[float, ...] = ()
+    #: Loaded rolling circumference of the driven tyres, metres.
+    tyre_loaded_circumference_m: float | None = Field(default=None, gt=0.0)
+    #: Where the driveline numbers come from. Required once any is set.
+    driveline_evidence: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_gear_ratios(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "gear_ratios" in data:
+            data = dict(data)
+            if data.pop("gear_ratios"):
+                raise ValueError(
+                    "vehicle parameter gear_ratios is retired (it mixed up gearbox x final "
+                    "drive with rpm per km/h): use final_drive, gearbox_ratios (one "
+                    "unitless ratio per gear) and tyre_loaded_circumference_m"
+                )
+        return data
+
+    @model_validator(mode="after")
+    def _driveline_has_evidence(self) -> VehicleParameters:
+        driveline = (self.final_drive, self.gearbox_ratios, self.tyre_loaded_circumference_m)
+        if any(driveline) and not self.driveline_evidence:
+            raise ValueError(
+                "driveline facts need driveline_evidence saying how they were measured"
+            )
+        if any(ratio <= 0 for ratio in self.gearbox_ratios):
+            raise ValueError("gearbox_ratios must be positive")
+        return self
+
+    def rpm_per_kph(self) -> tuple[float, ...]:
+        """Engine rpm per km/h of true road speed in each gear, or ``()``
+        unless the gearbox, final drive and tyre are all known."""
+        if not (self.gearbox_ratios and self.final_drive and self.tyre_loaded_circumference_m):
+            return ()
+        wheel_rpm_per_kph = 1000.0 / 60.0 / self.tyre_loaded_circumference_m
+        return tuple(g * self.final_drive * wheel_rpm_per_kph for g in self.gearbox_ratios)
 
 
 class VehicleConfig(_Strict):

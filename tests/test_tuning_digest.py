@@ -129,8 +129,15 @@ def test_all_did_capture_never_falls_back_to_mode01(tmp_path: Path, config: Cana
     assert any("all-DID capture lacks confirmed semantic roles" in note for note in digest.notes)
 
 
+# H07.2: the Logging page used to write pull_start/pull_end, which the digest
+# did not count; both spellings must count as a tagged pull.
+@pytest.mark.parametrize(
+    "pull_labels",
+    [("tuning_pull_start", "tuning_pull_end"), ("pull_start", "pull_end")],
+    ids=["canonical", "logging-page-before-h07-2"],
+)
 def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
-    tmp_path: Path, config: CanaryConfig
+    tmp_path: Path, config: CanaryConfig, pull_labels: tuple[str, str]
 ) -> None:
     """A partial all-DID drive still says exactly what its usable data means."""
     session = tmp_path / "_tuning-2026-08-05T142720"
@@ -159,8 +166,8 @@ def test_all_did_digest_carries_afr_lineage_rom_identity_and_polling_gaps(
         "\n".join(
             json.dumps(tag)
             for tag in (
-                {"t": T0.timestamp(), "label": "tuning_pull_start"},
-                {"t": (T0 + timedelta(seconds=3)).timestamp(), "label": "tuning_pull_end"},
+                {"t": T0.timestamp(), "label": pull_labels[0]},
+                {"t": (T0 + timedelta(seconds=3)).timestamp(), "label": pull_labels[1]},
             )
         )
         + "\n"

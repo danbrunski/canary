@@ -71,7 +71,7 @@ under GPS. Defects a dyno would inherit:
 
 ## Desk
 
-- [ ] **H07.1 Driveline facts that cannot be misread.** **Do:** replace
+- [~] **H07.1 Driveline facts that cannot be misread.** **Do:** replace
   `gear_ratios` with typed fields: `final_drive`, `gearbox_ratios` (unitless,
   one per gear), `tyre_loaded_circumference_m` with its evidence; compute
   expected rpm per km/h from them, so the unit mismatch cannot recur. Fix
@@ -80,11 +80,31 @@ under GPS. Defects a dyno would inherit:
   0x6F7 notes in `data/bindings.yaml`). **Accept:** gear estimates on the
   ground-truth slice match the three measured clusters; a config with the old
   field is refused with a message naming the new ones.
-- [ ] **H07.2 One pull-tag vocabulary.** **Do:** decide the canonical names
+  **Evidence (2026-09-23):** `VehicleParameters` gains `final_drive`,
+  `gearbox_ratios` (unitless, all gears or none), `tyre_loaded_circumference_m`
+  and a required `driveline_evidence`; `rpm_per_kph()` computes the table, and
+  `derived:GEAR_ESTIMATE` uses it. A non-empty `gear_ratios` is refused naming
+  the new fields; a stored empty one (the old default) still loads. The
+  Xterra's registry entry (`profiles.yaml`) carries final drive 4.08 and
+  2.609 m with their evidence; its gearbox table stays empty because nothing
+  records which gears the three measured clusters were, so the gear estimate
+  stays absent until H07.11. `canary.example.yaml`'s five-ratio,
+  wrong-unit example is gone. Tests in `tests/test_derived.py` (rpm per km/h:
+  26.06 in direct drive, ~2,606 rpm at 100 km/h).
+- [x] **H07.2 One pull-tag vocabulary.** **Do:** decide the canonical names
   (the digest's `tuning_pull_start`/`tuning_pull_end`, or the page's), make
   both producers and all consumers use a shared constant, and accept the other
   spelling on read for old sessions. **Accept:** a test that a pull tagged
   from the Logging page counts as `tagged` in `WotInventory`.
+  **Evidence (2026-09-23):** `src/analysis/pull_tags.py` names the canonical
+  `tuning_pull_start`/`tuning_pull_end` (what the guided sessions and capture
+  docs already used) and the readers accept every older spelling
+  (`wot_pull`, `pull_start`, `pull_end`); `tuning_digest.py` uses it in all
+  three places. The Logging page now writes the canonical labels, and
+  `tests/test_pull_tags.py` reads the page's tag list and fails if its pull
+  labels drift from the backend's. The digest's tagged-pull test runs over
+  both spellings (`tests/test_tuning_digest.py`). `pnpm typecheck` clean; the
+  tuning panel tests pass (38).
 - [ ] **H07.3 Speed and acceleration inputs.** **Do:** a function returning,
   for a pull window, GPS speed (absolute), `0x2D1` broadcast speed scaled by
   the profile's measured ECU/GPS ratio (100 Hz), `a` from a smoothed

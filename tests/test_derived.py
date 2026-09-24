@@ -277,8 +277,48 @@ def test_fuel_properties_by_type() -> None:
 # --------------------------------------------------------------------------- #
 
 
+XTERRA_FD = 4.08
+XTERRA_TYRE_M = 2.609  # back-solved loaded circumference, data/bindings.yaml 0x6F7 notes
+RPM_PER_KPH_PER_UNIT_RATIO = XTERRA_FD * 1000.0 / 60.0 / XTERRA_TYRE_M
+
+
+def _driveline(*rpm_per_kph: float) -> VehicleParameters:
+    """A vehicle whose gears give exactly these rpm per km/h."""
+    return VehicleParameters(
+        final_drive=XTERRA_FD,
+        tyre_loaded_circumference_m=XTERRA_TYRE_M,
+        gearbox_ratios=tuple(r / RPM_PER_KPH_PER_UNIT_RATIO for r in rpm_per_kph),
+        driveline_evidence="test",
+    )
+
+
+def test_rpm_per_kph_is_computed_from_the_driveline() -> None:
+    """Direct drive at the Xterra's 4.08 and 2.609 m: 26.06 rpm per km/h,
+    i.e. about 2,606 rpm at 100 km/h."""
+    vehicle = VehicleParameters(
+        final_drive=4.08,
+        gearbox_ratios=(1.0,),
+        tyre_loaded_circumference_m=2.609,
+        driveline_evidence="data/bindings.yaml 0x6F7 notes",
+    )
+    assert vehicle.rpm_per_kph() == pytest.approx((26.063,), abs=1e-3)
+    assert VehicleParameters(final_drive=4.08, driveline_evidence="x").rpm_per_kph() == ()
+
+
+def test_the_retired_gear_ratios_field_is_refused_by_name() -> None:
+    with pytest.raises(ValueError, match="final_drive, gearbox_ratios"):
+        VehicleParameters(gear_ratios=(40.0, 25.0))  # type: ignore[call-arg]
+    # A stored profile that still carries the old empty default keeps loading.
+    assert VehicleParameters.model_validate({"gear_ratios": []}).gearbox_ratios == ()
+
+
+def test_driveline_facts_need_their_evidence() -> None:
+    with pytest.raises(ValueError, match="driveline_evidence"):
+        VehicleParameters(final_drive=4.08)
+
+
 def test_gear_estimate_clusters_to_nearest_ratio() -> None:
-    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0, 15.0, 10.0))
+    vehicle = _driveline(40.0, 25.0, 15.0, 10.0)
     df = _frame(
         4,
         **{
@@ -291,15 +331,14 @@ def test_gear_estimate_clusters_to_nearest_ratio() -> None:
 
 
 def test_gear_estimate_skipped_without_ratio_table() -> None:
-    """Default ``gear_ratios=()`` (no vehicle profile table configured yet)
-    — the channel must be absent, not zero-filled."""
+    """No driveline in the profile — the channel must be absent, not zero-filled."""
     df = _frame(2, **{"obd:RPM": [2000.0, 2000.0], "obd:SPEED": [50.0, 80.0]})
     out = compute_instantaneous_channels(df, GASOLINE)
     assert "derived:GEAR_ESTIMATE" not in out.columns
 
 
 def test_gear_estimate_skipped_when_speed_or_rpm_missing() -> None:
-    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0))
+    vehicle = _driveline(40.0, 25.0)
     df = _frame(2, **{"obd:RPM": [2000.0, 2000.0]})  # no SPEED
     out = compute_instantaneous_channels(df, vehicle)
     assert "derived:GEAR_ESTIMATE" not in out.columns
@@ -308,7 +347,7 @@ def test_gear_estimate_skipped_when_speed_or_rpm_missing() -> None:
 def test_gear_estimate_masks_low_speed() -> None:
     """Below the min-speed gate the ratio is unreliable (neutral/clutch-in
     ambiguity, speed-PID quantization) — NaN, not a fabricated gear."""
-    vehicle = VehicleParameters(gear_ratios=(40.0, 25.0))
+    vehicle = _driveline(40.0, 25.0)
     df = _frame(2, **{"obd:RPM": [2000.0, 2000.0], "obd:SPEED": [0.0, 50.0]})
     out = compute_instantaneous_channels(df, vehicle)
     values = out["derived:GEAR_ESTIMATE"]

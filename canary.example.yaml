@@ -18,12 +18,12 @@ vehicle:
     drivetrain_loss_fraction: 0.15
     thermal_efficiency: 0.30
     # tire_diameter_m: 0.77      # optional; speed cross-checks only
-    # gear_ratios: [3.79, 2.06, 1.34, 1.00, 0.85]  # Task 4.6, GEAR_ESTIMATE:
-    #   combined gearbox x final-drive ratio per gear, lowest gear first.
-    #   Left unset (empty) here — not yet pinned by a real rpm/speed
-    #   capture per gear for this Xterra's 5MT; the channel is simply
-    #   absent until a profile supplies this table (no TCM on this bus, so
-    #   ratio-clustering is the only gear source).
+    # Driveline (H07.1; derived:GEAR_ESTIMATE and the driving dyno). Three
+    # separate facts, and evidence for them; rpm per km/h is computed.
+    # final_drive: 4.08
+    # gearbox_ratios: [...]          # one unitless ratio per forward gear, 1st first
+    # tyre_loaded_circumference_m: 2.609
+    # driveline_evidence: "how each was measured"
 
 hardware:
   # Legacy fallback only. Current hardware direction is Canable-native OBD via

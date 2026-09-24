@@ -26,6 +26,7 @@ import pandas as pd
 from src.analysis.afr import AfrCalibration, TargetAfrMap, load_afr_calibration, voltage_to_afr
 from src.analysis.channels import read_aligned, read_channels
 from src.analysis.noise_floor import load_noise_floor
+from src.analysis.pull_tags import is_pull_end, is_pull_start
 from src.analysis.tune_revisions import (
     load_tune_revisions,
     resolve_session_revision,
@@ -576,10 +577,8 @@ def _wot_inventory(
     and the July corpus had 25 such seconds against 4 usable ones.
     """
     tags = load_tags(session_dir / "tags.jsonl")
-    starts = [
-        float(tag["t"]) for tag in tags if tag.get("label") in {"tuning_pull_start", "wot_pull"}
-    ]
-    ends = [float(tag["t"]) for tag in tags if tag.get("label") == "tuning_pull_end"]
+    starts = [float(tag["t"]) for tag in tags if is_pull_start(tag)]
+    ends = [float(tag["t"]) for tag in tags if is_pull_end(tag)]
     if starts and rpm_spec is not None:
         try:
             rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
@@ -707,13 +706,12 @@ def _did_pull_inventory(
     starts = [
         float(tag["t"])
         for tag in tags
-        if tag.get("label") in {"tuning_pull_start", "wot_pull"}
-        and isinstance(tag.get("t"), int | float)
+        if is_pull_start(tag) and isinstance(tag.get("t"), int | float)
     ]
     ends = [
         float(tag["t"])
         for tag in tags
-        if tag.get("label") == "tuning_pull_end" and isinstance(tag.get("t"), int | float)
+        if is_pull_end(tag) and isinstance(tag.get("t"), int | float)
     ]
     rpm_spec = role_capabilities.get("rpm", {}).get("provider")
     if not starts:
@@ -911,8 +909,7 @@ def compute_tuning_digest(
         measured_afr_specs=afr_providers,
     )
     if did_continuous and not any(
-        tag.get("label") in {"tuning_pull_start", "wot_pull"}
-        for tag in load_tags(session_dir / "tags.jsonl")
+        is_pull_start(tag) for tag in load_tags(session_dir / "tags.jsonl")
     ):
         notes.append(
             "pull inventory unavailable: all-DID captures require a tagged physical pull "

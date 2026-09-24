@@ -492,20 +492,22 @@ def _gear_estimate(
     rpm: pd.Series | None,
 ) -> pd.Series | None:
     """Gear number (1-indexed) from the rpm/speed ratio, nearest-clustered to
-    ``vehicle.gear_ratios`` (Task 4.6).
+    ``vehicle.rpm_per_kph()`` (Task 4.6, H07.1).
 
-    ``vehicle.gear_ratios`` is the combined gearbox × final-drive ratio for
-    each gear, lowest gear first — a per-vehicle-profile config table (see
-    ``VehicleParameters``), never hardcoded here (this platform is meant to
-    generalize to any vehicle). Empty by default, so an unconfigured vehicle
-    simply never gets this channel — same absent-input contract as every
-    other channel here, not a special case.
+    The table is computed from the profile's gearbox ratios, final drive and
+    loaded tyre circumference, never hardcoded here (this platform is meant to
+    generalize to any vehicle). Until all three are known the vehicle simply
+    never gets this channel — same absent-input contract as every other
+    channel here, not a special case. ``speed`` is the ECU's, which may read
+    under true speed (the Xterra's reads ~8 % low); adjacent gears differ by
+    far more, so the nearest match holds.
 
     There is no TCM on this (manual-transmission) vehicle's bus, so this
     ratio clustering is the *only* gear source available, not a fallback for
     a missing TCM signal.
     """
-    if not vehicle.gear_ratios or speed is None or rpm is None:
+    table_values = vehicle.rpm_per_kph()
+    if not table_values or speed is None or rpm is None:
         return None
     speed_safe = speed.where(speed > _GEAR_ESTIMATE_MIN_SPEED_KPH)
     ratio = rpm / speed_safe
@@ -513,7 +515,7 @@ def _gear_estimate(
     valid = ratio.notna()
     if not valid.any():
         return gear
-    table = np.asarray(vehicle.gear_ratios, dtype=float)
+    table = np.asarray(table_values, dtype=float)
     vals = ratio[valid].to_numpy()
     nearest = np.argmin(np.abs(vals[:, np.newaxis] - table[np.newaxis, :]), axis=1)
     gear.loc[ratio[valid].index] = (nearest + 1).astype(float)
@@ -539,8 +541,8 @@ def compute_instantaneous_channels(
     Added when their inputs exist (else skipped, not zero-filled):
     ``FUEL_RATE_LPH``, ``INSTANT_ECONOMY_L_PER_100KM``,
     ``INSTANT_ECONOMY_MPG``, ``BOOST_VACUUM_KPA``, ``ESTIMATED_POWER_HP``,
-    ``ESTIMATED_TORQUE_NM``, ``GEAR_ESTIMATE`` (Task 4.6 — only when
-    ``vehicle.gear_ratios`` is configured).
+    ``ESTIMATED_TORQUE_NM``, ``GEAR_ESTIMATE`` (Task 4.6 — only when the
+    profile's gearbox ratios, final drive and tyre are all known, H07.1).
     """
     if wide.empty or "timestamp" not in wide.columns:
         return wide.copy()

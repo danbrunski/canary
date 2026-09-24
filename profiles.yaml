@@ -14,3 +14,10 @@ profiles:
     drivetrain_loss_fraction: 0.15
     thermal_efficiency: 0.3
     tire_diameter_m: null
+    final_drive: 4.08
+    tyre_loaded_circumference_m: 2.609
+    driveline_evidence: 'Final drive 4.08 (regeared) and loaded circumference 2.609 m
+      back-solved from steady-cruise rpm clusters against GPS speed; three clusters land
+      on gearbox ratios 1.000 (direct drive), 1.309 and 1.740 (data/bindings.yaml 0x6F7
+      notes). Gear numbers of those clusters not recorded, so gearbox_ratios waits for
+      H07.11 (all six gears, selected by hand).'

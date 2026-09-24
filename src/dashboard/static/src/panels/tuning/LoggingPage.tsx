@@ -9,9 +9,11 @@ import type { StatusResponse, WorkbenchItem } from "../../types";
 import { CaptureProfilesPanel } from "../CaptureProfilesPanel";
 import { PowerPanel } from "../PowerPanel";
 
+// Pull labels are the backend's canonical ones (src/analysis/pull_tags.py);
+// tests/test_pull_tags.py fails if these drift from what the digest counts.
 const PHYSICAL_TAGS = [
-  ["pull_start", "Pull start"],
-  ["pull_end", "Pull end"],
+  ["tuning_pull_start", "Pull start"],
+  ["tuning_pull_end", "Pull end"],
   ["steady_hold_start", "Steady hold start"],
   ["steady_hold_end", "Steady hold end"],
   ["decel", "Decel"],
