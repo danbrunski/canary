@@ -598,9 +598,12 @@ changes.
    its pressure sensors: the vent opening exposes the MEMS element, and
    ultrasonic cleaning can destroy it. A washed board would fail on every copy
    (see check 1).
-6. **Rework U5 with a known-good part** (BMP384, or the drop-in BMP390, §3.5)
-   by hot air. A working replacement confirms a part or process fault on that
-   one board.
+
+**Not an option: replacing U5 by hand** (operator, 2026-09-23). A 2 × 2 mm LGA
+with hidden pads is not reworkable at the operator's bench. Diagnosis stops at
+checks 1–5, and the rev 2.0 boards either get a working barometer from one of
+those or run without one. Check 1 (a second board) matters all the more,
+because it is the only way left to separate "this part" from "every part".
 
 **What rev 2.1 might change, depending on the answers:**
 
@@ -717,6 +720,6 @@ join the MCU's safe-state nets, and the header closes with no spare GPIO.
 | 9 | Board area closes single-sided? | Placement attempt (§13.5.7) |
 | 10 | X1 part: 40 MHz, 3.3 V, CMOS out, −40…+85 °C, EN pin polarity/default, current | Datasheet of the chosen part |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
-| 12 | U5 root cause: part, process or design (§13.5.6) | Checks 1–6 in §13.5.6, starting with a second board |
+| 12 | U5 root cause: part, process or design (§13.5.6) | Checks 1–5 in §13.5.6, starting with a second board (hand rework of U5 ruled out) |
 | 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided | Measure on the rev 2.0 stack (item 4), order to MPN |
