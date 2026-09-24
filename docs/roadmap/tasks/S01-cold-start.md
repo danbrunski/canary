@@ -112,11 +112,19 @@ system starting beside it.
   `test_run_daemon_reports_every_stage_in_order` (a writer held shut shows
   `first_record_stored` null while the collector's record waits, then every
   stage in order and one summary line) and
-  `test_status_serves_the_startup_block_in_both_views`. **Still owed:** one
-  cold reboot on the Pi reporting every stage, `first_record_stored` checked
-  against the session's first parquet timestamp, numbers recorded here.
+  `test_status_serves_the_startup_block_in_both_views`.
+  *Pi cold boot 2026-09-24 04:55:48Z (engine off; code `0d4b32b`+):* the
+  summary line reported every stage, measured from process start: main 33.42 s
+  (a cold interpreter start from the SD card), profile 35.55, collectors 50.46,
+  **first record 51.32 s** (gps), live source 52.57, app 55.88, HTTP 56.66,
+  IF loaded 68.19, LSTM 89.53. The warm restart at 16:03:22Z read first record
+  5.07 s, collectors 4.88 s. **Still owed:** the cross-check against the
+  session's first parquet timestamp. It is confounded on that boot because
+  the records went to `2026-09-24T035130`, a name taken from the pre-GPS clock
+  (no RTC cell, `docs/time-sync.md`), so the wall clock stepped under the
+  stamps. It needs a boot whose clock is right at start.
 
-- [~] **S01.2 Don't import torch until a sequence model loads.** Chain, found
+- [x] **S01.2 Don't import torch until a sequence model loads.** Chain, found
   with a `sys.meta_path` finder on the Pi: `src/daemon/runtime.py` →
   `src/control/replay_control.py` → `src/alerts/emitter.py` (imports
   `src.models.isolation_forest`, which executes the package `__init__`) →
@@ -154,8 +162,10 @@ system starting beside it.
   `test_sequence_detector_control.py`, `test_scoring_continuity.py`,
   `test_inference_worker.py` green. Laptop, warm, min of 7: `import
   src.daemon` after `import src.main` 2,746 ms / 2,198 modules → 165 ms /
-  1,064 modules. **Still owed:** the Pi cold reboot before/after from S01.1's
-  block.
+  1,064 modules. *Pi before/after (cold boots):* first record 69 s after the
+  unit starts (after `04b6cd0`/`a870887`, this file's header) → **51.3 s** on
+  the 2026-09-24 04:55Z cold boot (collectors 50.5 s). Torch now arrives only
+  with the LSTM (89.5 s), after recording began.
 
 - [~] **S01.3 Nothing on the path to recording imports what recording doesn't
   need.** After S01.2, repeat the cold trace and list every heavy import still
@@ -211,7 +221,7 @@ system starting beside it.
   read still run before the collector tasks and are not broken down.
   **Still owed:** the Pi cold trace.
 
-- [~] **S01.4 One silent Mode 09 answer is enough.** `probe_vehicle_info`
+- [x] **S01.4 One silent Mode 09 answer is enough.** `probe_vehicle_info`
   (`src/profiles.py`) asks for the VIN, the calibration ID and the CVN in
   sequence, each with `vin_probe_timeout_seconds` (2 s). With the ECU asleep
   all three time out: 6 s on the cold trace (socket opened at 25.86 s,
@@ -235,8 +245,10 @@ system starting beside it.
   `test_probe_answering_ecu_reads_all_three`,
   `test_probe_vin_nrc_still_asks_the_others`,
   `test_probe_implausible_vin_still_asks_the_others`,
-  `test_probe_partial_vin_answer_still_asks_the_others`. **Still owed:** a
-  key-off boot on the Pi showing the probe at ~2 s.
+  `test_probe_partial_vin_answer_still_asks_the_others`.
+  *Pi key-off boot 2026-09-24 04:55Z:* journal "VIN probe: no Mode 09
+  response; calibration ID and CVN skipped (no responder on the bus)"; the
+  probe cost profile_resolved − main_entered = **2.13 s** (was 6 s).
 
 - [~] **S01.5 Make a retention tick cheap, not just off the loop.** `a870887`
   moved the tick into a thread, but it still stats every session file and
@@ -275,8 +287,12 @@ system starting beside it.
   (73 sessions, 18,074 session files, ~31k more under `_`-prefixed dirs),
   warm, host load ~16: HEAD 3,314 / 3,044 ms per tick (7,724 ms the first);
   now 1,290 ms for the first tick (17,768 footers read), then 588 and
-  1,066 ms with `footers_read: 0`. **Still owed:** the tick duration on the
-  Pi, parked and during a drive, before and after, recorded here.
+  1,066 ms with `footers_read: 0`. *Pi, parked (2026-09-24, 120–121
+  sessions, 33,273 files):* the first tick after a start reads every footer
+  (49.8 s on the cold boot, 6.6–7.0 s after warm restarts), then every later
+  tick reads **0 footers in 0.59–0.86 s** (10 hourly ticks). **Still owed:**
+  a tick during a drive. The pre-change tick was never logged on the Pi, so
+  the "before" is the laptop's 3.0–3.3 s measurement above.
 
 ## Needs the truck
 

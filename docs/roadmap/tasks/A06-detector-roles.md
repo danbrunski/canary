@@ -104,8 +104,12 @@ training envelope". That is useful to know. It is not a diagnosis.
       `training_envelope: null`, so it reports "not recorded".
   - *Served since 2026-09-24:* the r2 LSTM, which records the envelope, is
     deployed (A06.3). **Remaining:** read `/status`
-    `detectors.inference.sequence_envelope` over a real drive; the Pi was
-    parked (`no_data`) at deploy, so the meter showed 0 windows.
+    `detectors.inference.sequence_envelope` over a real drive.
+    *2026-09-24 16:04–16:25Z, engine running:* the meter stayed at 0 windows,
+    and so did A01.7's `sequence_windows` and the lstm events, although
+    `stages.sequence` ran every tick (300 calls, median 344 ms). This is a
+    serving defect (no sequence result reaches `_apply` on the out-of-process
+    path) and is being debugged; it is not a quiet model.
   - Options:
     - (a) keep alerting after A01–A03 and A02's recalibration;
     - (b) a non-alerting *novelty screen* reporting "outside the learned
@@ -190,7 +194,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     as r2 (and r3 with parked rows dropped; r3 was noisier on D6, so r2 was
     chosen, per the evaluation's recommendation). The candidate IF's
     idle_transient rests on 2 physical drives, not 4 as first counted.
-  - **Deployed 2026-09-24 ~01:10 MDT:** the Pi serves
+  - **Deployed 2026-09-24 16:03:22Z (10:03 MDT):** the Pi serves
     `lstm_autoencoder_2026-09-24T035125.284392Z` (`model.pt` sha256
     `f7389acf…1f7a`, manifest `cc034239…c6b6`, hash-checked on the Pi) beside
     the unchanged `isolation_forest_2026-09-20T054703`. The prior LSTM

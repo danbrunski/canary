@@ -1329,7 +1329,7 @@ live here now, so the documents could be archived
     - **Recommendation: deploy r2.** Keep the filter for future retrains.
       [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md),
       r3 section.
-  - **r2 deployed 2026-09-24 ~01:10 MDT** beside the unchanged IF:
+  - **r2 deployed 2026-09-24 16:03:22Z (10:03 MDT)** beside the unchanged IF:
     `lstm_autoencoder_2026-09-24T035125.284392Z`, `model.pt` sha256
     `f7389acf…1f7a`, hash-checked on the Pi, no version mismatch, prior
     LSTM backed up under `models/nissan-xterra-2008/_prior/2026-09-24-pre-r2/`
@@ -1402,7 +1402,7 @@ live here now, so the documents could be archived
 
 ## Opened 2026-09-23 on the drive
 
-- [ ] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
+- [x] **D03.28 `GET /anomalies` parses the whole anomaly history in the collecting
   daemon, and two requests degraded collection mid-drive.** On 2026-09-23 at
   14:53:15Z and ~14:53:40Z, during a `tuning` capture, one curl and one MCP
   `get_recent_anomalies` call, both with `since=14:20Z`, timed out at 20 s. The Pi
@@ -1436,8 +1436,12 @@ live here now, so the documents could be archived
     `tests/test_anomaly_log_bounds.py::test_recent_since_never_opens_an_older_daily_file`
     (spies the per-file reader: only 09-22 and 09-23 opened for since=09-23T14:20Z)
     and `test_recent_since_survives_an_unreadable_old_file`.
-  - [ ] Verify on the Pi while collecting: a `since`-bounded request answers in
+  - [x] Verify on the Pi while collecting: a `since`-bounded request answers in
     < 1 s and the poller shows no missed ticks around it.
+    **Verified 2026-09-24 (Pi at `2971d79`, `engine_running`):** in `default`
+    at ~16:07Z, 0.064–0.094 s with missed ticks 2 → 2; during a `tuning`
+    capture (`_capture-tuning-2026-09-24T162444`) at 16:25Z, 0.075–0.082 s with
+    missed ticks 4 → 4 (ticks 1289 → 1295).
     *Idle half, 2026-09-23 17:48Z (Pi at `0d4b32b`, deployed by bundle,
     `vehicle_state` `no_data`, bench):* three `GET /anomalies?since=<now-30 min>`
     answered 200 in 0.048–0.049 s; inference 85 ticks scheduled / 85 completed /
@@ -1591,6 +1595,9 @@ live here now, so the documents could be archived
   - [ ] Unexplained, separate from the fix: why the receiver held no fix for the
     whole drive after being powered all night. Check the next drive's first
     minutes; if it repeats, it is a hardware or antenna question for the operator.
+    *2026-09-24 16:04Z key-on (Pi up since 04:55Z):* `/status.gps` showed a fix
+    within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
+    1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
 
 ## Deferred by decision, not blocked
 

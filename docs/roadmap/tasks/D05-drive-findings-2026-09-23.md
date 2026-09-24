@@ -5,7 +5,7 @@ A separate file on purpose: `D03-open-work.md` was mid-edit by another session
 measurement in hand and the session named. Fold into D03 when it is free.
 Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md).
 
-- [~] **D05.1 Six of eight `tuning` DIDs were silent for the first 37.5 s of a
+- [x] **D05.1 Six of eight `tuning` DIDs were silent for the first 37.5 s of a
   capture.** `_capture-tuning-2026-09-23T164007` started at 16:40:07.5Z with the
   engine warm and running on `default`. First stored row, seconds after start:
 
@@ -90,8 +90,17 @@ Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md)
     Tests: `test_profile_start_ledger_names_what_withheld_a_member` (a
     never-answered DID shows up as `backoff`, 55 s left, 2 misses, logged once)
     and `test_a_start_the_ecu_never_answers_is_reported_as_no_window`.
-  - [ ] Verify on the truck: three `tuning` starts from a running `default`, every
+  - [x] Verify on the truck: three `tuning` starts from a running `default`, every
     DID's first row within 1 s.
+    **Verified 2026-09-24 16:19–16:22Z** (Pi at `2971d79`, engine running, warm
+    idle, passive off, UpRev unplugged): three starts at different points of
+    `default`'s cycle. In each, the ProfileStartLedger resolved with nothing
+    withheld and all 10 members (8 DIDs + 2 RAM) first requested within
+    0.106–0.112 s. In the stored captures `_capture-tuning-2026-09-24T161939`,
+    `…162032` and `…162142`, every DID's first row is 0.17 / 0.14 / 0.23 s after
+    the capture's first row. The earlier starts at 16:10–16:13Z ran with
+    passive mode armed by another session (no CAN transmit), so they don't
+    count and their three captures are void.
 
 - [~] **D05.2 The trip-end digest summarised the wrong session.** Handed to the
   D03.29 owner on 2026-09-23, who folded it into D03.29 as a sub-item; tracked

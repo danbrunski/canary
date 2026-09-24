@@ -250,16 +250,23 @@ Follow [B00](B00-behavior-models-README.md).
       2026-09-23.**
     - `tests/test_behavior_lifecycle.py` looks up the deployed-snapshot entry
       by name, not position, because the artifact's model order changed.
-  - **Deployed 2026-09-24 ~01:10 MDT:** `vehicle_state` `no_data`, no
+  - **Deployed 2026-09-24 16:03:22Z (10:03 MDT):** `vehicle_state` `no_data`, no
     capture active; build `2971d79`, pulled on the Pi (the artifact is
     tracked, so git carried it) and restarted with
     `scripts/restart_canary.sh` (the same restart also swapped the LSTM,
     A06.3). Hash on the Pi `816c150b…e565` equals the laptop's.
     `/models/behavior` lists the 12 refreshed models (for example
     `stft_bank_balance_city` v1, `total_trim_vs_rpm_load_b1` v1,
-    `warm_idle_rpm_baseline` v3). **Remaining:** on the next drive, confirm
-    every model reports not-alerting with its reason and that off-map does
-    not read as healthy. The pre-refresh set is recoverable from git
+    `warm_idle_rpm_baseline` v3).
+  - *Checked live 2026-09-24 ~16:07Z (`engine_running`, cold start → warm
+    idle):* `/models/behavior` shows all 12 models `diagnostic_only`, each with
+    its named reason. The dashboard renders off-map and ineligible rows as
+    "off-map — … deviation unavailable" or with the reason, not the `ok` chip.
+    **Remaining (desk):** the raw `/models/behavior/live` and MCP payload still
+    report `severity: "ok"` beside `deviation: null` on off-map, stale,
+    mode-excluded and mode-mismatch rows, so an API consumer can read them as
+    healthy. Make the severity `null` or `unavailable` whenever there is no
+    deviation, and follow it through the dashboard's `BehaviorLiveModel` type. The pre-refresh set is recoverable from git
     (`2971d79^`) and the laptop's `_prior/2026-09-24T024700`.
 - [~] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
   the previous compatible artifact set and its evidence; exercise existing
