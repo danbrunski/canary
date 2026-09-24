@@ -1599,6 +1599,27 @@ live here now, so the documents could be archived
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
 
+- [ ] **D03.30 Passive mode does not survive a daemon restart.** On 2026-09-24
+  the operator had a scan tool connected with CANary passive (armed through
+  `/control/passive`, TTL 1800 s). A deploy restart at 16:53:24Z came up with
+  passive off, and CANary sent Mode 01 for ~13 s (0x7E8 answers
+  16:53:34–37Z) before it was re-armed by hand. It did not collide: the tool
+  was on the BCM at 0x745. It could have, on 0x7E0.
+  ([scan-tool session note](../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)).
+  - [ ] A passive arm with TTL remaining survives a restart: persist it (armed
+    at, TTL, source) and restore it before any collector transmits. Expired
+    at boot means off, and the log says which.
+  - [ ] `scripts/restart_canary.sh` names an armed passive mode in its output,
+    the way it names an active capture.
+  - [ ] Test: arm with a TTL, restart the daemon in the test harness, and no
+    frame is transmitted before the first status read shows passive on.
+  - `vehicle_state` under passive reads `engine_off` even at KOEO or with the
+    engine running, because CANary's own OBD polling is what tells those
+    apart. Report a passive-specific state, for example `passive` with the CAN
+    freshness, rather than a confident `engine_off`. An empty result says
+    which kind of empty.
+  - [ ] Test: while passive, `vehicle_state` names passive.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi
