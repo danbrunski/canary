@@ -168,7 +168,7 @@ What exists in `src/` is coupled to the USB cable:
   session's `feature_pipeline.py` work; until then the exposure is small,
   because a K-line session runs only under a capture profile and captures
   (`_capture-*`) are excluded from training discovery.
-- [ ] **H05.8 The collector.** **Do:** `src/collection/kline_collector.py`:
+- [~] **H05.8 The collector.** **Do:** `src/collection/kline_collector.py`:
   acquire ownership (H05.6), wake up, StartCommunication, define the requested
   set with `AC` (DIDs and RAM addresses from a capture profile's new `kline:`
   list), poll `21`, and emit records stamped at each exchange's midpoint with
@@ -178,6 +178,25 @@ What exists in `src/` is coupled to the USB cable:
   achieved rate. **Accept:** fake-transport tests for define/poll/decode,
   session loss mid-poll, and release on cancellation; a `kline` capture
   profile validates against the catalog.
+  **Partial (2026-09-23):** `src/collection/kline_collector.py`
+  (`KlineCollector`), `src/collection/kline/plan.py` (a profile's `kline:`
+  list → one definition; unknown names and DIDs without a catalog width
+  refused by name, with how to learn the width), `CaptureProfile.kline`, and
+  `hardware.kline` (`KlineConfig`: off by default; enabling means the
+  hardware may be used, not that it transmits). Idle until the active capture
+  profile lists `kline:` channels; then claims the ECM session, wakes the
+  ECM, defines local id `0x81`, polls, and emits `kline:DID_*`/`kline:MEM_*`
+  rows with raw bytes and `acquired_at` at the exchange midpoint; ends with
+  StopCommunication and releases when the list empties or the daemon stops.
+  7 tests (`tests/test_kline_collector.py`): idle-then-own, retry after a
+  failed start with ownership released between, a new session after loss
+  mid-poll, release on task cancellation, and refusals that never transmit.
+  The plan resolved `ECM_TARGET_EQUIV_RATIO` to RAM `0xFFFF26BE`/`26BF`,
+  the same two bytes UpRev's Target AFR definition reads. **Owed:** saving a
+  capture profile does not yet validate its `kline:` list against the catalog
+  (the collector refuses at run time instead, logged once); capture quality
+  does not yet measure the K-line rate; raw `kline:FRAME` rows are left to
+  the sniffer (H06), since each collector row already carries its raw bytes.
 
 ## Truck
 

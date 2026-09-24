@@ -225,6 +225,27 @@ class SupplyVoltageConfig(_Strict):
     rate_hz: float = Field(default=10.0, gt=0.0, le=200.0)
 
 
+class KlineConfig(_Strict):
+    """The CANary-HAT's K-line transceiver (TLIN1027 on uart0).
+
+    ``enabled`` only says the hardware is there and may be used. When K-line
+    is actually commanded is a capture profile's decision (its ``kline:``
+    list); the vehicle's protocol facts are ``daemon.kline_profile``. uart0 is
+    dormant in the board overlay until enabled (``dtoverlay=canary-hat,kline``
+    or ``dtoverlay uart0-pi5``).
+    """
+
+    enabled: bool = False
+    tty: str = "/dev/ttyAMA0"
+    gpio_chip: str = "/dev/gpiochip0"
+    #: TLIN1027 EN (HAT rev 2.0: GPIO26) and the commander pull-up FET gate
+    #: (GPIO24), as line offsets on ``gpio_chip``.
+    enable_gpio: int = 26
+    pullup_gpio: int = 24
+    #: Pause between polls of the defined set; 0 polls as fast as P3 allows.
+    poll_interval_seconds: float = Field(default=0.0, ge=0.0, le=10.0)
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
     can: CanBusConfig
@@ -232,6 +253,7 @@ class HardwareConfig(_Strict):
     imu: ImuConfig = ImuConfig()
     sensor_can: SensorCanConfig = SensorCanConfig()
     supply_voltage: SupplyVoltageConfig = SupplyVoltageConfig()
+    kline: KlineConfig = KlineConfig()
 
 
 class RecordArmingConfig(_Strict):

@@ -37,6 +37,7 @@ from src.collection.discovery import vehicle_key
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.imu_collector import collect_imu_from_config
+from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
@@ -119,6 +120,7 @@ def default_collectors(
         *_sensor_collectors(config, reconnect_policy),
         *_imu_collectors(config, reconnect_policy),
         *_supply_voltage_collectors(config, reconnect_policy),
+        *_kline_collectors(config),
     ]
 
     if config.collection.obd_source == "canable":
@@ -377,6 +379,25 @@ def _supply_voltage_collectors(
         )
 
     return [supply_voltage_collector]
+
+
+def _kline_collectors(config: CanaryConfig) -> list[CollectorStarter]:
+    """The K-line collector, or empty when the HAT's K-line is not enabled.
+
+    Enabled only means the hardware may be used; it transmits only while the
+    active capture profile lists ``kline:`` channels.
+    """
+    kline = config.hardware.kline
+    if not kline.enabled:
+        return []
+    from src.collection.obd_scheduler import _DIDS_YAML_PATH
+
+    collector = KlineCollector(kline, config.daemon.kline_profile, _DIDS_YAML_PATH)
+
+    async def kline_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collector.run(queue, stop)
+
+    return [kline_collector]
 
 
 __all__ = ["CollectorStarter", "default_collectors"]
