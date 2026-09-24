@@ -60,31 +60,57 @@ rather than building a second model system. Follow
   payloads can backfill the corpus. Tests:
   `tests/test_behavior_trim_contracts.py`. Evidence:
   [report §4](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [ ] **B05.3 — Fit total-trim B1/B2 and useful bank-balance baselines.**
+- [~] **B05.3 — Fit total-trim B1/B2 and useful bank-balance baselines.**
   Use existing recipes and consistent calibration cohorts; compare robust
   simple baselines against surfaces using B02. Test bank-specific changes,
   symmetric changes, normal STFT oscillation and LTFT adaptation. Count two
   banks/common ECU corrections appropriately in fusion; do not claim a bank
   asymmetry identifies a particular injector, leak or sensor by itself.
-  *Deferred: needs the operator's corpus choice (2026-09-22).* Data is
-  **not** the blocker: B05.1 counts 10,082 / 9,542 contract-eligible rows over
-  30 drives (11 qualifying) for the two banks and 19,949 closed-loop rows with
-  both banks paired. Two things the corpus choice must decide: the LTFT window
-  (long trims are exactly 0.0 before ~09-10 and again on the post-flash
-  2026-09-21 captures, so a cohort spanning those is fitting STFT under
-  another name) and the calibration cohort (the flash boundaries in
-  `tune_revisions.yaml`).
-- [ ] **B05.4 — Replace STFT-only alerting with evidence.** Compare qualified
+  *Fitted 2026-09-23 on ZS44A-20260920; none qualifies.* STFT bank-balance
+  criteria were declared in `behavior_validation.yaml` before the refit
+  (constant baseline, 5-point target, max MAE 2.0, p95 3.75). Results on
+  untouched drives ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §2, §5):
+  - *Total trim B1/B2:* skill 0.11 / −0.01 < 0.2, warning width 12.1 / 10.7
+    > 5, symmetric +5 %/120 s detection 0.04 / 0.07. Failed.
+  - *STFT bank balance city/highway:* MAE 0.94 / 1.16 %, p95 2.49 / 3.13,
+    bank-specific ±5 % steps detected 0.93–0.96, so they meet the accuracy
+    and sensitivity criteria. Normal STFT oscillation still raises 2.86 /
+    13.9 control events/h (> 2). Failed.
+  - *STFT bank balance idle:* bias +1.77 %, held-out warning rate 18 %. Not
+    published.
+  - *LTFT:* **every LTFT sample on this calibration is exactly 0.0**, so the
+    total-trim fits are STFT fits under another name, LTFT bank balance
+    cannot fit (zero-width domain), and LTFT adaptation is untestable.
+
+  **Fusion (done 2026-09-23):** total trim B1/B2, STFT/LTFT per bank and
+  both bank balances vote as one `behavior:fuel_trim` voice
+  (`src/alerts/fusion.py::behavior_fusion_group`, derived inside
+  `FusionScorer.behavior_source`). Before, `fuel_trim_vs_rpm_load` (STFT B1)
+  and `total_trim_b1` (STFT B1 + LTFT B1) were separate groups over the same
+  reading. Evidence: `tests/test_fusion.py::test_one_measurement_is_one_voice_across_its_derived_channels`.
+  **Remaining:**
+  - LTFT content (relearn) on this calibration;
+  - bank-balance event persistence that ordinary oscillation does not trip.
+- [~] **B05.4 — Replace STFT-only alerting with evidence.** Compare qualified
   replacements and the old `fuel_trim_vs_rpm_load` on identical eligible rows
   and fault cases, including coverage outside the intersection. Demote the
   old alert after the replacement qualifies; keep raw STFT for inspection.
   If data is insufficient, expose that state instead of claiming replacement
   complete or silently continuing to present the old surface as validated.
-  *Deferred: needs the operator's corpus choice (2026-09-22) and B05.3.* The
-  insufficiency is already exposed rather than hidden: the old
-  `fuel_trim_vs_rpm_load` is a legacy artifact with no serving contract
-  (`serving_status` diagnostic-only, so it cannot alert), and the replacement
-  recipes have declared criteria but no fit.
+  *Compared 2026-09-23; no replacement qualifies.* On the 1405 rows all three
+  surfaces evaluate:
+
+  | surface | MAE | bias | events | synthetic +5 %/120 s |
+  |---|---|---|---|---|
+  | published STFT v2 | 5.29 % | −3.98 | 17 | 0.00 |
+  | candidate STFT v3 | 3.81 % | +0.37 | 2 | 0.03 |
+  | total trim B1 | 3.48 % | +0.04 | 1 | 0.03 |
+
+  Outside the intersection, STFT v3 has 4721 rows that total trim refuses:
+  rate gates 3030, open loop/fuel cut 971, warmup 349. The old surface stays
+  diagnostic-only (legacy, no contract, cannot alert); the candidate STFT v3
+  also failed B02. Nothing is demoted or claimed replaced ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §5).
+  **Remaining:** a qualifying replacement (B05.3).
 
 ## Cam command tracking
 
@@ -109,15 +135,20 @@ rather than building a second model system. Follow
   (`did:ECM_INTAKE_CAM_ANGLE_COMMANDED ≤ 0.25 °/s`, `did:ECM_RPM ≤ 75 rpm/s`),
   with the caveat recorded in B05.2 that a rate gate is a 30 s net-change
   gate. Evidence: [report §6](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [ ] **B05.6 — Fit and verify the existing cam recipes end to end.** Validate
+- [~] **B05.6 — Fit and verify the existing cam recipes end to end.** Validate
   steady tracking residuals on independent drives, then inject stuck/offset
   response cases and ordinary command transitions. Prove a fitted artifact
   produces live and replay predictions with its derivative gates. Characterize
   response lag separately; transition lag is not a steady tracking fault.
-  *Deferred: needs the operator's corpus choice (2026-09-22)* — it fits the
-  cam recipes end to end. B05.5 supplies the identities, the steady subsets
-  and the first lag evidence (transition rows read r² 0.90–0.96 vs 0.996+
-  steady).
+  *Attempted 2026-09-23 — data-blocked on the current calibration.* Both cam
+  recipes skip with "missing `did:ECM_INTAKE_CAM_ANGLE_COMMANDED__roc`". The
+  commanded angle is polled in **no** ZS44A-20260920 session: the rom-trace
+  captures poll only the two measured channels, and the tuning profile polls
+  neither. That leaves 0 eligible rows (B05.1 inventory on the manifest
+  corpus). **Smallest missing capture:** a normal drive polling
+  `ECM_INTAKE_CAM_ANGLE_COMMANDED` with both measured channels in one round
+  (as the 2026-08-06/-07 tuning-did captures did), across ≥ 3 drives. B05.5
+  supplies the identities and steady subsets.
 
 ## TPS and AFR sensor balance
 
@@ -143,24 +174,41 @@ rather than building a second model system. Follow
   slowly) polling `0x120F` and `0x1210` in the same round at ≥ 5 Hz, plus the
   same pair on a normal drive. Detection of offset/stuck-track/dropout stays
   untested until then. Evidence: [report §6](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
-- [ ] **B05.8 — Qualify AFR bank balance separately.** Assess the existing
+- [~] **B05.8 — Qualify AFR bank balance separately.** Assess the existing
   `afr_bank_balance_robust` recipe with both bank measurements, fuel state,
   lag and relevant steady-state gates. Verify voltage-to-mixture semantics;
   equal voltages do not constitute an independently calibrated lambda reference.
   Keep this recipe unpublished if a useful bank-asymmetry claim cannot be
   supported; B06 owns target-versus-measured delivery, not raw voltage mapping.
-  *Deferred: needs the operator's corpus choice (2026-09-22)* (assessing the
-  recipe means fitting it). Inventory input available from B05.1: both AF
-  sensor DIDs are polled together in every tuning capture, so this one is not
-  data-blocked — it is fit-blocked.
-- [ ] **B05.9 — Publish the qualified subset.** Archive B02 reports and run
+  *Assessed 2026-09-23 — kept unpublished.* The fit on the current calibration
+  is refused publication:
+  - held-out critical rate 18 %
+  - 97 events in 2.4 h
+  - MAE 0.102 V against a fixed 0.05 V warning band
+  - no criteria declared
+
+  The existing recipe has **no fuel-state, mode or steady-state gate**, so
+  enrichment and fuel-cut rails are graded as bank asymmetry. The
+  voltage→AFR transfer is verified (`afr_calibration.yaml`, both banks agree
+  on held-out logs), but a voltage difference is non-linear in lambda
+  (≈ 2 AFR/V rich of 14.7, ≈ 3.9 AFR/V lean). No asymmetry claim is
+  supported ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §5). **Remaining:** closed-loop + steady gates on
+  the recipe contract (a `default_recipes` change), a residual in lambda
+  rather than volts, and declared criteria.
+- [~] **B05.9 — Publish the qualified subset.** Archive B02 reports and run
   B03 compatibility/replay/rollout steps per accepted model. Record explicit
   reasons for each unfitted recipe and the smallest missing capture. Dashboard
   and MCP must distinguish unavailable evidence from a healthy subsystem.
-  *Deferred: needs the operator's corpus choice (2026-09-22)* — nothing is
-  qualified to publish. The two reasons this task asks for are recorded:
-  per-recipe unfitted reasons and smallest missing captures in
-  [the report](../../../data/analyses/2026-09-22-b04-b05-measurements.md) §5–§6 and in B05.3/B05.7 above.
+  *2026-09-23: the qualified subset is empty.* B02 report archived
+  ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md)). Per-recipe failure and unfitted reasons, and the smallest
+  missing captures, are in §2/§5:
+  - cam commanded DID
+  - the KOEO throttle sweep + drive for TPS (B05.7; 244 rows)
+  - LTFT relearn
+  - AFR balance contract gates
+
+  B03.8's status surfaces already show "none recorded"/failed evidence as
+  not alerting. **Remaining:** publication once any model qualifies.
 
 **Done when:** each selected relationship works through fitting and actual
 serving with documented sensitivity, and each remaining recipe has a named

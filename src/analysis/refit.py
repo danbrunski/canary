@@ -65,6 +65,7 @@ from src.decode.behavior_models import (
     DeviationConfig,
     EngineStateRequirement,
     FuelControlRequirement,
+    LocalRangeCondition,
     RateOfChangeCondition,
     RequiredContext,
     ServingEligibility,
@@ -74,6 +75,7 @@ from src.decode.behavior_models import (
     fingerprint,
 )
 from src.preprocessing.features import roc_column
+from src.preprocessing.local_range import append_local_ranges, local_range_column
 from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import (
@@ -163,6 +165,35 @@ TOTAL_TRIM_STEADY_RATES: Mapping[str, float] = {
     "obd:ENGINE_LOAD": 0.5,
 }
 
+#: B07.6 — the warm-idle baseline grades steady idle only (operator decision
+#: 2026-09-23). The limit is B05.2's recorded 10 rpm/s (TOTAL_TRIM_STEADY_RATES),
+#: not re-derived: on the warm-idle training fold (drive 2026-09-21T194247, 631
+#: idle rows, 627 of them locally steady) 75/20/10 rpm/s pass the same 561
+#: rate-defined rows, so that fold cannot choose between limits, and no test
+#: drive was consulted. Before the gate, rpm excursions inside ``idle`` mode
+#: (a 30 s net change) were graded as idle deviations.
+#: data/analyses/2026-09-23-behavior-refit-validation-report.md §11.
+WARM_IDLE_STEADY_RATES: Mapping[str, float] = {"obd:RPM": 10.0}
+
+#: B07.6 — and a local-range limit the net-change gate cannot express
+#: (operator decision 2026-09-23): the rpm spread over the last 5 s. The limit
+#: is B05.2's "locally transient" definition (5 s rpm range > 100), recorded in
+#: data/analyses/2026-09-22-b04-b05-measurements.md §4, adopted as defined,
+#: not tuned. The capture it was defined on lies in warm idle's test drive
+#: group; on the warm-idle training fold 627 of 631 idle rows satisfy it.
+WARM_IDLE_LOCAL_RANGES: tuple[LocalRangeCondition, ...] = (
+    LocalRangeCondition(
+        channel="obd:RPM",
+        window_seconds=5.0,
+        max_range=100.0,
+        basis=(
+            "B05.2 'locally transient' definition: 5 s rpm range > 100 "
+            "(data/analyses/2026-09-22-b04-b05-measurements.md §4); adopted for warm "
+            "idle by operator decision 2026-09-23 (B07.6)"
+        ),
+    ),
+)
+
 
 @dataclass(frozen=True)
 class _RecipeBase:
@@ -205,6 +236,9 @@ class _RecipeBase:
     #: Measured quantities the output's meaning depends on; each tuple is an
     #: any-of group that must be present and fresh on the row.
     required_context: tuple[tuple[str, ...], ...] = ()
+    #: B07.6 — persisted local-range steady limits (``LocalRangeCondition``);
+    #: the refit builds their context before selecting rows, like serving.
+    local_ranges: tuple[LocalRangeCondition, ...] = ()
     #: Persisted steady-state constraints. Keys are base telemetry columns;
     #: values are maximum absolute per-second rates over the feature
     #: pipeline's rolling horizon. The fitter applies them and the resulting
@@ -268,6 +302,7 @@ class _RecipeBase:
                 RequiredContext(any_of=list(group)) for group in self.required_context
             ],
             excluded_operating_modes=list(self.excluded_operating_modes),
+            local_ranges=list(self.local_ranges),
             training_selection=TrainingSelection(
                 require_session_events=list(self.require_session_events),
                 require_contiguous_runtime=self.require_contiguous_runtime,
@@ -399,12 +434,22 @@ def default_recipes() -> list[Recipe]:
             fit_method="robust_baseline",
             min_r_squared=None,
             min_samples=200,
+            max_abs_rate_of_change=WARM_IDLE_STEADY_RATES,
+            local_ranges=WARM_IDLE_LOCAL_RANGES,
             deviation=DeviationConfig(
                 kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=25.0
             ),
             notes=(
                 "Warm stabilized idle baseline. Accessory-load state is not available, "
-                "so robust bands absorb ordinary A/C/electrical-load steps."
+                "so robust bands absorb ordinary A/C/electrical-load steps. Graded only "
+                "at steady rpm (WARM_IDLE_STEADY_RATES, WARM_IDLE_LOCAL_RANGES)."
+            ),
+            diagnostic_capabilities=("sustained warm-idle speed shift",),
+            diagnostic_limitations=(
+                "steady idle only: an rpm excursion (net change above 10 rpm/s over the "
+                "30 s feature horizon, or more than 100 rpm of spread within 5 s) is not "
+                "graded",
+                "does not detect elevated idle in general, nor identify its cause",
             ),
         ),
         Surface1DRecipe(
@@ -1177,6 +1222,24 @@ def fit_recipe(
                 sub, [StartContextSpec.from_requirement(eligibility.cold_start)]
             )
 
+    # 2a'. B07.6 local-range context, from whole sessions (as serving builds
+    # it from the live window), before any row-level selection.
+    missing_ranges = [
+        condition
+        for condition in eligibility.local_ranges
+        if local_range_column(condition) not in sub.columns
+    ]
+    if missing_ranges:
+        absent = [c.channel for c in missing_ranges if c.channel not in sub.columns]
+        if absent:
+            return RecipeResult(
+                recipe.name,
+                None,
+                skipped=True,
+                reason=f"missing {absent}; can't enforce local-range steady gate",
+            )
+        sub = append_local_ranges(sub, missing_ranges)
+
     # 2b. Training-only: whole sessions with a broken run-time clock are
     # poor warmup evidence (provenance in ``TrainingSelection``).
     if recipe.require_contiguous_runtime:
@@ -1433,6 +1496,13 @@ def legacy_reproduction_spec(
     are what it predicts, so they replace the recipe's — and the second
     element names that substitution so a report cannot present the artifact
     as the retargeted quantity. ``None`` when nothing was substituted.
+
+    Rate gates are the artifact's own persisted ``conditions``, never the
+    recipe's, and the recipe's local-range gates are dropped (no legacy
+    artifact was fitted under one): a gate added to the recipe after the fit (B07.6 gave warm idle a
+    steady-rpm gate on 2026-09-23) was not applied to the rows the artifact
+    was fitted and validated on, so reproducing it with the new gate would
+    silently re-select its held-out rows.
     """
     spec = recipe_serving_spec(recipe)
     model_inputs = (
@@ -1440,13 +1510,30 @@ def legacy_reproduction_spec(
         if isinstance(model, BehaviorModel1D)
         else tuple(axis.channel for axis in model.axes)
     )
-    if spec.output == model.output and spec.inputs == model_inputs:
-        return spec, None
-    note = (
-        f"recipe now targets {spec.output} on {list(spec.inputs)}; "
-        f"artifact evaluated on its own {model.output} on {list(model_inputs)}"
-    )
-    return replace(spec, output=model.output, inputs=model_inputs), note
+    notes: list[str] = []
+    model_conditions = tuple(model.conditions)
+    if spec.conditions != model_conditions:
+        notes.append(
+            f"recipe now gates {[c.channel for c in spec.conditions]}; artifact reproduced "
+            f"with its own fitted gates {[c.channel for c in model_conditions]}"
+        )
+        spec = replace(spec, conditions=model_conditions)
+    eligibility = spec.eligibility
+    if eligibility is not None and eligibility.local_ranges:
+        # Local-range gates (B07.6, 2026-09-23) postdate every legacy artifact.
+        notes.append(
+            "recipe now gates local ranges on "
+            f"{[c.channel for c in eligibility.local_ranges]}; not applied to an artifact "
+            "fitted before them"
+        )
+        spec = replace(spec, eligibility=eligibility.model_copy(update={"local_ranges": []}))
+    if spec.output != model.output or spec.inputs != model_inputs:
+        notes.append(
+            f"recipe now targets {spec.output} on {list(spec.inputs)}; "
+            f"artifact evaluated on its own {model.output} on {list(model_inputs)}"
+        )
+        spec = replace(spec, output=model.output, inputs=model_inputs)
+    return spec, ("; ".join(notes) or None)
 
 
 def _piece_time_key(piece: str) -> tuple[int, str, str]:

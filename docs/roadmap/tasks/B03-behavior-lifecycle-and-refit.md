@@ -105,30 +105,82 @@ Follow [B00](B00-behavior-models-README.md).
 
 ## Baseline refit
 
-- [ ] **B03.5 — Freeze the corpus manifest.** Reuse the operator's existing
+- [x] **B03.5 — Freeze the corpus manifest.** Reuse the operator's existing
   corpus decisions and tune registry; record eligible physical drives,
   calibration, dispositions and capture recipe grants. Complete the D03.22
   mode-label prerequisite and regenerate affected derived artifacts/caches.
   Name missing corpus facts rather than selecting across calibration boundaries
   by convenience. Inspect legacy fits with absent tune provenance explicitly.
-  *Not started — deferred by the operator 2026-09-22 ("don't retrain yet").*
-  The D03.22 laptop relabel it depended on is done (116 sidecars at classifier
-  0.3.0); the corpus choice itself is still open. The one provenance question
-  is settled: `2026-07-26T214348` is excluded in `behavior_validation.yaml`.
-- [ ] **B03.6 — Produce isolated candidates.** Refit qualified retained
+  *Done 2026-09-23 (operator corpus decision 2026-09-23: current calibration
+  only).* [Manifest](../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml): `resolve_session_revision() == ZS44A-20260920`
+  selects **53 directories** (40 sessions + 13 captures, 482 MB) under
+  `~/canary-data/sessions/nissan-xterra-2008`. Each one is pinned by content
+  hash with its start time, row range, revision source, capture profile and
+  sidecar grants, disposition and events, and drive. Of the 86 directories
+  *named* 2026-09-20..23, the resolver places 33 on ZS44A-k106 (started
+  before 2026-09-21T03:08:45Z). There are no flash crossings. The drives are
+  6 groups at the 600 s join gap; the parked overnight recording
+  `2026-09-23T032755` joins an evening and a morning drive (recorded).
+  D03.22 prerequisite: `label_sessions.py` (classifier 0.3.0, Pi taxonomy) ran
+  on every non-capture session. 38 sidecars were written and 2 were already
+  current; dispositions came out 14 ready / 7 review / 17 quarantine,
+  recorded rather than used as a filter. Capture grants: explicit-path
+  selection (the CLI's operator-grant semantics), with each sidecar
+  allowlist recorded beside it. Legacy fits: 7 of 8 published models carry
+  no `tune_revision` and trained on ZS04C-stock/ZS44A-osiris-initial
+  sessions, and `air_charge` is ZS44A-k106. None is on the current
+  calibration ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0).
+- [~] **B03.6 — Produce isolated candidates.** Refit qualified retained
   recipes on the laptop, preserving grid/version provenance. Run B02 validation
   with untouched held-out drives and archive per-model pass/refusal reasons.
   An unsuccessful candidate cannot overwrite the qualified baseline or restore
   a quarantined prior through carry-over. Missing data is a partial task, not
   grounds to relax criteria.
-  *Not started:* needs B03.5 and a refit.
-- [ ] **B03.7 — Replay before promotion.** Compare baseline and candidate
+  *Candidates produced 2026-09-23; none qualifies.* `scripts/refit_behavior_models.py`
+  over the 53 manifest paths wrote to `data/nissan-xterra-2008/_candidates/2026-09-23/`,
+  seeded with a copy of the published artifact so versions bump and prior
+  grids carry (`grid_version` 1). The refit did not touch the published
+  artifact; it was replaced afterwards by the operator-approved promotion
+  (B03.9). 10 recipes fitted with B02 evidence on untouched drives; every verdict is
+  `failed`, and per-model reasons are archived in the [report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §2 and
+  `behavior_models.yaml.report.json`. All 10 candidates' persisted held-out
+  numbers reproduce exactly through the independent evaluator frame path.
+  The carried-over `cat_warmup` stays quarantined and `timing_advance_vs_rpm_iat`
+  stays demoted, both flagged `contract_changed:recipe`. **Found and fixed:**
+  exposure counted 11 h of a parked truck inside one drive group, so the
+  first run stamped warm idle and STFT bank balance city/highway `passed`
+  with alert. With the fix (`EVALUATOR_VERSION` 3,
+  `tests/test_behavior_validation.py::test_parked_hours_inside_one_drive_are_not_exposure`)
+  they fail at 8.89 / 2.86 / 13.9 control events/h (§1). **Remaining
+  (data-limited, criteria unchanged):** warmup recipes (2 cold starts on
+  this calibration, `min_sessions` 3), cam (commanded cam never polled),
+  TPS (244 rows < 300), manifold VE (no MAP), LTFT balance (LTFT
+  constantly 0.0).
+- [~] **B03.7 — Replay before promotion.** Compare baseline and candidate
   on the same known recordings, with isolated `_replay-*` outputs. Record
   coverage, refusal reasons, residuals, persisted events and fusion contribution,
   including no-data and calibration/context mismatches. Verify IF/sequence
   compatibility or deploy their coordinated replacements; no vehicle-health
   conclusion follows from a synthetic replay fault.
-  *Not started:* needs B03.6 candidates.
+  *Offline equivalent done 2026-09-23.* The evaluator (`evaluate()`: serving
+  contract, then the daemon's `PersistenceGate` + dedupe) ran the published
+  artifact on each candidate's own test drives, on identical eligible rows.
+  [Report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §3 and [JSON](../../../data/analyses/2026-09-23-behavior-refit-comparison.json) `baseline_vs_candidate_same_test_drives`:
+  - coverage and off-map: timing 6976→7261, air mass 6516→7238
+  - residuals: fuel-trim MAE 5.39→4.09 %, timing warning width 23.1→13.2°
+  - persisted events: fuel trim 44→6, VE 17→0; warm idle 6→6 (bias
+    +4.8→+17.3 rpm)
+  - refusals: no-data refusals dominate (`engine_state_stale:obd:RPM`,
+    ~53k rows of the parked recording); calibration context is ZS44A-20260920
+    only
+  - fusion: no vote on either side, since no model alerts; groups are per
+    output channel
+
+  IF/sequence: no tracked or concurrently retrained
+  (`models/_candidates/2026-09-23-na`) manifest consumes a `deviation:*`
+  column. **Remaining:** runtime replay through the daemon with `_replay-*`
+  outputs. It needs a running daemon, and `scripts/replay.py` has no
+  behavior-event path. With an empty qualified set it gates nothing yet.
 
 ## Rollout and observability
 
@@ -154,13 +206,56 @@ Follow [B00](B00-behavior-models-README.md).
   `::test_live_abstain_reasons`, `tests/test_dashboard_api.py` (empty state),
   `src/dashboard/static/src/panels/BehaviorModelsPanel.test.ts` "status (B03.8)"
   (empty, eligible, demoted, failed, off-map, ineligible).
-- [ ] **B03.9 — Deploy and verify the selected qualified set.** Use the
+- [~] **B03.9 — Deploy and verify the selected qualified set.** Use the
   existing artifact publication/transfer workflow and verify hashes on the Pi.
   Use the guarded restart script if a restart is necessary. Observe the
   requested versions and ordinary eligible observations; confirm demoted models
   remain non-alerting and off-map does not read as healthy. Record vehicle
   state, active capture and deployed build with the result.
-  *Not started:* needs the qualified set (B03.6/B03.7) and the Pi.
+  *Promoted on the laptop 2026-09-23; Pi deploy owed.* **Operator decision
+  2026-09-23:** promote the 2026-09-23 candidate set as a **diagnostic-only
+  refresh**, even though the qualified set is empty.
+  - **Changed:** `data/nissan-xterra-2008/behavior_models.yaml` +
+    `.report.json` are byte-identical to `_candidates/2026-09-23/`
+    (artifact `sha256:816c150b…`, report `45b62be3…`; was `9cd174ce…` /
+    `5dc73028…`).
+    - Refit on ZS44A-20260920 with a contract and failed B02 evidence:
+      warm_idle v2→v3, timing_rpm_load v2→v3, fuel_trim v2→v3, air_mass
+      v2→v3, ve v2→v3, air_charge v1→v2.
+    - New: total_trim_b1/b2 v1, stft_bank_balance_city/highway v1.
+    - Carried over and flagged `contract_changed:recipe`: timing_rpm_iat v2
+      (still demoted) and cat_warmup v4 (still quarantined by fingerprint).
+    - `behavior_policy.yaml` is unchanged.
+    - **No model gains `alert`**, so fusion has no behavior votes, as before.
+  - **Rollback:** the replaced pair is in
+    `data/nissan-xterra-2008/_prior/2026-09-24T024700/` (gitignored, laptop
+    only) and in git at `HEAD`. Copy it back; hot reload picks up an
+    older-mtime artifact (B03.10).
+  - **Known answers re-pointed, not rewritten:**
+    `tests/test_behavior_validation_known_answers.py` now loads the replaced
+    set from `tests/fixtures/behavior_validation/behavior_models_2026-09-22.yaml`
+    (byte-identical to the `HEAD` artifact). The review's numbers belong to
+    the artifact it measured, and a promotion must not silently re-point
+    them.
+  - **Why `tests/test_behavior_models.py` changed:**
+    - `test_shipped_artifact_loads_diagnostic_only` asserted every shipped
+      model was a *legacy no-contract* artifact. The refits now carry
+      contracts and are diagnostic-only because they *failed validation*,
+      so it asserts each model is diagnostic-only with a stated reason.
+    - `test_shipped_air_charge_surface_is_revision_scoped` asserted k106's
+      numbers (`tune_revision == ZS44A-k106`, warning rate < 0.03). It now
+      asserts the shipped surface is scoped to the newest registry revision
+      with held-out rows. It will fail on the next flash until a refit, and
+      that is intended: **kept as a tripwire, operator decision
+      2026-09-23.**
+    - `tests/test_behavior_lifecycle.py` looks up the deployed-snapshot entry
+      by name, not position, because the artifact's model order changed.
+  - **Remaining (Pi, the orchestrator's):** read `/status.vehicle_state`,
+    save the deployed `/models/behavior` snapshot (B03.1/B03.10), transfer
+    the two files, verify hashes on the Pi, restart with
+    `scripts/restart_canary.sh` only if hot reload does not pick them up,
+    and confirm every model reports not-alerting with its reason and that
+    off-map does not read as healthy.
 - [~] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
   the previous compatible artifact set and its evidence; exercise existing
   rollback/loading behavior locally. Update D03 only for overlapping work

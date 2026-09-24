@@ -501,6 +501,26 @@ class RequiredContext(_Strict):
     note: str | None = None
 
 
+class LocalRangeCondition(_Strict):
+    """A steady-state limit on a channel's *local* range (B07.6, B01 schema).
+
+    A persisted rate gate reads ``<channel>__roc``, the net change over the
+    30 s feature horizon, so an up-and-back excursion inside the horizon
+    passes it: on 2026-09-23 two rpm blips (725 -> 938 -> 750 in ~10 s) were
+    graded as warm-idle deviations through a 10 rpm/s gate. This condition
+    bounds ``max - min`` of ``channel`` over the trailing ``window_seconds``
+    (rows with ``t - window < t_row <= t``). The value is serving context,
+    built by :mod:`src.preprocessing.local_range` on the batch and the live
+    paths alike, and refuses when the window is not fully observed.
+    """
+
+    channel: str = Field(min_length=1)
+    window_seconds: float = Field(gt=0)
+    max_range: float = Field(gt=0)
+    #: Where the limit came from (a measurement, a definition, a decision).
+    basis: str = Field(min_length=1)
+
+
 class TrainingSelection(_Strict):
     """Corpus rules applied only when *choosing training data* (B01.3).
 
@@ -534,6 +554,8 @@ class ServingEligibility(_Strict):
     #: different quantity. A row with no mode label is refused, not assumed
     #: to be outside the excluded set.
     excluded_operating_modes: list[str] = Field(default_factory=list)
+    #: B07.6 — local-range steady limits (see :class:`LocalRangeCondition`).
+    local_ranges: list[LocalRangeCondition] = Field(default_factory=list)
     training_selection: TrainingSelection = Field(default_factory=TrainingSelection)
 
 
@@ -1126,7 +1148,17 @@ def contract_fingerprint_payload(
         "eligibility": (
             None
             if eligibility is None
-            else eligibility.model_dump(mode="json", exclude={"training_selection"})
+            else eligibility.model_dump(
+                mode="json",
+                # An empty ``local_ranges`` (added 2026-09-23) is left out so
+                # every contract fingerprinted before it keeps its identity
+                # and its evidence still matches.
+                exclude=(
+                    {"training_selection"}
+                    if eligibility.local_ranges
+                    else {"training_selection", "local_ranges"}
+                ),
+            )
         ),
         "deviation": (
             None

@@ -271,3 +271,34 @@ recipes:
     max_control_events_per_hour: 2.0
     synthetic_faults:
       - {magnitude: 60.0, direction: negative, duration_seconds: 120}
+
+  # B05.3 — STFT bank-balance constant baselines, declared 2026-09-23 BEFORE the
+  # 2026-09-23 refit/test on the ZS44A-20260920 corpus
+  # (data/analyses/2026-09-23-behavior-corpus-manifest.yaml). Same target as
+  # the total-trim surfaces; the error bounds keep warm idle's proportions
+  # (max_mae 0.4x, p95 0.75x the meaningful deviation), so a meaningful shift
+  # sits outside the healthy 95th percentile. The two banks' trims are read
+  # sequentially, not at one instant: an ordinary closed-loop oscillation read
+  # at different phases is part of the healthy spread these bounds judge.
+  # LTFT bank balance is deliberately NOT declared: every LTFT sample on the
+  # current calibration is exactly 0.0 (relearn after the 2026-09-20 flash),
+  # so there is no content to validate.
+  stft_bank_balance_idle: &stft_bank_balance
+    kind: constant_baseline
+    unit: "%"
+    noise_floor: {value: 0.78125, basis: "trim PID LSB (100/128 %); a difference of two channels sharing it"}
+    meaningful_deviation: 5.0
+    meaningful_deviation_basis: >
+      a sustained 5-point bank-to-bank STFT difference, the same target as the
+      total-trim surfaces; smaller asymmetries sit inside ordinary closed-loop
+      oscillation (B05.2: STFT sd 3.47 % over all closed-loop rows, 1.16 % steady)
+    min_validation_drives: 2
+    min_eligible_observations: 150
+    max_mae: 2.0
+    max_abs_error_p95: 3.75
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 5.0, direction: positive, duration_seconds: 120}
+      - {magnitude: 5.0, direction: negative, duration_seconds: 120}
+  stft_bank_balance_city: *stft_bank_balance
+  stft_bank_balance_highway: *stft_bank_balance

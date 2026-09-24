@@ -41,6 +41,7 @@ from src.decode.behavior_models import (
     DriveSplitRecord,
     EngineStateRequirement,
     FuelControlRequirement,
+    LocalRangeCondition,
     NoiseFloor,
     PolynomialFit,
     RateOfChangeCondition,
@@ -55,6 +56,7 @@ from src.decode.behavior_models import (
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
+from src.preprocessing.local_range import local_range_column
 from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.session_context import (
     EngineStartTracker,
@@ -175,6 +177,79 @@ def test_b01_1_live_observation_exists_after_required_history(config: CanaryConf
     assert snapshot["expected"] == pytest.approx(10.0)
     assert snapshot["reason"] is None
     assert residuals[0].reason is None
+
+
+def _local_range_model() -> BehaviorModel1D:
+    return _steady_model(
+        conditions=[],
+        eligibility=ServingEligibility(
+            engine_state=EngineStateRequirement(state="engine_running"),
+            local_ranges=[
+                LocalRangeCondition(
+                    channel="obd:RPM", window_seconds=5.0, max_range=100.0, basis="test"
+                )
+            ],
+        ),
+    )
+
+
+def test_local_range_gate_refuses_a_blip_identically_batch_and_live(config: CanaryConfig) -> None:
+    """B07.6 — an rpm blip that returns inside the 30 s rate horizon is refused
+    by the local-range gate, on the batch frame and the live source alike; the
+    first 5 s of a recording have no history and refuse by name."""
+    model = _local_range_model()
+    models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[model])
+    wide = _constant_rpm_wide()
+    wide.loc[20:22, "obd:RPM"] = [1600.0, 1700.0, 1550.0]  # 725 -> 938 -> 750 in miniature
+    framed = featurize_wide_frame(wide, config, behavior_models=models).operating_frame
+    _, batch = explain_expected_column(framed, model)
+    expected = [None] * len(wide)
+    for i in range(5):
+        expected[i] = "range_insufficient_history:obd:RPM"
+    # 5 s windows holding the 1700 (rows 21..25); the 1600 alone is 100, not > 100.
+    for i in range(21, 26):
+        expected[i] = "range_exceeded:obd:RPM"
+    assert list(batch) == expected
+    # The rate gate this replaces would have passed the blip: net change ~0.
+    assert abs(framed["obd:RPM"].iloc[26] - framed["obd:RPM"].iloc[19]) == 0.0
+
+    source = LiveFeatureSource(config=config, behavior_models=models)
+    live = []
+    for second, row in wide.iterrows():
+        _live_tick(
+            source,
+            T0 + timedelta(seconds=int(second)),
+            {"RPM": row["obd:RPM"], "SPEED": 40.0, "TIMING_ADVANCE": 22.0},
+        )
+        live.append(_live_result(source).reason)
+    assert live == expected
+
+
+def test_empty_local_ranges_keep_every_existing_contract_fingerprint() -> None:
+    """The schema addition must not re-identify contracts fingerprinted before
+    it, or every promoted model's evidence would stop matching."""
+    plain = _steady_model()
+    assert plain.eligibility is not None and plain.eligibility.local_ranges == []
+    payload = contract_fingerprint(plain)
+    assert payload == contract_fingerprint(
+        plain.model_copy(update={"eligibility": plain.eligibility.model_copy()})
+    )
+    gated = _local_range_model()
+    assert contract_fingerprint(gated) != contract_fingerprint(
+        gated.model_copy(
+            update={
+                "eligibility": gated.eligibility.model_copy(update={"local_ranges": []})
+                if gated.eligibility
+                else None
+            }
+        )
+    )
+    shipped = load_behavior_models(
+        Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
+    )
+    for model in shipped.models:
+        if model.evidence is not None:
+            assert model.evidence.contract_fingerprint == contract_fingerprint(model), model.name
 
 
 def test_b01_1_stale_dependency_and_excess_rate_refuse(config: CanaryConfig) -> None:
@@ -392,6 +467,92 @@ def test_start_context_batch_equals_live(config: CanaryConfig) -> None:
     assert source.latest_operating_point[observed_col] == 0.0
 
 
+def _feed_live(source: LiveFeatureSource, drive: pd.DataFrame) -> list[dict[str, Any]]:
+    points = []
+    for _, row in drive.iterrows():
+        _live_tick(
+            source,
+            row["timestamp"].to_pydatetime(),
+            {
+                "RPM": row["obd:RPM"],
+                "RUN_TIME": row["obd:RUN_TIME"],
+                "COOLANT_TEMP": row["obd:COOLANT_TEMP"],
+            },
+        )
+        assert source.latest_operating_point is not None
+        points.append(dict(source.latest_operating_point))
+    return points
+
+
+def test_start_context_boundaries_session_replay_and_mid_drive_daemon_start(
+    config: CanaryConfig,
+) -> None:
+    """B07.7 — the cold-start context ends at every boundary B01.5 names, and
+    a daemon that starts mid-drive has no start evidence (unknown, never cold).
+    """
+    models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[_cold_model()])
+    observed_col, coolant_col = start_context_columns(_COLD)
+    model = _cold_model()
+
+    # Batch: a second session directory continuing the same running engine
+    # (no stopped rows, run-time past the start window) does not inherit the
+    # first session's start.
+    first = _drive("2026-09-21T120000", initial_coolant=20.0)
+    second = _drive("2026-09-21T120105", initial_coolant=26.0, koeo_seconds=0, first_runtime=65.0)
+    second["timestamp"] = second["timestamp"] + timedelta(seconds=65)
+    batch = append_start_context(pd.concat([first, second], ignore_index=True), [_SPEC])
+    in_second = batch[SESSION_COLUMN] == "2026-09-21T120105"
+    assert (batch.loc[~in_second, observed_col].iloc[-1]) == 1.0
+    assert (batch.loc[in_second, observed_col] == 0.0).all()
+
+    # Live, mid-drive daemon start: a fresh source joining at run-time 600 s.
+    mid = _drive("mid", initial_coolant=20.0, koeo_seconds=0, first_runtime=600.0)
+    points = _feed_live(LiveFeatureSource(config=config, behavior_models=models), mid)
+    assert all(point[observed_col] == 0.0 for point in points)
+    assert all(np.isnan(point[coolant_col]) for point in points)
+    assert point_eligibility(points[-1], model) == "cold_start_no_start_evidence"
+
+    # Replay entry/exit (the ReplayController calls reset(); covered in
+    # tests/test_replay_control.py): an observed cold start does not survive.
+    source = LiveFeatureSource(config=config, behavior_models=models)
+    assert _feed_live(source, first)[-1][observed_col] == 1.0
+    source.reset()
+    resumed = _feed_live(source, second)
+    assert all(point[observed_col] == 0.0 for point in resumed)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "B07.7 known gap: the batch fold resets the start context at every "
+        "session directory (a capture rotating the writer mid-warmup), while "
+        "the live source is never told about a writer rotation and keeps it. "
+        "Live serves a warmup model on rows the evaluation refuses."
+    ),
+)
+def test_start_context_live_matches_batch_across_a_writer_rotation(config: CanaryConfig) -> None:
+    models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[_cold_model()])
+    observed_col, _ = start_context_columns(_COLD)
+    first = _drive("2026-09-21T120000", initial_coolant=20.0, run_seconds=90)
+    # A capture armed 90 s into the run (past the 60 s start window): same
+    # engine run, new directory.
+    second = _drive(
+        "_capture-tuning-2026-09-21T120135",
+        initial_coolant=23.0,
+        koeo_seconds=0,
+        run_seconds=20,
+        first_runtime=90.0,
+    )
+    second["timestamp"] = second["timestamp"] + timedelta(seconds=95)
+    both = pd.concat([first, second], ignore_index=True)
+    batch = append_start_context(both, [_SPEC])[observed_col].tolist()
+    live = [
+        point[observed_col]
+        for point in _feed_live(LiveFeatureSource(config=config, behavior_models=models), both)
+    ]
+    assert live == batch
+
+
 # ---------------------------------------------------------------------------
 # B01.4 — fitting uses the same contract it persists
 # ---------------------------------------------------------------------------
@@ -426,6 +587,38 @@ def test_fit_recipe_persists_fuel_and_cold_start_contract() -> None:
     # Only the two cold drives' closed-loop running rows trained.
     assert model.fit.sessions == ["s0", "s1"]
     assert model.fit.sample_count == 2 * 180
+
+
+def test_fit_recipe_builds_and_persists_the_local_range_contract() -> None:
+    """B07.6 — the refit builds the local-range context from whole sessions
+    (the frame never carries it) and trains only on rows the persisted
+    contract would serve; the blip rows and each session's first 5 s drop."""
+    frames = []
+    for index in range(3):
+        drive = _drive(f"s{index}", initial_coolant=85.0, koeo_seconds=0, run_seconds=120)
+        drive["obd:RPM"] = 800.0 + 10.0 * (np.arange(len(drive)) % 3)  # 20 rpm of idle hunt
+        drive.loc[60:62, "obd:RPM"] = [950.0, 1100.0, 820.0]
+        frames.append(drive)
+    frame = pd.concat(frames, ignore_index=True)
+    local = LocalRangeCondition(channel="obd:RPM", window_seconds=5.0, max_range=100.0, basis="t")
+    recipe = Surface1DRecipe(
+        name="idle_test",
+        output="obd:RPM",
+        x_column="obd:RPM",
+        fit_method="robust_baseline",
+        min_samples=50,
+        min_r_squared=None,
+        min_rpm=400.0,
+        local_ranges=(local,),
+    )
+    assert local_range_column(local) not in frame.columns
+    result = fit_recipe(recipe, frame)
+    assert result.model is not None, result.reason
+    assert result.model.eligibility is not None
+    assert result.model.eligibility.local_ranges == [local]
+    # 120 rows each, minus the first 5 s and the 6 windows (rows 60..65) whose
+    # 5 s span holds the 950 or the 1100.
+    assert result.model.fit.sample_count == 3 * (120 - 5 - 6)
 
 
 # ---------------------------------------------------------------------------
@@ -534,7 +727,7 @@ def test_diagnostic_only_model_is_shown_but_never_alerts(
         ),
     )
 
-    def behavior_source(name: str, severity: str, *, group: str) -> Any:
+    def behavior_source(name: str, severity: str, *, channel: str) -> Any:
         sources_seen.append(name)
         return SimpleNamespace(fired=severity != "ok", severity=1.0)
 

@@ -268,7 +268,7 @@ def test_demoted_model_contributes_no_fusion_vote(
             ),
         )
         fusion = SimpleNamespace(
-            behavior_source=lambda name, severity, *, group: SimpleNamespace(
+            behavior_source=lambda name, severity, *, channel: SimpleNamespace(
                 fired=severity != "ok", severity=1.0
             )
         )
@@ -568,7 +568,8 @@ def test_inventory_records_deployed_identity_as_unknown_without_a_snapshot() -> 
     # A pre-B03.8 daemon (no artifact block) is compared by version/fitted_at.
     for entry in snapshot["models"]:
         entry.pop("artifact")
-    snapshot["models"][0]["version"] = 99
+    by_name = {entry.get("name"): entry for entry in snapshot["models"]}
+    by_name["air_charge_vs_rpm_throttle_did"]["version"] = 99  # by name, not position
     legacy = compare_deployed(models, snapshot)["models"]
     assert legacy["air_charge_vs_rpm_throttle_did"]["match"] is False
     assert "predates B03.8" in legacy["warm_idle_rpm_baseline"]["reason"]

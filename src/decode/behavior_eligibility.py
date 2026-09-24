@@ -29,6 +29,9 @@ this order wins:
 6. inputs — ``input_stale:<ch>``, ``input_missing:<ch>``
 7. rate gates — ``rate_unavailable:<__roc column>``, ``rate_stale:<ch>``,
    ``rate_insufficient_history:<ch>``, ``rate_exceeded:<ch>``
+8. local-range gates (B07.6) — ``range_unavailable:<context column>``,
+   ``range_stale:<ch>``, ``range_insufficient_history:<ch>``,
+   ``range_exceeded:<ch>``
 
 after which the surface itself may be ``off_map``, and a deviation may lack
 its actual value (``actual_stale:<ch>`` / ``actual_missing:<ch>``). A
@@ -60,6 +63,7 @@ from src.decode.behavior_models import (
     fuel_status_name,
 )
 from src.preprocessing.features import ROC_SUFFIX
+from src.preprocessing.local_range import local_range_column
 from src.preprocessing.resampler import gap_column
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import start_context_columns
@@ -85,6 +89,10 @@ RATE_UNAVAILABLE = "rate_unavailable"
 RATE_STALE = "rate_stale"
 RATE_INSUFFICIENT_HISTORY = "rate_insufficient_history"
 RATE_EXCEEDED = "rate_exceeded"
+RANGE_UNAVAILABLE = "range_unavailable"
+RANGE_STALE = "range_stale"
+RANGE_INSUFFICIENT_HISTORY = "range_insufficient_history"
+RANGE_EXCEEDED = "range_exceeded"
 OFF_MAP = "off_map"
 ACTUAL_STALE = "actual_stale"
 ACTUAL_MISSING = "actual_missing"
@@ -161,6 +169,7 @@ def required_channel_groups(
             cold = eligibility.cold_start
             groups.extend([(cold.rpm_channel,), (cold.coolant_channel,)])
         groups.extend(tuple(ctx.any_of) for ctx in eligibility.required_context)
+        groups.extend((condition.channel,) for condition in eligibility.local_ranges)
     unique: list[tuple[str, ...]] = []
     for group in groups:
         if group not in unique:
@@ -374,6 +383,22 @@ def _evaluate(cols: _Columns, spec: ServingSpec, *, include_actual: bool) -> np.
         refusals.assign(undefined, f"{RATE_INSUFFICIENT_HISTORY}:{base}")
         with np.errstate(invalid="ignore"):
             refusals.assign(np.abs(rate) > condition.max_abs_per_second, f"{RATE_EXCEEDED}:{base}")
+
+    # 8. local-range steady gates (B07.6), built before decoding like the rates
+    if spec.eligibility is not None:
+        for local in spec.eligibility.local_ranges:
+            column = local_range_column(local)
+            if not cols.has(column):
+                refusals.assign(np.ones(cols.size, dtype=bool), f"{RANGE_UNAVAILABLE}:{column}")
+                continue
+            spread = cols.floats(column)
+            undefined = ~np.isfinite(spread)
+            refusals.assign(
+                undefined & _stale_mask(cols, local.channel), f"{RANGE_STALE}:{local.channel}"
+            )
+            refusals.assign(undefined, f"{RANGE_INSUFFICIENT_HISTORY}:{local.channel}")
+            with np.errstate(invalid="ignore"):
+                refusals.assign(spread > local.max_range, f"{RANGE_EXCEEDED}:{local.channel}")
 
     if include_actual:
         _, stale, missing = _freshness(cols, spec.output)

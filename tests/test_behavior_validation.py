@@ -417,6 +417,71 @@ def test_evaluated_hours_is_wall_clock_exposure_not_a_row_count() -> None:
     assert metrics.evaluated_hours == pytest.approx(39 / 3600)
 
 
+def test_legacy_artifact_is_reproduced_with_its_own_gates_not_a_later_recipe_gate() -> None:
+    """B07.6 gave warm idle a steady-rpm gate on 2026-09-23. The artifact
+    fitted before it was fitted and validated without that gate, so its
+    reproduction keeps the artifact's own (empty) gates and says so;
+    re-applying the new gate refused every committed held-out row."""
+    from src.analysis.refit import legacy_reproduction_spec
+
+    recipe = {r.name: r for r in default_recipes()}["warm_idle_rpm_baseline"]
+    assert [c.channel for c in recipe.rate_conditions()] == ["obd:RPM__roc"]
+    legacy = load_behavior_models(
+        Path(__file__).parent / "fixtures/behavior_validation/behavior_models_2026-09-22.yaml"
+    ).by_name("warm_idle_rpm_baseline")
+    assert legacy is not None and legacy.eligibility is None and legacy.conditions == []
+    spec, note = legacy_reproduction_spec(recipe, legacy)
+    assert spec.conditions == ()
+    assert spec.eligibility is not None and spec.eligibility.local_ranges == []
+    assert note is not None and "own fitted gates" in note and "local ranges" in note
+    # The recipe's other row gates (mode, engine state) still select the rows.
+    assert spec.operating_mode == "idle"
+
+
+def test_parked_hours_inside_one_drive_are_not_exposure() -> None:
+    """EVALUATOR_VERSION 3: a gap longer than the drive join gap ends a watch.
+
+    2026-09-23T032755 kept recording a parked truck for 11 h, so
+    ``group_drives`` joined the evening drive before it and the morning drive
+    after it into one group, and the first-to-last span counted the parked
+    hours as time the detector watched: 6 warm-idle events over "17.4 h".
+    """
+    names = [f"2026-08-0{d + 1}T120000" for d in range(3)]
+    result = fit_recipe(
+        _timing_recipe(validation=_criteria(min_validation_drives=1)), _corpus(names)
+    )
+    model = result.model or result.candidate
+    assert model is not None
+    evening = _drive("2026-08-09T120000", T0 + timedelta(days=9), n=60, seed=9)
+    morning = _drive("2026-08-09T230000", T0 + timedelta(days=9, hours=11), n=60, seed=10)
+    one_group = pd.concat([evening, morning], ignore_index=True)
+    joined = {"2026-08-09T120000": "drive", "2026-08-09T230000": "drive"}
+    policy = EventPolicy()
+    assert policy.exposure_break_seconds == 600.0  # the profile's drive_join_gap_seconds
+    metrics = fold_metrics(
+        model, evaluate_rows(model, one_group), drive_of_piece=joined, policy=policy
+    )
+    assert metrics.drives == 1
+    assert metrics.evaluated_hours == pytest.approx(120 / 3600)  # two watches, not 11 h
+    # Gaps inside the join gap are still watched time (sparse polling).
+    sparse = evening.iloc[[0, 1, 18, 19, 36, 37]].reset_index(drop=True)
+    metrics = fold_metrics(model, evaluate_rows(model, sparse), drive_of_piece={}, policy=policy)
+    assert metrics.evaluated_hours == pytest.approx(38 / 3600)
+    # The break is the profile's join gap, carried by the policy.
+    document = BehaviorValidationDocument.model_validate(
+        {"approved_operating_modes": ["idle"], "drive_join_gap_seconds": 60000.0}
+    )
+    from src.config import CanaryConfig
+
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    wide = EventPolicy.from_config(config, document)
+    assert wide.exposure_break_seconds == 60000.0
+    metrics = fold_metrics(
+        model, evaluate_rows(model, one_group), drive_of_piece=joined, policy=wide
+    )
+    assert metrics.evaluated_hours == pytest.approx((11 * 3600 + 60) / 3600)
+
+
 def test_row_exceedance_is_not_an_event() -> None:
     policy = EventPolicy(required=3, window=5, window_seconds=8.0, dedupe_seconds=30.0)
     seconds = np.arange(120, dtype=float)

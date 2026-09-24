@@ -1,0 +1,3602 @@
+{
+ "report": "behavior-refit-2026-09-23",
+ "corpus_manifest": "data/analyses/2026-09-23-behavior-corpus-manifest.yaml",
+ "candidate_artifact": "data/nissan-xterra-2008/_candidates/2026-09-23/behavior_models.yaml@sha256:816c150bf4935139a35b0d72fb4cb5df5f11eb809d943c6e2a9734568d16e565",
+ "published_artifact": "data/nissan-xterra-2008/behavior_models.yaml@sha256:9cd174ce0388d73f02e7994d67b4dbf94298df0dd5f53e3ce641a8ac540652aa",
+ "criteria": "data/nissan-xterra-2008/behavior_validation.yaml@sha256:757eea61e8b2ee6dc5d0447e3bcdfb5b547e1e3913871eeed913fbec2648bdcd",
+ "evaluation_frame": "build_evaluation_frame(decode_can=mode-inputs) over the 53 manifest sessions, models = candidate artifact; 81562 rows",
+ "candidate_historical_reproduction": {
+  "warm_idle_rpm_baseline": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 1614,
+    "coverage": 1.0,
+    "r_squared": -0.04656544076220648,
+    "warning_row_rate": 0.006815365551425031,
+    "critical_row_rate": 0.016728624535315983
+   },
+   "recomputed": {
+    "evaluated": 1614,
+    "coverage": 1.0,
+    "r_squared": -0.04656544076220648,
+    "warning_row_rate": 0.006815365551425031,
+    "critical_row_rate": 0.016728624535315983
+   },
+   "held_out": [
+    "2026-09-21T223515",
+    "2026-09-21T225511",
+    "2026-09-21T231724",
+    "2026-09-21T234903",
+    "2026-09-21T235645",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-21T223734",
+    "_capture-tuning-2026-09-21T232153",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "timing_advance_vs_rpm_load": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 7261,
+    "coverage": 0.9103560682046138,
+    "r_squared": 0.4614503750618826,
+    "warning_row_rate": 0.012808153146949455,
+    "critical_row_rate": 0.0016526649221870265
+   },
+   "recomputed": {
+    "evaluated": 7261,
+    "coverage": 0.9103560682046138,
+    "r_squared": 0.4614503750618826,
+    "warning_row_rate": 0.012808153146949455,
+    "critical_row_rate": 0.0016526649221870265
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "timing_advance_vs_rpm_iat": {
+   "status": "held_out_sessions_not_supplied",
+   "held_out": [
+    "2026-07-26T225058"
+   ]
+  },
+  "fuel_trim_vs_rpm_load": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 6157,
+    "coverage": 0.9272590361445783,
+    "r_squared": 0.05545867778107039,
+    "warning_row_rate": 0.016079259379567973,
+    "critical_row_rate": 0.0
+   },
+   "recomputed": {
+    "evaluated": 6157,
+    "coverage": 0.9272590361445783,
+    "r_squared": 0.05545867778107039,
+    "warning_row_rate": 0.016079259379567973,
+    "critical_row_rate": 0.0
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "air_mass_per_cycle_vs_rpm_load": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 7238,
+    "coverage": 0.9067902781257831,
+    "r_squared": 0.8964536956827075,
+    "warning_row_rate": 0.006217187068250898,
+    "critical_row_rate": 0.0008289582757667864
+   },
+   "recomputed": {
+    "evaluated": 7238,
+    "coverage": 0.9067902781257831,
+    "r_squared": 0.8964536968934692,
+    "warning_row_rate": 0.006217187068250898,
+    "critical_row_rate": 0.0008289582757667864
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "ve_vs_rpm_load": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 7142,
+    "coverage": 0.9016538315869208,
+    "r_squared": 0.9035221531779161,
+    "warning_row_rate": 0.00574068888266592,
+    "critical_row_rate": 0.0005600672080649678
+   },
+   "recomputed": {
+    "evaluated": 7142,
+    "coverage": 0.9016538315869208,
+    "r_squared": 0.9035221538118826,
+    "warning_row_rate": 0.00574068888266592,
+    "critical_row_rate": 0.0005600672080649678
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "total_trim_vs_rpm_load_b1": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 1470,
+    "coverage": 0.8755211435378202,
+    "r_squared": 0.09764392377093334,
+    "warning_row_rate": 0.009523809523809525,
+    "critical_row_rate": 0.0020408163265306124
+   },
+   "recomputed": {
+    "evaluated": 1470,
+    "coverage": 0.8755211435378202,
+    "r_squared": 0.09764392377093334,
+    "warning_row_rate": 0.009523809523809525,
+    "critical_row_rate": 0.0020408163265306124
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "total_trim_vs_rpm_load_b2": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 1433,
+    "coverage": 0.8700667880995749,
+    "r_squared": 0.02108279374899036,
+    "warning_row_rate": 0.01465457083042568,
+    "critical_row_rate": 0.0013956734124214933
+   },
+   "recomputed": {
+    "evaluated": 1433,
+    "coverage": 0.8700667880995749,
+    "r_squared": 0.02108279374899036,
+    "warning_row_rate": 0.01465457083042568,
+    "critical_row_rate": 0.0013956734124214933
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "stft_bank_balance_city": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 2151,
+    "coverage": 1.0,
+    "r_squared": -0.0011977640995588512,
+    "warning_row_rate": 0.021385402138540215,
+    "critical_row_rate": 0.0
+   },
+   "recomputed": {
+    "evaluated": 2151,
+    "coverage": 1.0,
+    "r_squared": -0.001197764040876459,
+    "warning_row_rate": 0.021385402138540215,
+    "critical_row_rate": 0.0
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "stft_bank_balance_highway": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 1539,
+    "coverage": 1.0,
+    "r_squared": -0.022444655277406245,
+    "warning_row_rate": 0.07667316439246263,
+    "critical_row_rate": 0.003898635477582846
+   },
+   "recomputed": {
+    "evaluated": 1539,
+    "coverage": 1.0,
+    "r_squared": -0.022444655123707635,
+    "warning_row_rate": 0.07667316439246263,
+    "critical_row_rate": 0.003898635477582846
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  },
+  "cat_warmup": {
+   "status": "no_held_out_evidence",
+   "persisted_validation_samples": 0
+  },
+  "air_charge_vs_rpm_throttle_did": {
+   "status": "reproduced",
+   "mismatched": [],
+   "persisted": {
+    "evaluated": 4009,
+    "coverage": 0.9377777777777778,
+    "r_squared": 0.9067114624881885,
+    "warning_row_rate": 0.012222499376403092,
+    "critical_row_rate": 0.0022449488650536295
+   },
+   "recomputed": {
+    "evaluated": 4009,
+    "coverage": 0.9377777777777778,
+    "r_squared": 0.9067114624881885,
+    "warning_row_rate": 0.012222499376403092,
+    "critical_row_rate": 0.0022449488650536295
+   },
+   "held_out": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "2026-09-22T171544",
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "2026-09-23T145645",
+    "2026-09-23T150658",
+    "2026-09-23T162918",
+    "2026-09-23T165316",
+    "_capture-tuning-2026-09-22T170459",
+    "_capture-tuning-2026-09-22T235224",
+    "_capture-tuning-2026-09-23T022831",
+    "_capture-tuning-2026-09-23T142926",
+    "_capture-tuning-2026-09-23T164007"
+   ]
+  }
+ },
+ "baseline_vs_candidate_same_test_drives": {
+  "warm_idle_rpm_baseline": {
+   "test_drives": [
+    "2026-09-21T223515",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 1614,
+    "evaluated": 1614,
+    "coverage": 1.0,
+    "mae": 21.251548946716234,
+    "bias": 17.33271375464684,
+    "abs_error_p95": 37.5,
+    "warning_half_width_median": 75.0,
+    "skill_vs_baseline": 0.0,
+    "events": 6,
+    "evaluated_hours": 0.6752777777777778,
+    "events_per_hour": 8.885232414644179,
+    "refusals": {
+     "operating_mode_mismatch": 60710,
+     "engine_state_stale:obd:RPM": 102,
+     "engine_not_running": 6
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "control_events_per_hour=8.89>2.0"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 150.0,
+     "direction": "positive",
+     "duration_seconds": 60.0,
+     "windows": 37,
+     "control_detected": 7,
+     "clean_windows": 30,
+     "detected": 30,
+     "detection_fraction": 1.0,
+     "detection_delay_seconds_median": 2.0,
+     "detection_delay_seconds_max": 2.0,
+     "covered_envelope": null
+    },
+    {
+     "synthetic": true,
+     "magnitude": 150.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 37,
+     "control_detected": 7,
+     "clean_windows": 30,
+     "detected": 30,
+     "detection_fraction": 1.0,
+     "detection_delay_seconds_median": 2.0,
+     "detection_delay_seconds_max": 2.0,
+     "covered_envelope": null
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none)",
+   "published": {
+    "eligible": 1614,
+    "evaluated": 1614,
+    "coverage": 1.0,
+    "mae": 18.742255266418834,
+    "bias": 4.83271375464684,
+    "abs_error_p95": 37.5,
+    "warning_half_width_median": 75.0,
+    "skill_vs_baseline": null,
+    "events": 6,
+    "evaluated_hours": 0.6752777777777778,
+    "events_per_hour": 8.885232414644179,
+    "refusals": {
+     "operating_mode_mismatch": 60708,
+     "engine_state_stale:obd:RPM": 101,
+     "engine_not_running": 6
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "control_events_per_hour=8.89>2.0"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 150.0,
+     "direction": "positive",
+     "duration_seconds": 60.0,
+     "windows": 37,
+     "control_detected": 7,
+     "clean_windows": 30,
+     "detected": 30,
+     "detection_fraction": 1.0,
+     "detection_delay_seconds_median": 2.0,
+     "detection_delay_seconds_max": 2.0,
+     "covered_envelope": null
+    },
+    {
+     "synthetic": true,
+     "magnitude": 150.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 37,
+     "control_detected": 7,
+     "clean_windows": 30,
+     "detected": 30,
+     "detection_fraction": 1.0,
+     "detection_delay_seconds_median": 2.0,
+     "detection_delay_seconds_max": 2.0,
+     "covered_envelope": null
+    }
+   ],
+   "fusion_group": "behavior:obd:RPM"
+  },
+  "timing_advance_vs_rpm_load": {
+   "test_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 7976,
+    "evaluated": 7261,
+    "coverage": 0.9103560682046138,
+    "mae": 4.846465739183275,
+    "bias": -1.9420672875539309,
+    "abs_error_p95": 17.911448216766164,
+    "warning_half_width_median": 13.189303013956485,
+    "skill_vs_baseline": 0.35179893289230313,
+    "events": 3,
+    "evaluated_hours": 2.4783333333333335,
+    "events_per_hour": 1.21049092131809,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53451,
+     "engine_not_running": 2176,
+     "off_map": 715,
+     "input_stale:obd:ENGINE_LOAD": 27,
+     "actual_stale:obd:TIMING_ADVANCE": 11
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "mae=4.846>meaningful_deviation=3.0",
+    "warning_half_width_median=13.19>meaningful_deviation=3.0",
+    "synthetic_negative_3_60s_detection=0.56<0.8",
+    "transient_negative_6_3s_detection=0.30>0.0",
+    "transient_negative_6_10s_detection=0.38>0.0"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 3.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 144,
+     "control_detected": 3,
+     "clean_windows": 141,
+     "detected": 79,
+     "detection_fraction": 0.5602836879432624,
+     "detection_delay_seconds_median": 3.0,
+     "detection_delay_seconds_max": 59.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none)",
+   "published": {
+    "eligible": 7976,
+    "evaluated": 6976,
+    "coverage": 0.8746238716148446,
+    "mae": 5.599348939412846,
+    "bias": -1.1277707328711402,
+    "abs_error_p95": 18.416666666666668,
+    "warning_half_width_median": 23.09045711798337,
+    "skill_vs_baseline": null,
+    "events": 3,
+    "evaluated_hours": 2.4794444444444443,
+    "events_per_hour": 1.2099484651579655,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53442,
+     "engine_not_running": 2176,
+     "off_map": 1000,
+     "input_stale:obd:ENGINE_LOAD": 27,
+     "actual_stale:obd:TIMING_ADVANCE": 11
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "mae=5.599>meaningful_deviation=3.0",
+    "warning_half_width_median=23.09>meaningful_deviation=3.0",
+    "synthetic_negative_3_60s_detection=0.52<0.8",
+    "transient_negative_6_3s_detection=0.28>0.0",
+    "transient_negative_6_10s_detection=0.36>0.0",
+    "insufficient:skill_vs_baseline=unavailable (no training baseline)"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 3.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 146,
+     "control_detected": 3,
+     "clean_windows": 143,
+     "detected": 75,
+     "detection_fraction": 0.5244755244755245,
+     "detection_delay_seconds_median": 4.0,
+     "detection_delay_seconds_max": 46.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "fusion_group": "behavior:obd:TIMING_ADVANCE"
+  },
+  "fuel_trim_vs_rpm_load": {
+   "test_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 6640,
+    "evaluated": 6157,
+    "coverage": 0.9272590361445783,
+    "mae": 4.088593683530096,
+    "bias": -0.4817837243200748,
+    "abs_error_p95": 11.76030585106383,
+    "warning_half_width_median": 17.14980011575402,
+    "skill_vs_baseline": -0.02285706546102939,
+    "events": 6,
+    "evaluated_hours": 2.477777777777778,
+    "events_per_hour": 2.42152466367713,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53451,
+     "engine_not_running": 2176,
+     "actual_stale:obd:SHORT_FUEL_TRIM_1": 1347,
+     "off_map": 483,
+     "input_stale:obd:ENGINE_LOAD": 27
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "skill_vs_baseline=-0.023<0.3",
+    "warning_half_width_median=17.15>meaningful_deviation=5.0",
+    "control_events_per_hour=2.42>2.0",
+    "synthetic_positive_5_120s_detection=0.18<0.8"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 5.0,
+     "direction": "positive",
+     "duration_seconds": 120.0,
+     "windows": 79,
+     "control_detected": 5,
+     "clean_windows": 74,
+     "detected": 13,
+     "detection_fraction": 0.17567567567567569,
+     "detection_delay_seconds_median": 42.0,
+     "detection_delay_seconds_max": 100.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none)",
+   "published": {
+    "eligible": 6640,
+    "evaluated": 5416,
+    "coverage": 0.8156626506024096,
+    "mae": 5.388988066261969,
+    "bias": -3.6042805387920853,
+    "abs_error_p95": 13.506762479614325,
+    "warning_half_width_median": 19.13450880640395,
+    "skill_vs_baseline": null,
+    "events": 44,
+    "evaluated_hours": 2.4763888888888888,
+    "events_per_hour": 17.767807066741447,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53442,
+     "engine_not_running": 2176,
+     "actual_stale:obd:SHORT_FUEL_TRIM_1": 1347,
+     "off_map": 1224,
+     "input_stale:obd:ENGINE_LOAD": 27
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "mae=5.389>meaningful_deviation=5.0",
+    "warning_half_width_median=19.13>meaningful_deviation=5.0",
+    "control_events_per_hour=17.8>2.0",
+    "synthetic_positive_5_120s_detection=0.04<0.8",
+    "insufficient:skill_vs_baseline=unavailable (no training baseline)"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 5.0,
+     "direction": "positive",
+     "duration_seconds": 120.0,
+     "windows": 79,
+     "control_detected": 28,
+     "clean_windows": 51,
+     "detected": 2,
+     "detection_fraction": 0.0392156862745098,
+     "detection_delay_seconds_median": 52.5,
+     "detection_delay_seconds_max": 63.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "fusion_group": "behavior:obd:SHORT_FUEL_TRIM_1"
+  },
+  "air_mass_per_cycle_vs_rpm_load": {
+   "test_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 7982,
+    "evaluated": 7238,
+    "coverage": 0.9067902781257831,
+    "mae": 0.12505105352172965,
+    "bias": 0.025494046811841083,
+    "abs_error_p95": 0.5366436270218856,
+    "warning_half_width_median": 0.28058677772037643,
+    "skill_vs_baseline": 0.7213653539302147,
+    "events": 0,
+    "evaluated_hours": 2.477222222222222,
+    "events_per_hour": 0.0,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53451,
+     "engine_not_running": 2176,
+     "off_map": 744,
+     "input_stale:obd:ENGINE_LOAD": 27,
+     "actual_stale:derived:AIR_MASS_PER_CYCLE": 5
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "mae=0.1251>meaningful_deviation=0.08",
+    "warning_half_width_median=0.2806>meaningful_deviation=0.08",
+    "synthetic_negative_0.08_60s_detection=0.25<0.8"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 0.08,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 146,
+     "control_detected": 0,
+     "clean_windows": 146,
+     "detected": 37,
+     "detection_fraction": 0.2534246575342466,
+     "detection_delay_seconds_median": 22.0,
+     "detection_delay_seconds_max": 54.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none)",
+   "published": {
+    "eligible": 7982,
+    "evaluated": 6516,
+    "coverage": 0.8163367577048359,
+    "mae": 0.18336178989417617,
+    "bias": -0.01191934416994444,
+    "abs_error_p95": 0.6562652881975534,
+    "warning_half_width_median": 0.9514872241006698,
+    "skill_vs_baseline": null,
+    "events": 8,
+    "evaluated_hours": 2.477222222222222,
+    "events_per_hour": 3.229423637586903,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53442,
+     "engine_not_running": 2176,
+     "off_map": 1466,
+     "input_stale:obd:ENGINE_LOAD": 27,
+     "actual_stale:derived:AIR_MASS_PER_CYCLE": 5
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "mae=0.1834>meaningful_deviation=0.08",
+    "warning_half_width_median=0.9515>meaningful_deviation=0.08",
+    "control_events_per_hour=3.23>2.0",
+    "synthetic_negative_0.08_60s_detection=0.36<0.8",
+    "insufficient:skill_vs_baseline=unavailable (no training baseline)"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 0.08,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 146,
+     "control_detected": 6,
+     "clean_windows": 140,
+     "detected": 51,
+     "detection_fraction": 0.36428571428571427,
+     "detection_delay_seconds_median": 15.0,
+     "detection_delay_seconds_max": 58.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "fusion_group": "behavior:derived:AIR_MASS_PER_CYCLE"
+  },
+  "ve_vs_rpm_load": {
+   "test_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 7921,
+    "evaluated": 7142,
+    "coverage": 0.9016538315869208,
+    "mae": 3.1678778922285176,
+    "bias": 0.423816134577906,
+    "abs_error_p95": 13.232215578839755,
+    "warning_half_width_median": 7.911734716799261,
+    "skill_vs_baseline": 0.7322165371265932,
+    "events": 0,
+    "evaluated_hours": 2.4730555555555553,
+    "events_per_hour": 0.0,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53451,
+     "engine_not_running": 2176,
+     "off_map": 779,
+     "actual_stale:derived:VE_AMBIENT_PERCENT": 66,
+     "input_stale:obd:ENGINE_LOAD": 27
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "mae=3.168>meaningful_deviation=3.0",
+    "warning_half_width_median=7.912>meaningful_deviation=3.0",
+    "synthetic_negative_3_60s_detection=0.38<0.8"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 3.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 145,
+     "control_detected": 0,
+     "clean_windows": 145,
+     "detected": 55,
+     "detection_fraction": 0.3793103448275862,
+     "detection_delay_seconds_median": 15.0,
+     "detection_delay_seconds_max": 54.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none); recipe now targets derived:VE_AMBIENT_PERCENT on ['obd:RPM', 'obd:ENGINE_LOAD']; artifact evaluated on its own derived:VE_PERCENT on ['obd:RPM', 'obd:ENGINE_LOAD']",
+   "published": {
+    "eligible": 7921,
+    "evaluated": 6451,
+    "coverage": 0.814417371543997,
+    "mae": 4.823543592084784,
+    "bias": -1.7098742982587138,
+    "abs_error_p95": 16.643105133966664,
+    "warning_half_width_median": 27.048996182092573,
+    "skill_vs_baseline": null,
+    "events": 17,
+    "evaluated_hours": 2.471388888888889,
+    "events_per_hour": 6.878723165111835,
+    "refusals": {
+     "engine_state_stale:obd:RPM": 53442,
+     "engine_not_running": 2176,
+     "off_map": 1470,
+     "actual_stale:derived:VE_PERCENT": 66,
+     "input_stale:obd:ENGINE_LOAD": 27
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "mae=4.824>meaningful_deviation=3.0",
+    "warning_half_width_median=27.05>meaningful_deviation=3.0",
+    "control_events_per_hour=6.88>2.0",
+    "synthetic_negative_3_60s_detection=0.44<0.8",
+    "insufficient:skill_vs_baseline=unavailable (no training baseline)"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 3.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 145,
+     "control_detected": 20,
+     "clean_windows": 125,
+     "detected": 55,
+     "detection_fraction": 0.44,
+     "detection_delay_seconds_median": 5.0,
+     "detection_delay_seconds_max": 59.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "fusion_group": "behavior:derived:VE_AMBIENT_PERCENT"
+  },
+  "total_trim_vs_rpm_load_b1": {
+   "published": "no published model of this name"
+  },
+  "total_trim_vs_rpm_load_b2": {
+   "published": "no published model of this name"
+  },
+  "stft_bank_balance_city": {
+   "published": "no published model of this name"
+  },
+  "stft_bank_balance_highway": {
+   "published": "no published model of this name"
+  },
+  "air_charge_vs_rpm_throttle_did": {
+   "test_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "candidate": {
+    "eligible": 4275,
+    "evaluated": 4009,
+    "coverage": 0.9377777777777778,
+    "mae": 1770.5205952403028,
+    "bias": 537.7010203761525,
+    "abs_error_p95": 6034.8310652130185,
+    "warning_half_width_median": 8316.92843390525,
+    "skill_vs_baseline": 0.7063120126013949,
+    "events": 1,
+    "evaluated_hours": 2.236666666666667,
+    "events_per_hour": 0.4470938897168405,
+    "refusals": {
+     "input_stale:did:ECM_RPM": 59301,
+     "off_map": 266,
+     "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 52,
+     "actual_stale:did:ECM_AIR_CHARGE": 13
+    }
+   },
+   "candidate_verdict": "failed",
+   "candidate_failures": [
+    "mae=1771>meaningful_deviation=1500.0",
+    "warning_half_width_median=8317>meaningful_deviation=1500.0",
+    "synthetic_negative_1500_60s_detection=0.17<0.8"
+   ],
+   "candidate_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 1500.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 134,
+     "control_detected": 2,
+     "clean_windows": 132,
+     "detected": 23,
+     "detection_fraction": 0.17424242424242425,
+     "detection_delay_seconds_median": 25.0,
+     "detection_delay_seconds_max": 59.0,
+     "covered_envelope": 1.0
+    }
+   ],
+   "published_row_contract": "catalog recipe contract (artifact has none)",
+   "published": {
+    "eligible": 4275,
+    "evaluated": 3720,
+    "coverage": 0.8701754385964913,
+    "mae": 1872.9948377203532,
+    "bias": 64.17977431755038,
+    "abs_error_p95": 5794.123770491797,
+    "warning_half_width_median": 6510.037661901428,
+    "skill_vs_baseline": null,
+    "events": 0,
+    "evaluated_hours": 2.8066666666666666,
+    "events_per_hour": 0.0,
+    "refusals": {
+     "input_stale:did:ECM_RPM": 59292,
+     "off_map": 555,
+     "input_stale:did:ECM_THROTTLE_POS_SENSOR_1": 52,
+     "actual_stale:did:ECM_AIR_CHARGE": 13
+    }
+   },
+   "published_would_be_verdict": "failed",
+   "published_failures": [
+    "mae=1873>meaningful_deviation=1500.0",
+    "warning_half_width_median=6510>meaningful_deviation=1500.0",
+    "synthetic_negative_1500_60s_detection=0.18<0.8",
+    "insufficient:skill_vs_baseline=unavailable (no training baseline)"
+   ],
+   "published_synthetic": [
+    {
+     "synthetic": true,
+     "magnitude": 1500.0,
+     "direction": "negative",
+     "duration_seconds": 60.0,
+     "windows": 165,
+     "control_detected": 0,
+     "clean_windows": 165,
+     "detected": 29,
+     "detection_fraction": 0.17575757575757575,
+     "detection_delay_seconds_median": 13.0,
+     "detection_delay_seconds_max": 59.0,
+     "covered_envelope": 0.9565217391304348
+    }
+   ],
+   "fusion_group": "behavior:did:ECM_AIR_CHARGE"
+  }
+ },
+ "candidate_per_context": {
+  "warm_idle_rpm_baseline": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 1614,
+     "evaluated": 1614,
+     "mae": 21.251548946716234,
+     "bias": 17.33271375464684,
+     "events": 6
+    }
+   },
+   "intake_temp": {
+    "stale": {
+     "eligible": 7,
+     "evaluated": 7,
+     "mae": 17.857142857142858,
+     "bias": 10.714285714285714,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 671,
+     "evaluated": 671,
+     "mae": 30.178837555886737,
+     "bias": 23.28614008941878,
+     "events": 5
+    },
+    "[50,150) degC": {
+     "eligible": 169,
+     "evaluated": 169,
+     "mae": 13.31360946745562,
+     "bias": 12.721893491124261,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 758,
+     "evaluated": 758,
+     "mae": 15.352902374670185,
+     "bias": 13.308047493403693,
+     "events": 1
+    },
+    "[20,30) degC": {
+     "eligible": 9,
+     "evaluated": 9,
+     "mae": 4.166666666666667,
+     "bias": 4.166666666666667,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "stale": {
+     "eligible": 8,
+     "evaluated": 8,
+     "mae": 14.0625,
+     "bias": 14.0625,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 875,
+     "evaluated": 875,
+     "mae": 18.4,
+     "bias": 12.914285714285715,
+     "events": 3
+    },
+    "[80,90) degC": {
+     "eligible": 503,
+     "evaluated": 503,
+     "mae": 16.227634194831015,
+     "bias": 14.537773359840955,
+     "events": 1
+    },
+    "[60,80) degC": {
+     "eligible": 228,
+     "evaluated": 228,
+     "mae": 43.530701754385966,
+     "bias": 40.57017543859649,
+     "events": 3
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 1547,
+     "evaluated": 1547,
+     "mae": 16.184550743374274,
+     "bias": 12.613122171945701,
+     "events": 1
+    },
+    "[30,40) %": {
+     "eligible": 35,
+     "evaluated": 35,
+     "mae": 105.71428571428571,
+     "bias": 99.28571428571429,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 4,
+     "evaluated": 4,
+     "mae": 475.0,
+     "bias": 475.0,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 2,
+     "evaluated": 2,
+     "mae": 131.25,
+     "bias": 131.25,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 20,
+     "evaluated": 20,
+     "mae": 31.25,
+     "bias": 26.25,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 6,
+     "evaluated": 6,
+     "mae": 462.5,
+     "bias": 383.3333333333333,
+     "events": 0
+    }
+   },
+   "baro": {
+    "stale": {
+     "eligible": 44,
+     "evaluated": 44,
+     "mae": 31.818181818181817,
+     "bias": 28.977272727272727,
+     "events": 1
+    },
+    "[76,82) kPa": {
+     "eligible": 809,
+     "evaluated": 809,
+     "mae": 26.498763906056862,
+     "bias": 20.441903584672435,
+     "events": 4
+    },
+    "[82,90) kPa": {
+     "eligible": 761,
+     "evaluated": 761,
+     "mae": 15.062417871222076,
+     "bias": 13.354139290407359,
+     "events": 1
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 229,
+     "evaluated": 229,
+     "mae": 29.80349344978166,
+     "bias": 24.45414847161572,
+     "events": 2
+    },
+    "steady": {
+     "eligible": 1337,
+     "evaluated": 1337,
+     "mae": 13.743455497382199,
+     "bias": 10.415108451757666,
+     "events": 1
+    },
+    "transient": {
+     "eligible": 48,
+     "evaluated": 48,
+     "mae": 189.58333333333334,
+     "bias": 176.04166666666666,
+     "events": 2
+    }
+   }
+  },
+  "timing_advance_vs_rpm_load": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 7976,
+     "evaluated": 7261,
+     "mae": 4.846465739183275,
+     "bias": -1.9420672875539309,
+     "events": 3
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 5658,
+     "evaluated": 5031,
+     "mae": 6.080520015181828,
+     "bias": -2.623609604624467,
+     "events": 2
+    },
+    "stale": {
+     "eligible": 21,
+     "evaluated": 14,
+     "mae": 2.94466414024146,
+     "bias": -2.786036046139862,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 1596,
+     "evaluated": 1518,
+     "mae": 2.8867536882880227,
+     "bias": -0.5309529084560625,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 640,
+     "evaluated": 637,
+     "mae": 0.19628444436237039,
+     "bias": -0.1068431344901975,
+     "events": 1
+    },
+    "[50,150) degC": {
+     "eligible": 61,
+     "evaluated": 61,
+     "mae": 0.8318188194516107,
+     "bias": 0.18163020146092185,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 443,
+     "evaluated": 249,
+     "mae": 8.879284717081303,
+     "bias": -5.621833878999248,
+     "events": 1
+    },
+    "[60,80) degC": {
+     "eligible": 953,
+     "evaluated": 912,
+     "mae": 6.052267560634999,
+     "bias": -1.2244501865182094,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 1537,
+     "evaluated": 1430,
+     "mae": 5.465973798849163,
+     "bias": -1.7454292601122963,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 5021,
+     "evaluated": 4654,
+     "mae": 4.211522143407259,
+     "bias": -1.9444457673871862,
+     "events": 2
+    },
+    "stale": {
+     "eligible": 22,
+     "evaluated": 16,
+     "mae": 2.6757021616065106,
+     "bias": -2.4625578483204134,
+     "events": 0
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 3097,
+     "evaluated": 2756,
+     "mae": 1.1830730089572068,
+     "bias": -0.39953452161774955,
+     "events": 3
+    },
+    "[30,40) %": {
+     "eligible": 539,
+     "evaluated": 537,
+     "mae": 2.4900170493243388,
+     "bias": -0.8407404817370987,
+     "events": 1
+    },
+    "[60,101) %": {
+     "eligible": 1231,
+     "evaluated": 912,
+     "mae": 4.919233279387692,
+     "bias": -4.747900971884037,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 977,
+     "evaluated": 946,
+     "mae": 3.176629609318806,
+     "bias": -2.0411153563316007,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 2132,
+     "evaluated": 2110,
+     "mae": 10.948372987118178,
+     "bias": -2.9799881427534687,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 5080,
+     "evaluated": 4611,
+     "mae": 5.110467947301768,
+     "bias": -1.9916714001863125,
+     "events": 3
+    },
+    "[82,90) kPa": {
+     "eligible": 2846,
+     "evaluated": 2610,
+     "mae": 4.406062796010282,
+     "bias": -1.8613048803436325,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 50,
+     "evaluated": 40,
+     "mae": 3.1499032403616027,
+     "bias": -1.493700274328139,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 447,
+     "evaluated": 401,
+     "mae": 4.062739701190588,
+     "bias": -2.106370008519043,
+     "events": 2
+    },
+    "transient": {
+     "eligible": 4856,
+     "evaluated": 4378,
+     "mae": 5.821830637674661,
+     "bias": -2.385911243425091,
+     "events": 1
+    },
+    "steady": {
+     "eligible": 2673,
+     "evaluated": 2482,
+     "mae": 3.252640846209775,
+     "bias": -1.1326256155511327,
+     "events": 0
+    }
+   }
+  },
+  "fuel_trim_vs_rpm_load": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 6640,
+     "evaluated": 6157,
+     "mae": 4.088593683530096,
+     "bias": -0.4817837243200748,
+     "events": 6
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 4961,
+     "evaluated": 4525,
+     "mae": 4.1825392564757395,
+     "bias": -0.9732351119592471,
+     "events": 3
+    },
+    "stale": {
+     "eligible": 6,
+     "evaluated": 6,
+     "mae": 3.8399610142269203,
+     "bias": -2.1757394058961173,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 1201,
+     "evaluated": 1159,
+     "mae": 4.218534792629073,
+     "bias": 0.17023631060503894,
+     "events": 3
+    },
+    "[40,50) degC": {
+     "eligible": 433,
+     "evaluated": 429,
+     "mae": 2.82333861354341,
+     "bias": 2.645573819371924,
+     "events": 0
+    },
+    "[50,150) degC": {
+     "eligible": 39,
+     "evaluated": 38,
+     "mae": 3.2617715260395603,
+     "bias": 3.114365129223,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 316,
+     "evaluated": 313,
+     "mae": 5.332445908586227,
+     "bias": -4.857895599427079,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 713,
+     "evaluated": 688,
+     "mae": 3.942478457740523,
+     "bias": -0.7574820555646796,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 1247,
+     "evaluated": 1150,
+     "mae": 4.231670096730869,
+     "bias": 0.8830865586567087,
+     "events": 2
+    },
+    "[90,100) degC": {
+     "eligible": 4364,
+     "evaluated": 4006,
+     "mae": 3.9754293434701284,
+     "bias": -0.48432924519339504,
+     "events": 4
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 2381,
+     "evaluated": 2275,
+     "mae": 4.34777929198726,
+     "bias": -0.5180814740797945,
+     "events": 1
+    },
+    "[30,40) %": {
+     "eligible": 468,
+     "evaluated": 460,
+     "mae": 5.322246165544045,
+     "bias": -1.9009100471728841,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 868,
+     "evaluated": 863,
+     "mae": 4.025724165870309,
+     "bias": -1.7431887968461286,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 1830,
+     "evaluated": 1755,
+     "mae": 3.929804555132536,
+     "bias": -0.27604294464216056,
+     "events": 1
+    },
+    "[60,101) %": {
+     "eligible": 1093,
+     "evaluated": 804,
+     "mae": 3.0634741724749324,
+     "bias": 1.3377349304944761,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 4294,
+     "evaluated": 4056,
+     "mae": 4.10433136887681,
+     "bias": -1.3545496142149396,
+     "events": 4
+    },
+    "[82,90) kPa": {
+     "eligible": 2317,
+     "evaluated": 2074,
+     "mae": 4.073135921646825,
+     "bias": 1.248053478323777,
+     "events": 2
+    },
+    "stale": {
+     "eligible": 29,
+     "evaluated": 27,
+     "mae": 2.9118287346275387,
+     "bias": -2.250076645422931,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 316,
+     "evaluated": 295,
+     "mae": 3.8677261555617752,
+     "bias": -0.6158106466884493,
+     "events": 0
+    },
+    "transient": {
+     "eligible": 4250,
+     "evaluated": 3841,
+     "mae": 4.24442958673935,
+     "bias": -0.5187844302688377,
+     "events": 5
+    },
+    "steady": {
+     "eligible": 2074,
+     "evaluated": 2021,
+     "mae": 3.8246600944771063,
+     "bias": -0.391898690352797,
+     "events": 1
+    }
+   }
+  },
+  "air_mass_per_cycle_vs_rpm_load": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 7982,
+     "evaluated": 7238,
+     "mae": 0.12505105307597542,
+     "bias": 0.025494046148633133,
+     "events": 0
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 5658,
+     "evaluated": 5012,
+     "mae": 0.15345582964679558,
+     "bias": 0.03439002069229783,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 20,
+     "evaluated": 13,
+     "mae": 0.08808491640577851,
+     "bias": -0.03853539271435594,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 1596,
+     "evaluated": 1507,
+     "mae": 0.0799633113254483,
+     "bias": 0.00494134587781573,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 647,
+     "evaluated": 645,
+     "mae": 0.019928161983294976,
+     "bias": 0.006027191318459644,
+     "events": 0
+    },
+    "[50,150) degC": {
+     "eligible": 61,
+     "evaluated": 61,
+     "mae": 0.024515170724916272,
+     "bias": 0.02180222591838878,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 443,
+     "evaluated": 355,
+     "mae": 0.12019260000698194,
+     "bias": -0.01729030174835318,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 953,
+     "evaluated": 897,
+     "mae": 0.059156690384743436,
+     "bias": -0.010197132040341023,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 1536,
+     "evaluated": 1407,
+     "mae": 0.08962335952701954,
+     "bias": 0.006897704007225208,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 5029,
+     "evaluated": 4564,
+     "mae": 0.14941566067079304,
+     "bias": 0.041754934287449856,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 21,
+     "evaluated": 15,
+     "mae": 0.09029704868671343,
+     "bias": -0.030919936095274953,
+     "events": 0
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 3098,
+     "evaluated": 2688,
+     "mae": 0.04190006014046782,
+     "bias": 9.666763267157983e-05,
+     "events": 0
+    },
+    "[30,40) %": {
+     "eligible": 544,
+     "evaluated": 542,
+     "mae": 0.19756845724901048,
+     "bias": -0.08491151401577722,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 1231,
+     "evaluated": 929,
+     "mae": 0.3740753284233661,
+     "bias": 0.29970849534398714,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 977,
+     "evaluated": 969,
+     "mae": 0.20073772583602006,
+     "bias": 0.05380474772321532,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 2132,
+     "evaluated": 2110,
+     "mae": 0.06795223707912722,
+     "bias": -0.047525065732048795,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 5087,
+     "evaluated": 4623,
+     "mae": 0.12920881051108465,
+     "bias": 0.017941253934600887,
+     "events": 0
+    },
+    "[82,90) kPa": {
+     "eligible": 2846,
+     "evaluated": 2573,
+     "mae": 0.11731783466198849,
+     "bias": 0.039580728627963184,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 49,
+     "evaluated": 42,
+     "mae": 0.14115244252070114,
+     "bias": -0.006136325609584376,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 453,
+     "evaluated": 400,
+     "mae": 0.09821393941770154,
+     "bias": 0.007339882826092492,
+     "events": 0
+    },
+    "transient": {
+     "eligible": 4856,
+     "evaluated": 4295,
+     "mae": 0.16245570133886733,
+     "bias": 0.03191492676105547,
+     "events": 0
+    },
+    "steady": {
+     "eligible": 2673,
+     "evaluated": 2543,
+     "mae": 0.06609780147321839,
+     "bias": 0.01750505011979409,
+     "events": 0
+    }
+   }
+  },
+  "ve_vs_rpm_load": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 7921,
+     "evaluated": 7142,
+     "mae": 3.1678778900238247,
+     "bias": 0.42381612609418834,
+     "events": 0
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 5640,
+     "evaluated": 4954,
+     "mae": 3.848502228059708,
+     "bias": 0.4623223596148895,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 1573,
+     "evaluated": 1482,
+     "mae": 2.0500610724783734,
+     "bias": 0.2738000288365946,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 647,
+     "evaluated": 645,
+     "mae": 0.6788204753979047,
+     "bias": 0.38727375466157465,
+     "events": 0
+    },
+    "[50,150) degC": {
+     "eligible": 61,
+     "evaluated": 61,
+     "mae": 1.368428470455244,
+     "bias": 1.327648992458713,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 441,
+     "evaluated": 354,
+     "mae": 2.5248734440808915,
+     "bias": 0.3474304503227843,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 946,
+     "evaluated": 889,
+     "mae": 1.6364294489513358,
+     "bias": -0.24578513526307033,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 1518,
+     "evaluated": 1378,
+     "mae": 2.3262085144727713,
+     "bias": -0.045493856560838625,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 5016,
+     "evaluated": 4521,
+     "mae": 3.7759074492997806,
+     "bias": 0.704511814364108,
+     "events": 0
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 3071,
+     "evaluated": 2619,
+     "mae": 1.0808751117795956,
+     "bias": -0.07424753485597235,
+     "events": 0
+    },
+    "[30,40) %": {
+     "eligible": 532,
+     "evaluated": 530,
+     "mae": 5.271519042833111,
+     "bias": -2.207371961142573,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 1223,
+     "evaluated": 926,
+     "mae": 9.015151054513098,
+     "bias": 6.771020146720348,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 972,
+     "evaluated": 964,
+     "mae": 4.925568132629073,
+     "bias": 0.9134696087588748,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 2123,
+     "evaluated": 2103,
+     "mae": 1.8563905486278147,
+     "bias": -1.312074727983143,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 5086,
+     "evaluated": 4591,
+     "mae": 3.2639909346507614,
+     "bias": 0.32746772239299543,
+     "events": 0
+    },
+    "[82,90) kPa": {
+     "eligible": 2835,
+     "evaluated": 2551,
+     "mae": 2.9949045509872643,
+     "bias": 0.5972130376552138,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 392,
+     "evaluated": 344,
+     "mae": 2.066037788375746,
+     "bias": 0.9087232261801783,
+     "events": 0
+    },
+    "transient": {
+     "eligible": 4856,
+     "evaluated": 4259,
+     "mae": 4.150448355337466,
+     "bias": 0.4681353117717558,
+     "events": 0
+    },
+    "steady": {
+     "eligible": 2673,
+     "evaluated": 2539,
+     "mae": 1.6689670523696871,
+     "bias": 0.2837753800404898,
+     "events": 0
+    }
+   }
+  },
+  "total_trim_vs_rpm_load_b1": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 1679,
+     "evaluated": 1470,
+     "mae": 3.586164893120084,
+     "bias": 0.14140376645108463,
+     "events": 1
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 862,
+     "evaluated": 680,
+     "mae": 4.350795756213417,
+     "bias": -0.756066733090648,
+     "events": 1
+    },
+    "[30,40) degC": {
+     "eligible": 437,
+     "evaluated": 410,
+     "mae": 4.079618515830669,
+     "bias": 0.21678838122275482,
+     "events": 0
+    },
+    "[50,150) degC": {
+     "eligible": 5,
+     "evaluated": 5,
+     "mae": 1.7874928571635522,
+     "bias": 1.7874928571635522,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 375,
+     "evaluated": 375,
+     "mae": 1.6841072610266892,
+     "bias": 1.6644485722602336,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 40,
+     "evaluated": 7,
+     "mae": 6.830747462919595,
+     "bias": -6.830747462919595,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 177,
+     "evaluated": 166,
+     "mae": 4.1706612653152755,
+     "bias": -0.6981967759774063,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 351,
+     "evaluated": 320,
+     "mae": 3.0528955949563645,
+     "bias": 0.7638910836423918,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 1111,
+     "evaluated": 977,
+     "mae": 3.638271033999706,
+     "bias": 0.13012721286613657,
+     "events": 1
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 1044,
+     "evaluated": 885,
+     "mae": 3.0112950186821674,
+     "bias": 0.44656905122283946,
+     "events": 1
+    },
+    "[30,40) %": {
+     "eligible": 83,
+     "evaluated": 42,
+     "mae": 5.8156270355687525,
+     "bias": -0.442112405357694,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 203,
+     "evaluated": 196,
+     "mae": 7.1153415942145894,
+     "bias": 0.17789898442516924,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 212,
+     "evaluated": 210,
+     "mae": 3.030191946570295,
+     "bias": -2.0063204187925177,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 137,
+     "evaluated": 137,
+     "mae": 2.4194358000955862,
+     "bias": 1.588888572080292,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 972,
+     "evaluated": 803,
+     "mae": 3.847743315818532,
+     "bias": -1.338250346776191,
+     "events": 1
+    },
+    "[82,90) kPa": {
+     "eligible": 707,
+     "evaluated": 667,
+     "mae": 3.271251139856434,
+     "bias": 1.9227564694818229,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "steady": {
+     "eligible": 1679,
+     "evaluated": 1470,
+     "mae": 3.586164893120084,
+     "bias": 0.14140376645108463,
+     "events": 1
+    }
+   }
+  },
+  "total_trim_vs_rpm_load_b2": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 1647,
+     "evaluated": 1433,
+     "mae": 3.444753294248809,
+     "bias": 0.3482506697846346,
+     "events": 1
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 862,
+     "evaluated": 687,
+     "mae": 4.111297678507854,
+     "bias": -0.4239878036660506,
+     "events": 1
+    },
+    "[30,40) degC": {
+     "eligible": 405,
+     "evaluated": 366,
+     "mae": 3.6484946450031615,
+     "bias": 0.04045176457497393,
+     "events": 0
+    },
+    "[50,150) degC": {
+     "eligible": 5,
+     "evaluated": 5,
+     "mae": 2.283951410644809,
+     "bias": 2.283951410644809,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 375,
+     "evaluated": 375,
+     "mae": 2.0402697823980436,
+     "bias": 2.03759394141945,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 40,
+     "evaluated": 9,
+     "mae": 4.861948708576998,
+     "bias": -4.503152412280701,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 176,
+     "evaluated": 160,
+     "mae": 3.615096709010234,
+     "bias": -0.47450979944909355,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 337,
+     "evaluated": 306,
+     "mae": 3.3350464557792616,
+     "bias": 1.3999475109498518,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 1094,
+     "evaluated": 958,
+     "mae": 3.4380315692810632,
+     "bias": 0.19531232888633418,
+     "events": 1
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 1013,
+     "evaluated": 836,
+     "mae": 2.9574762260159795,
+     "bias": 0.597115525414649,
+     "events": 1
+    },
+    "[30,40) %": {
+     "eligible": 82,
+     "evaluated": 54,
+     "mae": 4.359509560122806,
+     "bias": -0.7591518467808084,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 203,
+     "evaluated": 196,
+     "mae": 6.9498415521869115,
+     "bias": 0.04969234155926519,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 212,
+     "evaluated": 210,
+     "mae": 2.4164016087672886,
+     "bias": -1.1029254995126707,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 137,
+     "evaluated": 137,
+     "mae": 2.6193762583415143,
+     "bias": 1.9176896805324335,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 940,
+     "evaluated": 764,
+     "mae": 3.678037463746042,
+     "bias": -1.1921337401864707,
+     "events": 1
+    },
+    "[82,90) kPa": {
+     "eligible": 707,
+     "evaluated": 669,
+     "mae": 3.1783420752714013,
+     "bias": 2.107374271007242,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "steady": {
+     "eligible": 1647,
+     "evaluated": 1433,
+     "mae": 3.444753294248809,
+     "bias": 0.3482506697846346,
+     "events": 1
+    }
+   }
+  },
+  "stft_bank_balance_city": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 2151,
+     "evaluated": 2151,
+     "mae": 0.943538831633596,
+     "bias": 0.04241796352025932,
+     "events": 5
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 1801,
+     "evaluated": 1801,
+     "mae": 0.9484864715238407,
+     "bias": -0.01775310077758473,
+     "events": 4
+    },
+    "[30,40) degC": {
+     "eligible": 346,
+     "evaluated": 346,
+     "mae": 0.8998130985137283,
+     "bias": 0.327230677713382,
+     "events": 1
+    },
+    "[40,50) degC": {
+     "eligible": 4,
+     "evaluated": 4,
+     "mae": 2.498139885919435,
+     "bias": 2.498139885919435,
+     "events": 0
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 100,
+     "evaluated": 100,
+     "mae": 2.553772120659513,
+     "bias": -2.553772120659513,
+     "events": 2
+    },
+    "[60,80) degC": {
+     "eligible": 180,
+     "evaluated": 180,
+     "mae": 1.1356831716398978,
+     "bias": -0.899754807411114,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 478,
+     "evaluated": 478,
+     "mae": 0.6996894558951753,
+     "bias": -0.18379827689896228,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 1393,
+     "evaluated": 1393,
+     "mae": 0.8867913022001711,
+     "bias": 0.42816201959061984,
+     "events": 2
+    }
+   },
+   "load": {
+    "[20,30) %": {
+     "eligible": 484,
+     "evaluated": 484,
+     "mae": 1.0086854274031487,
+     "bias": -0.16891549120575797,
+     "events": 1
+    },
+    "[40,60) %": {
+     "eligible": 342,
+     "evaluated": 342,
+     "mae": 0.908315115249303,
+     "bias": 0.2393642206529791,
+     "events": 2
+    },
+    "[30,40) %": {
+     "eligible": 208,
+     "evaluated": 208,
+     "mae": 0.9040989701561144,
+     "bias": -0.0880360595030157,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 698,
+     "evaluated": 698,
+     "mae": 0.8833510482916618,
+     "bias": -0.11664590769941141,
+     "events": 1
+    },
+    "[60,101) %": {
+     "eligible": 419,
+     "evaluated": 419,
+     "mae": 1.01688041304398,
+     "bias": 0.4555224767617236,
+     "events": 2
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 1657,
+     "evaluated": 1657,
+     "mae": 1.014995758266708,
+     "bias": 0.027112930444776397,
+     "events": 5
+    },
+    "[82,90) kPa": {
+     "eligible": 488,
+     "evaluated": 488,
+     "mae": 0.6940273622422481,
+     "bias": 0.11338855821064768,
+     "events": 1
+    },
+    "stale": {
+     "eligible": 6,
+     "evaluated": 6,
+     "mae": 1.5031171036188047,
+     "bias": -1.5031171036188047,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "steady": {
+     "eligible": 371,
+     "evaluated": 371,
+     "mae": 1.0524467713502148,
+     "bias": -0.17682354326223465,
+     "events": 1
+    },
+    "transient": {
+     "eligible": 1735,
+     "evaluated": 1735,
+     "mae": 0.9081952468730164,
+     "bias": 0.09854607030056542,
+     "events": 4
+    },
+    "rate_unavailable": {
+     "eligible": 45,
+     "evaluated": 45,
+     "mae": 1.4083449188500328,
+     "bias": -0.31410795309142525,
+     "events": 0
+    }
+   }
+  },
+  "stft_bank_balance_highway": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 1539,
+     "evaluated": 1539,
+     "mae": 1.1558970249522718,
+     "bias": 0.21533624360801212,
+     "events": 9
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 1539,
+     "evaluated": 1539,
+     "mae": 1.1558970249522718,
+     "bias": 0.21533624360801212,
+     "events": 9
+    }
+   },
+   "coolant": {
+    "[80,90) degC": {
+     "eligible": 162,
+     "evaluated": 162,
+     "mae": 0.8846406144549189,
+     "bias": 0.35353737305591615,
+     "events": 1
+    },
+    "[90,100) degC": {
+     "eligible": 1377,
+     "evaluated": 1377,
+     "mae": 1.187809543834313,
+     "bias": 0.1990772872023763,
+     "events": 8
+    }
+   },
+   "load": {
+    "[0,20) %": {
+     "eligible": 191,
+     "evaluated": 191,
+     "mae": 1.1906854061613057,
+     "bias": 0.6107567986176989,
+     "events": 1
+    },
+    "[40,60) %": {
+     "eligible": 484,
+     "evaluated": 484,
+     "mae": 1.01027218821272,
+     "bias": -0.2775725639706685,
+     "events": 2
+    },
+    "[30,40) %": {
+     "eligible": 171,
+     "evaluated": 171,
+     "mae": 1.1391336919082762,
+     "bias": 0.031116527959912522,
+     "events": 0
+    },
+    "[20,30) %": {
+     "eligible": 204,
+     "evaluated": 204,
+     "mae": 1.1045984415092487,
+     "bias": 0.07256066845706512,
+     "events": 0
+    },
+    "[60,101) %": {
+     "eligible": 489,
+     "evaluated": 489,
+     "mae": 1.3137074158396282,
+     "bias": 0.6727397723766205,
+     "events": 7
+    }
+   },
+   "baro": {
+    "[82,90) kPa": {
+     "eligible": 618,
+     "evaluated": 618,
+     "mae": 1.2385808085737189,
+     "bias": 0.40162359256809527,
+     "events": 6
+    },
+    "[76,82) kPa": {
+     "eligible": 921,
+     "evaluated": 921,
+     "mae": 1.100415398157424,
+     "bias": 0.09033561205824964,
+     "events": 4
+    }
+   },
+   "steady_state": {
+    "transient": {
+     "eligible": 1110,
+     "evaluated": 1110,
+     "mae": 1.153759794339048,
+     "bias": 0.35432634981790107,
+     "events": 8
+    },
+    "steady": {
+     "eligible": 408,
+     "evaluated": 408,
+     "mae": 1.1181105355474426,
+     "bias": -0.25481083472300303,
+     "events": 2
+    },
+    "rate_unavailable": {
+     "eligible": 21,
+     "evaluated": 21,
+     "mae": 2.003002437230756,
+     "bias": 2.003002437230756,
+     "events": 1
+    }
+   }
+  },
+  "air_charge_vs_rpm_throttle_did": {
+   "calibration": {
+    "ZS44A-20260920": {
+     "eligible": 4275,
+     "evaluated": 4009,
+     "mae": 1770.5205952403028,
+     "bias": 537.7010203761525,
+     "events": 1
+    }
+   },
+   "intake_temp": {
+    "[20,30) degC": {
+     "eligible": 3652,
+     "evaluated": 3473,
+     "mae": 1863.6204039294196,
+     "bias": 558.3281053236549,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 4,
+     "evaluated": 3,
+     "mae": 2686.8574549226955,
+     "bias": 1800.4453337105745,
+     "events": 0
+    },
+    "[30,40) degC": {
+     "eligible": 535,
+     "evaluated": 512,
+     "mae": 1176.86361622274,
+     "bias": 393.272478190657,
+     "events": 1
+    },
+    "[50,150) degC": {
+     "eligible": 65,
+     "evaluated": 2,
+     "mae": 925.3235493355628,
+     "bias": 567.2660272116686,
+     "events": 0
+    },
+    "[40,50) degC": {
+     "eligible": 19,
+     "evaluated": 19,
+     "mae": 694.6322369483266,
+     "bias": 456.7633689352911,
+     "events": 1
+    }
+   },
+   "coolant": {
+    "[-40,60) degC": {
+     "eligible": 81,
+     "evaluated": 75,
+     "mae": 1293.5236411683093,
+     "bias": 649.530942377108,
+     "events": 0
+    },
+    "[60,80) degC": {
+     "eligible": 349,
+     "evaluated": 281,
+     "mae": 1104.7845633798831,
+     "bias": -511.2828713876986,
+     "events": 0
+    },
+    "[80,90) degC": {
+     "eligible": 714,
+     "evaluated": 709,
+     "mae": 1701.582573661053,
+     "bias": -132.91341162474393,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 7,
+     "evaluated": 6,
+     "mae": 1781.0666330660672,
+     "bias": 1337.8605724600068,
+     "events": 0
+    },
+    "[90,100) degC": {
+     "eligible": 3124,
+     "evaluated": 2938,
+     "mae": 1862.984985158925,
+     "bias": 795.3735542126749,
+     "events": 1
+    }
+   },
+   "load": {
+    "[30,40) %": {
+     "eligible": 325,
+     "evaluated": 321,
+     "mae": 1922.5699333874654,
+     "bias": 104.8685548182988,
+     "events": 1
+    },
+    "[20,30) %": {
+     "eligible": 1078,
+     "evaluated": 1061,
+     "mae": 917.790987927482,
+     "bias": -175.06118988707738,
+     "events": 1
+    },
+    "[60,101) %": {
+     "eligible": 851,
+     "evaluated": 717,
+     "mae": 4094.243702040504,
+     "bias": 3682.057353722572,
+     "events": 0
+    },
+    "[0,20) %": {
+     "eligible": 1318,
+     "evaluated": 1212,
+     "mae": 1152.6538611974124,
+     "bias": -716.5452030439749,
+     "events": 0
+    },
+    "[40,60) %": {
+     "eligible": 698,
+     "evaluated": 694,
+     "mae": 1688.094044130277,
+     "bias": 773.7957323265621,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 5,
+     "evaluated": 4,
+     "mae": 742.3496873055146,
+     "bias": -219.01692572747015,
+     "events": 0
+    }
+   },
+   "baro": {
+    "[76,82) kPa": {
+     "eligible": 2950,
+     "evaluated": 2778,
+     "mae": 1665.4191268397403,
+     "bias": 465.39566914058344,
+     "events": 1
+    },
+    "[82,90) kPa": {
+     "eligible": 1300,
+     "evaluated": 1213,
+     "mae": 2012.1298895742934,
+     "bias": 691.7062664326312,
+     "events": 0
+    },
+    "stale": {
+     "eligible": 25,
+     "evaluated": 18,
+     "mae": 1709.398661330988,
+     "bias": 1318.5844795929315,
+     "events": 0
+    }
+   },
+   "steady_state": {
+    "rate_unavailable": {
+     "eligible": 119,
+     "evaluated": 99,
+     "mae": 1589.124202041996,
+     "bias": 1130.2656875883197,
+     "events": 1
+    },
+    "steady": {
+     "eligible": 1009,
+     "evaluated": 935,
+     "mae": 1384.0117756979305,
+     "bias": 257.00430634558484,
+     "events": 0
+    },
+    "transient": {
+     "eligible": 3147,
+     "evaluated": 2975,
+     "mae": 1898.031179844925,
+     "bias": 606.2010289692873,
+     "events": 0
+    }
+   }
+  }
+ },
+ "b04_7_air_mass_ve_ablation": {
+  "test_drives": [
+   "2026-09-22T154716",
+   "2026-09-22T233855"
+  ],
+  "rows": 63632,
+  "evaluated_air_mass": 7238,
+  "evaluated_ve": 7142,
+  "intersection": 7139,
+  "air_mass_only": 99,
+  "ve_only": 3,
+  "air_mass_only_refusals_of_ve": {
+   "actual_stale:derived:VE_AMBIENT_PERCENT": 51,
+   "off_map": 48
+  },
+  "air_mass_on_intersection": {
+   "evaluated": 7139,
+   "mae": 0.1253295721220454,
+   "bias": 0.02589547993393938,
+   "abs_error_p95": 0.5382108685258322,
+   "warning_half_width_median": 0.28058677772037643,
+   "skill_vs_baseline": 0.7208024275437181,
+   "events": 0,
+   "evaluated_hours": 2.4730555555555553,
+   "events_per_hour": 0.0
+  },
+  "air_mass_mae_over_warning_half_width": 0.4466695584884072,
+  "ve_on_intersection": {
+   "evaluated": 7139,
+   "mae": 3.169045909049157,
+   "bias": 0.42383101648920884,
+   "abs_error_p95": 13.237346813194208,
+   "warning_half_width_median": 7.919193469619374,
+   "skill_vs_baseline": 0.7322154463878997,
+   "events": 0,
+   "evaluated_hours": 2.4730555555555553,
+   "events_per_hour": 0.0
+  },
+  "ve_mae_over_warning_half_width": 0.40017281067909977,
+  "baro_kpa_range": [
+   79.0,
+   82.0
+  ],
+  "iat_c_range": [
+   20.0,
+   58.0
+  ],
+  "synthetic_input_cases": {
+   "maf_minus_10pct_common_input": {
+    "air_mass": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 33,
+     "fraction": 0.2323943661971831,
+     "median_delay_s": 23.0
+    },
+    "ve": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 22,
+     "fraction": 0.15492957746478872,
+     "median_delay_s": 24.0
+    },
+    "detected_by_both_windows": 22,
+    "unique_to_ve_windows": 0
+   },
+   "baro_minus_3kpa_ve_only": {
+    "air_mass": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 0,
+     "fraction": 0.0,
+     "median_delay_s": null
+    },
+    "ve": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 0,
+     "fraction": 0.0,
+     "median_delay_s": null
+    },
+    "detected_by_both_windows": 0,
+    "unique_to_ve_windows": 0
+   },
+   "iat_plus_10c_ve_only": {
+    "air_mass": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 0,
+     "fraction": 0.0,
+     "median_delay_s": null
+    },
+    "ve": {
+     "windows": 142,
+     "clean": 142,
+     "detected": 0,
+     "fraction": 0.0,
+     "median_delay_s": null
+    },
+    "detected_by_both_windows": 0,
+    "unique_to_ve_windows": 0
+   }
+  }
+ },
+ "b05_4_trim_same_rows": {
+  "rows": 63632,
+  "stft_v3": {
+   "evaluated": 1405,
+   "mae": 3.8128506959211754,
+   "bias": 0.36585366148232445,
+   "p95": 9.258092666586942,
+   "warning_half_width_median": 16.69626697312814,
+   "events": 2,
+   "hours": 2.107222222222222,
+   "synthetic_+5pct_120s": [
+    [
+     0.03278688524590164,
+     61,
+     26.0
+    ]
+   ]
+  },
+  "total_trim_b1": {
+   "evaluated": 1405,
+   "mae": 3.479129819631316,
+   "bias": 0.03564751207453586,
+   "p95": 9.451844262295083,
+   "warning_half_width_median": 12.046198211017153,
+   "events": 1,
+   "hours": 2.107222222222222,
+   "synthetic_+5pct_120s": [
+    [
+     0.03225806451612903,
+     62,
+     5.0
+    ]
+   ]
+  },
+  "stft_published_v2": {
+   "evaluated": 1405,
+   "mae": 5.288034502340511,
+   "bias": -3.981316136474091,
+   "p95": 13.292820054181716,
+   "warning_half_width_median": 9.633995648682063,
+   "events": 17,
+   "hours": 2.107222222222222,
+   "synthetic_+5pct_120s": [
+    [
+     0.0,
+     53,
+     null
+    ]
+   ]
+  },
+  "intersection_all_three": 1405,
+  "stft_v3_only_vs_total": 4721,
+  "total_only_vs_stft_v3": 34,
+  "total_trim_refusals_on_stft_rows": {
+   "rate_exceeded:obd:RPM": 2099,
+   "fuel_status_excluded:open_loop_load_or_fuel_cut": 971,
+   "rate_exceeded:obd:ENGINE_LOAD": 931,
+   "operating_mode_excluded:warmup": 349,
+   "off_map": 193,
+   "rate_insufficient_history:obd:RPM": 164
+  }
+ },
+ "b05_1_input_inventory_summary": {
+  "coolant_warmup": {
+   "eligible": 261,
+   "sessions": 53,
+   "drives_with_eligible_rows": 2,
+   "qualifying_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:RUN_TIME": 26,
+    "obd:COOLANT_TEMP": 20,
+    "obd:RPM": 18
+   }
+  },
+  "warm_idle_rpm_baseline": {
+   "eligible": 2217,
+   "sessions": 53,
+   "drives_with_eligible_rows": 4,
+   "qualifying_drives": [
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:RPM": 18
+   }
+  },
+  "cold_start_idle_rpm_vs_coolant": {
+   "eligible": 261,
+   "sessions": 53,
+   "drives_with_eligible_rows": 2,
+   "qualifying_drives": [
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:COOLANT_TEMP": 20,
+    "obd:RPM": 18
+   }
+  },
+  "timing_advance_vs_rpm_load": {
+   "eligible": 14179,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:TIMING_ADVANCE": 23,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "timing_advance_vs_rpm_iat": {
+   "eligible": 12952,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:TIMING_ADVANCE": 23,
+    "obd:INTAKE_TEMP": 20,
+    "obd:RPM": 18
+   }
+  },
+  "fuel_trim_vs_rpm_load": {
+   "eligible": 10889,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:SHORT_FUEL_TRIM_1": 20,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "air_mass_per_cycle_vs_rpm_load": {
+   "eligible": 14273,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:AIR_MASS_PER_CYCLE": 22,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "ve_vs_rpm_load": {
+   "eligible": 12972,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:VE_AMBIENT_PERCENT": 25,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "ve_manifold_vs_rpm_load": {
+   "eligible": 0,
+   "sessions": 53,
+   "drives_with_eligible_rows": 0,
+   "qualifying_drives": [],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:VE_MANIFOLD_PERCENT": 53,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "total_trim_vs_rpm_load_b1": {
+   "eligible": 2922,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:TOTAL_TRIM_B1": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "total_trim_vs_rpm_load_b2": {
+   "eligible": 2875,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:TOTAL_TRIM_B2": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18,
+    "obd:ENGINE_LOAD": 18
+   }
+  },
+  "stft_bank_balance_idle": {
+   "eligible": 1422,
+   "sessions": 53,
+   "drives_with_eligible_rows": 4,
+   "qualifying_drives": [
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:STFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "stft_bank_balance_city": {
+   "eligible": 1234,
+   "sessions": 53,
+   "drives_with_eligible_rows": 4,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:STFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "stft_bank_balance_highway": {
+   "eligible": 676,
+   "sessions": 53,
+   "drives_with_eligible_rows": 3,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:STFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "ltft_bank_balance_idle": {
+   "eligible": 1377,
+   "sessions": 53,
+   "drives_with_eligible_rows": 4,
+   "qualifying_drives": [
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:LTFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "ltft_bank_balance_city": {
+   "eligible": 1234,
+   "sessions": 53,
+   "drives_with_eligible_rows": 4,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:LTFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "ltft_bank_balance_highway": {
+   "eligible": 600,
+   "sessions": 53,
+   "drives_with_eligible_rows": 3,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:LTFT_BANK_BALANCE": 20,
+    "obd:FUEL_STATUS": 19,
+    "obd:RPM": 18
+   }
+  },
+  "cat_warmup": {
+   "eligible": 36,
+   "sessions": 53,
+   "drives_with_eligible_rows": 2,
+   "qualifying_drives": [],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "obd:CATALYST_TEMP_B1S1": 28,
+    "obd:RUN_TIME": 26,
+    "obd:COOLANT_TEMP": 20,
+    "obd:RPM": 18
+   }
+  },
+  "air_charge_vs_rpm_throttle_did": {
+   "eligible": 8290,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "did:ECM_THROTTLE_POS_SENSOR_1": 21,
+    "did:ECM_RPM": 20,
+    "did:ECM_AIR_CHARGE": 20
+   }
+  },
+  "cam_primary_vs_command_rpm_did": {
+   "eligible": 0,
+   "sessions": 53,
+   "drives_with_eligible_rows": 0,
+   "qualifying_drives": [],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 53,
+    "did:ECM_INTAKE_CAM_ANGLE_MEASURED": 51,
+    "did:ECM_RPM": 20
+   }
+  },
+  "cam_secondary_vs_command_rpm_did": {
+   "eligible": 0,
+   "sessions": 53,
+   "drives_with_eligible_rows": 0,
+   "qualifying_drives": [],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 53,
+    "did:ECM_INTAKE_CAM_ANGLE_MEASURED_B": 51,
+    "did:ECM_RPM": 20
+   }
+  },
+  "afr_bank_balance_robust": {
+   "eligible": 7197,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "derived:AFR_BANK_BALANCE": 21
+   }
+  },
+  "afr_voltage_vs_rpm_throttle_did": {
+   "eligible": 8294,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-21T142126",
+    "2026-09-21T194247",
+    "2026-09-21T223515",
+    "2026-09-22T154716",
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "did:ECM_THROTTLE_POS_SENSOR_1": 21,
+    "did:ECM_RPM": 20,
+    "did:ECM_AF_SENSOR_V_B1": 20
+   }
+  },
+  "tps_sensor_1_vs_sensor_2_did": {
+   "eligible": 244,
+   "sessions": 53,
+   "drives_with_eligible_rows": 5,
+   "qualifying_drives": [
+    "2026-09-22T233855"
+   ],
+   "min_rows_per_drive": 30,
+   "absent_in_sessions": {
+    "did:ECM_THROTTLE_POS_SENSOR_2": 30,
+    "did:ECM_THROTTLE_POS_SENSOR_1": 21
+   }
+  }
+ },
+ "b07_cold_start_inventory": {
+  "totals": {
+   "sessions_scanned": 40,
+   "sessions_without_polled_rows": 13,
+   "sessions_missing_contract_channels": 14,
+   "sessions_with_engine_runs": 23,
+   "sessions_with_cold_start": 2,
+   "engine_runs": 26,
+   "cold_starts": 2,
+   "warm_restarts": 8,
+   "unknown_initial_temperature": 16,
+   "drives": 17,
+   "drives_with_cold_start": 2,
+   "drives_with_cold_start_excluding_captures": 2,
+   "sidecar_cold_start_disagreements": 1
+  },
+  "context_rule": {
+   "min_spread": {
+    "obd:ENGINE_LOAD": 15.0,
+    "obd:INTAKE_TEMP": 8.0
+   },
+   "session_floor": 8,
+   "usable_cold_start_drives": 2,
+   "decision": "widen_bands"
+  },
+  "cold_starts": [
+   {
+    "session": "2026-09-22T163415",
+    "started_at": "2026-09-22T16:53:41+00:00",
+    "initial_coolant_c": 24.0,
+    "initial_iat_c": 27.0,
+    "duration_s": 642.0
+   },
+   {
+    "session": "2026-09-23T032755",
+    "started_at": "2026-09-23T14:26:44+00:00",
+    "initial_coolant_c": 26.0,
+    "initial_iat_c": 27.0,
+    "duration_s": 161.0
+   }
+  ]
+ },
+ "b06_lambda_delivery_states": {
+  "_capture-tuning-2026-09-22T170459": {
+   "fuel_cut": 35,
+   "target_invalid": 0,
+   "convention_unverified": 0,
+   "calibration_unknown": 0,
+   "measured_missing": 1,
+   "measured_rail": 8,
+   "measured_censored": 0,
+   "post_fuel_cut": 153,
+   "target_transient": 19,
+   "source_not_valid_in_regime": 0,
+   "unsupported_regime": 0,
+   "eligible": 448,
+   "total": 664
+  },
+  "_capture-tuning-2026-09-22T235224": {
+   "fuel_cut": 143,
+   "target_invalid": 0,
+   "convention_unverified": 0,
+   "calibration_unknown": 0,
+   "measured_missing": 5,
+   "measured_rail": 21,
+   "measured_censored": 0,
+   "post_fuel_cut": 415,
+   "target_transient": 28,
+   "source_not_valid_in_regime": 0,
+   "unsupported_regime": 0,
+   "eligible": 556,
+   "total": 1168
+  },
+  "_capture-tuning-2026-09-23T022831": {
+   "fuel_cut": 0,
+   "target_invalid": 0,
+   "convention_unverified": 0,
+   "calibration_unknown": 0,
+   "measured_missing": 1,
+   "measured_rail": 0,
+   "measured_censored": 0,
+   "post_fuel_cut": 0,
+   "target_transient": 3,
+   "source_not_valid_in_regime": 0,
+   "unsupported_regime": 0,
+   "eligible": 11,
+   "total": 15
+  },
+  "_capture-tuning-2026-09-23T142926": {
+   "fuel_cut": 194,
+   "target_invalid": 0,
+   "convention_unverified": 0,
+   "calibration_unknown": 0,
+   "measured_missing": 2,
+   "measured_rail": 15,
+   "measured_censored": 0,
+   "post_fuel_cut": 435,
+   "target_transient": 34,
+   "source_not_valid_in_regime": 0,
+   "unsupported_regime": 0,
+   "eligible": 989,
+   "total": 1669
+  },
+  "_capture-tuning-2026-09-23T164007": {
+   "fuel_cut": 51,
+   "target_invalid": 0,
+   "convention_unverified": 0,
+   "calibration_unknown": 0,
+   "measured_missing": 0,
+   "measured_rail": 13,
+   "measured_censored": 0,
+   "post_fuel_cut": 182,
+   "target_transient": 40,
+   "source_not_valid_in_regime": 0,
+   "unsupported_regime": 0,
+   "eligible": 473,
+   "total": 759
+  }
+ },
+ "b06_transport_delay_estimate": {
+  "ecm_lambda_pid_0x24": {
+   "seconds": 0.25,
+   "fitted_on": [
+    "_capture-fuel-target-research-2026-09-21T195844",
+    "_capture-tuning-2026-09-21T223734",
+    "_capture-tuning-2026-09-21T232153"
+   ],
+   "repr": "TransportDelay(seconds=0.25, fitted_on=('_capture-fuel-target-research-2026-09-21T195844', '_capture-tuning-2026-09-21T223734', '_capture-tuning-2026-09-21T232153'), method='mean_abs_residual_at_target_transitions', candidates=(0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0), scores=(2.3241213033689516, 2.2249564556370065, 2.550625926318092, 2.6241445729517014, 2.708339046787571, 2.890471060915918, 3.127285396719517, 2.8923784707821207, 2.890801992583322, 3.1483539010560704, 3.0541937788980897, 3.038365821809726, 3.1397060632705687), n_rows=2140)",
+   "test": {
+    "_capture-tuning-2026-09-22T170459": {
+     "no_delay": {
+      "states": {
+       "fuel_cut": 35,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 1,
+       "measured_rail": 8,
+       "measured_censored": 0,
+       "post_fuel_cut": 153,
+       "target_transient": 19,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 448,
+       "total": 664
+      },
+      "closed_loop": {
+       "n": 448,
+       "median_pct": 0.1068115234375,
+       "p05_pct": -4.518280029296875,
+       "p95_pct": 3.2458496093749996
+      },
+      "enrichment_n": 0
+     },
+     "frozen": {
+      "states": {
+       "fuel_cut": 35,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 2,
+       "measured_rail": 4,
+       "measured_censored": 0,
+       "post_fuel_cut": 158,
+       "target_transient": 19,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 446,
+       "total": 664
+      },
+      "closed_loop": {
+       "n": 446,
+       "median_pct": 0.08697509765625,
+       "p05_pct": -3.560638427734375,
+       "p95_pct": 2.93426513671875
+      },
+      "enrichment_n": 0
+     }
+    },
+    "_capture-tuning-2026-09-22T235224": {
+     "no_delay": {
+      "states": {
+       "fuel_cut": 143,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 5,
+       "measured_rail": 21,
+       "measured_censored": 0,
+       "post_fuel_cut": 415,
+       "target_transient": 28,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 556,
+       "total": 1168
+      },
+      "closed_loop": {
+       "n": 555,
+       "median_pct": -0.3814697265625,
+       "p05_pct": -5.020751953125,
+       "p95_pct": 3.5031127929687425
+      },
+      "enrichment_n": 1
+     },
+     "frozen": {
+      "states": {
+       "fuel_cut": 143,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 18,
+       "measured_rail": 10,
+       "measured_censored": 0,
+       "post_fuel_cut": 420,
+       "target_transient": 28,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 549,
+       "total": 1168
+      },
+      "closed_loop": {
+       "n": 548,
+       "median_pct": -0.3692626953125,
+       "p05_pct": -4.840850830078125,
+       "p95_pct": 4.137420654296872
+      },
+      "enrichment_n": 1
+     }
+    },
+    "_capture-tuning-2026-09-23T142926": {
+     "no_delay": {
+      "states": {
+       "fuel_cut": 194,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 2,
+       "measured_rail": 15,
+       "measured_censored": 0,
+       "post_fuel_cut": 435,
+       "target_transient": 34,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 989,
+       "total": 1669
+      },
+      "closed_loop": {
+       "n": 988,
+       "median_pct": -0.09002685546875,
+       "p05_pct": -6.917877197265625,
+       "p95_pct": 3.3271789550781246
+      },
+      "enrichment_n": 1
+     },
+     "frozen": {
+      "states": {
+       "fuel_cut": 194,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 16,
+       "measured_rail": 9,
+       "measured_censored": 0,
+       "post_fuel_cut": 440,
+       "target_transient": 34,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 976,
+       "total": 1669
+      },
+      "closed_loop": {
+       "n": 975,
+       "median_pct": -0.0152587890625,
+       "p05_pct": -7.09381103515625,
+       "p95_pct": 3.6672973632812487
+      },
+      "enrichment_n": 1
+     }
+    },
+    "_capture-tuning-2026-09-23T164007": {
+     "no_delay": {
+      "states": {
+       "fuel_cut": 51,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 0,
+       "measured_rail": 13,
+       "measured_censored": 0,
+       "post_fuel_cut": 182,
+       "target_transient": 40,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 473,
+       "total": 759
+      },
+      "closed_loop": {
+       "n": 473,
+       "median_pct": -0.23193359375,
+       "p05_pct": -9.2999267578125,
+       "p95_pct": 3.8220214843749925
+      },
+      "enrichment_n": 0
+     },
+     "frozen": {
+      "states": {
+       "fuel_cut": 51,
+       "target_invalid": 0,
+       "convention_unverified": 0,
+       "calibration_unknown": 0,
+       "measured_missing": 10,
+       "measured_rail": 3,
+       "measured_censored": 0,
+       "post_fuel_cut": 187,
+       "target_transient": 40,
+       "source_not_valid_in_regime": 0,
+       "unsupported_regime": 0,
+       "eligible": 468,
+       "total": 759
+      },
+      "closed_loop": {
+       "n": 468,
+       "median_pct": -0.152587890625,
+       "p05_pct": -7.523956298828125,
+       "p95_pct": 4.179687499999994
+      },
+      "enrichment_n": 0
+     }
+    }
+   }
+  }
+ },
+ "drives": [
+  {
+   "drive_id": "2026-09-21T142126",
+   "pieces": [
+    "2026-09-21T142126",
+    "2026-09-21T142900",
+    "_capture-rom-trace-2026-09-21T142926",
+    "2026-09-21T143331#segment-001",
+    "2026-09-21T143331#segment-002"
+   ],
+   "started_at": "2026-09-21T14:21:26+00:00",
+   "ended_at": "2026-09-21T16:28:52+00:00"
+  },
+  {
+   "drive_id": "2026-09-21T194247",
+   "pieces": [
+    "2026-09-21T194247",
+    "2026-09-21T195228",
+    "2026-09-21T195641",
+    "_capture-rom-trace-2026-09-21T195647",
+    "2026-09-21T195819",
+    "_capture-fuel-target-research-2026-09-21T195844",
+    "2026-09-21T201836#segment-001",
+    "2026-09-21T201836#segment-002"
+   ],
+   "started_at": "2026-09-21T19:42:47+00:00",
+   "ended_at": "2026-09-21T22:22:06+00:00"
+  },
+  {
+   "drive_id": "2026-09-21T223515",
+   "pieces": [
+    "2026-09-21T223515",
+    "_capture-tuning-2026-09-21T223734",
+    "2026-09-21T225511#segment-001",
+    "2026-09-21T225511#segment-002",
+    "2026-09-21T231724",
+    "_capture-tuning-2026-09-21T232153",
+    "2026-09-21T234903",
+    "2026-09-21T235645"
+   ],
+   "started_at": "2026-09-21T22:35:15+00:00",
+   "ended_at": "2026-09-22T00:02:51+00:00"
+  },
+  {
+   "drive_id": "2026-09-22T154716",
+   "pieces": [
+    "2026-09-22T154716",
+    "2026-09-22T155624",
+    "2026-09-22T160006",
+    "2026-09-22T160234",
+    "2026-09-22T162008",
+    "2026-09-22T162232",
+    "2026-09-22T162659",
+    "2026-09-22T163209",
+    "2026-09-22T163415",
+    "2026-09-22T170423",
+    "2026-09-22T170433",
+    "2026-09-22T170453",
+    "_capture-tuning-2026-09-22T170459",
+    "2026-09-22T171544"
+   ],
+   "started_at": "2026-09-22T15:47:16+00:00",
+   "ended_at": "2026-09-22T17:27:23+00:00"
+  },
+  {
+   "drive_id": "2026-09-22T233855",
+   "pieces": [
+    "2026-09-22T233855",
+    "2026-09-22T234813",
+    "_capture-tuning-2026-09-22T235224",
+    "2026-09-23T001344",
+    "2026-09-23T002340",
+    "2026-09-23T003917",
+    "2026-09-23T022631",
+    "_capture-tuning-2026-09-23T022831",
+    "2026-09-23T022847",
+    "2026-09-23T032755",
+    "_capture-tuning-2026-09-23T142926",
+    "2026-09-23T145645",
+    "2026-09-23T150658#segment-001",
+    "2026-09-23T150658#segment-002",
+    "2026-09-23T162918",
+    "_capture-tuning-2026-09-23T164007",
+    "2026-09-23T165316"
+   ],
+   "started_at": "2026-09-22T23:38:55+00:00",
+   "ended_at": "2026-09-23T17:00:06+00:00"
+  },
+  {
+   "drive_id": "2026-09-23T174610",
+   "pieces": [
+    "2026-09-23T174610"
+   ],
+   "started_at": "2026-09-23T17:46:10+00:00",
+   "ended_at": "2026-09-23T18:59:23+00:00"
+  }
+ ]
+}

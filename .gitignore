@@ -151,3 +151,4 @@ data/_validation/
 
 # Behavior refits keep the replaced artifact here (B03.10); local recovery copies.
 data/*/_prior/
+data/*/_candidates/

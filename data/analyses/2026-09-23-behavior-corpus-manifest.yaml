@@ -1,0 +1,1366 @@
+# B03.5 frozen behavior-model corpus -- built by a scratch script from the era resolver;
+# consumed by scripts/evaluate_behavior_models.py --manifest (hash-checked) and as the
+# explicit session list for scripts/refit_behavior_models.py.
+manifest: behavior-corpus-zs44a-20260920
+frozen_at: '2026-09-23T23:20:45+00:00'
+purpose: B03.5 frozen corpus for the 2026-09-23 behavior-model refit (B03.6) and its B02 validation.
+decision: 'Operator 2026-09-23: only drives on the current calibration -- sessions started at or after
+  the ZS44A-20260920 flash, resolved by the era resolver from tune_revisions.yaml; single source ~/canary-data/sessions/nissan-xterra-2008,
+  captures included. The ''don''t retrain yet'' deferral (2026-09-22) is lifted.'
+corpus_root: ~/canary-data
+selection:
+  rule: src.analysis.tune_revisions.resolve_session_revision(session) == ZS44A-20260920 (capture manifest
+    tune_revision wins, else newest flash at or before the parsed session start)
+  boundary:
+    revision: ZS44A-20260920
+    flashed_at: '2026-09-21T03:08:45.954035+00:00'
+    calibration_id: 1ZS44A00000
+    rom_sha256: 03d00051a59b86251ac0d5d9cf2ac9651682cfcba978edce81f07371f1c128a2
+  tune_registry: data/nissan-xterra-2008/tune_revisions.yaml@sha256:63154293bc5c995dbdeb9ef98214335d78e2850eb4d53b19b7ce88a9be366185
+  excluded_directories:
+  - _archive (quarantine)
+  name_dated_2026_09_20_to_23: 86
+  name_dated_but_earlier_calibration: 33
+  note: 86 directories carry a 2026-09-20..23 date in their name; the resolver places 33 of them (started
+    before 2026-09-21T03:08:45Z) on ZS44A-k106, so the current-calibration corpus is 53 directories. Names
+    are UTC.
+  flash_crossings: 'none: every selected session starts after the flash (checked again by the refit CLI
+    per row)'
+capture_grants:
+  rule: Captures are in the corpus by the operator's 2026-09-23 selection. They are passed to scripts/refit_behavior_models.py
+    as explicit session paths, whose documented semantics grant an explicitly selected capture to the
+    recipes being refit (_capture_recipe_allowlists, explicit_recipe_grants). Each capture's own sidecar
+    allowlist is recorded beside it as capture_sidecar_recipes.
+mode_labels: 'D03.22 prerequisite: label_sessions.py (classifier 0.3.0, canary.pi.example.yaml taxonomy)
+  run on every non-capture session here on 2026-09-23; none predates f8b7d38. Sidecars feed only event-gated
+  recipes (cold_start); per-row modes come from the feature pipeline''s segmenter. Dispositions are recorded,
+  not used as a filter: every recipe gates rows by its own serving contract.'
+git_commit: 7aceaab3bf009d4ca1e752c3cd630834e1d0b527
+counts:
+  directories: 53
+  captures: 13
+  with_rows: 53
+  independent_drives: 6
+drives:
+- drive: 2026-09-21T142126
+  pieces:
+  - 2026-09-21T142126
+  - 2026-09-21T142900
+  - _capture-rom-trace-2026-09-21T142926
+  - 2026-09-21T143331
+  start: '2026-09-21T14:21:37.641997+00:00'
+  end: '2026-09-21T16:28:52.193271+00:00'
+- drive: 2026-09-21T194247
+  pieces:
+  - 2026-09-21T194247
+  - 2026-09-21T195228
+  - 2026-09-21T195641
+  - _capture-rom-trace-2026-09-21T195647
+  - 2026-09-21T195819
+  - _capture-fuel-target-research-2026-09-21T195844
+  - 2026-09-21T201836
+  start: '2026-09-21T19:42:58.891814+00:00'
+  end: '2026-09-21T22:22:06.720104+00:00'
+- drive: 2026-09-21T223439
+  pieces:
+  - 2026-09-21T223439
+  - 2026-09-21T223515
+  - _capture-tuning-2026-09-21T223734
+  - 2026-09-21T225511
+  - 2026-09-21T231724
+  - _capture-tuning-2026-09-21T232153
+  - 2026-09-21T234903
+  - 2026-09-21T235645
+  start: '2026-09-21T22:34:54.481364+00:00'
+  end: '2026-09-22T00:02:51.343384+00:00'
+- drive: 2026-09-22T154716
+  pieces:
+  - 2026-09-22T154716
+  - 2026-09-22T155624
+  - 2026-09-22T160006
+  - 2026-09-22T160234
+  - 2026-09-22T162008
+  - 2026-09-22T162232
+  - 2026-09-22T162659
+  - 2026-09-22T163209
+  - 2026-09-22T163415
+  - _capture-tuning-2026-09-22T170423
+  - 2026-09-22T170423
+  - _capture-tuning-2026-09-22T170433
+  - 2026-09-22T170433
+  - _capture-tuning-2026-09-22T170453
+  - 2026-09-22T170453
+  - _capture-tuning-2026-09-22T170459
+  - 2026-09-22T171544
+  start: '2026-09-22T15:47:29.308864+00:00'
+  end: '2026-09-22T17:27:23.473933+00:00'
+- drive: 2026-09-22T233855
+  pieces:
+  - 2026-09-22T233855
+  - 2026-09-22T234813
+  - _capture-tuning-2026-09-22T235224
+  - 2026-09-23T001344
+  - 2026-09-23T002340
+  - 2026-09-23T003917
+  - 2026-09-23T022631
+  - _capture-tuning-2026-09-23T022831
+  - 2026-09-23T022847
+  - 2026-09-23T032755
+  - _capture-tuning-2026-09-23T142926
+  - 2026-09-23T145645
+  - 2026-09-23T150658
+  - 2026-09-23T162918
+  - _capture-tuning-2026-09-23T164007
+  - 2026-09-23T165316
+  start: '2026-09-22T23:38:59.283615+00:00'
+  end: '2026-09-23T17:00:06.798781+00:00'
+- drive: 2026-09-23T174610
+  pieces:
+  - 2026-09-23T174610
+  start: '2026-09-23T17:57:18.735991+00:00'
+  end: '2026-09-23T18:59:23.872484+00:00'
+legacy_fits:
+- model: air_charge_vs_rpm_throttle_did
+  version: 1
+  recorded_tune_revision: ZS44A-k106
+  fitted_at: '2026-08-07T15:04:47.245437+00:00'
+  sessions_by_resolved_revision:
+    ZS44A-k106:
+    - _capture-tuning-did-2026-08-06T003148
+    - _capture-tuning-did-2026-08-06T034041
+    - _capture-tuning-did-2026-08-06T145004
+    - _capture-tuning-did-2026-08-07T005351
+  on_current_calibration: false
+- model: warm_idle_rpm_baseline
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:06.144540+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-19T000112
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-22T163011
+    - 2026-07-22T163917
+    - 2026-07-22T170353
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: timing_advance_vs_rpm_load
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:06.545712+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-18T222019
+    - 2026-07-19T000112
+    - 2026-07-19T003124
+    - 2026-07-19T202721
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-22T163011
+    - 2026-07-26T162332
+    - 2026-07-26T164436
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: timing_advance_vs_rpm_iat
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:06.923608+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-18T222019
+    - 2026-07-19T000112
+    - 2026-07-19T003124
+    - 2026-07-19T202721
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-22T163011
+    - 2026-07-22T163917
+    - 2026-07-22T170353
+    - 2026-07-26T162332
+    - 2026-07-26T164436
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: fuel_trim_vs_rpm_load
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:07.220714+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-18T222019
+    - 2026-07-19T000112
+    - 2026-07-19T003124
+    - 2026-07-19T202721
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-26T162332
+    - 2026-07-26T164436
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: air_mass_per_cycle_vs_rpm_load
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:07.601569+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-18T222019
+    - 2026-07-19T000112
+    - 2026-07-19T003124
+    - 2026-07-19T202721
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-22T163011
+    - 2026-07-22T163917
+    - 2026-07-22T170353
+    - 2026-07-26T162332
+    - 2026-07-26T164436
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: ve_vs_rpm_load
+  version: 2
+  recorded_tune_revision: null
+  fitted_at: '2026-07-27T06:09:08.015964+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-07-18T202456
+    - 2026-07-18T215941
+    - 2026-07-18T222019
+    - 2026-07-19T000112
+    - 2026-07-19T003124
+    - 2026-07-19T202721
+    - 2026-07-22T143129
+    - 2026-07-22T161632
+    - 2026-07-22T163011
+    - 2026-07-22T163917
+    - 2026-07-22T170353
+    - 2026-07-26T162332
+    - 2026-07-26T164436
+    - 2026-07-26T214348
+    ZS44A-osiris-initial:
+    - 2026-07-26T223147
+    - 2026-07-26T225058
+  on_current_calibration: false
+- model: cat_warmup
+  version: 4
+  recorded_tune_revision: null
+  fitted_at: '2026-05-25T15:17:44.374674+00:00'
+  sessions_by_resolved_revision:
+    ZS04C-stock:
+    - 2026-05-18T015823
+    - 2026-05-18T021421
+    - 2026-05-18T024234
+    - 2026-05-18T024456
+    - 2026-05-18T032933
+    - 2026-05-18T033254
+    - 2026-05-18T033527
+    - 2026-05-20T033820
+    - 2026-05-24T190027
+    - 2026-05-24T190535
+    - 2026-05-24T193045
+  on_current_calibration: false
+sessions:
+- path: sessions/nissan-xterra-2008/2026-09-21T142126
+  sha256: sha256:339673eef073b9060c336ba4dc51695bad1294d80eb04a0c5ac0a937f92963be
+  chunks: 102
+  bytes: 10667381
+  started_at: '2026-09-21T14:21:26+00:00'
+  first_row: '2026-09-21T14:21:37.641997+00:00'
+  last_row: '2026-09-21T14:28:42.912917+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:15:52.081612Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 426.0
+    mode_seconds:
+      city: 307.0
+      idle_transient: 43.0
+      unknown: 3.0
+      warmup: 73.0
+    events:
+      cruise: 2
+      idle_period: 3
+      stop: 1
+  drive: 2026-09-21T142126
+- path: sessions/nissan-xterra-2008/2026-09-21T142900
+  sha256: sha256:5498119adf0aaf355168481d389f63739f8353d336e515820455264bccbe51d9
+  chunks: 6
+  bytes: 625101
+  started_at: '2026-09-21T14:29:00+00:00'
+  first_row: '2026-09-21T14:29:02.953899+00:00'
+  last_row: '2026-09-21T14:29:26.543625+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:15:55.165173Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 25.0
+    mode_seconds:
+      highway: 22.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-21T142126
+- path: sessions/nissan-xterra-2008/2026-09-21T143331
+  sha256: sha256:27d5f5985af0ca6b5f1c5176cb0eaa68bfafedddfeeddc48783743d8919a9478
+  chunks: 697
+  bytes: 21330777
+  started_at: '2026-09-21T14:33:31+00:00'
+  first_row: '2026-09-21T14:33:33.094456+00:00'
+  last_row: '2026-09-21T16:28:52.193271+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:01.725561Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 6920.0
+    mode_seconds:
+      city: 193.0
+      highway: 502.0
+      idle_transient: 37.0
+      koeo: 6.0
+      unknown: 6182.0
+    events:
+      cruise: 6
+      idle_period: 3
+      stop: 3
+  drive: 2026-09-21T142126
+- path: sessions/nissan-xterra-2008/2026-09-21T194247
+  sha256: sha256:adc3593749565658c1bf39e65f5d6928b2648b09c5859de4a85990ec49975e4f
+  chunks: 134
+  bytes: 12276449
+  started_at: '2026-09-21T19:42:47+00:00'
+  first_row: '2026-09-21T19:42:58.891814+00:00'
+  last_row: '2026-09-21T19:52:21.574064+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:09.830473Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 564.0
+    mode_seconds:
+      idle: 260.0
+      unknown: 3.0
+      warmup: 301.0
+    events:
+      idle_period: 2
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/2026-09-21T195228
+  sha256: sha256:6c3721ab7519924bf228de5b97b1db837f157f41baa099999f1a2e21a04f1480
+  chunks: 57
+  bytes: 5216170
+  started_at: '2026-09-21T19:52:28+00:00'
+  first_row: '2026-09-21T19:52:30.796933+00:00'
+  last_row: '2026-09-21T19:56:27.742536+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:12.810950Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 238.0
+    mode_seconds:
+      idle: 235.0
+      unknown: 3.0
+    events:
+      idle_period: 3
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/2026-09-21T195641
+  sha256: sha256:f1b7c4c8146eeaeed811e826842736f8ea8c5f6d4b2dd26034a4930c4e7f500c
+  chunks: 2
+  bytes: 92666
+  started_at: '2026-09-21T19:56:41+00:00'
+  first_row: '2026-09-21T19:56:43.219002+00:00'
+  last_row: '2026-09-21T19:56:47.242849+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:14.029724Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 5.0
+    mode_seconds:
+      idle: 2.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/2026-09-21T195819
+  sha256: sha256:1352c90538a33ad43272b6f6ab0ac954ae23c18d028c0ec27fb12a6d5b77112a
+  chunks: 6
+  bytes: 697407
+  started_at: '2026-09-21T19:58:19+00:00'
+  first_row: '2026-09-21T19:58:19.218042+00:00'
+  last_row: '2026-09-21T19:58:44.463541+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:14.654617Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 26.0
+    mode_seconds:
+      city: 23.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/2026-09-21T201836
+  sha256: sha256:d28339f8abdeae2d23af9969b850875cc4bcbbe553ff9a2dfecab8fd4a1af551
+  chunks: 747
+  bytes: 5461155
+  started_at: '2026-09-21T20:18:36+00:00'
+  first_row: '2026-09-21T20:18:36.165435+00:00'
+  last_row: '2026-09-21T22:22:06.720104+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:18.366885Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 7411.0
+    mode_seconds:
+      city: 25.0
+      idle: 142.0
+      koeo: 5.0
+      unknown: 7239.0
+    events:
+      idle_period: 1
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/2026-09-21T223439
+  sha256: sha256:57e07caac58dc7be0068f2369a6a98abe30f4369757ec26e5b1736080a76c0c2
+  chunks: 2
+  bytes: 9466
+  started_at: '2026-09-21T22:34:39+00:00'
+  first_row: '2026-09-21T22:34:54.481364+00:00'
+  last_row: '2026-09-21T22:34:54.673515+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:23.298993Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 1.0
+    mode_seconds:
+      unknown: 1.0
+    events: {}
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-21T223515
+  sha256: sha256:c555fc4b10d975143fc7d07fe4bb5bd17f65533fb2c3c58b5298b5ecf9e4f710
+  chunks: 33
+  bytes: 2738038
+  started_at: '2026-09-21T22:35:15+00:00'
+  first_row: '2026-09-21T22:35:17.646078+00:00'
+  last_row: '2026-09-21T22:37:33.994872+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:24.775387Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 137.0
+    mode_seconds:
+      koeo: 122.0
+      unknown: 3.0
+      warmup: 12.0
+    events:
+      cold_start: 1
+      idle_period: 1
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-21T225511
+  sha256: sha256:280d8c2d095810e4162614396c578bb1e5f4771b02d639c5f33e4cfccf4fa8ef
+  chunks: 94
+  bytes: 2938960
+  started_at: '2026-09-21T22:55:11+00:00'
+  first_row: '2026-09-21T22:55:11.136648+00:00'
+  last_row: '2026-09-21T23:17:24.011743+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:28.224928Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 1334.0
+    mode_seconds:
+      idle: 118.0
+      koeo: 6.0
+      unknown: 1210.0
+    events:
+      idle_period: 1
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-21T231724
+  sha256: sha256:e80098b3698b64741094a14b8e01d89ecfce2a7b7191dc7a3558121b443db1ba
+  chunks: 64
+  bytes: 5813629
+  started_at: '2026-09-21T23:17:24+00:00'
+  first_row: '2026-09-21T23:17:24.010805+00:00'
+  last_row: '2026-09-21T23:21:53.109495+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:31.954521Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 270.0
+    mode_seconds:
+      idle: 265.0
+      unknown: 5.0
+    events:
+      idle_period: 2
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-21T234903
+  sha256: sha256:2a346017191ab8a1ab3196d9127ecbbcafec7ce627376add2ad7b5866f2fa57a
+  chunks: 87
+  bytes: 550388
+  started_at: '2026-09-21T23:49:03+00:00'
+  first_row: '2026-09-21T23:49:03.396326+00:00'
+  last_row: '2026-09-21T23:56:33.517452+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:34.089216Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 451.0
+    mode_seconds:
+      unknown: 451.0
+    events: {}
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-21T235645
+  sha256: sha256:ec6e60146333dc0f2dc686dba7feaed1d506306bda84ba01abce9dff3c690900
+  chunks: 26
+  bytes: 86661
+  started_at: '2026-09-21T23:56:45+00:00'
+  first_row: '2026-09-22T00:00:41.227128+00:00'
+  last_row: '2026-09-22T00:02:51.343384+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:34.820551Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 131.0
+    mode_seconds:
+      unknown: 131.0
+    events: {}
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/2026-09-22T154716
+  sha256: sha256:126b968ced1dbe4a09df3754bfd044dfa172b1bec0841e6059f348e06608ff73
+  chunks: 103
+  bytes: 1878003
+  started_at: '2026-09-22T15:47:16+00:00'
+  first_row: '2026-09-22T15:47:29.308864+00:00'
+  last_row: '2026-09-22T15:56:02.268144+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:35.608911Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 512.0
+    mode_seconds:
+      unknown: 512.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T155624
+  sha256: sha256:e0d6e647f650c85e5e76f26ed73631e689e825441c4dbd8e9229e1603425fc4b
+  chunks: 40
+  bytes: 694363
+  started_at: '2026-09-22T15:56:24+00:00'
+  first_row: '2026-09-22T15:56:38.620589+00:00'
+  last_row: '2026-09-22T15:59:52.518039+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:36.501135Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 194.0
+    mode_seconds:
+      unknown: 194.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T160006
+  sha256: sha256:84e1d7d782d6f5532634f34d59631c904580a577866e8de2b3d876631428911f
+  chunks: 5
+  bytes: 59991
+  started_at: '2026-09-22T16:00:06+00:00'
+  first_row: '2026-09-22T16:00:16.658560+00:00'
+  last_row: '2026-09-22T16:00:32.086889+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:36.849615Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 16.0
+    mode_seconds:
+      unknown: 16.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T160234
+  sha256: sha256:7bbeb3da91831ea9930356a2cc9ff02714ea8d160a019d4a26f408dcd9f0f1fb
+  chunks: 202
+  bytes: 3720920
+  started_at: '2026-09-22T16:02:34+00:00'
+  first_row: '2026-09-22T16:03:00.881316+00:00'
+  last_row: '2026-09-22T16:19:54.100089+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:38.103696Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 1014.0
+    mode_seconds:
+      unknown: 1014.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T162008
+  sha256: sha256:e5b4f171407c1c6742edd9d9bde38b099546d19532d08a70e7ee17b6c40e7cc0
+  chunks: 5
+  bytes: 62256
+  started_at: '2026-09-22T16:20:08+00:00'
+  first_row: '2026-09-22T16:20:22.938941+00:00'
+  last_row: '2026-09-22T16:20:40.615947+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:39.372393Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 17.0
+    mode_seconds:
+      unknown: 17.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T162232
+  sha256: sha256:fb78bc094da4343eb954ea0f98b09de41206f2f73b35b966593b37f7a07a737f
+  chunks: 37
+  bytes: 670193
+  started_at: '2026-09-22T16:22:32+00:00'
+  first_row: '2026-09-22T16:23:04.082747+00:00'
+  last_row: '2026-09-22T16:26:06.773465+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:39.803190Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 183.0
+    mode_seconds:
+      unknown: 183.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T162659
+  sha256: sha256:400115e5c14cb4837c7c2e0135c7cc63f07442f15af88c3c6f934caa7d7ed0f9
+  chunks: 51
+  bytes: 141599
+  started_at: '2026-09-22T16:26:59+00:00'
+  first_row: '2026-09-22T16:27:30.745367+00:00'
+  last_row: '2026-09-22T16:31:51.797575+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:40.490017Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 260.0
+    mode_seconds:
+      unknown: 260.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T163209
+  sha256: sha256:b9055d92465433f315b7786c4c3f95bae1e7bed70b5f82145f90a1005d9bc569
+  chunks: 2
+  bytes: 5479
+  started_at: '2026-09-22T16:32:09+00:00'
+  first_row: '2026-09-22T16:32:16.019366+00:00'
+  last_row: '2026-09-22T16:32:25.053521+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:40.840271Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 10.0
+    mode_seconds:
+      unknown: 10.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T163415
+  sha256: sha256:4e0a86dc1ddfc667b5bd6fecdeb8fc914bbada5974fdcccdb7557bcd439c1e3b
+  chunks: 370
+  bytes: 16484533
+  started_at: '2026-09-22T16:34:15+00:00'
+  first_row: '2026-09-22T16:34:51.832398+00:00'
+  last_row: '2026-09-22T17:04:23.558724+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:46.516403Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 1772.0
+    mode_seconds:
+      city: 415.0
+      highway: 73.0
+      idle_transient: 50.0
+      unknown: 1131.0
+      warmup: 103.0
+    events:
+      cold_start: 1
+      cruise: 4
+      idle_period: 3
+      stop: 4
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T170423
+  sha256: sha256:23b4c29fca302fe345fdbe23ae230a4637a3390915cc56a8b9cfc8d9da2834e2
+  chunks: 3
+  bytes: 263242
+  started_at: '2026-09-22T17:04:23+00:00'
+  first_row: '2026-09-22T17:04:23.563557+00:00'
+  last_row: '2026-09-22T17:04:33.347756+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:51.029222Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 11.0
+    mode_seconds:
+      city: 8.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T170433
+  sha256: sha256:6fd8f88ae58c788ffcfe88b3cfd7314d787c62ac80534f1c6b84fcb3b8f316f7
+  chunks: 5
+  bytes: 549504
+  started_at: '2026-09-22T17:04:33+00:00'
+  first_row: '2026-09-22T17:04:33.383545+00:00'
+  last_row: '2026-09-22T17:04:53.439871+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:52.061120Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 21.0
+    mode_seconds:
+      city: 16.0
+      highway: 2.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T170453
+  sha256: sha256:391acbd53baa9619f1330bb5af0d31f8dfa4672b954a45f3756cf875f3da3b7a
+  chunks: 2
+  bytes: 151268
+  started_at: '2026-09-22T17:04:53+00:00'
+  first_row: '2026-09-22T17:04:53.447805+00:00'
+  last_row: '2026-09-22T17:04:59.023077+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:52.982700Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 7.0
+    mode_seconds:
+      highway: 4.0
+      unknown: 3.0
+    events: {}
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T171544
+  sha256: sha256:26c52f7c8e0ecd3d1bf1d8c0b11eb4e5354ed2c1b21c08c04a98b9bfc94ae1d2
+  chunks: 144
+  bytes: 5903508
+  started_at: '2026-09-22T17:15:44+00:00'
+  first_row: '2026-09-22T17:15:44.550763+00:00'
+  last_row: '2026-09-22T17:27:23.473933+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:55.143745Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 700.0
+    mode_seconds:
+      city: 155.0
+      idle: 7.0
+      idle_transient: 9.0
+      koeo: 6.0
+      unknown: 523.0
+    events:
+      cruise: 1
+      idle_period: 1
+      stop: 1
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/2026-09-22T233855
+  sha256: sha256:79d71f0b6b58b7f34e588baf4ee45204c662dd9965c5b74c395982d0f27877ef
+  chunks: 103
+  bytes: 8296181
+  started_at: '2026-09-22T23:38:55+00:00'
+  first_row: '2026-09-22T23:38:59.283615+00:00'
+  last_row: '2026-09-22T23:46:53.118947+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:16:58.419994Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 474.0
+    mode_seconds:
+      idle: 261.0
+      idle_high: 6.0
+      unknown: 43.0
+      warmup: 164.0
+    events:
+      idle_period: 4
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-22T234813
+  sha256: sha256:093f0415cc31c9c19f8669ea0ecd5b8eee9396335e0642820e0c7f09383fcdfa
+  chunks: 59
+  bytes: 5307358
+  started_at: '2026-09-22T23:48:13+00:00'
+  first_row: '2026-09-22T23:48:16.959469+00:00'
+  last_row: '2026-09-22T23:52:24.356752+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:01.452910Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 249.0
+    mode_seconds:
+      idle: 246.0
+      unknown: 3.0
+    events:
+      idle_period: 1
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T001344
+  sha256: sha256:035c36ad663d8b39d7d7c357072800ce2877fe69e6552d13c0ed5a6c8488d3aa
+  chunks: 72
+  bytes: 740369
+  started_at: '2026-09-23T00:13:44+00:00'
+  first_row: '2026-09-23T00:13:44.600620+00:00'
+  last_row: '2026-09-23T00:23:40.320904+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:03.713513Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 597.0
+    mode_seconds:
+      idle: 12.0
+      koeo: 8.0
+      unknown: 577.0
+    events:
+      idle_period: 1
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T002340
+  sha256: sha256:688d095a46ad979e696b913eaa0231849b5c61cd2259b6a3d57631ae3e43b1eb
+  chunks: 216
+  bytes: 20535419
+  started_at: '2026-09-23T00:23:40+00:00'
+  first_row: '2026-09-23T00:23:40.319912+00:00'
+  last_row: '2026-09-23T00:39:17.483866+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:08.440582Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 938.0
+    mode_seconds:
+      city: 615.0
+      highway: 11.0
+      idle: 145.0
+      idle_high: 3.0
+      idle_transient: 16.0
+      koeo: 6.0
+      unknown: 142.0
+    events:
+      cruise: 5
+      idle_period: 5
+      stop: 2
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T003917
+  sha256: sha256:929335418a731938877bbe6dd0f54b2ccd30ff7a0bbb25d33546d39c6d0f9450
+  chunks: 1296
+  bytes: 33178369
+  started_at: '2026-09-23T00:39:17+00:00'
+  first_row: '2026-09-23T00:39:17.482518+00:00'
+  last_row: '2026-09-23T02:26:20.367993+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:22.727248Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 6424.0
+    mode_seconds:
+      koeo: 1569.0
+      unknown: 4855.0
+    events:
+      idle_period: 4
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T022631
+  sha256: sha256:dc4341fda9c2453e51032e9efc5a9c4522324bd9291ca8d11ff1db82d9d0bde7
+  chunks: 29
+  bytes: 2330849
+  started_at: '2026-09-23T02:26:31+00:00'
+  first_row: '2026-09-23T02:26:32.540762+00:00'
+  last_row: '2026-09-23T02:28:31.966420+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:34.181672Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 120.0
+    mode_seconds:
+      koeo: 117.0
+      unknown: 3.0
+    events:
+      idle_period: 1
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T022847
+  sha256: sha256:4b63d23317350220c0dc81ae13fc986e0815e14ef9d78a1244666c4b516235fc
+  chunks: 692
+  bytes: 9695115
+  started_at: '2026-09-23T02:28:47+00:00'
+  first_row: '2026-09-23T02:28:47.245240+00:00'
+  last_row: '2026-09-23T03:27:33.924905+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:17:39.087870Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 3527.0
+    mode_seconds:
+      koeo: 417.0
+      unknown: 3110.0
+    events:
+      idle_period: 1
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T032755
+  sha256: sha256:303d2697f2cb6bbb238cf619644dc5930e2f42b992e7146d945cfefc762c0b34
+  chunks: 7517
+  bytes: 23223314
+  started_at: '2026-09-23T03:27:55+00:00'
+  first_row: '2026-09-23T03:28:11.798874+00:00'
+  last_row: '2026-09-23T14:29:25.997649+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:13.510603Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 39675.0
+    mode_seconds:
+      unknown: 39515.0
+      warmup: 160.0
+    events:
+      cold_start: 1
+      idle_period: 3
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T145645
+  sha256: sha256:b43a2ab493fec178e834898347eb58644c3af99dbd3caa6279af6c04ee6bdafa
+  chunks: 65
+  bytes: 309257
+  started_at: '2026-09-23T14:56:45+00:00'
+  first_row: '2026-09-23T14:56:44.799136+00:00'
+  last_row: '2026-09-23T15:06:58.025779+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:27.857690Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 615.0
+    mode_seconds:
+      unknown: 615.0
+    events: {}
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T150658
+  sha256: sha256:1f653b58d83006ff423c5f3a5e5a665500c80dde3565a3ea430ec74f067a8807
+  chunks: 308
+  bytes: 20432159
+  started_at: '2026-09-23T15:06:58+00:00'
+  first_row: '2026-09-23T15:06:58.023679+00:00'
+  last_row: '2026-09-23T16:29:18.757940+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:33.702455Z'
+    predates_mode_label_fix: false
+    disposition: review
+    duration_seconds: 4941.0
+    mode_seconds:
+      city: 400.0
+      highway: 242.0
+      idle: 8.0
+      idle_transient: 130.0
+      koeo: 6.0
+      unknown: 4155.0
+    events:
+      cruise: 1
+      idle_period: 4
+      stop: 5
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T162918
+  sha256: sha256:0913c916fb919725db3d38eaad4d3273ed0d5ee2bf30cdef71793c9bd65c3caa
+  chunks: 153
+  bytes: 13917442
+  started_at: '2026-09-23T16:29:18+00:00'
+  first_row: '2026-09-23T16:29:18.756919+00:00'
+  last_row: '2026-09-23T16:40:07.370611+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:42.010810Z'
+    predates_mode_label_fix: false
+    disposition: ready
+    duration_seconds: 650.0
+    mode_seconds:
+      idle: 593.0
+      unknown: 3.0
+      warmup: 54.0
+    events:
+      idle_period: 5
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T165316
+  sha256: sha256:93f5c75b37e2a8c3e70636d1841d19bf987bf3ce2ee6d41cab4d14d1d4649ed4
+  chunks: 79
+  bytes: 264341
+  started_at: '2026-09-23T16:53:16+00:00'
+  first_row: '2026-09-23T16:53:16.798792+00:00'
+  last_row: '2026-09-23T17:00:06.798781+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:44.678350Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 411.0
+    mode_seconds:
+      unknown: 411.0
+    events: {}
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/2026-09-23T174610
+  sha256: sha256:b53a9385020f62c8fef87391ad053255405efa3df885b8aab35c5c041b6e5a55
+  chunks: 717
+  bytes: 2215659
+  started_at: '2026-09-23T17:46:10+00:00'
+  first_row: '2026-09-23T17:57:18.735991+00:00'
+  last_row: '2026-09-23T18:59:23.872484+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  classification:
+    classifier_version: 0.3.0
+    classified_at: '2026-09-23T23:18:48.073374Z'
+    predates_mode_label_fix: false
+    disposition: quarantine
+    duration_seconds: 3726.0
+    mode_seconds:
+      city: 19.0
+      unknown: 3707.0
+    events: {}
+  drive: 2026-09-23T174610
+- path: sessions/nissan-xterra-2008/_capture-fuel-target-research-2026-09-21T195844
+  sha256: sha256:52180770561fe4d98ca04f1642a98cd0ce8b5c5186ae583af81b11fd65054266
+  chunks: 288
+  bytes: 32417785
+  started_at: '2026-09-21T19:58:44+00:00'
+  first_row: '2026-09-21T19:58:44.464298+00:00'
+  last_row: '2026-09-21T20:18:36.218480+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: fuel-target-research
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/_capture-rom-trace-2026-09-21T142926
+  sha256: sha256:083bbba6af27f936b7b3e53042157bd9bf4cdcfd73bc0ba9257fd7531277fc67
+  chunks: 57
+  bytes: 7073936
+  started_at: '2026-09-21T14:29:26+00:00'
+  first_row: '2026-09-21T14:29:26.545164+00:00'
+  last_row: '2026-09-21T14:32:56.911745+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: rom-trace
+  capture_sidecar_recipes:
+  - air_charge_vs_rpm_throttle_did
+  - cam_primary_vs_command_rpm_did
+  - cam_secondary_vs_command_rpm_did
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-21T142126
+- path: sessions/nissan-xterra-2008/_capture-rom-trace-2026-09-21T195647
+  sha256: sha256:1f42ed2473502dcf5532130e83302de1ce2fb58a76bf407b55617f80abc16a7e
+  chunks: 24
+  bytes: 2601231
+  started_at: '2026-09-21T19:56:47+00:00'
+  first_row: '2026-09-21T19:56:47.218092+00:00'
+  last_row: '2026-09-21T19:58:19.251365+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: rom-trace
+  capture_sidecar_recipes:
+  - air_charge_vs_rpm_throttle_did
+  - cam_primary_vs_command_rpm_did
+  - cam_secondary_vs_command_rpm_did
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-21T194247
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-21T223734
+  sha256: sha256:e656d7db2270ff01d643c0b61316f74171bddbdeddfacfe12e44711b29df5378
+  chunks: 259
+  bytes: 28284919
+  started_at: '2026-09-21T22:37:34+00:00'
+  first_row: '2026-09-21T22:37:33.997515+00:00'
+  last_row: '2026-09-21T22:55:11.136431+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: capture_manifest
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-21T232153
+  sha256: sha256:72f6361fed0d6e290513fff3844cee343658178f92c5e310d0f561de2c993797
+  chunks: 393
+  bytes: 42548905
+  started_at: '2026-09-21T23:21:53+00:00'
+  first_row: '2026-09-21T23:21:53.111447+00:00'
+  last_row: '2026-09-21T23:49:03.395811+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: capture_manifest
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-21T223439
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-22T170423
+  sha256: sha256:2eb2908c2987a93c0a94993926fb92e13c25e2b817b5bf719317c4dce28c8942
+  chunks: 1
+  bytes: 2747
+  started_at: '2026-09-22T17:04:23+00:00'
+  first_row: '2026-09-22T17:04:23.562372+00:00'
+  last_row: '2026-09-22T17:04:23.563339+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-22T170433
+  sha256: sha256:fee9aea1cde908b1a0e8f043f3fa8b8eafcec3f91ed60f25993f5279dd1f24d9
+  chunks: 1
+  bytes: 4410
+  started_at: '2026-09-22T17:04:33+00:00'
+  first_row: '2026-09-22T17:04:33.148536+00:00'
+  last_row: '2026-09-22T17:04:33.383319+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-22T170453
+  sha256: sha256:2efbc99739d079578dd74773085b709f93567d10f4e5f45344c17c7169b7e222
+  chunks: 1
+  bytes: 3391
+  started_at: '2026-09-22T17:04:53+00:00'
+  first_row: '2026-09-22T17:04:53.440771+00:00'
+  last_row: '2026-09-22T17:04:53.445590+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-22T170459
+  sha256: sha256:0ad28c39c46ef159c16b0be042fd85fe93007a1fb89356f90e4661b703d085a5
+  chunks: 158
+  bytes: 17587678
+  started_at: '2026-09-22T17:04:59+00:00'
+  first_row: '2026-09-22T17:04:59.023316+00:00'
+  last_row: '2026-09-22T17:15:44.550523+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T154716
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-22T235224
+  sha256: sha256:f7b8b370a7d6f81e8946ddc69137b79b0c8a3fc76115b7642dae5596381bf9be
+  chunks: 305
+  bytes: 31134268
+  started_at: '2026-09-22T23:52:24+00:00'
+  first_row: '2026-09-22T23:52:24.356992+00:00'
+  last_row: '2026-09-23T00:13:44.602344+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: capture_manifest
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-23T022831
+  sha256: sha256:e07872227172b8d2b3761e52527a5f6863957c23dfe2df0a3e87c54041d6ee6b
+  chunks: 5
+  bytes: 321173
+  started_at: '2026-09-23T02:28:31+00:00'
+  first_row: '2026-09-23T02:28:31.922984+00:00'
+  last_row: '2026-09-23T02:28:47.244996+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-23T142926
+  sha256: sha256:88bf397e6ee9b23c17af57ca35c3c343b42c56dfa37bc6345c86388a8ddabdfc
+  chunks: 397
+  bytes: 43712539
+  started_at: '2026-09-23T14:29:26+00:00'
+  first_row: '2026-09-23T14:29:25.799539+00:00'
+  last_row: '2026-09-23T14:56:45.064022+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T233855
+- path: sessions/nissan-xterra-2008/_capture-tuning-2026-09-23T164007
+  sha256: sha256:d5b2f5365b9a86462e05b7fe699b502fefc6031035d8f4d0987091c51fd14d6d
+  chunks: 191
+  bytes: 20168600
+  started_at: '2026-09-23T16:40:07+00:00'
+  first_row: '2026-09-23T16:40:07.371680+00:00'
+  last_row: '2026-09-23T16:53:16.498058+00:00'
+  tune_revision: ZS44A-20260920
+  revision_source: registry
+  revision_conflict: false
+  capture_profile: tuning
+  capture_sidecar_recipes: []
+  classification: none (captures are not labelled by label_sessions.py)
+  drive: 2026-09-22T233855

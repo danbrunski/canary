@@ -36,7 +36,12 @@ from src.decode.behavior_models import (
 )
 
 FIXTURES = Path("tests/fixtures/behavior_validation")
-ARTIFACT = load_behavior_models(Path("data/nissan-xterra-2008/behavior_models.yaml"))
+# The review's known answers belong to the artifact it measured: the set
+# published until the 2026-09-23 current-calibration refresh, pinned here as a
+# fixture so a promotion cannot silently re-point them (B03.9).
+ARTIFACT = load_behavior_models(
+    Path(__file__).parent / "fixtures/behavior_validation/behavior_models_2026-09-22.yaml"
+)
 CRITERIA = load_validation_document(Path("data/nissan-xterra-2008/behavior_validation.yaml"))
 CATALOG = {recipe.name: recipe for recipe in default_recipes()}
 

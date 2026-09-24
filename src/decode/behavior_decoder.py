@@ -55,6 +55,7 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.preprocessing.features import ROC_SUFFIX, FeatureConfig, compute_rate_of_change
+from src.preprocessing.local_range import append_local_ranges, local_range_column
 from src.preprocessing.resampler import gap_column
 from src.preprocessing.session_context import append_start_context, start_context_specs
 
@@ -330,6 +331,10 @@ def append_behavior_prerequisites(
       ``frame`` lacks it (batch), folded per session by
       :func:`~src.preprocessing.session_context.append_start_context`. The
       live source supplies its own, which outlives its ring buffer.
+    * ``context:range_*`` local-range steady context (B07.6) for every
+      :class:`~src.decode.behavior_models.LocalRangeCondition` a contract
+      names, via :func:`~src.preprocessing.local_range.append_local_ranges`,
+      on the batch frame and the live ring buffer alike.
 
     Returns ``frame`` itself when nothing is needed.
     """
@@ -362,6 +367,15 @@ def append_behavior_prerequisites(
     ]
     if specs:
         out = append_start_context(out, specs)
+    local_ranges = {
+        local_range_column(condition): condition
+        for model in models.models
+        if model.eligibility is not None
+        for condition in model.eligibility.local_ranges
+        if local_range_column(condition) not in out.columns
+    }
+    if local_ranges:
+        out = append_local_ranges(out, local_ranges.values())
     return out
 
 

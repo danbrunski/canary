@@ -355,15 +355,16 @@ def test_fuel_control_rejects_non_j1979_states() -> None:
 
 
 def test_shipped_artifact_loads_diagnostic_only() -> None:
-    """B01.6 — the shipped schema-1 artifacts predate the serving contract;
-    they load, but none is presented as a trusted alert source."""
-    from src.decode.behavior_models import STATUS_LEGACY_NO_CONTRACT, diagnostic_only_models
+    """B01.6/B03.9 — no shipped model is a trusted alert source until one passes
+    B02, and every one says why (the 2026-09-23 current-calibration refresh was
+    promoted diagnostic-only: all ten refits failed validation)."""
+    from src.decode.behavior_models import diagnostic_only_models
 
     path = Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/behavior_models.yaml"
     models = load_behavior_models(path)
     diagnostic = diagnostic_only_models(models)
     assert set(diagnostic) == {model.name for model in models.models}
-    assert all(STATUS_LEGACY_NO_CONTRACT in reasons for reasons in diagnostic.values())
+    assert all(reasons for reasons in diagnostic.values())
 
 
 def test_shipped_air_charge_surface_is_revision_scoped() -> None:
@@ -371,10 +372,17 @@ def test_shipped_air_charge_surface_is_revision_scoped() -> None:
     surface = load_behavior_models(path).by_name("air_charge_vs_rpm_throttle_did")
 
     assert surface is not None
-    assert surface.fit.tune_revision == "ZS44A-k106"
-    assert surface.fit.validation_sample_count >= 1_000
+    # Scoped to the calibration in force: the newest flashed revision.
+    import yaml
+
+    revisions = yaml.safe_load(
+        (
+            Path(__file__).resolve().parents[1] / "data/nissan-xterra-2008/tune_revisions.yaml"
+        ).read_text()
+    )["revisions"]
+    assert surface.fit.tune_revision == revisions[-1]["revision"]
+    assert surface.fit.validation_sample_count > 0
     assert surface.fit.validation_warning_rate is not None
-    assert surface.fit.validation_warning_rate < 0.03
 
 
 def test_load_rejects_unknown_field(tmp_path: Path) -> None:

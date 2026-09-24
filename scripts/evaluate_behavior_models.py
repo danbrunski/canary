@@ -638,7 +638,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     decode_can: Literal["none", "mode-inputs"] = args.decode_can or (
         "none" if args.mode == "historical" else "mode-inputs"
     )
-    policy = EventPolicy.from_config(scoped)
+    policy = EventPolicy.from_config(scoped, document)
     revisions_path: Path = args.tune_revisions or (
         scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
     )

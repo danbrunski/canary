@@ -856,7 +856,15 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
     )
     profile = CaptureProfile(
         name="default",
-        mode01={"RPM": 1.0, "ENGINE_LOAD": 1.0, "MAF": 1.0, "INTAKE_TEMP": 1.0},
+        # BAROMETRIC_PRESSURE: ve_vs_rpm_load reads the ambient-referenced
+        # derived:VE_AMBIENT_PERCENT (B04.5), whose reference is baro only.
+        mode01={
+            "RPM": 1.0,
+            "ENGINE_LOAD": 1.0,
+            "MAF": 1.0,
+            "INTAKE_TEMP": 1.0,
+            "BAROMETRIC_PRESSURE": 1.0,
+        },
         corpus_eligible=True,
         broadcast_decode=True,
     )
@@ -875,10 +883,22 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
     assert "cat_warmup" in flagged
     assert {"obd:CATALYST_TEMP_B1S1", "obd:RUN_TIME"} <= missing
 
-    # Broadcast decode is what supplies MAP; turning it off starves VE.
+    # And a derived channel whose physical input the profile does not poll
+    # is reported: without baro, ambient-referenced VE cannot be computed.
+    no_baro = CaptureProfile(
+        name="default",
+        mode01={"RPM": 1.0, "ENGINE_LOAD": 1.0, "MAF": 1.0, "INTAKE_TEMP": 1.0},
+        corpus_eligible=True,
+        broadcast_decode=True,
+    )
+    starved = {w["model"]: w["missing_channels"] for w in store.save(no_baro)}
+    assert starved.get("ve_vs_rpm_load") == ["derived:VE_AMBIENT_PERCENT"]
+
+    # Ambient-referenced VE needs no MAP (B04.5), so turning broadcast decode
+    # off does not starve it: baro and IAT both come from Mode 01 here.
     without_decode = profile.model_copy(update={"broadcast_decode": False})
     starved = model_input_warnings(without_decode, behavior_models)
-    assert "ve_vs_rpm_load" in {warning["model"] for warning in starved}
+    assert "ve_vs_rpm_load" not in {warning["model"] for warning in starved}
 
 
 def test_capture_preserves_and_restores_an_operator_bus_budget(tmp_path: Path) -> None:

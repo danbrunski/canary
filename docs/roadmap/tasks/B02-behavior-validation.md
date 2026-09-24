@@ -67,7 +67,7 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   `::test_drive_fragments_never_cross_folds`, `::test_fit_recipe_keeps_segments_of_one_drive_in_one_fold`,
   `::test_prior_edges_fitted_on_a_test_drive_are_refused`. It showed the July
   held-out J26 is a 35 s continuation of training session `223147` ([report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §2).
-- [~] **B02.4 — Enforce provenance and adequate evidence.** Validate tune
+- [x] **B02.4 — Enforce provenance and adequate evidence.** Validate tune
   boundaries, source/decoder identity, mode labels and capture recipe grants.
   Unknown revisions and sessions crossing a flash need a named resolution,
   not an assumed calibration. Require multiple independent validation drives
@@ -88,6 +88,27 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   `provenance_resolutions`; event-gated warmup recipes are blocked by **D03.22** (stale
   sidecar events); cat_warmup's May training sessions are absent locally. All
   eight shipped models stay diagnostic-only ([report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §4).
+  *Remainder resolved 2026-09-23:* the machinery was applied to the operator's
+  current-calibration corpus (ZS44A-20260920, decision 2026-09-23;
+  [manifest](../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml)).
+  - Every session resolves to one revision (13 via their capture manifests),
+    with no unknown revisions and no flash crossings (checked per row by the
+    refit CLI).
+  - D03.22 is done for this corpus: 40 sidecars at classifier 0.3.0, none
+    stale.
+  - Capture grants are recorded per capture.
+  - Correction to the 09-21 remainder: the May sessions *are* local (B07.1).
+  - Each of the 10 fitted recipes now has **2 qualifying independent test
+    drive groups**, so the "no two qualifying drives on one calibration"
+    remainder no longer holds. Checked on the promoted artifact: every
+    `evidence.test.drives == 2`, and no failure reads `test_drives`.
+
+  Where evidence is still missing, it is reported and the model stays
+  diagnostic-only: the warmup recipes (2 cold starts), cam (commanded angle
+  never polled), TPS (244 rows), manifold VE (no MAP), LTFT balance (LTFT
+  constantly 0.0). All 12 shipped models are diagnostic-only because they
+  *failed* or lack evidence, never by default
+  ([refit report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0, §2).
 - [x] **B02.5 — Report denominators and practical accuracy.** Per model,
   drive and relevant regime, emit input-present/fresh/eligible/evaluated counts,
   refusal reasons, coverage, MAE, signed bias, error quantiles, R² where useful,

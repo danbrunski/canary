@@ -46,10 +46,20 @@ a residual alone.
   `::test_a_test_drive_cannot_pick_its_own_lag`,
   `::test_drives_that_chose_the_eligibility_constants_are_not_evaluation_evidence`,
   `::test_transport_delay_refuses_insufficient_training_evidence`.
-  **Remaining:** choose and freeze an actual lag — deferred: needs the
-  operator's corpus choice (2026-09-22) and drives holding enrichment long
-  enough to resolve one (the three 2026-09-21 drives yield 2 eligible
-  enrichment rows in total).
+  *Lag estimated 2026-09-23 on the current calibration (corpus decision
+  2026-09-23).* `estimate_transport_delay()` was run on the three informing
+  drives only (candidates 0–3 s in 0.25 s steps, RAM target vs PID 0x24,
+  2140 rows). It picks **0.25 s**: the first non-zero step, equal to the
+  acquisition tolerance, with a 4 % score change (2.32 → 2.22). Frozen and
+  applied to four later, independent tuning captures, it tightens
+  closed-loop p05/p95 on one (−4.52/3.25 → −3.56/2.93 %) and widens p95 on
+  the other three. At the ~1 Hz target cadence, lag is not resolved beyond
+  acquisition skew ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §6). **Remaining:** not frozen into
+  `lambda_delivery.yaml`. `TransportDelayDeclaration` has no numeric
+  `seconds`/`fitted_on`, and a lag written into its `note` would be a
+  constraint in a comment, so freezing one needs that schema field. A lag
+  worth freezing needs a faster target read or sustained enrichment (still
+  0–1 eligible enrichment rows per drive).
 - [~] **B06.4 — Share analysis and serving semantics.** Implement the
   relationship in the existing derived/model pipeline with B01's persisted
   eligibility. Reconcile analysis and live paths, including differing stored
@@ -72,20 +82,35 @@ a residual alone.
   `tests/test_lambda_delivery_known_answers.py::test_state_counts_account_for_every_target_observation`,
   `tests/test_workbench_analysis.py`, `tests/test_tuning_frame.py`.
   **Remaining:** the live/serving implementation (a persisted-eligibility
-  behavior model or derived channel evaluated on the 1 Hz operating frame)
-  — deferred: it needs a published model, i.e. the operator's corpus choice
-  (2026-09-22), and its 1 Hz pairing must not claim instantaneous tracking.
-- [ ] **B06.5 — Evaluate useful sensitivity.** *Deferred: needs the
-  operator's corpus choice (2026-09-22), plus drives with sustained
-  enrichment and declared dwell — the current corpus yields 2 eligible
-  enrichment rows.* Use independent steady pulls
+  behavior model or derived channel evaluated on the 1 Hz operating frame).
+  The corpus choice is made (2026-09-23), but no delivery model can be
+  fitted and validated yet (B06.5), and the serving path is new code, not a
+  refit. Its 1 Hz pairing must not claim instantaneous tracking.
+- [~] **B06.5 — Evaluate useful sensitivity.** Use independent steady pulls
   and closed-loop controls with known calibration, adequate target variation
   and declared dwell. Test normal target steps plus lag, sustained lean/rich
   deviations, fuel cut and input dropout. Report qualified sample/event counts,
   coverage, error, detection delay and uncertainty under B02. Ordinary tip-in
   lag must not become a persistent lean-delivery finding.
-- [ ] **B06.6 — Publish with bounded claims.** *Deferred: publication is
-  fitting + rollout (operator's corpus choice, 2026-09-22).* Prefer this relationship over
+  *Closed-loop controls measured 2026-09-23; enrichment still absent.*
+  `lambda_delivery_evidence.py` covered the five ZS44A-20260920 tuning
+  captures after the three informing drives (all independent of the
+  declared constants). RAM target vs PID 0x24 states per capture:
+  - eligible closed loop: 448 / 556 / 11 / 989 / 473
+  - fuel cut: 35 / 143 / 0 / 194 / 51
+  - post-cut holdoff: 153 / 415 / 0 / 435 / 182
+  - target transient: 19 / 28 / 3 / 34 / 40
+  - **eligible enrichment: 0 / 1 / 0 / 1 / 0**
+
+  Closed-loop residual median −0.38 … +0.78 %; on the four captures with
+  ≥ 448 rows, p05 −4.5 … −9.3 % and p95 +3.2 … +3.8 %. **Remaining:** independent steady enrichment dwell (a
+  held WOT or high-load pull ≥ the 3 s dwell, repeated over ≥ 2 drives).
+  Until then, lean/rich sensitivity and tip-in behaviour cannot be scored
+  under B02. There is no closed-loop noise floor either (refused by
+  `regime_noise_floor`, correctly).
+- [ ] **B06.6 — Publish with bounded claims.** *Not publishable (2026-09-23):
+  corpus chosen, but there is no validated delivery model (B06.5) and no
+  serving implementation (B06.4).* Prefer this relationship over
   adding an unconditional raw AFR-voltage surface when it qualifies. Surface
   target, actual, residual, regime and eligibility reason together. A detected
   delivery mismatch does not identify pressure, injector calibration or sensor
