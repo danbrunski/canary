@@ -49,6 +49,7 @@ from src.collection.obd_scheduler import (
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
+from src.collection.supply_voltage_collector import collect_supply_voltage_from_config
 from src.config import CanaryConfig
 from src.control.calibration import active_registry_path
 from src.telemetry import TelemetryRecord
@@ -117,6 +118,7 @@ def default_collectors(
         *_gps_collectors(config, reconnect_policy),
         *_sensor_collectors(config, reconnect_policy),
         *_imu_collectors(config, reconnect_policy),
+        *_supply_voltage_collectors(config, reconnect_policy),
     ]
 
     if config.collection.obd_source == "canable":
@@ -356,6 +358,25 @@ def _imu_collectors(
         await collect_imu_from_config(imu, queue, stop, reconnect_policy=reconnect_policy)
 
     return [imu_collector]
+
+
+def _supply_voltage_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """The HAT's 12 V sense collector, or empty when it is not enabled."""
+    supply = config.hardware.supply_voltage
+    if not supply.enabled:
+        return []
+
+    async def supply_voltage_collector(
+        queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event
+    ) -> None:
+        await collect_supply_voltage_from_config(
+            supply, queue, stop, reconnect_policy=reconnect_policy
+        )
+
+    return [supply_voltage_collector]
 
 
 __all__ = ["CollectorStarter", "default_collectors"]

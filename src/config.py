@@ -204,12 +204,34 @@ class ImuConfig(_Strict):
         return self
 
 
+class SupplyVoltageConfig(_Strict):
+    """The CANary-HAT's 12 V sense: an ADS1015 reading the protected ``+12V``
+    rail through a resistor divider. Recorded as ``sensor:SUPPLY_VOLTAGE``.
+
+    Unlike ``obd:CONTROL_MODULE_VOLTAGE`` it needs no awake ECM, so it reads
+    key-off and parked. Disabled by default (no HAT, no ADC). An
+    external-sensor channel: never trains or scores the anomaly detectors.
+    """
+
+    enabled: bool = False
+    i2c_bus: int = 1
+    i2c_address: int = 0x48
+    #: ADS1015 input the divider feeds (single-ended). HAT rev 2.0: AIN0.
+    input_channel: int = Field(default=0, ge=0, le=3)
+    #: Rail volts per volt at the ADC pin. HAT rev 2.0: R11 100 k over R12
+    #: 22 k, so (100 + 22) / 22. A per-board fact, kept here, not in code.
+    divider_ratio: float = Field(default=122.0 / 22.0, gt=1.0)
+    #: Conversions per second. The rail moves slowly except while cranking.
+    rate_hz: float = Field(default=10.0, gt=0.0, le=200.0)
+
+
 class HardwareConfig(_Strict):
     elm327_port: str
     can: CanBusConfig
     gps: GpsConfig = GpsConfig()
     imu: ImuConfig = ImuConfig()
     sensor_can: SensorCanConfig = SensorCanConfig()
+    supply_voltage: SupplyVoltageConfig = SupplyVoltageConfig()
 
 
 class RecordArmingConfig(_Strict):

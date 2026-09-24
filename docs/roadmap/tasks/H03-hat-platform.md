@@ -32,7 +32,7 @@ other checklist leans on.
 
 ## Desk
 
-- [ ] **H03.1 12 V sense collector.** **Do:** an ADS1015 driver on the same
+- [x] **H03.1 12 V sense collector.** **Do:** an ADS1015 driver on the same
   bus abstraction as H02.2 (single-shot, AIN0 single-ended, ±4.096 V FSR,
   11.1 mV per LSB at the 12 V side), a collector emitting
   `sensor:SUPPLY_VOLTAGE` in volts at a configured rate (default 10 Hz), with
@@ -41,6 +41,18 @@ other checklist leans on.
   (`telemetry.py` already anticipates "an ADC-read sender"), so no new source.
   **Accept:** fake-bus tests for the conversion and the reconnect path;
   H01.1 keeps it out of the detectors.
+  **Evidence (2026-09-23):** `src/collection/ads1015.py` (single-shot,
+  single-ended, 16-bit registers through the new `RegisterBus.write_block`),
+  `src/collection/supply_voltage_collector.py`, and
+  `hardware.supply_voltage` (`SupplyVoltageConfig`: bus, address, input,
+  `divider_ratio` default 122/22, `rate_hz` default 10, disabled by default),
+  wired through `_supply_voltage_collectors`. 11 tests
+  (`tests/test_supply_voltage.py`) pin the two bring-up answers: config word
+  `0xC383` and code 1143 = 12.68 V. **On the HAT:** 50 conversions in 128 ms,
+  12.311 V, steady (the truck resting since the KOEO test). The config key is
+  `hardware.supply_voltage`, not the `hardware.hat.supply_divider` sketched
+  above: the HAT has no other block to share. Not enabled on the Pi until
+  H01.1 keeps `sensor:` out of the detectors.
 - [ ] **H03.2 Feed the non-volatile write gate.** **Do:** supply
   `NonvolatileWriteSignals.battery_voltage` from `sensor:SUPPLY_VOLTAGE` when
   it is fresh, else from `obd:CONTROL_MODULE_VOLTAGE`, and make an unknown

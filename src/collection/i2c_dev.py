@@ -32,12 +32,15 @@ MAX_READ = 4096
 
 class RegisterBus(Protocol):
     """One device's registers: read ``length`` bytes from ``register`` onward,
-    or write one byte. Auto-increment across registers is the device's job
-    (e.g. the LSM6DSOX's ``IF_INC``)."""
+    write one byte, or write several (a 16-bit register such as the ADS1015's,
+    MSB first). Auto-increment across registers is the device's job (e.g. the
+    LSM6DSOX's ``IF_INC``)."""
 
     def read(self, register: int, length: int) -> bytes: ...
 
     def write(self, register: int, value: int) -> None: ...
+
+    def write_block(self, register: int, data: bytes) -> None: ...
 
     def close(self) -> None: ...
 
@@ -89,7 +92,13 @@ class LinuxI2cBus:
         return bytes(out)
 
     def write(self, register: int, value: int) -> None:
-        buf = (ctypes.c_uint8 * 2)(register & 0xFF, value & 0xFF)
+        self.write_block(register, bytes([value & 0xFF]))
+
+    def write_block(self, register: int, data: bytes) -> None:
+        """Write ``data`` starting at ``register`` (e.g. a 16-bit register, MSB first)."""
+        if not 1 <= len(data) <= 64:
+            raise ValueError(f"write length {len(data)} outside 1..64")
+        buf = (ctypes.c_uint8 * (1 + len(data)))(register & 0xFF, *data)
         self._transfer((0, buf))
 
     def close(self) -> None:

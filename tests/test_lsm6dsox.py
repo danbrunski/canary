@@ -168,6 +168,10 @@ class FakeBus:
             value &= ~lsm.CTRL3_SW_RESET  # reset completes immediately
         self.regs[register] = value
 
+    def write_block(self, register: int, data: bytes) -> None:
+        for offset, value in enumerate(data):
+            self.write(register + offset, value)
+
     def close(self) -> None:
         self.closed = True
 
