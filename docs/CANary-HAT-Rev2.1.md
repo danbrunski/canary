@@ -65,6 +65,9 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | Correct U8's stale schematic note | — (text) |
 | 11 | **One 40 MHz oscillator clocks both controllers**; Y1 + C5/C6 deleted, no Y2 | X1 MEMS oscillator, C25 100n, R27 33 Ω |
+| 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6) | BT1 (net change) |
+| 13 | **U5 barometer: fix whatever the rev 2.0 investigation finds** (§13.5.6) | U5 — TBD |
+| 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
 
 Roughly **+25 components** on a 65 × 56 mm board that already carries 57 — see
 §13.5.7 for where they go.
@@ -524,7 +527,113 @@ Why this arrangement:
   high-impedance analog input is the conservative choice.
 - `J3` (+12V pass-through to the X1202) is **unchanged**.
 
-### 13.5.6 Carry-over fix
+### 13.5.6 Carry-over fixes
+
+Defects in rev 2.0 itself, found on the first assembled board (bring-up
+2026-09-23, §13.1.1 of [`CANary-HAT-Revisions.md`](CANary-HAT-Revisions.md)).
+They go into rev 2.1 whatever happens to the boosted-engine work above.
+
+#### BT1 — GNSS backup cell polarity is reversed
+
+On the first board the cell's polarity at BT1 is backwards: the pin that should
+carry the cell's + (to D2's anode, then V_BCKP) is the one wired to GND.
+**Fix: swap BT1's two pin connections, GND ↔ D2 anode.** It is a net change
+only; the footprint and D2 stay as they are.
+
+- **Rev 2.0 boards are not damaged by it.** With the cell reversed, D2's anode
+  sits about 3 V *below* GND, so D2 blocks and V_BCKP gets nothing. The
+  receiver cold-starts on every boot, as if no cell were fitted. The workaround
+  on rev 2.0 is to swap the two crimps in the cable's JST-SH housing, not to
+  rework the board.
+- **Make it impossible next time.** JST-SH battery leads have no standard
+  polarity: vendors wire red to either pin. Pin the exact cell/lead part number in
+  [`BOM-offboard.md`](../hardware/canary-hat/BOM-offboard.md), mark `+` in the
+  silkscreen beside BT1, and check the chosen lead against the footprint before
+  ordering. "A 2-pin JST-SH cell" alone is what let this happen.
+
+#### U5 — BMP384 powers up but never converts
+
+Symptom (§13.1.1): chip ID `0x50`, NVM, error register, sensor-time counter and
+data-ready flags are all correct, but every conversion returns temperature
+**exactly 0** and pressure pinned at ≈`0x801C00`. Bring-up concluded "dead part,
+replace U5". **That has not been shown yet.** One board is one sample, so a
+design or process fault that would recur on rev 2.1 has not been ruled out.
+Work through the list below on the rev 2.0 boards before deciding what rev 2.1
+changes.
+
+**Already ruled out (checked against the PCB file, 2026-09-23):**
+
+- **Pinout.** Pads match the BMP384 datasheet: VDDIO=1, SCK=2 (SCL1), VSS=3/8/9,
+  SDI=4 (SDA1), SDO=5→+3V3 (addr 0x77), CSB=6→+3V3 (I²C), INT=7 (GPIO17),
+  VDD=10. A rotated or mirrored footprint would move SCK/SDI off the bus, and
+  the part answers, so orientation is right too.
+- **Decoupling present.** C10 and C13 (100 nF, +3V3↔GND) sit about 3 mm either
+  side of U5.
+
+**Still to check, cheapest first:**
+
+1. **Is it this part or every part?** Five boards were built. Run
+   `checkout_hat.sh` on a second board. If every board fails the same way, it is
+   design or process. If only one does, it is the part. This check decides the
+   rest.
+2. **Rails at the pins.** Measure VDD (pin 10) and VDDIO (pin 1) *at the
+   package* while a conversion is running, on a scope as well as a meter. The
+   core can answer I²C at a VDD that is too low for the analog front end (POR is
+   1.58 V, operating minimum 1.71 V), so a high-resistance joint on pin 10 alone
+   is not excluded just because the digital side works. X-ray or inspect
+   pins 8–10 for voids and tombstoning; LGA joints can't be seen from the top.
+3. **The command sequence.** Rule the software out with Bosch's reference
+   driver (`BMP3_SensorAPI`), not the hand-written `0x13` → `PWR_CTRL` in
+   `checkout_hat.sh`. Read `PWR_CTRL` back after the write (press_en,
+   temp_en and mode must all stick), check `ERR_REG.conf_err` and
+   `STATUS.drdy_temp` *after* a conversion, and set `OSR`/`ODR` explicitly
+   before normal mode. An invalid OSR/ODR pair leaves normal mode idle.
+4. **A real hard reset.** The BMP384 has no reset pin. Its only resets are the
+   soft reset (`0xB6` → `0x7E`, already tried) and a power cycle. A Pi reboot
+   does *not* remove +3V3. Remove power completely (unplug the Pi, wait, no UPS
+   stacked) and read again.
+5. **Assembly process.** Ask PCBWay whether the boards were washed (aqueous or
+   ultrasonic) after reflow, and what reflow profile and moisture handling
+   (MSL) the part got. Bosch forbids both washing and ultrasonic cleaning for
+   its pressure sensors: the vent opening exposes the MEMS element, and
+   ultrasonic cleaning can destroy it. A washed board would fail on every copy
+   (see check 1).
+6. **Rework U5 with a known-good part** (BMP384, or the drop-in BMP390, §3.5)
+   by hot air. A working replacement confirms a part or process fault on that
+   one board.
+
+**What rev 2.1 might change, depending on the answers:**
+
+- *Process* → a "do not wash, no ultrasonic" line against U5 in `FAB-NOTES.md`
+  and the assembly notes, plus a moisture-bake requirement if MSL is the cause.
+- *A power cycle revives it* → a way to hard-reset U5 without taking the Pi
+  down: feed its VDD/VDDIO from a small load switch, or directly from a GPIO
+  (it draws ≤ 0.7 mA peak). **No GPIO is free** once rev 2.1 closes the header
+  (§13.3.9), so this has to share an existing enable or wait for the rev 3.0
+  supervisor. Decide this after the investigation, not before.
+- *A marginal joint* → review the LGA-10 footprint's paste aperture and stencil
+  thickness against Bosch's handling and soldering guide.
+- *One bad part* → no design change. Keep U5 as the BMP384, or move to the BMP390
+  if measurement 9 (noise) argues for it anyway.
+
+#### J1 — the BOM let the assembler fit the wrong header
+
+PCBWay fitted a **standard-height** 2×20 header at J1. The stack needs the
+**13.5 mm stacking header** to clear the Pi 5 active cooler. The rev 2.0 BOM
+line is ambiguous. Its value says `2x20 stacking hdr 13mm` and it is marked
+operator-sourced / do-not-fit, but its notes still suggest Adafruit 2223, which
+has an 8.5 mm body. It also has no manufacturer part number. **Fix in rev 2.1:**
+give J1 an exact MPN for the 13.5 mm part, delete the conflicting candidates,
+and choose one of two options, then say it the same way in `BOM.csv`,
+`FAB-NOTES.md` and `pcbway-assembly-notes.txt`:
+
+- have the assembler fit that MPN, or
+- keep J1 do-not-fit, and put the reason on the order.
+
+A do-not-fit line with no MPN is what the assembler filled with a generic part
+this time. The first choice is the one that can't be misread.
+
+#### U8 — stale schematic note
 
 **U8's schematic `Note` is stale.** It says the ±4.096 V FSR is needed for
 *"the 2.92V full scale the divider plus D1 clamp can produce."* 2.92 V is
@@ -608,3 +717,6 @@ join the MCU's safe-state nets, and the header closes with no spare GPIO.
 | 9 | Board area closes single-sided? | Placement attempt (§13.5.7) |
 | 10 | X1 part: 40 MHz, 3.3 V, CMOS out, −40…+85 °C, EN pin polarity/default, current | Datasheet of the chosen part |
 | 11 | Rev 2.0 Y1 starts cold? (§13.1 meas. 14) — informs whether the crystal fallback is ever viable | Bench, ≤ 1 pF probe on OSC2 |
+| 12 | U5 root cause: part, process or design (§13.5.6) | Checks 1–6 in §13.5.6, starting with a second board |
+| 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
+| 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided | Measure on the rev 2.0 stack (item 4), order to MPN |
