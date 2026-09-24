@@ -44,6 +44,9 @@ class VehicleParameters(_Strict):
     #: Mass of one road wheel with its tyre, kg: rotating mass, which the
     #: dyno's inertia term needs separately from the total (H07.6).
     wheel_tire_assembly_kg: float | None = Field(default=None, gt=0.0)
+    #: The operator's usual load — driver and cargo — in kg. A default for a
+    #: run's conditions; a run records what was actually aboard.
+    usual_payload_kg: float | None = Field(default=None, ge=0.0)
     #: ``gasoline`` | ``diesel`` | ``e85`` — selects stoichiometric AFR, fuel
     #: density, and the CO2 emission factor.
     fuel_type: Literal["gasoline", "diesel", "e85"] = "gasoline"

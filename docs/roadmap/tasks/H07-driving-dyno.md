@@ -156,14 +156,16 @@ under GPS. Defects a dyno would inherit:
 - [~] **H07.10 Weigh the truck.** A public scale, with the driver, fuel level
   and cargo noted. **Accept:** mass and conditions in the profile.
   **Partial (2026-09-24):** an itemised estimate in the profile until a scale
-  ticket: **2,212 kg (4,876 lb), range 4,803–4,938 lb**, from the operator's
+  ticket: **2,185 kg (4,816 lb), range 4,728–4,893 lb**, from the operator's
   4,387 lb curb (6-speed manual; 4,400 lb is the automatic) plus 489 lb of
-  modifications (wheels and KO3 tyres, Hefty
+  additions less ~60 lb of stock step rails and hitch they replaced (wheels and KO3 tyres, Hefty
   bumpers, winch, skids and sliders), each item's source in
   `mass_evidence`. About ±1.3 %, which scales absolute power by the same;
   before/after comparisons on the same truck cancel it. Also recorded:
   40.3 kg per road wheel and tyre (stock 28.6 kg), the rotating mass H07.6
-  needs. Occupants, cargo and fuel level are per-run conditions.
+  needs. Occupants, cargo and fuel level are per-run conditions; the usual
+  load is `usual_payload_kg` = 127 kg (driver 180 lb + cargo 100 lb), so a
+  typical run moves ~2,311 kg (5,096 lb) on a full tank.
 - [ ] **H07.11 Measure the missing gear ratios.** Steady cruise in 2nd, 4th,
   5th and 6th (1st if practical), with GPS speed. **Accept:** all six in the
   profile, and the three already measured confirmed.
