@@ -21,6 +21,11 @@ needs (dashboard build, Python dependencies, Pi configuration), restart
 CANary through scripts/restart_canary.sh, and verify /status. If the new code
 does not come up, the checkout is reset to the commit it was on and redeployed.
 
+models/ belongs to the Pi, not to git: artefacts arrive with their manifests
+(canaryctl models upload, scp) and the daemon retrains in place, so local
+changes there are expected. They never block an update, and neither the pull
+nor a rollback changes anything under models/.
+
 Options:
   --force        Restart even if a capture is active (ends that capture).
   --full         Run every step regardless of what changed: dashboard build,
@@ -33,7 +38,7 @@ Exit codes:
   1  setup error (not root, missing checkout or installer)
   2  usage error
   3  refused: a capture is active (from restart_canary.sh --check)
-  4  refused: the checkout has tracked local changes
+  4  refused: the checkout has tracked local changes (outside models/)
   5  fetch or fast-forward failed; nothing was changed
   6  new code failed its health check; rolled back to the previous commit,
      which is healthy again
@@ -149,6 +154,68 @@ finish() {
 }
 
 # ---------------------------------------------------------------------------
+# models/ belongs to the Pi. A manifest describes the binary beside it, and the
+# binary never travels by git (it is gitignored; it arrives by `canaryctl models
+# upload` or scp, or the daemon retrains it), so a pulled manifest is one that
+# does not match the binary on disk: the 2026-07-26 blind IF was manifests from
+# a pull beside binaries two weeks older. A retrain on the Pi rewrites the
+# tracked manifest, which is why a dirty models/ is normal and not refused.
+# ---------------------------------------------------------------------------
+MODELS_PATH="models"
+
+keep_models() {
+  # Run "$@" (a git command that moves HEAD) and put every path git tracks
+  # under models/ back exactly as it was: local edits kept, anything the
+  # command added removed, anything it deleted restored.
+  local snap rc=0 restore_rc=0 path
+  snap="$(mktemp -d)"
+  git -C "${CANARY_HOME}" ls-files -z -- "${MODELS_PATH}" >"${snap}/tracked"
+  : >"${snap}/present"
+  while IFS= read -r -d '' path; do
+    if [[ -e "${CANARY_HOME}/${path}" ]]; then
+      printf '%s\0' "${path}" >>"${snap}/present"
+    fi
+  done <"${snap}/tracked"
+  tar -C "${CANARY_HOME}" --null -T "${snap}/present" -cpf "${snap}/models.tar"
+  if [[ -n "$(git -C "${CANARY_HOME}" status --porcelain --untracked-files=no -- "${MODELS_PATH}")" ]]; then
+    # A dirty tracked file would stop a fast-forward that touches it.
+    runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" checkout -q HEAD -- "${MODELS_PATH}" \
+      || restore_rc=$?
+  fi
+
+  if [[ "${restore_rc}" -eq 0 ]]; then
+    "$@" || rc=$?
+  fi
+
+  local -A was_present=()
+  while IFS= read -r -d '' path; do
+    was_present["${path}"]=1
+  done <"${snap}/present"
+  while IFS= read -r -d '' path; do
+    if [[ -z "${was_present["${path}"]:-}" ]]; then
+      rm -f -- "${CANARY_HOME:?}/${path}" || restore_rc=$?
+    fi
+  done < <(git -C "${CANARY_HOME}" ls-files -z -- "${MODELS_PATH}")
+  tar -C "${CANARY_HOME}" -xpf "${snap}/models.tar" || restore_rc=$?
+
+  if [[ "${restore_rc}" -ne 0 ]]; then
+    echo "Could not keep ${MODELS_PATH}/ as it was; the pre-update copy is ${snap}/models.tar" >&2
+    return 1
+  fi
+  rm -rf -- "${snap}"
+  return "${rc}"
+}
+
+pull_update() {
+  if [[ -n "${CANARY_UPDATE_REF:-}" ]]; then
+    runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" fetch origin "${CANARY_UPDATE_REF}" \
+      && runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" merge --ff-only FETCH_HEAD
+  else
+    runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" pull --ff-only
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # Refusals. First, unconditional, and the only two.
 # ---------------------------------------------------------------------------
 step "Checking whether CANary can restart"
@@ -166,7 +233,7 @@ if [[ "${rc}" -ne 0 ]]; then
   finish "${rc}"
 fi
 
-tracked_changes="$(git -C "${CANARY_HOME}" status --short --untracked-files=no)"
+tracked_changes="$(git -C "${CANARY_HOME}" status --short --untracked-files=no -- . ":(exclude)${MODELS_PATH}")"
 if [[ -n "${tracked_changes}" ]]; then
   echo "Refusing to update a checkout with tracked local changes:" >&2
   printf '%s\n' "${tracked_changes}" >&2
@@ -187,13 +254,7 @@ else
   before="$(git -C "${CANARY_HOME}" rev-parse --short HEAD)"
   step "Fetching CANary update"
   rc=0
-  if [[ -n "${CANARY_UPDATE_REF:-}" ]]; then
-    runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" fetch origin "${CANARY_UPDATE_REF}" \
-      && runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" merge --ff-only FETCH_HEAD \
-      || rc=$?
-  else
-    runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" pull --ff-only || rc=$?
-  fi
+  keep_models pull_update || rc=$?
   if [[ "${rc}" -ne 0 ]]; then
     echo "Fetch failed (exit ${rc}); the checkout is unchanged at ${before}." >&2
     after="${before}"
@@ -421,9 +482,11 @@ if [[ "${healthy}" -ne 1 ]]; then
 
   step "Rolling back ${after} -> ${before}"
   # Safe: the updater refused a dirty tracked tree before fetching, so the
-  # only thing reset discards is the fast-forward it just made.
+  # only thing reset discards is the fast-forward it just made; models/ is
+  # the Pi's and keep_models puts it back.
   rollback_rc=0
-  runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" reset --hard "${before}" || rollback_rc=$?
+  keep_models runuser -u "${CANARY_USER}" -- git -C "${CANARY_HOME}" reset --hard "${before}" \
+    || rollback_rc=$?
   if [[ "${rollback_rc}" -ne 0 ]]; then
     SUMMARY_ROLLBACK="FAILED (git reset --hard ${before} exited ${rollback_rc})"
     SUMMARY_RESULT="update failed and rollback failed"

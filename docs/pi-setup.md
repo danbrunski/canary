@@ -208,12 +208,19 @@ sudo journalctl -u canary --since "10 minutes ago"
 
 `canary-update` is installed into `/usr/local/sbin` by `install_pi.sh`. It
 refuses to update during an active capture (through `restart_canary.sh
---check`) or when the checkout has tracked local changes, fast-forwards the
-checkout, then does only the work the change needs, restarts both CANary
+--check`) or when the checkout has tracked local changes outside `models/`,
+fast-forwards the checkout, then does only the work the change needs, restarts both CANary
 services through `scripts/restart_canary.sh`, and waits up to 90 s for the
 daemon health endpoint. It uses the checkout's configured Git remote, so
 private-repository installs still need a working deploy key or SSH credential
 for now.
+
+`models/` belongs to the Pi, not to git. A manifest describes the binary beside
+it, and binaries never travel by git (`canaryctl models upload`, scp, or a
+retrain on the Pi), so a pulled manifest would not match the binary on disk.
+Local changes there never block an update, and neither the pull nor a rollback
+changes anything under `models/` — every tracked path there is put back exactly
+as it was.
 
 What runs is decided from `git diff --name-only <before> <after>` and from the
 artefacts on disk, and every decision is printed as `ran (<reason>)` or
@@ -252,7 +259,7 @@ limits: enforced (...)` or `NOT enforced`, `rollback:`, `result: ... (exit
 | 1 | setup error: not root, missing checkout or installer |
 | 2 | usage error |
 | 3 | refused: a capture is active (`restart_canary.sh --check`'s own code) |
-| 4 | refused: the checkout has tracked local changes |
+| 4 | refused: the checkout has tracked local changes (outside `models/`) |
 | 5 | fetch or fast-forward failed; nothing was changed |
 | 6 | new code failed its health check; rolled back to `<before>`, which is healthy again |
 | 7 | new code failed its health check and the rollback did not come up either |

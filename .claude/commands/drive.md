@@ -93,7 +93,8 @@ its own criteria frozen before its data.
   `rollback:`, and `result: ... (exit <code>)`. Exit 0 is healthy; 3 and 4
   are the two refusals; 6 means it rolled back and the *old* code is what is
   running; 7/8 mean the daemon is down — `docs/pi-setup.md` has the table. It
-  refuses while a capture is active, and refuses tracked local changes: since
+  refuses while a capture is active, and refuses tracked local changes outside
+  `models/` (the Pi's own; kept as-is through the pull): since
   `2c709b5` a saved catalog is never rewritten on load, so a dirty
   `data/<vehicle>/capture_profiles.yaml` is somebody's edit, not daemon noise
   — back it up to `/tmp`, diff it, and ask before resetting. `canary-update`

@@ -37,6 +37,9 @@ EXIT_ROLLED_BACK = 6
 EXIT_ROLLBACK_FAILED = 7
 EXIT_LEFT_BROKEN = 8
 
+# A tracked manifest, as on the Pi (the binary beside it is gitignored).
+MANIFEST = "models/demo/isolation_forest/model.manifest.json"
+
 pytestmark = pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
 
 
@@ -221,6 +224,8 @@ def harness(tmp_path: Path) -> Harness:
     (upstream / "systemd" / "canary.service").write_text("[Unit]\n")
     (upstream / "docs").mkdir()
     (upstream / "docs" / "readme.md").write_text("docs\n")
+    (upstream / MANIFEST).parent.mkdir(parents=True)
+    (upstream / MANIFEST).write_text('{"v": "git"}\n')
     _git(upstream, "add", "-A")
     _git(upstream, "commit", "-q", "-m", "initial")
     # A pull from a non-bare upstream is fine as long as we never push to it.
@@ -318,6 +323,60 @@ def test_refuses_a_checkout_with_tracked_local_changes(harness: Harness) -> None
     assert harness.head() == before
     assert harness.canary_restarts() == 0
     assert "result: refused: tracked local changes (exit 4)" in _summary(result.stdout)
+
+
+def test_local_model_changes_do_not_block_and_are_kept(harness: Harness) -> None:
+    # 2026-09-24: a retrain on the Pi rewrote a tracked manifest and every
+    # update refused with exit 4.
+    before = harness.head()
+    after = harness.commit_upstream("docs", **{"docs/readme.md": "new docs\n"})
+    (harness.checkout / MANIFEST).write_text('{"v": "pi"}\n')
+
+    result = harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert harness.head() == after != before
+    assert (harness.checkout / MANIFEST).read_text() == '{"v": "pi"}\n'
+
+
+def test_pull_never_changes_the_pis_models(harness: Harness) -> None:
+    # The binary does not travel by git, so a pulled manifest would describe a
+    # binary the Pi does not have. Both the dirty and the clean case.
+    other = "models/demo/sequence/model.manifest.json"
+    after = harness.commit_upstream(
+        "models", **{MANIFEST: '{"v": "laptop"}\n', other: '{"v": "new"}\n'}
+    )
+
+    result = harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert harness.head() == after
+    assert (harness.checkout / MANIFEST).read_text() == '{"v": "git"}\n'
+    assert not (harness.checkout / other).exists()
+
+
+def test_local_model_edit_survives_an_upstream_change_to_the_same_file(
+    harness: Harness,
+) -> None:
+    after = harness.commit_upstream("models", **{MANIFEST: '{"v": "laptop"}\n'})
+    (harness.checkout / MANIFEST).write_text('{"v": "pi"}\n')
+
+    result = harness.run()
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert harness.head() == after
+    assert (harness.checkout / MANIFEST).read_text() == '{"v": "pi"}\n'
+
+
+def test_model_changes_do_not_hide_other_local_changes(harness: Harness) -> None:
+    (harness.checkout / MANIFEST).write_text('{"v": "pi"}\n')
+    (harness.checkout / "src" / "main.py").write_text("print('local edit')\n")
+
+    result = harness.run()
+
+    assert result.returncode == EXIT_DIRTY, result.stdout + result.stderr
+    assert "src/main.py" in result.stderr
+    assert MANIFEST not in result.stderr
 
 
 def test_prints_the_source_line_in_drive_md_form(harness: Harness) -> None:
@@ -605,6 +664,18 @@ def test_failed_health_rolls_back_to_before_and_is_healthy(harness: Harness) -> 
     assert f"rollback: rolled back to {before}; healthy after" in summary
     assert f"result: update failed; rolled back to {before} (exit 6)" in summary
     assert len(harness.calls("pnpm build")) == 2
+
+
+def test_rollback_keeps_the_pis_models(harness: Harness) -> None:
+    before = harness.head()
+    harness.commit_upstream("models", **{MANIFEST: '{"v": "laptop"}\n'})
+    (harness.checkout / MANIFEST).write_text('{"v": "pi"}\n')
+
+    result = harness.run(SHIM_HEALTH_FAIL_CALLS_1="-1", SHIM_HEALTH_FAIL_CALLS_2="0")
+
+    assert result.returncode == EXIT_ROLLED_BACK, result.stdout + result.stderr
+    assert harness.head() == before
+    assert (harness.checkout / MANIFEST).read_text() == '{"v": "pi"}\n'
 
 
 def test_rollback_that_also_fails_says_so_with_its_own_code(harness: Harness) -> None:
