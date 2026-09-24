@@ -117,11 +117,11 @@ the procedure are in `hardware/canary-hat/firmware/` (`checkout_hat.sh`,
 | CAN (U3/U4/Y1) | **Pass** | `mcp251xfd` probes `MCP2518FD … o:40.00MHz`. KOEO: 20,737 frames, 0 errors/drops/overruns, the Xterra's normal ID set at its usual rates, multi-frame ISO-TP OBD replies from `7E8`. STB (GPIO22) held low by the overlay's `gpio-hog`. |
 | CAN LED (D6/R16) | **Pass** | Blinks with the Pi's own ~2 Hz key-off probes; solid on a live bus. |
 | 12V input + sense (Q1/D3, U8, R11/R12) | **Pass** | ADS1015 at 0x48 reads 0.000 V with no vehicle, 12.68 V key-off, 12.43 V KOEO. Pi `throttled=0x0`. |
-| K-line (U2, R5/R6, Q2/Q3) | **Pass** | See measurements 1 and 10 below. |
+| K-line (U2, R6) | **Pass** | See measurements 1 and 10 below. |
 | IMU (U6) | **Pass** | `WHO_AM_I` 0x6C, \|a\| = 1.004 g at rest, gyro ≈ 0. |
 | GNSS (U7) + PPS | **Pass** | NMEA at 9600 on `/dev/ttyAMA2` (uart2); SBAS fix, 12 satellites, HDOP 0.79 with the antenna on J4. `pps-gpio` on GPIO18 pulses once fixed. |
 | **Barometer (U5)** | **Fail** | Chip ID 0x50, NVM, error register, sensor-time counter and data-ready flags all correct — the digital core is alive — but every conversion (forced and normal, soft reset, OSR ×1…×32) returns temperature **exactly 0** and pressure pinned at ≈`0x801C00`. Netlist is right (VDD pin 10 and VDDIO pin 1 on +3V3; CSB/SDO high). VDD cannot be open (POR needs VDD > 1.58 V, p.7) and a ≤700 µA load makes a marginal joint implausible, so the analog front end/converter of this part is dead. Replace U5 (a BMP390 drops in, §3.5). |
-| Pull-up FET (Q2/Q3) | **Not confirmed** | Echo passes with it on and off, because the ECM already pulls the bus up. Needs a meter on J2 pin 6 with EN low while GPIO24 toggles. |
+| Pull-up FET (Q2/Q3, R5, D5) | **Pass** | Echo cannot test it (the ECM already pulls the bus up), so it was measured separately: K-line wire lifted from J2 pin 6, 12 V still applied, EN low, ammeter from J2 pin 6 to GND. GPIO24 low → 0 A, high → 10–20 mA (10 A range, 10 mA resolution; expected ≈ 11.8 mA through 1 kΩ + diode), low → 0 A. |
 | X1202 coexistence | Not tested | UPS not stacked. |
 
 **Overlay defect found and fixed on the board, not in the schematic.** The first
