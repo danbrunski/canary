@@ -57,8 +57,19 @@ UPREV_SOURCE: Final = "uprev"
 #: the hardware is configured. Frame layouts are data
 #: (``data/sensor_can_signals.yaml``), not code.
 SENSOR_SOURCE: Final = "sensor"
+#: ECU data CANary reads itself over K-line, through the CANary-HAT's own
+#: transceiver (``src.collection.kline``): ``kline:DID_<hex>`` and
+#: ``kline:MEM_<NAME>`` values, and raw ``kline:FRAME`` rows carrying the
+#: wire bytes so any session can be re-decoded later. A different instrument
+#: from ``uprev`` (the UpRev cable's logs, import-only) and from ``obd`` (the
+#: same DIDs over CAN): lineage decides which instrument a value came from
+#: (all-did-tuning-hardening 2.7, 8.5). Not trainable until the operator
+#: decides otherwise (H00: it exists only while a K-line session runs).
+KLINE_SOURCE: Final = "kline"
 
-TelemetrySource = Literal["obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor"]
+TelemetrySource = Literal[
+    "obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor", "kline"
+]
 # PEP 586 forbids spelling a Literal from variables, so the line above is the
 # one unavoidable duplication. Guard it against silently drifting from the
 # constants it must mirror.
@@ -71,6 +82,7 @@ assert set(get_args(TelemetrySource)) == {
     IMU_SOURCE,
     UPREV_SOURCE,
     SENSOR_SOURCE,
+    KLINE_SOURCE,
 }
 
 #: Sources the live pipeline **re-derives from a raw row** rather than
@@ -86,7 +98,7 @@ RE_DERIVED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DECODED_SOURC
 #: Sources that only ever originate at a collector/importer: nothing
 #: downstream can reconstruct them, so they are always safe to re-emit.
 CAPTURED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset(
-    {OBD_SOURCE, CAN_SOURCE, GPS_SOURCE, IMU_SOURCE, UPREV_SOURCE, SENSOR_SOURCE}
+    {OBD_SOURCE, CAN_SOURCE, GPS_SOURCE, IMU_SOURCE, UPREV_SOURCE, SENSOR_SOURCE, KLINE_SOURCE}
 )
 # Every source must be classified as one or the other. A new entry in
 # ``TelemetrySource`` therefore fails here at import time until someone

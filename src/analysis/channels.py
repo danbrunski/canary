@@ -64,7 +64,9 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "imu", "mem", "sensor"]
+SpecSource = Literal[
+    "obd", "did", "decoded", "can", "uprev", "gps", "imu", "mem", "sensor", "kline"
+]
 #: The same names as a tuple, for validation and messages. Derived from the
 #: Literal so the two cannot drift (they had: ``imu`` was a captured source
 #: for months before a spec could name it).
@@ -573,6 +575,7 @@ def read_channels(
         "gps": lambda s: _numeric_series(frame, s, "gps"),
         "imu": lambda s: _numeric_series(frame, s, "imu"),
         "sensor": lambda s: _numeric_series(frame, s, "sensor"),
+        "kline": lambda s: _numeric_series(frame, s, "kline"),
         "mem": lambda s: _memory_series(frame, s),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),

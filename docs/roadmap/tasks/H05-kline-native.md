@@ -151,7 +151,7 @@ What exists in `src/` is coupled to the USB cable:
   validation harness resets claims. Six new tests in `tests/test_tx_gate.py`;
   the passive-control, record-arming, idle-shutdown and did_log suites pass
   unchanged (118 tests).
-- [ ] **H05.7 The `kline` source.** **Do (after H05.1):** add it to
+- [~] **H05.7 The `kline` source.** **Do (after H05.1):** add it to
   `TelemetrySource`, `CAPTURED_SOURCES`, H01.1's trainability classification
   (not trainable), `channels.SpecSource`, `spec_producibility`, the live
   router and `tests/test_telemetry.py` — the sweep `f73333f` made for
@@ -159,6 +159,15 @@ What exists in `src/` is coupled to the USB cable:
   catalog names), raw frames as `kline:FRAME` rows with payload bytes so any
   session can be re-decoded later. **Accept:** `grep` for every place
   `TelemetrySource` members are listed shows `kline` or a stated reason.
+  **Partial (2026-09-23):** `KLINE_SOURCE` in `src/telemetry.py` (Literal,
+  sync assert, `CAPTURED_SOURCES`, a docstring stating the lineage and the
+  not-trainable decision), `channels.SpecSource` with a reader, the exact-set
+  test, and `spec_producibility`'s comment giving the reason it is absent
+  there. The live router's catch-all already handles it. **Owed:** the
+  trainability classification is H01.1's, still waiting on the other
+  session's `feature_pipeline.py` work; until then the exposure is small,
+  because a K-line session runs only under a capture profile and captures
+  (`_capture-*`) are excluded from training discovery.
 - [ ] **H05.8 The collector.** **Do:** `src/collection/kline_collector.py`:
   acquire ownership (H05.6), wake up, StartCommunication, define the requested
   set with `AC` (DIDs and RAM addresses from a capture profile's new `kline:`
