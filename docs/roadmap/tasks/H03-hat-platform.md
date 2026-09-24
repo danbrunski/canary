@@ -82,12 +82,21 @@ other checklist leans on.
   `canary-gpsd@.service` before `gpsdctl add`, or by gpsd's own `-s`/`ubxtool`.
   **Accept:** **(Pi)** `gpspipe -w` shows TPV at 10 Hz; the daemon's
   `gps:speed` arrives at ~10 Hz.
-- [ ] **H03.5 uart0 on by default in the overlay** once H05 has a collector
+- [x] **H03.5 uart0 on by default in the overlay** once H05 has a collector
   that uses it. The SysRq hazard needs a console on uart0, and on the Pi 5 the
   console is `ttyAMA10`; make `install_pi.sh` refuse a `console=` on
   `ttyAMA0`/`serial0`-mapped-to-uart0 rather than trusting it. **Accept:**
   installer test for the refusal; the dormant `kline` parameter removed from
   the overlay and the README.
+  **Evidence (2026-09-23):** the overlay's uart0 fragment is a normal one and
+  the `kline` parameter is gone. **Checked by reboot on the HAT** with it
+  enabled: `serial0` → `ttyAMA10`, consoles `tty1` and `ttyAMA10` only, the
+  only serial getty on `ttyAMA10`, `ttyAMA0` muxed onto GPIO14/15 with
+  nothing on it. `install_pi.sh` (HAT detected) refuses any `console=` that
+  names or resolves (through `serial*`) to `ttyAMA0`; four installer tests.
+  **Found while checking:** claiming GPIO15 as an input (the edge-capture
+  tool) re-muxes it off uart0 and the kernel leaves it there after release;
+  `kline_edges.py` now restores `a4` on exit.
 
 ## Hardware
 

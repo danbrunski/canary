@@ -184,6 +184,37 @@ fi
 # A serial device has one owner, so this is all-or-nothing: with gpsd running,
 # canary must be configured `gps.source: gpsd` (see docs/time-sync.md).
 # Set CANARY_INSTALL_GPS_STACK=0 to skip (e.g. a Pi with no GPS attached).
+# Is a CANary-HAT fitted? The firmware reads its ID EEPROM at boot and exposes
+# the product string here; several steps below differ for it.
+HAT_PRODUCT_FILE="${CANARY_HAT_PRODUCT_FILE:-/proc/device-tree/hat/product}"
+hat_product=""
+[[ -r "${HAT_PRODUCT_FILE}" ]] && hat_product="$(tr -d '\0' <"${HAT_PRODUCT_FILE}")"
+
+# The HAT's K-line transceiver is on uart0 (GPIO14/15). A kernel console there
+# would turn a held-low K-line (every wake-up pulse) into a serial break, which
+# with magic SysRq can reboot the Pi (docs/CANary-HAT-Spec.md §11 step 1). On
+# the Pi 5 the console is the debug UART: `serial0` stays ttyAMA10 even with
+# uart0 enabled (checked on the HAT 2026-09-23). Refuse a console that names
+# uart0 rather than trust that nobody set one.
+if [[ "${hat_product}" == CANary-HAT* ]]; then
+  CMDLINE_FOR_CONSOLE="${CANARY_CMDLINE:-${ROOT}/boot/firmware/cmdline.txt}"
+  SERIAL_DEV_DIR="${CANARY_SERIAL_DEV_DIR:-/dev}"
+  if [[ -f "${CMDLINE_FOR_CONSOLE}" ]]; then
+    for console in $(tr ' ' '\n' <"${CMDLINE_FOR_CONSOLE}" | sed -n 's/^console=\([^,]*\).*/\1/p'); do
+      target="${console}"
+      if [[ "${console}" == serial* && -L "${SERIAL_DEV_DIR}/${console}" ]]; then
+        target="$(readlink "${SERIAL_DEV_DIR}/${console}")"
+      fi
+      if [[ "${target##*/}" == "ttyAMA0" ]]; then
+        echo "REFUSING: console=${console} is uart0 (${target}), the CANary-HAT's K-line." >&2
+        echo "  A wake-up pulse on K-line would reach that console as a break (SysRq)." >&2
+        echo "  Remove it from ${CMDLINE_FOR_CONSOLE} (the debug UART is ttyAMA10)." >&2
+        exit 1
+      fi
+    done
+  fi
+fi
+
 CANARY_INSTALL_GPS_STACK="${CANARY_INSTALL_GPS_STACK:-1}"
 CANARY_GPS_DEVICE="${CANARY_GPS_DEVICE:-}"
 GPS_STACK_INSTALLED=0
@@ -197,9 +228,6 @@ if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2
   # board overlay its ID EEPROM names). When the firmware reports the HAT, that
   # receiver is the GPS — the antenna is on the board — whatever USB serial
   # devices are also plugged in. An explicit CANARY_GPS_DEVICE still wins.
-  HAT_PRODUCT_FILE="${CANARY_HAT_PRODUCT_FILE:-/proc/device-tree/hat/product}"
-  hat_product=""
-  [[ -r "${HAT_PRODUCT_FILE}" ]] && hat_product="$(tr -d '\0' <"${HAT_PRODUCT_FILE}")"
   if [[ -z "${CANARY_GPS_DEVICE}" && "${hat_product}" == CANary-HAT* ]]; then
     CANARY_GPS_DEVICE="/dev/ttyAMA2"
     echo "  CANary-HAT detected; GPS device: ${CANARY_GPS_DEVICE}"

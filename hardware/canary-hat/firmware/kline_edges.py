@@ -9,11 +9,15 @@ to whatever else is on K-line -- e.g. UpRev's cable while it logs. Records the
 kernel timestamp of every RXD edge, so any baud rate, 5-baud address or fast-init
 pulse can be decoded afterwards with kline_decode.py.
 
-uart0 must NOT own GPIO15 (remove a runtime `dtoverlay uart0-pi5` first).
+Claiming GPIO15 as an input re-muxes it away from uart0 (the overlay enables
+uart0 at boot), and the kernel leaves it that way after release — measured on
+the HAT 2026-09-23. So this script puts the pin back to uart0 RXD (``a4``) on
+exit; while it runs, the daemon's K-line collector hears nothing.
 Output: a `# start_wall ...` header, then one line per edge,
 "<timestamp_ns> <level after the edge>".
 """
 
+import subprocess
 import sys
 import time
 
@@ -21,6 +25,8 @@ import gpiod
 from gpiod.line import Direction, Edge, Value
 
 GPIO_RXD, GPIO_PULLUP, GPIO_EN = 15, 24, 26
+#: GPIO15's uart0 function on the Pi 5 (RXD0), restored on exit.
+UART0_RXD_FUNCTION = "a4"
 
 
 def main() -> None:
@@ -69,7 +75,8 @@ def main() -> None:
         ctl.set_value(GPIO_EN, Value.INACTIVE)
         ctl.release()
         rx.release()
-        print(f"done: {n} edges -> {out}", flush=True)
+        subprocess.run(["pinctrl", "set", str(GPIO_RXD), UART0_RXD_FUNCTION], check=False)
+        print(f"done: {n} edges -> {out}; GPIO15 back to uart0", flush=True)
 
 
 if __name__ == "__main__":

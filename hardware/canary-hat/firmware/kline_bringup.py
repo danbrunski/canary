@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """CANary-HAT rev 2.0 K-line bring-up (TLIN1027 on uart0, run on the Pi).
 
-Needs uart0 enabled (dtoverlay=canary-hat,kline or a runtime
-`dtoverlay uart0-pi5`), +12V on J2, and nothing else driving K-line.
+Needs uart0 (on in the board overlay), +12V on J2, the daemon's K-line
+collector stopped, and nothing else driving K-line.
 
 Steps, each a subcommand:
   sniff     transceiver on, pull-up off, listen only

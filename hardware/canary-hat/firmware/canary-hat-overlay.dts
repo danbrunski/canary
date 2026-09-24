@@ -11,9 +11,11 @@
 //         userspace exists and survives a daemon crash.
 //   GNSS  MAX-M10M (U7) on uart2 (GPIO4 TX / GPIO5 RX) -> /dev/ttyAMA2
 //         TIMEPULSE on GPIO18 -> pps-gpio (/dev/ppsN)
-//   K-line TLIN1027 (U2) on uart0 (GPIO14/15). DORMANT by default: nothing
-//         consumes it yet, and a console on uart0 turns a held-low RXD into a
-//         SysRq break (§11 step 1). Enable with dtoverlay=canary-hat,kline.
+//   K-line TLIN1027 (U2) on uart0 (GPIO14/15) -> /dev/ttyAMA0, for the K-line
+//         collector (src/collection/kline_collector.py). A console on uart0
+//         would turn a held-low RXD into a SysRq break (§11 step 1); on the
+//         Pi 5 the console is the debug UART (ttyAMA10), and install_pi.sh
+//         refuses a console= that names uart0 (H03.5).
 //
 // Deliberately NOT here: kernel drivers for the LSM6DSOX (0x6B), BMP384 (0x77)
 // and ADS1015 (0x48). CANary reads those from userspace over /dev/i2c-1; a bound
@@ -117,13 +119,9 @@
 
 	fragment@6 {
 		target = <&uart0>;
-		__dormant__ {
+		__overlay__ {
 			status = "okay";
 			pinctrl-0 = <&uart0_pins>;
 		};
-	};
-
-	__overrides__ {
-		kline = <0>, "+6";
 	};
 };

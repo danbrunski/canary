@@ -153,9 +153,10 @@ Measurements from the §13.1 table that this board answered:
   byte-exact at 9600 and 10400 with the pull-up on or off.
 - **13 — SysRq:** not exercised by design. On the Pi 5 the console is the debug
   UART (`ttyAMA10`), not `uart0`, so the hazard needs a deliberate
-  `uart0_console` to arise. The overlay still keeps uart0 dormant
-  (`dtoverlay=canary-hat,kline` or a runtime `dtoverlay uart0-pi5`) until a
-  K-line collector exists.
+  `uart0_console` to arise. Confirmed by reboot with uart0 enabled in the
+  overlay: `serial0` stays `ttyAMA10`, the only consoles are `tty1` and
+  `ttyAMA10`, and no getty runs on `ttyAMA0`. uart0 is now on by default, and
+  `install_pi.sh` refuses a `console=` that resolves to it (H03.5).
 - **14 — Y1 start-up:** started at room temperature on both boots with the overlay loaded; cold
   start and OSC2 amplitude not measured.
 

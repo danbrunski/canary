@@ -105,7 +105,7 @@ class Installer:
     def config(self) -> Path:
         return self.root / "etc" / "canary" / "canary.yaml"
 
-    def run(self, **env: str) -> subprocess.CompletedProcess[str]:
+    def run(self, *, check: bool = True, **env: str) -> subprocess.CompletedProcess[str]:
         self.shim_log.write_text("")
         # The installer leaves the sudoers drop-in 0440 and rewrites it on the
         # next run; root writes through that mode, this unprivileged run cannot.
@@ -119,7 +119,8 @@ class Installer:
             env={**self.env, **env},
             timeout=120,
         )
-        assert result.returncode == 0, result.stdout + result.stderr
+        if check:
+            assert result.returncode == 0, result.stdout + result.stderr
         return result
 
     def calls(self, prefix: str) -> list[str]:
@@ -458,3 +459,54 @@ def test_fitting_a_hat_later_restarts_chrony_once(installer: Installer) -> None:
     assert "systemctl restart chrony" in installer.restarts()
     installer.run(CANARY_HAT_PRODUCT_FILE=hat)
     assert "systemctl restart chrony" not in installer.restarts()
+
+
+def _cmdline(installer: Installer, text: str) -> Path:
+    path = installer.root / "cmdline.txt"
+    path.write_text(text + "\n")
+    return path
+
+
+def _serial_dir(installer: Installer, serial0_target: str) -> Path:
+    dev = installer.root / "fake-dev"
+    dev.mkdir(exist_ok=True)
+    (dev / "serial0").symlink_to(serial0_target)
+    return dev
+
+
+def test_a_console_on_uart0_is_refused_with_a_hat(installer: Installer) -> None:
+    result = installer.run(
+        check=False,
+        CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)),
+        CANARY_CMDLINE=str(_cmdline(installer, "console=ttyAMA0,115200 root=PARTUUID=1 rootwait")),
+    )
+    assert result.returncode == 1
+    assert "REFUSING: console=ttyAMA0 is uart0" in result.stderr
+
+
+def test_serial0_is_refused_only_when_it_points_at_uart0(installer: Installer) -> None:
+    hat = str(_hat_product_file(installer))
+    cmdline = str(_cmdline(installer, "console=serial0,115200 console=tty1 root=PARTUUID=1"))
+    refused = installer.run(
+        check=False,
+        CANARY_HAT_PRODUCT_FILE=hat,
+        CANARY_CMDLINE=cmdline,
+        CANARY_SERIAL_DEV_DIR=str(_serial_dir(installer, "ttyAMA0")),
+    )
+    assert refused.returncode == 1 and "console=serial0 is uart0" in refused.stderr
+
+
+def test_the_pi5_default_console_passes(installer: Installer) -> None:
+    """What the HAT Pi actually has: serial0 -> ttyAMA10, the debug UART."""
+    result = installer.run(
+        CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)),
+        CANARY_CMDLINE=str(
+            _cmdline(installer, "console=serial0,115200 console=tty1 root=PARTUUID=1")
+        ),
+        CANARY_SERIAL_DEV_DIR=str(_serial_dir(installer, "ttyAMA10")),
+    )
+    assert "REFUSING" not in result.stderr
+
+
+def test_without_a_hat_the_console_is_not_the_installers_business(installer: Installer) -> None:
+    installer.run(CANARY_CMDLINE=str(_cmdline(installer, "console=ttyAMA0,115200 root=PARTUUID=1")))

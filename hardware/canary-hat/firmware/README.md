@@ -7,7 +7,7 @@ in `docs/CANary-HAT-Revisions.md` §13.1.1.
 
 | File | What it is |
 |---|---|
-| `canary-hat-overlay.dts` | The board overlay: `mcp251xfd` on SPI0 CE0 (40 MHz, nINT GPIO25) → `can0`; TCAN1042 STB (GPIO22) held low by a `gpio-hog`; GNSS on `uart2` → `/dev/ttyAMA2`; TIMEPULSE → `pps-gpio` on GPIO18; K-line `uart0` **dormant** (`dtoverlay=canary-hat,kline`). No kernel drivers for the IMU, barometer or ADC — CANary reads those over `/dev/i2c-1`. |
+| `canary-hat-overlay.dts` | The board overlay: `mcp251xfd` on SPI0 CE0 (40 MHz, nINT GPIO25) → `can0`; TCAN1042 STB (GPIO22) held low by a `gpio-hog`; GNSS on `uart2` → `/dev/ttyAMA2`; TIMEPULSE → `pps-gpio` on GPIO18; K-line `uart0` → `/dev/ttyAMA0`. No kernel drivers for the IMU, barometer or ADC — CANary reads those over `/dev/i2c-1`. |
 | `eeprom_settings.txt` | HAT+ v2 ID record for `eepmake`: `CANary-HAT rev 2.0`, `dt_blob "canary-hat"`. |
 | `program_hat.sh` | Programs a board: installs the `.dtbo`, comments out Waveshare `mcp2515` lines in `config.txt`, backs up then writes the EEPROM. |
 | `checkout_hat.sh` | Pass/fail checkout of every subsystem, saying what the bench cannot test. |
@@ -34,15 +34,22 @@ overlay changed.
 
 ## K-line
 
-uart0 is dormant in the overlay until a K-line collector exists. For bring-up,
-load it at runtime (gone at the next reboot), and put the daemon in passive mode
-first — the ECM has one diagnostic session shared between CAN and K-line:
+uart0 (`/dev/ttyAMA0`) is on in the overlay. On the Pi 5 the console stays on
+the debug UART (`serial0` → `ttyAMA10`, checked on the HAT), and
+`install_pi.sh` refuses a `console=` that names uart0: a wake-up pulse would
+reach it as a serial break (SysRq).
+
+In the daemon, `hardware.kline.enabled` lets the K-line collector sniff
+whenever no capture profile asks for a session, and read the ECU when one does
+(`docs/roadmap/tasks/H05-kline-native.md`, `H06-kline-sniffer.md`). For
+bring-up by hand, put the daemon in passive mode first — the ECM has one
+diagnostic session shared between CAN and K-line — and stop its K-line
+collector if it is enabled (the port and the EN/pull-up lines are exclusive):
 
 ```bash
 curl -sX POST http://canary.local:8000/control/passive \
   -H "Authorization: Bearer $CANARY_CONTROL_TOKEN" \
   -H 'Content-Type: application/json' -d '{"enabled": true, "ttl_seconds": 600}'
-sudo dtoverlay uart0-pi5
 python3 kline_bringup.py echo       # hardware only; no ECU involved
 python3 kline_bringup.py fastinit   # KOEO; defaults to what the Xterra ECM answers
 ```
@@ -51,16 +58,18 @@ python3 kline_bringup.py fastinit   # KOEO; defaults to what the Xterra ECM answ
 and then the 518.9 ms one this ECM actually answers (vehicle skill,
 `nissan-xterra-2008`). Everything it sends is volatile; nothing writes the ECM.
 
-To watch another tester, free GPIO15 from uart0 first:
+To watch another tester at an unknown baud or with a 5-baud init, capture raw
+edges. Claiming GPIO15 re-muxes it away from uart0 and the kernel leaves it
+that way, so the script restores it on exit (`pinctrl set 15 a4` by hand if it
+was killed):
 
 ```bash
-sudo dtoverlay -r uart0-pi5
 python3 kline_edges.py 300 capture.txt      # Ctrl-C stops early, cleanly
 python3 kline_decode.py capture.txt --baud 10400
 ```
 
 The TLIN1027 order from `docs/CANary-HAT-Spec.md` §11 is enforced by both
-scripts: tty open before EN (GPIO26) rises, RX discarded across the mode change,
-EN and the pull-up (GPIO24) dropped on every exit path. With EN low after power-up
-the transceiver sits in standby with RXD low; one EN cycle takes it to sleep
-with RXD high.
+scripts and by `src/collection/kline/transport.py`: tty open before EN (GPIO26)
+rises, RX discarded across the mode change, EN and the pull-up (GPIO24) dropped
+on every exit path. With EN low after power-up the transceiver sits in standby
+with RXD low; one EN cycle takes it to sleep with RXD high.

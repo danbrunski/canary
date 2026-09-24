@@ -270,9 +270,8 @@ class KlineConfig(_Strict):
 
     ``enabled`` only says the hardware is there and may be used. When K-line
     is actually commanded is a capture profile's decision (its ``kline:``
-    list); the vehicle's protocol facts are ``daemon.kline_profile``. uart0 is
-    dormant in the board overlay until enabled (``dtoverlay=canary-hat,kline``
-    or ``dtoverlay uart0-pi5``).
+    list); the vehicle's protocol facts are ``daemon.kline_profile``. The
+    board overlay enables uart0 (``/dev/ttyAMA0``).
     """
 
     enabled: bool = False
