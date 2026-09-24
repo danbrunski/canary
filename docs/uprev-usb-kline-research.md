@@ -592,6 +592,133 @@ Two points differ from the CAN side and from the USB-only reading:
 needs no UpRev cable at all; this is read-only and volatile, and the
 non-volatile-write policy above applies unchanged to anything beyond it.
 
+## UpRev CSV vs the wire (daemon sniff, 2026-09-24)
+
+UpRev logged 53 s at idle, warm, with one rev blip
+(`UpRev_Log9-24-2026_10-10-51_AM.csv`, 650 rows). The daemon's own K-line
+sniffer (`kline_collector`, sniff mode, H06) recorded the wire at the same time,
+with CANary passive on CAN. Session `2026-09-24T160323` and the captures after
+it; a local copy is in `~/canary-data/kline-compare-20260924/`. The analysis
+scripts were throwaway. The method was to split every `61 84` reply into
+bytes, pair replies with CSV rows by exact A/F-voltage values (longest common
+subsequence, since wire order is preserved), then fit each CSV column against
+every byte offset.
+
+**The failed starts were a definition that was too long.** Each of UpRev's
+three starts needed two wake-ups; the first attempt was never answered. On starts 1 and 2 UpRev defined
+`0x81`–`0x83` (all acknowledged), then `10 AC 84 01 83 02 12 01 02 11 1A 02 11 1B 02 12 1A 62`
+→ **`03 7F AC 12 40`** (refused). It went quiet for ~5 s and started again.
+Before start 3 the operator removed two measurands, and start 3 logged. Its
+`21 84` reply is **exactly 61 data bytes** (`3F 61 84 …`). The refused
+definition would have been longer: the accepted layout has lost `1249`, `124A`
+and `121A` compared with it. That is inferred from byte positions, because
+the sniffer missed start 3's `AC 82`–`AC 84` frames (see below). So the ECM
+caps a local identifier's reply at about 61 bytes and refuses a longer
+definition with NRC `0x12`, which is the failure a K-line capture profile has
+to plan around.
+
+**Logging rate.** One `04 21 84 04 01 AE` every 82 ms, **12.2 replies/s** (the
+09-23 log's 52-byte set ran at ~9/s). Each CSV row is one reply. `Time` is
+UpRev's receipt time: outside sniffer stalls it matches the wire reply time to
+±10 ms. **`Time = 0` is the filename timestamp + 1.719 s** on the Pi's clock
+(the gap includes StartCommunication, the definitions and any laptop/Pi clock
+offset). One point measured, so it is a calibration for this pair of clocks,
+not a constant. It does mean a CSV can be placed on the CAN timeline without
+cross-correlating RPM.
+
+**Layout of `21 84` (61 bytes) and what UpRev shows from it.** Fits are
+same-instant over 581 paired samples. "Exact" means r² = 1.0000 with residuals
+no bigger than the CSV's display rounding.
+
+| Offset | Source | CSV column | Decode |
+|---|---|---|---|
+| 0 | RAM `FFFF103E` | Fuel Target X Trace | × 0.2509, exact (catalog `ECM_FUEL_TARGET_MAP_X_TRACE`) |
+| 1–2 | RAM `FFFF11D8`/`11D9` | Fuel Target Y Trace | u16 × 12.5 rpm, exact (`ECM_ENGINE_SPEED_RAM`) |
+| 3 | RAM `FFFF11CA` | Intake Cam VQ Y Trace | × 50, exact (`ECM_CAM_MAP_RPM_TRACE`) |
+| 4 | RAM `FFFF28AA` | — | varies; no column matched |
+| 5–8 | RAM `FFFF13FE`/`13FF`, twice | — | constant `FB 00` |
+| 9–10 | RAM `FFFF2EEC`/`2EED` | — | constant `00 7D` |
+| 11–12 | RAM `FFFF26BE`/`26BF` | TARGET AFR | 14.7 ÷ (u16 × 2⁻¹⁴); `0x4000` → 14.7; **0 → UpRev shows 30.0** (11 samples, the blip's decel) |
+| 13–14 | RAM `FFFF1C2C`/`1C2D` | Throttle X Trace | r² 0.9998 (`ECM_THROTTLE_MAP_X_TRACE`) |
+| 15–16 | RAM `FFFF1902`/`1903` | Throttle Y Trace | u16 × 3.125, exact (`ECM_THROTTLE_MAP_Y_TRACE`) |
+| 17 | RAM `FFFF283F` | — | constant |
+| 18–19 | DID `1225` | A/F WB-B1 (V) | × 0.005, exact. "AFR WB-B1" is UpRev's non-linear lookup of this |
+| 20–21 | `1226` | A/F WB-B2 (V) | × 0.005, exact |
+| 22–23 | `120D` | ACCEL PED POS 1 | × 0.005 |
+| 24–25 | `1225` again | — | UpRev's own duplicate |
+| 26–27 | **`1208`** | **B-FUEL SCHDL (ms)** | **raw ÷ 2040**, r² 0.9997, residuals within the 0.1 ms display |
+| 28 | `1117` | CAL/LD VALUE (%) | × 0.3906 |
+| 29 | `1101` | COOLANT TEMP (°F) | (raw − 50) °C, exact |
+| 30–31 | `122B` | C/C SPEED SET | constant 0; 2 bytes by position |
+| 32–33 | `1201` | ENGINE RPM | × 12.5, exact |
+| 34 | `110A` | IGN TIMING | 110 − raw, exact |
+| 35–36 / 37–38 | `1206` / `1207` | INJ PULSE-B1 / B2 | × 0.01 |
+| 39 | `1106` | INTAKE AIR TMP (°F) | (raw − 50) °C, exact |
+| 40 / 41 | `1135` / `1163` | INTK CAM TIM-B1 / B2 | × 0.5 − 64, exact |
+| 42 / 43 | `1125` / `1126` | LT Fuel Trim B2 / — | constant (LTFT reads 0 on this calibration) |
+| 44–45 | `1209` | MAF GM/S | × 0.01, exact |
+| 46–47 | `1204` | MAS A/F -B1 (V) | × 0.005 |
+| 48–49 | `120F` | THROTTLE SENSOR 1-B1 (V) | × 0.005 |
+| 50 | `1102` | LT Fuel Trim B1 | constant; **1 byte here** (the catalog says 2) |
+| 51 / 52 | `114E` / `114F` | A/F S1 HTR-B1 / B2 (%) | × 0.4, exact |
+| 53 / 54 | `1123` / `1124` | A/F CORR-B1 / B2 (%) | × 1, exact |
+| 55–56 / 57–58 | `1206` / `1201` again | — | duplicates |
+| 59 / 60 | `111A` / `111B` | NB-O2 SEN 2-B1 / B2 (V) | × 0.01, exact |
+
+INJ DUTY (%) is computed, = PW × RPM / 1200. KNOCK EVENT / STRENGTH /
+THRESHOLD, HI DET, Target AFR Adjustment and VEHICLE SPEED were constant, so
+this log cannot place them.
+
+Every scale the catalog already had agrees. What is new or different:
+
+- **`0x1208` is UpRev's base fuel schedule at raw ÷ 2040.** This is the
+  same-instant UpRev check the `1208` candidate was waiting for. The catalog still
+  calls it `ECM_AIR_CHARGE`, unit unknown. The two are consistent: a Nissan
+  base fuel schedule is the air-charge-proportional base pulse, which is also
+  why it ignores enrichment and fuel cut.
+- **Widths the catalog lacks**, from the layout: `1117`, `1123`, `1124`,
+  `114E`, `114F`, `111A`, `111B`, `1126` are 1 byte; `1209`, `1204`, `122B` are
+  2 bytes. Without them the sniffer's `DefinitionTracker` refuses the whole
+  reply (`no catalog width for DID 0x1117`).
+- **`1102` is 1 byte and `1204` is 2 here.** Both fits pin it:
+  MAS A/F-B1 at 46–47 and TPS 1 at 48–49 leave one byte for `1102`. The
+  catalog has `1102` at 2 bytes, and `test_kline_sniff`'s missing-widths
+  test uses `1204: 1`. Swapping the two gives the same total, which is why
+  that test still lays out. One of the two is wrong for K-line. Check `1102`'s CAN
+  reply length before changing either.
+
+**The sniffer lost ~10 % of the frames (fixed).** It saw 619 of ~650 requests
+and 588 of ~650 replies. The CSV, at 82 ms ± 15 ms with no gaps, shows that
+UpRev itself missed nothing. About once a second the Pi stopped reading K-line
+for ~350 ms: the reader ran in 50 ms bursts through `asyncio.to_thread`, so a
+busy event loop or executor left gaps between bursts. The tty buffered the
+bytes, but they came back in one read with one timestamp. The frame that was
+arriving when the stall began then looked like it had a >25 ms gap inside
+it and was abandoned. Each stall cost exactly that one frame. The stalls also
+lost the ~300 ms of start 3's `AC 82`–`AC 84` definitions and stamped ~17 % of
+the logging frames with a timestamp shared with their neighbours, as late as
+the stall. The resync after an abandonment twice put a
+"frame" together from pieces whose checksum happened to match (a 102-byte
+"tester" frame, and `04 29 40 01 93 01`). The stall model used in the tests
+also turned up a latent crash: a resync `0x80` taken as a zero-length
+addressed frame made `decode_addressed` raise, which ends sniffing.
+
+The fix changes three things:
+
+- The sniff reader owns the port on a thread of its own
+  (`KlineTransport.listen`).
+- Each read is an `RxChunk` that carries what the reader actually knows: the
+  bytes arrived after the last empty read and by the time the read returned.
+  The line was *observed* silent for `quiet_s` before them.
+- `FrameDecoder` abandons a frame only on observed silence, and every frame
+  and sniffed value carries `timing_uncertainty_s` (a frame is stamped at the
+  latest it can have ended).
+
+`test_host_stalls_cost_no_frames` replays the 09-23 session through the real
+`listen` loop on a host that stalls 350 ms every second: all 1,462 frames, no
+resyncs. `test_the_stall_model_breaks_read_time_gaps` shows that the same
+reads lose frames when gaps are judged the old way.
+
 ## Integration boundary
 
 This should become an independent optional `uprev_usb` collector, not another

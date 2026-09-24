@@ -112,6 +112,10 @@ the HAT alone (2026-09-23, KOEO). Details and the full exchange:
 - **One diagnostic session, two transports.** The ECM's session state is
   shared between CAN and K-line: put CANary in passive mode
   (`POST /control/passive` with a TTL) while anything else owns K-line.
+- **A local identifier's reply is capped at ~61 data bytes.** A definition
+  that would exceed it is refused `7F AC 12`; UpRev then drops the session and
+  restarts, which looks like a flaky start. The fix is fewer measurands
+  (2026-09-24; layout in `docs/uprev-usb-kline-research.md`).
 
 ## The UpRev logger on this truck
 
@@ -129,8 +133,10 @@ the HAT alone (2026-09-23, KOEO). Details and the full exchange:
   to CAN on RPM leaves other channels skewed — MAF sits **+0.10 s** later than
   RPM. Always scan a per-channel lag before concluding a channel has no
   broadcast home; ignoring this nearly killed a valid airflow binding.
-- CSV `Time` is milliseconds from log start; the filename timestamp is t₀
-  (verified against file mtime). It logs to memory — the operator saves the CSV
+- CSV `Time` is milliseconds from log start and is UpRev's receipt time of
+  each reply (±10 ms against the wire, 2026-09-24). `Time = 0` fell **1.72 s
+  after the filename timestamp** on the Pi clock (setup plus clock offset;
+  one measurement). It logs to memory — the operator saves the CSV
   manually, so mtime is the save time, not the stop time.
 - Aligning by RPM cross-correlation **fails at idle** (CANary polls RPM every
   5–7 s and idle blips alias). Use a rev sweep, or decode RPM off `0x1F9` for a
