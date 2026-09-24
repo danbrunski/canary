@@ -36,6 +36,14 @@ class VehicleParameters(_Strict):
 
     #: Curb/test mass in kg — used for acceleration-derived power sanity.
     mass_kg: float = 1900.0
+    #: How ``mass_kg`` was arrived at (a scale ticket, or an itemised estimate
+    #: with its range), and what it includes. Occupants, cargo and fuel below
+    #: full are *test conditions*, not vehicle facts: the dyno records them
+    #: per run (H07).
+    mass_evidence: str | None = None
+    #: Mass of one road wheel with its tyre, kg: rotating mass, which the
+    #: dyno's inertia term needs separately from the total (H07.6).
+    wheel_tire_assembly_kg: float | None = Field(default=None, gt=0.0)
     #: ``gasoline`` | ``diesel`` | ``e85`` — selects stoichiometric AFR, fuel
     #: density, and the CO2 emission factor.
     fuel_type: Literal["gasoline", "diesel", "e85"] = "gasoline"
