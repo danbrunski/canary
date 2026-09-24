@@ -231,7 +231,8 @@ changed_between() {
 }
 
 # Files install_pi.sh installs somewhere outside the checkout, or runs.
-INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml)'
+# The HAT overlay source is one: install_pi.sh compiles it into /boot/firmware.
+INSTALL_PI_INPUTS='^(scripts/install_pi\.sh|scripts/install_deps\.py|scripts/update_canary\.sh|systemd/|canary\.pi\.example\.yaml|hardware/canary-hat/firmware/canary-hat-overlay\.dts)'
 PIP_INPUTS='^(pyproject\.toml|requirements[^/]*\.txt|uv\.lock|poetry\.lock|pdm\.lock)$'
 
 decide_dashboard() {

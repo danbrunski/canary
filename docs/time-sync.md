@@ -55,6 +55,11 @@ GPS receiver ──serial──> gpsd ──SHM unit 0──> chrony ──> sys
 `scripts/install_pi.sh` installs and configures all of this. Set
 `CANARY_INSTALL_GPS_STACK=0` to skip it, or `CANARY_GPS_DEVICE=/dev/serial/by-id/...`
 to name the receiver when autodetection can't (more than one serial device).
+On a CANary-HAT (the firmware reports it in `/proc/device-tree/hat/product`) the
+board's own MAX-M10M on `/dev/ttyAMA2` is chosen automatically, and the udev rule
+matches it by kernel name — a device-tree UART has no `by-id` symlink. Its
+TIMEPULSE is `pps-gpio` on GPIO18 (a `/dev/ppsN` named `canary-pps`); feeding
+that to chrony as a PPS refclock is not done yet.
 
 Re-running the installer (every `canary-update` that touches it does) restarts
 gpsd only when `/etc/default/gpsd`, `70-canary-gps.rules` or

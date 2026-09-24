@@ -88,8 +88,9 @@ sudo CAN_IFACE=can1 CAN_BITRATE=250000 scripts/canup.sh
 ```
 
 Note on `restart-ms` (bus-off auto-recovery): support depends on the
-adapter driver. The mcp251x driver (Waveshare 2-CH CAN HAT, the current
-in-vehicle rig) accepts it, and `systemd/can0.service` sets
+adapter driver. The mcp251xfd driver (CANary-HAT, the current in-vehicle
+rig; verified 2026-09-23) and the mcp251x driver (Waveshare 2-CH CAN HAT)
+both accept it, and `systemd/can0.service` sets
 `restart-ms 100`. The gs_usb driver (Canable) rejects it, which is why
 `scripts/canup.sh` deliberately does *not* pass it — on a Canable,
 bus-off recovery is a re-plug / `canup.sh` re-run.

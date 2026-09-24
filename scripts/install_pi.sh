@@ -193,6 +193,18 @@ if [[ "${CANARY_INSTALL_GPS_STACK}" == "1" ]] && command -v apt-get >/dev/null 2
   GPS_STACK_INSTALLED=1
   DEBIAN_FRONTEND=noninteractive apt-get install -y gpsd gpsd-clients chrony
 
+  # A CANary-HAT carries its own GNSS receiver on uart2 (/dev/ttyAMA2, from the
+  # board overlay its ID EEPROM names). When the firmware reports the HAT, that
+  # receiver is the GPS — the antenna is on the board — whatever USB serial
+  # devices are also plugged in. An explicit CANARY_GPS_DEVICE still wins.
+  HAT_PRODUCT_FILE="${CANARY_HAT_PRODUCT_FILE:-/proc/device-tree/hat/product}"
+  hat_product=""
+  [[ -r "${HAT_PRODUCT_FILE}" ]] && hat_product="$(tr -d '\0' <"${HAT_PRODUCT_FILE}")"
+  if [[ -z "${CANARY_GPS_DEVICE}" && "${hat_product}" == CANary-HAT* ]]; then
+    CANARY_GPS_DEVICE="/dev/ttyAMA2"
+    echo "  CANary-HAT detected; GPS device: ${CANARY_GPS_DEVICE}"
+  fi
+
   # Autodetect the receiver when not told. The by-id symlink is stable across
   # re-enumeration; /dev/ttyUSB0 is not, and gpsd holds this path for the life
   # of the service, so the unstable name is a real failure mode.
@@ -251,11 +263,20 @@ EOF
     # here — works even when the receiver is absent at install time, which is
     # precisely the case this rule exists to cover. 70- runs after 60-serial's
     # by-id symlink is in place.
+    #
+    # A board UART (the HAT's /dev/ttyAMA2) has no by-id symlink: udev never
+    # lists it under SYMLINK, so a SYMLINK match would silently never fire.
+    # Match those on their kernel name, which a device-tree UART keeps.
+    if [[ "${CANARY_GPS_DEVICE}" == /dev/serial/* ]]; then
+      GPS_MATCH="SYMLINK==\"${CANARY_GPS_DEVICE#/dev/}\""
+    else
+      GPS_MATCH="KERNEL==\"${CANARY_GPS_DEVICE#/dev/}\""
+    fi
     write_managed gpsd "$(dirname "${CANARY_SERVICE}")/canary-gpsd@.service" \
       <"${CANARY_HOME}/systemd/canary-gpsd@.service"
     write_managed gpsd "${ROOT}/etc/udev/rules.d/70-canary-gps.rules" <<EOF
 # Managed by canary scripts/install_pi.sh — see systemd/canary-gpsd@.service
-ACTION=="add", SUBSYSTEM=="tty", SYMLINK=="${CANARY_GPS_DEVICE#/dev/}", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd@%k.service"
+ACTION=="add", SUBSYSTEM=="tty", ${GPS_MATCH}, TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd@%k.service"
 EOF
     systemctl daemon-reload
     udevadm control --reload || true
@@ -390,6 +411,32 @@ if [[ ! -f "${ROOT}/sys/fs/cgroup/cgroup.controllers" ]] \
   CGROUP_REBOOT_NEEDED=1
 fi
 
+# ---------------------------------------------------------------------------
+# CANary-HAT board overlay
+# ---------------------------------------------------------------------------
+# The HAT's ID EEPROM names the overlay ("canary-hat") and the firmware loads
+# /boot/firmware/overlays/canary-hat.dtbo at boot — but only if that file is
+# there. On a fresh image it is not, and the board comes up with no can0, no
+# GNSS UART and the CAN transceiver in standby. Installed on every Pi whether or
+# not a HAT is fitted: the firmware ignores an overlay nothing names.
+OVERLAY_DIR="${CANARY_OVERLAY_DIR:-${ROOT}/boot/firmware/overlays}"
+HAT_OVERLAY_SRC="${CANARY_HOME}/hardware/canary-hat/firmware/canary-hat-overlay.dts"
+HAT_REBOOT_NEEDED=0
+if [[ -d "${OVERLAY_DIR}" && -f "${HAT_OVERLAY_SRC}" ]]; then
+  if command -v dtc >/dev/null 2>&1; then
+    hat_dtbo="$(mktemp)"
+    if dtc -@ -q -I dts -O dtb -o "${hat_dtbo}" "${HAT_OVERLAY_SRC}"; then
+      write_managed hat-overlay "${OVERLAY_DIR}/canary-hat.dtbo" <"${hat_dtbo}"
+      [[ -n "${CONFIG_CHANGED[hat-overlay]:-}" ]] && HAT_REBOOT_NEEDED=1
+    else
+      echo "WARNING: could not compile ${HAT_OVERLAY_SRC}; canary-hat.dtbo not updated" >&2
+    fi
+    rm -f "${hat_dtbo}"
+  else
+    echo "WARNING: dtc not found (raspi-utils-dt); canary-hat.dtbo not installed" >&2
+  fi
+fi
+
 cd "${CANARY_HOME}"
 runuser -u "${CANARY_USER}" -- "${CANARY_PYTHON}" scripts/install_deps.py \
   --venv "${CANARY_HOME}/.venv" \
@@ -445,4 +492,8 @@ if [[ "${CGROUP_REBOOT_NEEDED}" -eq 1 ]]; then
   echo
   echo "REBOOT REQUIRED: the memory cgroup controller is not active, so"
   echo "canary.service's MemoryMax/MemorySwapMax are not enforced until the Pi reboots."
+fi
+if [[ "${HAT_REBOOT_NEEDED}" -eq 1 ]]; then
+  echo
+  echo "REBOOT REQUIRED: canary-hat.dtbo changed; the firmware loads it only at boot."
 fi

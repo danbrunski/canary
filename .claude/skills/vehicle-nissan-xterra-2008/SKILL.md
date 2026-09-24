@@ -91,6 +91,28 @@ only**, so a signal appearing only under road load could still have been missed.
 validating any time alignment or decode chain — it fits slope 1.0000 against
 UpRev RPM with scale stability 0.9985–1.0011 across 750–3700 rpm.
 
+## K-line (OBD pin 7)
+
+Read off UpRev's own session with the CANary-HAT sniffing, then reproduced by
+the HAT alone (2026-09-23, KOEO). Details and the full exchange:
+`docs/uprev-usb-kline-research.md` → "On-wire view".
+
+- **10400 baud 8N1, KWP2000 (ISO 14230).** ECM address **`0x10`**.
+- **Tester address `0xFC`, not the ISO 14230-4 default `0xF1`.** A
+  StartCommunication from `0xF1` (or to `0x33`/`0x11`/`0x01`/`0x12`) gets
+  silence — which reads exactly like dead hardware.
+- **The standard 25 ms fast init is ignored.** The wake-up this ECM answers is
+  **518.9 ms low, then 18.1 ms high**, then `81 10 FC 81 0E` sent back-to-back
+  → `83 FC 10 C1 5D 8F 3C` (key bytes `5D 8F`).
+- After StartCommunication, frames are `<len> <data…> <sum & 0xff>` with no
+  address bytes. StopCommunication is `01 82 83` → `01 C2 C3`.
+- **Known answer:** `05 22 11 03 04 01 40` → `04 62 11 03 <value> <cs>` (value
+  0x99–0x9A at KOEO). The same two-DID request is rejected on CAN (below); on
+  K-line it is answered.
+- **One diagnostic session, two transports.** The ECM's session state is
+  shared between CAN and K-line: put CANary in passive mode
+  (`POST /control/passive` with a TTL) while anything else owns K-line.
+
 ## The UpRev logger on this truck
 
 - **Its logging is K-line (pins 7/15), not CAN.** With CANary passive it emits

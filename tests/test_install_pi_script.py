@@ -332,3 +332,102 @@ def test_no_gps_lines_when_the_gps_stack_is_skipped(installer: Installer) -> Non
     assert "hardware.gps.source" not in result.stdout
     assert "unchanged: gpsd" not in result.stdout
     assert installer.restarts() == ["systemctl restart systemd-journald"]
+
+
+# ---------------------------------------------------------------------------
+# CANary-HAT: its GNSS is the GPS, and the board overlay is installed
+# ---------------------------------------------------------------------------
+
+
+def _hat_product_file(installer: Installer, product: str = "CANary-HAT rev 2.0") -> Path:
+    # /proc/device-tree strings are NUL-terminated.
+    path = installer.root / "proc-hat-product"
+    path.write_bytes(product.encode() + b"\0")
+    return path
+
+
+def _gps_rule(installer: Installer) -> str:
+    return (installer.root / "etc" / "udev" / "rules.d" / "70-canary-gps.rules").read_text()
+
+
+def test_a_canary_hat_makes_its_gnss_uart_the_gps(installer: Installer) -> None:
+    result = installer.run(
+        CANARY_GPS_DEVICE="", CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer))
+    )
+
+    assert "CANary-HAT detected; GPS device: /dev/ttyAMA2" in result.stdout
+    # A board UART has no by-id symlink, so a SYMLINK match would never fire.
+    assert 'KERNEL=="ttyAMA2"' in _gps_rule(installer)
+    assert "SYMLINK" not in _gps_rule(installer)
+
+
+def test_an_explicit_gps_device_beats_the_hat(installer: Installer) -> None:
+    installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    assert 'SYMLINK=="serial/by-id/usb-test-gps-if00-port0"' in _gps_rule(installer)
+
+
+def test_another_hat_is_not_mistaken_for_a_canary_hat(installer: Installer) -> None:
+    result = installer.run(
+        CANARY_GPS_DEVICE="",
+        CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer, "Some Other HAT")),
+    )
+
+    assert "CANary-HAT detected" not in result.stdout
+
+
+# Stands in for dtc: "compiles" by copying the source to the -o path.
+_DTC_SHIM = (
+    "#!/usr/bin/env bash\n"
+    + _LOG_PRELUDE
+    + """
+out=""; src=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    -I|-O) shift 2 ;;
+    -*) shift ;;
+    *) src="$1"; shift ;;
+  esac
+done
+cp "$src" "$out"
+"""
+)
+
+
+def _with_overlay(installer: Installer) -> Path:
+    firmware = installer.checkout / "hardware" / "canary-hat" / "firmware"
+    firmware.mkdir(parents=True)
+    shutil.copy(
+        REPO_ROOT / "hardware" / "canary-hat" / "firmware" / "canary-hat-overlay.dts", firmware
+    )
+    overlays = installer.root / "boot" / "firmware" / "overlays"
+    overlays.mkdir(parents=True)
+    bin_dir = Path(installer.env["PATH"].split(":", 1)[0])
+    _write_exec(bin_dir / "dtc", _DTC_SHIM)
+    return overlays
+
+
+def test_the_hat_overlay_is_installed_and_asks_for_a_reboot(installer: Installer) -> None:
+    overlays = _with_overlay(installer)
+
+    result = installer.run()
+
+    assert (overlays / "canary-hat.dtbo").exists()
+    assert "REBOOT REQUIRED: canary-hat.dtbo changed" in result.stdout
+
+
+def test_an_unchanged_hat_overlay_asks_for_nothing(installer: Installer) -> None:
+    _with_overlay(installer)
+    installer.run()
+
+    result = installer.run()
+
+    assert "canary-hat.dtbo changed" not in result.stdout
+
+
+def test_no_overlay_dir_means_no_overlay_work(installer: Installer) -> None:
+    result = installer.run()
+
+    assert "canary-hat.dtbo" not in result.stdout + result.stderr
+    assert not installer.calls("dtc")

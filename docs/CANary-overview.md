@@ -11,8 +11,9 @@ a 2008 Nissan Xterra (and broadly any OBD-II compliant vehicle) via raw CAN bus
 capture and standardized OBD-II diagnostics. The hardware interface is a
 single SocketCAN device (`can0`) used for both broadcast CAN capture and
 active ISO-TP OBD/UDS requests. Two SocketCAN adapters are supported
-first-class: the Waveshare 2-CH CAN HAT (MCP2515/SPI, the current in-vehicle
-rig) and the Canable USB (gs_usb/candleLight). The original ELM327 path
+first-class: the CANary-HAT (MCP2518FD/SPI, the current in-vehicle rig — see
+`hardware/canary-hat/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) and the
+Canable USB (gs_usb/candleLight). The original ELM327 path
 remains in the repo as a legacy fallback.
 
 The system runs headlessly on a Raspberry Pi 5 mounted in-vehicle, logs all telemetry to local storage, and surfaces anomaly alerts via a local network dashboard or notification mechanism.
@@ -211,7 +212,7 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 | Configuration | YAML via `pyyaml` |
 | Testing | `pytest`, virtual CAN buses, `ELM327-emulator` for legacy path |
 | Deployment | `systemd` service, optional Docker |
-| Hardware | Raspberry Pi 5 (8 GB); SocketCAN adapter — Waveshare 2-CH CAN HAT (MCP2515/SPI, current) or Canable USB (gs_usb); ELM327 optional legacy fallback |
+| Hardware | Raspberry Pi 5 (8 GB); SocketCAN adapter — CANary-HAT (MCP2518FD/SPI, current), Waveshare 2-CH CAN HAT (MCP2515/SPI) or Canable USB (gs_usb); ELM327 optional legacy fallback |
 
 ---
 
@@ -221,7 +222,8 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 Vehicle OBD-II Port (J1962)
          │
 SocketCAN adapter (can0)
-Waveshare 2-CH CAN HAT (MCP2515/SPI, current)
+CANary-HAT (MCP2518FD/SPI, current),
+Waveshare 2-CH CAN HAT (MCP2515/SPI)
 or Canable USB (gs_usb)
 (broadcast CAN + OBD ISO-TP)
          │

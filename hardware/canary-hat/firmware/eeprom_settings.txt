@@ -1,0 +1,28 @@
+########################################################################
+# CANary-HAT rev 2.0 -- HAT+ ID EEPROM settings (U1, CAT24C256 @ 0x50)
+#
+# Build:  eepmake eeprom_settings.txt canary-hat.eep
+# Check:  eepdump canary-hat.eep
+# Flash:  see README.md in this directory
+#
+# HAT+ format (v2). Not a Power HAT+: the board sources no 5V to the Pi
+# (docs/CANary-HAT-Circuits.md §3.8), so current_supply stays 0.
+########################################################################
+
+# Zero -> eepmake generates a fresh RFC 4122 UUID, so each board flashed from
+# this file is distinguishable.
+product_uuid 00000000-0000-0000-0000-000000000000
+
+product_id 0x0001
+
+# 0xMMmm: rev 2.0
+product_ver 0x0200
+
+vendor "CANary"
+
+product "CANary-HAT rev 2.0"
+
+current_supply 0
+
+# Firmware loads /boot/firmware/overlays/canary-hat.dtbo at boot.
+dt_blob "canary-hat"

@@ -2,8 +2,9 @@
 Description=Bring up SocketCAN can0 for CANary capture
 # Run before the canary daemon so the link exists when it opens the bus.
 Before=canary.service
-# can0 is the Waveshare 2-CH CAN HAT (MCP2515, SPI); appears as a net device
-# once the mcp251x driver probes at boot.
+# can0 is an SPI CAN HAT -- the CANary-HAT (MCP2518FD, mcp251xfd driver) or
+# the Waveshare 2-CH CAN HAT (MCP2515, mcp251x); it appears as a net device
+# once the driver probes at boot.
 BindsTo=sys-subsystem-net-devices-can0.device
 After=sys-subsystem-net-devices-can0.device
 
@@ -13,7 +14,7 @@ RemainAfterExit=yes
 Environment=CAN_IFACE=can0
 Environment=CAN_BITRATE=500000
 # `restart-ms 100` = kernel auto-recovers the controller from CAN bus-off.
-# The mcp251x (MCP2515) driver implements do_set_mode, so unlike the old
+# Both mcp251xfd and mcp251x implement do_set_mode, so unlike the old
 # gs_usb Canable it accepts IFLA_CAN_RESTART_MS. This is the link-layer
 # companion to the recorder's app-level ReconnectPolicy
 # (src/collection/can_collector.py).

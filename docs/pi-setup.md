@@ -106,9 +106,14 @@ sudo nano /etc/canary/canary.yaml
 
 ## 4. Bring Up SocketCAN
 
-Two SocketCAN adapters are supported. The **Waveshare 2-CH CAN HAT**
-(MCP2515/SPI — current in-vehicle rig) enumerates as `can0` at boot once
-the SPI overlay is configured, and `systemd/can0.service` raises it with
+Three SocketCAN adapters are supported. The **CANary-HAT** (MCP2518FD/SPI —
+current in-vehicle rig) needs no `config.txt` lines: its ID EEPROM names the
+`canary-hat` overlay, `install_pi.sh` installs
+`/boot/firmware/overlays/canary-hat.dtbo`, and the firmware loads it at boot
+(programming a new board, checkout and K-line tools:
+`hardware/canary-hat/firmware/README.md`). The **Waveshare 2-CH CAN HAT**
+(MCP2515/SPI) enumerates as `can0` at boot once the SPI overlay is configured.
+Either HAT comes up as `can0`, and `systemd/can0.service` raises it with
 `restart-ms 100`. A **Canable USB** must run **candleLight/gs_usb**
 firmware so it appears as a native `can0` (slcan firmware exposes only
 `/dev/ttyACM0` and breaks the headless automation) — if `can0` does not

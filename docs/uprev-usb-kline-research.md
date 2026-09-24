@@ -542,6 +542,56 @@ minimization made cold starts fail. Minimize one operation at a time against a
 known-answer DID; do not replace the sequence with the entire Windows startup
 transcript.
 
+## On-wire view (CANary-HAT sniff, 2026-09-23)
+
+The USB captures above show what ROM Editor asks the cable for; the cable's own
+MCU runs the K-line state machine, so they never showed the wire. The CANary-HAT
+rev 2.0 was fitted to the same OBD port and sniffed K-line passively (TLIN1027
+in normal mode, commander pull-up off, nothing transmitted) through ROM Editor's
+startup ECU check and a logging run. 93 s, 37,403 bytes, 1,462 frames, **every
+checksum good**; UpRev behaved normally. Tools: `kline_edges.py` (kernel-
+timestamped RXD edges) and `kline_decode.py` in `hardware/canary-hat/firmware/`.
+
+**Physical layer.** 10400 baud 8N1 (ISO 14230). Two wake-ups, alternating while
+the cable retries: a standard fast init (25.0 ms low, 25.1 ms high, request bytes
+10 ms apart) that this ECM never answered, and **518.9 ms low, 18.1 ms high,
+request bytes back-to-back** — every answered StartCommunication followed this
+one.
+
+**Addressing.** `81 10 FC 81 0E` → `83 FC 10 C1 5D 8F 3C`: ECM `0x10`, tester
+**`0xFC`**, key bytes `5D 8F`. After that, frames carry no address bytes:
+`<len> <data…> <sum & 0xff>`.
+
+**How the USB envelope maps onto the wire.** A USB IN payload is `0x66`
+followed by the raw K-line frame: the captured positive response
+`66 02 ec 81 6f` is the wire frame `02 EC 81 6F`, and the `LL`/`KK` fields in
+"Dynamic K-line stream" are simply the K-line length byte and checksum. On the
+way out the cable strips a `02 00` prefix and adds length and checksum: the USB
+poll `02 00 21 81 04 01` corresponds to wire requests of the form
+`04 21 8x 04 01 <cs>`.
+
+**Session sequence seen on the wire.**
+
+| Phase | Tester → ECM | ECM → tester |
+|---|---|---|
+| ECU check | `02 A1 00 A3`, `02 A2 00 A4` | `03 7F A1 12 35`, `03 7F A2 11 35` (refused) |
+| | a read whose reply carries ASCII `UPRV` (`55 50 52 56`) | |
+| | `05 22 11 03 04 01 40`, repeated at ~3.6 Hz | `04 62 11 03 9A 14` |
+| Logging setup | `AC 81 …` (16-bit RAM descriptors `83 FF FF xx xx`), `AC 82 01 81 …` (RAM + DIDs incl. `12 25`/`12 26`), `AC 83 01 82 …` (DIDs) | `02 EC 81 6F`, `02 EC 83 71` |
+| Logging | `04 21 83 04 01 AD` | `34 61 83 …` (52 data bytes), ~9 Hz |
+
+Two points differ from the CAN side and from the USB-only reading:
+
+- `22 11 03 04 01` — UpRev's two-DID read, which this ECM **rejects on CAN**
+  (`7F 22 12`) — is **answered on K-line**, with `62 11 03` plus one value byte.
+- The logging rate on the wire was ~9 replies/s for a 52-byte set, not 16 Hz.
+
+**The HAT then did it itself** (UpRev unplugged, KOEO): wake-up 518.9/18.1 ms,
+`81 10 FC 81 0E` → `83 FC 10 C1 5D 8F 3C`, `05 22 11 03 04 01 40` →
+`04 62 11 03 99 13`, `01 82 83` → `01 C2 C3`. So a CANary-native K-line path
+needs no UpRev cable at all; this is read-only and volatile, and the
+non-volatile-write policy above applies unchanged to anything beyond it.
+
 ## Integration boundary
 
 This should become an independent optional `uprev_usb` collector, not another

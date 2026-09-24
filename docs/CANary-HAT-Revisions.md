@@ -104,6 +104,62 @@ with the four remaining discretionary pins on test points. Manufacturer-
 discretionary bus access is therefore *not* an unserved gap in the market —
 useful context for any future form-factor work.
 
+#### 13.1.1 Rev 2.0 bring-up — first board, 2026-09-23
+
+One assembled rev 2.0 board on the Pi 5, checked on the bench and then on the
+Xterra through the OBD port (key off, then KOEO), with no UPS stacked. Tools and
+the procedure are in `hardware/canary-hat/firmware/` (`checkout_hat.sh`,
+`kline_bringup.py`, `kline_edges.py`, `kline_decode.py`).
+
+| Subsystem | Result | Evidence |
+|---|---|---|
+| ID EEPROM (U1) | **Pass** | Arrived blank (32 KiB of `0xFF`). Programmed with a HAT+ v2 record (`vendor "CANary"`, `product "CANary-HAT rev 2.0"`, `product_ver 0x0200`, `dt_blob "canary-hat"`), read back byte-identical. Firmware reports it in `/proc/device-tree/hat/` and loads the overlay with no `config.txt` line. JP1 open = writable, as designed. |
+| CAN (U3/U4/Y1) | **Pass** | `mcp251xfd` probes `MCP2518FD … o:40.00MHz`. KOEO: 20,737 frames, 0 errors/drops/overruns, the Xterra's normal ID set at its usual rates, multi-frame ISO-TP OBD replies from `7E8`. STB (GPIO22) held low by the overlay's `gpio-hog`. |
+| CAN LED (D6/R16) | **Pass** | Blinks with the Pi's own ~2 Hz key-off probes; solid on a live bus. |
+| 12V input + sense (Q1/D3, U8, R11/R12) | **Pass** | ADS1015 at 0x48 reads 0.000 V with no vehicle, 12.68 V key-off, 12.43 V KOEO. Pi `throttled=0x0`. |
+| K-line (U2, R5/R6, Q2/Q3) | **Pass** | See measurements 1 and 10 below. |
+| IMU (U6) | **Pass** | `WHO_AM_I` 0x6C, \|a\| = 1.004 g at rest, gyro ≈ 0. |
+| GNSS (U7) + PPS | **Pass** | NMEA at 9600 on `/dev/ttyAMA2` (uart2); SBAS fix, 12 satellites, HDOP 0.79 with the antenna on J4. `pps-gpio` on GPIO18 pulses once fixed. |
+| **Barometer (U5)** | **Fail** | Chip ID 0x50, NVM, error register, sensor-time counter and data-ready flags all correct — the digital core is alive — but every conversion (forced and normal, soft reset, OSR ×1…×32) returns temperature **exactly 0** and pressure pinned at ≈`0x801C00`. Netlist is right (VDD pin 10 and VDDIO pin 1 on +3V3; CSB/SDO high). VDD cannot be open (POR needs VDD > 1.58 V, p.7) and a ≤700 µA load makes a marginal joint implausible, so the analog front end/converter of this part is dead. Replace U5 (a BMP390 drops in, §3.5). |
+| Pull-up FET (Q2/Q3) | **Not confirmed** | Echo passes with it on and off, because the ECM already pulls the bus up. Needs a meter on J2 pin 6 with EN low while GPIO24 toggles. |
+| X1202 coexistence | Not tested | UPS not stacked. |
+
+**Overlay defect found and fixed on the board, not in the schematic.** The first
+overlay enabled `uart2` with `status = "okay"` alone: `/dev/ttyAMA2` appeared but
+GPIO4/5 stayed unmuxed and no NMEA arrived. The fragments now set
+`pinctrl-0 = <&uart2_pins>` (and `<&uart0_pins>` for K-line), as the stock
+`uart*-pi5` overlays do.
+
+Measurements from the §13.1 table that this board answered:
+
+- **1 — K-line commander mode: yes.** The HAT woke the ECM, opened a KWP2000
+  session, read a DID and closed it on its own (KOEO):
+  `81 10 FC 81 0E → 83 FC 10 C1 5D 8F 3C`, `05 22 11 03 04 01 40 → 04 62 11 03 99 13`,
+  `01 82 83 → 01 C2 C3`. Two vehicle facts made it work — tester address **0xFC**
+  (0xF1 is ignored) and a **518.9 ms low / 18.1 ms high** wake-up (the standard
+  25 ms fast init is ignored). Both were read off UpRev's own session with the
+  HAT sniffing, not guessed; the vehicle skill carries them.
+- **2 — pull-up disturbing another tester: not with it off.** 93 s of UpRev's
+  session (ECU check, logging setup, ~9 Hz logging) sniffed passively, EN high
+  and pull-up off: 1,462 frames, every checksum good, UpRev unaffected. With the
+  pull-up *on* alongside UpRev is still unmeasured.
+- **3 — crystal: effectively yes.** The driver reports 40.00 MHz and 500 kbit/s
+  runs error-free against the vehicle's nodes; not measured with a counter, and
+  C5/C6 dielectric not inspected.
+- **10 — TLIN1027 at the real baud: yes.** The ECM's K-line runs at
+  **10400 baud 8N1** (ISO 14230), inside the 20 kbps transmit ceiling. Echo is
+  byte-exact at 9600 and 10400 with the pull-up on or off.
+- **13 — SysRq:** not exercised by design. On the Pi 5 the console is the debug
+  UART (`ttyAMA10`), not `uart0`, so the hazard needs a deliberate
+  `uart0_console` to arise. The overlay still keeps uart0 dormant
+  (`dtoverlay=canary-hat,kline` or a runtime `dtoverlay uart0-pi5`) until a
+  K-line collector exists.
+- **14 — Y1 start-up:** started at room temperature on both boots with the overlay loaded; cold
+  start and OSC2 amplitude not measured.
+
+Still open on this board: 4 (TTFF / hotspot desense, measured only as "fixed
+within minutes"), 5, 6, 7, 8, 9 (blocked by U5), 11, 12.
+
 ### 13.2 Rev 2.0 — the board that gets fabricated
 
 **This is the submission list**, re-triaged 2026-08-22 when rev 1.0 was withdrawn

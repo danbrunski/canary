@@ -3,7 +3,7 @@
 > Early anomaly detection and diagnostics for vehicle telemetry via OBD-II and CAN bus monitoring.
 
 CANary is an on-vehicle telemetry, anomaly-detection, and diagnostics platform.
-It continuously reads raw CAN bus traffic (SocketCAN — Waveshare CAN HAT or
+It continuously reads raw CAN bus traffic (SocketCAN — CANary-HAT, Waveshare CAN HAT or
 Canable USB) and standardized OBD-II PID reads, uses unsupervised machine
 learning to learn normal vehicle behavior and flag anomalous conditions in real
 time, and doubles as an **engine performance analysis and diagnostic
@@ -27,8 +27,9 @@ detecting subtle signs of trouble before they become failures.
 
 - **Dual-channel ingestion** — raw CAN frames plus OBD-II Mode 01 / selected
   Mode 22 (Nissan DID) reads through one CAN-native `python-can` path, over
-  either the Waveshare 2-CH CAN HAT (MCP2515/SPI, the current in-vehicle rig)
-  or a Canable USB adapter; the ELM327 path remains for emulator/fallback
+  the CANary-HAT (MCP2518FD/SPI, the current in-vehicle rig; see
+  `hardware/canary-hat/`), the Waveshare 2-CH CAN HAT (MCP2515/SPI) or a
+  Canable USB adapter; the ELM327 path remains for emulator/fallback
   coverage. An optional serial NMEA GPS receiver adds ground-speed and
   position channels.
 - **Parquet ring buffer** — timestamped, columnar, rotated per ignition session,
@@ -82,8 +83,8 @@ requirements, and development phases.
 ### Prerequisites
 
 - Python 3.12+
-- For on-vehicle use: Raspberry Pi 5 plus a SocketCAN adapter — Waveshare
-  2-CH CAN HAT (current in-vehicle rig) or Canable USB. OBD reads run through
+- For on-vehicle use: Raspberry Pi 5 plus a SocketCAN adapter — CANary-HAT
+  (current in-vehicle rig), Waveshare 2-CH CAN HAT or Canable USB. OBD reads run through
   the CAN-native client; no ELM327 is required.
 
 ### Install (development)
@@ -299,7 +300,8 @@ for the original (now complete) capture plan.
 Vehicle OBD-II Port (J1962)
          │
   SocketCAN adapter — either:
-   · Waveshare 2-CH CAN HAT (MCP2515/SPI) — current in-vehicle rig
+   · CANary-HAT rev 2.0 (MCP2518FD/SPI; also K-line, GNSS, IMU) — current in-vehicle rig
+   · Waveshare 2-CH CAN HAT (MCP2515/SPI)
    · Canable USB
   (CAN sniff + OBD ISO-TP)
           │

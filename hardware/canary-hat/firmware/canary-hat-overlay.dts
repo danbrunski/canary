@@ -1,0 +1,129 @@
+// CANary-HAT rev 2.0 board overlay (Raspberry Pi 5).
+//
+// Named by the HAT+ ID EEPROM (eeprom_settings.txt, dt_blob "canary-hat"), so
+// firmware loads it at boot with no config.txt lines. Covers what §11 of
+// docs/CANary-HAT-Spec.md asks of the overlay:
+//
+//   CAN   MCP2518FD (U3) on SPI0 CE0, nINT GPIO25, 40 MHz crystal (Y1) -> can0
+//         TCAN1042 (U4) STB on GPIO22, hogged LOW. STB has an internal pull-up,
+//         so an undriven pin leaves the transceiver in standby and can0 up but
+//         deaf -- the "dead CAN hardware" trap. The hog asserts it before any
+//         userspace exists and survives a daemon crash.
+//   GNSS  MAX-M10M (U7) on uart2 (GPIO4 TX / GPIO5 RX) -> /dev/ttyAMA2
+//         TIMEPULSE on GPIO18 -> pps-gpio (/dev/ppsN)
+//   K-line TLIN1027 (U2) on uart0 (GPIO14/15). DORMANT by default: nothing
+//         consumes it yet, and a console on uart0 turns a held-low RXD into a
+//         SysRq break (§11 step 1). Enable with dtoverlay=canary-hat,kline.
+//
+// Deliberately NOT here: kernel drivers for the LSM6DSOX (0x6B), BMP384 (0x77)
+// and ADS1015 (0x48). CANary reads those from userspace over /dev/i2c-1; a bound
+// kernel driver would claim the address and make those reads fail with EBUSY.
+// GPIO24 (K-line pull-up FET) and GPIO26 (TLIN1027 EN) are left to the K-line
+// collector; R15/R4 hold them off until it drives them.
+//
+// Constants are written numerically so plain `dtc` builds it on the Pi with no
+// kernel headers: IRQ_TYPE_LEVEL_LOW = 8, GPIO_ACTIVE_HIGH = 0,
+// BCM2835_FSEL_GPIO_IN = 0.
+//
+// Build: dtc -@ -I dts -O dtb -o canary-hat.dtbo canary-hat-overlay.dts
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2712";
+
+	fragment@0 {
+		target = <&spidev0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/clocks";
+		__overlay__ {
+			clk_canary_can: clk_canary_can {
+				#clock-cells = <0>;
+				compatible = "fixed-clock";
+				clock-frequency = <40000000>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target = <&gpio>;
+		__overlay__ {
+			canary_can_int: canary_can_int {
+				brcm,pins = <25>;
+				brcm,function = <0>;
+			};
+
+			canary_pps_pins: canary_pps_pins {
+				brcm,pins = <18>;
+				brcm,function = <0>;
+				brcm,pull = <0>;
+			};
+
+			canary_can_stb {
+				gpio-hog;
+				gpios = <22 0>;
+				output-low;
+				line-name = "CANARY_CAN_STB";
+			};
+		};
+	};
+
+	fragment@3 {
+		target = <&spi0>;
+		__overlay__ {
+			status = "okay";
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			canary_can: can@0 {
+				compatible = "microchip,mcp2518fd";
+				reg = <0>;
+				pinctrl-names = "default";
+				pinctrl-0 = <&canary_can_int>;
+				spi-max-frequency = <20000000>;
+				interrupt-parent = <&gpio>;
+				interrupts = <25 8>;
+				clocks = <&clk_canary_can>;
+			};
+		};
+	};
+
+	fragment@4 {
+		target = <&uart2>;
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <&uart2_pins>;
+		};
+	};
+
+	fragment@5 {
+		target-path = "/";
+		__overlay__ {
+			canary_pps: canary-pps {
+				compatible = "pps-gpio";
+				pinctrl-names = "default";
+				pinctrl-0 = <&canary_pps_pins>;
+				gpios = <&gpio 18 0>;
+				status = "okay";
+			};
+		};
+	};
+
+	fragment@6 {
+		target = <&uart0>;
+		__dormant__ {
+			status = "okay";
+			pinctrl-0 = <&uart0_pins>;
+		};
+	};
+
+	__overrides__ {
+		kline = <0>, "+6";
+	};
+};

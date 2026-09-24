@@ -558,7 +558,18 @@ committees.
 
 ## 11. Software Work Implied
 
-None of this is blocking for fabrication, but none of it exists yet either.
+None of this is blocking for fabrication.
+
+> **Status, 2026-09-23 (rev 2.0 bring-up, §13.1.1).** Done: the board overlay
+> (`hardware/canary-hat/firmware/canary-hat-overlay.dts` — `mcp251xfd`, the STB
+> `gpio-hog`, GNSS `uart2`, `pps-gpio`, dormant K-line `uart0`), its delivery by
+> ID EEPROM (`program_hat.sh`) and by `scripts/install_pi.sh` (which installs the
+> `.dtbo` and points gpsd at `/dev/ttyAMA2` when a CANary-HAT is fitted). K-line
+> is proven end to end with bring-up tools, and the startup order below held on
+> real hardware — but there is still no K-line *collector*, no IMU or barometer
+> collector, and no chrony PPS refclock. The K-line protocol this ECM actually
+> speaks (tester 0xFC, a 518.9 ms wake-up, 10400 baud KWP2000) is in the
+> vehicle skill and `docs/uprev-usb-kline-research.md`.
 
 - **Overlay delivery:** write a single board overlay covering `mcp251xfd`, the
   GNSS UART, and `pps-gpio`, and name it in the HAT+ ID EEPROM so firmware loads
