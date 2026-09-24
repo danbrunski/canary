@@ -71,7 +71,7 @@ under GPS. Defects a dyno would inherit:
 
 ## Desk
 
-- [~] **H07.1 Driveline facts that cannot be misread.** **Do:** replace
+- [x] **H07.1 Driveline facts that cannot be misread.** **Do:** replace
   `gear_ratios` with typed fields: `final_drive`, `gearbox_ratios` (unitless,
   one per gear), `tyre_loaded_circumference_m` with its evidence; compute
   expected rpm per km/h from them, so the unit mismatch cannot recur. Fix
@@ -166,9 +166,20 @@ under GPS. Defects a dyno would inherit:
   needs. Occupants, cargo and fuel level are per-run conditions; the usual
   load is `usual_payload_kg` = 127 kg (driver 180 lb + cargo 100 lb), so a
   typical run moves ~2,311 kg (5,096 lb) on a full tank.
-- [ ] **H07.11 Measure the missing gear ratios.** Steady cruise in 2nd, 4th,
+- [~] **H07.11 Measure the missing gear ratios.** Steady cruise in 2nd, 4th,
   5th and 6th (1st if practical), with GPS speed. **Accept:** all six in the
   profile, and the three already measured confirmed.
+  **Partial (2026-09-24):** the FS6R31A's published ratios are in the profile
+  (4.368/2.518/1.743/1.283/1.000/0.769; the operator regeared the Off-Road's
+  stock 3.69 axles to 4.08), so `derived:GEAR_ESTIMATE` now runs for the
+  Xterra — it was already on the non-trainable categorical list, so no model
+  changes. Against the three cruise clusters already measured: 5th exact (the
+  tyre circumference was solved from it), 3rd within 0.2 %, 4th 2.0 % high.
+  The estimate reads ECU speed, ~8 % under true, so its rpm per km/h runs
+  ~8.7 % high; adjacent gears are 25–30 % apart, so the nearest match holds,
+  with less margin (H07.3's scaled speed removes it). Still owed on the truck:
+  hand-selected steady cruise in each gear, to confirm 1st, 2nd, 4th and 6th
+  and explain 4th's 2 %.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
   pairs in 3rd from ≤ 2,500 rpm to the limiter (supercharger NA1/NA5).
