@@ -22,6 +22,19 @@ shipped; this stub records where the behavior now lives.
   sessions), not on the training window — in-sample calibration once
   masked the TCN entirely.
 
+**Role (operator decision 2026-09-23, [A06](roadmap/tasks/A06-detector-roles.md)).**
+Per-mode calibration did not make either detector fit to alert. On A02.11's
+held-out drives (`data/analyses/2026-09-23-a02-detector-baseline.md`, false
+alarms per engine-hour against a budget of 1) the Isolation Forest read 1.18
+[0.00, 3.94] with 81 % of rows withheld, and the sequence detector as served
+45.35 [24.51, 61.28] (its global score alone 2.96 [1.66, 5.04]). Both now
+default to `models.roles: evidence`: they score, store and vote in fusion,
+but never alert on their own. The sequence detector is a novelty screen: each
+event states whether its window lies outside the artifact's per-mode training
+envelope (baro, IAT and speed ranges, A03.8), per mode, which is what its
+per-mode thresholds mostly measured. The primary detector is the behavior
+models and the deterministic layer (A06.4).
+
 Full per-mode *models* (one detector per mode) remain not-adopted; the
 shipped per-mode calibration was judged sufficient. The original
 findings, the correction history, and the design reasoning are in git

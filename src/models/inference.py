@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import math
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
@@ -83,6 +84,10 @@ class SequenceInferenceResult:
     #: conditions included) or ``"engine_response_targets"`` (an artifact whose
     #: context inputs are kept out of the score, A03.2).
     ranking_scope: str = "all_channels"
+    #: A06.2 — the novelty screen: the window against the artifact's recorded
+    #: training envelope (:meth:`TrainingEnvelope.check`). ``None`` when the
+    #: artifact recorded no envelope — "not recorded", never "inside".
+    envelope: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -106,6 +111,7 @@ class SequenceInferenceResult:
             "window_span_seconds": self.window_span_seconds,
             "window_max_step_seconds": self.window_max_step_seconds,
             "ranking_scope": self.ranking_scope,
+            "envelope": None if self.envelope is None else dict(self.envelope),
             "reconstruction_overlays": {
                 k: {sub: list(seq) for sub, seq in overlay.items()}
                 for k, overlay in self.reconstruction_overlays.items()
@@ -208,6 +214,132 @@ def compare_suppression(
     )
 
 
+#: A06.2 — the novelty screen's verdicts. ``outside`` and ``mode_not_trained``
+#: are both "outside the learned envelope"; ``not_compared`` means no recorded
+#: quantity could be compared in this window (no fresh value, or never measured
+#: in training) — an empty result that says which kind of empty it is, never
+#: read as ``inside``.
+ENVELOPE_INSIDE = "inside"
+ENVELOPE_OUTSIDE = "outside"
+ENVELOPE_MODE_NOT_TRAINED = "mode_not_trained"
+ENVELOPE_NOT_COMPARED = "not_compared"
+#: Per-quantity verdicts beside ``inside`` / ``outside``.
+ENVELOPE_QUANTITY_NOT_TRAINED = "not_trained"
+ENVELOPE_QUANTITY_NO_DATA = "no_data"
+#: Units for the envelope sentence, keyed by the quantity names A03.8 records
+#: (``sequence_training.ENVELOPE_QUANTITIES``). An unknown name prints bare.
+ENVELOPE_UNITS: dict[str, str] = {"baro_kpa": "kPa", "iat_c": "°C", "speed_kph": "km/h"}
+
+
+@dataclass(frozen=True)
+class TrainingEnvelope:
+    """The per-mode ranges a sequence artifact trained on (A03.8), served (A06.2).
+
+    Built once from the manifest's ``training_envelope``; :meth:`check` is a
+    few comparisons per scored window. The range is the recorded ``[min,
+    max]``, not p05–p95: "outside" means no training row was there at all.
+    """
+
+    #: quantity -> column, e.g. ``baro_kpa -> obd:BAROMETRIC_PRESSURE``.
+    channels: Mapping[str, str]
+    #: mode -> quantity -> (trained min, trained max). A quantity the mode
+    #: never measured is absent (``unmeasured`` in the record).
+    ranges: Mapping[str, Mapping[str, tuple[float, float]]]
+    #: mode -> engine-hours of training data in it.
+    hours: Mapping[str, float]
+
+    @classmethod
+    def from_record(cls, record: Mapping[str, Any] | None) -> TrainingEnvelope | None:
+        """``None`` for an artifact that recorded no envelope (pre-A03.8)."""
+        if not isinstance(record, Mapping):
+            return None
+        modes = record.get("modes")
+        if not isinstance(modes, Mapping):
+            return None
+        channels = {
+            str(name): str(column) for name, column in (record.get("quantities") or {}).items()
+        }
+        ranges: dict[str, dict[str, tuple[float, float]]] = {}
+        hours: dict[str, float] = {}
+        for mode, summary in modes.items():
+            per_quantity: dict[str, tuple[float, float]] = {}
+            for name, stats in (summary.get("quantities") or {}).items():
+                if not stats or not int(stats.get("rows", 0)):
+                    continue
+                per_quantity[str(name)] = (float(stats["min"]), float(stats["max"]))
+                channels.setdefault(str(name), str(stats.get("channel", name)))
+            ranges[str(mode)] = per_quantity
+            hours[str(mode)] = float(summary.get("hours", 0.0) or 0.0)
+        return cls(channels=channels, ranges=ranges, hours=hours)
+
+    @property
+    def columns(self) -> tuple[str, ...]:
+        """The row columns the window must carry for :meth:`check`."""
+        return tuple(self.channels.values())
+
+    def check(
+        self,
+        mode: str | None,
+        observed: Mapping[str, tuple[float, float] | None],
+    ) -> dict[str, Any]:
+        """The window against the envelope of ``mode``.
+
+        ``observed`` is quantity -> the window's (min, max) over its finite
+        values (forward-filled ones included: baro, IAT and speed move slowly
+        enough that a held value is still the condition), or ``None`` when the
+        window held none.
+        """
+        quantities: dict[str, dict[str, Any]] = {}
+        trained = self.ranges.get(mode) if mode is not None else None
+        for name, column in self.channels.items():
+            window = observed.get(name)
+            entry: dict[str, Any] = {
+                "channel": column,
+                "unit": ENVELOPE_UNITS.get(name, ""),
+                "window_min": None if window is None else window[0],
+                "window_max": None if window is None else window[1],
+                "trained_min": None,
+                "trained_max": None,
+            }
+            span = None if trained is None else trained.get(name)
+            if span is not None:
+                entry["trained_min"], entry["trained_max"] = span
+            if trained is None:
+                entry["status"] = None
+            elif span is None:
+                entry["status"] = ENVELOPE_QUANTITY_NOT_TRAINED
+            elif window is None:
+                entry["status"] = ENVELOPE_QUANTITY_NO_DATA
+            elif window[0] < span[0] or window[1] > span[1]:
+                entry["status"] = ENVELOPE_OUTSIDE
+            else:
+                entry["status"] = ENVELOPE_INSIDE
+            quantities[name] = entry
+        outside_on = [n for n, e in quantities.items() if e["status"] == ENVELOPE_OUTSIDE]
+        reason: str | None = None
+        if mode is None:
+            status = ENVELOPE_NOT_COMPARED
+            reason = "the window carries no operating mode"
+        elif trained is None:
+            status = ENVELOPE_MODE_NOT_TRAINED
+        elif outside_on:
+            status = ENVELOPE_OUTSIDE
+        elif any(e["status"] == ENVELOPE_INSIDE for e in quantities.values()):
+            status = ENVELOPE_INSIDE
+        else:
+            status = ENVELOPE_NOT_COMPARED
+            reason = "no recorded quantity had a fresh value in the window and a trained range"
+        return {
+            "mode": mode,
+            "status": status,
+            "outside": status in (ENVELOPE_OUTSIDE, ENVELOPE_MODE_NOT_TRAINED),
+            "outside_on": outside_on,
+            "trained_hours": None if mode is None else self.hours.get(mode),
+            "reason": reason,
+            "quantities": quantities,
+        }
+
+
 def _base_channel(column: str) -> str:
     """Strip a rolling-feature suffix to the raw channel for ``__gap`` lookup."""
     for suffix in ("__mean", "__std", "__roc"):
@@ -241,6 +373,7 @@ class SequenceWindowBuffer:
         max_gap_seconds: float = WINDOW_MAX_GAP_SECONDS,
         observation_mask: str = MASK_FRESH_WITHIN_MAX_GAP,
         freshness_fallback_columns: frozenset[str] = frozenset(),
+        condition_columns: tuple[str, ...] = (),
     ) -> None:
         if sequence_length <= 0:
             raise ValueError("sequence_length must be positive")
@@ -268,6 +401,11 @@ class SequenceWindowBuffer:
             else arrival_column_for(column)
             for column in feature_columns
         )
+        #: A06.2 — driving-condition columns kept beside the window (raw, in
+        #: the row's own units) for the novelty screen's envelope check. They
+        #: need not be model inputs; absent or non-finite reads as no value.
+        self.condition_columns = tuple(condition_columns)
+        self._conditions: deque[tuple[float, ...]] = deque(maxlen=sequence_length)
         self._values: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._masks: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
         self._deltas: deque[np.ndarray[Any, np.dtype[np.float32]]] = deque(maxlen=sequence_length)
@@ -356,6 +494,10 @@ class SequenceWindowBuffer:
         self._deltas.append(delta.astype(self.dtype))
         self._metadata.append((timestamp_str, session))
         self._stamps.append(timestamp)
+        if self.condition_columns:
+            self._conditions.append(
+                tuple(_coerce_feature_value(row.get(column)) for column in self.condition_columns)
+            )
         raw_mode = row.get(self.mode_column)
         self._last_mode = raw_mode if isinstance(raw_mode, str) else None
         return self.ready
@@ -411,6 +553,7 @@ class SequenceWindowBuffer:
         self._deltas.clear()
         self._metadata.clear()
         self._stamps.clear()
+        self._conditions.clear()
         self._session = None
         self._last_mode = None
         self._delta_accumulator = np.zeros(len(self.feature_columns), dtype=np.float64)
@@ -449,6 +592,15 @@ class SequenceWindowBuffer:
         ]
         return sum(steps), max(steps)
 
+    def condition_ranges(self) -> dict[str, tuple[float, float] | None]:
+        """Per condition column, the window's (min, max) over its finite
+        values; ``None`` for a column the window never held a value for."""
+        out: dict[str, tuple[float, float] | None] = {}
+        for index, column in enumerate(self.condition_columns):
+            values = [row[index] for row in self._conditions if math.isfinite(row[index])]
+            out[column] = (min(values), max(values)) if values else None
+        return out
+
     def metadata(self) -> tuple[str, str, str]:
         """Return start timestamp, end timestamp, and current session."""
         if not self.ready:
@@ -484,12 +636,23 @@ class SequenceInferenceEngine:
         # ``__arrived``.
         mask_rule, fallback_columns = observation_mask_from_schema(trained.manifest.schema)
         self.observation_mask = mask_rule
+        #: A06.2 — the novelty screen's reference, ``None`` for an artifact
+        #: that recorded no envelope (every result then says so).
+        self.envelope: TrainingEnvelope | None = TrainingEnvelope.from_record(
+            getattr(trained.manifest, "training_envelope", None)
+        )
+        #: Row columns the envelope check reads, model inputs or not; the
+        #: daemon keeps them on the row it hands to :meth:`observe`.
+        self.condition_columns: tuple[str, ...] = (
+            self.envelope.columns if self.envelope is not None else ()
+        )
         self.buffer = SequenceWindowBuffer(
             feature_columns=self.feature_columns,
             sequence_length=self.sequence_length,
             dtype=dtype,
             observation_mask=mask_rule,
             freshness_fallback_columns=fallback_columns,
+            condition_columns=self.condition_columns,
         )
         # Resolve suppress_channels (config-driven; base names auto-expand to
         # rolling-derivative siblings) into integer indices into
@@ -609,6 +772,18 @@ class SequenceInferenceEngine:
             window_rows=self.sequence_length,
             window_span_seconds=span_seconds,
             window_max_step_seconds=max_step_seconds,
+            envelope=self.envelope_check(self.buffer.last_mode),
+        )
+
+    def envelope_check(self, mode: str | None) -> dict[str, Any] | None:
+        """The current window against the training envelope (A06.2): a few
+        comparisons per scored window. ``None`` when none was recorded."""
+        if self.envelope is None:
+            return None
+        ranges = self.buffer.condition_ranges()
+        return self.envelope.check(
+            mode,
+            {name: ranges.get(column) for name, column in self.envelope.channels.items()},
         )
 
     def score_window(

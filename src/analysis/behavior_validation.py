@@ -58,6 +58,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.alerts.fusion import PersistenceGate
+from src.analysis import drives as _drives
 from src.analysis.pairing import to_seconds
 from src.analysis.surface_2d import containing_cell_indices, trusted_cell_mask
 from src.config import CanaryConfig
@@ -102,7 +103,12 @@ log = logging.getLogger(__name__)
 #: 2 (2026-09-22, B04.3): row times in true seconds for microsecond frames
 #: (events, dedupe and synthetic windows were 1000x compressed), detection
 #: delay, covered envelope and transient controls.
-EVALUATOR_VERSION = 2
+#: 3 (2026-09-23, B03.6): evaluated-hours exposure breaks at gaps longer than
+#: the drive join gap. A directory that kept recording 11 h of a parked
+#: truck (2026-09-23T032755) joined an evening and a morning drive into one
+#: group, and its span counted the parked hours as watched time -- control
+#: event rates came out ~10x too low.
+EVALUATOR_VERSION = 3
 
 #: Default join gap between adjacent directories of one physical drive. A
 #: capture arm/disarm rotates the writer with ~0 s gap; an engine restart
@@ -296,12 +302,12 @@ def decoder_identity(
 # Drive grouping and grouped splits (B02.3)
 # ---------------------------------------------------------------------------
 
-SEGMENT_MARKER = "#segment-"
+SEGMENT_MARKER = _drives.SEGMENT_MARKER
 
 
 def parent_session(piece: str) -> str:
     """The recording directory a (possibly ``#segment``) piece came from."""
-    return piece.split(SEGMENT_MARKER, 1)[0]
+    return _drives.parent_session(piece)
 
 
 @dataclass(frozen=True)
@@ -322,22 +328,60 @@ class Drive:
         )
 
 
-def piece_time_ranges(frame: pd.DataFrame) -> dict[str, tuple[datetime | None, datetime | None]]:
-    """``{piece: (first, last)}`` from the frame's timestamps, if it has them."""
+class PieceRanges(dict[str, tuple[datetime | None, datetime | None]]):
+    """``{piece: (first, last)}``, plus each row's physical drive when the
+    ranges came from a frame (:func:`piece_time_ranges`).
+
+    ``drive_rows`` (piece, epoch seconds, drive label) is what
+    :func:`group_drives` groups on: the one physical-drive definition the
+    trainers use (``src.analysis.drives``), captures and activity pauses
+    included. A plain mapping (no rows) falls back to joining recordings by
+    their ranges.
+    """
+
+    drive_rows: pd.DataFrame | None = None
+
+    def merge(self, other: Mapping[str, tuple[datetime | None, datetime | None]]) -> None:
+        """Add ``other``'s pieces, keeping both sides' drive rows."""
+        self.update(other)
+        rows = getattr(other, "drive_rows", None)
+        if isinstance(rows, pd.DataFrame):
+            self.drive_rows = (
+                rows
+                if self.drive_rows is None
+                else pd.concat([self.drive_rows, rows], ignore_index=True)
+            )
+
+
+def piece_time_ranges(frame: pd.DataFrame) -> PieceRanges:
+    """``{piece: (first, last)}`` from the frame's timestamps, if it has them,
+    carrying the rows' physical drives for :func:`group_drives`."""
     if SESSION_COLUMN not in frame.columns:
-        return {}
+        return PieceRanges()
     pieces = frame[SESSION_COLUMN].astype(str)
     if TIMESTAMP_COLUMN not in frame.columns:
-        return {piece: (None, None) for piece in pieces.unique()}
+        return PieceRanges({piece: (None, None) for piece in pieces.unique()})
     stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True, errors="coerce")
     grouped = pd.DataFrame({"piece": pieces, "t": stamps}).groupby("piece", sort=False)["t"]
-    out: dict[str, tuple[datetime | None, datetime | None]] = {}
+    out = PieceRanges()
     for piece, lo, hi in zip(
         grouped.min().index, grouped.min().to_numpy(), grouped.max().to_numpy(), strict=True
     ):
         first = None if pd.isna(lo) else pd.Timestamp(lo).tz_convert(UTC).to_pydatetime()
         last = None if pd.isna(hi) else pd.Timestamp(hi).tz_convert(UTC).to_pydatetime()
         out[str(piece)] = (first, last)
+    if stamps.notna().any():
+        keep = stamps.notna().to_numpy()
+        rows = frame.loc[keep]
+        out.drive_rows = pd.DataFrame(
+            {
+                "piece": pieces.to_numpy()[keep],
+                "t": (stamps[keep] - pd.Timestamp(0, tz="UTC")).dt.total_seconds().to_numpy(),
+                "drive": _drives.row_drive_labels(
+                    rows, session_column=SESSION_COLUMN, timestamp_column=TIMESTAMP_COLUMN
+                ),
+            }
+        )
     return out
 
 
@@ -348,15 +392,25 @@ def group_drives(
 ) -> list[Drive]:
     """Group pieces into independent drives, oldest first.
 
-    A parent directory's start is its parsed name stamp, else its earliest
-    timestamp; its end is its latest timestamp, else its start. Parents are
-    joined into one drive when the next one starts within
-    ``join_gap_seconds`` of the current drive's end (overlap included).
+    Ranges from a frame (:class:`PieceRanges` with rows) group by physical
+    drive, the definition every trainer uses (``src.analysis.drives``):
+    vehicle activity, captures bridging, a pause longer than the join gap
+    splitting even one recording. Drives are then joined when one starts
+    within ``join_gap_seconds`` of the previous one's end, and pieces sharing
+    a drive travel together (a piece cannot cross folds).
+
+    A plain mapping groups by parent directory: a parent's start is its
+    parsed name stamp, else its earliest timestamp; its end is its latest
+    timestamp, else its start; parents join when the next starts within
+    ``join_gap_seconds`` of the current group's end.
     """
+    rows = getattr(ranges, "drive_rows", None)
+    if isinstance(rows, pd.DataFrame) and not rows.empty:
+        return _group_physical(ranges, rows, join_gap_seconds=join_gap_seconds)
     by_parent: dict[str, list[str]] = {}
     for piece in ranges:
         by_parent.setdefault(parent_session(piece), []).append(piece)
-    spans: list[tuple[datetime, datetime, str]] = []
+    spans: list[_drives.SessionSpan] = []
     unordered: list[str] = []
     for parent, pieces in by_parent.items():
         firsts = [t for p in pieces if (t := ranges[p][0]) is not None]
@@ -368,28 +422,67 @@ def group_drives(
             unordered.append(parent)
             continue
         end = max([start, *lasts]) if lasts else start
-        spans.append((start, end, parent))
+        spans.append(_drives.SessionSpan(parent, start, end))
     if unordered:
         raise UnorderedSessionsError(
             "cannot order sessions without a parseable start stamp or timestamps: "
             + ", ".join(sorted(unordered))
         )
-    spans.sort(key=lambda item: (item[0], item[1]))
+    return [
+        _make_drive([(s.start, s.end, s.name) for s in group], by_parent)
+        for group in _drives.join_spans(spans, gap_seconds=join_gap_seconds)
+    ]
+
+
+def _group_physical(
+    ranges: Mapping[str, tuple[datetime | None, datetime | None]],
+    rows: pd.DataFrame,
+    *,
+    join_gap_seconds: float,
+) -> list[Drive]:
+    if join_gap_seconds < _drives.DRIVE_GAP_SECONDS:
+        raise ValueError(
+            f"drive_join_gap_seconds {join_gap_seconds:g} is shorter than the physical-drive "
+            f"gap ({_drives.DRIVE_GAP_SECONDS:g} s) the frame's drives were stamped with; "
+            "it cannot split them further"
+        )
+    extents = rows.dropna(subset=["drive"]).groupby("drive")["t"].agg(["min", "max"])
+    physical = [
+        _drives.SessionSpan(str(label), _epoch(lo), _epoch(hi))
+        for label, lo, hi in extents.itertuples(name=None)
+    ]
+    coarse = {
+        span.name: index
+        for index, group in enumerate(_drives.join_spans(physical, gap_seconds=join_gap_seconds))
+        for span in group
+    }
+    labelled = rows.dropna(subset=["drive"])
+    together = [
+        tuple(str(p) for p in dict.fromkeys(members))
+        for members in labelled.groupby(labelled["drive"].map(coarse))["piece"].agg(list).tolist()
+    ]
+    together.extend((str(piece),) for piece in ranges)
+    first = rows.groupby("piece")["t"].min()
+    last = rows.groupby("piece")["t"].max()
     drives: list[Drive] = []
-    current: list[tuple[datetime, datetime, str]] = []
-    current_end: datetime | None = None
-    for start, end, parent in spans:
-        if current and current_end is not None:
-            gap = (start - current_end).total_seconds()
-            if gap > join_gap_seconds:
-                drives.append(_make_drive(current, by_parent))
-                current = []
-                current_end = None
-        current.append((start, end, parent))
-        current_end = end if current_end is None else max(current_end, end)
-    if current:
-        drives.append(_make_drive(current, by_parent))
-    return drives
+    for unit in _drives.recording_units_of(together):
+        pieces = sorted(unit, key=lambda p: (first.get(p, float("inf")), _segment_order(p)))
+        timed = [p for p in pieces if p in first.index]
+        if not timed:
+            continue
+        drives.append(
+            Drive(
+                drive_id=parent_session(pieces[0]),
+                pieces=tuple(pieces),
+                started_at=_epoch(float(min(first[p] for p in timed))),
+                ended_at=_epoch(float(max(last[p] for p in timed))),
+            )
+        )
+    return sorted(drives, key=lambda d: (d.started_at, d.drive_id))
+
+
+def _epoch(seconds: float) -> datetime:
+    return datetime.fromtimestamp(float(seconds), tz=UTC)
 
 
 def _make_drive(
@@ -526,9 +619,16 @@ class EventPolicy:
     window_seconds: float | None = 8.0
     dedupe_seconds: float = 30.0
     interval_seconds: float = 1.0
+    #: Exposure (the events/h denominator) stops accumulating across a gap
+    #: between evaluated rows longer than this: the drive join gap, so rows
+    #: that would have been two drives in two directories are two watches in
+    #: one directory too (see :func:`_evaluated_hours`).
+    exposure_break_seconds: float = DEFAULT_JOIN_GAP_SECONDS
 
     @classmethod
-    def from_config(cls, config: CanaryConfig) -> EventPolicy:
+    def from_config(
+        cls, config: CanaryConfig, document: BehaviorValidationDocument | None = None
+    ) -> EventPolicy:
         alerts = config.alerts
         return cls(
             required=alerts.min_consecutive_ticks,
@@ -536,6 +636,11 @@ class EventPolicy:
             window_seconds=alerts.persistence_window_seconds,
             dedupe_seconds=alerts.min_seconds_between_events,
             interval_seconds=1.0 / config.preprocessing.resample_hz,
+            exposure_break_seconds=(
+                document.drive_join_gap_seconds
+                if document is not None
+                else DEFAULT_JOIN_GAP_SECONDS
+            ),
         )
 
     def describe(self) -> str:
@@ -837,7 +942,12 @@ def _median_or_none(values: np.ndarray) -> float | None:
 
 
 def _evaluated_hours(
-    seconds: np.ndarray, evaluated: np.ndarray, drives: np.ndarray, *, interval_seconds: float
+    seconds: np.ndarray,
+    evaluated: np.ndarray,
+    drives: np.ndarray,
+    *,
+    interval_seconds: float,
+    break_seconds: float = DEFAULT_JOIN_GAP_SECONDS,
 ) -> float:
     """Wall-clock exposure of the evaluated rows, in hours (B02.5).
 
@@ -847,13 +957,23 @@ def _evaluated_hours(
     exposure a twentieth of what it was. Per drive, first-to-last evaluated
     time plus one tick (so a lone row counts one interval and contiguous
     1 Hz rows give exactly the old ``n`` seconds), summed over drives.
+
+    A gap between consecutive evaluated rows longer than ``break_seconds``
+    (the drive join gap) ends one watch and starts the next: a directory
+    that kept recording a parked truck overnight is one "drive" to
+    :func:`group_drives`, and its span is not time anything was watched
+    (EVALUATOR_VERSION 3).
     """
     total = 0.0
     for drive in set(drives[evaluated].tolist()):
         stamps = seconds[evaluated & (drives == drive)]
-        stamps = stamps[np.isfinite(stamps)]
-        if stamps.size:
-            total += float(stamps.max() - stamps.min()) + interval_seconds
+        stamps = np.sort(stamps[np.isfinite(stamps)])
+        if not stamps.size:
+            continue
+        breaks = np.flatnonzero(np.diff(stamps) > break_seconds)
+        starts = np.concatenate(([0], breaks + 1))
+        ends = np.concatenate((breaks, [stamps.size - 1]))
+        total += float(np.sum(stamps[ends] - stamps[starts])) + interval_seconds * starts.size
     return total / 3600.0
 
 
@@ -887,7 +1007,11 @@ def fold_metrics(
         "coverage": (n / int(eligible.sum())) if eligible.any() else None,
         "refusals": dict(sorted(refusals.items(), key=lambda kv: (-kv[1], kv[0]))),
         "evaluated_hours": _evaluated_hours(
-            ev.seconds, evaluated, drives, interval_seconds=policy.interval_seconds
+            ev.seconds,
+            evaluated,
+            drives,
+            interval_seconds=policy.interval_seconds,
+            break_seconds=policy.exposure_break_seconds,
         ),
         "envelope_coverage": envelope_coverage(model, ev),
     }
@@ -1386,7 +1510,7 @@ class ValidationContext:
     ) -> ValidationContext:
         modes = tuple(config.preprocessing.operating_modes)
         return cls(
-            policy=EventPolicy.from_config(config),
+            policy=EventPolicy.from_config(config, document),
             decoder_identity=dict(decoder),
             mode_taxonomy=modes,
             criteria_source=criteria_source,
@@ -1620,9 +1744,12 @@ def build_evaluation_frame(
             )
         )
     resampled = drop_fully_stale_rows(pd.concat(parts, ignore_index=True))
-    return featurize_wide_frame(
+    operating = featurize_wide_frame(
         resampled, config, behavior_models=models, bindings=bindings
     ).operating_frame
+    # Each row's physical drive, as build_feature_frame stamps it, so the
+    # evaluator's drive grouping is the trainers' (src.analysis.drives).
+    return _drives.stamp_physical_drives(operating, [Path(s) for s in sessions])
 
 
 def session_content_identity(session: Path) -> dict[str, Any]:
@@ -1673,6 +1800,7 @@ __all__ = [
     "group_drives",
     "load_validation_document",
     "parent_session",
+    "PieceRanges",
     "piece_time_ranges",
     "regime_labels",
     "session_content_identity",

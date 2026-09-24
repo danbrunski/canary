@@ -157,6 +157,9 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
             "--all",
             "--skip-if",
             "--no-feedback-policy",
+            # Trainer dispatch only: these sessions are empty directories, and
+            # the quarantine screen needs a real frame.
+            "--skip-quarantine-exclusion",
         ]
     )
     assert rc == 0
@@ -181,6 +184,9 @@ def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             "--all",
             "--skip-sequence",
             "--no-feedback-policy",
+            # Trainer dispatch only: these sessions are empty directories, and
+            # the quarantine screen needs a real frame.
+            "--skip-quarantine-exclusion",
         ]
     )
     assert rc == 0
@@ -218,6 +224,9 @@ def test_retrain_sequence_model_tcn(
             "tcn",
             "--skip-if",
             "--no-feedback-policy",
+            # Trainer dispatch only: these sessions are empty directories, and
+            # the quarantine screen needs a real frame.
+            "--skip-quarantine-exclusion",
         ]
     )
     assert rc == 0
@@ -268,6 +277,9 @@ def test_retrain_since_boundary_excludes_older_sessions(
             "--since-boundary",
             "--skip-sequence",
             "--no-feedback-policy",
+            # Trainer dispatch only: these sessions are empty directories, and
+            # the quarantine screen needs a real frame.
+            "--skip-quarantine-exclusion",
         ]
     )
     assert rc == 0
@@ -1314,6 +1326,43 @@ def test_a_calibration_drive_takes_its_sibling_sessions(tmp_path: Path) -> None:
     assert held.training == (other,)
 
 
+def _write_span(session: Path, start: str, minutes: float) -> None:
+    """A recording answering OBD every 10 s for ``minutes``."""
+    session.mkdir(parents=True)
+    stamps = pd.date_range(start, periods=int(minutes * 6) + 1, freq="10s", tz="UTC")
+    pd.DataFrame({"timestamp": stamps, "source": "obd", "value_number": 1.0}).to_parquet(
+        session / "telemetry-00000.parquet"
+    )
+
+
+def test_a_capture_window_keeps_the_sessions_either_side_one_drive(tmp_path: Path) -> None:
+    """The training pool never holds captures, but a capture is recorded in
+    the middle of a drive. On 2026-09-21 a 20-minute fuel-target capture sat
+    between two live sessions of one drive; without it they were 20 minutes
+    apart and the retrain split put one on the evaluation side and the other
+    in training. The capture bridges the grouping and never joins a side."""
+    root = tmp_path / "sessions"
+    before = root / "2026-09-21T194247"
+    capture = root / "_capture-fuel-target-research-2026-09-21T195844"
+    after = root / "2026-09-21T201836"
+    other = root / "2026-09-22T163415"
+    _write_span(before, "2026-09-21T19:42:47", 15)
+    _write_span(capture, "2026-09-21T19:58:44", 20)
+    _write_span(after, "2026-09-21T20:18:36", 60)
+    _write_span(other, "2026-09-22T16:34:15", 30)
+
+    drives = retrain.drives_of_sessions([before, after, other])
+    assert [drive.session_names for drive in drives] == [
+        (before.name, after.name),
+        (other.name,),
+    ]
+
+    held = retrain.holdout_by_drive([before, after, other], evaluation=[before])
+    assert held.evaluation == (before, after)
+    assert held.training == (other,)
+    assert capture not in (*held.training, *held.calibration, *held.evaluation)
+
+
 def test_calibration_picker_takes_one_session_per_physical_drive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1375,6 +1424,54 @@ def test_retrain_hands_the_if_trainer_its_calibration_policy_and_override(
     assert policy["quarantine"]["applied"] is False
     assert "serve-time scoring does not quarantine" in policy["quarantine"]["reason"]
     assert "quarantined_cells" in seen
+
+
+@pytest.mark.parametrize("skip", ["--skip-sequence", "--skip-if"])
+def test_quarantine_exclusion_applies_whichever_trainers_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, skip: str
+) -> None:
+    """2026-09-23: an IF-only retrain skipped the quarantine screen, because the
+    shared frame it is applied to was built only when both trainers ran. The
+    A06.3 candidate IF trained on 0 quarantined cells where the same corpus
+    with both trainers lost 369 of 709 city rows."""
+    session = tmp_path / "sessions" / "2026-05-13T120000"
+    session.mkdir(parents=True)
+    monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
+    frame = pd.DataFrame({"row": range(3)})
+    monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: frame)
+    screened = frame.assign(screened=True)
+    monkeypatch.setattr(
+        retrain,
+        "_apply_quarantine_exclusion",
+        lambda f, *_a, **_k: (screened, {"obd:RPM": 1}, {"obd:RPM": pd.Index([0])}),
+    )
+    seen: dict[str, dict[str, object]] = {}
+    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.update(if_=k))
+    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.update(seq=k))
+
+    rc = retrain.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--sessions-root",
+            str(tmp_path / "sessions"),
+            "--all",
+            "--if-out",
+            str(tmp_path / "if"),
+            "--sequence-out",
+            str(tmp_path / "lstm"),
+            "--no-feedback-policy",
+            "--no-ledger",
+            "--skip-benchmark",
+            "--skip-disposition-summary",
+            skip,
+        ]
+    )
+    assert rc == 0
+    (kwargs,) = seen.values()
+    assert kwargs["feature_frame"] is screened
+    if skip == "--skip-sequence":
+        assert kwargs["quarantined_cells"] == {"obd:RPM": pd.Index([0])}
 
 
 def test_feedback_filtered_calibration_frame_goes_to_the_if_only(

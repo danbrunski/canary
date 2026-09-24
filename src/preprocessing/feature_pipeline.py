@@ -26,6 +26,7 @@ import pandas as pd
 from src.analysis.afr import append_afr_channels, load_afr_calibration
 from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
+from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
@@ -61,6 +62,7 @@ from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, is_flag_colu
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
+    UNKNOWN_MODE,
     SegmenterConfig,
     segment_operating_modes,
 )
@@ -668,7 +670,7 @@ def build_feature_frame(
                         "columns": len(cached.columns),
                     },
                 )
-                return cached
+                return _with_physical_drives(cached, session_dirs)
             except Exception as exc:  # noqa: BLE001 - cache corruption should not fail retrain
                 log.warning(
                     "feature frame cache unreadable; rebuilding",
@@ -784,7 +786,20 @@ def build_feature_frame(
     ).features
     if cache_path is not None and cache_metadata is not None:
         _write_feature_frame_cache(cache_path, features, cache_metadata)
-    return features
+    return _with_physical_drives(features, session_dirs)
+
+
+def _with_physical_drives(features: pd.DataFrame, session_dirs: Sequence[Path]) -> pd.DataFrame:
+    """Label every row with its physical drive (``src.analysis.drives``).
+
+    Stamped after the cache, never into it: which drive a row belongs to
+    depends on the recordings beside it (captures bridge drives, quarantine
+    moves recordings away), not only on the sessions this frame was built from.
+    Every trainer's drive floor, validation split and count reads this label.
+    """
+    if features.empty or "session" not in features.columns:
+        return features
+    return stamp_physical_drives(features, session_dirs)
 
 
 def drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
@@ -1043,8 +1058,27 @@ def isolation_forest_feature_columns(
     columns = trainable_feature_columns(features, policy=policy)
     if min_coverage <= 0 or features.empty:
         return columns
-    rows = len(features)
-    return [c for c in columns if float(features[c].notna().sum()) / rows >= min_coverage]
+    scored = isolation_forest_coverage_rows(features)
+    rows = len(scored)
+    return [c for c in columns if float(scored[c].notna().sum()) / rows >= min_coverage]
+
+
+def isolation_forest_coverage_rows(features: pd.DataFrame) -> pd.DataFrame:
+    """The rows the IF coverage floor is measured over: those in a classified
+    operating mode.
+
+    The IF never fits the ``unknown`` mode (``SKIP_UNCLASSIFIED_MODE``) and
+    serving refuses one (A04.8), so an unclassified row is a row it can never
+    score. Counting them let parked key-off chatter decide the feature set: in
+    the 2026-09-21..23 corpus 72 % of rows were ``unknown`` (the Pi recording
+    GPS with the engine off), every engine channel fell under the floor, and
+    the retrained IF kept two channels. A frame with no classified row (or no
+    mode column) is measured whole.
+    """
+    if MODE_COLUMN not in features.columns:
+        return features
+    classified = features[features[MODE_COLUMN].astype(str) != UNKNOWN_MODE]
+    return classified if len(classified) else features
 
 
 def low_coverage_columns(
@@ -1060,12 +1094,13 @@ def low_coverage_columns(
     """
     if features.empty:
         return {}
-    rows = len(features)
+    scored = isolation_forest_coverage_rows(features)
+    rows = len(scored)
     out: dict[str, float] = {}
     for column in columns:
-        if column not in features.columns:
+        if column not in scored.columns:
             continue
-        coverage = float(features[column].notna().sum()) / rows
+        coverage = float(scored[column].notna().sum()) / rows
         if coverage < min_coverage:
             out[str(column)] = round(coverage, 6)
     return out
@@ -1118,7 +1153,7 @@ def candidate_feature_columns(
     repo defaults — the gates cannot be skipped by not passing an argument.
     """
     resolved_policy = policy if policy is not None else resolve_feature_policy()
-    skip_exact = {"session", "timestamp", MODE_COLUMN}
+    skip_exact = {"session", "timestamp", MODE_COLUMN, DRIVE_COLUMN}
     non_trainable_committees = non_trainable_committee_outputs()
     # ``dbc:*`` signals that also exist as ``decoded:*`` are the same wire
     # bytes decoded twice (data/dbc/xterra_2008.dbc was *emitted from*

@@ -491,6 +491,7 @@ async def run_daemon(
             stop_event,
             interval_seconds=config.daemon.model_poll_seconds,
             health=components.health_monitor,
+            role_gate=components.role_gate,
         )
     )
     passive_ttl_task = asyncio.create_task(poll_passive_ttl(stop_event))

@@ -1170,6 +1170,18 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   conditioning the surfaces is B04.2/B04.6, deferred on the operator's
   2026-09-22 "don't retrain yet". The IF/sequence side of this item is
   untouched. [B04/B05 measurements](../../../data/analyses/2026-09-22-b04-b05-measurements.md).
+  *Behavior side, 2026-09-23 (B04.2/B04.6/B04.8; does not close this):* the
+  surfaces were refit on the current calibration (ZS44A-20260920, operator
+  corpus decision 2026-09-23) and promoted diagnostic-only. Every one fails
+  B02 and none alerts. That corpus reaches only **76–90 kPa** (test rows
+  79–82 kPa), so there is still no drive to fit or validate an air-density
+  axis on. Air mass is not retired in favour of VE: on identical rows VE adds
+  0 unique detections, and a synthetic baro −3 kPa or IAT +10 °C error is
+  caught by neither. Air mass and VE now share one fusion voice
+  (`behavior:airflow`), so an altitude excursion on one MAF reading no longer
+  counts as two agreeing detectors. **Still owed here:** a drive below
+  76 kPa on the current calibration, then B04.2/B04.6 re-run.
+  [Refit report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §4.
 
 - [x] **D03.21 The Pi's memory limits are not enforced.** The kernel cmdline
   has `cgroup_disable=memory`, so `MemoryMax=6G` / `MemorySwapMax=0` exist only in
@@ -1278,6 +1290,50 @@ live here now, so the documents could be archived
   D01.10 and D03.27 made the serving and training resample paths agree, and
   B03's policy keeps demoted behavior columns out of IF feature selection.
   The corpus choice stays with the operator.
+  **2026-09-23: retrained and evaluated on the laptop (A06.3); not
+  deployed.** The operator lifted the deferral and chose the corpus: drives
+  recorded under ZS44A-20260920 only.
+  - **Candidates:** `models/_candidates/2026-09-23-na/`, IF sha256
+    `69463c07…52b3c` and LSTM `3edfd8fe…99f2`. Both are built against the
+    current bindings, 0.3.0 mode labels and the seed-revision-4 profile DIDs.
+  - **Evaluation:** one held-out drive, deployed vs candidate on the same
+    rows:
+    [`2026-09-23-a06-3-retrain-evaluation.md`](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md).
+  - **r2, 2026-09-23 (later).** The operator chose to deploy the LSTM only,
+    keep the deployed IF, and archive the 14 excluded sessions (done, laptop
+    and Pi).
+    - The verifier found drive grouping in three places. The r1 LSTM's
+      validation drives shared physical drives with training.
+    - One definition now serves every caller, `src/analysis/drives.py`:
+      vehicle activity, captures bridging, and a pause of more than 300 s
+      splitting even one recording.
+    - The LSTM was retrained as r2: `models/_candidates/2026-09-23-na-r2/`,
+      `model.pt` sha256 `f7389acf…1f7a`, `lstm_autoencoder_2026-09-24T035125.284392Z`.
+    - On D6, beside the deployed IF, on the same rows and windows as the
+      deployed LSTM (live sessions):
+      - global path: 0 episodes against 29;
+      - family path: 8 episodes over 131 of 2,269 rows, against 4 episodes
+        over 1,431 rows.
+      - [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md),
+        r2 section.
+  - **r3, 2026-09-24.** The operator took option (b), dropping parked rows,
+    and the IF-only quarantine gap was fixed.
+    - Output: `models/_candidates/2026-09-23-na-r3/`, `model.pt` sha256
+      `b14fc599…ec65`.
+    - 6,869 of 11,084 rows were parked. Training fell to 600 windows, and
+      validation became a tail block of D4 (real driving, not an independent
+      drive).
+    - On D6, on the same rows and windows as r2, r3 is noisier: 15 against 8
+      per-channel episodes live, 70 against 32 with captures, 1 against 0
+      global live.
+    - **Recommendation: deploy r2.** Keep the filter for future retrains.
+      [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md),
+      r3 section.
+  - **Remaining:**
+    - the Pi deploy of the recommended LSTM (r2) beside the deployed IF, and
+      its hash check;
+    - the Pi side of D03.22 (`label_sessions.py` there);
+    - the IF-side replay diff (the IF is not being redeployed).
 - [~] **D03.26 Backfill the vehicle ledger.** *From
   `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
   entry; real entries need the operator's history and go in through

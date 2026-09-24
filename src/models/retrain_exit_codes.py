@@ -18,4 +18,10 @@ from __future__ import annotations
 #: scheduled run.
 WINDOW_TOO_SMALL_FOR_HOLDOUT = 3
 
-__all__ = ["WINDOW_TOO_SMALL_FOR_HOLDOUT"]
+#: A06.5 — an alert-role artifact did not show the alert budget (at most 1
+#: alert per engine-hour, upper bound, on the evaluation drives) and was set
+#: aside instead of published (``src.models.alert_budget``). Distinct from a
+#: trainer crash (1): the artifact trained fine and is kept for inspection.
+ALERT_BUDGET_REFUSED = 4
+
+__all__ = ["ALERT_BUDGET_REFUSED", "WINDOW_TOO_SMALL_FOR_HOLDOUT"]

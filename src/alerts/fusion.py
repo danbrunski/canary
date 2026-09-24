@@ -275,6 +275,43 @@ def lstm_source(
     return FusionSource(name, score, threshold, True, severity)
 
 
+#: B04.8 / B05.3 — behavior outputs that re-express one measurement. A
+#: behavior residual votes in fusion as its output's *measurement family*, not
+#: as its output channel: ``derived:AIR_MASS_PER_CYCLE`` and the VE channels
+#: are the same MAF/RPM reading divided by different references, and total
+#: trim, bank balance and the per-bank trims are the same closed-loop fuel
+#: correction. Grouping by output channel let one MAF excursion (or one trim
+#: excursion) count as two or three agreeing voices. Keyed by channel prefix
+#: over platform names (Mode 01 PIDs and ``derived:`` channels), never a
+#: vehicle's DIDs.
+BEHAVIOR_MEASUREMENT_FAMILIES: dict[str, tuple[str, ...]] = {
+    "airflow": (
+        "obd:MAF",
+        "derived:AIR_MASS_PER_CYCLE",
+        "derived:VE_",
+    ),
+    "fuel_trim": (
+        "obd:SHORT_FUEL_TRIM_",
+        "obd:LONG_FUEL_TRIM_",
+        "derived:TOTAL_TRIM_",
+        "derived:STFT_BANK_BALANCE",
+        "derived:LTFT_BANK_BALANCE",
+    ),
+}
+
+
+def behavior_fusion_group(channel: str) -> str:
+    """The fusion group a behavior residual on ``channel`` votes in.
+
+    Its measurement family when it belongs to one, else the output channel
+    itself (sibling surfaces grading one channel still share a voice).
+    """
+    for family, prefixes in BEHAVIOR_MEASUREMENT_FAMILIES.items():
+        if any(channel == prefix or channel.startswith(prefix) for prefix in prefixes):
+            return f"behavior:{family}"
+    return f"behavior:{channel}"
+
+
 class FusionScorer:
     """Combine per-tick detector outputs into one calibrated severity."""
 
@@ -290,17 +327,17 @@ class FusionScorer:
     def enabled(self) -> bool:
         return self._config.enabled
 
-    def behavior_source(
-        self, name: str, severity_band: str, *, group: str | None = None
-    ) -> FusionSource:
+    def behavior_source(self, name: str, severity_band: str, *, channel: str) -> FusionSource:
         """A behavior-residual source from a graded deviation band.
 
         The band is the behavior decoder's own calibrated verdict, so its
         configured severity *is* the magnitude — no scale needed. ``"ok"``
-        (or anything unrecognized) does not fire. ``group`` should identify
-        the graded output channel so sibling surfaces over the same signal
-        don't double-count as agreement.
+        (or anything unrecognized) does not fire. ``channel`` is the graded
+        output channel; the group is derived here
+        (:func:`behavior_fusion_group`), so no caller can make two transforms
+        of one measurement vote as independent agreement.
         """
+        group = behavior_fusion_group(channel)
         if severity_band == "critical":
             sev = self._config.behavior_critical_severity
         elif severity_band == "warning":

@@ -423,7 +423,7 @@ def test_validation_rows_do_not_move_the_scaler(tmp_path: Path) -> None:
     first, second = manifests
     holdout = first.validation_holdout
     assert holdout is not None
-    assert holdout["rule"] == "mode_coverage_by_drive_v1"
+    assert holdout["rule"] == "mode_coverage_by_drive_v2"
     assert holdout["scaler_fit_excludes_validation"] is True
     assert second.validation_holdout is not None
     assert holdout["sessions"] == second.validation_holdout["sessions"]

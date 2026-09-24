@@ -124,20 +124,58 @@ The name references both the CAN bus and the "canary in a coal mine" idiom — d
 - Each anomaly event SHALL include: timestamp, affected PID(s) / CAN ID(s), model used, anomaly score, operating mode at time of detection
 - The system SHALL persist all anomaly events to a separate log file for post-hoc analysis
 
-> **Detector roles — current state, decision pending (A06, 2026-09-23).**
-> Each learned detector has a configured role (`models.roles`:
-> `isolation_forest`, `sequence`), either `alert` or `evidence`. An
-> `evidence`-role detector still scores and stores its events, flagged
-> `role: evidence`, and still counts toward fusion agreement. It never sends
-> an ntfy push, never shows as an active anomaly on the dashboard, and cannot
-> be the reason a fused event fires: that needs an `alert`-role source among
-> the agreeing voices. The `agreement >= 2` gate is unchanged. Both detectors
-> are still `alert`, because which role each gets is an open operator
-> decision ([A06.1/A06.2](roadmap/tasks/A06-detector-roles.md)). The
-> evidence for it is A02.11's held-out baseline table
-> (`data/analyses/2026-09-23-a02-detector-baseline.md`, provisional until
-> its re-run) and A05's deterministic plausibility checks. The FR-05/FR-06
-> text above describes what the detectors compute, not whether they alert.
+> **Detector roles — decided by the operator, 2026-09-23 (A06).** Each
+> learned detector has a configured role (`models.roles`: `isolation_forest`,
+> `sequence`), either `alert` or `evidence`. An `evidence`-role detector still
+> scores and stores its events, flagged `role: evidence`, and still counts
+> toward fusion agreement. It never sends an ntfy push, never shows as an
+> active anomaly on the dashboard, and cannot be the reason a fused event
+> fires: that needs an `alert`-role source among the agreeing voices. The
+> `agreement >= 2` gate is unchanged. Both learned detectors default to
+> `evidence` ([A06](roadmap/tasks/A06-detector-roles.md)), on A02.11's
+> held-out table (`data/analyses/2026-09-23-a02-detector-baseline.md`: 14
+> drives in the artifacts' era, false alarms per engine-hour against a budget
+> of 1, 95 % drive-bootstrap intervals):
+>
+> - **Isolation Forest — evidence only (A06.1).** 1.18 [0.00, 3.94] false
+>   alarms per engine-hour with 81 % of rows withheld, and blind to a
+>   single-quantity shift of any size (A04.1). A05's deterministic plausibility
+>   checks own the gross single-channel faults it was meant to catch.
+> - **Sequence detector — a non-alerting novelty screen (A06.2).** As served
+>   it raised 45.35 [24.51, 61.28] false alarms per engine-hour; its global
+>   score alone, 2.96 [1.66, 5.04]. On one vehicle, "unusual" has mostly meant
+>   "outside the training envelope", so that is what it now reports: each
+>   event's `detail.envelope` and `detail.novelty_summary` say whether the
+>   window was outside the artifact's recorded training envelope (A03.8:
+>   per-mode baro, IAT and speed ranges) and on which quantity, then name the
+>   largest deviations. `/status` `detectors.inference.sequence_envelope`
+>   counts scored windows outside the envelope by mode and quantity, the
+>   corpus-coverage meter that will show where the post-supercharger normal
+>   lacks data. An artifact without an envelope reports it as not recorded,
+>   never as inside.
+> - **Primary detector (A06.4):** the behavior models and the second brain's
+>   deterministic layer, with A05's plausibility checks for gross faults.
+> - **The retrain (A06.3).** The naturally aspirated retrain on the current
+>   calibration (`data/analyses/2026-09-23-a06-3-retrain-evaluation.md`, one
+>   held-out drive, 1.06 engine-hours) quieted the sequence global score (0
+>   episodes against the deployed model's 29 on live sessions), but its
+>   per-channel path still raised 54.9 [41.7, 70.9] false alarms per
+>   engine-hour (Poisson). It stays evidence.
+> - **The alert budget (A06.5)** is a refusal, not a report: `scripts/retrain.py`
+>   trains an `alert`-role artifact into a `_staging-*` directory and publishes
+>   it only if the upper bound of its false alarms per engine-hour on the
+>   evaluation drives is at most 1 (exit 4 and a `_refused-alert-budget-*`
+>   directory otherwise; `--accept-alert-budget "<reason>"` overrides the
+>   refusal). Evidence roles are never gated. The daemon enforces it too
+>   (operator decision 2026-09-23): an `alert` role takes effect only for an
+>   artifact with a passing verdict for its sha256 beside it
+>   (`<artifact>.alert-budget.json`, written by retrain, travels with the
+>   binary). Otherwise it serves as evidence, and `/status`
+>   `health.detector_roles` shows the configured and effective role and why.
+>   A config flip to `alert` is gated the same way.
+>
+> The FR-05/FR-06 text above describes what the detectors compute, not whether
+> they alert.
 
 #### FR-08 — Dashboard
 - The system SHALL expose a local HTTP/WebSocket API (FastAPI) serving real-time telemetry and anomaly events
@@ -370,9 +408,9 @@ models:
     behavior_warning_severity: 0.5
     behavior_critical_severity: 1.0
     min_agreement: 2                    # 6.2: fused is_anomaly needs >=2 independent sources
-  roles:                                # A06.5: alert | evidence (operator decision, A06.1/A06.2)
-    isolation_forest: alert
-    sequence: alert
+  roles:                                # A06.5: alert | evidence (operator decision 2026-09-23, A06.1/A06.2)
+    isolation_forest: evidence
+    sequence: evidence
 
 alerts:                                 # 6.1: M-of-N persistence, e.g. 3-of-5
   min_consecutive_ticks: 3

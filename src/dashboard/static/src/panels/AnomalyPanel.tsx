@@ -10,7 +10,7 @@ import { badgeClass, cn, inputClass, placeholderClass, selectClass } from "../st
 import type { AnomalyEvent } from "../types";
 import { formatTimestamp } from "../util/time";
 import { LiveModelScores } from "./LiveModelScores";
-import { channelRankingCaption, relatedEventsFor } from "../lib/evidence";
+import { channelRankingCaption, noveltyScreen, relatedEventsFor } from "../lib/evidence";
 import { ModelEvidencePanel } from "./ModelEvidencePanel";
 
 const LEVEL_TONE: Record<AnomalyLevel, string> = {
@@ -206,6 +206,15 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     >
       <>
         <LiveModelScores scores={liveScores ?? {}} />
+        <p className="mb-2 mt-0 text-[0.72rem] text-fg-faint">
+          By default the Isolation Forest and the sequence model (LSTM) are
+          evidence, not alarms: their events are stored and tagged{" "}
+          <span className="uppercase tracking-[0.08em]">evidence</span>, never pushed.
+          A sequence event says whether its window was outside the envelope the
+          model trained on. The primary detector is the behavior models, with
+          the plausibility checks for gross faults (operator decision
+          2026-09-23, models.roles).
+        </p>
         {events.length === 0 ? (
           <p className={placeholderClass}>
             no anomalies emitted yet — the live scores above show current
@@ -320,6 +329,17 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                 )}
                 {e.operating_mode && (
                   <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
+                )}
+                {noveltyScreen(e) && (
+                  <span
+                    className={cn(
+                      "rounded border border-border px-1.5 py-0.5 text-[0.7rem]",
+                      noveltyScreen(e)?.outside ? "text-warn" : "text-fg-dim",
+                    )}
+                    title={noveltyScreen(e)?.sentence}
+                  >
+                    {noveltyScreen(e)?.label}
+                  </span>
                 )}
                 <span
                   className={cn("font-num tabular-nums", LEVEL_TONE[view.level])}

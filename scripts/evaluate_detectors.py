@@ -53,6 +53,7 @@ except ImportError:  # loaded as `scripts.evaluate_detectors`
     )
     from scripts.detector_benchmark import load_resampled_session  # type: ignore[no-redef]
 
+from src.analysis.drives import parent_session
 from src.analysis.labelled_events import (
     LABELLED_EVENTS_FILENAME,
     LabelledEvent,
@@ -76,11 +77,11 @@ from src.models.evaluation import (
     alert_episodes,
     band_of,
     bootstrap_ratio_ci,
+    drives_of_sessions,
     engine_hours,
     engine_running,
     era_resolver,
     fault_attributable_detection,
-    group_into_drives,
     observed_median,
     session_span,
     single_quantity_shift,
@@ -276,6 +277,19 @@ def load_raw_streams(
             stream.samples.assign(mode=stream.modes.astype(str)).to_parquet(path)
             streams[(detector.names[0], session.name)] = stream
     return streams
+
+
+def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> None:
+    """Note every recording ``manifest`` trained or calibrated on, by directory.
+
+    Manifests name the pieces they used, and a recording split at a data gap
+    is named ``<dir>#segment-00N``; drives list directories. Recording the
+    parent directory is what lets a drive the detector saw part of be
+    skipped (the 2026-09-23 candidates name ``2026-09-21T143331#segment-001``).
+    """
+    for role in ("training_sessions", "calibration_sessions"):
+        for name in getattr(manifest, role, ()) or ():
+            seen.setdefault(parent_session(str(name)), {})[label] = role.removesuffix("_sessions")
 
 
 def file_sha256(path: Path) -> str | None:
@@ -1301,9 +1315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "manifest_sha256": file_sha256(path.with_name("model.manifest.json")),
             "model_version": manifest.model_version,
         }
-        for role in ("training_sessions", "calibration_sessions"):
-            for name in getattr(manifest, role, ()) or ():
-                seen.setdefault(str(name), {})[label] = role.removesuffix("_sessions")
+        record_seen(seen, label, manifest)
 
     roots = list(args.sessions_root)
     session_dirs = list(args.sessions) or discover_session_dirs(roots)
@@ -1325,15 +1337,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if "training" in roles.values() and (started := session_started_at(name)) is not None
     }
 
-    spans = []
-    no_span: list[str] = []
-    for path in session_dirs:
-        span = session_span(path)
-        if span is None:
-            no_span.append(path.name)
-        else:
-            spans.append(span)
-    drives = group_into_drives(spans, era_of=resolve_era)
+    no_span = [path.name for path in session_dirs if session_span(path) is None]
+    # Physical drives: vehicle activity, sibling recordings (captures) bridging,
+    # and a pause inside one recording splitting it (src.analysis.drives).
+    drives = drives_of_sessions(
+        [path for path in session_dirs if path.name not in set(no_span)], era_of=resolve_era
+    )
 
     skipped: list[dict[str, Any]] = [
         {"drive": name, "sessions": [name], "reason": "skipped: no telemetry rows"}

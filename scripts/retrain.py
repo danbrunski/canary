@@ -31,10 +31,12 @@ log + continue.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import gc
 import hashlib
 import json
 import logging
+import shutil
 import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -72,6 +74,15 @@ from src.config import CanaryConfig  # noqa: E402
 from src.control.sessions import session_started_at  # noqa: E402
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.models.alert_budget import (  # noqa: E402
+    AlertBudgetCheck,
+    alert_role_sources,
+    check_alert_budget,
+    evaluation_drives,
+    file_sha256,
+    verdict_record,
+    write_verdict,
+)
 from src.models.evaluation import (  # noqa: E402
     HoldoutSplit,
     drives_of_sessions,
@@ -80,7 +91,10 @@ from src.models.evaluation import (  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
 from src.models.manifest import ManifestValidationError  # noqa: E402
-from src.models.retrain_exit_codes import WINDOW_TOO_SMALL_FOR_HOLDOUT  # noqa: E402
+from src.models.retrain_exit_codes import (  # noqa: E402
+    ALERT_BUDGET_REFUSED,
+    WINDOW_TOO_SMALL_FOR_HOLDOUT,
+)
 from src.models.retraining_policy import (  # noqa: E402
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
@@ -552,6 +566,20 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
     )
     parser.add_argument(
+        "--accept-alert-budget",
+        type=_stated_reason,
+        default=None,
+        metavar="REASON",
+        help=(
+            "Publish an alert-role artifact that failed the alert-budget gate (A06.5: "
+            "at most 1 alert per engine-hour, upper bound, on the evaluation drives). "
+            "Needs a stated reason; it is recorded in the gate's report and in the "
+            "verdict beside the artifact. The daemon still serves such an artifact as "
+            "evidence: an override is not a passing verdict (operator decision "
+            "2026-09-23). Evidence-role detectors (models.roles) are never gated."
+        ),
+    )
+    parser.add_argument(
         "--skip-disposition-summary",
         action="store_true",
         help=(
@@ -605,6 +633,18 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
     return parser.parse_args(argv)
+
+
+def _stated_reason(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("an override needs a stated reason")
+    return value.strip()
+
+
+#: A06.5 — the event source each retrained artifact publishes under
+#: (``DetectorRolesConfig.by_source``): both sequence backbones fill the one
+#: ``lstm_autoencoder`` slot.
+SEQUENCE_SOURCE = "lstm_autoencoder"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -791,8 +831,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     ledger = None if args.no_ledger else TrainingLedger(args.ledger)
     feedback_labels = {} if args.no_feedback_policy else FeedbackStore(args.feedback).labels()
     any_trainer_requested = not args.skip_if or not args.skip_sequence
+    # The shared frame is where the quarantine screen and the feedback policy
+    # are applied, so it is built whenever either applies -- not only when both
+    # trainers run. An IF-only retrain (--skip-sequence) used to hand the
+    # trainer an unscreened frame: the 2026-09-23 A06.3 candidate IF lost 0
+    # rows to quarantine where the same corpus, both trainers, lost 369 of 709.
     needs_shared_feature_frame = any_trainer_requested and (
-        (not args.skip_if and not args.skip_sequence) or bool(feedback_labels)
+        (not args.skip_if and not args.skip_sequence)
+        or bool(feedback_labels)
+        or not args.skip_quarantine_exclusion
     )
     shared_feature_frame = None
     feedback_report: RetrainingFeedbackReport | None = None
@@ -947,6 +994,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     manifests_before = {
         out_dir: _manifest_fingerprint(out_dir) for out_dir in (args.if_out, args.sequence_out)
     }
+    # A06.5: an alert-role artifact trains into a staging directory and reaches
+    # the served one only through the alert-budget gate below, so the daemon's
+    # ModelManager can never hot-swap an artifact the gate then refuses.
+    served_out = {"isolation_forest": args.if_out, SEQUENCE_SOURCE: args.sequence_out}
+    budget_gated = set(
+        alert_role_sources(
+            config.models.roles.by_source(),
+            [
+                source
+                for source, skipped in (
+                    ("isolation_forest", args.skip_if),
+                    (SEQUENCE_SOURCE, args.skip_sequence),
+                )
+                if not skipped
+            ],
+        )
+    )
+    if "isolation_forest" in budget_gated:
+        args.if_out = _staging_dir(args.if_out)
+    if SEQUENCE_SOURCE in budget_gated:
+        args.sequence_out = _staging_dir(args.sequence_out)
 
     if not args.skip_if:
         try:
@@ -965,7 +1033,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results["isolation_forest"] = "ok"
-            ledger_pending.append(args.if_out)
+            ledger_pending.append(served_out["isolation_forest"])
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
             results["isolation_forest"] = f"failed: {exc}"
@@ -991,7 +1059,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 **feature_kwargs,
             )
             results[seq_model_type] = "ok"
-            ledger_pending.append(args.sequence_out)
+            ledger_pending.append(served_out[SEQUENCE_SOURCE])
         except Exception as exc:  # noqa: BLE001
             log.exception(
                 "sequence trainer failed", extra={"error": str(exc), "model": seq_model_type}
@@ -1005,11 +1073,44 @@ def main(argv: Sequence[str] | None = None) -> int:
         benchmark_report_path, benchmark_diff = _run_benchmark_gate(
             config, evaluation_sessions, args
         )
+    published = [
+        source
+        for source, name in (
+            ("isolation_forest", "isolation_forest"),
+            (SEQUENCE_SOURCE, seq_model_type),
+        )
+        if results.get(name) == "ok"
+    ]
+    budget_check = _run_alert_budget_gate(config, evaluation_sessions, args, published)
+    refused_dirs: dict[Path, Path] = {}
+    for source in sorted(budget_gated):
+        staged = args.if_out if source == "isolation_forest" else args.sequence_out
+        name = "isolation_forest" if source == "isolation_forest" else seq_model_type
+        if source not in published:
+            # The trainer failed: nothing to publish or keep.
+            if staged.exists():
+                shutil.rmtree(staged)
+            continue
+        # The verdict travels with the binary (operator decision 2026-09-23):
+        # models reach the Pi by scp and data/analyses never does, so the
+        # daemon serves an `alert` role only beside an accepted verdict that
+        # names this artifact's sha256 (src/models/role_gate.py).
+        _write_artifact_verdict(budget_check, source, staged / _artifact_name(config, source, args))
+        if budget_check.refused:
+            refused_dirs[served_out[source]] = _set_aside_refused(staged, served_out[source])
+            results[name] = "refused: alert budget (see the alert-budget report)"
+        else:
+            _publish_staged(staged, served_out[source])
+    if budget_gated:
+        # Every later step (the report, the ledger) names the served paths.
+        args.if_out = served_out["isolation_forest"]
+        args.sequence_out = served_out[SEQUENCE_SOURCE]
     for out_dir in ledger_pending:
+        refused_at = refused_dirs.get(out_dir)
         _ingest_ledger(
             ledger,
-            out_dir,
-            "succeeded",
+            refused_at if refused_at is not None else out_dir,
+            "failed" if refused_at is not None else "succeeded",
             args.job_id,
             feedback_report=feedback_report,
             detector_benchmark_report_path=benchmark_report_path,
@@ -1025,7 +1126,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         feedback_report=feedback_report,
         benchmark_report_path=benchmark_report_path,
         benchmark_diff=benchmark_diff,
+        budget_check=budget_check,
     )
+    if budget_check.refused:
+        # A06.5: a refusal, not a report. The refused artifact sits in a
+        # ``_refused-alert-budget-*`` directory beside the served one.
+        log.error(budget_check.message())
+        print(f"error: {budget_check.message()}", file=sys.stderr)
+        return ALERT_BUDGET_REFUSED
+    if budget_check.override_reason is not None and budget_check.violations:
+        log.warning(
+            "alert budget not met; published under --accept-alert-budget %r: %s",
+            budget_check.override_reason,
+            "; ".join(budget_check.violations),
+        )
     # Partial success is the documented contract (a broken LSTM must not block
     # the IF artifact, and vice versa — see the module docstring). Exit
     # non-zero ONLY when every requested trainer failed, so the caller
@@ -1376,6 +1490,192 @@ def _run_benchmark_gate(
         return None, None
 
 
+def _staging_dir(served: Path) -> Path:
+    """Where an alert-role artifact trains before the budget gate (A06.5): a
+    ``_``-prefixed sibling of the served directory, which neither the
+    ModelManager nor training discovery reads. Emptied first, so a stale
+    artifact from an earlier run can never be the one that gets published."""
+    staging = served.parent / f"_staging-{served.name}"
+    if staging.exists():
+        shutil.rmtree(staging)
+    return staging
+
+
+def _artifact_name(config: CanaryConfig, source: str, args: argparse.Namespace) -> str:
+    """The binary a gated source's verdict names (``model.joblib`` / ``model.pt``)."""
+    if source == "isolation_forest":
+        return Path(config.daemon.isolation_forest_artifact).name
+    if getattr(args, "seq_model_type", None) == "tcn_autoencoder":
+        return Path(config.daemon.tcn_artifact).name
+    return Path(config.daemon.lstm_artifact).name
+
+
+def _write_artifact_verdict(check: AlertBudgetCheck, source: str, artifact: Path) -> None:
+    if not artifact.exists():
+        log.warning("no artifact at %s to write an alert-budget verdict beside", artifact)
+        return
+    write_verdict(
+        artifact,
+        verdict_record(check, source=source, artifact_path=artifact, sha256=file_sha256(artifact)),
+    )
+
+
+def _publish_staged(staged: Path, served: Path) -> None:
+    """Move a gated artifact into the served directory: the alert-budget
+    verdict first, then the binaries, the manifest last. A poller then never
+    pairs a new manifest with an old binary, and never sees the new binary
+    without its verdict (which would serve it as evidence until the next
+    poll)."""
+    served.mkdir(parents=True, exist_ok=True)
+
+    def order(path: Path) -> int:
+        if path.name.endswith(".alert-budget.json"):
+            return 0
+        return 2 if path.name.endswith(".manifest.json") else 1
+
+    files = sorted(staged.iterdir(), key=order)
+    for path in files:
+        path.replace(served / path.name)
+    staged.rmdir()
+
+
+def _set_aside_refused(staged: Path, served: Path) -> Path:
+    """Keep a refused artifact for inspection, out of every served path."""
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    target = served.parent / f"_refused-alert-budget-{stamp}-{served.name}"
+    staged.replace(target)
+    return target
+
+
+def _evaluate_on_drives(
+    config: CanaryConfig,
+    evaluation_sessions: Sequence[Path],
+    args: argparse.Namespace,
+    *,
+    if_model: Path,
+    sequence_model: Path | None,
+    out: Path,
+) -> dict[str, Any]:
+    """A02's harness (``scripts/evaluate_detectors.py``) on the evaluation
+    drives, clean scoring only: no baselines, injections or shift test, which
+    the budget does not read. Returns its JSON report."""
+    import evaluate_detectors
+
+    argv = [
+        *(str(path) for path in evaluation_sessions),
+        "--config",
+        str(args.config),
+        "--bindings",
+        str(args.bindings),
+        "--if-model",
+        str(if_model),
+        "--baselines",
+        "--faults",
+        "--injections-per-drive",
+        "0",
+        "--no-shift-test",
+        "--out",
+        str(out),
+    ]
+    if getattr(args, "profile", None):
+        argv += ["--profile", str(args.profile)]
+    argv += (
+        ["--no-sequence"] if sequence_model is None else ["--sequence-model", str(sequence_model)]
+    )
+    code = evaluate_detectors.main(argv)
+    if code != 0:
+        raise RuntimeError(f"evaluate_detectors exited {code}")
+    report: dict[str, Any] = json.loads(out.read_text())
+    return report
+
+
+def _run_alert_budget_gate(
+    config: CanaryConfig,
+    evaluation_sessions: Sequence[Path],
+    args: argparse.Namespace,
+    published: Sequence[str],
+) -> AlertBudgetCheck:
+    """A06.5 — at most 1 alert per engine-hour on the evaluation drives, as a
+    refusal (``src.models.alert_budget``). Only alert-role artifacts are held
+    to it; with both detectors ``evidence`` (the operator's 2026-09-23
+    decision) it returns "not required" without scoring anything.
+
+    Unlike the benchmark gate, a failure here is not "gate didn't run": an
+    alert-role artifact that could not be measured has not shown the budget,
+    and is refused like one that failed it.
+    """
+    roles = config.models.roles.by_source()
+    override = getattr(args, "accept_alert_budget", None)
+    if not alert_role_sources(roles, published):
+        return check_alert_budget(
+            None, roles_by_source=roles, published_sources=published, override_reason=override
+        )
+    sequence_model: Path | None = None
+    missing: str | None = None
+    sequence_type = getattr(args, "seq_model_type", "lstm_autoencoder")
+    if sequence_type == "lstm_autoencoder":
+        candidate = args.sequence_out / Path(config.daemon.lstm_artifact).name
+        sequence_model = candidate if candidate.exists() else None
+    elif roles.get(SEQUENCE_SOURCE) == "alert" and SEQUENCE_SOURCE in published:
+        missing = f"A02's harness scores LSTM sequence artifacts only, not {sequence_type}"
+    if not evaluation_sessions:
+        missing = (
+            "no evaluation holdout (a corpus too small to spare one, or --no-calibration-holdout)"
+        )
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    out = args.analyses_dir / f"alert-budget-{stamp}.json"
+    report: dict[str, Any] | None = None
+    if missing is None:
+        try:
+            args.analyses_dir.mkdir(parents=True, exist_ok=True)
+            report = _evaluate_on_drives(
+                config,
+                evaluation_sessions,
+                args,
+                if_model=args.if_out / "model.joblib",
+                sequence_model=sequence_model,
+                out=out,
+            )
+        except Exception as exc:  # noqa: BLE001 — unmeasured is refused below, not a crash
+            log.exception("alert-budget evaluation failed", extra={"error": str(exc)})
+            missing = f"the evaluation failed: {exc}"
+    expected = {
+        "isolation_forest": _file_sha256(args.if_out / "model.joblib")
+        if "isolation_forest" in published
+        else None,
+        "sequence": _file_sha256(sequence_model)
+        if sequence_model is not None and SEQUENCE_SOURCE in published
+        else None,
+    }
+    check = check_alert_budget(
+        report,
+        roles_by_source=roles,
+        published_sources=published,
+        override_reason=override,
+        missing_report_reason=missing,
+        expected_artifacts=expected,
+        report_path=str(out) if report is not None else None,
+    )
+    check = dataclasses.replace(check, extra={"evaluation_drives": evaluation_drives(report)})
+    verdict_path = out.with_name(f"{out.stem}-verdict.json")
+    try:
+        args.analyses_dir.mkdir(parents=True, exist_ok=True)
+        verdict_path.write_text(json.dumps(check.to_dict(), indent=2, sort_keys=True) + "\n")
+    except OSError as exc:
+        log.warning("cannot write the alert-budget verdict %s: %s", verdict_path, exc)
+    return check
+
+
+def _file_sha256(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _mark_requested_failures(
     results: dict[str, str],
     args: argparse.Namespace,
@@ -1395,6 +1695,7 @@ def _print_report(
     feedback_report: RetrainingFeedbackReport | None = None,
     benchmark_report_path: Path | None = None,
     benchmark_diff: dict[str, Any] | None = None,
+    budget_check: AlertBudgetCheck | None = None,
 ) -> None:
     print("=" * 72)
     print(f"RETRAIN  ({len(sessions)} sessions)")
@@ -1433,6 +1734,14 @@ def _print_report(
         else:
             symbol, status = "✓", "ok"
         print(f"  {symbol} benchmark  →  {benchmark_report_path}  {status}")
+    if budget_check is not None and budget_check.required:
+        if budget_check.refused:
+            symbol, status = "✗", "refused: " + "; ".join(budget_check.violations)
+        elif budget_check.violations:
+            symbol, status = "!", f"accepted over budget: {budget_check.override_reason}"
+        else:
+            symbol, status = "✓", "within budget"
+        print(f"  {symbol} alert budget  →  {budget_check.report or 'no report'}  {status}")
     print()
 
 

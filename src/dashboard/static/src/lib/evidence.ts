@@ -55,6 +55,33 @@ export function channelRankingCaption(
   return null;
 }
 
+/** A06.2 — the sequence detector's novelty screen, as the event carries it:
+ *  `detail.novelty_summary` (the sentence) and `detail.envelope` (the
+ *  structured verdict, `null` when the artifact recorded no envelope).
+ *  Events stored before A06.2 carry neither and return `null`. */
+export interface NoveltyScreen {
+  sentence: string;
+  label: string;
+  outside: boolean;
+}
+
+export function noveltyScreen(event: AnomalyEvent): NoveltyScreen | null {
+  const sentence = event.detail?.novelty_summary;
+  if (typeof sentence !== "string" || !sentence) return null;
+  const envelope = record(event.detail?.envelope);
+  if (envelope === null) {
+    return { sentence, label: "envelope not recorded", outside: false };
+  }
+  const status = envelope.status;
+  if (status === "outside" || status === "mode_not_trained") {
+    return { sentence, label: "outside envelope", outside: true };
+  }
+  if (status === "inside") {
+    return { sentence, label: "inside envelope", outside: false };
+  }
+  return { sentence, label: "envelope not compared", outside: false };
+}
+
 export interface ChannelEvidence {
   channel: string;
   score: number;

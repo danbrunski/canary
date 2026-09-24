@@ -33,13 +33,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
 from src.analysis.pairing import to_seconds
-from src.control.sessions import session_started_at
 from src.preprocessing.session_context import EngineStartTracker, StartContextSpec
 
 #: The serving contract's channels, thresholds and cold ceiling. Defaults
@@ -357,44 +357,52 @@ def usable_context_runs(
 
 
 def group_into_drives(
-    inventories: Sequence[SessionInventory], *, join_gap_seconds: float = 600.0
+    inventories: Sequence[SessionInventory], *, join_gap_seconds: float | None = None
 ) -> list[dict[str, Any]]:
     """Independent physical drives, oldest first, with their cold starts.
 
-    Uses the B02 drive grouping on parsed session start times — the fourth
-    re-derivation of "never order sessions by directory name" is not needed
-    here because this calls the one implementation.
+    Uses the shared physical-drive definition (:mod:`src.analysis.drives`):
+    vehicle activity, sibling captures as bridges, and a split at a long pause
+    in activity *inside* a recording, so an overnight parked recording no
+    longer joins the evening and morning cold starts into one drive (operator,
+    2026-09-23). A cold start belongs to the drive whose span holds its start.
     """
-    from src.analysis.behavior_validation import group_drives
+    from src.analysis.drives import DRIVE_GAP_SECONDS, physical_drives
 
-    ranges: dict[str, tuple[datetime | None, datetime | None]] = {}
-    for inventory in inventories:
-        start = session_started_at(inventory.session)
-        last = None
-        ended = inventory.runs[-1].ended_at if inventory.runs else None
-        if ended is not None:
-            last = pd.Timestamp(ended).to_pydatetime()
-        if start is None and inventory.started_at is not None:
-            start = pd.Timestamp(inventory.started_at).to_pydatetime()
-        if start is None:
-            continue
-        ranges[inventory.session] = (start, last or start)
-    drives = group_drives(ranges, join_gap_seconds=join_gap_seconds)
+    gap = DRIVE_GAP_SECONDS if join_gap_seconds is None else join_gap_seconds
     by_session = {inventory.session: inventory for inventory in inventories}
+    drives = physical_drives(
+        [
+            Path(inventory.path).with_name(inventory.session)
+            if inventory.path
+            else Path(inventory.session)
+            for inventory in inventories
+        ],
+        gap_seconds=gap,
+    )
+
+    def _at(value: str | None) -> datetime | None:
+        if value is None:
+            return None
+        stamp = pd.Timestamp(value)
+        return (stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp).to_pydatetime()
+
     out: list[dict[str, Any]] = []
     for drive in drives:
-        cold = [
-            {"session": piece, **run.as_dict()}
-            for piece in drive.pieces
-            for run in by_session[piece].cold_starts
-        ]
+        pieces = [name for name in drive.sessions if name in by_session]
+        cold = []
+        for piece in pieces:
+            for run in by_session[piece].cold_starts:
+                begun = _at(run.started_at)
+                if begun is None or drive.start <= begun <= drive.end or len(drives) == 1:
+                    cold.append({"session": piece, **run.as_dict()})
         out.append(
             {
                 "drive_id": drive.drive_id,
-                "pieces": list(drive.pieces),
-                "started_at": drive.started_at.isoformat(),
-                "ended_at": drive.ended_at.isoformat(),
-                "is_capture": any(by_session[p].is_capture for p in drive.pieces),
+                "pieces": pieces,
+                "started_at": drive.start.isoformat(),
+                "ended_at": drive.end.isoformat(),
+                "is_capture": any(by_session[p].is_capture for p in pieces),
                 "cold_starts": cold,
             }
         )

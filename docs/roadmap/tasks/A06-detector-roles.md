@@ -60,9 +60,52 @@ training envelope". That is useful to know. It is not a diagnosis.
   by the operator, 2026-09-23: (b) a non-alerting novelty screen.** The
   non-alerting half is in force: `sequence` now defaults to `evidence`. It
   rests on the A02.11 table: 45.4 false alarms per engine-hour as served,
-  3.0 on the global score. **Remaining:** the novelty-screen report ("outside
-  the learned envelope on X, Y") against A03.8's envelope. The deployed
-  artifact records no envelope, so the report needs the A06.3 retrain.
+  3.0 on the global score.
+  - *Novelty-screen report, done 2026-09-23 (code and tests):*
+    - `TrainingEnvelope` (`src/models/inference.py`) is built once from the
+      manifest's `training_envelope` (A03.8). For each scored window,
+      `SequenceInferenceEngine.envelope_check` compares the window's
+      [min, max] of each recorded quantity (baro, IAT, speed) with the
+      trained [min, max] for the window's mode. It returns `inside`,
+      `outside`, `mode_not_trained`, or `not_compared` (no fresh value, or no
+      mode, with the reason). It is carried as `SequenceInferenceResult.envelope`.
+      An artifact without an envelope gives `envelope: None`, never "inside".
+    - The window buffer keeps the envelope columns beside the window whether
+      or not they are model inputs, and `_sequence_observe` passes them
+      through the feature reconciliation. The scoring child uses the same
+      path.
+    - Each sequence event carries `detail.envelope` and
+      `detail.novelty_summary`, e.g. "Outside the learned envelope in city on
+      BAROMETRIC_PRESSURE (63 kPa vs trained 80–82 kPa); largest deviations:
+      …" (`sequence_envelope_summary`, `src/alerts/events.py`).
+    - `/status` `detectors.inference.sequence_envelope`
+      (`EnvelopeCoverageMeter`, `src/daemon/inference_metrics.py`) is the
+      coverage meter: windows inside and outside, `mode_not_trained`,
+      `not_compared` and `not_recorded`. The outside share is taken of the
+      compared windows only, by mode and by quantity, and the counts restart
+      when the served artifact changes.
+    - The dashboard's anomaly row shows an envelope badge with the sentence
+      as its title, and the LSTM evidence card shows the sentence.
+    - Cost: 39 µs per scored window on the laptop, for the 30-row, 3-quantity
+      check.
+    - Tests: `tests/test_sequence_novelty_screen.py`, 12 passed. It fails on
+      HEAD, where `sequence_envelope_summary` does not exist. It covers the
+      altitude case, inside, mode not trained, not compared, not recorded,
+      buffer condition columns, the engine and event end to end on a stub
+      model, `_sequence_observe` passing the columns through, the meter by
+      mode and quantity, an unrecorded envelope with a restart on a new
+      artifact, and `_apply` feeding the meter. `ModelEvidenceHealth.test.ts`
+      has 2 new cases.
+    - Checked against the real candidate manifest
+      (`models/_candidates/2026-09-23-na/lstm_autoencoder`): a 63–65 kPa,
+      30–90 km/h city window reads "Outside the learned envelope in city on
+      BAROMETRIC_PRESSURE (63 kPa vs trained 80–82 kPa), SPEED (90 km/h vs
+      trained 0–84 km/h)". The deployed 2026-09-20 manifest has
+      `training_envelope: null`, so it reports "not recorded".
+  - **Remaining:** seeing it live. It needs the candidate LSTM, which records
+    the envelope, served on the Pi (A06.3's remainder, then a Pi pull and
+    restart). After that, read `/status`
+    `detectors.inference.sequence_envelope` over a drive.
   - Options:
     - (a) keep alerting after A01–A03 and A02's recalibration;
     - (b) a non-alerting *novelty screen* reporting "outside the learned
@@ -85,9 +128,71 @@ training envelope". That is useful to know. It is not a diagnosis.
     mechanism the decision would switch is in A06.5.
 - [~] **A06.3 — Decision: scope of the owed retrain (D03.25).** **Decided
   by the operator, 2026-09-23: (a) a full naturally aspirated retrain now**,
-  with the A02–A04 fixes and the A04.10 tree count (600). **Remaining:** run
-  the retrain, score it on A02's harness against the A02.11 baseline on the
-  same drives, then deploy. It is owed
+  with the A02–A04 fixes and the A04.10 tree count (600). *Retrained and
+  evaluated 2026-09-23; not deployed.*
+  [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md)
+  (the `.json` beside it has every number).
+  - **Corpus.** The operator's choice: sessions starting at or after the
+    ZS44A-20260920 flash (2026-09-21T03:08:45Z, `era_resolver`), from
+    `~/canary-data/sessions/nissan-xterra-2008` only.
+    - 40 live sessions and 13 captures. 13 no-OBD sessions
+      (`classify_sessions.py`) and the 11-hour parked session
+      `2026-09-23T032755` were left out of the explicit list.
+    - That leaves 6 physical drives. `min_training_drives_per_mode` (3) has
+      no override, so the split was set explicitly:
+      - evaluation: the newest drive, D6 (09-23);
+      - calibration: 2 drives (D5, D3) by the picker's own rule;
+      - training: D1, D2, D4.
+    - `--accept-thin-calibration "operator chose current-calibration-only
+      corpus (post ZS44A-20260920), 2026-09-23"` is stamped in both manifests.
+    - Training used `canary.example.yaml`, as the deployed artifacts did.
+      `canary.dev.example.yaml` disables the LSTM.
+  - **Candidates** (gitignored, `models/_candidates/2026-09-23-na/`):
+    - IF `model.joblib` sha256 `69463c07…52b3c`, 600 trees, 204 features. It
+      serves city, idle_transient and warmup. idle and highway were refused
+      at 2 training drives.
+    - `seed_agreement` mean Jaccard at 600 trees: city 0.57, warmup 0.68,
+      idle_transient 1.00 (one flagged row of 14).
+    - LSTM `model.pt` sha256 `3edfd8fe…99f2`: 250 columns, `arrived_sample`
+      mask, global threshold 1.0575.
+    - `training_envelope` records about 0.73 engine-h of moded data (city
+      0.26 h, highway 0.16 h). `suppress_channels` is empty.
+  - **Held out, same rows, one drive.** Scored on D6 with
+    `scripts/evaluate_detectors.py` for both the deployed 2026-09-20
+    artifacts and the candidates: 4,825 rows, 1.06 engine-h.
+    - Each deployed detector was paired with a candidate so that the harness
+      grades injections: the deployed pair alone is cross-era on post-flash
+      drives.
+    - Injection windows and each artifact's results are identical across
+      runs. Batched/served parity: 0 of 171 windows differ.
+    - One drive gives no bootstrap. Intervals are Poisson on episode counts.
+  - **Findings, candidate vs deployed:**
+    - **Sequence global, live sessions:** 0 episodes against 29. It caught a
+      10 % bank imbalance in 4 of 6 windows; the deployed model masked every
+      window.
+    - **Family path:** 54.9 FA/eh [41.7, 70.9] against 5.7 [2.1, 12.4].
+      The deployed flood is one run over 82 % of rows; the candidate flags
+      37 %.
+    - **Tuning captures:** they carry most sequence episodes for both
+      artifacts. Captures never train.
+    - **IF:** the candidate withholds 91 % of the drive's rows (deployed
+      72 %). Neither IF raised an alarm or caught any fault, and both fail the
+      A04.1 shift.
+  - **Code fixes the retrain needed** (each with a default-tier test, named
+    in the report):
+    - captures now bridge drive grouping in `drives_of_sessions`;
+    - the IF coverage floor ignores `unknown`-mode rows, which had left the
+      first candidate IF with 8 columns;
+    - a column seen only in validation drives no longer crashes the sequence
+      trainer's scaler; it is recorded as `unobserved_in_training`.
+  - **Remaining:** the operator chose to deploy the candidate LSTM only and
+    keep the deployed IF (2026-09-23). Owed: an LSTM re-run after the
+    drive-grouping fix (the sequence trainer's validation split crossed
+    physical drives), then the Pi deploy, the hash check, and the 600-tree
+    tick cost (the IF is not deployed). The candidate IF's idle_transient
+    rests on 2 physical drives, not 4 as first counted.
+
+  The retrain was owed
   for three reasons: the binding retraction, the mode labels, and the new
   default-profile DIDs. The supercharger build will make the result obsolete
   within weeks.
@@ -134,15 +239,16 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.5 — Fusion and the alert budget follow the roles.** Once
+- [x] **A06.5 — Fusion and the alert budget follow the roles.** Once
   A06.1/A06.2 are decided, change fusion so non-alerting detectors
   contribute evidence but cannot raise an alert on their own. Enforce ≤ 1
   alert per engine-hour on A02's evaluation drives at publish time, as a
   refusal, not a report.
   - *Done, decision-neutral (2026-09-23):* the role mechanism.
     `models.roles.{isolation_forest,sequence}: alert | evidence`
-    (`DetectorRolesConfig`, `src/config.py`) defaults both to `alert`, so an
-    unchanged config behaves as before. It is enforced in the two shared
+    (`DetectorRolesConfig`, `src/config.py`) was built defaulting both to
+    `alert`. Since the operator's A06.1/A06.2 decision both default to
+    `evidence`. It is enforced in the two shared
     paths, not per detector:
     - `AnomalyEventEmitter._emit` stamps `role: evidence` on the stored
       event, counts it in `emitted_evidence` rather than `emitted`, and never
@@ -178,17 +284,131 @@ training envelope". That is useful to know. It is not a diagnosis.
     in `tests/test_notifier.py`, and 2 `TripPanel.test.ts` cases. The
     existing fusion, emitter, notifier, digest and trip-end suites pass
     unchanged.
-  - *Remaining:*
-    - the operator's role choice (A06.1/A06.2);
-    - the publish-time alert-budget refusal (≤ 1 alert per engine-hour on
-      A02's evaluation drives). It depends on A02's harness
-      (`src/models/evaluation*.py`, `scripts/evaluate_detectors.py`), which
-      another implementer is fixing, so it is not built. It has to count
-      `role: alert` events only.
-    - A02's harness builds `FusionScorer(config.models.fusion)` without
-      `roles=` (`evaluation_detectors.py`, `synthetic_fault_eval.py`), so
-      its fused numbers assume both detectors alert until it passes
-      `roles=config.models.roles.by_source()`.
+  - *The role choice:* made by the operator on 2026-09-23 (A06.1, A06.2).
+    A02's harness now builds `FusionScorer` with
+    `roles=config.models.roles.by_source()` (`evaluation_detectors.py:446`,
+    `synthetic_fault_eval.py:501`).
+  - *Publish-time refusal, done 2026-09-23:*
+    - `src/models/alert_budget.py` holds each published `alert`-role detector
+      to ≤ 1 alert per engine-hour on A02's evaluation drives, scored by
+      `scripts/evaluate_detectors.py`. Evidence roles are never gated. The
+      fused verdict is gated too whenever an alert-role source is published.
+    - **Upper bound, not estimate:** the larger of the harness's drive
+      bootstrap and an exact Poisson bound on pooled episodes over pooled
+      engine-hours, both 97.5 %. The bootstrap reads 0 whenever every drive
+      was quiet and gives no interval on one drive. The estimate would pass
+      A02.11's IF (1.18, interval 0–3.94) on noise. The stated cost: zero
+      alarms need about 3.7 held-out engine-hours.
+    - Also refused:
+      - an alert-role detector nobody measured (no evaluation holdout, a TCN
+        the harness cannot score, a failed evaluation, no engine time);
+      - a report that counted it as `evidence`;
+      - a report on other artifact bytes (sha256).
+    - Every refusal names the 2026-09-10 incident.
+    - `scripts/retrain.py` trains an alert-role artifact into
+      `<models>/_staging-<type>/`, which the ModelManager never reads, so a
+      refused artifact is never hot-swapped mid-gate. It publishes by moving
+      the files in, binaries first and the manifest last. On refusal it moves
+      the artifact to `_refused-alert-budget-<ts>-<type>/`, records a
+      `failed` ledger run, writes `alert-budget-<ts>-verdict.json` and exits
+      `ALERT_BUDGET_REFUSED` (4). `--accept-alert-budget "<reason>"` is the
+      only override. A blank reason is rejected, and the reason is recorded
+      in the verdict.
+    - Tests: `tests/test_alert_budget.py`, 17 passed. It fails on HEAD, where
+      the module does not exist. It covers:
+      - the Poisson bound against Garwood's table (0 → 3.689, 1 → 5.572);
+      - evidence roles not gated;
+      - one alarm in 1 engine-h refused on its 5.57/h bound;
+      - zero alarms over 1.06 engine-h refused, naming the 3.7 engine-h
+        needed;
+      - 5 quiet engine-h passing;
+      - the bootstrap bound deciding;
+      - cross-era drives excluded;
+      - unmeasured, evidence-counted and stale-hash refusals;
+      - fused gated;
+      - the override needing a reason;
+      - retrain end to end: evidence publishes without scoring, an alert-role
+        flood is refused and set aside while the served artifact is kept, a
+        quiet one is published from staging, the override publishes and
+        records, and no evaluation drive is refused. The gate's harness argv
+        parses under `evaluate_detectors.parse_args`.
+
+      `tests/test_retrain_script.py` (foreign-dirty) passes unchanged.
+  - *Operator decisions, 2026-09-23:*
+    1. **The daemon refuses too (option b).** An `alert` role takes effect
+       only for an artifact whose sha256 has a passing alert-budget verdict.
+       Otherwise the detector serves as `evidence` and `/status` names why.
+    2. **The bound stays the upper confidence bound**, as built above.
+  - *The daemon gate, done 2026-09-23. A config flip of `models.roles` to
+    `alert` is now gated.*
+    - **The verdict travels with the binary.** Retrain writes
+      `<artifact>.alert-budget.json`, e.g. `model.joblib.alert-budget.json`,
+      beside every gated artifact (`verdict_record` / `write_verdict`,
+      `src/models/alert_budget.py`). It carries:
+      - the schema version and the artifact's sha256;
+      - `passed` / `accepted`, the bound, per-detector numbers and
+        violations;
+      - the evaluation drives with their engine-hours;
+      - the date, the override reason and the incident.
+
+      This is necessary because models reach the Pi by `scp` and
+      `data/analyses` never does. `_publish_staged` moves the verdict first,
+      the binaries next and the manifest last. A refused artifact keeps its
+      failed verdict in `_refused-alert-budget-*`.
+    - **The daemon resolves effective roles** (`DetectorRoleGate`,
+      `src/models/role_gate.py`, `components.role_gate`). An
+      `alert`-configured detector is `alert` only when the verdict beside the
+      served binary exists, is schema 1, names the binary's sha256, and
+      passed with no violations. Otherwise it is `evidence`, with the reason:
+      - "alert role refused: no passing alert-budget verdict for <sha12>";
+      - "… (the verdict beside it is for <sha12>)";
+      - "… failed: <violations with their numbers>";
+      - "unreadable";
+      - "no artifact loaded".
+
+      A publish override (`--accept-alert-budget`) is **not** a passing
+      verdict under the operator's wording. That artifact publishes but
+      serves as `evidence`, and the reason says so.
+    - **Applied where roles are resolved, not in `fusion.py`:**
+      - the emitter holds the gate as its role mapping by reference, so each
+        event is stamped with the effective role;
+      - the IF and sequence detectors stamp their fusion sources through
+        `_with_effective_role` (`src/daemon/inference.py`).
+
+      `FusionScorer` never promotes an evidence source, so it needed no
+      change.
+    - **At a hot-swap:** resolution is cached per `LoadedModel` object. The
+      first lookup after a swap re-resolves, so an artifact without a verdict
+      demotes at the swap. `poll_model_managers` also calls
+      `role_gate.refresh()` in the same worker thread as the poll: the
+      hashing stays off the event loop, and a verdict that arrives after its
+      binary is picked up on the next poll.
+    - **`/status`:** `health.detector_roles` shows, per source, the
+      configured and effective role, the reason, the artifact path and
+      sha256, the model version, and the verdict's numbers.
+    - Tests: `tests/test_role_gate.py`, 13 passed. It fails on HEAD, where
+      the module does not exist. It covers:
+      - evidence stays evidence;
+      - alert with no verdict gives evidence and the named reason with the
+        sha;
+      - alert with a passing verdict for this sha gives alert;
+      - alert with a verdict for a different sha gives evidence;
+      - a failed verdict gives evidence with its numbers;
+      - an override is not passing;
+      - an unreadable verdict gives evidence;
+      - a hot-swap to a binary without a verdict demotes at the swap and
+        publishes to `/status`;
+      - a late verdict is picked up by `refresh`;
+      - the emitter stamps evidence after a swap;
+      - the live fusion source is demoted;
+      - the `health.detector_roles` snapshot;
+      - `build_components` wiring.
+
+      `tests/test_alert_budget.py` (17 passed) now also asserts:
+      - a published artifact's verdict names its sha256, lists its 5
+        evaluation drives, and resolves to `alert`;
+      - a refused artifact's verdict stays with it, with `accepted: false`;
+      - the served directory gets no verdict.
 - [~] **A06.6 — Give back the tick budget if the sequence detector stops
   alerting.** A novelty screen does not need 1 Hz. Measure it at a lower
   cadence, or post-drive, on the Pi, and return the time to the collector and
@@ -198,12 +418,29 @@ training envelope". That is useful to know. It is not a diagnosis.
     advanced by every row (in-process and in the scoring child), so "score
     every n ticks" means "append every tick, forward-pass every n". That
     change touches `src/models/inference.py` and the worker, not just config.
-- [~] **A06.7 — Update the docs that describe the detectors' role.**
-  *Partial (2026-09-23): `CANary-overview.md` now has a "current state,
-  decision pending" note on the role mechanism (FR-07) and a `roles:` block
-  in its config sample. The Anomalies panel tags evidence events. Remaining:
-  the role text itself for all four docs, and A02's final numbers, once
-  A06.1/A06.2 are decided.*
+    *Note (2026-09-23):* the novelty-screen report does not need the forward
+    pass. The envelope check reads the buffer's condition columns, at 39 µs
+    per window on the laptop. A lower-cadence screen could keep the check
+    every tick and run the forward pass every n.
+- [x] **A06.7 — Update the docs that describe the detectors' role.**
+  *Done 2026-09-23*, citing A02.11
+  (`2026-09-23-a02-detector-baseline.md`: IF 1.18 [0.00, 3.94] per
+  engine-hour with 81 % of rows withheld; sequence 45.35 [24.51, 61.28];
+  global 2.96 [1.66, 5.04]) and the A06.3 retrain evaluation (candidate
+  global score 0 episodes against 29; family path 54.9 [41.7, 70.9]):
+  - `CANary-overview.md`: the FR-07 "decision pending" note is replaced by
+    the decided roles, the novelty screen and its `/status` meter, the
+    primary detector and the alert-budget refusal. The config sample's
+    `roles:` now reads `evidence`/`evidence`.
+  - `per-mode-detection-and-mode-taxonomy.md`: a "Role" paragraph.
+  - `online-training-strategy.md`: a new section, "What the retrained
+    detectors are for". It covers what the central danger means for
+    evidence-role detectors, the envelope record as the retrain's product,
+    and the publish gate beside the promotion gate's FP/hr caveat.
+  - Anomalies panel (`AnomalyPanel.tsx`): a caption saying the IF and the
+    sequence model are evidence by default and naming the primary detector.
+    It also has the envelope badge (A06.2). `pnpm test` 357 passed,
+    `pnpm typecheck` clean.
   Update, citing A02's numbers:
   - [`CANary-overview.md`](../../CANary-overview.md);
   - [`per-mode-detection-and-mode-taxonomy.md`](../../per-mode-detection-and-mode-taxonomy.md);

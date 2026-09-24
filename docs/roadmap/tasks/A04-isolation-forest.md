@@ -192,6 +192,17 @@ confirms which artifact the Pi runs.
     `test_main_refuses_a_single_drive_corpus_and_says_why`.
   - On the 2026-09-20 corpus this refuses at least idle and warmup (one
     calibration session).
+  - *Physical drives, 2026-09-23 (verifier finding on the A06.3 candidate).*
+    `_drive_count` grouped each mode's rows by session span. A capture
+    between two sessions of one drive made it two, so the candidate's
+    idle_transient "4 training drives" were 2 (D1, D4).
+    - The count is now `src.analysis.drives.count_drives` over the frame's
+      stamped physical drive, so captures bridge and pauses in activity
+      split.
+    - The r2 retrain applies it: idle rests on 1 drive; idle_transient is
+      refused on fit rows (37).
+    - Test:
+      `tests/test_physical_drives.py::test_frames_carry_physical_drives_and_every_count_reads_them`.
   - **Remaining:** takes effect at the next retrain (operator-deferred
     2026-09-22), then judged on A02's harness against A02.11's baseline, per
     drive on the same rows.
@@ -377,8 +388,14 @@ confirms which artifact the Pi runs.
     between stability (city plateaus at 500) and per-tick cost (1,000 trees
     was 3.5-4x the IF cost). `n_estimators: 600` is set in all three example
     configs. It takes effect at the A06.3 retrain.
-  - **Remaining:** the retrain's `seed_agreement` at 600 trees, and the Pi's
-    per-tick IF cost at 600. `max_samples`/`max_features` are not swept.
+  - **Retrain's `seed_agreement` at 600 trees** (A06.3 candidate,
+    2026-09-23, current-calibration corpus): mean/min Jaccard city 0.57/0.47
+    (561 fit rows), warmup 0.68/0.50 (198 rows), idle_transient 1.00 (one
+    flagged row of 14). The fit sets are about half the sweep's, so this is
+    below the sweep's 500-tree plateau.
+    [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md).
+  - **Remaining:** the Pi's per-tick IF cost at 600. `max_samples` and
+    `max_features` are not swept.
 - [~] **A04.11 — Count exceedance episodes, not rows.** The rule of at least
   10 exceedances per calibration treats 1 Hz rows as independent, despite
   30 s rolling windows. On `134345` the warmup top 1 % was 4 rows forming 1

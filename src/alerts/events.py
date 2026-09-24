@@ -55,6 +55,69 @@ SEQUENCE_CHANNEL_RANKING_NOTES: dict[str, str] = {
 }
 
 
+#: A06.2 — how many of the ranked channels the novelty sentence names.
+NOVELTY_SUMMARY_DEVIATIONS = 3
+
+
+def _channel_label(column: str) -> str:
+    """``obd:BAROMETRIC_PRESSURE`` -> ``BAROMETRIC_PRESSURE`` for prose."""
+    return column.split(":", 1)[-1]
+
+
+def _envelope_quantity_phrase(entry: Mapping[str, Any]) -> str:
+    unit = f" {entry['unit']}" if entry.get("unit") else ""
+    low, high = entry["trained_min"], entry["trained_max"]
+    seen: list[float] = []
+    if entry["window_min"] is not None and entry["window_min"] < low:
+        seen.append(entry["window_min"])
+    if entry["window_max"] is not None and entry["window_max"] > high:
+        seen.append(entry["window_max"])
+    observed = "–".join(f"{value:g}" for value in seen)
+    return (
+        f"{_channel_label(str(entry['channel']))} ({observed}{unit} vs trained "
+        f"{low:g}–{high:g}{unit})"
+    )
+
+
+def sequence_envelope_summary(
+    envelope: Mapping[str, Any] | None, top_channels: tuple[str, ...] = ()
+) -> str:
+    """A06.2 — the novelty screen's sentence for one sequence window.
+
+    Leads with where the window sits against the artifact's training envelope
+    (``SequenceInferenceResult.envelope``), then names the largest
+    deviations. An artifact without an envelope says "not recorded"; a window
+    nothing could be compared on says why — neither reads as "inside".
+    """
+    mode = None if envelope is None else envelope.get("mode")
+    in_mode = f" in {mode}" if mode else ""
+    if envelope is None:
+        lead = "Training envelope not recorded for this artifact"
+    elif envelope.get("status") == "mode_not_trained":
+        lead = f"Outside the learned envelope: mode {mode!r} was never in training"
+    elif envelope.get("status") == "outside":
+        quantities = envelope.get("quantities", {})
+        phrases = [
+            _envelope_quantity_phrase(quantities[name])
+            for name in envelope.get("outside_on", ())
+            if name in quantities
+        ]
+        lead = f"Outside the learned envelope{in_mode} on " + ", ".join(phrases)
+    elif envelope.get("status") == "inside":
+        compared = [
+            _channel_label(str(entry["channel"]))
+            for entry in envelope.get("quantities", {}).values()
+            if entry.get("status") == "inside"
+        ]
+        lead = f"Inside the learned envelope{in_mode} on " + ", ".join(compared)
+    else:
+        lead = f"Envelope not compared: {envelope.get('reason') or 'no comparable quantity'}"
+    deviations = [_channel_label(c) for c in top_channels[:NOVELTY_SUMMARY_DEVIATIONS]]
+    if deviations:
+        return f"{lead}; largest deviations: {', '.join(deviations)}."
+    return f"{lead}."
+
+
 class AnomalyEvent(BaseModel):
     """One anomaly detection, from either detector.
 
@@ -162,6 +225,12 @@ class AnomalyEvent(BaseModel):
                 SEQUENCE_CHANNEL_RANKING_NOTES["all_channels"],
             ),
         }
+        # A06.2 — the novelty screen: where the window sits against the
+        # artifact's training envelope (``None``: not recorded), in a sentence
+        # beside the structured verdict.
+        envelope = getattr(result, "envelope", None)
+        detail["envelope"] = None if envelope is None else dict(envelope)
+        detail["novelty_summary"] = sequence_envelope_summary(envelope, top_channels)
         recon_series = getattr(result, "reconstruction_series", None)
         if recon_series:
             detail["reconstruction_series"] = {k: list(v) for k, v in recon_series.items()}

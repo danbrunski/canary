@@ -185,6 +185,27 @@ what the code says it means.
     one session. Both pick the same validation drive; the scaler moves
     exactly when the shifted session trained, and the manifest scaler equals
     one fit on the training rows only.
+  - *Fix 2026-09-23 (found in the A06.3 retrain):* a channel observed only
+    in the validation drives (`mem:ECM_ENGINE_SPEED_RAM`) left the training
+    rows with no value, and `ZScoreScaler.fit` raised, killing the retrain.
+    Such columns are now dropped before the feature set resolves, and
+    recorded in the schema as `unobserved_in_training`. Test:
+    `tests/test_train_sequence_columns.py::test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named`.
+  - *Fixes, 2026-09-24 (r3 retrain):*
+    - **Tail-block scaler fix.** A tail-block validation fallback always
+      failed the leak check: the scaler was fit on every row, including the
+      tail. `train_sequence` now fits it on the rows before the tail
+      (`sequence_training.tail_block_validation_start`). The library compares
+      each validation window's start with the last row the scaler read from
+      that session (`scaler_fit_until`). Test:
+      `test_a_tail_block_validation_never_moves_the_scaler`, which fails
+      without the fix.
+    - **Parked rows dropped.** Operator decision (b): rows with no physical
+      drive neither train nor validate. The drop happens at
+      `train_sequence.train` and is recorded as
+      `schema.rows_without_physical_drive`. Test:
+      `test_parked_rows_neither_train_nor_validate`, which fails without the
+      filter.
 - [x] **A03.5 — Choose validation sessions by a stated rule.** The seeded
   shuffle in `sequence_training.py` is immediately re-sorted by window
   count; the sort is stable, so the shuffle only breaks ties. Validation is
@@ -208,6 +229,16 @@ what the code says it means.
   (not the two smallest sessions; a restart pair stays together; every mode
   stays trainable; deterministic) and
   `test_one_drive_falls_back_to_a_tail_block_and_says_so`.
+  - *Rule v2, 2026-09-23 (verifier finding on the A06.3 candidate).*
+    Validation drives were grouped from frame rows alone, so a capture
+    between two live sessions split one physical drive. The candidate's
+    validation drives (`143331#segment-002`, `201836#segment-001`, `171544`)
+    therefore shared D1, D2 and D4 with training.
+    - `_session_drives` now uses `src.analysis.drives.piece_units`: the
+      frame's stamped physical drive, with captures bridging.
+    - The rule id is `mode_coverage_by_drive_v2`.
+    - Test:
+      `tests/test_physical_drives.py::test_validation_never_shares_a_physical_drive_with_training`.
 - [x] **A03.6 — Refuse ambiguous holdouts at the CLI.** `_resolve_training_sessions`
   (`scripts/train_sequence.py`) has two holes:
   - It returns explicit positional sessions without removing

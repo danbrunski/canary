@@ -13,6 +13,7 @@ import {
   extractResiduals,
   heatColor,
   isEvidenceSource,
+  noveltyScreen,
   severityTone,
 } from "../lib/evidence";
 import { MeterBar } from "../components/MetricTile";
@@ -148,6 +149,16 @@ function SourceEvidenceCard({
               {event.model_version}
             </dd>
           </dl>
+          {noveltyScreen(event) && (
+            <p
+              className={cn(
+                "mb-0 mt-2 text-[0.72rem]",
+                noveltyScreen(event)?.outside ? "text-warn" : "text-fg-dim",
+              )}
+            >
+              {noveltyScreen(event)?.sentence}
+            </p>
+          )}
           {event.affected_channels.length > 0 && channelRankingCaption(event) && (
             <p
               className="mb-0 mt-2 text-[0.68rem] text-fg-faint"

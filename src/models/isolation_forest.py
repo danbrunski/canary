@@ -142,7 +142,7 @@ MAX_RESOLVABILITY_FLAG_RATE = 0.05
 DEFAULT_EXCEEDANCE_EPISODE_GAP_SECONDS = 30.0
 
 #: A04.4 — a mode's threshold must rest on this many independent physical
-#: drives (``evaluation.group_into_drives``), per mode, not only globally: the
+#: drives (``src.analysis.drives.count_drives``), per mode, not only globally: the
 #: 2026-09-20 idle and warmup thresholds came entirely from one session at
 #: 71-73 kPa against a training median of 79. Same floor as the sequence
 #: detector's (``sequence_registry.MIN_CALIBRATION_SESSIONS``).
@@ -792,21 +792,13 @@ def exceedance_episodes(
     return int(starts.sum())
 
 
-def _drive_count(timestamps: pd.Series, sessions: pd.Series) -> int:
-    """Independent physical drives among rows (``evaluation.group_into_drives``:
-    sessions within a key-off gap of each other are one drive)."""
-    from src.models.evaluation import SessionSpan, group_into_drives
+def _drive_count(rows: pd.DataFrame, *, timestamp_column: str, session_column: str) -> int:
+    """Independent physical drives among ``rows`` (:func:`src.analysis.drives.count_drives`:
+    the frame's stamped physical drive, captures and in-recording pauses
+    included; rows from one drive either side of a capture count once)."""
+    from src.analysis.drives import count_drives
 
-    if len(timestamps) == 0:
-        return 0
-    frame = pd.DataFrame(
-        {"session": sessions.astype(str).to_numpy(), "t": pd.to_datetime(timestamps, utc=True)}
-    )
-    spans = [
-        SessionSpan(str(name), group["t"].min().to_pydatetime(), group["t"].max().to_pydatetime())
-        for name, group in frame.groupby("session", sort=True)
-    ]
-    return len(group_into_drives(spans))
+    return count_drives(rows, session_column=session_column, timestamp_column=timestamp_column)
 
 
 def _base_channel(column: str) -> str:
@@ -1224,7 +1216,9 @@ def fit_isolation_forest(
         # mode can quietly narrow to one day's drives while the header still
         # names 19 sessions.
         training_drives = _drive_count(
-            frame.loc[fit_index, timestamp_column], frame.loc[fit_index, session_column]
+            frame.loc[fit_index],
+            timestamp_column=timestamp_column,
+            session_column=session_column,
         )
         if training_drives < min_training_drives:
             skipped_modes.append(
@@ -1275,7 +1269,7 @@ def fit_isolation_forest(
             else:
                 rows = frame.loc[holdout_index]
             calibration_drives = (
-                _drive_count(rows[timestamp_column], rows[session_column])
+                _drive_count(rows, timestamp_column=timestamp_column, session_column=session_column)
                 if session_column in rows.columns
                 else 0
             )

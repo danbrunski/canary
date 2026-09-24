@@ -50,6 +50,14 @@ import numpy as np
 import pandas as pd
 
 from src.alerts.fusion import PersistenceGate
+from src.analysis.drives import (
+    DRIVE_GAP_SECONDS,
+    SessionSpan,
+    drive_id_for,
+    join_spans,
+    physical_drives,
+    recording_units,
+)
 from src.analysis.refit import ENGINE_RUNNING_MIN_RPM
 from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.config import CanaryConfig
@@ -58,11 +66,6 @@ from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
-
-#: Sessions separated by less than this are one physical drive. A daemon
-#: restart or a capture window opening mid-drive leaves a gap of seconds; a
-#: key-off between two drives leaves minutes.
-DRIVE_GAP_SECONDS = 300.0
 
 #: Longest step between rows that still counts as continuous engine time when
 #: integrating engine-hours (the 1 Hz grid with a few dropped ticks).
@@ -91,16 +94,6 @@ UNMEASURED = "unmeasured"
 # ---------------------------------------------------------------------------
 # Sessions, drives, eras
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SessionSpan:
-    """A session's first and last telemetry timestamp (UTC)."""
-
-    name: str
-    start: datetime
-    end: datetime
-    path: Path | None = None
 
 
 def session_span(path: Path) -> SessionSpan | None:
@@ -210,40 +203,37 @@ def group_into_drives(
     put a later session first. A session that overlaps the running drive, or
     starts within ``max_gap_seconds`` of its end, joins it.
     """
-    ordered = sorted(spans, key=lambda span: (_utc(span.start), span.name))
-    groups: list[list[SessionSpan]] = []
-    group_end: datetime | None = None
-    gap = timedelta(seconds=max_gap_seconds)
-    for span in ordered:
-        if groups and group_end is not None and _utc(span.start) <= group_end + gap:
-            groups[-1].append(span)
-            group_end = max(group_end, _utc(span.end))
+    return [
+        _drive(tuple(group), era_of=era_of)
+        for group in join_spans(spans, gap_seconds=max_gap_seconds)
+    ]
+
+
+def _drive(
+    members: tuple[SessionSpan, ...],
+    *,
+    era_of: EraResolver | None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> Drive:
+    start = _utc(start) if start is not None else min(_utc(span.start) for span in members)
+    end = _utc(end) if end is not None else max(_utc(span.end) for span in members)
+    era: Era | None = None
+    straddles: str | None = None
+    if era_of is not None:
+        first, last = era_of(start), era_of(end)
+        if first == last:
+            era = first
         else:
-            groups.append([span])
-            group_end = _utc(span.end)
-    drives: list[Drive] = []
-    for group in groups:
-        start = min(_utc(span.start) for span in group)
-        end = max(_utc(span.end) for span in group)
-        era: Era | None = None
-        straddles: str | None = None
-        if era_of is not None:
-            first, last = era_of(start), era_of(end)
-            if first == last:
-                era = first
-            else:
-                straddles = f"spans era {first.label} -> {last.label}"
-        drives.append(
-            Drive(
-                drive_id=f"drive-{start:%Y-%m-%dT%H%M%S}",
-                sessions=tuple(group),
-                start=start,
-                end=end,
-                era=era,
-                straddles=straddles,
-            )
-        )
-    return drives
+            straddles = f"spans era {first.label} -> {last.label}"
+    return Drive(
+        drive_id=drive_id_for(start),
+        sessions=members,
+        start=start,
+        end=end,
+        era=era,
+        straddles=straddles,
+    )
 
 
 def span_from_name(name: str, *, duration_seconds: float = 0.0) -> SessionSpan | None:
@@ -300,17 +290,58 @@ class HoldoutSplit:
         return {"calibration": list(self.calibration), "evaluation": list(self.evaluation)}
 
 
-def drives_of_sessions(sessions: Sequence[Path]) -> list[Drive]:
-    """Physical drives among session directories: each session's parquet span
-    when readable, else its name's start alone (an empty or unconverted
-    session is then its own drive). Paths stay on the spans."""
-    spans: list[SessionSpan] = []
-    for session in sessions:
-        path = Path(session)
-        span = session_span(path) or span_from_name(path.name)
-        if span is not None:
-            spans.append(SessionSpan(span.name, span.start, span.end, path))
-    return group_into_drives(spans)
+def drives_of_sessions(
+    sessions: Sequence[Path], *, era_of: EraResolver | None = None
+) -> list[Drive]:
+    """Physical drives among session directories, as units a holdout can take
+    whole (:func:`src.analysis.drives.physical_drives`, oldest first).
+
+    Drives are vehicle activity joined across recordings, with every sibling
+    recording (captures included) as evidence, and split where the activity
+    inside one directory pauses. A directory with activity in two drives
+    cannot be split across a holdout, so it links them into one unit here.
+    A directory with no vehicle activity at all is its own unit, spanning its
+    name's start. Each member span covers that directory's activity in the
+    unit; the unit's start and end cover the drives, siblings included.
+    """
+    paths = [Path(s) for s in sessions]
+    by_name = {p.name: p for p in paths}
+    drives = physical_drives(paths)
+    extent: dict[str, tuple[datetime, datetime]] = {}
+    unit_extent: dict[str, tuple[datetime, datetime]] = {}
+    for drive in drives:
+        for span in drive.spans:
+            if span.name in by_name:
+                lo, hi = extent.get(span.name, (_utc(span.start), _utc(span.end)))
+                extent[span.name] = (min(lo, _utc(span.start)), max(hi, _utc(span.end)))
+        for name in drive.sessions:
+            lo, hi = unit_extent.get(name, (drive.start, drive.end))
+            unit_extent[name] = (min(lo, drive.start), max(hi, drive.end))
+    units = recording_units(drives)
+    placed = {name for unit in units for name in unit}
+    out: list[Drive] = []
+    for unit in units:
+        members = tuple(
+            SessionSpan(name, *extent[name], by_name[name])
+            for name in sorted(unit, key=lambda n: (extent[n][0], n))
+        )
+        out.append(
+            _drive(
+                members,
+                era_of=era_of,
+                start=min(unit_extent[n][0] for n in unit),
+                end=max(unit_extent[n][1] for n in unit),
+            )
+        )
+    for path in paths:
+        if path.name in placed:
+            continue
+        named = span_from_name(path.name)
+        if named is not None:
+            out.append(
+                _drive((SessionSpan(named.name, named.start, named.end, path),), era_of=era_of)
+            )
+    return sorted(out, key=lambda d: (d.start, d.drive_id))
 
 
 @dataclass(frozen=True)

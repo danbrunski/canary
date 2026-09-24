@@ -51,6 +51,50 @@ and is out of scope until the guards below exist.
 The delta to "online" is small in mechanism (a scheduler + a rolling
 window) and entirely in the guard model.
 
+## What the retrained detectors are for (A06, 2026-09-23)
+
+The operator decided the learned detectors' roles on 2026-09-23
+([A06](tasks/A06-detector-roles.md)), on A02.11's held-out table
+(`data/analyses/2026-09-23-a02-detector-baseline.md`; false alarms per
+engine-hour against a budget of 1):
+
+- **Isolation Forest: evidence only.** 1.18 [0.00, 3.94] with 81 % of rows
+  withheld, and blind to a single-quantity shift of any size (A04.1).
+- **Sequence detector: a non-alerting novelty screen.** 45.35 [24.51, 61.28]
+  as served, 2.96 [1.66, 5.04] on its global score alone. Its events say
+  whether the window was outside the artifact's training envelope, and
+  `/status` `detectors.inference.sequence_envelope` meters how much of the
+  driving falls outside it, by mode and quantity.
+- **Primary detector: the behavior models and the deterministic layer**, with
+  A05's plausibility checks for gross faults.
+
+For this document that changes what a continual retrain of the IF and the
+sequence model buys. An evidence-role detector cannot silence an alarm,
+because it raises none, so "the central danger" below applies to them only
+as a quieter evidence stream. It applies in full to the behavior models,
+which B03 refits. The retrained sequence model's useful product is its
+recorded envelope, and the coverage meter is how the corpus after the
+supercharger build shows where it still lacks data. The A06.3 retrain on the
+current calibration (`data/analyses/2026-09-23-a06-3-retrain-evaluation.md`,
+one held-out drive) quieted the global score to 0 episodes against the
+deployed model's 29, but its per-channel path still read 54.9 [41.7, 70.9]
+per engine-hour, so it stays evidence.
+
+A detector flipped back to `alert` has to earn it at publish time:
+`scripts/retrain.py` trains an alert-role artifact into a `_staging-*`
+directory and publishes it only when the 97.5 % upper bound of its false
+alarms per engine-hour on A02's evaluation drives is at most 1. The bound is
+the larger of the drive bootstrap and an exact Poisson bound, so zero alarms
+need about 3.7 held-out engine-hours. Otherwise it exits 4 and leaves the
+artifact in `_refused-alert-budget-*`; `--accept-alert-budget "<reason>"` is
+the only override (`src/models/alert_budget.py`, A06.5). The daemon holds the
+same line: an `alert` role serves only with a passing
+`<artifact>.alert-budget.json` verdict for the binary's sha256 beside it, so a
+hot-swapped or scp'd artifact without one serves as evidence
+(`src/models/role_gate.py`, `/status` `health.detector_roles`). Unlike the promotion
+gate's FP/hr (caveat 3 below), this counts episodes inside a labelled `fault`
+window as catches, not false alarms.
+
 ## The central danger
 
 An unsupervised anomaly detector retrained on freshly collected data will,

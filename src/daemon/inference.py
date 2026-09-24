@@ -372,9 +372,14 @@ class IsolationForestDetector:
         if if_input is None:
             return []
         return [
-            downgrade_unsustained(
-                isolation_forest_source(if_input.score, if_input.threshold, scale=if_input.scale),
-                if_input.sustained,
+            _with_effective_role(
+                self._components,
+                downgrade_unsustained(
+                    isolation_forest_source(
+                        if_input.score, if_input.threshold, scale=if_input.scale
+                    ),
+                    if_input.sustained,
+                ),
             )
         ]
 
@@ -487,8 +492,11 @@ class SequenceDetector:
         if not (result.is_anomaly and not sustained):
             self._components.emitter.emit_lstm(result, operating_mode=ctx.operating_mode)
         return [
-            downgrade_unsustained(
-                lstm_source(result.global_score, result.global_threshold), sustained
+            _with_effective_role(
+                self._components,
+                downgrade_unsustained(
+                    lstm_source(result.global_score, result.global_threshold), sustained
+                ),
             )
         ]
 
@@ -542,12 +550,13 @@ class BehaviorDetector:
             # a fusion vote; it stays visible on the overlay with its reason.
             if not residual.alerting:
                 continue
-            # Sibling surfaces grading the same output channel share a
-            # fusion group so they count as one agreeing voice, not two.
+            # Surfaces over one measurement (same output channel, or one
+            # family such as MAF airflow or fuel trim) share a fusion group,
+            # derived inside ``behavior_source``: one agreeing voice, not two.
             behavior = self._fusion.behavior_source(
                 f"behavior:{residual.name}",
                 residual.severity,
-                group=f"behavior:{residual.channel}",
+                channel=residual.channel,
             )
             # 6.1 — off-mode is a missing verdict (the model didn't evaluate
             # this tick at all), not a miss: freeze the M-of-N window instead
@@ -1086,6 +1095,10 @@ class LiveInferencePipeline:
                 span_seconds=getattr(sequence_result, "window_span_seconds", None),
                 max_step_seconds=getattr(sequence_result, "window_max_step_seconds", None),
             )
+            recorder.note_sequence_envelope(
+                getattr(sequence_result, "envelope", None),
+                model_version=getattr(sequence_result, "model_version", None),
+            )
             sources.extend(self._sequence.apply(sequence_result, ctx))
         sources.extend(self._behavior.apply(list(request.behavior_residuals), ctx))
         self._fuse(sources, ctx)
@@ -1327,6 +1340,23 @@ def _start_feature_executor(components: DaemonComponents) -> Executor | None:
     )
 
 
+def _with_effective_role(components: Any, source: FusionSource) -> FusionSource:
+    """A06.5 — stamp the detector's *effective* role on its fusion source.
+
+    ``FusionScorer`` holds the configured roles and never promotes an
+    ``evidence`` source, so an ``alert``-configured detector serving an
+    artifact without an accepted alert-budget verdict is demoted here, from
+    ``components.role_gate`` (which re-resolves at a hot-swap), without the
+    scorer knowing about artifacts.
+    """
+    gate = getattr(components, "role_gate", None)
+    if gate is None or source.role == "evidence":
+        return source
+    if gate.get(source.name, "alert") == "evidence":
+        return replace(source, role="evidence")
+    return source
+
+
 def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
     """Build a ``SequenceInferenceEngine`` for a freshly-swapped model, or
     ``None`` on a bad checkpoint (retried next tick). Backbone-agnostic: the
@@ -1392,9 +1422,12 @@ def _sequence_observe(engine: Any, row: Any) -> Any:
         report,
     )
     observed = aligned.iloc[0].to_dict()
+    # A06.2: the novelty screen reads its driving-condition columns from the
+    # row whether or not the artifact takes them as inputs.
+    conditions = set(getattr(engine, "condition_columns", ()) or ())
     for column in row.columns:
         name = str(column)
-        if is_flag_column(name) and name not in observed:
+        if (is_flag_column(name) or name in conditions) and name not in observed:
             observed[name] = row.iloc[0][column]
     return engine.observe(observed)
 

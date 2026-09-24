@@ -47,6 +47,7 @@ from typing import Any
 import pandas as pd
 from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
 
+from src.analysis.drives import DRIVE_COLUMN, drop_rows_without_drive
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models
 from src.log import configure_logging
@@ -86,6 +87,7 @@ from src.models.sequence_training import (
     configure_torch_threads,
     default_training_device,
     session_envelopes,
+    tail_block_validation_start,
 )
 from src.preprocessing import discover_sessions
 from src.preprocessing.feature_pipeline import (
@@ -103,6 +105,14 @@ from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_fla
 from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
+
+#: Manifest ``schema`` key naming the columns dropped because they were
+#: observed only in the validation sessions (no training statistics).
+UNOBSERVED_IN_TRAINING_SCHEMA_KEY = "unobserved_in_training"
+
+#: Manifest ``schema`` key: training-frame rows dropped because no vehicle
+#: activity lay near them (parked time, ``src.analysis.drives``).
+ROWS_WITHOUT_DRIVE_SCHEMA_KEY = "rows_without_physical_drive"
 
 #: Selectable backbones for this CLI's ``--backbone`` flag / ``bind_backbone``.
 BACKBONES: dict[str, SequenceTrainingBackend] = {
@@ -193,7 +203,8 @@ def build_dataset(
         # wide feature frame and commonly doubles multi-GB corpus RSS.
         structural = [
             column
-            for column in (SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN)
+            # DRIVE_COLUMN: the calibration drive floor counts physical drives.
+            for column in (SESSION_COLUMN, TIMESTAMP_COLUMN, MODE_COLUMN, DRIVE_COLUMN)
             if column in features.columns
         ]
         # Both flag families: ``__gap`` and (A03.1) ``__arrived`` drive the mask.
@@ -289,6 +300,18 @@ def train(
             force_rebuild=rebuild_feature_cache,
         )
     )
+    # Parked rows (no vehicle activity near them) neither train nor validate:
+    # a sequence model of normal driving learns nothing from a key-off truck,
+    # and early stopping judged on one measures nothing. Applied here, the one
+    # entry every sequence retrain goes through, so no caller can forget it.
+    features, rows_without_drive = drop_rows_without_drive(features)
+    if rows_without_drive:
+        log.info(
+            "dropped %d row(s) with no physical drive (parked) from sequence training",
+            rows_without_drive,
+        )
+    if features.empty:
+        raise ValueError("every training row is parked: no row lies in a physical drive")
     columns = sequence_feature_columns(features, policy=policy)
     if not columns:
         raise ValueError(
@@ -297,11 +320,55 @@ def train(
             f"{bindings_path} present so CAN payloads get decoded?"
         )
     config_block = _config_block(config, backend)
+    # A03.4/A03.5: fix the validation drives first; the scaler is fit on the
+    # rows that train, and validation rows never move it.
+    length = config_block.sequence_length if sequence_length is None else int(sequence_length)
     training_stride = (
         int(getattr(config_block, "training_stride", DEFAULT_SEQUENCE_STRIDE))
         if stride is None
         else stride
     )
+    validation_choice = choose_validation_sessions(
+        features,
+        sequence_length=length,
+        validation_fraction=float(config_block.validation_fraction),
+        random_state=int(config_block.random_state),
+        stride=training_stride,
+    )
+    scaler_rows = _rows_outside(features, validation_choice)
+    if not validation_choice.sessions:
+        # No eligible drive: validation is the tail block of the windows
+        # (A03.5's stated fallback). Fit the scaler on the rows before it.
+        tail = tail_block_validation_start(
+            features,
+            sequence_length=length,
+            stride=training_stride,
+            validation_fraction=float(config_block.validation_fraction),
+        )
+        if tail is not None:
+            tail_session, tail_start = tail
+            names = scaler_rows[SESSION_COLUMN].astype(str)
+            stamps = pd.to_datetime(scaler_rows[TIMESTAMP_COLUMN], utc=True)
+            before = (names < tail_session) | ((names == tail_session) & (stamps < tail_start))
+            scaler_rows = scaler_rows.loc[before.to_numpy()]
+    # A channel observed only in the validation drives has no training
+    # statistics: the scaler cannot centre it and the encoder never learns it.
+    # It is not a feature of this model, and the schema says so. (2026-09-23:
+    # `mem:ECM_ENGINE_SPEED_RAM` appeared only in the validation drive of the
+    # post-flash corpus and the scaler fit raised on it.)
+    unobserved_in_training = [c for c in columns if not scaler_rows[c].notna().any()]
+    if unobserved_in_training:
+        log.warning(
+            "dropping %d column(s) observed only in the validation sessions",
+            len(unobserved_in_training),
+            extra={
+                "columns": unobserved_in_training,
+                "validation_sessions": list(validation_choice.sessions),
+            },
+        )
+        columns = [c for c in columns if c not in set(unobserved_in_training)]
+        if not columns:
+            raise ValueError("every trainable column was observed only in the validation sessions")
     # Exclude config-suppressed channels (and their rolling-derivative siblings)
     # at train time so the manifest's ``feature_columns`` reflects what the
     # model actually scores on. The serve path also masks these at runtime —
@@ -338,19 +405,15 @@ def train(
     # scaler is fit skipna, so per-column means/stds use each channel's real
     # observations regardless of other channels' gaps.
     #
-    # A03.4/A03.5: fix the validation drives first, then fit the scaler on the
-    # rows that train. Validation rows never move it.
-    length = config_block.sequence_length if sequence_length is None else int(sequence_length)
-    validation_choice = choose_validation_sessions(
-        features,
-        sequence_length=length,
-        validation_fraction=float(config_block.validation_fraction),
-        random_state=int(config_block.random_state),
-        stride=training_stride,
-    )
-    scaler_rows = _rows_outside(features, validation_choice)
     scaler = ZScoreScaler.fit(scaler_rows, columns=columns)
     scaler_fit_sessions = sorted(scaler_rows[SESSION_COLUMN].astype(str).unique())
+    scaler_fit_until = {
+        str(name): pd.Timestamp(stamp).isoformat()
+        for name, stamp in pd.to_datetime(scaler_rows[TIMESTAMP_COLUMN], utc=True)
+        .groupby(scaler_rows[SESSION_COLUMN].astype(str))
+        .max()
+        .items()
+    }
 
     dataset = build_dataset(
         backend,
@@ -423,6 +486,8 @@ def train(
     )
     # A03.2/A03.3 — what this model conditions on and what it scores.
     feature_spec[FEATURE_SET_SCHEMA_KEY] = dict(resolution.record)
+    feature_spec[UNOBSERVED_IN_TRAINING_SCHEMA_KEY] = sorted(unobserved_in_training)
+    feature_spec[ROWS_WITHOUT_DRIVE_SCHEMA_KEY] = rows_without_drive
     trained = train_sequence_autoencoder(
         backend,
         dataset,
@@ -445,6 +510,7 @@ def train(
         calibration_override=calibration_override,
         validation_choice=validation_choice,
         scaler_fit_sessions=scaler_fit_sessions,
+        scaler_fit_until=scaler_fit_until,
     )
     if evaluation_sessions:
         trained = replace(

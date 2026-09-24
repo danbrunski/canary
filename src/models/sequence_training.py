@@ -375,10 +375,11 @@ def cpu_state_dict(model: Any) -> dict[str, Any]:
 
 #: A03.5 — the stated rule validation sessions are chosen by, recorded in the
 #: manifest's ``validation_holdout``.
-VALIDATION_RULE = "mode_coverage_by_drive_v1"
+#: v2 (2026-09-23): drives are physical drives (captures bridge, activity pauses split).
+VALIDATION_RULE = "mode_coverage_by_drive_v2"
 VALIDATION_RULE_STATEMENT = (
     "Whole physical drives are held out (sessions grouped as "
-    "evaluation.group_into_drives groups them). Drives are taken in a seeded "
+    "src.analysis.drives.piece_units groups them). Drives are taken in a seeded "
     "random order: first, while an operating mode the model will score (at least "
     "MIN_CALIBRATION_SAMPLES independent windows) is missing from validation, the "
     "drive adding the most missing modes; then drives in order until validation "
@@ -434,15 +435,12 @@ def _frame_window_table(
 
 
 def _session_drives(frame: pd.DataFrame) -> list[tuple[str, ...]]:
-    from src.models.evaluation import SessionSpan, group_into_drives
+    """Frame pieces that must be held out together: one physical drive
+    (:func:`src.analysis.drives.piece_units`), so validation can never share a
+    drive with training, even across a capture the frame does not contain."""
+    from src.analysis.drives import piece_units
 
-    stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
-    bounds = stamps.groupby(frame[SESSION_COLUMN].astype(str)).agg(["min", "max"])
-    spans = [
-        SessionSpan(str(name), row["min"].to_pydatetime(), row["max"].to_pydatetime())
-        for name, row in bounds.iterrows()
-    ]
-    return [drive.session_names for drive in group_into_drives(spans)]
+    return piece_units(frame, session_column=SESSION_COLUMN, timestamp_column=TIMESTAMP_COLUMN)
 
 
 def choose_validation_sessions(
@@ -572,6 +570,48 @@ class ValidationSplit:
     train_indexes: list[int]
     validation_indexes: list[int]
     record: Mapping[str, Any] | None
+
+
+def tail_block_validation_start(
+    frame: pd.DataFrame,
+    *,
+    sequence_length: int,
+    stride: int,
+    validation_fraction: float,
+) -> tuple[str, pd.Timestamp] | None:
+    """Where :func:`validation_split`'s tail-block fallback starts, before any
+    window is built: the (session, timestamp) of the first validation window's
+    first row, in the dataset's (session, timestamp) order.
+
+    A03.4 needs this. With no eligible drive the validation set is the tail of
+    the windows, and the scaler must be fit on the rows before it; a
+    session-level check cannot say which rows those are. ``None`` when there
+    is no validation (fraction 0, or one window).
+    """
+    from src.models.sequence_dataset import WINDOW_MAX_GAP_SECONDS, contiguous_segments
+
+    ordered = frame.sort_values([SESSION_COLUMN, TIMESTAMP_COLUMN], kind="stable").reset_index(
+        drop=True
+    )
+    segments = contiguous_segments(ordered, max_gap_seconds=WINDOW_MAX_GAP_SECONDS)
+    starts: list[int] = []
+    length = max(1, int(sequence_length))
+    for _session, group in ordered.groupby(SESSION_COLUMN, sort=True, dropna=False):
+        positions = group.index.to_numpy(dtype=int)
+        for run in np.split(positions, np.flatnonzero(np.diff(segments[positions]) != 0) + 1):
+            if len(run) < length:
+                continue
+            starts.extend(int(run[i]) for i in range(0, len(run) - length + 1, max(1, stride)))
+    n = len(starts)
+    if validation_fraction <= 0 or n <= 1:
+        return None
+    stamps = pd.DatetimeIndex(pd.to_datetime(ordered[TIMESTAMP_COLUMN], utc=True))
+    validation_count = min(max(1, int(round(n * validation_fraction))), n - 1)
+    first = starts[n - validation_count]
+    return (
+        str(ordered.at[first, SESSION_COLUMN]),
+        pd.Timestamp(stamps[first]),
+    )
 
 
 def validation_split(
@@ -1336,6 +1376,7 @@ def configure_torch_threads(thread_count: int | None = None) -> None:
 
 
 __all__ = [
+    "tail_block_validation_start",
     "CONTEXT_UNCALIBRATED_REASON",
     "ENVELOPE_QUANTITIES",
     "MIN_ENVELOPE_COVERAGE",

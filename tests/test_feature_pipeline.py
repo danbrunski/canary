@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.analysis.drives import DRIVE_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
 from src.preprocessing.decode import decode_can_rows
@@ -451,7 +452,11 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
         dbc_dir=tmp_path / "missing-dbc",
     )
 
-    pd.testing.assert_frame_equal(standalone, combined)
+    # The batch path adds one bookkeeping column: each row's physical drive
+    # (src.analysis.drives), which no model reads as a feature.
+    assert combined[DRIVE_COLUMN].notna().all()
+    assert DRIVE_COLUMN not in candidate_feature_columns(combined)
+    pd.testing.assert_frame_equal(standalone, combined.drop(columns=[DRIVE_COLUMN]))
 
 
 def test_expand_suppress_channels_matches_base_and_rolling_siblings() -> None:
@@ -760,6 +765,38 @@ def test_if_feature_columns_drops_below_coverage_floor() -> None:
     assert "obd:RPM" in cols  # 100%
     assert "obd:SPEED" in cols  # exactly 50% -> at the floor, kept
     assert "did:ECM_AF_SENSOR_V_B1" not in cols  # 2% -> the blind-IF offender
+
+
+def test_if_coverage_floor_ignores_rows_the_if_can_never_score() -> None:
+    """2026-09-23: 72 % of the post-flash corpus was ``unknown`` mode (the Pi
+    logging GPS with the engine off), so every engine channel fell under a
+    floor counted over all rows and the retrained IF kept two channels. The
+    IF never fits or serves ``unknown``; the floor is measured on the rows it
+    scores."""
+    engine = _coverage_frame(40)
+    parked = pd.DataFrame(
+        {
+            "session": ["s1"] * 60,
+            "timestamp": pd.date_range("2026-07-22T15:00:00Z", periods=60, freq="1s"),
+            MODE_COLUMN: ["unknown"] * 60,
+            "obd:RPM": [float("nan")] * 60,
+            "obd:SPEED": [float("nan")] * 60,
+            "did:ECM_AF_SENSOR_V_B1": [float("nan")] * 60,
+        }
+    )
+    frame = pd.concat([engine, parked], ignore_index=True)
+
+    cols = isolation_forest_feature_columns(frame, min_coverage=0.5)
+    assert "obd:RPM" in cols  # 40 % of all rows, 100 % of the scored ones
+    assert "obd:SPEED" in cols
+    assert "did:ECM_AF_SENSOR_V_B1" not in cols  # sparse where it is scored, too
+    health = summarize_feature_health(
+        frame, cols, candidate_columns=candidate_feature_columns(frame)
+    )
+    assert health["dropped_low_coverage_columns"]["did:ECM_AF_SENSOR_V_B1"] == pytest.approx(0.025)
+    # A frame with nothing classified is measured whole, as before.
+    unclassified = frame.assign(**{MODE_COLUMN: "unknown"})
+    assert "obd:RPM" not in isolation_forest_feature_columns(unclassified, min_coverage=0.5)
 
 
 def test_if_coverage_floor_is_opt_out() -> None:

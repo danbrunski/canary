@@ -36,6 +36,7 @@ from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
 from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
+from src.models.role_gate import DetectorRoleGate
 from src.models.sequence_registry import resolve_sequence_backend
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
@@ -131,6 +132,14 @@ class DaemonComponents:
     #: the live-inference scheduler; written by ``run_live_inference`` (loop
     #: only), read by ``/status`` ``detectors.inference``.
     inference_timing: InferenceTimingRecorder = field(default_factory=InferenceTimingRecorder)
+    #: A06.5 — effective detector roles: ``models.roles`` demoted to
+    #: ``evidence`` for any ``alert``-configured detector whose served
+    #: artifact has no accepted alert-budget verdict beside it. The emitter
+    #: reads it per event, the live detectors stamp their fusion sources from
+    #: it, and ``/status`` ``health.detector_roles`` shows configured vs
+    #: effective with the reason. ``None`` in tests that build components by
+    #: hand (the configured roles then apply as before).
+    role_gate: DetectorRoleGate | None = None
 
 
 def build_components(config: CanaryConfig, *, load_models: bool = True) -> DaemonComponents:
@@ -149,6 +158,7 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
     audit_logger = ControlAuditLogger(config.daemon.audit_log)
     tuner = AlertTuner(load_tuning_config(config.daemon.tuning_config))
     notifier = Notifier(config.notifications)
+    role_gate = DetectorRoleGate(config.models.roles.by_source())
     emitter = _make_broadcasting_emitter(
         event_logger,
         anomalies_bus,
@@ -157,7 +167,7 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
         notifier=notifier,
         notify_min_severity=config.notifications.min_severity,
         notify_max_pushes_per_session=config.notifications.max_pushes_per_session,
-        roles=config.models.roles.by_source(),
+        roles=role_gate,
     )
     model_managers = _load_model_managers(config, load=load_models)
     alerts_cfg = config.alerts
@@ -216,7 +226,21 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
     # Needs a reference back to the assembled record (model_managers +
     # sequence_model_type are what it swaps), so wire it after construction.
     components.sequence_detector_controller = SequenceDetectorController(components)
+    components.role_gate = role_gate
+    role_gate.bind(
+        functools.partial(_loaded_for_source, components),
+        on_change=components.health_monitor.observe_detector_roles,
+    )
     return components
+
+
+def _loaded_for_source(components: DaemonComponents, source: str) -> Any:
+    """The ``LoadedModel`` serving event source ``source`` right now. Both
+    sequence backbones publish as ``lstm_autoencoder``; their manager is keyed
+    by the active ``sequence_model_type``, which a live backbone swap changes."""
+    key = components.sequence_model_type if source == "lstm_autoencoder" else source
+    manager = components.model_managers.get(key) if key is not None else None
+    return None if manager is None else manager.current
 
 
 def _make_job_controller(config: CanaryConfig) -> JobController:

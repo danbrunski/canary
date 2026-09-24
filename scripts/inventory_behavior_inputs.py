@@ -42,6 +42,7 @@ from src.analysis.behavior_input_inventory import (
     with_contract_context,
 )
 from src.analysis.behavior_validation import (
+    PieceRanges,
     build_evaluation_frame,
     group_drives,
     load_validation_document,
@@ -107,7 +108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     empty = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[])
 
     per_session: list[dict[str, Any]] = []
-    ranges: dict[str, Any] = {}
+    ranges = PieceRanges()
     for session in sessions:
         try:
             frame = build_evaluation_frame(
@@ -122,7 +123,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             log.warning("skipping %s: %s", session, exc)
             per_session.append({"session": session.name, "error": str(exc)})
             continue
-        ranges.update(piece_time_ranges(frame))
+        ranges.merge(piece_time_ranges(frame))
         frame = with_contract_context(frame, recipes)
         revision = registry.for_session(session.name) if registry is not None else None
         per_session.append(

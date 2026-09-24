@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { noveltyScreen } from "../lib/evidence";
 import type { AnomalyEvent, StatusResponse } from "../types";
 import { ModelEvidencePanel } from "./ModelEvidencePanel";
 import { ModelHealthPanel } from "./ModelHealthPanel";
@@ -83,6 +84,47 @@ describe("ModelEvidencePanel", () => {
     expect(
       screen.getByText("largest deviation from training envelope (not a cause)"),
     ).toHaveAttribute("title", note);
+  });
+});
+
+describe("novelty screen (A06.2)", () => {
+  const sentence =
+    "Outside the learned envelope in idle on BAROMETRIC_PRESSURE (63 kPa vs trained 80–82 kPa); " +
+    "largest deviations: RPM.";
+
+  it("shows the envelope sentence on the sequence card", () => {
+    const event: AnomalyEvent = {
+      ...LSTM_EVENT,
+      detail: {
+        ...LSTM_EVENT.detail,
+        envelope: { status: "outside", outside: true, mode: "idle" },
+        novelty_summary: sentence,
+      },
+    };
+    render(createElement(ModelEvidencePanel, { event, relatedEvents: [event] }));
+    expect(screen.getByText(sentence)).toBeInTheDocument();
+  });
+
+  it("labels each kind of envelope verdict, and never calls an unrecorded one inside", () => {
+    const withEnvelope = (envelope: unknown): AnomalyEvent => ({
+      ...LSTM_EVENT,
+      detail: { ...LSTM_EVENT.detail, envelope, novelty_summary: "s" },
+    });
+    expect(noveltyScreen(withEnvelope({ status: "outside" }))).toMatchObject({
+      label: "outside envelope",
+      outside: true,
+    });
+    expect(noveltyScreen(withEnvelope({ status: "mode_not_trained" }))?.outside).toBe(true);
+    expect(noveltyScreen(withEnvelope({ status: "inside" }))?.label).toBe("inside envelope");
+    expect(noveltyScreen(withEnvelope({ status: "not_compared" }))?.label).toBe(
+      "envelope not compared",
+    );
+    expect(noveltyScreen(withEnvelope(null))).toMatchObject({
+      label: "envelope not recorded",
+      outside: false,
+    });
+    // Stored before A06.2: no sentence, nothing shown.
+    expect(noveltyScreen(LSTM_EVENT)).toBeNull();
   });
 });
 

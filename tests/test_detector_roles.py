@@ -252,7 +252,7 @@ def test_evidence_plus_behavior_residual_alerts() -> None:
     fused = fs.fuse(
         [
             isolation_forest_source(0.0, -0.0645, scale=0.05),
-            fs.behavior_source("behavior:coolant", "warning"),
+            fs.behavior_source("behavior:coolant", "warning", channel="obd:COOLANT_TEMP"),
         ],
         timestamp="t",
         operating_mode="city",

@@ -61,9 +61,9 @@ def test_lstm_source_threshold_relative() -> None:
 
 def test_behavior_source_bands() -> None:
     fs = FusionScorer(FusionConfig())
-    assert not fs.behavior_source("behavior:x", "ok").fired
-    warn = fs.behavior_source("behavior:x", "warning")
-    crit = fs.behavior_source("behavior:x", "critical")
+    assert not fs.behavior_source("behavior:x", "ok", channel="obd:X").fired
+    warn = fs.behavior_source("behavior:x", "warning", channel="obd:X")
+    crit = fs.behavior_source("behavior:x", "critical", channel="obd:X")
     assert warn.fired and warn.severity == 0.5
     assert crit.fired and crit.severity == 1.0
 
@@ -97,7 +97,7 @@ def test_fuse_agreement_boost_and_clamp() -> None:
         [
             lstm_source(0.05, 0.05),  # base 0.5
             isolation_forest_source(0.0, -0.0645, scale=0.05),  # ~1.0
-            fs.behavior_source("behavior:coolant", "warning"),  # 0.5
+            fs.behavior_source("behavior:coolant", "warning", channel="obd:COOLANT_TEMP"),  # 0.5
         ],
         timestamp="t",
         operating_mode="all",
@@ -453,10 +453,10 @@ def test_fuse_grouped_siblings_count_as_one_agreeing_voice() -> None:
     fs = FusionScorer(FusionConfig(agreement_boost=0.25, severity_threshold=0.5))
     siblings = [
         fs.behavior_source(
-            "behavior:timing_advance_vs_rpm_load", "warning", group="behavior:obd:TIMING_ADVANCE"
+            "behavior:timing_advance_vs_rpm_load", "warning", channel="obd:TIMING_ADVANCE"
         ),
         fs.behavior_source(
-            "behavior:timing_advance_vs_rpm_iat", "warning", group="behavior:obd:TIMING_ADVANCE"
+            "behavior:timing_advance_vs_rpm_iat", "warning", channel="obd:TIMING_ADVANCE"
         ),
     ]
     fused = fs.fuse(list(siblings), timestamp="t", operating_mode=None)
@@ -469,3 +469,32 @@ def test_fuse_grouped_siblings_count_as_one_agreeing_voice() -> None:
         operating_mode=None,
     )
     assert with_if.severity == 0.75  # two independent groups → one boost
+
+
+def test_one_measurement_is_one_voice_across_its_derived_channels() -> None:
+    """B04.8/B05.3 — air mass and VE are one MAF/RPM reading; total trim,
+    bank balance and STFT are one closed-loop fuel correction. Grouping by
+    output channel let each transform vote as independent agreement."""
+    from src.alerts.fusion import behavior_fusion_group
+
+    fs = FusionScorer(FusionConfig(agreement_boost=0.25, severity_threshold=0.5, min_agreement=2))
+    airflow = [
+        fs.behavior_source("behavior:air_mass", "warning", channel="derived:AIR_MASS_PER_CYCLE"),
+        fs.behavior_source("behavior:ve", "warning", channel="derived:VE_AMBIENT_PERCENT"),
+    ]
+    fused = fs.fuse(airflow, timestamp="t", operating_mode=None)
+    assert fused.severity == 0.5 and not fused.is_anomaly  # one voice: no boost, no agreement
+    trims = [
+        fs.behavior_source("behavior:tt1", "warning", channel="derived:TOTAL_TRIM_B1"),
+        fs.behavior_source("behavior:tt2", "warning", channel="derived:TOTAL_TRIM_B2"),
+        fs.behavior_source("behavior:stft", "warning", channel="obd:SHORT_FUEL_TRIM_1"),
+        fs.behavior_source("behavior:bal", "warning", channel="derived:STFT_BANK_BALANCE"),
+    ]
+    fused = fs.fuse(trims, timestamp="t", operating_mode=None)
+    assert fused.severity == 0.5 and not fused.is_anomaly
+    # Different measurements still corroborate each other.
+    fused = fs.fuse([airflow[0], trims[0]], timestamp="t", operating_mode=None)
+    assert fused.severity == 0.75 and fused.is_anomaly
+    assert behavior_fusion_group("obd:TIMING_ADVANCE") == "behavior:obd:TIMING_ADVANCE"
+    assert behavior_fusion_group("derived:VE_MANIFOLD_PERCENT") == "behavior:airflow"
+    assert behavior_fusion_group("obd:LONG_FUEL_TRIM_2") == "behavior:fuel_trim"

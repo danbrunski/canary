@@ -433,6 +433,7 @@ class HealthMonitor:
         #: A01.5 — the serving sequence engine's suppress list against the one
         #: its artifact was trained with; ``None`` until an engine is built.
         self._sequence_suppression: dict[str, Any] | None = None
+        self._detector_roles: dict[str, Any] | None = None
         self._obd_scheduler: dict[str, Any] | None = None
         self._telemetry_sinks: dict[str, dict[str, Any]] = {}
         self._cpu_prev: tuple[float, float] | None = None
@@ -589,6 +590,12 @@ class HealthMonitor:
         lists (A01.5), so a difference is on ``/status`` and not only in the
         load-time log line. ``None`` clears it (no engine loaded)."""
         self._sequence_suppression = None if comparison is None else dict(comparison)
+
+    def observe_detector_roles(self, roles: Mapping[str, Any] | None) -> None:
+        """Record each learned detector's configured and effective role and
+        why (A06.5, ``DetectorRoleGate``): an ``alert`` role serves only with
+        an accepted alert-budget verdict for the artifact's sha256."""
+        self._detector_roles = None if roles is None else dict(roles)
 
     def observe_obd_scheduler(self, metrics: Any) -> None:
         """Record the latest adaptive OBD scheduler snapshot for ``/status``."""
@@ -876,6 +883,11 @@ class HealthMonitor:
             **(
                 {"sequence_suppression": dict(self._sequence_suppression)}
                 if self._sequence_suppression is not None
+                else {}
+            ),
+            **(
+                {"detector_roles": dict(self._detector_roles)}
+                if self._detector_roles is not None
                 else {}
             ),
             "system": {**system_metrics(), **memory_limit_status()},

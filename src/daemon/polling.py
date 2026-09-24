@@ -19,6 +19,7 @@ from src.models.manager import ModelManager
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
     # the daemon's path to recording (S01.3).
+    from src.models.role_gate import DetectorRoleGate
     from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ async def poll_model_managers(
     *,
     interval_seconds: float,
     health: HealthMonitor | None = None,
+    role_gate: DetectorRoleGate | None = None,
 ) -> None:
     """Periodically call ``manager.poll()`` on each ModelManager.
 
@@ -90,6 +92,12 @@ async def poll_model_managers(
 
     With ``health``, the first load of each model and the end of the first
     pass over all of them are startup stages (S01.1).
+
+    With ``role_gate`` (A06.5), each poll re-resolves the effective detector
+    roles in the same worker thread, right after a possible swap: the gate
+    hashes the served artifact against its alert-budget verdict, which is
+    file I/O the event loop should not do, and a verdict that lands after
+    its binary is picked up here.
     """
     while not stop_event.is_set():
         # Snapshot: a live sequence-detector swap (Phase 9.6) mutates this dict
@@ -100,7 +108,7 @@ async def poll_model_managers(
                 # A swap is a full artifact load (seconds warm, tens of
                 # seconds cold off the SD card); run on the loop it stalled
                 # collection, HTTP and every sink for that long.
-                attempt = await asyncio.to_thread(manager.poll)
+                attempt = await asyncio.to_thread(_poll_and_resolve, manager, role_gate)
             except Exception:  # noqa: BLE001 — manager.poll already swallows + logs internally
                 log.exception("model manager poll raised", extra={"manager": name})
                 if health is not None:
@@ -136,6 +144,16 @@ async def poll_model_managers(
             await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
         except TimeoutError:
             continue
+
+
+def _poll_and_resolve(manager: ModelManager[Any], role_gate: DetectorRoleGate | None) -> Any:
+    attempt = manager.poll()
+    if role_gate is not None:
+        try:
+            role_gate.refresh()
+        except Exception:  # noqa: BLE001 — role reporting never stops polling
+            log.exception("detector role refresh failed")
+    return attempt
 
 
 async def poll_config(

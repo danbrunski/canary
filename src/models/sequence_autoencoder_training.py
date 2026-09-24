@@ -100,6 +100,20 @@ class CalibrationCoverageError(ValueError):
         )
 
 
+def _calibration_drive_count(calibration: SequenceWindowDataset, sessions: Sequence[str]) -> int:
+    """Physical drives the calibration windows come from
+    (:func:`src.analysis.drives.count_drives` over the rows of the windowed
+    pieces: the stamped drive where the frame carries one)."""
+    from src.analysis.drives import count_drives
+    from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+
+    frame = calibration.frame
+    if SESSION_COLUMN not in frame.columns or TIMESTAMP_COLUMN not in frame.columns:
+        return len(sessions)
+    rows = frame.loc[frame[SESSION_COLUMN].astype(str).isin(set(sessions))]
+    return count_drives(rows, session_column=SESSION_COLUMN, timestamp_column=TIMESTAMP_COLUMN)
+
+
 def calibration_coverage_violations(
     training: SequenceWindowDataset,
     calibration: SequenceWindowDataset,
@@ -111,8 +125,8 @@ def calibration_coverage_violations(
 ) -> list[str]:
     """What a calibration fails to cover, before anything is trained.
 
-    * fewer than :data:`MIN_CALIBRATION_SESSIONS` *physical drives* (sessions
-      grouped as ``evaluation.group_into_drives`` groups them) — held-out only;
+    * fewer than :data:`MIN_CALIBRATION_SESSIONS` *physical drives*
+      (:func:`src.analysis.drives.count_drives`) — held-out only;
     * an operating mode the model will score (at least
       :data:`MIN_CALIBRATION_SAMPLES` independent training windows) that the
       calibration gives no band of its own — held-out only;
@@ -126,25 +140,14 @@ def calibration_coverage_violations(
     The 2026-09-20 artifact failed all three: one session, city and warmup
     only, and two injector-pulse channels with no calibration observations.
     """
-    from src.models.evaluation import SessionSpan, group_into_drives
-
     violations: list[str] = []
     if held_out:
-        spans: dict[str, list[pd.Timestamp]] = {}
-        for window in calibration.windows:
-            stamps = spans.setdefault(window.session, [])
-            stamps.append(pd.Timestamp(window.start_timestamp))
-            stamps.append(pd.Timestamp(window.end_timestamp))
-        drives = group_into_drives(
-            [
-                SessionSpan(name, min(stamps).to_pydatetime(), max(stamps).to_pydatetime())
-                for name, stamps in spans.items()
-            ]
-        )
-        if len(drives) < MIN_CALIBRATION_SESSIONS:
+        windowed = sorted({window.session for window in calibration.windows})
+        drives = _calibration_drive_count(calibration, windowed)
+        if drives < MIN_CALIBRATION_SESSIONS:
             violations.append(
-                f"calibration rests on {len(drives)} physical drive(s) "
-                f"({', '.join(sorted(spans))}); {MIN_CALIBRATION_SESSIONS} are required"
+                f"calibration rests on {drives} physical drive(s) "
+                f"({', '.join(windowed)}); {MIN_CALIBRATION_SESSIONS} are required"
             )
         trained_modes = _modes_with_blocks(training)
         calibrated_modes = _modes_with_blocks(calibration)
@@ -240,6 +243,7 @@ def train_sequence_autoencoder(
     calibration_override: str | None = None,
     validation_choice: ValidationChoice | None = None,
     scaler_fit_sessions: Sequence[str] | None = None,
+    scaler_fit_until: Mapping[str, str] | None = None,
 ) -> TrainedSequenceAutoencoder:
     """Train ``backend``'s autoencoder on clean sequence windows.
 
@@ -317,11 +321,26 @@ def train_sequence_autoencoder(
         choice=validation_choice,
     )
     validation_record = None if split.record is None else dict(split.record)
-    validation_session_names = {dataset.windows[i].session for i in split.validation_indexes}
     train_session_names = sorted({dataset.windows[i].session for i in split.train_indexes})
     if validation_record is not None:
         if scaler_fit_sessions is not None:
-            leaked = sorted(validation_session_names & {str(x) for x in scaler_fit_sessions})
+            # ``scaler_fit_until``: the last timestamp the scaler read from each
+            # session. A validation window that starts after it did not move
+            # the scaler, which is how a tail-block fallback (validation and
+            # training in one drive) still honours A03.4.
+            until = {str(k): pd.Timestamp(v) for k, v in (scaler_fit_until or {}).items()}
+            leaked = sorted(
+                {
+                    dataset.windows[i].session
+                    for i in split.validation_indexes
+                    if dataset.windows[i].session in {str(x) for x in scaler_fit_sessions}
+                    and (
+                        dataset.windows[i].session not in until
+                        or pd.Timestamp(dataset.windows[i].start_timestamp)
+                        <= until[dataset.windows[i].session]
+                    )
+                }
+            )
             if leaked:
                 raise ValueError(
                     f"the scaler was fit on validation session(s) {leaked}: fit it on the "

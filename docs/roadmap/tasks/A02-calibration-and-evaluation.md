@@ -71,6 +71,39 @@ This checklist builds the yardstick.
     `test_calibration_picker_takes_one_session_per_physical_drive`,
     `test_run_benchmark_gate_skips_cleanly_with_no_evaluation_sessions`,
     `test_one_physical_drive_cannot_sit_on_both_sides`.
+  - *Fix 2026-09-23 (found in the A06.3 retrain):* a training pool holds no
+    captures, so live sessions either side of a capture window read as two
+    drives. The automatic split put one physical drive on both the
+    evaluation and the training side. `drives_of_sessions` now uses the
+    `_capture-*` directories beside the sessions to bridge the grouping, and
+    they never join a side. Test:
+    `test_a_capture_window_keeps_the_sessions_either_side_one_drive`.
+  - *One physical-drive definition, 2026-09-23 (verifier finding).* The
+    bridge first reached only `drives_of_sessions`. The sequence validation
+    split and the IF per-mode floors still grouped frame rows without it,
+    and so did the harness and behavior validation.
+    - All of them now use `src/analysis/drives.py`. A drive is *vehicle
+      activity*: OBD/UDS responses and decoded engine broadcast, with raw
+      CAN frames only for a recording that has neither.
+    - Sibling recordings, captures included, bridge the grouping.
+    - Operator decision: a pause in activity longer than the join gap splits
+      one recording into two drives. `2026-09-23T032755` kept writing GPS
+      all night, so a data-gap rule could not split it.
+    - `build_feature_frame` stamps each row's drive (`physical_drive`). The
+      frame-level counts read that stamp: IF floors, sequence validation
+      units, sequence calibration drives and behavior `group_drives`.
+    - A directory with activity in two drives is one holdout unit, since it
+      cannot be split across sides.
+    - The harness groups drives the same way. Its "seen" check strips
+      `#segment-00N` suffixes (`record_seen`).
+    - Tests: `tests/test_physical_drives.py` (6), covering:
+      - the pause split;
+      - holdout units;
+      - stamped counts through `_drive_count`;
+      - validation never sharing a drive with training (fails under the old
+        grouping);
+      - behavior grouping;
+      - the seen check.
 - [~] **A02.2 — Refuse thresholds that do not cover what they will score.**
   The deployed sequence artifact (2026-09-20) was calibrated on one session,
   `2026-09-18T134345`: city and warmup only, 71–73 kPa, 0–58 km/h. The

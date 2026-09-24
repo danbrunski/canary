@@ -120,6 +120,108 @@ class WindowSpanSummary:
         }
 
 
+@dataclass
+class EnvelopeCoverageMeter:
+    """A06.2 — the novelty screen as a corpus-coverage meter.
+
+    Counts scored sequence windows against the served artifact's training
+    envelope (``SequenceInferenceResult.envelope``), since start or since the
+    artifact last changed: overall, by operating mode, and by quantity. A
+    window from an artifact that recorded no envelope is ``not_recorded``,
+    never folded into ``inside``; one the envelope could not be compared on
+    (no fresh value, no mode) is ``not_compared``. After the supercharger
+    build this is where the new normal shows it lacks data. Bounded by the
+    number of modes times quantities, not by time.
+    """
+
+    model_version: str | None = None
+    windows: int = 0
+    not_recorded: int = 0
+    _by_status: Counter[str] = field(default_factory=Counter, repr=False)
+    _by_mode: dict[str, Counter[str]] = field(default_factory=dict, repr=False)
+    _by_quantity: dict[str, Counter[str]] = field(default_factory=dict, repr=False)
+    _mode_quantity: dict[str, dict[str, Counter[str]]] = field(default_factory=dict, repr=False)
+
+    def note(self, envelope: Mapping[str, Any] | None, *, model_version: str | None) -> None:
+        if model_version != self.model_version:
+            # A new artifact has a new envelope: its counts start over.
+            self.model_version = model_version
+            self.windows = self.not_recorded = 0
+            self._by_status = Counter()
+            self._by_mode = {}
+            self._by_quantity = {}
+            self._mode_quantity = {}
+        self.windows += 1
+        if envelope is None:
+            self.not_recorded += 1
+            return
+        status = str(envelope.get("status"))
+        self._by_status[status] += 1
+        mode = str(envelope.get("mode"))
+        self._by_mode.setdefault(mode, Counter())[status] += 1
+        for name, entry in (envelope.get("quantities") or {}).items():
+            quantity_status = entry.get("status")
+            if quantity_status is None:
+                continue
+            self._by_quantity.setdefault(str(name), Counter())[str(quantity_status)] += 1
+            per_mode = self._mode_quantity.setdefault(mode, {})
+            per_mode.setdefault(str(name), Counter())[str(quantity_status)] += 1
+
+    def to_dict(self) -> dict[str, Any]:
+        recorded = self.windows - self.not_recorded
+        outside = self._by_status["outside"] + self._by_status["mode_not_trained"]
+        return {
+            "model_version": self.model_version,
+            # ``None`` until a window was scored: nothing is known yet.
+            "envelope_recorded": None if self.windows == 0 else recorded > 0,
+            "windows": self.windows,
+            "not_recorded": self.not_recorded,
+            "inside": self._by_status["inside"],
+            "outside": outside,
+            "mode_not_trained": self._by_status["mode_not_trained"],
+            "not_compared": self._by_status["not_compared"],
+            # Of the windows compared (inside or outside), never of every
+            # scored window: ``not_compared`` / ``not_recorded`` are unknowns.
+            "share_outside": _share(outside, outside + self._by_status["inside"]),
+            "by_mode": {
+                mode: {
+                    "windows": sum(counts.values()),
+                    "outside": counts["outside"] + counts["mode_not_trained"],
+                    "mode_not_trained": counts["mode_not_trained"],
+                    "not_compared": counts["not_compared"],
+                    "share_outside": _share(
+                        counts["outside"] + counts["mode_not_trained"],
+                        counts["outside"] + counts["mode_not_trained"] + counts["inside"],
+                    ),
+                    "by_quantity": {
+                        name: _quantity_block(q)
+                        for name, q in sorted(self._mode_quantity.get(mode, {}).items())
+                    },
+                }
+                for mode, counts in sorted(self._by_mode.items())
+            },
+            "by_quantity": {
+                name: _quantity_block(counts) for name, counts in sorted(self._by_quantity.items())
+            },
+        }
+
+
+def _quantity_block(counts: Counter[str]) -> dict[str, Any]:
+    """Outside share of the windows a quantity was actually compared on."""
+    compared = counts["inside"] + counts["outside"]
+    return {
+        "compared": compared,
+        "outside": counts["outside"],
+        "no_data": counts["no_data"],
+        "not_trained": counts["not_trained"],
+        "share_outside": _share(counts["outside"], compared),
+    }
+
+
+def _share(part: int, whole: int) -> float | None:
+    return None if whole <= 0 else round(part / whole, 4)
+
+
 @dataclass(frozen=True)
 class InferenceTiming:
     """Point-in-time snapshot of the recorder, JSON-safe via :meth:`to_dict`.
@@ -165,6 +267,9 @@ class InferenceTiming:
     #: when ``plausibility.enabled`` is off. Its per-tick cost is also the
     #: ``stages["plausibility"]`` occupancy.
     plausibility: Mapping[str, Any] | None = None
+    #: A06.2 — scored sequence windows against the served artifact's training
+    #: envelope (:class:`EnvelopeCoverageMeter`).
+    sequence_envelope: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -184,6 +289,9 @@ class InferenceTiming:
             "stages": {name: summary.to_dict() for name, summary in self.stages.items()},
             "window": self.window,
             "plausibility": dict(self.plausibility) if self.plausibility is not None else None,
+            "sequence_envelope": (
+                dict(self.sequence_envelope) if self.sequence_envelope is not None else None
+            ),
         }
 
 
@@ -215,6 +323,7 @@ class InferenceTimingRecorder:
     _windows_stretched: int = field(default=0, repr=False)
     _windows_unmeasured: int = field(default=0, repr=False)
     _plausibility: Mapping[str, Any] | None = field(default=None, repr=False)
+    _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
 
     def __post_init__(self) -> None:
         if self.window < 1:
@@ -302,6 +411,13 @@ class InferenceTimingRecorder:
         if max_step_seconds is not None:
             self._window_max_steps.append(max_step_seconds)
 
+    def note_sequence_envelope(
+        self, envelope: Mapping[str, Any] | None, *, model_version: str | None
+    ) -> None:
+        """Count one scored sequence window against the training envelope
+        (A06.2). ``envelope`` is ``None`` when the artifact recorded none."""
+        self._envelope.note(envelope, model_version=model_version)
+
     def _window_span_summary(self) -> WindowSpanSummary:
         ratios = sorted(self._window_ratios)
         steps = sorted(self._window_max_steps)
@@ -342,6 +458,7 @@ class InferenceTimingRecorder:
             },
             window=self.window,
             plausibility=self._plausibility,
+            sequence_envelope=self._envelope.to_dict(),
         )
 
 
@@ -361,6 +478,7 @@ def _round(value: float) -> float:
 
 __all__ = [
     "DEFAULT_WINDOW",
+    "EnvelopeCoverageMeter",
     "MISSED_COMPUTE_BUSY",
     "MISSED_OVERRUN",
     "STRETCHED_WINDOW_RATIO",

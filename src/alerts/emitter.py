@@ -129,8 +129,11 @@ class AnomalyEventEmitter:
         self._logger = logger
         #: A06.5 — role per event source (``DetectorRolesConfig.by_source``).
         #: A source not named here is ``alert``. Applied in :meth:`_emit`, the
-        #: one path every event takes, so no emit method can forget it.
-        self._roles: dict[str, DetectorRole] = dict(roles or {})
+        #: one path every event takes, so no emit method can forget it. Held
+        #: by reference, not copied: the daemon passes its
+        #: ``DetectorRoleGate``, whose *effective* roles change when a
+        #: hot-swap serves an artifact without an accepted alert-budget verdict.
+        self._roles: Mapping[str, DetectorRole] = roles if roles is not None else {}
         self._min_seconds_between_events = min_seconds_between_events
         self._tuner = tuner
         self._last_emit: dict[tuple[str, str], float] = {}
