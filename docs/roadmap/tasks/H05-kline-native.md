@@ -130,7 +130,7 @@ What exists in `src/` is coupled to the USB cable:
   sub-function. Tests: one per refused id, plus every request the module
   builds passing its own allowlist. The transport (H05.4) calls it on every
   send, so no caller can skip it.
-- [ ] **H05.6 ECM session ownership.** **Do:** generalise `tx_gate` from a
+- [x] **H05.6 ECM session ownership.** **Do:** generalise `tx_gate` from a
   CAN passive flag into an owner of the ECM diagnostic session:
   `can_diagnostics` (default), `kline`, `foreign` (H06: another tester seen
   on K-line), `none`. CAN diagnostic requests go out only when the owner is
@@ -138,6 +138,19 @@ What exists in `src/` is coupled to the USB cable:
   shown in `/status`, and accounted in `capture_lifetime` like today's passive
   pauses. **Accept:** tests for each transition, and that broadcast CAN is
   never affected; the MCP `set_passive_mode` behaviour is unchanged.
+  **Evidence (2026-09-23):** in `src/collection/tx_gate.py`, not a new
+  module: holders `kline` and `foreign` claim the session (optionally with a
+  TTL, renewable), a foreign claim outranks ours, and `is_passive()` — the
+  question every existing caller asks — is true while any claim stands, so
+  the OBD loop, the `send` backstop, record arming and idle shutdown needed
+  no change and no daemon file was touched. The snapshot (`/status`,
+  `/control/passive`) gains `ecm_session_owner`, `ecm_session_claims` and
+  `tx_suppressed`, additively; `enabled` stays the operator's switch. Owner
+  changes bump the capture generation and open/close `ecm-session-<holder>`
+  pause windows; `check_expiry` (already polled) releases expired claims; the
+  validation harness resets claims. Six new tests in `tests/test_tx_gate.py`;
+  the passive-control, record-arming, idle-shutdown and did_log suites pass
+  unchanged (118 tests).
 - [ ] **H05.7 The `kline` source.** **Do (after H05.1):** add it to
   `TelemetrySource`, `CAPTURED_SOURCES`, H01.1's trainability classification
   (not trainable), `channels.SpecSource`, `spec_producibility`, the live

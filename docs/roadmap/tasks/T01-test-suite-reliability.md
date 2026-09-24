@@ -26,6 +26,7 @@ measurement in hand.
   | `tests/test_daemon.py` alone beside the burners, after | `145e223` + T01 diff | 15.1–29.6 | 0 of 68, five times |
   | two burners per core, after | `145e223` + T01 diff | 27.5–36.6 | 0 of 194, three times |
   | `scripts/ci_gate.sh`, `-n auto` | `3f2845d` | 18.9–23.0 (1/5-min, at the serial re-run) | `tests/test_sustained_validation.py::test_fuel_map_persists_tuples_and_known_answers_hold`, passed serially in 39 s — T01.9 |
+  | `scripts/ci_gate.sh`, `-n auto` | `9d3fa4b` | 30.1 (1-min, at the serial re-run) | same test again, passed serially in 25 s — T01.9 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is

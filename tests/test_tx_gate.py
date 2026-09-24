@@ -28,9 +28,11 @@ from src.config import CanBusConfig
 def _reset_gate() -> Iterator[None]:
     """The gate is process-wide state; never leak it between tests."""
     tx_gate.set_passive(False, source="test")
+    tx_gate.reset_ecm_session_claims()
     tx_gate.reset_suppressed()
     yield
     tx_gate.set_passive(False, source="test")
+    tx_gate.reset_ecm_session_claims()
     tx_gate.reset_suppressed()
 
 
@@ -92,6 +94,9 @@ def test_snapshot_reports_state_source_and_count() -> None:
         "source": "control",
         "suppressed_frames": 1,
         "ttl_remaining_seconds": None,
+        "ecm_session_owner": "can_diagnostics",
+        "ecm_session_claims": {},
+        "tx_suppressed": True,
     }
 
 
@@ -301,3 +306,82 @@ def test_passive_mode_suspends_the_arming_silence_disarm() -> None:
     tx_gate.set_passive(False, source="test")
     assert gate.observe(TelemetryRecord.gps(t0 + 3601.0, "speed", 0.0, "km/h")) is False
     assert gate.armed is False
+
+
+# --------------------------------------------------------------------------
+# H05.6 — ECM diagnostic session ownership
+# --------------------------------------------------------------------------
+
+
+def _msg() -> can.Message:
+    return can.Message(arbitration_id=0x7E0, data=b"\x02\x01\x0c", is_extended_id=False)
+
+
+def test_a_kline_claim_suppresses_can_diagnostics_like_passive_mode() -> None:
+    bus = _RecordingBus()
+    assert tx_gate.ecm_session_owner() == "can_diagnostics"
+    tx_gate.claim_ecm_session("kline", now=0.0)
+    assert tx_gate.is_passive()
+    assert tx_gate.send(bus, _msg(), what="t") is False  # type: ignore[arg-type]
+    assert bus.sent == []
+    snap = tx_gate.snapshot()
+    assert snap["ecm_session_owner"] == "kline"
+    assert snap["enabled"] is False  # the operator's switch is untouched
+    assert snap["tx_suppressed"] is True
+    tx_gate.release_ecm_session("kline", now=1.0)
+    assert not tx_gate.is_passive()
+    assert tx_gate.send(bus, _msg(), what="t") is True  # type: ignore[arg-type]
+
+
+def test_a_foreign_tester_outranks_our_own_kline_session() -> None:
+    tx_gate.claim_ecm_session("kline", now=0.0)
+    previous = tx_gate.claim_ecm_session("foreign", now=1.0)
+    assert previous == "kline"
+    assert tx_gate.ecm_session_owner() == "foreign"
+    tx_gate.release_ecm_session("foreign", now=2.0)
+    assert tx_gate.ecm_session_owner() == "kline"
+
+
+def test_a_claim_with_a_ttl_is_released_by_check_expiry() -> None:
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=10.0, now=100.0)
+    assert tx_gate.check_expiry(now=105.0) is False
+    assert tx_gate.snapshot(now=105.0)["ecm_session_claims"] == {"foreign": 5.0}
+    assert tx_gate.check_expiry(now=110.0) is True
+    assert tx_gate.ecm_session_owner() == "can_diagnostics"
+
+
+def test_renewing_a_claim_pushes_its_expiry_out() -> None:
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=10.0, now=100.0)
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=10.0, now=108.0)
+    assert tx_gate.check_expiry(now=112.0) is False
+    assert tx_gate.ecm_session_owner() == "foreign"
+
+
+def test_releasing_a_claim_leaves_the_operators_passive_switch_alone() -> None:
+    tx_gate.set_passive(True, source="control")
+    tx_gate.claim_ecm_session("kline", now=0.0)
+    tx_gate.release_ecm_session("kline", now=1.0)
+    assert tx_gate.is_passive()
+
+
+def test_ownership_changes_open_and_close_capture_pause_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[bool, str]] = []
+    monkeypatch.setattr(
+        tx_gate.capture_lifetime,
+        "mark_paused",
+        lambda paused, *, reason, now: calls.append((paused, reason)),
+    )
+    tx_gate.claim_ecm_session("kline", now=0.0)
+    tx_gate.claim_ecm_session("foreign", now=1.0)
+    tx_gate.release_ecm_session("foreign", now=2.0)
+    tx_gate.release_ecm_session("kline", now=3.0)
+    assert calls == [
+        (True, "ecm-session-kline"),
+        (False, "ecm-session-kline"),
+        (True, "ecm-session-foreign"),
+        (False, "ecm-session-foreign"),
+        (True, "ecm-session-kline"),
+        (False, "ecm-session-kline"),
+    ]

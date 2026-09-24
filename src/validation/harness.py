@@ -288,6 +288,7 @@ def reset_process_state(default_profile: CaptureProfile) -> None:
     tuning_profile.configure_default(default_profile)
     aliases = {name: f"DID_{parse_did_token(name):04X}" for name in known_did_names()}
     tuning_profile.configure_did_aliases(aliases)
+    tx_gate.reset_ecm_session_claims()
     if tx_gate.is_passive():
         tx_gate.set_passive(False, source="validation")
     if bus_budget.override() is not None:

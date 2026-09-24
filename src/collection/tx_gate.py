@@ -41,6 +41,19 @@ even if nobody calls ``set_passive(False, ...)``. A background poll task
 (``src.daemon.polling.poll_passive_ttl``) calls :func:`check_expiry`
 periodically so a died session or a forgotten disarm doesn't silently log
 nothing forever.
+
+**ECM session ownership (H05.6).** The ECM has one diagnostic session, shared
+between CAN and K-line: an active K-line stream starved CAN Mode 01 for ~132 s
+on 2026-09-20. So besides the operator's passive switch, a *holder* may claim
+the session — ``kline`` (CANary's own K-line collector) or ``foreign``
+(another tester seen on K-line, e.g. UpRev or a scan tool) — and while any
+claim stands, CAN diagnostic transmission is suppressed exactly as in passive
+mode. :func:`is_passive` answers "is CAN diagnostic TX suppressed?", which is
+what every existing caller means (the OBD loop, record arming and idle
+shutdown all treat it as "OBD is stale by design"), so they need no change.
+A foreign claim outranks our own; claims may carry a TTL, and
+:func:`check_expiry` releases one whose TTL has passed. Broadcast CAN capture
+is listen-only and never affected.
 """
 
 from __future__ import annotations
@@ -49,7 +62,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any
+from typing import Any, Literal
 
 import can
 
@@ -76,11 +89,76 @@ _source: str = "env" if _passive else "default"
 #: can't extend or shorten an already-armed window.
 _expires_at: float | None = None
 
+EcmSessionHolder = Literal["kline", "foreign"]
+EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign"]
+#: Holder -> ``time.monotonic()`` expiry, or ``None`` for "until released".
+_claims: dict[str, float | None] = {}
+
+
+def _owner_locked() -> EcmSessionOwner:
+    if "foreign" in _claims:
+        return "foreign"
+    if "kline" in _claims:
+        return "kline"
+    return "can_diagnostics"
+
 
 def is_passive() -> bool:
-    """True when CAN transmission is currently suppressed."""
+    """True when CAN diagnostic transmission is currently suppressed: the
+    operator's passive switch, or another holder owns the ECM session."""
     with _lock:
-        return _passive
+        return _passive or bool(_claims)
+
+
+def ecm_session_owner() -> EcmSessionOwner:
+    """Who owns the ECM's diagnostic session right now."""
+    with _lock:
+        return _owner_locked()
+
+
+def _owner_changed(previous: EcmSessionOwner, current: EcmSessionOwner, now: float) -> None:
+    if previous == current:
+        return
+    capture_generation.bump(f"ecm-session-{current}")
+    if previous != "can_diagnostics":
+        capture_lifetime.mark_paused(False, reason=f"ecm-session-{previous}", now=now)
+    if current != "can_diagnostics":
+        capture_lifetime.mark_paused(True, reason=f"ecm-session-{current}", now=now)
+    log.warning(
+        "ECM diagnostic session owner: %s -> %s",
+        previous,
+        current,
+        extra={"ecm_session_owner": current, "previous_owner": previous},
+    )
+
+
+def claim_ecm_session(
+    holder: EcmSessionHolder, *, ttl_seconds: float | None = None, now: float | None = None
+) -> EcmSessionOwner:
+    """Claim (or renew) the ECM session for ``holder``. Returns the owner
+    before the claim. Renewing with a TTL pushes the expiry out."""
+    effective_now = time.monotonic() if now is None else now
+    with _lock:
+        previous = _owner_locked()
+        _claims[holder] = effective_now + ttl_seconds if ttl_seconds is not None else None
+        current = _owner_locked()
+    _owner_changed(previous, current, effective_now)
+    return previous
+
+
+def release_ecm_session(holder: EcmSessionHolder, *, now: float | None = None) -> None:
+    effective_now = time.monotonic() if now is None else now
+    with _lock:
+        previous = _owner_locked()
+        _claims.pop(holder, None)
+        current = _owner_locked()
+    _owner_changed(previous, current, effective_now)
+
+
+def reset_ecm_session_claims(*, now: float | None = None) -> None:
+    """Drop every claim (test and validation-harness setup)."""
+    for holder in ("foreign", "kline"):
+        release_ecm_session(holder, now=now)
 
 
 def set_passive(
@@ -132,8 +210,17 @@ def check_expiry(*, now: float | None = None) -> bool:
     global _passive, _expires_at
     effective_now = time.monotonic() if now is None else now
     with _lock:
+        expired_claims = [
+            holder
+            for holder, deadline in _claims.items()
+            if deadline is not None and effective_now >= deadline
+        ]
+    for holder in expired_claims:
+        log.warning("ECM session claim by %s expired; released", holder)
+        release_ecm_session(holder, now=effective_now)  # type: ignore[arg-type]
+    with _lock:
         if not _passive or _expires_at is None or effective_now < _expires_at:
-            return False
+            return bool(expired_claims)
         _passive = False
         _expires_at = None
     log.warning("passive mode TTL expired; auto-disarmed", extra={"passive": False})
@@ -167,6 +254,14 @@ def snapshot(*, now: float | None = None) -> dict[str, Any]:
             "source": _source,
             "suppressed_frames": _suppressed,
             "ttl_remaining_seconds": ttl_remaining,
+            "ecm_session_owner": _owner_locked(),
+            "ecm_session_claims": {
+                holder: (
+                    round(max(0.0, deadline - effective_now), 1) if deadline is not None else None
+                )
+                for holder, deadline in sorted(_claims.items())
+            },
+            "tx_suppressed": _passive or bool(_claims),
         }
 
 
@@ -183,7 +278,7 @@ def send(bus: can.BusABC, message: can.Message, *, what: str) -> bool:
     """
     global _suppressed
     with _lock:
-        if _passive:
+        if _passive or _claims:
             _suppressed += 1
             suppressed = _suppressed
         else:
@@ -199,8 +294,14 @@ def send(bus: can.BusABC, message: can.Message, *, what: str) -> bool:
 
 __all__ = [
     "PASSIVE_ENV_VAR",
+    "EcmSessionHolder",
+    "EcmSessionOwner",
     "check_expiry",
+    "claim_ecm_session",
+    "ecm_session_owner",
     "is_passive",
+    "release_ecm_session",
+    "reset_ecm_session_claims",
     "reset_suppressed",
     "send",
     "set_passive",
