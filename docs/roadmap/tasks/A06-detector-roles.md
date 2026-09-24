@@ -102,10 +102,10 @@ training envelope". That is useful to know. It is not a diagnosis.
       BAROMETRIC_PRESSURE (63 kPa vs trained 80–82 kPa), SPEED (90 km/h vs
       trained 0–84 km/h)". The deployed 2026-09-20 manifest has
       `training_envelope: null`, so it reports "not recorded".
-  - **Remaining:** seeing it live. It needs the candidate LSTM, which records
-    the envelope, served on the Pi (A06.3's remainder, then a Pi pull and
-    restart). After that, read `/status`
-    `detectors.inference.sequence_envelope` over a drive.
+  - *Served since 2026-09-24:* the r2 LSTM, which records the envelope, is
+    deployed (A06.3). **Remaining:** read `/status`
+    `detectors.inference.sequence_envelope` over a real drive; the Pi was
+    parked (`no_data`) at deploy, so the meter showed 0 windows.
   - Options:
     - (a) keep alerting after A01–A03 and A02's recalibration;
     - (b) a non-alerting *novelty screen* reporting "outside the learned
@@ -185,12 +185,21 @@ training envelope". That is useful to know. It is not a diagnosis.
       first candidate IF with 8 columns;
     - a column seen only in validation drives no longer crashes the sequence
       trainer's scaler; it is recorded as `unobserved_in_training`.
-  - **Remaining:** the operator chose to deploy the candidate LSTM only and
-    keep the deployed IF (2026-09-23). Owed: an LSTM re-run after the
-    drive-grouping fix (the sequence trainer's validation split crossed
-    physical drives), then the Pi deploy, the hash check, and the 600-tree
-    tick cost (the IF is not deployed). The candidate IF's idle_transient
-    rests on 2 physical drives, not 4 as first counted.
+  - The operator chose to deploy the candidate LSTM only and keep the
+    deployed IF (2026-09-23). After the drive-grouping fix the LSTM was re-run
+    as r2 (and r3 with parked rows dropped; r3 was noisier on D6, so r2 was
+    chosen, per the evaluation's recommendation). The candidate IF's
+    idle_transient rests on 2 physical drives, not 4 as first counted.
+  - **Deployed 2026-09-24 ~01:10 MDT:** the Pi serves
+    `lstm_autoencoder_2026-09-24T035125.284392Z` (`model.pt` sha256
+    `f7389acf…1f7a`, manifest `cc034239…c6b6`, hash-checked on the Pi) beside
+    the unchanged `isolation_forest_2026-09-20T054703`. The prior LSTM
+    (`c77165ad…1112`) is backed up at
+    `models/nissan-xterra-2008/_prior/2026-09-24-pre-r2/`. `/status`:
+    no version mismatches; both detectors effectively `evidence`.
+  - **Remaining:** the IF replay diff (D03.25), and the next IF retrain once
+    idle and highway clear the 3-drive floor. The 600-tree tick cost waits
+    for an IF that is deployed.
 
   The retrain was owed
   for three reasons: the binding retraction, the mode labels, and the new

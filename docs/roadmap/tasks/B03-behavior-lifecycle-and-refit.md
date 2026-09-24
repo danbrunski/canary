@@ -212,7 +212,7 @@ Follow [B00](B00-behavior-models-README.md).
   requested versions and ordinary eligible observations; confirm demoted models
   remain non-alerting and off-map does not read as healthy. Record vehicle
   state, active capture and deployed build with the result.
-  *Promoted on the laptop 2026-09-23; Pi deploy owed.* **Operator decision
+  *Promoted on the laptop 2026-09-23; deployed to the Pi 2026-09-24.* **Operator decision
   2026-09-23:** promote the 2026-09-23 candidate set as a **diagnostic-only
   refresh**, even though the qualified set is empty.
   - **Changed:** `data/nissan-xterra-2008/behavior_models.yaml` +
@@ -250,12 +250,17 @@ Follow [B00](B00-behavior-models-README.md).
       2026-09-23.**
     - `tests/test_behavior_lifecycle.py` looks up the deployed-snapshot entry
       by name, not position, because the artifact's model order changed.
-  - **Remaining (Pi, the orchestrator's):** read `/status.vehicle_state`,
-    save the deployed `/models/behavior` snapshot (B03.1/B03.10), transfer
-    the two files, verify hashes on the Pi, restart with
-    `scripts/restart_canary.sh` only if hot reload does not pick them up,
-    and confirm every model reports not-alerting with its reason and that
-    off-map does not read as healthy.
+  - **Deployed 2026-09-24 ~01:10 MDT:** `vehicle_state` `no_data`, no
+    capture active; build `2971d79`, pulled on the Pi (the artifact is
+    tracked, so git carried it) and restarted with
+    `scripts/restart_canary.sh` (the same restart also swapped the LSTM,
+    A06.3). Hash on the Pi `816c150b…e565` equals the laptop's.
+    `/models/behavior` lists the 12 refreshed models (for example
+    `stft_bank_balance_city` v1, `total_trim_vs_rpm_load_b1` v1,
+    `warm_idle_rpm_baseline` v3). **Remaining:** on the next drive, confirm
+    every model reports not-alerting with its reason and that off-map does
+    not read as healthy. The pre-refresh set is recoverable from git
+    (`2971d79^`) and the laptop's `_prior/2026-09-24T024700`.
 - [~] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
   the previous compatible artifact set and its evidence; exercise existing
   rollback/loading behavior locally. Update D03 only for overlapping work

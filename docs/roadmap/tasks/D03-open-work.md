@@ -1329,11 +1329,16 @@ live here now, so the documents could be archived
     - **Recommendation: deploy r2.** Keep the filter for future retrains.
       [Report](../../../data/analyses/2026-09-23-a06-3-retrain-evaluation.md),
       r3 section.
+  - **r2 deployed 2026-09-24 ~01:10 MDT** beside the unchanged IF:
+    `lstm_autoencoder_2026-09-24T035125.284392Z`, `model.pt` sha256
+    `f7389acf…1f7a`, hash-checked on the Pi, no version mismatch, prior
+    LSTM backed up under `models/nissan-xterra-2008/_prior/2026-09-24-pre-r2/`
+    (A06.3).
   - **Remaining:**
-    - the Pi deploy of the recommended LSTM (r2) beside the deployed IF, and
-      its hash check;
-    - the Pi side of D03.22 (`label_sessions.py` there);
-    - the IF-side replay diff (the IF is not being redeployed).
+    - the Pi side of D03.22 (`label_sessions.py` there, with the Pi idle);
+    - the IF-side replay diff (the IF is not being redeployed);
+    - an IF retrain once idle and highway clear the 3-drive floor on this
+      calibration.
 - [~] **D03.26 Backfill the vehicle ledger.** *From
   `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
   entry; real entries need the operator's history and go in through
