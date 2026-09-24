@@ -46,15 +46,23 @@ piece of hardware.
   lists are chosen outside `candidate_feature_columns`
   (`sequence_feature_set.py`, behavior-model recipe validation: a recipe that
   names an `imu:`/`gps:`/`sensor:` input is refused at load, naming the rule).
+  **This is a feature-set change and needs a retrain.** The deployed IF and
+  LSTM manifests for `nissan-xterra-2008` (and the 2026-09-23 NA candidates)
+  carry `gps:speed` and its `__mean`/`__std`/`__roc` expansions, so the gate
+  applies to *training* first; a deployed model keeps being served the
+  features its manifest names until the retrain replaces it. Excluding them
+  at serve time before then would blind it (the D02.5 failure). Coordinate
+  the retrain with the A-series work that owns it (A02/A03/A04/A06).
   **Accept:** a synthetic session carrying `imu:*`, `gps:*`, `sensor:*` and a
   derived channel built from `gps:` yields no feature from any of them; the
-  feature list the current corpus produces is **unchanged** apart from
-  channels already excluded by name (diff it, and record the diff here); a
+  feature list the current corpus produces differs only by the `gps:speed`
+  family and channels already excluded by name (diff it, and record the diff
+  here); the next retrained manifests carry no external-sensor feature; a
   test that a source added to the Literal without a trainability
   classification fails at import. **Sequencing:** `feature_pipeline.py` had
   another session's uncommitted edits on 2026-09-23. Land this after that
   work is committed.
-- [ ] **H01.2 Teach the analysis allowlists the new namespaces.** The survey
+- [x] **H01.2 Teach the analysis allowlists the new namespaces.** The survey
   found three that disagree with `TelemetrySource`:
   `src/analysis/channels.py` `SpecSource` and its hard-coded tuple (no `imu`,
   no `derived`), `src/models/spec_producibility.py` `CAPTURED_NAMESPACES`
@@ -64,6 +72,16 @@ piece of hardware.
   can read IMU channels (H02.5 and H07 need it). **Accept:** a test that
   every `CAPTURED_SOURCES` member is readable by `channels.read_channels`, or
   is named in an explicit exclusion with its reason.
+  **Evidence (2026-09-23):** `channels.SpecSource` gains `imu`, with a reader;
+  the validation tuple is now `SPEC_SOURCES = get_args(SpecSource)`, so the
+  Literal and the check cannot drift again (mypy then narrows the spec source
+  by itself, and the old `type: ignore` went). `spec_producibility`
+  deliberately does **not** gain `imu`/`sensor`: it checks what tracked model
+  manifests can depend on, and decision 1 says none may depend on external
+  sensors; the reason is in the code comment, which also records that `gps`
+  stays only until the retrain H01.1 needs. Test:
+  `test_every_captured_source_can_be_named_in_a_spec`
+  (`tests/test_analysis_channels.py`).
 - [~] **H01.3 Runtime dependencies.** The collectors need I²C (`smbus2`, pure
   Python) and GPIO line control (`gpiod`, libgpiod v2 bindings; the bring-up
   scripts use the system package). **Do:** add `smbus2` to `pyproject.toml`

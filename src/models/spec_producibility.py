@@ -53,6 +53,11 @@ DEFAULT_DIDS_PATH = _REPO_ROOT / "data" / "dids.yaml"
 DEFAULT_DBC_DIR = _REPO_ROOT / "data" / "dbc"
 
 #: Namespaces whose channels come straight from a catalog/collector.
+#: External sensors never train or score a detector (operator decision,
+#: docs/roadmap/tasks/H00-hat-integration-README.md), so ``imu`` and ``sensor``
+#: are deliberately absent. ``gps`` is still listed only because the tracked
+#: IF and LSTM manifests were trained with ``gps:speed``; it leaves with the
+#: retrain that drops it (H01.1).
 CAPTURED_NAMESPACES: tuple[str, ...] = ("decoded", "dbc", "did", "obd", "gps")
 #: Namespaces the feature transform computes from the captured ones.
 COMPUTED_NAMESPACES: tuple[str, ...] = ("derived", "deviation")

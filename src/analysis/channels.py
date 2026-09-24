@@ -49,7 +49,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 import numpy as np
 import pandas as pd
@@ -64,7 +64,11 @@ from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
 #: literal ``source`` column values — a DID reading is stored with
 #: ``source="obd"`` and channel ``DID_1225``.
-SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "mem", "sensor"]
+SpecSource = Literal["obd", "did", "decoded", "can", "uprev", "gps", "imu", "mem", "sensor"]
+#: The same names as a tuple, for validation and messages. Derived from the
+#: Literal so the two cannot drift (they had: ``imu`` was a captured source
+#: for months before a spec could name it).
+SPEC_SOURCES: tuple[SpecSource, ...] = get_args(SpecSource)
 
 _RAW_UNIT = "counts"
 
@@ -102,12 +106,11 @@ def parse_spec(text: str) -> ChannelSpec:
     name = name.strip()
     if not name:
         raise ChannelSpecError(f"channel spec {text!r} has no channel name")
-    if source not in ("obd", "did", "decoded", "can", "uprev", "gps", "mem", "sensor"):
+    if source not in SPEC_SOURCES:
         raise ChannelSpecError(
-            f"unknown namespace {source!r} in {text!r}; "
-            "expected obd/did/decoded/can/uprev/gps/mem/sensor"
+            f"unknown namespace {source!r} in {text!r}; expected {'/'.join(SPEC_SOURCES)}"
         )
-    return ChannelSpec(source=source, name=name, text=raw)  # type: ignore[arg-type]
+    return ChannelSpec(source=source, name=name, text=raw)
 
 
 @dataclass
@@ -568,6 +571,7 @@ def read_channels(
         "obd": lambda s: _numeric_series(frame, s, "obd"),
         "uprev": lambda s: _numeric_series(frame, s, "uprev"),
         "gps": lambda s: _numeric_series(frame, s, "gps"),
+        "imu": lambda s: _numeric_series(frame, s, "imu"),
         "sensor": lambda s: _numeric_series(frame, s, "sensor"),
         "mem": lambda s: _memory_series(frame, s),
         "did": lambda s: _did_series(frame, s, catalogs),

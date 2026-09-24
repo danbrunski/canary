@@ -572,3 +572,25 @@ def test_rescale_leaves_unpinned_and_unknown_bindings_untouched() -> None:
     out = rescale_channel_rows(rows, bindings_path=BINDINGS, dids_path=DIDS)
     assert out[0]["value_number"] == pytest.approx(7.0)
     assert out[1]["value_number"] == pytest.approx(440.0)
+
+
+def test_every_captured_source_can_be_named_in_a_spec(tmp_path: Path) -> None:
+    """H01.2: a captured source nobody can read is a silent-empty trap.
+
+    ``imu`` was a ``TelemetrySource`` for months before a spec could name it,
+    so ``compare_channels`` could not pair IMU acceleration with anything.
+    Every captured source must be a spec namespace, and every namespace must
+    have a reader.
+    """
+    from src.analysis.channels import SPEC_SOURCES
+    from src.telemetry import CAPTURED_SOURCES
+
+    assert set(CAPTURED_SOURCES) <= set(SPEC_SOURCES)
+    session = _session(
+        tmp_path,
+        [TelemetryRecord.imu(T0.timestamp(), "ACCEL_X", 0.25, "g")],
+    )
+    frame = read_channels(session, ["imu:ACCEL_X"], bindings_path=BINDINGS, dids_path=DIDS)
+    assert frame["value"].tolist() == [pytest.approx(0.25)]
+    with pytest.raises(ChannelSpecError, match="obd/did/decoded/can/uprev/gps/imu/mem/sensor"):
+        parse_spec("bogus:X")
