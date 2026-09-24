@@ -36,7 +36,9 @@ venv="$repo_root/.venv/bin"
 sha="$(git rev-parse --verify "${1:-HEAD}^{commit}")" || exit 2
 base="$(git rev-parse --verify "${2:-origin/main}^{commit}" 2>/dev/null || true)"
 range="${base:+$base..}$sha"
-stamp_dir="$(git rev-parse --git-common-dir)/ci-gate"
+# Absolute: the worktree below has a .git *file*, so a relative ".git/..." path
+# breaks inside it (mypy crashed trying to make its cache there, 2026-09-24).
+stamp_dir="$(git rev-parse --path-format=absolute --git-common-dir)/ci-gate"
 mkdir -p "$stamp_dir"
 
 wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-gate-XXXXXX")"
