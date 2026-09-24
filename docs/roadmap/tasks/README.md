@@ -1,5 +1,14 @@
 # Implementation task index
 
+**Status 2026-09-23 — H01–H07: CANary-HAT integration.**
+[`H00-hat-integration-README.md`](H00-hat-integration-README.md) indexes seven
+checklists that take the HAT from "passed checkout" to "recorded, checked and
+used": the source policy that keeps external sensors out of the detectors
+(operator decision), the IMU, 12 V/PPS/GNSS platform work, committees that
+flag, a native K-line collector, live sniffing of UpRev and scan tools, and a
+driving dyno. H00 records the operator's decisions and the defaults awaiting
+confirmation.
+
 **Status 2026-09-23 — T01: test-suite reliability.**
 [`T01-test-suite-reliability.md`](T01-test-suite-reliability.md) opened when the
 new pre-push gate first ran: `tests/test_daemon.py` gives a real daemon 1–5 s
