@@ -1,5 +1,26 @@
 # Implementation task index
 
+**Status 2026-09-24: R01–R08, the second refactor review.**
+[`R00-refactor-README.md`](R00-refactor-README.md) indexes eight checklists
+from a six-area review of the ~125k lines added since the July refactor
+([`../archive/refactoring.md`](../archive/refactoring.md)). The biggest items
+are the 1,640-line `register_control_routes`, the 727-line
+`run_can_obd_loop`, the 3,137-line `obd_scheduler.py`, and a dashboard whose
+new pages bypass its shared helpers.
+
+It also turned up over thirty places where duplicated copies now disagree.
+The serve-path ones come first:
+
+- the inference gate's vehicle-state classifier lacks the broadcast-RPM
+  fallback that `/status` has;
+- an slcan parse error during a discovery probe is re-raised as a config
+  error;
+- session classification computes in-process, unbounded;
+- flashes recorded from the dashboard are invisible to the digest and MCP.
+
+R00 separates the bugs it confirmed from those only reported, lists the
+operator decisions, and orders the work. The overnight queue is unchanged.
+
 **Status 2026-09-23 — H01–H07: CANary-HAT integration.**
 [`H00-hat-integration-README.md`](H00-hat-integration-README.md) indexes seven
 checklists that take the HAT from "passed checkout" to "recorded, checked and
