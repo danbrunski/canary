@@ -32,9 +32,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from queue import Empty, SimpleQueue
 
 from src.collection import tuning_profile, tx_gate
 from src.collection.kline import protocol as kp
@@ -45,7 +47,13 @@ from src.collection.kline.profile import (
     load_kline_profile,
 )
 from src.collection.kline.sniff import DefinitionTracker, Exchange, FrameDecoder, SniffedFrame
-from src.collection.kline.transport import HatPins, KlineTransport, KlineTransportError, Mode
+from src.collection.kline.transport import (
+    HatPins,
+    KlineTransport,
+    KlineTransportError,
+    Mode,
+    RxChunk,
+)
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import ReconnectPolicy
 from src.config import KlineConfig
@@ -60,8 +68,9 @@ LOCAL_ID = 0x81
 #: How often an idle collector re-reads the active profile.
 IDLE_CHECK_SECONDS = 0.5
 
-#: How long one sniff read gathers bytes before decoding them.
-SNIFF_BURST_SECONDS = 0.05
+#: How often the event loop decodes what the sniff reader has gathered. Only
+#: latency: the reader stamps bytes as it reads them, on its own thread.
+SNIFF_DRAIN_SECONDS = 0.05
 
 TransportFactory = Callable[[KlineProfile, Mode], KlineTransport]
 EntriesSource = Callable[[], tuple[str, ...]]
@@ -260,16 +269,36 @@ class KlineCollector:
         pending: SniffedFrame | None = None
         transport = self._factory(profile, Mode.SNIFF)
         await asyncio.to_thread(transport.open)
+        # The reader owns the port on a thread of its own, so a busy event loop
+        # or a saturated executor delays decoding, never reading. It used to
+        # read in 50 ms bursts through asyncio.to_thread, and each ~350 ms gap
+        # between bursts cost a frame (2026-09-24).
+        chunks: SimpleQueue[RxChunk] = SimpleQueue()
+        halt = threading.Event()
+        failures: list[BaseException] = []
+
+        def read() -> None:
+            try:
+                transport.listen(halt.is_set, chunks.put)
+            except BaseException as exc:  # handed to the loop below
+                failures.append(exc)
+
+        reader = threading.Thread(target=read, name="kline-sniff", daemon=True)
+        reader.start()
         log.info(
             "K-line sniffing (listening only, pull-up off)",
             extra={"tty": self.config.tty, "baud": profile.baud},
         )
         try:
             while not stop.is_set() and self._wants_command() is None:
-                burst = await asyncio.to_thread(transport.read_burst, SNIFF_BURST_SECONDS)
+                await _wait(stop, SNIFF_DRAIN_SECONDS)
                 to_epoch = time.time() - time.monotonic()
-                for at, byte in burst:
-                    for frame in decoder.feed(at, byte):
+                while True:
+                    try:
+                        chunk = chunks.get_nowait()
+                    except Empty:
+                        break
+                    for frame in decoder.feed_chunk(chunk):
                         self.sniffed_frames += 1
                         stamp = frame.finished + to_epoch
                         put_nowait_or_drop(
@@ -287,15 +316,20 @@ class KlineCollector:
                         exchange, pending = Exchange(pending, frame), None
                         for record in sniffed_value_records(exchange, tracker, stamp):
                             put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+                if failures:
+                    raise failures[0]
         finally:
+            halt.set()
+            await asyncio.to_thread(reader.join)
             await asyncio.to_thread(transport.close)
 
 
 def frame_record(frame: SniffedFrame, stamp: float) -> TelemetryRecord:
-    metadata: dict[str, str | int | None] = {
+    metadata: dict[str, str | int | float | None] = {
         "instrument": "sniff",
         "direction": frame.direction,
         "kind": frame.kind,
+        "timing_uncertainty_s": round(frame.timing_uncertainty_s, 6),
     }
     if frame.source is not None:
         metadata["source_address"] = frame.source
@@ -317,7 +351,7 @@ def sniffed_value_records(
     request, reply = exchange.request, exchange.reply
     if reply is None:
         return []
-    pairs: list[tuple[str, bytes, dict[str, str | int | None]]] = []
+    pairs: list[tuple[str, bytes, dict[str, str | int | float | None]]] = []
     if request.payload[:1] == bytes([kp.SID_READ_DATA_BY_COMMON_ID]):
         if reply.payload[:1] == bytes([kp.SID_READ_DATA_BY_COMMON_ID + kp.POSITIVE_OFFSET]):
             did = int.from_bytes(request.payload[1:3], "big")
@@ -344,7 +378,11 @@ def sniffed_value_records(
             channel=name,
             value=value.hex(),
             payload=value,
-            metadata={"instrument": "sniff", **extra},
+            metadata={
+                "instrument": "sniff",
+                "timing_uncertainty_s": round(reply.timing_uncertainty_s, 6),
+                **extra,
+            },
         )
         for name, value, extra in pairs
     ]

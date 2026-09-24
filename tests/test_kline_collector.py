@@ -4,7 +4,9 @@ exactly while it reads; ends cleanly; refuses a plan it cannot read."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+import time
+from collections import deque
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
@@ -13,7 +15,7 @@ from src.collection import tx_gate
 from src.collection.kline import protocol as kp
 from src.collection.kline.plan import resolve_plan
 from src.collection.kline.profile import KlineProfile
-from src.collection.kline.transport import KlineTimeoutError
+from src.collection.kline.transport import KlineTimeoutError, RxChunk
 from src.collection.kline_collector import LOCAL_ID, KlineCollector, plan_records
 from src.collection.reconnect import ReconnectPolicy
 from src.config import KlineConfig
@@ -241,12 +243,12 @@ def _uprev_stream() -> list[tuple[float, int]]:
 
 
 class FakeSniffTransport:
-    """Replays UpRev's real session through ``read_burst``, then goes quiet."""
+    """Replays UpRev's real session through ``listen``, then goes quiet."""
 
     instances: list[tuple[FakeSniffTransport, object]] = []
 
     def __init__(self, stream: list[tuple[float, int]], mode: object) -> None:
-        self.stream = list(stream)
+        self.stream = deque(stream)
         self.mode = mode
         self.calls: list[str] = []
         FakeSniffTransport.instances.append((self, mode))
@@ -257,9 +259,15 @@ class FakeSniffTransport:
     def close(self) -> None:
         self.calls.append("close")
 
-    def read_burst(self, seconds: float) -> list[tuple[float, int]]:
-        chunk, self.stream = self.stream[:2000], self.stream[2000:]
-        return chunk
+    def listen(self, until: Callable[[], bool], sink: Callable[[RxChunk], None]) -> None:
+        """Byte by byte, each gap as the kernel timestamped it: exact timing."""
+        last = self.stream[0][0] if self.stream else 0.0
+        while self.stream and not until():
+            at, byte = self.stream.popleft()
+            sink(RxChunk(at=at, data=bytes([byte]), quiet_s=at - last, after=last, char_s=0.0))
+            last = at
+        while not until():
+            time.sleep(0.001)
 
     def write(self, *_: object) -> None:  # pragma: no cover - must never be called
         raise AssertionError("sniff mode transmitted")
@@ -335,3 +343,28 @@ async def test_a_capture_request_waits_for_the_foreign_tester() -> None:
     await task
     modes = {mode for _, mode in FakeSniffTransport.instances}
     assert modes == {Mode.SNIFF}  # never switched to command while foreign
+
+
+class BrokenReader(FakeSniffTransport):
+    def listen(self, until: Callable[[], bool], sink: Callable[[RxChunk], None]) -> None:
+        raise OSError("tty went away")
+
+
+async def test_a_reader_thread_failure_reaches_the_retry_loop() -> None:
+    """The reader runs on its own thread; its failure must not die there."""
+    FakeSniffTransport.instances.clear()
+    collector = KlineCollector(
+        KlineConfig(enabled=True),
+        PROFILE,
+        DIDS,
+        entries=lambda: (),
+        transport_factory=lambda profile, mode: BrokenReader([], mode),  # type: ignore[arg-type,return-value]
+        reconnect_policy=FAST,
+    )
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
+    await asyncio.sleep(0.3)
+    stop.set()
+    await task
+    assert len(FakeSniffTransport.instances) >= 2  # reopened after the failure
+    assert all(t.calls[-1] == "close" for t, _ in FakeSniffTransport.instances)

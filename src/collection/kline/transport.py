@@ -71,6 +71,41 @@ class TransmitRefusedError(KlineTransportError):
     """Sniff mode never transmits."""
 
 
+@dataclass(frozen=True)
+class RxChunk:
+    """The bytes one read returned, and what the reader knows of their timing.
+
+    A read only says the bytes arrived by ``at``; a host that stopped reading
+    for 300 ms gets that whole stretch of traffic back in one read. So the
+    chunk carries bounds, not guesses: every byte arrived after ``after`` (the
+    last read that found nothing), and the line was *observed* silent for
+    ``quiet_s`` before the first of them — the only gap a sniffer may act on.
+    (An empty read can miss a byte still in the UART's FIFO, which holds it for
+    its ~32-bit receive timeout, ~3 ms at 10400 baud: small against the 25 ms
+    the sniffer needs before it abandons a frame.)
+    On 2026-09-24 inferring gaps from read times instead abandoned the frame in
+    flight at each ~350 ms host stall: ~10 % of UpRev's replies.
+    """
+
+    at: float
+    data: bytes
+    quiet_s: float
+    after: float
+    char_s: float
+
+    def byte_bounds(self) -> list[tuple[float, float]]:
+        """``(earliest, latest)`` arrival of each byte: bytes take ``char_s``
+        each on the wire, the last arrived by ``at``, the first after ``after``."""
+        n = len(self.data)
+        return [
+            (
+                min(self.after + (k + 1) * self.char_s, self.at - (n - 1 - k) * self.char_s),
+                self.at - (n - 1 - k) * self.char_s,
+            )
+            for k in range(n)
+        ]
+
+
 class Mode(Enum):
     COMMAND = "command"
     SNIFF = "sniff"
@@ -216,19 +251,37 @@ class KlineTransport:
             self._sleep(0.001)
         return bytes(buf)
 
-    def read_burst(self, seconds: float, *, poll_s: float = 0.001) -> list[tuple[float, int]]:
-        """Every byte that arrives for ``seconds``, each with its arrival time
-        on :attr:`clock` (to about ``poll_s``). For sniffing: never transmits."""
-        out: list[tuple[float, int]] = []
-        deadline = self._clock() + seconds
-        while self._clock() < deadline:
+    def listen(
+        self,
+        until: Callable[[], bool],
+        sink: Callable[[RxChunk], None],
+        *,
+        poll_s: float = 0.001,
+    ) -> None:
+        """Hand every byte that arrives to ``sink`` until ``until()`` is true.
+        For sniffing: never transmits. Run it on a thread of its own — a caller
+        that stops reading (a busy event loop, a saturated executor) does not
+        lose bytes, the tty buffers them, but it loses the knowledge of *when*
+        they came, and each :class:`RxChunk` says how much of that it kept."""
+        last_data = self._clock()
+        seen_idle = last_data  # the last read that returned nothing
+        while not until():
             chunk = self.port.read(4096)
-            if chunk:
-                now = self._clock()
-                out.extend((now, byte) for byte in chunk)
-            else:
+            now = self._clock()
+            if not chunk:
+                seen_idle = now
                 self._sleep(poll_s)
-        return out
+                continue
+            sink(
+                RxChunk(
+                    at=now,
+                    data=bytes(chunk),
+                    quiet_s=max(0.0, seen_idle - last_data),
+                    after=seen_idle,
+                    char_s=self.char_s,
+                )
+            )
+            last_data = seen_idle = now
 
     def _idle_for(self, seconds: float) -> None:
         deadline = self._clock() + seconds
@@ -339,6 +392,7 @@ __all__ = [
     "Mode",
     "NoEchoError",
     "OutputLines",
+    "RxChunk",
     "SerialPort",
     "TransmitRefusedError",
     "WakeupTimingError",
