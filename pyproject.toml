@@ -162,6 +162,6 @@ pythonpath = ["."]
 addopts = "-n auto -m 'not integration and not ml_training'"
 markers = [
     "integration: real-hardware-equivalent tests (e.g. ELM327-emulator); slow.",
-    "slow: multi-second tests (collector/replay/decode, and every ml_training test); excluded from the inner loop via `-m 'not slow'`.",
+    "slow: multi-second tests: marked by hand, or listed in tests/slow_tests.txt (measured, >= 2 s; scripts/mark_slow_tests.py). The push gate skips them; CI runs them.",
     "ml_training: torch training / bake-off / FP-benchmark suites; not a commit gate -- run when ML code changes (scripts/ml_paths.txt), or with `-m ml_training`.",
 ]

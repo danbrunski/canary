@@ -14,6 +14,30 @@ import pytest
 
 from src.jsonl_store import JsonlStore
 
+#: Tests measured slower than the push gate can afford (scripts/mark_slow_tests.py
+#: writes this from a ``--durations`` run). They get the ``slow`` marker here, so
+#: the one-minute push gate skips them; bare ``pytest`` and GitHub CI still run
+#: them on every push (operator, 2026-09-24).
+_SLOW_TESTS_FILE = Path(__file__).with_name("slow_tests.txt")
+
+
+def _measured_slow_tests() -> frozenset[str]:
+    if not _SLOW_TESTS_FILE.exists():
+        return frozenset()
+    return frozenset(
+        line.split()[0]
+        for line in _SLOW_TESTS_FILE.read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    )
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    slow = _measured_slow_tests()
+    for item in items:
+        if item.nodeid in slow:
+            item.add_marker(pytest.mark.slow)
+
+
 #: ``src.models.training_ledger.DEFAULT_TRAINING_LEDGER_PATH``, spelled out:
 #: importing it here would pull ``src.models`` (and torch) into every xdist
 #: worker. ``test_conftest_ledger_guard_matches_the_default_path`` pins the two.

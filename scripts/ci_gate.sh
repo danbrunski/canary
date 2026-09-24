@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
-# The full CI gate on one commit, in a throwaway worktree, before anything
-# reaches origin. On success it stamps that exact commit, which is what the
-# pre-push hook checks. Usually run by scripts/push.sh rather than by hand.
+# The push gate on one commit, in a throwaway worktree, before anything reaches
+# origin. On success it stamps that exact commit, which is what the pre-push
+# hook checks. Usually run by scripts/push.sh rather than by hand.
+#
+# **About a minute (operator, 2026-09-24); GitHub CI runs everything.** The
+# gate runs lint, types, and the whole suite except the `slow` tier -- the
+# ~140 tests measured at 2 s or more (tests/slow_tests.txt), which were 3 % of
+# the tests and most of the time: without them the rest ran in 86 s at load
+# average 10. CI runs the slow tier, full vitest and e2e on every push, so
+# after pushing, confirm CI, and a red main is fixed before anything else.
 #
 #   scripts/ci_gate.sh [<commit>] [<base>]    # default: HEAD against origin/main
 #
@@ -9,12 +16,15 @@
 #   and their uncommitted edits must not decide whether *your* commits pass.
 # - The venv must match constraints-dev.txt (scripts/check_dev_env.py), because
 #   that file is what CI installs. Green on other versions proves nothing.
-# - Python: ruff check, ruff format --check, mypy, pytest (ci.yml `test`).
-#   Parallel-run failures are re-run serially once (see T01). The
-#   `ml_training` tier runs only when <base>..<commit> touches
-#   scripts/ml_paths.txt (scripts/ml_changed.sh).
+# - Python: ruff check, ruff format --check, mypy (with a cache kept between
+#   gates -- cold, it is 45 s of the budget), then pytest without
+#   `slow`/`integration`/`ml_training`. Parallel-run
+#   failures are re-run serially once (see T01). The `ml_training` tier still
+#   runs here when <base>..<commit> touches scripts/ml_paths.txt, because CI
+#   has no torch (operator, 2026-09-23): those pushes take minutes, not one.
 # - Frontend, only when <base>..<commit> touches src/dashboard/static: pnpm
-#   typecheck, vitest, playwright e2e (ci.yml `frontend`).
+#   typecheck and `vitest related` on the changed files. Full vitest and
+#   playwright e2e are CI's (ci.yml `frontend`).
 #
 # Why not inside the pre-push hook: git opens the connection to GitHub before
 # the hook runs, and GitHub closed it during the ~7 min gate on 2026-09-23
@@ -44,11 +54,12 @@ start=$(date +%s)
     "$venv/python" "$wt/scripts/check_dev_env.py" "$wt/constraints-dev.txt" || exit 1
     echo "==> ruff check .";          "$venv/ruff" check . || rc=1
     echo "==> ruff format --check ."; "$venv/ruff" format --check . >/dev/null || { "$venv/ruff" format --check . | tail -5; rc=1; }
-    echo "==> mypy";                  "$venv/mypy" || rc=1
+    echo "==> mypy";                  MYPY_CACHE_DIR="$stamp_dir/mypy-cache" "$venv/mypy" || rc=1
     [[ $rc -ne 0 ]] && exit 1
-    echo "==> pytest"
+    echo "==> pytest (not slow; CI runs the slow tier)"
     log="$wt/.prepush-pytest.log"
-    "$venv/pytest" -q -rf -p no:cacheprovider >"$log" 2>&1
+    "$venv/pytest" -q -rf -p no:cacheprovider \
+      -m "not integration and not ml_training and not slow" >"$log" 2>&1
     prc=$?
     tail -4 "$log"
     if [[ $prc -ne 0 ]]; then
@@ -81,13 +92,14 @@ start=$(date +%s)
       [[ ${PIPESTATUS[0]} -ne 0 ]] && { echo "✗ ml_training tier failed" >&2; exit 1; }
     fi
 
-    if git -C "$wt" diff --name-only "${range%%..*}" "$sha" 2>/dev/null | grep -q '^src/dashboard/static/' \
-       || [[ "$range" != *..* ]]; then
+    mapfile -t frontend < <(git -C "$wt" diff --name-only "${range%%..*}" "$sha" 2>/dev/null \
+      | sed -n 's|^src/dashboard/static/||p')
+    if [[ ${#frontend[@]} -gt 0 || "$range" != *..* ]]; then
       cd src/dashboard/static || exit 1
       echo "==> pnpm install --frozen-lockfile"; pnpm install --frozen-lockfile --prefer-offline >/dev/null || exit 1
       echo "==> pnpm typecheck"; pnpm typecheck || exit 1
-      echo "==> pnpm test";      pnpm test || exit 1
-      echo "==> pnpm e2e";       pnpm e2e || exit 1
+      echo "==> vitest related (${#frontend[@]} changed file(s)); full vitest + e2e run in CI"
+      pnpm exec vitest related --run --passWithNoTests "${frontend[@]}" || exit 1
     fi
   )
 rc=$?
@@ -96,6 +108,10 @@ if [[ $rc -ne 0 ]]; then
   echo "✗ ci_gate: ${sha:0:7} is not green -- fix it before pushing." >&2
   exit 1
 fi
-printf '%s green %s (%ss)%s\n' "$sha" "$(date -u +%FT%TZ)" "$(( $(date +%s) - start ))" \
+elapsed=$(( $(date +%s) - start ))
+printf '%s green %s (%ss)%s\n' "$sha" "$(date -u +%FT%TZ)" "$elapsed" \
   "${flaky:+ flaky-under-load: $flaky}" >"$stamp_dir/$sha"
-echo "✓ ci_gate: ${sha:0:7} green -- stamped; git push will accept it"
+echo "✓ ci_gate: ${sha:0:7} green in ${elapsed}s -- stamped; git push will accept it"
+if [[ $elapsed -gt 120 ]]; then
+  echo "  (well over the ~1 minute budget: if tests, re-measure with scripts/mark_slow_tests.py)" >&2
+fi
