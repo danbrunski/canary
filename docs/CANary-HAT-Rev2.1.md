@@ -581,11 +581,17 @@ What that shows:
   runs. Every channel that was *not* enabled keeps the reset value `0x800000`,
   so a rejected or missing command would leave `0x800000`, not `0`. The chip
   reports that it finished a temperature conversion, and the result is zero.
-- **The pressure channel converts real input.** Its noise shrinks with
-  oversampling as it should (roughly 20× from ×1 to ×32). Compensated with the
-  chip's own trims, it gives 81.0 kPa at an assumed 25 °C and 83.3 kPa at the
-  IMU's 37.3 °C die temperature. The operator's home is about 80 kPa, so this
-  is the right magnitude but not yet verified.
+- **The pressure channel responds to real pressure.** Blowing on the lid
+  (2026-09-23, OSR ×8, 50 Hz) moved the raw word by about +90,000 counts
+  (about 1.4 kPa). It returned to baseline within 0.5 s of stopping, and the
+  temperature word stayed `0x000000` in all 63 half-second samples. The *raw
+  level* proves nothing by itself: with these trims the compensated result
+  moves only about 16 Pa per 1,000 counts, so any word near `0x80xxxx` comes
+  out near 81–83 kPa. Absolute accuracy is unverified. At the IMU's 37.3 °C
+  die temperature it reads 83.3 kPa against a phone's 80.42 kPa.
+- **Both readout paths agree.** The FIFO (unfiltered, press+temp frames)
+  carries temperature `0x000000` as well, so this is not a data-register
+  readout effect.
 - **NVM trims are plausible** (T1=27364, T2=19153, T3=−12; for comparison,
   `0x802A00` read as a temperature decodes to 24.8 °C). Uncompensated
   temperature `0` decodes to −127 °C: the temperature ADC is pinned at its
@@ -594,8 +600,20 @@ What that shows:
   connections are supply, I²C, straps and INT, all of which demonstrably work.
   The temperature path is entirely inside the die. That leaves a damaged part
   (ESD, reflow, or cleaning at assembly, or a bad die) rather than the
-  schematic, so check 1 (a second board) decides whether rev 2.1 needs a
+  schematic. One exception is not yet excluded: the rail's power-up ramp,
+  which the datasheet constrains (§3.2, added in its rev 0.91) and nobody has
+  measured. A cold power cycle (unplug, not reboot) is check 4, so check 1 (a second board) decides whether rev 2.1 needs a
   *process* note.
+
+**Decision (operator, 2026-09-23): treat U5's temperature channel as broken
+and compensate its pressure with U6's die temperature.** Investigation stops
+here; checks 1–5 below remain available but are not scheduled. The BMP384
+driver, which does not exist yet, takes its compensation temperature from U6
+(`src/collection/lsm6dsox.py` already batches die temperature at 1.6 Hz) and
+never from U5's temperature word. The surrogate is a property of this board
+revision, not of the BMP384, so it belongs in board or profile config and not
+in the driver's code path. Until the known-answer check below passes, the
+channel carries its provenance and is not trusted as absolute pressure.
 
 **Salvaging U5 on rev 2.0 without rework.** Compensation needs a temperature,
 not specifically U5's own. U6 (LSM6DSOX) is 11 mm away on the same board and
@@ -606,8 +624,9 @@ barometer only after it passes a known-answer check: record the ECM's
 barometric PID (Mode 01 PID 0x33) alongside it through a drive with real
 altitude change, and compare the pairs with `compare_channels`. It is not good
 enough for `derived:GRADE`, where the two dies' temperature drift would show up
-as grade. Whether the pressure path is itself compromised is also open: at the
-IMU temperature it reads about 3 kPa above the expected home pressure.
+as grade. The ~3 kPa gap to the phone at the IMU temperature is what that check must
+explain: a die-temperature gap between U5 and U6, or an offset in U5's
+pressure path.
 
 **Already ruled out (checked against the PCB file, 2026-09-23):**
 
