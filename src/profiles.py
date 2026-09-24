@@ -514,6 +514,7 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "custom_pids": _scope_file(config.daemon.custom_pids, slug),
             "capture_profiles": _scope_file(config.daemon.capture_profiles, slug),
             "afr_calibration": _scope_file(config.daemon.afr_calibration, slug),
+            "kline_profile": _scope_file(config.daemon.kline_profile, slug),
             "catalog_db": _scope_file(config.daemon.catalog_db, slug),
         }
     )

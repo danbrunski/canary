@@ -1,0 +1,25 @@
+{
+ "source": "CANary-HAT passive sniff of UpRev ROM Editor start-up and logging, 2008 Xterra KOEO, 2026-09-23, 10400 8N1. docs/uprev-usb-kline-research.md 'On-wire view'.",
+ "note": "One example of each frame shape, byte-exact; checksums verified at extraction. Tester 0xFC, ECM 0x10.",
+ "frames": {
+  "start_communication": "81 10 fc 81 0e",
+  "start_communication_reply": "83 fc 10 c1 5d 8f 3c",
+  "probe_a1": "02 a1 00 a3",
+  "probe_a1_refused": "03 7f a1 12 35",
+  "probe_a2": "02 a2 00 a4",
+  "probe_a2_refused": "03 7f a2 11 35",
+  "read_did": "05 22 11 03 04 01 40",
+  "read_did_reply": "04 62 11 03 9a 14",
+  "define_81": "3e ac 81 83 ff ff 10 3e 83 ff ff 11 d8 83 ff ff 11 d9 83 ff ff 11 ca 83 ff ff 28 aa 83 ff ff 13 fe 83 ff ff 13 ff 83 ff ff 13 fe 83 ff ff 13 ff 83 ff ff 2e ec 83 ff ff 2e ed 83 ff ff 26 be a4",
+  "define_81_reply": "02 ec 81 6f",
+  "define_82": "3e ac 82 01 81 83 ff ff 26 bf 83 ff ff 1c 2c 83 ff ff 1c 2d 83 ff ff 19 02 83 ff ff 19 03 02 12 25 02 12 26 02 12 0d 02 12 25 02 12 08 02 11 17 02 11 01 02 12 2b 02 12 01 02 11 0a 02 12 06 d2",
+  "define_82_reply": "02 ec 82 70",
+  "define_83": "22 ac 83 01 82 02 12 07 02 11 06 02 11 35 02 11 63 02 11 25 02 11 26 02 12 09 02 12 04 02 12 0f 02 11 02 a4",
+  "define_83_reply": "02 ec 83 71",
+  "poll_83": "04 21 83 04 01 ad",
+  "poll_83_reply": "34 61 83 58 00 00 00 00 00 00 00 00 00 7d 40 00 89 4a 00 20 01 b8 01 b8 00 9d 01 b8 77 0c 00 6b 00 00 00 00 00 03 de 03 de 70 80 80 64 64 00 76 00 4c 00 8b 00 1d",
+  "native_read_reply": "04 62 11 03 99 13",
+  "native_stop": "01 82 83",
+  "native_stop_reply": "01 c2 c3"
+ }
+}

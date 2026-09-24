@@ -883,6 +883,9 @@ class DaemonConfig(_Strict):
     capture_profiles: Path = Path("data/capture_profiles.yaml")
     #: Per-vehicle, per-tune AFR voltage transfer and target-table exports.
     afr_calibration: Path = Path("data/afr_calibration.yaml")
+    #: Per-vehicle K-line facts (addresses, wake-up, framing, timing) for the
+    #: CANary-HAT's native K-line path; absent means K-line is not configured.
+    kline_profile: Path = Path("data/kline.yaml")
     #: Session catalog (Task 6.1, eval-longitudinal-and-dtc.md) — SQLite index
     #: over session sidecars. Rebuildable from disk at any time
     #: (``scripts/catalog.py rebuild``); never a second source of truth.

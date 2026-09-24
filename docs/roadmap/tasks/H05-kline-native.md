@@ -58,14 +58,21 @@ What exists in `src/` is coupled to the USB cable:
 
 ## Desk
 
-- [ ] **H05.2 Vehicle K-line facts as profile data.** **Do:**
+- [x] **H05.2 Vehicle K-line facts as profile data.** **Do:**
   `data/nissan-xterra-2008/kline.yaml` with a pydantic model: baud, ECM and
   tester addresses, the wake-up sequence(s) in order of preference, key
   bytes, frame format after StartCommunication, P2/P3 timings, and
   known-answer requests with their expected reply shape. Required fields, no
   defaults for the vehicle-specific ones. **Accept:** loader tests; a profile
   without the file means "K-line not configured", named.
-- [ ] **H05.3 Wire-level KWP2000 protocol module.** **Do:**
+  **Evidence (2026-09-23):** `src/collection/kline/profile.py` (strict model:
+  no default for any vehicle fact; wake-ups, known answers and the profile
+  itself each require `evidence`), `data/nissan-xterra-2008/kline.yaml`, and
+  `daemon.kline_profile`, scoped per vehicle by `scope_config` (the exhaustive
+  scoping test covers it). A missing file raises `KlineNotConfiguredError`.
+  `tests/test_kline_profile.py` checks the file rebuilds the captured
+  StartCommunication and known-answer frames byte for byte.
+- [x] **H05.3 Wire-level KWP2000 protocol module.** **Do:**
   `src/collection/kline/protocol.py` (pure): addressed frames (format byte,
   target, source) for StartCommunication, length-byte frames after it,
   checksums, a `local_id` parameter for `AC`/`21`, the `01 <lid>` include
@@ -75,6 +82,18 @@ What exists in `src/` is coupled to the USB cable:
   (`02 00` out, `0x66` in). **Accept:** the frames captured on 2026-09-23 are
   test fixtures and round-trip byte-exact; every existing `test_uprev_*` test
   still passes unchanged.
+  **Evidence (2026-09-23):** `src/collection/kline/protocol.py`; 32 tests in
+  `tests/test_kline_protocol.py` over every frame shape captured on the truck
+  (`tests/fixtures/kline/uprev_session_frames.json`), all byte-exact,
+  including UpRev's three chained `AC` definitions and the 50-byte `61 83`
+  reply. The wire parser keeps duplicate descriptors (UpRev defines RAM
+  `0xFFFF13FE`/`13FF` twice); only our own definitions refuse them.
+  `uprev_protocol.py` now encodes descriptors and checksums through it and
+  keeps only the cable's envelope and its tested parsing contract; all 44
+  UpRev tests pass unchanged. **Found by it:** five DIDs UpRev logs have no
+  width in `data/dids.yaml` (`0x1117`, `0x1126`, `0x1204`, `0x1209`,
+  `0x122B`), so the real reply is refused, correctly; the reply pins their
+  total at 7 bytes. A native `22` read of each gives the widths (H05.9).
 - [ ] **H05.4 Serial + GPIO transport.** **Do:**
   `src/collection/kline/transport.py`: one class that owns the tty, EN
   (GPIO26) and the commander pull-up (GPIO24), and enforces the order: tty
@@ -86,11 +105,17 @@ What exists in `src/` is coupled to the USB cable:
   fake GPIO for tests. **Accept:** tests for each ordering rule (the fake
   records the sequence), echo mismatch (bus contention) as a named error,
   timeout, and cleanup on cancellation.
-- [ ] **H05.5 Service allowlist in the client.** **Do:** the K-line client
+- [x] **H05.5 Service allowlist in the client.** **Do:** the K-line client
   accepts only the read/session/define services, and refuses every
   non-volatile write service by id (e.g. `0x2E`, `0x3B`, `0x3D`,
   `0x34`/`0x36`/`0x37`, routine controls that erase) with an error naming
   the AGENTS.md policy. **Accept:** a test per refused id.
+  **Evidence (2026-09-23):** `protocol.check_request`: an allowlist (read,
+  session, define, StartCommunication/Stop, TesterPresent), named refusals for
+  every write service, and `10 85` (programming session) refused as a
+  sub-function. Tests: one per refused id, plus every request the module
+  builds passing its own allowlist. The transport (H05.4) calls it on every
+  send, so no caller can skip it.
 - [ ] **H05.6 ECM session ownership.** **Do:** generalise `tx_gate` from a
   CAN passive flag into an owner of the ECM diagnostic session:
   `can_diagnostics` (default), `kline`, `foreign` (H06: another tester seen

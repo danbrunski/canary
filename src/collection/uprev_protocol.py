@@ -6,6 +6,13 @@ Windows D2XX transport and a future Linux transport can share one parser.
 
 The live-vehicle evidence is recorded in ``docs/uprev-usb-kline-research.md``.
 None of the helpers here issue ECU programming or non-volatile writes.
+
+The cable carries KWP2000 K-line payloads inside its own envelope: a ``02 00``
+prefix on requests and a ``0x66`` byte before each reply's wire frame. The
+KWP2000 part — descriptor encoding and the frame checksum — is
+:mod:`src.collection.kline.protocol`, shared with the CANary-HAT's native
+K-line path; this module keeps only the cable's envelope and its parsing
+contract.
 """
 
 from __future__ import annotations
@@ -13,6 +20,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
+
+from src.collection.kline import protocol as kline
 
 MAGIC = b"UPRV"
 HEADER_LENGTH = 12
@@ -115,13 +124,12 @@ def build_stream_definition(identifiers: Sequence[int]) -> bytes:
         raise UprvProtocolError("stream definition needs at least one identifier")
     if len(set(identifiers)) != len(identifiers):
         raise UprvProtocolError("stream definition contains duplicate identifiers")
-    descriptors = bytearray()
     for identifier in identifiers:
         if not 0 <= identifier <= 0xFFFF:
             raise UprvProtocolError(f"identifier out of range: 0x{identifier:x}")
-        descriptors.append(2)
-        descriptors.extend(identifier.to_bytes(2, "big"))
-    return STREAM_DEFINITION_PREFIX + bytes(descriptors)
+    return STREAM_DEFINITION_PREFIX + kline.encode_descriptors(
+        [kline.DidDescriptor(identifier) for identifier in identifiers]
+    )
 
 
 def build_memory_byte_stream_definition(addresses: Sequence[int]) -> bytes:
@@ -135,13 +143,12 @@ def build_memory_byte_stream_definition(addresses: Sequence[int]) -> bytes:
         raise UprvProtocolError("memory stream definition needs at least one address")
     if len(set(addresses)) != len(addresses):
         raise UprvProtocolError("memory stream definition contains duplicate addresses")
-    descriptors = bytearray()
     for address in addresses:
         if not 0 <= address <= 0xFFFFFFFF:
             raise UprvProtocolError(f"memory address out of range: 0x{address:x}")
-        descriptors.append(MEMORY_BYTE_DESCRIPTOR)
-        descriptors.extend(address.to_bytes(4, "big"))
-    return STREAM_DEFINITION_PREFIX + bytes(descriptors)
+    return STREAM_DEFINITION_PREFIX + kline.encode_descriptors(
+        [kline.MemoryByteDescriptor(address) for address in addresses]
+    )
 
 
 def build_mixed_stream_definition(
@@ -253,7 +260,7 @@ def parse_stream_data(payload: bytes, widths: Sequence[int]) -> tuple[bytes, ...
         )
     if payload[2:4] != STREAM_DATA_PREFIX:
         raise UprvProtocolError(f"not a local-ID 0x81 response: {payload.hex()}")
-    checksum = sum(payload[1:-1]) & 0xFF
+    checksum = kline.checksum(payload[1:-1])
     if checksum != payload[-1]:
         raise UprvProtocolError(
             f"inner checksum mismatch: calculated 0x{checksum:02x}, received 0x{payload[-1]:02x}"
