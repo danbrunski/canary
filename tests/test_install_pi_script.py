@@ -431,3 +431,30 @@ def test_no_overlay_dir_means_no_overlay_work(installer: Installer) -> None:
 
     assert "canary-hat.dtbo" not in result.stdout + result.stderr
     assert not installer.calls("dtc")
+
+
+def test_a_canary_hat_adds_its_pps_to_chrony_under_a_stable_name(installer: Installer) -> None:
+    installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
+    assert "refclock PPS /dev/pps-canary lock GPS refid PPS" in chrony
+    assert "refclock SHM 0 refid GPS" in chrony  # PPS locks to it; it must stay
+    rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").read_text()
+    assert 'ATTR{name}=="canary-pps", SYMLINK+="pps-canary"' in rule
+
+
+def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:
+    installer.run()
+
+    chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
+    assert "refclock PPS" not in chrony
+    assert not (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").exists()
+
+
+def test_fitting_a_hat_later_restarts_chrony_once(installer: Installer) -> None:
+    installer.run()
+    hat = str(_hat_product_file(installer))
+    installer.run(CANARY_HAT_PRODUCT_FILE=hat)
+    assert "systemctl restart chrony" in installer.restarts()
+    installer.run(CANARY_HAT_PRODUCT_FILE=hat)
+    assert "systemctl restart chrony" not in installer.restarts()

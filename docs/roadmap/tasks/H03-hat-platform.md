@@ -59,13 +59,22 @@ other checklist leans on.
   voltage a refusal with its reason, not a pass. **Accept:** tests for fresh,
   stale and absent voltage. (No write is ever started by this; it only makes
   the existing gate able to say no.)
-- [ ] **H03.3 PPS as a chrony refclock.** **Do:** a udev rule giving the
+- [~] **H03.3 PPS as a chrony refclock.** **Do:** a udev rule giving the
   `canary-pps` device a stable name (`/dev/pps-canary`), and in
   `install_pi.sh`'s chrony drop-in `refclock PPS /dev/pps-canary lock GPS
   refid PPS`, only when the HAT is detected. **Accept:**
   `test_install_pi_script.py` covers HAT and no-HAT; **(Pi)** `chronyc
   sources` shows PPS selected with sub-millisecond offset, and a cold boot
   away from the network still steps once, early.
+  **Partial (2026-09-23):** `install_pi.sh`, when the HAT is detected, writes
+  `70-canary-pps.rules` (`/dev/pps-canary` by device name, since the Ethernet
+  PHY's PTP clock is also a `/dev/pps`) and adds
+  `refclock PPS /dev/pps-canary lock GPS refid PPS precision 1e-7 prefer` to
+  the chrony drop-in, whose NMEA `GPS` source it locks to. Locking needs NMEA
+  within ±0.5 s of true time: measured on the HAT's receiver at 9600 baud,
+  +154 ms with a standard deviation under 1 ms (chrony against NTP). Three
+  installer tests (HAT, no HAT, HAT fitted later restarts chrony once).
+  **Owed (Pi):** deploy, and check `chronyc sources` selects PPS with a fix.
 - [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
   power cut): UBX `CFG-VALSET` for `CFG-RATE-MEAS` 100 ms and a UART1 baud that
