@@ -561,6 +561,54 @@ design or process fault that would recur on rev 2.1 has not been ruled out.
 Work through the list below on the rev 2.0 boards before deciding what rev 2.1
 changes.
 
+**Register-level result (2026-09-23, `firmware/baro_diag.py` on the first
+board).** The temperature channel is dead on its own. The commands, the
+pressure channel and the digital core all work.
+
+| Test | STATUS | ERR | Pressure word | Temperature word |
+|---|---|---|---|---|
+| After soft reset | `0x10` | `0x00` | `0x800000` | `0x800000` (both at the datasheet reset value) |
+| Forced, temp only (`PWR_CTRL=0x12`) | `0x50` (drdy_temp) | `0x00` | `0x800000` (untouched) | **`0x000000`** |
+| Forced, press only (`0x11`) | `0x30` (drdy_press) | `0x00` | `0x802000`–`0x802C00` | `0x800000` (untouched) |
+| Forced, both, OSR ×1, ×10 | `0x70` | `0x00` | spread 1,024–3,072 LSB | `0x000000` every time |
+| Forced, both, OSR p×32/t×8, ×5 | `0x70` | `0x00` | spread 40–112 LSB | `0x000000` every time |
+| Normal mode, OSR ×1, ODR 12.5 Hz | `0x70` | `0x00` | `0x8030xx`–`0x8036xx` | `0x000000` |
+
+What that shows:
+
+- **The commands are right.** Each enable bit gates exactly its own channel,
+  the matching drdy bit sets, ERR_REG stays 0, and the sensor-time counter
+  runs. Every channel that was *not* enabled keeps the reset value `0x800000`,
+  so a rejected or missing command would leave `0x800000`, not `0`. The chip
+  reports that it finished a temperature conversion, and the result is zero.
+- **The pressure channel converts real input.** Its noise shrinks with
+  oversampling as it should (roughly 20× from ×1 to ×32). Compensated with the
+  chip's own trims, it gives 81.0 kPa at an assumed 25 °C and 83.3 kPa at the
+  IMU's 37.3 °C die temperature. The operator's home is about 80 kPa, so this
+  is the right magnitude but not yet verified.
+- **NVM trims are plausible** (T1=27364, T2=19153, T3=−12; for comparison,
+  `0x802A00` read as a temperature decodes to 24.8 °C). Uncompensated
+  temperature `0` decodes to −127 °C: the temperature ADC is pinned at its
+  bottom code.
+- **Nothing on the board can cause this.** The package's only external
+  connections are supply, I²C, straps and INT, all of which demonstrably work.
+  The temperature path is entirely inside the die. That leaves a damaged part
+  (ESD, reflow, or cleaning at assembly, or a bad die) rather than the
+  schematic, so check 1 (a second board) decides whether rev 2.1 needs a
+  *process* note.
+
+**Salvaging U5 on rev 2.0 without rework.** Compensation needs a temperature,
+not specifically U5's own. U6 (LSM6DSOX) is 11 mm away on the same board and
+has a die temperature sensor. Pressure sensitivity to the assumed temperature
+is about **188 Pa/°C** at this raw value, so a 1 °C gap between the two dies
+costs about 0.19 kPa (about 17 m of altitude). That is usable as an absolute
+barometer only after it passes a known-answer check: record the ECM's
+barometric PID (Mode 01 PID 0x33) alongside it through a drive with real
+altitude change, and compare the pairs with `compare_channels`. It is not good
+enough for `derived:GRADE`, where the two dies' temperature drift would show up
+as grade. Whether the pressure path is itself compromised is also open: at the
+IMU temperature it reads about 3 kPa above the expected home pressure.
+
 **Already ruled out (checked against the PCB file, 2026-09-23):**
 
 - **Pinout.** Pads match the BMP384 datasheet: VDDIO=1, SCK=2 (SCL1), VSS=3/8/9,
@@ -582,12 +630,8 @@ changes.
    1.58 V, operating minimum 1.71 V), so a high-resistance joint on pin 10 alone
    is not excluded just because the digital side works. X-ray or inspect
    pins 8–10 for voids and tombstoning; LGA joints can't be seen from the top.
-3. **The command sequence.** Rule the software out with Bosch's reference
-   driver (`BMP3_SensorAPI`), not the hand-written `0x13` → `PWR_CTRL` in
-   `checkout_hat.sh`. Read `PWR_CTRL` back after the write (press_en,
-   temp_en and mode must all stick), check `ERR_REG.conf_err` and
-   `STATUS.drdy_temp` *after* a conversion, and set `OSR`/`ODR` explicitly
-   before normal mode. An invalid OSR/ODR pair leaves normal mode idle.
+3. ~~**The command sequence.**~~ **Ruled out 2026-09-23** — see the result
+   below.
 4. **A real hard reset.** The BMP384 has no reset pin. Its only resets are the
    soft reset (`0xB6` → `0x7E`, already tried) and a power cycle. A Pi reboot
    does *not* remove +3V3. Remove power completely (unplug the Pi, wait, no UPS

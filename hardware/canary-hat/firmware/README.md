@@ -14,6 +14,7 @@ in `docs/CANary-HAT-Revisions.md` §13.1.1.
 | `kline_bringup.py` | K-line: `sniff`, `echo` (single-wire loopback) and `fastinit` (StartCommunication → known-answer read → StopCommunication). |
 | `kline_edges.py` | Passive edge capture of K-line — no transmit, pull-up off — for watching another tester (UpRev) at any baud. |
 | `kline_decode.py` | Decodes an edge capture: bit time, wake-up pulses, bytes, messages. |
+| `baro_diag.py` | U5 (BMP384) register-level diagnostic: each channel alone and together, STATUS/ERR per conversion, pressure compensated at the IMU's die temperature. |
 
 ## Programming a new board
 
