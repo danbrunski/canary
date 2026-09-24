@@ -27,6 +27,7 @@ measurement in hand.
   | two burners per core, after | `145e223` + T01 diff | 27.5–36.6 | 0 of 194, three times |
   | `scripts/ci_gate.sh`, `-n auto` | `3f2845d` | 18.9–23.0 (1/5-min, at the serial re-run) | `tests/test_sustained_validation.py::test_fuel_map_persists_tuples_and_known_answers_hold`, passed serially in 39 s — T01.9 |
   | `scripts/ci_gate.sh`, `-n auto` | `9d3fa4b` | 30.1 (1-min, at the serial re-run) | same test again, passed serially in 25 s — T01.9 |
+  | `scripts/ci_gate.sh` vitest (full dashboard suite) | `92b5374` | not recorded | `src/panels/SessionsPanel.test.ts` › hosts SessionsCard and ReplayCard side by side; failed again in a full local `pnpm vitest run`, passed 3 of 3 alone — T01.10 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -298,3 +299,13 @@ measurement in hand.
   inside. The failing traceback was not kept (the gate prints only the summary
   line). Reproduce beside the per-core burners, record which wait expires, and
   replace it with a condition, as T01.1–T01.6 did.
+
+- [ ] **T01.10 `SessionsPanel.test.ts` fails in the full vitest run and passes
+  alone — and the gate has no retry for vitest.** Blocked the `92b5374` push
+  (2026-09-23), a commit whose only dashboard change was two tag labels in
+  `LoggingPage.tsx`; failed again in a full local run (1 of 357), passed 3 of 3
+  run alone. The Python side of `scripts/ci_gate.sh` re-runs parallel-run
+  failures serially and names them flaky; the vitest side does not, so a
+  dashboard flake blocks a push outright. Two fixes: find what the test waits
+  on by wall clock under load (the T01.1 approach), and give the gate the same
+  serial re-run for vitest.
