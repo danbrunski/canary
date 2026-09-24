@@ -602,7 +602,8 @@ What that shows:
   (ESD, reflow, or cleaning at assembly, or a bad die) rather than the
   schematic. One exception is not yet excluded: the rail's power-up ramp,
   which the datasheet constrains (§3.2, added in its rev 0.91) and nobody has
-  measured. A cold power cycle (unplug, not reboot) is check 4, so check 1 (a second board) decides whether rev 2.1 needs a
+  measured. A cold power cycle did not clear it (check 4), so a POR fault would
+  have to recur on every power-up to explain this, so check 1 (a second board) decides whether rev 2.1 needs a
   *process* note.
 
 **Decision (operator, 2026-09-23): treat U5's temperature channel as broken
@@ -651,10 +652,10 @@ pressure path.
    pins 8–10 for voids and tombstoning; LGA joints can't be seen from the top.
 3. ~~**The command sequence.**~~ **Ruled out 2026-09-23** — see the result
    below.
-4. **A real hard reset.** The BMP384 has no reset pin. Its only resets are the
-   soft reset (`0xB6` → `0x7E`, already tried) and a power cycle. A Pi reboot
-   does *not* remove +3V3. Remove power completely (unplug the Pi, wait, no UPS
-   stacked) and read again.
+4. ~~**A real hard reset.**~~ **Done 2026-09-23, no change.** Pi unplugged
+   (12 V left connected), cold boot. U5 came up with registers at defaults and
+   `EVENT.por_detected` set, so it saw a genuine power-on reset. Temperature
+   was still `0x000000` and pressure still converted.
 5. **Assembly process.** Ask PCBWay whether the boards were washed (aqueous or
    ultrasonic) after reflow, and what reflow profile and moisture handling
    (MSL) the part got. Bosch forbids both washing and ultrasonic cleaning for
