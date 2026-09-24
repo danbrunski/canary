@@ -33,7 +33,7 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
 
 ## Desk
 
-- [ ] **H06.1 A streaming frame decoder.** **Do:** turn the batch logic into
+- [x] **H06.1 A streaming frame decoder.** **Do:** turn the batch logic into
   a streaming decoder in `src/collection/kline/sniff.py` fed by UART bytes
   with timestamps: frames by length byte (and by format byte during init),
   checksum per frame, direction by protocol (StartCommunication and requests
@@ -41,13 +41,30 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
   `7F`), request/reply pairing, and the wake-up pulse recognised as a UART
   break. **Accept:** the 2026-09-23 capture, replayed byte by byte through
   it, gives the same 1,462 frames with every checksum good, paired.
-- [ ] **H06.2 Definition tracking.** **Do:** remember each `AC` definition by
+  **Evidence (2026-09-23):** `src/collection/kline/sniff.py` (`FrameDecoder`,
+  `exchanges`). Replayed byte by byte over UpRev's session
+  (`tests/fixtures/kline/uprev_session_bytes.json.gz`, 27 KB: every UART byte
+  with timing, each wake-up as the `0x00` break a Linux UART delivers): 1,462
+  frames, 12 wake-ups, 0 resyncs, 723 requests paired with 723 replies, and 12
+  StartCommunication attempts of which the ECM answered 4. **A bug the
+  corruption test found:** a resync that left a data `0x00` at the front of
+  the buffer waited on it forever, so one flipped bit cost 547 frames; fixed,
+  200 random single-bit flips now lose at most 7. 9 tests in
+  `tests/test_kline_sniff.py`.
+- [x] **H06.2 Definition tracking.** **Do:** remember each `AC` definition by
   local id (including `01 <lid>` chains), and lay out later `21 <lid>`
   replies into `kline:DID_*`/`kline:MEM_*` values using `data/dids.yaml`
   widths and scales; replies whose definition was not seen are kept raw with
   the reason. **Accept:** the captured logging stream decodes into named
   channels; a capture cut to start after the definition yields raw frames
   and a named reason, no guessed values.
+  **Evidence (2026-09-23):** `DefinitionTracker` records UpRev's three
+  acknowledged definitions (`81`, `82` including `81`, `83` including `82`)
+  and lays out its 590 logging replies: all 590 refused today, naming DID
+  `0x1117`, because five of UpRev's DIDs have no catalog width (see H05.3);
+  given widths that fit the reply, every one lays out into 38 values. A
+  capture cut after the definitions keeps its raw replies with "never
+  defined". Raw bytes are kept on every result for a later re-decode.
 - [ ] **H06.3 Sniff mode in the daemon.** **Do:** the K-line collector
   (H05.8) runs in `sniff` mode whenever it is not commanding: EN high,
   pull-up off, transmit impossible (the transport refuses writes in this
