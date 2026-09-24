@@ -94,7 +94,7 @@ What exists in `src/` is coupled to the USB cable:
   width in `data/dids.yaml` (`0x1117`, `0x1126`, `0x1204`, `0x1209`,
   `0x122B`), so the real reply is refused, correctly; the reply pins their
   total at 7 bytes. A native `22` read of each gives the widths (H05.9).
-- [ ] **H05.4 Serial + GPIO transport.** **Do:**
+- [x] **H05.4 Serial + GPIO transport.** **Do:**
   `src/collection/kline/transport.py`: one class that owns the tty, EN
   (GPIO26) and the commander pull-up (GPIO24), and enforces the order: tty
   open before EN rises, RX discarded across the mode change, break-based
@@ -105,6 +105,20 @@ What exists in `src/` is coupled to the USB cable:
   fake GPIO for tests. **Accept:** tests for each ordering rule (the fake
   records the sequence), echo mismatch (bus contention) as a named error,
   timeout, and cleanup on cancellation.
+  **Evidence (2026-09-23):** `src/collection/kline/transport.py`
+  (`KlineTransport`, `command`/`sniff` modes, the six ordering rules in its
+  docstring) over `src/collection/gpio_lines.py` (GPIO v2 uAPI through
+  `ctypes`, no dependency). 16 tests (`tests/test_kline_transport.py`) with a
+  scripted ECU answering in the frames captured on the truck, virtual time,
+  and an event log that pins the order: tty, lines, EN high, discard; EN and
+  pull-up low, release, tty closed, also when the body raises or raising EN
+  fails. **On the HAT:** wake-ups measured 519.01 ms (profile 518.9) and
+  25.08 ms (25.0); after an exception mid-session GPIO24 and GPIO26 read low.
+  With the OBD plug out the transceiver has no VSUP and nothing echoes, now a
+  named `NoEchoError` rather than a bare timeout. **Measured on the Pi 5:** a
+  released GPIO line keeps its last level, so EN is always driven low before
+  release; a SIGKILL mid-session can still leave it high until reboot.
+  Still owed: an ECM exchange through this class (KOEO, H05.9).
 - [x] **H05.5 Service allowlist in the client.** **Do:** the K-line client
   accepts only the read/session/define services, and refuses every
   non-volatile write service by id (e.g. `0x2E`, `0x3B`, `0x3D`,

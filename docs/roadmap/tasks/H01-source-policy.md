@@ -82,7 +82,7 @@ piece of hardware.
   stays only until the retrain H01.1 needs. Test:
   `test_every_captured_source_can_be_named_in_a_spec`
   (`tests/test_analysis_channels.py`).
-- [~] **H01.3 Runtime dependencies.** The collectors need I²C (`smbus2`, pure
+- [x] **H01.3 Runtime dependencies.** The collectors need I²C (`smbus2`, pure
   Python) and GPIO line control (`gpiod`, libgpiod v2 bindings; the bring-up
   scripts use the system package). **Do:** add `smbus2` to `pyproject.toml`
   and the constraints lock per `scripts/lock_dev_constraints.sh`; decide
@@ -97,6 +97,11 @@ piece of hardware.
   ioctl in a few lines of `ctypes` (what `smbus2` does inside), so nothing
   changes in `pyproject.toml` or the constraints lock. GPIO (K-line EN and
   pull-up) is still open and is decided with H05.4.
+  **Done (2026-09-23):** GPIO needs no dependency either:
+  `src/collection/gpio_lines.py` requests output lines through the kernel's
+  GPIO v2 uAPI in `ctypes` (struct sizes asserted at import), checked on the
+  HAT (claim, set, a second claimant refused with EBUSY). Nothing was added to
+  `pyproject.toml`; pyserial was already a dependency.
 - [ ] **H01.4 Reconcile the documents that predate the HAT.**
   `docs/roadmap/imu-gps-integration.md` Phase 2b still plans a BNO055 over
   UART, a BMP390 and upper-case `gps:SPEED`/`LAT` names (the code uses
