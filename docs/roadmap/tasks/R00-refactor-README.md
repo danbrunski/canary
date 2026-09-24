@@ -42,7 +42,9 @@ it has not been independently re-checked; the failing test is the check.
 
 | Item | What goes wrong | Where | Status |
 |---|---|---|---|
-| R03.1 | During an all-DID capture, `/status` says `engine_running` but the inference gate says `engine_off`: it lacks the broadcast-RPM fallback, so IF and sequence scoring are withheld | daemon | verified |
+| R03.12 | IF and sequence score and emit on tuning captures. The gate checks only vehicle state, and the Xterra `tuning` profile polls Mode 01 RPM. The operator decision (below) says they must not | daemon | verified |
+| R04.6 | The A02 evaluation (`evaluate_detectors`) scores tuning captures as drives ("captures included") | offline | verified |
+| R03.1 | During an all-DID capture, `/status` says `engine_running` but the inference gate says `engine_off`: it lacks the broadcast-RPM fallback. Land it after R03.12, which is what should keep tuning captures unscored | daemon | verified |
 | R02.1 | An slcan parse error during a discovery probe propagates as `ValueError`, which `run_with_reconnect` re-raises as a config error | collector | verified (chain); exit reported |
 | R03.2 | `POST …/classification` loads a whole session twice in-process: no child, preflight, deferral or single-flight. MCP agents can reach it | daemon | verified |
 | R03.3 | `DELETE /control/sessions/{id}` guards only the active capture, not the writer's live session | daemon | verified |
@@ -72,7 +74,6 @@ Reported but not re-checked, each behind its own failing test:
 - R03.5: `loss_epoch_start` is `None` after a shutdown.
 - R04.3: rolling-suffix copies.
 - R04.4: live vs storage decode metadata.
-- R04.6: fault windows on Mode-01-less captures.
 - R04.7: fast/slow gap rule.
 - R04.13: harness wiring.
 - R05.3: cam-tracking `corrcoef`.
@@ -85,8 +86,9 @@ Reported but not re-checked, each behind its own failing test:
 
 ## Order
 
-1. **The serve-path drift bugs.** R03.1, R02.1, R03.2, R03.3, R05.1, then
-   R02.2–R02.7. Each is small and independent. Serve-path items replay a
+1. **The serve-path drift bugs.** R03.12 then R03.1, R02.1, R03.2, R03.3,
+   R05.1, then R02.2–R02.7. R04.6 can go alongside, since it is offline.
+   Each is small and independent. Serve-path items replay a
    pinned session before and after.
 2. **R01, the shared homes.** Most later items delete copies into these
    homes, so they go before the area work that uses them. R01.1 and R01.2
@@ -119,6 +121,9 @@ Record each answer in the item and never re-open it.
 
 - **R01.1:** does a `_tuning-<id>` directory count as a session for HTTP
   reads and sidecars?
+- **R03.12:** should `corpus_eligible: true` stay possible for a
+  non-default profile? Do behavior-model deviations and plausibility checks
+  also stop during tuning captures?
 - **R03.1:** which freshness rule is right for the broadcast-RPM fallback?
   The live copy requires CAN freshness; the Parquet copy does not.
 - **R03.11:** keep the `--collection-only` drain on the storage sink, or
@@ -171,6 +176,13 @@ Record each answer in the item and never re-open it.
   the imports H01 relies on.
 
 ## Decisions carried forward (don't re-open)
+
+- **Tuning logs are not in the anomaly detectors** (operator, 2026-09-24).
+  They don't represent the default profile, so IF and sequence neither train,
+  calibrate, evaluate nor score live on a non-corpus-eligible capture.
+  Training was already protected by `_capture-*` storage. R03.12 closes live
+  scoring, and R04.6 closes evaluation. Behavior models and plausibility
+  checks are separate calls, recorded as questions in R03.12.
 
 - The collection `decode_*` functions and the φ/λ decoder pair stay
   separate. The ISO-TP *assemblers* stay as they are. R02.5 shares only the

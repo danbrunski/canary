@@ -48,6 +48,16 @@ Findings to carry forward, not re-derive:
 - **The supercharger build invalidates every learned normal within weeks**,
   so retraining the naturally aspirated engine is a scoped decision (A06.3),
   not a default.
+- **Tuning logs are not in the anomaly detectors** (operator, 2026-09-24).
+  They don't represent the default profile. Training was already protected:
+  `corpus_eligible: false` profiles write to `_capture-*`, which training
+  discovery skips. Two paths still let them in:
+  - live scoring, where the inference gate looks only at vehicle state
+    ([R03.12](R03-daemon-control-http.md));
+  - A02's `evaluate_detectors`, which includes captures as evaluation drives
+    ([R04.6](R04-models-and-preprocessing.md)).
+
+  Both are open. The A02.11 baseline is regenerated when R04.6 lands.
 
 ## Shared acceptance rules
 

@@ -156,18 +156,44 @@ about: a rule copied four times is a rule that four places can disagree on.
   golden has one fails and names the reason. **Accept:** failing tests first
   for both silent passes. `test_promotion_gate.py` passes. Size **S**.
 
-- [ ] **R04.6 Realistic-fault windows must find engine time on Mode-01-less
-  captures.**
-  - `synthetic_fault_eval._running_mask` / `_idle_mask` read only
-    `obd:RPM` / `obd:SPEED`.
-  - `evaluation.engine_running` coalesces the segmenter's RPM candidates, and
-    its docstring says why: "a capture whose profile disables Mode 01 still
-    has engine time".
-  - So `choose_fault_window` finds no stretch for maf_gain, bank_imbalance or
-    lazy_o2 on those captures.
+- [ ] **R04.6 Evaluate the detectors on default-profile data only.**
+  *Operator decision 2026-09-24: tuning logs don't represent the default
+  profile, so they are not in the anomaly detectors. See R03.12 for the live
+  half.*
 
-  **Do:** reuse `engine_running`, and add a matching speed coalescer.
-  **Accept:** a failing test on a DID-only fixture. Size **S**.
+  This item was first written the other way round: "make fault windows find
+  engine time on Mode-01-less captures". That direction is withdrawn.
+
+  **Today (checked 2026-09-24):** `scripts/evaluate_detectors.discover_session_dirs`
+  is "Every recorded session under `roots`, captures included". It skips
+  only `_archive` and `_replay`, so `_capture-tuning-*` sessions become
+  evaluation drives, and the A02 per-drive table scores IF and sequence on
+  tuning data. `evaluation.engine_running` coalesces RPM candidates for
+  exactly that case ("a capture whose profile disables Mode 01 still has
+  engine time").
+
+  **Do:**
+  - Keep captures in *drive grouping*. `drives_of_sessions` bridges a
+    capture with its sibling recordings, and that keeps a drive's default
+    parts together, so held-out stays honest.
+  - Exclude non-corpus-eligible sessions (`read_capture_manifest(...).corpus_eligible`,
+    and `_tuning-*`) from the rows that are scored, from fault injection
+    (`choose_fault_window`) and from every metric.
+  - A drive whose only rows are a tuning capture is reported as `skipped: no
+    default-profile rows`, not silently dropped.
+  - `synthetic_fault_eval._running_mask`'s `obd:RPM`-only view is then
+    sufficient, because default-profile rows carry Mode 01. Leave it, or
+    route it through `engine_running` only for consistency.
+
+  **Accept:**
+  - A failing test first: a fixture drive made of a default session and a
+    `_capture-tuning-*` sibling is scored on the default rows only, and the
+    capture's rows appear in no metric.
+  - The A02 baseline table (A02.11) is regenerated, and the change is
+    recorded next to it.
+  - Record the decision in A00's decisions list too.
+
+  Size **S–M**.
 
 - [ ] **R04.7 Write the fast/slow max-gap rule once.**
   - The resampler honours `ResampleConfig.fast_channels`/`slow_channels`.

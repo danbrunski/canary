@@ -28,9 +28,71 @@ Three problems carry most of the weight here:
 
 ## Correctness first
 
+- [ ] **R03.12 Withhold IF and sequence scoring while a non-default profile
+  polls.** *Operator decision 2026-09-24, serve path. Added after the review;
+  it goes before R03.1.*
+
+  **The decision.** Tuning logs don't represent the default profile, so they
+  are not in the anomaly detectors: not in training, calibration or
+  evaluation, and not in live scoring. The detectors learned "normal" under
+  the default profile's channels and rates. A tuning capture polls a
+  different set at different rates, so scoring it measures the profile
+  change, not the engine.
+
+  **Today (checked 2026-09-24):**
+  - Training and calibration are protected. The `tuning` profile is
+    `corpus_eligible: false`, so `ParquetWriter` writes it to
+    `_capture-tuning-*`, which `discover_sessions` skips.
+  - Live scoring is not protected. The inference gate (`scoring_allowed`
+    in `daemon/inference.py`) looks only at `vehicle_state`. The Xterra
+    `tuning` profile polls Mode 01 RPM, so vehicle state reads
+    `engine_running` and IF/sequence score and emit on tuning data for the
+    whole capture.
+  - All-DID profiles are withheld only by accident: vehicle state misreads
+    them as `engine_off` (R03.1).
+
+  **Do:**
+  - Add a second gate beside the vehicle-state one: IF and sequence score
+    only while the active profile is corpus-eligible
+    (`tuning_profile.active_profile().corpus_eligible`). Count refusals as
+    `skipped_capture_profile`, a separate counter from
+    `skipped_vehicle_state`, so an empty score stream says which kind of
+    empty it is.
+  - Surface the withheld state in `/status` detectors.
+  - During replay the gate reads the replayed session's capture manifest
+    (`read_capture_manifest(...).corpus_eligible`), not the daemon's live
+    profile.
+  - Behavior models and plausibility checks are not IF/sequence and are out
+    of scope here (see below).
+
+  **Accept:**
+  - Failing tests first:
+    - with a non-eligible profile active and `engine_running`, IF and
+      sequence emit nothing and `skipped_capture_profile` counts;
+    - on return to `default`, scoring resumes;
+    - replaying a `_capture-tuning-*` session scores nothing.
+  - A replay of a default-profile session is unchanged.
+
+  **Coordinate first:** `src/daemon/inference.py` was dirty in another
+  session on 2026-09-24.
+
+  **Operator questions (record the answers here):**
+  - Should `corpus_eligible: true` stay possible for a non-default profile?
+    The schema allows it today and no profile uses it. The decision's
+    wording, "doesn't represent the default profile", suggests it should
+    not.
+  - Do behavior-model deviations also stop during tuning captures? Some
+    refit recipes deliberately fit on capture-only DIDs (B-series), so that
+    is a separate call.
+  - Should plausibility checks (A05) keep running? They are deterministic
+    range/stuck/freshness checks, and profile-independent.
+
+  Size **S–M**.
+
 - [ ] **R03.1 One vehicle-state module. The inference copy has lost the
-  broadcast-RPM fallback.** *Drift bug, serve path.* `VehicleState` is
-  derived three times:
+  broadcast-RPM fallback.** *Drift bug, serve path. Land R03.12 first:
+  without it, this fix turns scoring **on** during all-DID tuning
+  captures.* `VehicleState` is derived three times:
   - `dashboard/status._derive_vehicle_state` (from Parquet).
   - `status._derive_vehicle_state_live` (from memory).
   - `daemon/inference._live_vehicle_state`. Its docstring says it "Mirrors
@@ -45,11 +107,15 @@ Three problems carry most of the weight here:
   one requires CAN freshness and the Parquet one does not.
 
   During a Mode-01-less capture, `/status` and autostart therefore say
-  `engine_running` while the inference gate says `engine_off`. That withholds
-  IF and sequence scoring (`skipped_vehicle_state`) and feeds
-  `idle_shutdown.observe` the wrong state; idle shutdown is opt-in and ships
-  disabled. The future non-volatile-write gate, which proceeds only from
-  `ignition_only`, will need one trustworthy classifier.
+  `engine_running` while the inference gate says `engine_off`.
+  - The withheld IF/sequence scoring that results is the *right outcome for
+    the wrong reason*: tuning captures must not be scored (R03.12). Once
+    R03.12 gates on the profile, the classifier no longer has to be wrong to
+    keep them out.
+  - The same wrong state is fed to `idle_shutdown.observe` (opt-in, ships
+    disabled).
+  - The future non-volatile-write gate, which proceeds only from
+    `ignition_only`, will need one trustworthy classifier.
 
   There are also import inversions:
   - `daemon/inference.py` and `control/nonvolatile_write.py` import
@@ -68,7 +134,9 @@ Three problems carry most of the weight here:
 
   **Accept:**
   - A failing test first: an all-DID capture (Mode 01 stale, broadcast RPM
-    fresh) classifies `engine_running` in the inference gate.
+    fresh) classifies `engine_running` in the inference gate. The same test
+    shows IF/sequence still withheld, now counted under
+    `skipped_capture_profile`.
   - `test_vehicle_state.py`, `test_daemon.py`'s vehicle-state tests,
     `test_decoded_mode_signals.py` and `test_dashboard_status_cache.py` pass.
 
