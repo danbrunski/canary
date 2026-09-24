@@ -260,6 +260,10 @@ class KlineCollector:
         pending: SniffedFrame | None = None
         transport = self._factory(profile, Mode.SNIFF)
         await asyncio.to_thread(transport.open)
+        log.info(
+            "K-line sniffing (listening only, pull-up off)",
+            extra={"tty": self.config.tty, "baud": profile.baud},
+        )
         try:
             while not stop.is_set() and self._wants_command() is None:
                 burst = await asyncio.to_thread(transport.read_burst, SNIFF_BURST_SECONDS)
