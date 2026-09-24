@@ -434,14 +434,20 @@ def test_no_overlay_dir_means_no_overlay_work(installer: Installer) -> None:
     assert not installer.calls("dtc")
 
 
-def test_a_canary_hat_adds_its_pps_to_chrony_under_a_stable_name(installer: Installer) -> None:
+def test_a_canary_hat_gets_a_stable_pps_name_but_no_fatal_refclock(
+    installer: Installer,
+) -> None:
+    """chronyd exits when a `refclock PPS` device is missing; on 2026-09-23 that
+    took the Pi's time sync down. The name rule stays; the direct refclock may
+    not come back."""
     installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
 
     chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
-    assert "refclock PPS /dev/pps-canary lock GPS refid PPS" in chrony
-    assert "refclock SHM 0 refid GPS" in chrony  # PPS locks to it; it must stay
+    assert "refclock PPS" not in chrony
+    assert "refclock SHM 0 refid GPS" in chrony
     rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").read_text()
-    assert 'ATTR{name}=="canary-pps", SYMLINK+="pps-canary"' in rule
+    # The device's name reads `canary-pps.-1`, so an exact match never fires.
+    assert 'ATTR{name}=="canary-pps*", SYMLINK+="pps-canary"' in rule
 
 
 def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:

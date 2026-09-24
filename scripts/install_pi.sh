@@ -323,13 +323,19 @@ EOF
   # is the admin's and may carry local NTP policy we shouldn't clobber.
   install -d -m 0755 "${ROOT}/etc/chrony/conf.d"
   # A CANary-HAT also brings the receiver's TIMEPULSE (pps-gpio on GPIO18, a
-  # /dev/ppsN named canary-pps). Its number depends on probe order (the
-  # Ethernet PHY's PTP clock is another /dev/pps), so a udev rule gives it a
-  # stable name for chrony.
+  # /dev/ppsN whose name reads `canary-pps.-1`). Its number depends on probe
+  # order (the Ethernet PHY's PTP clock and gpsd's tty line discipline are
+  # other /dev/pps devices), so a udev rule gives it a stable name.
+  #
+  # It is NOT given to chrony as `refclock PPS` here: chronyd exits fatally
+  # when a configured PPS device does not exist, so a missing overlay or a
+  # udev race at boot would take all time sync down. It did, on 2026-09-23,
+  # the first time this shipped (the rule matched `canary-pps` exactly and
+  # never fired). The safe path is a SOCK refclock fed by gpsd (H03.3).
   if [[ "${hat_product:-}" == CANary-HAT* ]]; then
     write_managed chrony "${ROOT}/etc/udev/rules.d/70-canary-pps.rules" <<'EOF'
 # Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS.
-SUBSYSTEM=="pps", ATTR{name}=="canary-pps", SYMLINK+="pps-canary"
+SUBSYSTEM=="pps", ATTR{name}=="canary-pps*", SYMLINK+="pps-canary"
 EOF
     if [[ -n "${CONFIG_CHANGED[chrony]:-}" ]]; then
       udevadm control --reload || true
@@ -356,17 +362,6 @@ refclock SHM 0 refid GPS precision 5e-1 offset 0.0
 # this box is safety-critical or ordering-sensitive w.r.t. wall clock.
 makestep 1 -1
 EOF
-    if [[ "${hat_product:-}" == CANary-HAT* ]]; then
-      cat <<'EOF'
-
-# CANary-HAT PPS: the MAX-M10M's TIMEPULSE, microsecond-accurate once the
-# receiver has a fix. A pulse carries no second number, so it is locked to the
-# GPS (NMEA) refclock above, which must be within half a second of true time:
-# measured +154 ms (std dev < 1 ms) on the HAT at 9600 baud, 2026-09-23.
-# Without a fix there are no pulses and chrony simply ignores this source.
-refclock PPS /dev/pps-canary lock GPS refid PPS precision 1e-7 prefer
-EOF
-    fi
   )
 
   # Debian's chrony.conf pulls in conf.d by default; older configs may not.

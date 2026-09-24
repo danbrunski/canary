@@ -59,22 +59,28 @@ other checklist leans on.
   voltage a refusal with its reason, not a pass. **Accept:** tests for fresh,
   stale and absent voltage. (No write is ever started by this; it only makes
   the existing gate able to say no.)
-- [~] **H03.3 PPS as a chrony refclock.** **Do:** a udev rule giving the
-  `canary-pps` device a stable name (`/dev/pps-canary`), and in
-  `install_pi.sh`'s chrony drop-in `refclock PPS /dev/pps-canary lock GPS
-  refid PPS`, only when the HAT is detected. **Accept:**
-  `test_install_pi_script.py` covers HAT and no-HAT; **(Pi)** `chronyc
-  sources` shows PPS selected with sub-millisecond offset, and a cold boot
-  away from the network still steps once, early.
-  **Partial (2026-09-23):** `install_pi.sh`, when the HAT is detected, writes
-  `70-canary-pps.rules` (`/dev/pps-canary` by device name, since the Ethernet
-  PHY's PTP clock is also a `/dev/pps`) and adds
-  `refclock PPS /dev/pps-canary lock GPS refid PPS precision 1e-7 prefer` to
-  the chrony drop-in, whose NMEA `GPS` source it locks to. Locking needs NMEA
-  within ±0.5 s of true time: measured on the HAT's receiver at 9600 baud,
-  +154 ms with a standard deviation under 1 ms (chrony against NTP). Three
-  installer tests (HAT, no HAT, HAT fitted later restarts chrony once).
-  **Owed (Pi):** deploy, and check `chronyc sources` selects PPS with a fix.
+- [ ] **H03.3 PPS as a chrony refclock.** **Do:** feed the HAT's PPS to
+  chrony through gpsd and a `refclock SOCK` (chrony creates the socket; gpsd
+  writes pulses to it when it has them), **not** `refclock PPS`: chronyd exits
+  fatally when a configured PPS device is missing, so a direct refclock ties
+  all time sync to the overlay loading and to a udev race at boot. Lock it to
+  the NMEA `GPS` source. **Accept:** `test_install_pi_script.py` covers HAT and
+  no HAT; **(Pi)** `chronyc sources` selects PPS with sub-millisecond offset;
+  chrony still starts with the overlay removed; a cold boot away from the
+  network still steps once, early.
+  **What 2026-09-23 established:** (1) the kernel device's name reads
+  `canary-pps.-1`, not `canary-pps` — the installer's udev rule now matches
+  `canary-pps*` and gives `/dev/pps-canary` (the Ethernet PHY's PTP clock and
+  gpsd's tty line discipline are also `/dev/pps` devices, so the number moves);
+  (2) the first deploy's `refclock PPS /dev/pps-canary` line, with the exact
+  match that never fired, **stopped chronyd at start** ("Could not open
+  /dev/pps-canary"), leaving the Pi without time sync until the rule was fixed
+  by hand — the installer no longer writes that line, and a test forbids it;
+  (3) pulses do arrive (the assert counter advances at 1 Hz with a fix), but
+  the direct refclock, locked to GPS, took no samples in over a minute — to
+  understand with the SOCK path; (4) the HAT's NMEA runs +154..161 ms late
+  (std dev < 1 ms) at 9600 baud, inside the ±0.5 s a lock needs.
+
 - [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
   power cut): UBX `CFG-VALSET` for `CFG-RATE-MEAS` 100 ms and a UART1 baud that
