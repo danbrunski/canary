@@ -29,9 +29,18 @@ profiles:
     thermal_efficiency: 0.3
     tire_diameter_m: null
     final_drive: 4.08
+    gearbox_ratios:
+    - 4.368
+    - 2.518
+    - 1.743
+    - 1.283
+    - 1.0
+    - 0.769
     tyre_loaded_circumference_m: 2.609
-    driveline_evidence: 'Final drive 4.08 (regeared) and loaded circumference 2.609 m
-      back-solved from steady-cruise rpm clusters against GPS speed; three clusters land
-      on gearbox ratios 1.000 (direct drive), 1.309 and 1.740 (data/bindings.yaml 0x6F7
-      notes). Gear numbers of those clusters not recorded, so gearbox_ratios waits for
-      H07.11 (all six gears, selected by hand).'
+    driveline_evidence: 'Final drive 4.08: regeared by the operator from the Off-Road
+      trim''s stock 3.69. Gearbox: the FS6R31A 6-speed manual''s published ratios
+      4.368/2.518/1.743/1.283/1.000/0.769 (reverse 3.966; diyauto.com, clubfrontier.org).
+      Loaded tyre circumference 2.609 m back-solved from steady-cruise rpm clusters
+      against GPS speed, which land on 1.000, 1.740 and 1.309 (data/bindings.yaml 0x6F7
+      notes): 5th exactly (the circumference was solved from it), 3rd within 0.2 %, 4th
+      2.0 % high. Confirm all six by hand-selected steady cruise (H07.11).'
