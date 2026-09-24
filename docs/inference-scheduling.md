@@ -85,7 +85,13 @@ Exactly one `ThreadPoolExecutor(max_workers=1)` is owned per
 `run_live_inference` task, and at most one scoring job is in flight. If a job
 is still running when the next deadline arrives, the new snapshot is retained
 in a depth-one newest-wins queue; displacing an older pending snapshot counts
-`missed_by_reason.compute_busy`. A worker exception is
+`missed_by_reason.compute_busy`. "Still running" is judged *after* the
+snapshot, not before it: a job that finishes while the next tick's features
+are built has already drained the queue, and a tick queued on the earlier
+answer was then overtaken by the tick after it, so its older row reached the
+sequence window late and restarted it (2026-09-24: the r2 LSTM scored no
+window for a whole drive). Dispatch also refuses any tick older than the last
+one dispatched, counted as `compute_busy`. A worker exception is
 logged, counted (`compute_failures`), and the loop continues. On stop the
 in-flight job is awaited for up to `max(interval, 1 s)`, then the executor is
 shut down; the shutdown test asserts no `canary-inference` thread survives.

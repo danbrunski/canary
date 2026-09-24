@@ -825,13 +825,23 @@ class LiveInferencePipeline:
         two concurrent scores would interleave it. Ordering therefore still
         holds — computes are dispatched in tick order and applied in dispatch
         order — and the queue is depth 1.
+
+        Whether the worker is busy is decided *after* the snapshot, never from
+        a flag read before it (2026-09-24). A score that finishes while this
+        tick's features are built drains the queue on its way out; a tick
+        parked on the stale "busy" answer then sat in the queue with nothing in
+        flight, the next tick dispatched ahead of it, and the older row was
+        scored after the newer one. Every such row restarts the sequence window
+        (time went backwards, A01.3), so on the Pi — a ~300 ms score against a
+        ~250 ms feature build — no 30-row window ever filled and the r2 LSTM
+        scored nothing for a whole drive. :meth:`_dispatch` refuses an older
+        tick outright, so no path can reintroduce the reordering.
         """
-        busy = self._inflight is not None and not self._inflight.done()
         request = await self._snapshot(slot)
         if not request.needs_worker:
             self._apply(request, _EMPTY_RESULT)
             return
-        if busy or (self._inflight is not None and not self._inflight.done()):
+        if self._inflight is not None and not self._inflight.done():
             # Depth-1 queue, newest wins. A deeper queue would score rows that
             # are already stale by the time they reach the detector and would
             # let a slow scorer grow memory and lag without bound; dropping the
@@ -849,7 +859,23 @@ class LiveInferencePipeline:
         self._dispatch(request)
 
     def _dispatch(self, request: _TickRequest) -> None:
-        """Start the one compute task for ``request``."""
+        """Start the one compute task for ``request``.
+
+        Refuses a tick older than the last one dispatched: its row would reach
+        the sequence engine after a newer one and restart the window (A01.3).
+        Counted as a ``compute_busy`` miss — the tick lost its turn to the busy
+        worker — and logged, since reaching it means the queue discipline in
+        :meth:`run_tick` broke again.
+        """
+        if request.slot.index <= self._inflight_index:
+            self._recorder.note_missed(MISSED_COMPUTE_BUSY)
+            log.warning(
+                "not scoring inference tick %d after tick %d: an older row would "
+                "restart the sequence window",
+                request.slot.index,
+                self._inflight_index,
+            )
+            return
         self._inflight_index = request.slot.index
         self._inflight = asyncio.create_task(
             self._compute_and_apply(request),
