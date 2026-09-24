@@ -64,7 +64,7 @@ piece of hardware.
   can read IMU channels (H02.5 and H07 need it). **Accept:** a test that
   every `CAPTURED_SOURCES` member is readable by `channels.read_channels`, or
   is named in an explicit exclusion with its reason.
-- [ ] **H01.3 Runtime dependencies.** The collectors need I²C (`smbus2`, pure
+- [~] **H01.3 Runtime dependencies.** The collectors need I²C (`smbus2`, pure
   Python) and GPIO line control (`gpiod`, libgpiod v2 bindings; the bring-up
   scripts use the system package). **Do:** add `smbus2` to `pyproject.toml`
   and the constraints lock per `scripts/lock_dev_constraints.sh`; decide
@@ -74,6 +74,11 @@ piece of hardware.
   is lazy and every test runs with a fake, so CI never needs the hardware.
   **Accept:** `scripts/check_dev_env.py` passes on the laptop venv; the Pi
   venv imports both; CI green.
+  **Partial (2026-09-23):** I²C needs **no dependency** — `src/collection/i2c_dev.py`
+  does the combined write/read transaction through the kernel's `I2C_RDWR`
+  ioctl in a few lines of `ctypes` (what `smbus2` does inside), so nothing
+  changes in `pyproject.toml` or the constraints lock. GPIO (K-line EN and
+  pull-up) is still open and is decided with H05.4.
 - [ ] **H01.4 Reconcile the documents that predate the HAT.**
   `docs/roadmap/imu-gps-integration.md` Phase 2b still plans a BNO055 over
   UART, a BMP390 and upper-case `gps:SPEED`/`LAT` names (the code uses

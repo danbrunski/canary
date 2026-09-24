@@ -40,7 +40,7 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
 
 ## Desk
 
-- [ ] **H02.1 `ImuConfig` for the LSM6DSOX.** **Do:** add `lsm6dsox` to
+- [x] **H02.1 `ImuConfig` for the LSM6DSOX.** **Do:** add `lsm6dsox` to
   `ImuConfig.source`; fields `i2c_address` (0x6B), `odr_hz` (from the chip's
   set: 26/52/104/208/416), `accel_range_g` (2/4/8/16), `gyro_range_dps`
   (250/500/1000/2000), optional `int1_gpio` (16). Validators refuse values the
@@ -48,7 +48,14 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
   (OVERNIGHT-QUEUE pre-made decision); `canary.pi.example.yaml` and
   `canary.example.yaml` gain the HAT stanza, commented. **Accept:**
   `tests/test_config.py` covers each validator and the default.
-- [ ] **H02.2 LSM6DSOX driver + `imu_collector.py`.** **Do:**
+  **Evidence (2026-09-23):** `ImuConfig` gains `lsm6dsox`, `i2c_address`,
+  `accel_range_g`, `gyro_range_dps`, `fifo_poll_seconds`; a model validator
+  checks rate and ranges against the driver's own tables
+  (`lsm6dsox.ImuSettings`), so the pre-HAT default of 100 Hz is refused for
+  `lsm6dsox` rather than rounded. Tests in `tests/test_imu_collector.py`
+  (`test_config_refuses_a_rate_the_lsm6dsox_cannot_do`); both example configs
+  carry the HAT stanza, commented.
+- [x] **H02.2 LSM6DSOX driver + `imu_collector.py`.** **Do:**
   `src/collection/lsm6dsox.py`: register-level driver over a small bus
   protocol (`read(reg, n)`, `write(reg, value)`), so a fake bus drives every
   test and rev 3.0 can supply an MCU-backed bus. Use the **FIFO** with a
@@ -63,6 +70,24 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
   decoding, partial batches, overrun), timestamp spacing, the reconnect path
   when the bus errors, and a daemon test that the collector starts only when
   `source: lsm6dsox`.
+  **Evidence (2026-09-23):** `src/collection/i2c_dev.py` (`I2C_RDWR` ioctl,
+  no dependency), `src/collection/lsm6dsox.py` (FIFO burst reads — the
+  `0x7E`→`0x78` address wrap measured on the chip — instants grouped by tag
+  counter, dated from the chip's timestamp words, ticks per instant learned
+  from consecutive stamps, a 100 ms power-up settling window), and
+  `src/collection/imu_collector.py` wired through `_imu_collectors`. A pre-HAT
+  chip is refused at start-up rather than silently recording nothing. 25
+  tests (`tests/test_lsm6dsox.py`, `tests/test_imu_collector.py`), including a
+  real three-batch FIFO dump from the HAT at rest
+  (`tests/fixtures/lsm6dsox/fifo_at_rest.json`). **The settling window came
+  from that dump:** the first accelerometer sample after power-up read 0.89 g
+  and the gyroscope read up to 33 deg/s for ~50 ms on a board sitting still.
+  **On the chip (Pi, 5 s, 100 ms polls):** 517 samples at 104.55 Hz, 0
+  overruns, 0 undated, 11 settling instants dropped, gaps 9.59 ms median
+  (9.37–9.72), 384.00 ticks per instant learned (the chip's "104 Hz" is
+  104.17 Hz), newest sample 34 ms old at read, |a| = 1.0055 ± 0.0056 g, gyro
+  peak 2.45 deg/s. The ±0.2 ms gap jitter is the per-batch host mapping; it
+  can be smoothed if a consumer ever needs better.
 - [ ] **H02.3 Choose the recorded rate from a measurement, not a guess.**
   **Do (Pi):** run the collector at 52, 104 and 208 Hz on the Pi with the
   normal CAN/OBD load, engine running or replaying a busy session, and record

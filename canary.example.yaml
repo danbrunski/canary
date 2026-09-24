@@ -48,10 +48,18 @@ hardware:
   # `disabled` (default) is a hard requirement: the daemon runs normally
   # without it, same as gps.enabled=false above.
   imu:
-    source: disabled  # bno055 | mpu6050 | icm20948 | disabled
+    source: disabled  # lsm6dsox (CANary-HAT) | bno055 | mpu6050 | icm20948 | disabled
     i2c_bus: 1
     sample_rate_hz: 100
     mount_orientation: auto
+    # CANary-HAT (only lsm6dsox has a collector; its rates are 12.5/26/52/104/
+    # 208/416/833 Hz and anything else is refused). External-sensor channels:
+    # recorded, never used to train or score the anomaly detectors.
+    # source: lsm6dsox
+    # i2c_address: 0x6B
+    # sample_rate_hz: 104
+    # accel_range_g: 8
+    # gyro_range_dps: 2000
 
 collection:
   # canable = one Canable does broadcast CAN + active OBD/UDS ISO-TP.

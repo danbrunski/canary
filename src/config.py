@@ -154,11 +154,25 @@ class ImuConfig(_Strict):
     #: bno055 does gravity removal + orientation fusion on-chip (see
     #: ``src.preprocessing.imu_frame``'s module docstring); mpu6050/icm20948
     #: are raw accel+gyro requiring this codebase's own gravity low-pass.
+    #: lsm6dsox is the CANary-HAT's IMU (raw accel+gyro, read through its FIFO
+    #: by ``src.collection.imu_collector``) and the only chip with a collector.
     #: ``disabled`` (default) — no IMU wired, daemon startup skips it exactly
     #: like ``gps.enabled=False`` skips the GPS collector.
-    source: Literal["bno055", "mpu6050", "icm20948", "disabled"] = "disabled"
+    source: Literal["bno055", "mpu6050", "icm20948", "lsm6dsox", "disabled"] = "disabled"
     i2c_bus: int = 1
+    #: 7-bit I²C address (lsm6dsox only; the HAT straps SA0 high -> 0x6B).
+    i2c_address: int = 0x6B
+    #: Output data rate. For lsm6dsox it must be one of the chip's rates
+    #: (12.5, 26, 52, 104, 208, 416, 833 Hz) — refused, not rounded. The
+    #: recorded rate is a load decision, measured in H02.3.
     sample_rate_hz: float = 100.0
+    #: Full-scale ranges (lsm6dsox only). ±8 g / ±2000 deg/s did not clip on
+    #: a hand-shaken board (2.2 g, 244 deg/s peaks, 2026-09-23).
+    accel_range_g: int = 8
+    gyro_range_dps: int = 2000
+    #: How often the collector drains the chip's FIFO. The FIFO holds ~2 s at
+    #: 104 Hz, so this only trades latency against bus transactions.
+    fifo_poll_seconds: float = Field(default=0.1, gt=0.0, le=1.0)
     #: ``auto`` resolves mount tilt dynamically via the gravity low-pass in
     #: ``imu_frame.py`` (the only correct option per the doc's physics
     #: section — a one-shot calibration is permanently biased by wherever
@@ -171,6 +185,23 @@ class ImuConfig(_Strict):
     def enabled(self) -> bool:
         """Mirrors ``GpsConfig.enabled`` — ``False`` only when ``source == "disabled"``."""
         return self.source != "disabled"
+
+    @model_validator(mode="after")
+    def _chip_settings(self) -> ImuConfig:
+        if self.source != "lsm6dsox":
+            return self
+        # Validate against the driver's own tables so the two cannot drift.
+        from src.collection.lsm6dsox import ImuSettings
+
+        try:
+            ImuSettings(
+                odr_hz=self.sample_rate_hz,
+                accel_range_g=self.accel_range_g,
+                gyro_range_dps=self.gyro_range_dps,
+            )
+        except ValueError as exc:
+            raise ValueError(f"hardware.imu: {exc}") from exc
+        return self
 
 
 class HardwareConfig(_Strict):

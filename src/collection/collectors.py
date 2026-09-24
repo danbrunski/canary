@@ -36,6 +36,7 @@ from src.collection.custom_pids import load_custom_pids
 from src.collection.discovery import vehicle_key
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
+from src.collection.imu_collector import collect_imu_from_config
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
@@ -111,10 +112,11 @@ def default_collectors(
     # independent serial device), so it's appended to every branch's collector
     # list rather than gated on obd_source.
     # Add-on sensors likewise: a separate CAN interface, independent of which
-    # vehicle-bus path is configured.
+    # vehicle-bus path is configured. The HAT's IMU is its own I²C device.
     aux_collectors = [
         *_gps_collectors(config, reconnect_policy),
         *_sensor_collectors(config, reconnect_policy),
+        *_imu_collectors(config, reconnect_policy),
     ]
 
     if config.collection.obd_source == "canable":
@@ -329,6 +331,31 @@ def _sensor_collectors(
         )
 
     return [sensor_can_collector]
+
+
+def _imu_collectors(
+    config: CanaryConfig,
+    reconnect_policy: ReconnectPolicy,
+) -> list[CollectorStarter]:
+    """The IMU collector, or empty when no IMU is configured.
+
+    Only the LSM6DSOX (the CANary-HAT's IMU) has a collector; the other
+    ``hardware.imu.source`` values predate the HAT and are refused here rather
+    than silently recording nothing.
+    """
+    imu = config.hardware.imu
+    if not imu.enabled:
+        return []
+    if imu.source != "lsm6dsox":
+        raise ValueError(
+            f"hardware.imu.source={imu.source!r} has no collector; "
+            "the CANary-HAT's IMU is `lsm6dsox`"
+        )
+
+    async def imu_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        await collect_imu_from_config(imu, queue, stop, reconnect_policy=reconnect_policy)
+
+    return [imu_collector]
 
 
 __all__ = ["CollectorStarter", "default_collectors"]
