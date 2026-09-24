@@ -54,11 +54,31 @@ One-off reads during screen load (0x1100 `F8000B41`, 0x1200 `C1BF0000`,
 0x1315 `0018`, 0x1120 `00000000`) are probably identification or
 configuration. Not interpreted.
 
+## Engine running (16:40–16:42Z, same screen)
+
+The operator read battery 13.73 V and engine speed 750–820 rpm; everything
+else unchanged.
+
+- **0x1202 engine speed: confirmed linear.** Each ABS reading was paired with
+  the nearest same-instant `decoded:ECM_RPM` within 100 ms (the ECM's own CAN
+  broadcast, a confirmed binding at raw/8). That gave 21 pairs over raw
+  232–334. The per-sample ratio to raw decoded counts was 25.0–25.2 (median
+  25.10, spread 0.28 %), so rpm ≈ raw × 3.13. The likely exact value is
+  3.125 (100/32); the median's small excess over 25 is pairing skew. At idle,
+  245 × 3.125 = 766 rpm, inside the displayed 750–820.
+- **0x1118 battery: consistent across two points.** 160–161 at 12.48 V KOEO
+  and 175–176 at 13.73 V running, both about 0.078 V/count (1/12.8 = 0.078125
+  fits within display rounding). Still two points; no same-instant reference
+  voltage was recorded (CANary was passive, so there was no Mode 01
+  CONTROL_MODULE_VOLTAGE).
+- 0x111A (decel G), 0x1210 (yaw) and the flag words did not change, as
+  expected parked.
+
 ## Next known answers, cheapest first
 
 1. KOEO, scan tool on this screen: brake pedal presses (stop lamp switch) and
    ABS/VDC OFF switch presses, with times noted. Each flips a named bit.
-2. Engine running: battery and engine speed (0x1118, 0x1202).
+2. Done 2026-09-24: engine speed confirmed, battery consistent (above).
 3. A short drive with left and right turns, a hard stop and the screen left
    open: wheel speeds, yaw rate and decel G against CAN and GPS.
 
