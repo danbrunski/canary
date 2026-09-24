@@ -216,6 +216,20 @@ class KlineTransport:
             self._sleep(0.001)
         return bytes(buf)
 
+    def read_burst(self, seconds: float, *, poll_s: float = 0.001) -> list[tuple[float, int]]:
+        """Every byte that arrives for ``seconds``, each with its arrival time
+        on :attr:`clock` (to about ``poll_s``). For sniffing: never transmits."""
+        out: list[tuple[float, int]] = []
+        deadline = self._clock() + seconds
+        while self._clock() < deadline:
+            chunk = self.port.read(4096)
+            if chunk:
+                now = self._clock()
+                out.extend((now, byte) for byte in chunk)
+            else:
+                self._sleep(poll_s)
+        return out
+
     def _idle_for(self, seconds: float) -> None:
         deadline = self._clock() + seconds
         while self._clock() < deadline:

@@ -65,20 +65,39 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
   given widths that fit the reply, every one lays out into 38 values. A
   capture cut after the definitions keeps its raw replies with "never
   defined". Raw bytes are kept on every result for a later re-decode.
-- [ ] **H06.3 Sniff mode in the daemon.** **Do:** the K-line collector
+- [x] **H06.3 Sniff mode in the daemon.** **Do:** the K-line collector
   (H05.8) runs in `sniff` mode whenever it is not commanding: EN high,
   pull-up off, transmit impossible (the transport refuses writes in this
   mode), emitting decoded channels and `kline:FRAME` rows with
   `metadata.tester` set to the source address seen (`0xFC` for UpRev).
   **Accept:** fake-serial tests that sniff mode never writes, and that a
   switch to command mode is refused while a foreign tester is active.
-- [ ] **H06.4 Foreign tester detection.** **Do:** traffic from a tester that
+  **Evidence (2026-09-23):** `KlineCollector` sniffs whenever no capture
+  profile asks for a session (`hardware.kline.sniff`, default on): transport
+  in `Mode.SNIFF` (pull-up off, `send_frame`/`wake` refuse), bytes read in
+  50 ms bursts through `read_burst`, every frame recorded as `kline:FRAME`
+  (raw bytes, direction, addresses when addressed), values from a tracked
+  `AC` set or a `22` read as `kline:DID_*`/`kline:RAM_*` with
+  `instrument: sniff`. Replaying UpRev's session through it: 1,462
+  `kline:FRAME` rows and its `22 11 03` reads decoded (`0x99`/`0x9A`, a live
+  value); its logging set stays raw until the five missing widths are known.
+  `tests/test_kline_collector.py`.
+- [~] **H06.4 Foreign tester detection.** **Do:** traffic from a tester that
   is not CANary moves session ownership to `foreign`, which holds until the
   line has been quiet for a configured time after that tester's
   StopCommunication or last frame. **Accept:** tests for enter, hold and
   release; `/status` shows the foreign tester's address and when it was last
   heard.
 
+  **Partial (2026-09-23):** every tester frame heard in sniff mode renews a
+  `foreign` claim on the ECM session with a TTL of
+  `hardware.kline.foreign_hold_seconds` (default 10 s), which `check_expiry`
+  (already polled by the daemon) releases; while it stands CAN diagnostics
+  pause and a capture profile's K-line request waits in sniff mode, logged
+  once. Tests: ownership held while UpRev talks and released after the hold;
+  a K-line request never switches to command mode while foreign. **Owed:**
+  `/status` shows the owner and the claim's remaining hold, but not yet the
+  foreign tester's address or when it was last heard.
 ## Truck
 
 - [ ] **H06.5 Known answer: sniffed values equal UpRev's own log.** **Do

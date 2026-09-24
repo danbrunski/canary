@@ -75,11 +75,11 @@ class FakeTransport:
 def _collector(entries: list[tuple[str, ...]], **kwargs: object) -> KlineCollector:
     FakeTransport.instances.clear()
     return KlineCollector(
-        KlineConfig(enabled=True, poll_interval_seconds=0.01),
+        KlineConfig(enabled=True, poll_interval_seconds=0.01, sniff=False),
         PROFILE,
         DIDS,
         entries=lambda: entries[0],
-        transport_factory=lambda profile: FakeTransport(profile, **kwargs),  # type: ignore[arg-type]
+        transport_factory=lambda profile, mode: FakeTransport(profile, **kwargs),  # type: ignore[arg-type]
         reconnect_policy=FAST,
     )
 
@@ -162,11 +162,11 @@ async def test_an_unreadable_plan_is_refused_once_and_never_transmits(
 async def test_a_vehicle_without_kline_facts_never_transmits(tmp_path: Path) -> None:
     FakeTransport.instances.clear()
     collector = KlineCollector(
-        KlineConfig(enabled=True),
+        KlineConfig(enabled=True, sniff=False),
         tmp_path / "kline.yaml",
         DIDS,
         entries=lambda: ENTRIES,
-        transport_factory=lambda profile: FakeTransport(profile),  # type: ignore[arg-type,return-value]
+        transport_factory=lambda profile, mode: FakeTransport(profile),  # type: ignore[arg-type,return-value]
         reconnect_policy=FAST,
     )
     stop = asyncio.Event()
@@ -218,3 +218,120 @@ async def test_cancelling_the_daemon_task_still_closes_and_releases() -> None:
     (transport,) = FakeTransport.instances
     assert transport.calls[-1] == "close"
     assert tx_gate.ecm_session_owner() == "can_diagnostics"
+
+
+# --------------------------------------------------------------------------
+# H06.3 / H06.4 — sniffing another tester
+# --------------------------------------------------------------------------
+
+
+def _uprev_stream() -> list[tuple[float, int]]:
+    import gzip
+    import json
+
+    fixture = json.loads(
+        gzip.open(Path("tests/fixtures/kline/uprev_session_bytes.json.gz"), "rt").read()
+    )
+    t = 1000.0
+    out = []
+    for byte, dt in zip(bytes.fromhex(fixture["bytes"]), fixture["dt_us"], strict=True):
+        t += dt / 1e6
+        out.append((t, byte))
+    return out
+
+
+class FakeSniffTransport:
+    """Replays UpRev's real session through ``read_burst``, then goes quiet."""
+
+    instances: list[tuple[FakeSniffTransport, object]] = []
+
+    def __init__(self, stream: list[tuple[float, int]], mode: object) -> None:
+        self.stream = list(stream)
+        self.mode = mode
+        self.calls: list[str] = []
+        FakeSniffTransport.instances.append((self, mode))
+
+    def open(self) -> None:
+        self.calls.append("open")
+
+    def close(self) -> None:
+        self.calls.append("close")
+
+    def read_burst(self, seconds: float) -> list[tuple[float, int]]:
+        chunk, self.stream = self.stream[:2000], self.stream[2000:]
+        return chunk
+
+    def write(self, *_: object) -> None:  # pragma: no cover - must never be called
+        raise AssertionError("sniff mode transmitted")
+
+
+async def _sniff_until_drained(
+    collector: KlineCollector, queue: asyncio.Queue[TelemetryRecord]
+) -> list[TelemetryRecord]:
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(queue, stop))
+    for _ in range(500):
+        await asyncio.sleep(0.01)
+        if FakeSniffTransport.instances and not FakeSniffTransport.instances[-1][0].stream:
+            break
+    await asyncio.sleep(0.05)
+    stop.set()
+    await task
+    records = []
+    while not queue.empty():
+        records.append(queue.get_nowait())
+    return records
+
+
+def _sniffer(entries: list[tuple[str, ...]], hold: float = 10.0) -> KlineCollector:
+    FakeSniffTransport.instances.clear()
+    stream = _uprev_stream()
+    return KlineCollector(
+        KlineConfig(enabled=True, foreign_hold_seconds=hold),
+        PROFILE,
+        DIDS,
+        entries=lambda: entries[0],
+        transport_factory=lambda profile, mode: FakeSniffTransport(stream, mode),  # type: ignore[arg-type,return-value]
+        reconnect_policy=FAST,
+    )
+
+
+async def test_idle_collector_sniffs_uprevs_session_frame_for_frame() -> None:
+    from src.collection.kline.transport import Mode
+
+    collector = _sniffer([()])
+    records = await _sniff_until_drained(collector, asyncio.Queue())
+    frames = [r for r in records if r.channel == "FRAME"]
+    assert len(frames) == 1462
+    assert {r.metadata["instrument"] for r in records} == {"sniff"}
+    assert FakeSniffTransport.instances[0][1] is Mode.SNIFF
+    # UpRev's ECU-check reads (22 11 03) decode; its logging set needs widths
+    # the catalog lacks, so those stay raw frames.
+    did_1103 = [r for r in records if r.channel == "DID_1103"]
+    # A live value: it flickered 0x99/0x9A within UpRev's own session.
+    assert did_1103 and {r.value for r in did_1103} == {"99", "9a"}
+    assert collector.foreign_frames == 12 + 723
+
+
+async def test_another_tester_owns_the_session_while_it_talks() -> None:
+    collector = _sniffer([()])
+    await _sniff_until_drained(collector, asyncio.Queue())
+    assert tx_gate.ecm_session_owner() == "foreign"
+    assert tx_gate.is_passive()  # CAN diagnostics stepped aside
+    tx_gate.check_expiry(now=float("inf"))  # the daemon polls this; time passes
+    assert tx_gate.ecm_session_owner() == "can_diagnostics"
+
+
+async def test_a_capture_request_waits_for_the_foreign_tester() -> None:
+    from src.collection.kline.transport import Mode
+
+    entries: list[tuple[str, ...]] = [ENTRIES]
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=60.0)
+    collector = _sniffer(entries)
+    stop = asyncio.Event()
+    task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
+    await asyncio.sleep(0.2)
+    stop.set()
+    await task
+    modes = {mode for _, mode in FakeSniffTransport.instances}
+    assert modes == {Mode.SNIFF}  # never switched to command while foreign

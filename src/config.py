@@ -244,6 +244,14 @@ class KlineConfig(_Strict):
     pullup_gpio: int = 24
     #: Pause between polls of the defined set; 0 polls as fast as P3 allows.
     poll_interval_seconds: float = Field(default=0.0, ge=0.0, le=10.0)
+    #: Listen whenever no capture profile asks for a session (pull-up off,
+    #: never transmitting), decoding other testers — UpRev, a scan tool — and
+    #: stepping CAN diagnostics aside while one is active (H06).
+    sniff: bool = True
+    #: How long after another tester's last frame the ECM session still
+    #: counts as theirs. UpRev polls every ~0.1-0.3 s; its session times out
+    #: after P3max (5 s).
+    foreign_hold_seconds: float = Field(default=10.0, gt=0.0, le=300.0)
 
 
 class HardwareConfig(_Strict):
