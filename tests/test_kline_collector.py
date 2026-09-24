@@ -363,7 +363,10 @@ async def test_a_reader_thread_failure_reaches_the_retry_loop() -> None:
     )
     stop = asyncio.Event()
     task = asyncio.create_task(collector.run(asyncio.Queue(), stop))
-    await asyncio.sleep(0.3)
+    for _ in range(500):  # a loaded host (the parallel gate) needs more than 0.3 s
+        await asyncio.sleep(0.01)
+        if len(FakeSniffTransport.instances) >= 2:
+            break
     stop.set()
     await task
     assert len(FakeSniffTransport.instances) >= 2  # reopened after the failure
