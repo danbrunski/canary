@@ -28,6 +28,7 @@ measurement in hand.
   | `scripts/ci_gate.sh`, `-n auto` | `3f2845d` | 18.9–23.0 (1/5-min, at the serial re-run) | `tests/test_sustained_validation.py::test_fuel_map_persists_tuples_and_known_answers_hold`, passed serially in 39 s — T01.9 |
   | `scripts/ci_gate.sh`, `-n auto` | `9d3fa4b` | 30.1 (1-min, at the serial re-run) | same test again, passed serially in 25 s — T01.9 |
   | `scripts/ci_gate.sh` vitest (full dashboard suite) | `92b5374` | not recorded | `src/panels/SessionsPanel.test.ts` › hosts SessionsCard and ReplayCard side by side; failed again in a full local `pnpm vitest run`, passed 3 of 3 alone — T01.10 |
+  | `scripts/ci_gate.sh`, `-n auto` | `dda8835` | not recorded | `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`, passed serially in 7.5 s (a `test_daemon.py` test: T01.1's family, after its fix) |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
