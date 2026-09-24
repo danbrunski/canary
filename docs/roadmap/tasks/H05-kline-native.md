@@ -48,10 +48,13 @@ What exists in `src/` is coupled to the USB cable:
 
 ## Decisions
 
-- [ ] **H05.1 Confirm the proposed defaults** (H00): source `kline`; K-line
+- [x] **H05.1 Confirm the proposed defaults** (H00): source `kline`; K-line
   channels not trainable until decided; collector off by default and started
   by a capture profile; CAN diagnostic requests stop while K-line owns the
   session. **Accept:** the operator's answer recorded in H00 and here.
+  **Evidence (2026-09-23):** the operator chose all three recommended options:
+  a new `kline` source; not trainable yet; the collector takes the ECM
+  session only when a capture profile asks, otherwise the HAT sniffs.
 
 ## Desk
 

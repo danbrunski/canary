@@ -38,7 +38,7 @@ PENDING-HARDWARE used bare `H0`–`H9`; these are `H01.1` onward.)
 3. **The barometer is parked.** The BMP384 on the first board is dead
    (§13.1.1); everything that needs it is marked **(hardware)**.
 
-## Proposed defaults (confirm or override before the item that needs them)
+## K-line defaults (proposed, confirmed by the operator 2026-09-23)
 
 - **K-line gets its own source, `kline`.** Not `uprev` (documented as
   import-only, and a different instrument) and not `obd` rows (instrument
