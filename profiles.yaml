@@ -7,9 +7,10 @@ profiles:
   model: Xterra
   year: 2008
   parameters:
-    mass_kg: 2218.0
-    mass_evidence: 'Itemised estimate, 2026-09-24, not a scale ticket: 4,400 lb curb
-      (operator) + 489 lb of modifications = 4,889 lb (range 4,816-4,951 lb). Added:
+    mass_kg: 2211.6
+    mass_evidence: 'Itemised estimate, 2026-09-24, not a scale ticket: 4,387 lb curb
+      (operator; the 6-speed manual Off-Road 4x4, 4,400 lb is the automatic) + 489 lb of
+      modifications = 4,876 lb (range 4,803-4,938 lb). Added:
       5 x Fuel Vector 16x8 (27-30 lb) on BFG KO3 LT285/75R16 (60.3 lb), Hefty aluminum
       front bumper (55 lb), Warn VR EVO 10-S synthetic (73 lb), Hefty steel rear bumper
       with swing-out (~150 lb, owner report), Hefty aluminum radiator skid (15 lb) and
