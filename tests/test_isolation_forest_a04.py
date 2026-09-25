@@ -561,3 +561,14 @@ def test_blindness_transitions_and_messages_follow_the_per_mode_verdict() -> Non
     changed = updates[-1].verdict
     assert changed is not None
     assert changed["blind_modes"] == ["city"] and changed["scores_nothing"] is False
+
+
+def test_default_feature_discovery_never_picks_an_external_sensor() -> None:
+    """H01.1: with no column list, the fitter's own discovery applies the
+    source gate — an IMU/GPS/sensor column in the frame never trains."""
+    frame = _drive_frame(sessions=THREE_DRIVES)
+    rng = np.random.default_rng(3)
+    for column in ("imu:ACCEL_X", "gps:speed", "sensor:FUEL_PRESSURE"):
+        frame[column] = rng.normal(size=len(frame))
+    trained = fit_isolation_forest(frame, _Config())
+    assert set(trained.feature_columns) == set(FEATURES)

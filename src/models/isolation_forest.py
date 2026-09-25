@@ -38,6 +38,7 @@ from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.preprocessing.segmenter import MODE_COLUMN, UNKNOWN_MODE
 from src.timefmt import format_timestamp as _format_timestamp
+from src.trainability import source_exclusion_reason
 
 log = logging.getLogger(__name__)
 
@@ -1934,6 +1935,9 @@ def _resolve_feature_columns(
         if is_flag_column(column):  # ``__gap`` / ``__arrived`` bookkeeping
             continue
         if not pd.api.types.is_numeric_dtype(frame[column]):
+            continue
+        # H01.1 source gate: discovery never picks an external sensor.
+        if source_exclusion_reason(column) is not None:
             continue
         discovered.append(column)
     if not discovered:

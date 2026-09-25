@@ -1,5 +1,25 @@
 # IMU + GPS integration — motion-aware auto-tagging and grade de-confounding
 
+> **Status (2026-09-24, H01.4).** Phase 1 and Phase 2a are done. Phase 2b's
+> hardware is the **CANary-HAT rev 2.0** (checkout passed 2026-09-23): an
+> LSM6DSOX 6-axis IMU, a MAX-M10M GNSS with PPS and a BMP384 barometer (dead
+> on the first board). The remaining work is tracked in the H series, not
+> here: IMU in [`H02`](tasks/H02-imu.md), PPS / 10 Hz GNSS / barometer in
+> [`H03`](tasks/H03-hat-platform.md), sensor cross-checks in
+> [`H04`](tasks/H04-committees.md). Two things below are **historical** and no
+> longer the plan: the BNO055 recommendation (the HAT's IMU has no on-chip
+> fusion, so gravity/heading resolution stays ours, `imu_frame.py`), and the
+> BMP390 add-on (a BMP390 is only the footprint-compatible replacement for the
+> HAT's dead part, H03.6).
+>
+> **External sensors never train or score the anomaly detectors** (H00
+> operator decision 1, 2026-09-23, enforced by the H01.1 source gate in
+> `src/telemetry.py` / `src/trainability.py`): `gps:`, `imu:` and `sensor:`
+> channels feed tagging, segmentation context, committees (H04) and the
+> driving dyno (H07), never the Isolation Forest, the sequence detector or a
+> behavior model's axes. Where this document says an IMU or GPS channel
+> reaches the IF/LSTM, read it as superseded.
+
 Adding a 3-axis IMU and a GPS receiver to the Pi so the daemon can label
 runs by *what the vehicle is doing* (hard accel, hard brake, cornering,
 stopped, highway cruise, launch) without a human in the second terminal,
@@ -90,10 +110,12 @@ is bounded and enumerable:
 | `src/config.py` | New `ImuConfig` / `GpsConfig` blocks alongside `CollectionConfig`, same `_Strict` pattern |
 | Parquet storage | None — `parquet_row()` already columnar and source-neutral |
 
-New channels by convention: `imu:ACCEL_X/Y/Z`, `imu:GYRO_X/Y/Z`,
-`imu:LIN_ACCEL_LON/LAT` (gravity-removed, frame-resolved),
-`gps:SPEED`, `gps:LAT`, `gps:LON`, `gps:ALT`, `gps:COURSE`, `gps:FIX`,
-`derived:GRADE`.
+Channels as the code names them (the design draft used upper-case
+`gps:SPEED`/`LAT`/`LON`; the shipped collector is lower-case):
+`imu:ACCEL_X/Y/Z`, `imu:GYRO_X/Y/Z`, `imu:ACCEL_LON/LAT` (gravity-removed,
+frame-resolved by `imu_frame.py`), `gps:speed`, `gps:latitude`,
+`gps:longitude`, `gps:altitude`, `gps:heading`, `gps:fix_quality`,
+`gps:num_satellites`, `gps:hdop`, and later `derived:GRADE`.
 
 ## The collectors
 
@@ -125,7 +147,7 @@ Config sketch (mirrors `CollectionConfig`'s `Literal` source pattern so
 
 ```yaml
 imu:
-  source: bno055        # bno055 | mpu6050 | icm20948 | disabled
+  source: lsm6dsox      # the HAT's IMU (H02.1); disabled by default
   i2c_bus: 1
   sample_rate_hz: 100
   mount_orientation: auto   # auto = dynamic gravity resolution; or fixed quaternion
@@ -152,8 +174,9 @@ A small module (`src/preprocessing/imu_frame.py`) turns raw
 3. **Sign** — take longitudinal sign from the OBD speed derivative, not
    the IMU, so accel/brake labelling works even before heading converges.
 
-**If the chosen module is a BNO055, steps 1–2 collapse into a hardware
-read** — its on-chip fusion outputs gravity-removed linear acceleration
+**(Historical: the HAT's LSM6DSOX has no on-chip fusion, so steps 1–2
+stay in `imu_frame.py`.) If the chosen module were a BNO055, steps 1–2 would
+collapse into a hardware read** — its on-chip fusion outputs gravity-removed linear acceleration
 and an absolute orientation quaternion directly. We still take *sign*
 from OBD and *heading* from GPS (the BNO's magnetometer-based yaw is
 unreliable in a car), but the gravity-vector math we discussed is then
@@ -168,8 +191,9 @@ per-resample-tick aggregation step (alongside the existing resampler):
 for each output tick emit `imu:ACCEL_LON_MAX`, `imu:ACCEL_LON_RMS`,
 `imu:JERK_MAX`, `imu:ACCEL_LAT_MAX`. Raw high-rate samples still land in
 Parquet (long format, cheap, source-agnostic) for offline forensics; only
-the wide/feature frame is decimated. This keeps the IF/LSTM feature
-vector the same width-class it is today.
+the wide/feature frame is decimated. (The decimated columns are for tags,
+segmenter modes and committees: no `imu:` column is ever an IF/LSTM feature,
+H01.1.)
 
 ## The auto-tagger
 
@@ -192,8 +216,8 @@ Event taxonomy (label, trigger):
 | `hard_brake` | `imu:ACCEL_LON_MAX` > θ_b **and** d(`obd:SPEED`)/dt < 0 | IMU + OBD |
 | `cornering` | `imu:ACCEL_LAT_MAX` > θ_c | IMU (heading-resolved) |
 | `launch` | `obd:SPEED` ≈ 0 → sustained `hard_accel` | IMU + OBD |
-| `stopped` | `gps:SPEED` ≈ 0 (bus-independent) | GPS |
-| `highway_cruise` | `gps:SPEED` > θ_h sustained, low lat/lon accel variance | GPS + IMU |
+| `stopped` | `gps:speed` ≈ 0 (bus-independent) | GPS |
+| `highway_cruise` | `gps:speed` > θ_h sustained, low lat/lon accel variance | GPS + IMU |
 
 Thresholds live in config, not code, so they tune without a deploy
 (same philosophy as the behavior-model deviation bands). Each tag
@@ -218,7 +242,11 @@ already uses `operating_mode: idle`.
 
 ## Hardware recommendations
 
-### IMU — recommended: **Bosch BNO055** (Adafruit/equivalent breakout)
+*Historical (pre-HAT, kept for the reasoning): the HAT carries an LSM6DSOX
+IMU and a MAX-M10M GNSS with PPS, so none of the parts below are being
+bought. See H02/H03.*
+
+### IMU — recommended (historical): **Bosch BNO055** (Adafruit/equivalent breakout)
 
 | Module | Axes | Fusion | Bus | ~Cost | Verdict |
 |---|---|---|---|---|---|
@@ -227,7 +255,7 @@ already uses `operating_mode: idle`.
 | MPU-6050 | 6 | none | I²C | $2–4 | Cheapest, ubiquitous libraries, fine for harsh-event *magnitude*. No magnetometer (irrelevant here). Aging; clone quality varies. |
 | ADXL345 | 3 (accel only) | none | I²C | $2–4 | Not recommended — no gyro means gravity tracking during sustained accel is harder and rotation context is lost. |
 
-The BNO055 has a well-known caveat: its **I²C clock-stretching breaks
+The BNO055 (historical) has a well-known caveat: its **I²C clock-stretching breaks
 the Raspberry Pi's hardware I²C**. Run it in **UART mode** on the Pi
 (or use a software-I²C overlay). Flag this in `pi-setup.md` when wiring.
 Whatever the choice, mechanical rigidity matters more than the sensor —
@@ -241,7 +269,7 @@ urban-canyon fixes. A **USB GPS dongle** is the lowest-integration option
 (`/dev/ttyACM0`, `gpsd`); a UART module frees USB but needs the Pi serial
 console disabled. Prefer one with a **PPS pin** — see below.
 
-### Grade — add a barometric altimeter: **BMP390** (or MS5611), I²C, ~$5
+### Grade — add a barometric altimeter: **BMP390** (or MS5611), I²C, ~$5 (historical: the HAT has a BMP384 site, H03.6)
 
 GPS altitude is ±10–30 m and noisy — poor for grade. A baro's *relative*
 altitude over tens of seconds is low-noise; differentiating it against
@@ -273,8 +301,9 @@ logic, low current, off the Pi rails. No conflict with the Canable
    is **not** built yet — it moves to Phase 2 alongside the IMU tags.
 2. **IMU + frame resolution.** `imu_collector.py`, decimation step,
    `imu_frame.py`, the `hard_accel` / `hard_brake` / `cornering` /
-   `launch` tags. Recommend BNO055 to keep step 1–2 of frame resolution
-   out of our code.
+   `launch` tags. (Historical: the BNO055 was recommended to keep steps 1–2
+   of frame resolution out of our code; the HAT's LSM6DSOX keeps them in.
+   Now H02.)
 3. **Grade + behavior-model payoff.** Baro, `derived:GRADE`, then either
    filter behavior-model training to near-flat segments or add grade as a
    context axis, and re-fit. Measure deviation-band tightening to confirm
@@ -286,7 +315,7 @@ logic, low current, off the Pi rails. No conflict with the Canable
   yaw offset converges, `cornering` may bleed into `hard_accel`. The
   OBD-sign trick keeps longitudinal labelling correct meanwhile;
   cornering is the one that waits.
-* **Cheap GPS dropout** (tunnels, cold start, canyon) — treat `gps:FIX`
+* **Cheap GPS dropout** (tunnels, cold start, canyon) — treat `gps:fix_quality`
   as a first-class channel; auto-tag rules must degrade, not lie, when
   fix is lost. The IMU is the fast sensor, GPS the slow absolute one;
   never treat GPS as ground truth for fast transients.
@@ -338,7 +367,7 @@ blocked on purchasing/wiring the IMU + baro + 10 Hz GPS.
 - [x] **2a.4 — `imu_frame.py`.** Landed: gravity low-pass gated on a
   quiescent-window mask, GPS-course yaw-offset resolution (persisted
   via this repo's atomic tmp+rename sidecar convention), longitudinal
-  sign correction from the OBD speed derivative, BNO055
+  sign correction from the OBD speed derivative, (historical) BNO055
   `gravity_removed=True` bypass sharing heading+sign code with the
   other two chip paths. Synthetic known-tilt/known-maneuver test
   recovers yaw within 2° and lon/lat within 0.05g.
@@ -374,17 +403,21 @@ blocked on purchasing/wiring the IMU + baro + 10 Hz GPS.
   a genuine third-way confirmation, never silently degrading to the
   existing 2-way speed committee.
 
-### Phase 2b — hardware + validation (blocked until parts arrive)
+### Phase 2b — hardware + validation (moved to the H series, 2026-09-23)
 
-- [ ] **2b.1 — Hardware.** BNO055 (UART mode — Pi I²C clock-stretching
-  caveat), BMP390 baro, 10 Hz GPS with PPS; wiring + `pi-setup.md`
-  section. *(operator)*
-- [ ] **2b.2 — `imu_collector.py`.** Sensor-rate thread, reconnect
-  supervision like `obd_collector.py`, live validation.
-- [ ] **2b.3 — PPS time discipline.** chrony/gpsd PPS; verify pre-NTP
-  session wall time.
-- [ ] **2b.4 — Threshold tuning.** Re-run the offline tagger over real
-  drives; tune θ values in config.
-- [ ] **2b.5 — Grade payoff.** `derived:GRADE` from baro + GPS speed;
-  near-flat training filter or grade context axis; refit and measure
-  deviation-band tightening.
+The hardware arrived as the CANary-HAT. Each item now lives in an H
+checklist, whose boxes are the truth; the lines below only say where.
+
+- **2b.1 — Hardware.** Fitted: LSM6DSOX IMU, MAX-M10M GNSS with PPS, BMP384
+  barometer (dead on the first board). Superseded by the HAT; the original
+  plan (a BNO055 over UART, a BMP390 add-on) is historical. IMU config and
+  driver: H02.1–H02.2; barometer: H03.6 **(hardware)**.
+- **2b.2 — `imu_collector.py`** → H02.2 (collector), H02.3 (recorded rate),
+  H02.5 (health).
+- **2b.3 — PPS time discipline** → H03.3; 10 Hz GNSS → H03.4.
+- **2b.4 — Threshold tuning** → H02.7.
+- **2b.5 — Grade payoff.** The IMU carries grade itself (H07); a baro grade
+  channel waits on H03.6. Grade may become behavior-model *context* only
+  through a trainable channel: H01.1 refuses a behavior model whose axes or
+  eligibility read an external sensor, so a grade axis built from `imu:` or
+  `gps:` is not available (H00 decision 1).

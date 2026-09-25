@@ -32,7 +32,7 @@ piece of hardware.
 
 ## Desk
 
-- [ ] **H01.1 A source-level trainability gate.** **Do:** in `src/telemetry.py`,
+- [~] **H01.1 A source-level trainability gate.** **Do:** in `src/telemetry.py`,
   a `TRAINABLE_SOURCES` frozenset beside `CAPTURED_SOURCES`
   (`obd`, `decoded`; `can` raw frames never become features anyway) with an
   import-time assert that it is a subset of `TelemetrySource`, and every
@@ -62,6 +62,84 @@ piece of hardware.
   classification fails at import. **Sequencing:** `feature_pipeline.py` had
   another session's uncommitted edits on 2026-09-23. Land this after that
   work is committed.
+  **Partial (2026-09-24).** Done, offline:
+  - `src/telemetry.py`: `TRAINABLE_SOURCES` = {`obd`, `decoded`},
+    `INPUT_GATED_SOURCES` = {`derived`}, `NON_TRAINABLE_SOURCES` (reason per
+    source: `can`, `gps`, `imu`, `sensor`, `uprev`, `kline`), the subset
+    `assert`, and `require_trainability_classified`, a raise (not an assert)
+    run at import over the Literal.
+  - `src/trainability.py` (new): `source_exclusion_reason(column)`, the one
+    gate every chooser calls. Allowlist; wide-only namespaces that may train
+    are listed with a reason (`did`, `dbc`, `deviation`); a bare or
+    unclassified prefix (e.g. `baro:`) is refused; `derived:` follows every
+    declared input, recursively, optional inputs included; an undeclared
+    derived channel is refused. Reasons start `source_not_trainable: `.
+  - `src/analysis/derived.py`: `DERIVED_CHANNEL_INPUTS` 4 → 38 entries (every
+    channel `compute_anomaly_signals`, `append_afr_channels`,
+    `compute_instantaneous_channels`, `compute_derived_channels` and every
+    committee emit) plus `DERIVED_CHANNEL_OPTIONAL_INPUTS`; the seven inline
+    dependency-gap declarations now read the registry.
+  - `FeaturePolicy.exclusion_reason` checks the source gate first, so
+    `candidate_feature_columns` (IF and sequence), `build_feature_spec`'s
+    `feature_policy_exclusions` and the IF load audit all see it.
+    `sequence_feature_set`: `gps:speed` role removed; a roles file naming a
+    non-trainable channel is refused at load; `all_channels` refuses a
+    non-trainable candidate, `engine_response` drops it with the reason.
+    Behavior models: `refuse_non_trainable_sources` runs in the
+    `BehaviorModel1D`/`2D` validators (artifact load) and in
+    `_RecipeBase.__post_init__` (refit recipes), over axes, output, rate
+    gates and every eligibility channel. All tracked `behavior_models.yaml`
+    files (6) and the 24 default recipes still load.
+  - The three library defaults that discover columns when none are passed
+    apply the same gate: `isolation_forest._resolve_feature_columns`,
+    `sequence_dataset.resolve_sequence_feature_columns` and
+    `normalization._resolve_columns` (the scaler). Failing-first tests
+    (each fails with the gate disabled, passes with it):
+    `test_default_feature_discovery_never_picks_an_external_sensor` in
+    `test_isolation_forest_a04.py` (`fit_isolation_forest` with no columns on
+    a frame with `imu:ACCEL_X`, `gps:speed`, `sensor:FUEL_PRESSURE`) and
+    `test_sequence_dataset.py`, and
+    `test_default_column_discovery_never_picks_an_external_sensor` in
+    `test_preprocessing_normalization.py`. Those two older files used bare
+    names (`x`, `rpm`) that the allowlist now refuses; renamed to `obd:`.
+  - Behaviour change from the registry growing 4 → 38:
+    `capture_profiles._channel_satisfied` now resolves 34 more derived
+    channels instead of treating them as unresolvable, so
+    `model_input_warnings` can report a trim/AFR/fuel/committee behavior model
+    as starved when its physical inputs are not polled
+    (`test_model_input_warnings_resolve_derived_and_decoded_channels` loosened
+    to allow the trim residuals its profile genuinely starves). Both tracked
+    default profiles (`data/capture_profiles.yaml`,
+    `data/nissan-xterra-2008/capture_profiles.yaml`) give `[]` before and
+    after. `scripts/evaluate_behavior_models._input_resolution` likewise now
+    reports input resolution for every derived output in the registry, not
+    only the VE/air-mass four.
+  - Serve is untouched: `reconcile_feature_frame_to_spec` still aligns to the
+    manifest, so the deployed IF/LSTM keep receiving `gps:speed`; the IF load
+    audit now lists its 4 `gps:speed*` features as `policy_violations`.
+  - Tests: `tests/test_trainability.py` (26: synthetic session with `imu:*`,
+    `gps:*`, `sensor:*`, `baro:*` and `derived:SPEED_SOURCE_DIVERGENCE` yields
+    none of them as a feature; a source added to the Literal alone fails the
+    import of a patched `telemetry.py` with `TypeError`; every emitted derived
+    channel is declared; recipe and artifact refusals), plus updated
+    `test_gps_feature_exclusion.py`, `test_sequence_feature_set.py` (deployed
+    schema now 80 kept / 41 context / 281 dropped; was 82/43/279, the
+    difference is `gps:speed` + `__roc`), `test_capture_profiles.py`.
+  - **Corpus diff**, `build_feature_frame` over the 30 non-capture sessions
+    2026-09-21T010459..2026-09-23T162918 in `~/canary-data` (29,649 rows),
+    `candidate_feature_columns` with vs without the source gate: 348 → 344,
+    removed exactly `gps:speed`, `gps:speed__mean`, `gps:speed__std`,
+    `gps:speed__roc`, added none. The other source exclusions recorded
+    (`gps:latitude/longitude/altitude/heading/fix_quality/num_satellites/hdop`,
+    `derived:SPEED_SOURCE_DIVERGENCE`) were already excluded by name /
+    committee flag. Applied to the tracked manifests, the gate removes only
+    the `gps:speed` family: deployed IF 295 → 291, LSTM 361 → 357; the
+    2026-09-23 NA candidates IF 204 → 201, LSTM 254 → 250 (r2, r3) and
+    250 → 246 (first).
+
+  **Remaining:** "the next retrained manifests carry no external-sensor
+  feature" needs the retrain the A-series owns (A02/A03/A04/A06); not run
+  here (retrain and deployment are not this checklist's).
 - [x] **H01.2 Teach the analysis allowlists the new namespaces.** The survey
   found three that disagree with `TelemetrySource`:
   `src/analysis/channels.py` `SpecSource` and its hard-coded tuple (no `imu`,
@@ -102,7 +180,7 @@ piece of hardware.
   GPIO v2 uAPI in `ctypes` (struct sizes asserted at import), checked on the
   HAT (claim, set, a second claimant refused with EBUSY). Nothing was added to
   `pyproject.toml`; pyserial was already a dependency.
-- [ ] **H01.4 Reconcile the documents that predate the HAT.**
+- [x] **H01.4 Reconcile the documents that predate the HAT.**
   `docs/roadmap/imu-gps-integration.md` Phase 2b still plans a BNO055 over
   UART, a BMP390 and upper-case `gps:SPEED`/`LAT` names (the code uses
   lower-case); `OVERNIGHT-QUEUE.md` says "BNO055 is the assumed sensor";
@@ -112,3 +190,25 @@ piece of hardware.
   ignition timing unresolved and gives BFS as /2040..2048. **Do:** fix each,
   pointing Phase 2b at H02/H03. **Accept:** `grep -rn BNO055 docs/roadmap`
   returns only historical mentions marked as such.
+  **Evidence (2026-09-24):** `imu-gps-integration.md` gains a status banner
+  (HAT parts, remaining work in H02/H03/H04, BNO055/BMP390 historical,
+  external sensors never train, H00 decision 1); its channel list, auto-tag
+  table and dropout note use the code's lower-case names (`gps:speed`,
+  `gps:latitude`, `gps:fix_quality`, `imu:ACCEL_LON/LAT`); the config sketch
+  says `lsm6dsox`; every BNO055/BMP390 recommendation is labelled historical;
+  Phase 2b's five items now point at H02.1–H02.3/H02.5/H02.7, H03.3/H03.4/H03.6
+  and H07. `OVERNIGHT-QUEUE.md`'s two BNO055 lines are marked historical
+  (the pre-made decisions themselves unchanged). `CANary-HAT-Spec.md` §9 now
+  says commanded AFR and timing are absent from the *broadcast* bus only:
+  timing is DID `0x110A` (`110 − raw` °BTDC) and the final commanded phi is
+  `mem:ECM_TARGET_EQUIV_RATIO`, both over active CAN, with K-line's remaining
+  value named (synchronous sets, multi-DID read, passive sniffing).
+  `uprev-usb-kline-research.md`: ignition timing resolved (`0x110A`), BFS
+  `raw × 0.00049` ms (≈ /2040; /2048 refuted on 360/405 vs 405/405 rows, per
+  `data/dids.yaml` `ECM_AIR_CHARGE` evidence) in all four places that said
+  /2040..2048. Also reconciled with decision 1: `docs/sensor-committees.md`
+  (residual-as-feature narrowed) and the `GpsConfig` docstring. After the edit
+  `grep -rn BNO055 docs/roadmap` returns 9 lines in
+  `imu-gps-integration.md` and 2 in `OVERNIGHT-QUEUE.md`, each inside text
+  marked historical, 1 in `H02-imu.md` ("which planned a BNO055") and the rest
+  in this checklist's own text.

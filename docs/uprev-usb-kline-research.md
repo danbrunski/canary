@@ -252,7 +252,10 @@ This is Target AFR's two RAM bytes first, followed by DIDs `0x1207`, `0x1225`,
 `0x1226`, `0x1208`, and `0x1206`. The individual A/F WB Bank 2 and ignition
 captures started after logging was already active, so their definitions are
 absent from those files. The combined capture now resolves Bank 2 as `0x1226`;
-ignition was not included and remains unresolved.
+ignition was not included in it. *(Resolved since: ignition timing is DID
+`0x110A`, `110 − raw` °BTDC, identified from UpRev's detailed-scheme stream
+definition and reproduced exactly against its displayed column; see "UpRev CSV
+vs the wire" below and `data/dids.yaml` `ECM_IGNITION_TIMING`.)*
 
 Definitions can also contain absolute-memory byte descriptors. Target AFR used
 two consecutive descriptors, each encoded as `83` followed by a 32-bit
@@ -294,7 +297,8 @@ universal shared-code assumptions:
 |---|---:|---|---|
 | `0x1101` | 1 | coolant temperature | `raw - 50` °C |
 | `0x1201` | 2, big-endian | engine speed | `raw * 12.5` rpm |
-| `0x1208` | 2, big-endian | BFS | approximately `raw / 2040..2048` ms; exact divisor unresolved |
+| `0x1208` | 2, big-endian | BFS | `raw × 0.00049` ms (≈ raw / 2040); /2048 refuted, see below |
+| `0x110A` | 1 | ignition timing | `110 − raw` °BTDC (found later, detailed-scheme stream) |
 | `0x1225` | 2, big-endian | A/F WB Bank 1 | `raw * 0.005` V (existing independently pinned scale) |
 | `0x1206` | 2, big-endian | injector pulse Bank 1 | `raw * 0.01` ms (directly pinned against UpRev display export) |
 | `0x1207` | 2, big-endian | injector pulse Bank 2 | `raw * 0.01` ms (directly pinned against UpRev display export) |
@@ -322,8 +326,14 @@ to 1.594–12.528 ms and maps the first capture to 13.662 ms. The independent
 era-ratio evidence in `data/dids.yaml` estimates approximately 2,040 counts/ms
 and explicitly includes 2,048 within its error. These PCAPs do not record the
 GUI's value text at each instant and therefore cannot distinguish 2,040 from
-2,048. Keep the conversion provisional until several exact, simultaneous ROM
-Editor display values are recorded beside their raw samples.
+2,048. *(Resolved since, by exactly the recording asked for here: in UpRev's
+detailed-scheme log of 2026-09-20 (`UpRev_Log9-20-2026_6-53-59_PM`), its
+`B-FUEL SCHDL (ms)` column comes from the same stream reply as DID `0x1208`,
+and `raw × 0.00049` reproduces it on 405/405 rows; `raw / 2040` on 401/405,
+`raw / 2048` on only 360/405. 2048 is refuted. The ms scale lives in
+`data/nissan-xterra-2008/tuning_providers.yaml`; the evidence is on
+`ECM_AIR_CHARGE` in `data/dids.yaml`. See also "UpRev CSV vs the wire"
+below.)*
 
 Target AFR did not use a DID in its captured definition. It read bytes at
 `0xffff26be` and `0xffff26bf` and returned big-endian `0x4000` in all 525
@@ -388,7 +398,8 @@ diagnostic endpoint (`0x7E0` request, `0x7E8` response):
 | UpRev item | CAN request | CANary status |
 |---|---|---|
 | injector pulse Bank 1/2 | Mode 22 DIDs `0x1206` / `0x1207` | confirmed, `raw * 0.01 ms` |
-| BFS / air-charge coordinate | Mode 22 DID `0x1208` | confirmed identity; exact `2040` vs `2048` counts/ms remains provisional |
+| BFS / air-charge coordinate | Mode 22 DID `0x1208` | confirmed identity; `raw × 0.00049` ms (≈ /2040, /2048 refuted) |
+| ignition timing | Mode 22 DID `0x110A` | confirmed, `110 − raw` °BTDC |
 | A/F WB Bank 1/2 | Mode 22 DIDs `0x1225` / `0x1226` | confirmed, `raw * 0.005 V` |
 | coarse rich-side target phi | Mode 22 DID `0x1134` | confirmed as a clamped/floored view, not the final target |
 | final Target AFR / phi | service `0x23`, KWP32 body `FF FF 26 BE 00 02` | positive response; Q14 word, zero means fuel cut |
@@ -495,7 +506,7 @@ ECU read rather than indicating packet loss.
 | `0x1207` injector B2 | 45–1,128 | 146 | 0.45–11.28 ms at x0.01 ms/count |
 | `0x1225` A/F B1 | 68–1,013 | 205 | 0.340–5.065 V |
 | `0x1226` A/F B2 | 57–1,013 | 197 | 0.285–5.065 V |
-| `0x1208` BFS | 3,355–30,218 | 340 | approximately 1.64–14.81 ms under the unresolved /2040..2048 scale |
+| `0x1208` BFS | 3,355–30,218 | 340 | 1.64–14.81 ms at `× 0.00049` (≈ /2040) |
 | `0x1206` injector B1 | 45–1,146 | 156 | 0.45–11.46 ms at x0.01 ms/count |
 
 The two injector registers track at Pearson `r=0.999347`; their raw difference

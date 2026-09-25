@@ -36,6 +36,8 @@ from typing import Any, Literal
 
 import yaml
 
+from src.trainability import non_trainable_inputs, source_exclusion_reason
+
 FEATURE_SET_SCHEMA_KEY = "sequence_feature_set"
 ALL_CHANNELS = "all_channels"
 ENGINE_RESPONSE = "engine_response"
@@ -98,7 +100,8 @@ J1979_ROLES: dict[str, ChannelRole] = {
         ("obd:FUEL_LEVEL", "fuel_level"),
         ("obd:FUEL_STATUS", "fuel_system_status"),
         ("obd:RUN_TIME", "engine_run_time"),
-        ("gps:speed", "gps_speed"),
+        # No ``gps:speed``: external sensors never condition or score a
+        # detector (H00 operator decision 1; H01.1 source gate).
     ),
     **_roles(
         "target",
@@ -187,6 +190,14 @@ def load_vehicle_sequence_roles(path: Path | None) -> VehicleSequenceRoles:
     overlap = sorted((set(channels) | set(excluded)) & set(mirrors))
     if overlap:
         raise ValueError(f"{path}: {overlap} are both a mirror and assigned/excluded")
+    # H01.1: a role or a mirror reference is a claim that the channel feeds
+    # the detector; only a trainable source may (exclusions may name anything).
+    refused = non_trainable_inputs([*channels, *mirrors, *mirrors.values()])
+    if refused:
+        raise ValueError(
+            f"{path}: channels whose source may not feed a detector "
+            f"(H00 decision 1, src.trainability): {refused}"
+        )
     return VehicleSequenceRoles(channels, mirrors, excluded, source=str(path))
 
 
@@ -223,7 +234,21 @@ def resolve_feature_set(
     if name not in FEATURE_SETS:
         raise ValueError(f"unknown sequence feature set {name!r}; expected one of {FEATURE_SETS}")
     columns = [str(column) for column in candidate_columns]
+    # H01.1 source gate. Candidates normally arrive already gated
+    # (feature_pipeline.candidate_feature_columns); this is the second lock.
+    source_refused = {
+        column: reason
+        for column in columns
+        if (reason := source_exclusion_reason(column)) is not None
+    }
     if name == ALL_CHANNELS:
+        if source_refused:
+            # all_channels promises every candidate is scored, so a refused
+            # candidate means the caller skipped the pipeline gate.
+            raise ValueError(
+                f"feature set {ALL_CHANNELS!r} was handed columns whose source may not "
+                f"train a detector: {source_refused}"
+            )
         return FeatureSetResolution(
             ALL_CHANNELS,
             tuple(columns),
@@ -239,6 +264,9 @@ def resolve_feature_set(
     context: list[str] = []
     for column in columns:
         base, suffix = _split_rolling(column)
+        if column in source_refused:
+            dropped[column] = source_refused[column]
+            continue
         if base in DERIVED_DROPPED:
             dropped[column] = DERIVED_DROPPED[base]
             continue

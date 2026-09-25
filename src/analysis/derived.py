@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from src.analysis.committees import COMMITTEES
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.preprocessing.resampler import (
@@ -49,6 +50,7 @@ log = logging.getLogger(__name__)
 
 __all__ = [
     "DERIVED_CHANNEL_INPUTS",
+    "DERIVED_CHANNEL_OPTIONAL_INPUTS",
     "FUEL_PROPERTIES",
     "IDLE_RPM_FLOOR",
     "IDLE_SPEED_CEIL_KPH",
@@ -162,6 +164,15 @@ def _append_dependency_gap(
 #: computing it — capture-profile validation resolving a `derived:` model
 #: input down to pollable channels — share one source of truth with the
 #: computation itself.
+#:
+#: H01.1 — it covers **every** ``derived:`` channel the feature pipeline and
+#: the live tick can emit (``tests/test_trainability.py`` featurizes a frame
+#: carrying every input and fails on an undeclared output), because it is
+#: also what makes a derived channel trainable: :mod:`src.trainability`
+#: admits one only when every input named here (and in
+#: :data:`DERIVED_CHANNEL_OPTIONAL_INPUTS`) is itself trainable, and treats an
+#: undeclared derived channel as not trainable. Declaring inputs is how a new
+#: derived channel becomes a feature.
 DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "derived:AIR_MASS_PER_CYCLE": (
         ("obd:MAF",),
@@ -187,6 +198,100 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         ("derived:AIR_MASS_PER_CYCLE",),
         ("obd:BAROMETRIC_PRESSURE",),
         ("obd:INTAKE_TEMP", "decoded:IAT"),
+    ),
+    # --- compute_anomaly_signals: physical residuals -------------------------
+    "derived:STFT_BANK_BALANCE": (("obd:SHORT_FUEL_TRIM_1",), ("obd:SHORT_FUEL_TRIM_2",)),
+    "derived:LTFT_BANK_BALANCE": (("obd:LONG_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_2",)),
+    "derived:TOTAL_TRIM_B1": (("obd:SHORT_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_1",)),
+    "derived:TOTAL_TRIM_B2": (("obd:SHORT_FUEL_TRIM_2",), ("obd:LONG_FUEL_TRIM_2",)),
+    "derived:CAT_EFFICIENCY_B1": (("obd:O2_B1S1",), ("obd:O2_B1S2",)),
+    "derived:CAT_EFFICIENCY_B2": (("obd:O2_B2S1",), ("obd:O2_B2S2",)),
+    "derived:AFR_BANK_BALANCE": (("did:ECM_AF_SENSOR_V_B1",), ("did:ECM_AF_SENSOR_V_B2",)),
+    "derived:TPS_VOLTAGE_PER_PCT": (("did:ECM_THROTTLE_POS_SENSOR_1",), ("obd:THROTTLE_POS",)),
+    # --- src.analysis.afr.append_afr_channels ------------------------------
+    # Measured AFR: the wideband lambda PID, else the AF-sensor voltage DID
+    # through the profile's transfer (only when a calibration is loaded).
+    **{
+        f"derived:AFR_{kind}B{bank}": (
+            (f"obd:O2_WR_LAMBDA_S{bank}", f"did:ECM_AF_SENSOR_V_B{bank}"),
+        )
+        for bank in (1, 2)
+        for kind in ("", "CENSORED_")
+    },
+    "derived:TARGET_AFR": (("obd:RPM",), ("obd:ENGINE_LOAD",)),
+    **{
+        f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))
+        for bank in (1, 2)
+    },
+    # --- compute_instantaneous_channels: performance channels ----------------
+    # Fuel rate has three alternative methods (fuel-rate PID; MAF; speed-density
+    # from RPM and MAP), so its groups are the conjunctive form of "any one
+    # method": each group is necessary, and together they are sufficient.
+    # Refinements read only when present are in DERIVED_CHANNEL_OPTIONAL_INPUTS.
+    "derived:FUEL_RATE_LPH": (
+        (
+            "obd:ENGINE_FUEL_RATE",
+            "decoded:ENGINE_FUEL_RATE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:RPM",
+            "decoded:ECM_RPM",
+        ),
+        (
+            "obd:ENGINE_FUEL_RATE",
+            "decoded:ENGINE_FUEL_RATE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:INTAKE_PRESSURE",
+            "decoded:MAP",
+        ),
+    ),
+    "derived:INSTANT_ECONOMY_L_PER_100KM": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
+    "derived:INSTANT_ECONOMY_MPG": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
+    "derived:BOOST_VACUUM_KPA": (
+        ("obd:INTAKE_PRESSURE", "decoded:MAP"),
+        ("obd:BAROMETRIC_PRESSURE",),
+    ),
+    # Torque PIDs (actual % x reference, at rpm), else the fuel-energy estimate.
+    "derived:ESTIMATED_POWER_HP": (
+        ("obd:RPM", "decoded:ECM_RPM", "derived:FUEL_RATE_LPH"),
+        ("obd:ACTUAL_ENGINE_TORQUE", "derived:FUEL_RATE_LPH"),
+        ("obd:ENGINE_REFERENCE_TORQUE", "derived:FUEL_RATE_LPH"),
+    ),
+    "derived:ESTIMATED_TORQUE_NM": (
+        ("derived:ESTIMATED_POWER_HP",),
+        ("obd:RPM", "decoded:ECM_RPM"),
+    ),
+    "derived:GEAR_ESTIMATE": (("obd:SPEED",), ("obd:RPM", "decoded:ECM_RPM")),
+    # --- compute_derived_channels / the live session accumulators ------------
+    "derived:FUEL_USED_L": (("derived:FUEL_RATE_LPH",),),
+    "derived:CO2_KG": (("derived:FUEL_USED_L",),),
+    "derived:TRIP_DISTANCE_KM": (("obd:SPEED",),),
+    "derived:AVG_ECONOMY_L_PER_100KM": (("derived:FUEL_USED_L",), ("derived:TRIP_DISTANCE_KM",)),
+    "derived:IDLE_TIME_S": (("obd:RPM", "decoded:ECM_RPM"), ("obd:SPEED",)),
+    # --- src.analysis.committees: divergence residuals -----------------------
+    # Any ``min_members`` of the members, on rows where every gate holds.
+    **{
+        committee.output: (
+            committee.members,
+            *((gate.channel,) for gate in committee.gates),
+        )
+        for committee in COMMITTEES
+    },
+}
+
+#: Columns a derived channel reads *when present* but does not need: the
+#: fuel-rate lambda / commanded-equivalence-ratio refinement of the MAF method
+#: and the speed-density IAT (25 degC when absent). Not part of the dependency
+#: groups (their absence never makes the channel unproducible), but they are
+#: inputs all the same, so :mod:`src.trainability` checks them too.
+DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
+    "derived:FUEL_RATE_LPH": (
+        "obd:O2_WR_LAMBDA_S1",
+        "obd:O2_WR_LAMBDA_S2",
+        "obd:COMMANDED_EQUIV_RATIO",
+        "obd:INTAKE_TEMP",
+        "decoded:IAT",
     ),
 }
 
@@ -912,8 +1017,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:STFT_BANK_BALANCE",
-            ("obd:SHORT_FUEL_TRIM_1",),
-            ("obd:SHORT_FUEL_TRIM_2",),
+            *DERIVED_CHANNEL_INPUTS["derived:STFT_BANK_BALANCE"],
         )
     ltft_b1 = _series(out, "obd:LONG_FUEL_TRIM_1")
     ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
@@ -922,8 +1026,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:LTFT_BANK_BALANCE",
-            ("obd:LONG_FUEL_TRIM_1",),
-            ("obd:LONG_FUEL_TRIM_2",),
+            *DERIVED_CHANNEL_INPUTS["derived:LTFT_BANK_BALANCE"],
         )
 
     # Total trim per bank (Task 4.3): LTFT + STFT, reusing the per-bank
@@ -933,16 +1036,14 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:TOTAL_TRIM_B1",
-            ("obd:SHORT_FUEL_TRIM_1",),
-            ("obd:LONG_FUEL_TRIM_1",),
+            *DERIVED_CHANNEL_INPUTS["derived:TOTAL_TRIM_B1"],
         )
     if stft_b2 is not None and ltft_b2 is not None:
         out["derived:TOTAL_TRIM_B2"] = (stft_b2 + ltft_b2).astype(float)
         _append_dependency_gap(
             out,
             "derived:TOTAL_TRIM_B2",
-            ("obd:SHORT_FUEL_TRIM_2",),
-            ("obd:LONG_FUEL_TRIM_2",),
+            *DERIVED_CHANNEL_INPUTS["derived:TOTAL_TRIM_B2"],
         )
 
     # Catalyst efficiency index (Task 4.4) — see docstring for the
@@ -964,8 +1065,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             f"derived:CAT_EFFICIENCY_B{bank}",
-            (upstream_col,),
-            (downstream_col,),
+            *DERIVED_CHANNEL_INPUTS[f"derived:CAT_EFFICIENCY_B{bank}"],
         )
 
     # Wideband AFR voltage asymmetry (DID-dependent).
@@ -976,8 +1076,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:AFR_BANK_BALANCE",
-            ("did:ECM_AF_SENSOR_V_B1",),
-            ("did:ECM_AF_SENSOR_V_B2",),
+            *DERIVED_CHANNEL_INPUTS["derived:AFR_BANK_BALANCE"],
         )
 
     # TPS voltage vs calculated throttle %. Inputs span different units
@@ -993,8 +1092,7 @@ def compute_anomaly_signals(
         _append_dependency_gap(
             out,
             "derived:TPS_VOLTAGE_PER_PCT",
-            ("did:ECM_THROTTLE_POS_SENSOR_1",),
-            ("obd:THROTTLE_POS",),
+            *DERIVED_CHANNEL_INPUTS["derived:TPS_VOLTAGE_PER_PCT"],
         )
 
     return out

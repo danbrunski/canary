@@ -67,6 +67,7 @@ from src.preprocessing.segmenter import (
     segment_operating_modes,
 )
 from src.telemetry import source_of
+from src.trainability import source_exclusion_reason
 
 log = logging.getLogger(__name__)
 
@@ -115,9 +116,12 @@ _SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
 #: GPS channels logged for trip reconstruction and data-quality context but
 #: deliberately excluded from model features. Absolute position would teach the
 #: detectors location identity; heading wraps at 360°; and fix-quality /
-#: satellite-count / HDOP describe the receiver, not the vehicle. Only
-#: ``gps:speed`` (coalesced into the segmenter's speed signal) and its rolling
-#: derivatives feed the IF / LSTM.
+#: satellite-count / HDOP describe the receiver, not the vehicle. Since H01.1
+#: the source gate (``src.trainability``) excludes *every* ``gps:`` channel,
+#: ``gps:speed`` included (H00 operator decision 1: external sensors never
+#: train or score the detectors; ``gps:speed`` still backs up the segmenter's
+#: speed signal, which is mode labelling, not a feature). This name list is
+#: kept as the named, older reason for these seven.
 NON_TRAINABLE_GPS_CHANNELS: frozenset[str] = frozenset(
     {
         "gps:latitude",
@@ -206,6 +210,10 @@ NON_TRAINABLE_STATE_CHANNELS: frozenset[str] = frozenset(
 
 FEATURE_SPEC_VERSION = 1
 
+#: Bookkeeping columns every feature frame carries; never features, and never
+#: judged by :class:`FeaturePolicy` (they name no source).
+_STRUCTURAL_COLUMNS: frozenset[str] = frozenset({"session", "timestamp", MODE_COLUMN, DRIVE_COLUMN})
+
 #: Repo-root-anchored serving capture-profile catalog, used when no config is
 #: threaded (same anchoring as ``engineering.DEFAULT_BINDINGS_PATH``).
 DEFAULT_CAPTURE_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data/capture_profiles.yaml"
@@ -246,7 +254,21 @@ class FeaturePolicy:
         return {} if self.bindings is None else {sig.name: sig for sig in self.bindings.signals}
 
     def exclusion_reason(self, base: str) -> str | None:
-        """Why base channel ``base`` may not train, or ``None`` if it may."""
+        """Why base channel ``base`` may not train, or ``None`` if it may.
+
+        The source gate comes first (H01.1, :func:`src.trainability.source_exclusion_reason`):
+        a channel whose origin is not on the ECU-origin allowlist — ``gps:``,
+        ``imu:``, ``sensor:``, a ``derived:`` channel computed from one, an
+        undeclared ``derived:`` channel, an unclassified namespace — is
+        refused as ``source_not_trainable: ...`` before any data-file gate.
+        Enforced at *training*: a deployed artifact that already carries such
+        a feature keeps being served it (the serve-side reconciler aligns to
+        the manifest, never to this policy); the load audit names it as a
+        policy violation until the retrain replaces it.
+        """
+        source_reason = source_exclusion_reason(base)
+        if source_reason is not None:
+            return source_reason
         if base.startswith(DECODED_PREFIX) or base.startswith(DBC_PREFIX):
             signal = self._signals_by_name.get(base.split(":", 1)[1])
             if signal is None:
@@ -324,7 +346,11 @@ def feature_policy_exclusions(
     out: dict[str, str] = {}
     for raw in features.columns:
         column = str(raw)
-        if is_flag_column(column):
+        if (
+            column in _STRUCTURAL_COLUMNS
+            or is_flag_column(column)
+            or column.startswith(CONTEXT_COLUMN_PREFIX)
+        ):
             continue
         base = _base_feature_name(column)
         if base in out:
@@ -1153,7 +1179,7 @@ def candidate_feature_columns(
     repo defaults — the gates cannot be skipped by not passing an argument.
     """
     resolved_policy = policy if policy is not None else resolve_feature_policy()
-    skip_exact = {"session", "timestamp", MODE_COLUMN, DRIVE_COLUMN}
+    skip_exact = _STRUCTURAL_COLUMNS
     non_trainable_committees = non_trainable_committee_outputs()
     # ``dbc:*`` signals that also exist as ``decoded:*`` are the same wire
     # bytes decoded twice (data/dbc/xterra_2008.dbc was *emitted from*

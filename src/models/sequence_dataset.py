@@ -44,6 +44,7 @@ from src.preprocessing.resampler import (
 )
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
+from src.trainability import source_exclusion_reason
 
 DEFAULT_SEQUENCE_STRIDE = 1
 
@@ -516,6 +517,9 @@ def resolve_sequence_feature_columns(
     for raw in frame.columns:
         column = str(raw)
         if column in skip or is_flag_column(column):
+            continue
+        # H01.1 source gate: discovery never picks an external sensor.
+        if source_exclusion_reason(column) is not None:
             continue
         if pd.api.types.is_numeric_dtype(frame[column]):
             discovered.append(column)

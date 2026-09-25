@@ -34,6 +34,7 @@ from src.preprocessing.resampler import (
     is_flag_column,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.trainability import source_exclusion_reason
 
 _DEFAULT_STD_FLOOR = 1e-9
 
@@ -184,6 +185,9 @@ def _resolve_columns(
         if is_flag_column(col):
             continue
         if not pd.api.types.is_numeric_dtype(df[col]):
+            continue
+        # H01.1 source gate: discovery never picks an external sensor.
+        if source_exclusion_reason(col) is not None:
             continue
         cols.append(col)
     return cols

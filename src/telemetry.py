@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from types import MappingProxyType
 from typing import Final, Literal, get_args
 
 #: Separator between a telemetry source namespace and its channel in a
@@ -107,6 +109,76 @@ CAPTURED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset(
 # exists to close.
 assert RE_DERIVED_SOURCES | CAPTURED_SOURCES == set(get_args(TelemetrySource))
 assert not (RE_DERIVED_SOURCES & CAPTURED_SOURCES)
+
+#: H01.1 — sources whose channels may train and score the anomaly detectors
+#: (Isolation Forest, sequence detector) and behavior models. An **allowlist**
+#: of ECU-origin sources: a source is eligible because it is listed here, and a
+#: source nobody classified is not, so a new source cannot become a feature by
+#: being forgotten. ``can`` raw frames never become features themselves; their
+#: engineering values arrive as ``decoded``. This is the *source* gate, over
+#: channels. Which *capture profile's* sessions the detectors may train,
+#: calibrate, evaluate or score on (tuning captures: none of these, operator
+#: 2026-09-24, R03.12) is a separate, profile-level gate, over sessions.
+TRAINABLE_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({OBD_SOURCE, DECODED_SOURCE})
+#: Sources that are not origins: a ``derived`` channel is trainable only when
+#: every input it is computed from is (``src.trainability``, reading
+#: ``src.analysis.derived.DERIVED_CHANNEL_INPUTS``). "Derived" says how a value
+#: was made, not where it came from.
+INPUT_GATED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DERIVED_SOURCE})
+#: Every other source, with the reason it never trains. Surfaced verbatim in
+#: the ``source_not_trainable`` exclusion reason and in manifests.
+NON_TRAINABLE_SOURCES: Final[Mapping[TelemetrySource, str]] = MappingProxyType(
+    {
+        CAN_SOURCE: "raw CAN frames; their values train as `decoded`",
+        GPS_SOURCE: "external sensor (H00 operator decision 1, 2026-09-23)",
+        IMU_SOURCE: "external sensor (H00 operator decision 1, 2026-09-23)",
+        SENSOR_SOURCE: "external sensor (H00 operator decision 1, 2026-09-23)",
+        UPREV_SOURCE: "imported UpRev log, a foreign instrument kept out of the corpus",
+        KLINE_SOURCE: (
+            "exists only while a K-line session runs; not trainable until the "
+            "operator decides (H00 K-line defaults)"
+        ),
+    }
+)
+# The allowlist names only real sources (H01.1).
+assert TRAINABLE_SOURCES <= set(get_args(TelemetrySource))
+
+
+def require_trainability_classified(
+    sources: Collection[str],
+    trainable: Collection[str],
+    input_gated: Collection[str],
+    non_trainable: Collection[str],
+) -> None:
+    """Refuse unless every source is classified for training exactly once.
+
+    Called below at import time over ``TelemetrySource``, so a source added to
+    the Literal without a trainability decision fails the first import of this
+    module — the alternative is the IMU arriving in the next Isolation Forest
+    fit and leaving with the hardware (the D02.5 failure shape in reverse).
+    A raise, not an ``assert``, so ``python -O`` cannot skip it.
+    """
+    classes = (set(trainable), set(input_gated), set(non_trainable))
+    unclassified = set(sources) - set().union(*classes)
+    if unclassified:
+        raise TypeError(
+            f"telemetry sources {sorted(unclassified)} have no trainability classification: "
+            "add each to TRAINABLE_SOURCES, INPUT_GATED_SOURCES or NON_TRAINABLE_SOURCES "
+            "(src/telemetry.py, H01.1)"
+        )
+    unknown = set().union(*classes) - set(sources)
+    if unknown:
+        raise TypeError(f"trainability classification names non-sources {sorted(unknown)}")
+    overlap = sorted(
+        (classes[0] & classes[1]) | (classes[0] & classes[2]) | (classes[1] & classes[2])
+    )
+    if overlap:
+        raise TypeError(f"telemetry sources {overlap} are classified more than once")
+
+
+require_trainability_classified(
+    get_args(TelemetrySource), TRAINABLE_SOURCES, INPUT_GATED_SOURCES, NON_TRAINABLE_SOURCES
+)
 
 TelemetryValue = bool | int | float | str | None
 MetadataValue = bool | int | float | str | None

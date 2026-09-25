@@ -141,9 +141,9 @@ class GpsConfig(_Strict):
     Optional and defaulted-disabled so configs without a GPS keep loading and
     behave exactly as before. When ``enabled``, the daemon runs a serial
     collector that parses NMEA 0183 (GGA/RMC/VTG) and emits ``gps:*`` telemetry
-    records. ``gps:speed`` (km/h, matching ``obd:SPEED``) feeds the operating-
-    mode segmenter; position/heading/quality are logged but excluded from model
-    features (see ``feature_pipeline.NON_TRAINABLE_GPS_CHANNELS``).
+    records. ``gps:speed`` (km/h, matching ``obd:SPEED``) backs up the
+    operating-mode segmenter's speed signal; no ``gps:`` channel is ever a
+    model feature (H00 operator decision 1, enforced by ``src.trainability``).
     """
 
     enabled: bool = False

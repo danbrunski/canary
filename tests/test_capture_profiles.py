@@ -874,8 +874,15 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
 
     # AIR_MASS_PER_CYCLE and VE_PERCENT resolve through MAF/RPM plus the
     # broadcast-decoded MAP, so neither may be reported as starved — they are
-    # computed channels and can never appear in a poll list.
-    assert not any(channel.startswith("derived:") for channel in missing)
+    # computed channels and can never appear in a poll list. Since H01.1 the
+    # registry declares every derived channel, so the trim residuals resolve
+    # too, and this profile polls no fuel trim: those are genuinely starved.
+    assert {channel for channel in missing if channel.startswith("derived:")} <= {
+        "derived:TOTAL_TRIM_B1",
+        "derived:TOTAL_TRIM_B2",
+        "derived:STFT_BANK_BALANCE",
+        "derived:LTFT_BANK_BALANCE",
+    }
     assert "air_mass_per_cycle_vs_rpm_load" not in flagged
     assert "ve_vs_rpm_load" not in flagged
 

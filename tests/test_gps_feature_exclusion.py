@@ -1,7 +1,8 @@
-"""GPS channels: gps:speed is modeled; position/quality are logged-only.
+"""GPS channels are logged, never modeled (H00 operator decision 1, H01.1).
 
-Absolute position would teach the detectors location identity, so only
-``gps:speed`` (and its rolling derivatives) may enter the feature candidates.
+Absolute position would teach the detectors location identity, and since
+H01.1 no external sensor trains the detectors at all: ``gps:speed`` and its
+rolling derivatives are refused by the source gate too.
 """
 
 from __future__ import annotations
@@ -36,11 +37,11 @@ def _gps_frame() -> pd.DataFrame:
     )
 
 
-def test_gps_speed_is_a_feature_candidate() -> None:
+def test_gps_speed_is_not_a_feature_candidate() -> None:
     cols = candidate_feature_columns(_gps_frame())
-    assert "gps:speed" in cols
-    assert "gps:speed__roc" in cols
-    assert "obd:RPM" in cols
+    assert "gps:speed" not in cols
+    assert "gps:speed__roc" not in cols
+    assert cols == ["obd:RPM"]
 
 
 def test_gps_position_and_quality_channels_are_excluded() -> None:
@@ -53,6 +54,6 @@ def test_gps_position_and_quality_channels_are_excluded() -> None:
 
 def test_trainable_columns_also_drop_position() -> None:
     cols = trainable_feature_columns(_gps_frame())
-    assert "gps:speed" in cols
+    assert "gps:speed" not in cols
     assert "gps:latitude" not in cols
     assert "gps:num_satellites" not in cols

@@ -45,6 +45,9 @@ from pydantic import (
     model_validator,
 )
 
+from src.telemetry import source_of
+from src.trainability import source_exclusion_reason
+
 log = logging.getLogger(__name__)
 
 #: Current ``behavior_models.yaml`` document version (B01.6).
@@ -988,6 +991,46 @@ class BehaviorPolicy(_Strict):
         return None
 
 
+def _model_channels(model: BehaviorModel1D | BehaviorModel2D, axes: tuple[str, ...]) -> list[str]:
+    """Every telemetry channel a model's contract reads: axes, output, rate
+    gates and every eligibility channel (the set
+    ``behavior_eligibility.required_channel_groups`` plans collection from)."""
+    channels = [*axes, model.output, *(condition.channel for condition in model.conditions)]
+    eligibility = model.eligibility
+    if eligibility is not None:
+        channels.append(eligibility.engine_state.rpm_channel)
+        if eligibility.fuel_control is not None:
+            channels.append(eligibility.fuel_control.channel)
+        if eligibility.cold_start is not None:
+            channels.extend(
+                (eligibility.cold_start.rpm_channel, eligibility.cold_start.coolant_channel)
+            )
+        channels.extend(c for ctx in eligibility.required_context for c in ctx.any_of)
+        channels.extend(condition.channel for condition in eligibility.local_ranges)
+    return channels
+
+
+def refuse_non_trainable_sources(name: str, channels: Sequence[str]) -> None:
+    """H01.1 — refuse a behavior model (recipe or loaded artifact) that reads a
+    channel whose source may not feed a detector: an external sensor (``gps:``,
+    ``imu:``, ``sensor:``; H00 operator decision 1, 2026-09-23), a ``derived:``
+    channel computed from one or with no declared inputs, or an unclassified
+    namespace. A bare, unprefixed name is left to the contract's own
+    resolution (an output with no namespace is read as ``decoded:``)."""
+    refused = {
+        channel: reason
+        for channel in dict.fromkeys(channels)
+        if source_of(channel) is not None
+        and (reason := source_exclusion_reason(channel)) is not None
+    }
+    if refused:
+        raise ValueError(
+            f"{name}: behavior models may read only trainable sources "
+            f"(H00 operator decision 1: external sensors never train or score a "
+            f"behavior model; src.trainability): {refused}"
+        )
+
+
 class BehaviorModel1D(_Strict):
     """A 1D expected-behavior surface."""
 
@@ -1018,6 +1061,11 @@ class BehaviorModel1D(_Strict):
     #: :func:`load_behavior_models` / :func:`apply_behavior_policy`. Private:
     #: never serialized, and an artifact cannot carry its own policy.
     _policy_entry: LifecyclePolicyEntry | None = PrivateAttr(default=None)
+
+    @model_validator(mode="after")
+    def _check_input_sources(self) -> BehaviorModel1D:
+        refuse_non_trainable_sources(self.name, _model_channels(self, (self.axis.channel,)))
+        return self
 
     @model_validator(mode="after")
     def _check_deviation(self) -> BehaviorModel1D:
@@ -1067,6 +1115,13 @@ class BehaviorModel2D(_Strict):
     #: cross-version drift comparison reads the same operating rectangles;
     #: an explicit re-grid recomputes edges *and* bumps this.
     grid_version: int = Field(default=1, ge=1)
+
+    @model_validator(mode="after")
+    def _check_input_sources(self) -> BehaviorModel2D:
+        refuse_non_trainable_sources(
+            self.name, _model_channels(self, tuple(axis.channel for axis in self.axes))
+        )
+        return self
 
     @model_validator(mode="after")
     def _check_cells(self) -> BehaviorModel2D:

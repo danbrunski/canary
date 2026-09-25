@@ -73,6 +73,7 @@ from src.decode.behavior_models import (
     ValidationCriteria,
     contract_fingerprint_payload,
     fingerprint,
+    refuse_non_trainable_sources,
 )
 from src.preprocessing.features import roc_column
 from src.preprocessing.local_range import append_local_ranges, local_range_column
@@ -326,6 +327,25 @@ class _RecipeBase:
             raise ValueError(
                 f"max_abs_rate_of_change requires named channels and positive limits: {invalid}"
             )
+        # H01.1 — refused at construction, before any corpus is read: a
+        # recipe naming an external-sensor input can never fit.
+        refuse_non_trainable_sources(self.name, self._named_channels())
+
+    def _named_channels(self) -> list[str]:
+        """Every telemetry channel this recipe names (axes, output, gates)."""
+        axes = [
+            str(getattr(self, field_name))
+            for field_name in ("x_column", "y_column")
+            if getattr(self, field_name, "")
+        ]
+        return [
+            *axes,
+            self.output,
+            self.fuel_status_channel,
+            *self.max_abs_rate_of_change,
+            *(channel for group in self.required_context for channel in group),
+            *(condition.channel for condition in self.local_ranges),
+        ]
 
 
 @dataclass(frozen=True)

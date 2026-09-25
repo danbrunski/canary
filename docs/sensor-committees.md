@@ -40,7 +40,13 @@ Design rules:
 
 - **Residual-as-feature.** The divergence is an ordinary `derived:` feature the
   IF/LSTM learn — no separate fusion source. (Decision A; revisit if an explicit
-  fusion member is wanted later.)
+  fusion member is wanted later.) *Narrowed 2026-09-23 by H00 operator
+  decision 1:* external sensors (GPS, IMU, `sensor:`, the HAT's 12 V and
+  barometer) never train or score the detectors, so a committee with such a
+  member is never a feature, whatever its `trainable` flag says; it takes part
+  in detection only as a deterministic cross-check (H04). The H01.1 source gate
+  (`src/trainability.py`) enforces it: a `derived:` channel trains only when
+  every input declared for it in `DERIVED_CHANNEL_INPUTS` is ECU-origin.
 - **Compute-but-exclude.** `trainable=False` committees are still computed and
   available (dashboards / inspection) but kept out of the trained set via
   `feature_pipeline.candidate_feature_columns` — mirrors `NON_TRAINABLE_GPS_CHANNELS`.

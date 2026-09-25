@@ -121,16 +121,38 @@ def test_engine_response_over_the_deployed_schema_names_every_column() -> None:
     )
     record = resolved.record
     assert len(resolved.feature_columns) + len(record["dropped"]) == len(columns)
-    # Pinned so the evidence quoted in A03.2 cannot drift from the code: 82
-    # kept (43 context, 39 target columns), 279 dropped with a reason, 13
+    # Pinned so the evidence quoted in A03.2 cannot drift from the code: 80
+    # kept (41 context, 39 target columns), 281 dropped with a reason, 13
     # unassigned broadcast channels, one unconfirmed same-quantity pair.
+    # (A03.2 quoted 82/43/279: H01.1 took `gps:speed` and `gps:speed__roc`
+    # out of the inputs — external sensors never condition a detector.)
     assert len(columns) == 361
-    assert len(resolved.feature_columns) == 82
-    assert len(resolved.context_columns) == 43
+    assert len(resolved.feature_columns) == 80
+    assert len(resolved.context_columns) == 41
     assert len(record["targets"]) == 39
-    assert len(record["dropped"]) == 279
+    assert len(record["dropped"]) == 281
+    for gps_column in ("gps:speed", "gps:speed__mean", "gps:speed__std", "gps:speed__roc"):
+        assert record["dropped"][gps_column].startswith("source_not_trainable")
     assert len(record["unassigned"]) == 13
     assert all(name.startswith("decoded:") for name in record["unassigned"])
     assert record["same_quantity_unconfirmed"] == {"engine_speed": ["did:ECM_RPM", "obd:RPM"]}
     assert "obd:BAROMETRIC_PRESSURE" in resolved.context_columns
     assert not any(c.startswith("decoded:ECM_COOLANT_TEMP") for c in resolved.feature_columns)
+
+
+def test_the_source_gate_holds_in_the_feature_set_resolution(tmp_path: Path) -> None:
+    """H01.1: an external-sensor column never conditions or scores a sequence
+    model — refused outright by ``all_channels`` (whose promise is "every
+    candidate is scored"), dropped with the named reason by ``engine_response``,
+    and refused when a vehicle roles file assigns it a role."""
+    with pytest.raises(ValueError, match="source may not train"):
+        resolve_feature_set(ALL_CHANNELS, ["obd:RPM", "imu:ACCEL_X"])
+    resolved = resolve_feature_set(
+        ENGINE_RESPONSE, ["obd:RPM", "obd:MAF", "gps:speed", "sensor:FUEL_PRESSURE"]
+    )
+    assert "gps:speed" not in resolved.feature_columns
+    assert resolved.record["dropped"]["sensor:FUEL_PRESSURE"].startswith("source_not_trainable")
+    roles = tmp_path / "sequence_roles.yaml"
+    roles.write_text("inputs:\n  vehicle_speed:\n    - gps:speed\n")
+    with pytest.raises(ValueError, match="H00 decision 1"):
+        load_vehicle_sequence_roles(roles)

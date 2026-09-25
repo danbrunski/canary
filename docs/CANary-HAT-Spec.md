@@ -528,11 +528,20 @@ CAN channel and the missing L-line way stay deferred.
 The K-line interface is the reason to build this board. Two long-standing
 blockers close with it:
 
-- **Commanded AFR and ignition timing are not on the CAN bus**
-  (`docs/roadmap/engine-tuning-support.md`, `data/bindings.yaml`), and Mode 01 /
-  Mode 22 exclusivity means a single CAN tuning capture cannot produce them.
-  On-board K-line puts spark and commanded AFR on the *same host clock* as the
-  CAN capture.
+- **Commanded AFR and ignition timing are not on the *broadcast* CAN bus**
+  (`docs/roadmap/engine-tuning-support.md`, `data/bindings.yaml`
+  `absent_signals`). *Corrected 2026-09-24 (H01.4):* when this was written
+  they had no CAN source at all; both have since been found on **active** CAN,
+  by request: final ignition timing is Mode 22 DID `0x110A`
+  (`did:ECM_IGNITION_TIMING`, identified 2026-09-20 from UpRev's stream
+  definition, `data/dids.yaml`), and the final commanded equivalence ratio is
+  RAM word `mem:ECM_TARGET_EQUIV_RATIO` read by service 0x23
+  (`data/dids.yaml` `memory:`). What K-line still adds is what CAN refuses on
+  this ECM: one-request synchronous sets (`AC` define + `21` poll) and the
+  multi-DID read (H05), so several tuning channels arrive at one instant
+  instead of ~1.5 ms apart per request, plus passive decoding of whatever
+  UpRev or a scan tool reads (H06), all on the *same host clock* as the CAN
+  capture.
 - It retires the laptop-side UpRev import path (`tools/import_uprev_log.py`) and
   the cross-log clock alignment it requires (`src/analysis/clock_align.py`) for
   anything the Pi can poll itself.
@@ -540,7 +549,9 @@ blockers close with it:
 The IMU, barometer, and GNSS consolidate hardware the roadmap already committed
 to (`docs/roadmap/imu-gps-integration.md` Phase 2b, `docs/sensor-committees.md`)
 and unblock `derived:GRADE` plus four of the six declared-but-dormant sensor
-committees.
+committees. They take part in detection only through those committees: no
+external-sensor channel trains or scores the anomaly detectors or behavior
+models (H00 operator decision 1, 2026-09-23; enforced by H01.1).
 
 ## 10. Capability Delta vs the Current Rig
 

@@ -218,8 +218,11 @@ backend features), plus the unchecked tail of
   rescan workflow and needs the truck. Leave unchecked; do not implement
   overnight.
 - **All IMU work targets `source: disabled` default** and must be fully
-  testable with synthetic data (BNO055 is the assumed sensor per the
-  doc). New committees land `trainable=False` compute-but-exclude.
+  testable with synthetic data (BNO055 was the assumed sensor when this was
+  written; historical since 2026-09-23: the CANary-HAT's LSM6DSOX is the IMU,
+  H02). New committees land `trainable=False` compute-but-exclude, and since
+  H01.1 no `imu:`/`gps:`/`sensor:` channel trains a detector at all (H00
+  operator decision 1).
 
 ## Queue — round 2
 
@@ -339,7 +342,8 @@ backend features), plus the unchecked tail of
 
 ## Round-2 morning backlog
 
-Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b),
+Hardware purchases + wiring (BNO055/BMP390/10 Hz GPS w/ PPS — Q22's 2b;
+historical: superseded 2026-09-23 by the CANary-HAT, tracked in H02/H03),
 authoring real accepted-baseline overrides from the Q17 disposition
 report, declaring the golden baseline + enabling the scheduler (Q19),
 the 6.5 Mode 04 decision, 6.28/6.29 acceptance runs, 6.39 offline-loop

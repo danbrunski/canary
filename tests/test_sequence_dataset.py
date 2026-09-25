@@ -44,9 +44,9 @@ def _frame() -> pd.DataFrame:
                 ],
                 utc=True,
             ),
-            "rpm": [11.0, 10.0, 13.0, 12.0, 0.0, 1.0, 2.0, 3.0, 4.0],
-            "speed": [21.0, 20.0, 23.0, 22.0, 30.0, 31.0, 32.0, 33.0, 34.0],
-            f"rpm{GAP_SUFFIX}": [False] * 9,
+            "obd:RPM": [11.0, 10.0, 13.0, 12.0, 0.0, 1.0, 2.0, 3.0, 4.0],
+            "obd:SPEED": [21.0, 20.0, 23.0, 22.0, 30.0, 31.0, 32.0, 33.0, 34.0],
+            f"obd:RPM{GAP_SUFFIX}": [False] * 9,
             MODE_COLUMN: ["city"] * 4 + ["idle"] * 5,
         }
     )
@@ -62,7 +62,7 @@ def test_resolve_sequence_feature_columns_picks_numeric_non_gap_columns() -> Non
 
     columns = resolve_sequence_feature_columns(frame)
 
-    assert columns == ("rpm", "speed")
+    assert columns == ("obd:RPM", "obd:SPEED")
 
 
 def test_windows_form_on_multi_rate_frame_with_mask_and_delta() -> None:
@@ -105,7 +105,7 @@ def test_windows_form_on_multi_rate_frame_with_mask_and_delta() -> None:
 def test_build_sequence_windows_sorts_and_does_not_cross_sessions() -> None:
     result = build_sequence_windows(_frame(), sequence_length=3)
 
-    assert result.feature_columns == ("rpm", "speed")
+    assert result.feature_columns == ("obd:RPM", "obd:SPEED")
     assert len(result.windows) == 5  # A has 3 windows; B has 2 windows.
     assert [window.session for window in result.windows] == ["A", "A", "A", "B", "B"]
     assert [window.start_row for window in result.windows] == [0, 1, 2, 5, 6]
@@ -125,7 +125,7 @@ def test_build_sequence_windows_marks_gaps_in_mask_without_dropping() -> None:
     surfaced through the per-cell mask (¬gap) and accumulated Δt instead."""
     frame = _frame()
     gap_at_t2 = frame[SESSION_COLUMN].eq("A") & frame[TIMESTAMP_COLUMN].dt.second.eq(2)
-    frame.loc[gap_at_t2, f"rpm{GAP_SUFFIX}"] = True
+    frame.loc[gap_at_t2, f"obd:RPM{GAP_SUFFIX}"] = True
 
     result = build_sequence_windows(frame, sequence_length=3)
 
@@ -147,9 +147,11 @@ def test_build_sequence_windows_imputes_leading_nan_and_masks_it() -> None:
     torch = pytest.importorskip("torch")
     frame = _frame()
     lead = frame[SESSION_COLUMN].eq("A") & frame[TIMESTAMP_COLUMN].dt.second.eq(0)
-    frame.loc[lead, "rpm"] = np.nan
+    frame.loc[lead, "obd:RPM"] = np.nan
 
-    dataset = SequenceWindowDataset(frame, sequence_length=3, feature_columns=["rpm", "speed"])
+    dataset = SequenceWindowDataset(
+        frame, sequence_length=3, feature_columns=["obd:RPM", "obd:SPEED"]
+    )
     assert len(dataset) == 5  # nothing dropped
     value, mask, delta = dataset[0]  # session A, rows 0..2 (the NaN is row 0)
     assert isinstance(value, torch.Tensor)
@@ -172,7 +174,7 @@ def test_build_sequence_windows_honors_explicit_gap_columns() -> None:
     # With an explicit gap column the mask is derived from value-presence only
     # (the explicit caller manages its own gap semantics); windows still all
     # form, and the feature set excludes the explicit gap column.
-    assert result.feature_columns == ("rpm", "speed")
+    assert result.feature_columns == ("obd:RPM", "obd:SPEED")
     assert [window.session for window in result.windows] == ["A", "A", "A", "B", "B"]
     assert resolve_gap_columns(frame, ["manual_gap"]) == ("manual_gap",)
 
@@ -188,18 +190,18 @@ def test_sequence_window_dataset_exposes_metadata_without_torch() -> None:
     dataset = SequenceWindowDataset(
         _frame(),
         sequence_length=3,
-        feature_columns=["rpm", "speed"],
+        feature_columns=["obd:RPM", "obd:SPEED"],
     )
 
     assert len(dataset) == 5
-    assert dataset.feature_columns == ("rpm", "speed")
+    assert dataset.feature_columns == ("obd:RPM", "obd:SPEED")
     assert dataset.window_metadata(0).to_dict()["session"] == "A"
 
 
 def test_sequence_window_dataset_getitem_dependency_error_without_torch() -> None:
     if _torch_installed():
         pytest.skip("torch installed")
-    dataset = SequenceWindowDataset(_frame(), sequence_length=3, feature_columns=["rpm"])
+    dataset = SequenceWindowDataset(_frame(), sequence_length=3, feature_columns=["obd:RPM"])
 
     with pytest.raises(MissingSequenceDependencyError, match="torch is required"):
         dataset[0]
@@ -210,7 +212,7 @@ def test_sequence_window_dataset_returns_value_mask_delta_tuple() -> None:
     dataset = SequenceWindowDataset(
         _frame(),
         sequence_length=3,
-        feature_columns=["rpm", "speed"],
+        feature_columns=["obd:RPM", "obd:SPEED"],
     )
 
     value, mask, delta = dataset[0]
@@ -231,7 +233,7 @@ def test_sequence_frame_from_sessions_runs_preprocessing_pipeline(tmp_path: Path
         t = 1_778_500_000.0 + i
         records.extend(
             [
-                TelemetryRecord.obd(t, "RPM", 800.0 + i, "rpm"),
+                TelemetryRecord.obd(t, "RPM", 800.0 + i, "obd:RPM"),
                 TelemetryRecord.obd(t, "SPEED", 0.0, "km/h"),
                 TelemetryRecord.obd(t, "THROTTLE_POS", 5.0, "%"),
             ]
@@ -254,7 +256,7 @@ def test_sequence_window_dataset_from_sessions_uses_lstm_sequence_length(
         t = 1_778_500_000.0 + i
         records.extend(
             [
-                TelemetryRecord.obd(t, "RPM", 800.0 + i, "rpm"),
+                TelemetryRecord.obd(t, "RPM", 800.0 + i, "obd:RPM"),
                 TelemetryRecord.obd(t, "SPEED", 0.0, "km/h"),
                 TelemetryRecord.obd(t, "THROTTLE_POS", 5.0, "%"),
             ]
@@ -277,3 +279,11 @@ def _torch_installed() -> bool:
     except ImportError:
         return False
     return True
+
+
+def test_default_feature_discovery_never_picks_an_external_sensor() -> None:
+    """H01.1: the default column discovery applies the source gate."""
+    frame = _frame()
+    frame["imu:ACCEL_X"] = 0.1
+    frame["gps:speed"] = 20.0
+    assert resolve_sequence_feature_columns(frame) == ("obd:RPM", "obd:SPEED")

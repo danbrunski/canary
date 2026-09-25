@@ -21,19 +21,19 @@ from src.preprocessing.segmenter import MODE_COLUMN
 
 
 def test_fit_recovers_mean_and_std_exactly():
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(df)
     # Population std (ddof=0) of [1..5] = sqrt(2)
-    assert scaler.means == {"x": 3.0}
-    assert scaler.stds["x"] == pytest.approx(np.sqrt(2.0))
+    assert scaler.means == {"obd:X": 3.0}
+    assert scaler.stds["obd:X"] == pytest.approx(np.sqrt(2.0))
 
 
 def test_fit_uses_ddof_zero_population_std():
     """Pinning the convention: we use population std, not sample std."""
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0]})
     scaler = ZScoreScaler.fit(df)
     # population variance of [1,2,3] = 2/3
-    assert scaler.stds["x"] == pytest.approx(np.sqrt(2.0 / 3.0))
+    assert scaler.stds["obd:X"] == pytest.approx(np.sqrt(2.0 / 3.0))
 
 
 def test_fit_default_picks_numeric_value_columns():
@@ -54,10 +54,10 @@ def test_fit_default_picks_numeric_value_columns():
 
 
 def test_fit_explicit_columns_overrides_auto_discovery():
-    df = pd.DataFrame({"x": [1.0, 2.0], "y": [10.0, 20.0]})
-    scaler = ZScoreScaler.fit(df, columns=["x"])
-    assert scaler.columns == ("x",)
-    assert "y" not in scaler.means
+    df = pd.DataFrame({"obd:X": [1.0, 2.0], "obd:Y": [10.0, 20.0]})
+    scaler = ZScoreScaler.fit(df, columns=["obd:X"])
+    assert scaler.columns == ("obd:X",)
+    assert "obd:Y" not in scaler.means
 
 
 def test_fit_rejects_non_numeric_in_explicit_columns():
@@ -67,24 +67,24 @@ def test_fit_rejects_non_numeric_in_explicit_columns():
 
 
 def test_fit_rejects_missing_column_in_explicit_columns():
-    df = pd.DataFrame({"x": [1.0, 2.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0]})
     with pytest.raises(KeyError, match="missing required columns"):
-        ZScoreScaler.fit(df, columns=["x", "y"])
+        ZScoreScaler.fit(df, columns=["obd:X", "obd:Y"])
 
 
 def test_fit_errors_on_all_nan_column():
     """All-NaN columns produce NaN mean/std; the scaler is useless. Fail loudly."""
-    df = pd.DataFrame({"x": [np.nan, np.nan, np.nan]})
+    df = pd.DataFrame({"obd:X": [np.nan, np.nan, np.nan]})
     with pytest.raises(ValueError, match="no non-NaN values"):
-        ZScoreScaler.fit(df, columns=["x"])
+        ZScoreScaler.fit(df, columns=["obd:X"])
 
 
 def test_fit_skips_nans_in_partial_column():
-    df = pd.DataFrame({"x": [1.0, np.nan, 3.0, np.nan, 5.0]})
+    df = pd.DataFrame({"obd:X": [1.0, np.nan, 3.0, np.nan, 5.0]})
     scaler = ZScoreScaler.fit(df)
     # mean of [1, 3, 5] = 3; population std = sqrt(8/3)
-    assert scaler.means["x"] == pytest.approx(3.0)
-    assert scaler.stds["x"] == pytest.approx(np.sqrt(8.0 / 3.0))
+    assert scaler.means["obd:X"] == pytest.approx(3.0)
+    assert scaler.stds["obd:X"] == pytest.approx(np.sqrt(8.0 / 3.0))
 
 
 # ---------------------------------------------------------------------------
@@ -93,34 +93,34 @@ def test_fit_skips_nans_in_partial_column():
 
 
 def test_transform_applies_z_score():
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(df)
     transformed = scaler.transform(df)
     # Mean = 3, std = sqrt(2). Z-scores: (-2,-1,0,1,2)/sqrt(2)
     expected = np.array([-2.0, -1.0, 0.0, 1.0, 2.0]) / np.sqrt(2.0)
-    assert transformed["x"].tolist() == pytest.approx(expected.tolist())
+    assert transformed["obd:X"].tolist() == pytest.approx(expected.tolist())
 
 
 def test_fit_transform_produces_zero_mean_unit_std():
     """The classic property: scaled training data has μ≈0 and σ≈1."""
     rng = np.random.default_rng(42)
-    df = pd.DataFrame({"x": rng.normal(loc=10.0, scale=3.0, size=1000)})
+    df = pd.DataFrame({"obd:X": rng.normal(loc=10.0, scale=3.0, size=1000)})
     scaler = ZScoreScaler.fit(df)
     scaled = scaler.transform(df)
-    assert scaled["x"].mean() == pytest.approx(0.0, abs=1e-10)
-    assert scaled["x"].std(ddof=0) == pytest.approx(1.0, abs=1e-10)
+    assert scaled["obd:X"].mean() == pytest.approx(0.0, abs=1e-10)
+    assert scaled["obd:X"].std(ddof=0) == pytest.approx(1.0, abs=1e-10)
 
 
 def test_transform_passes_non_fitted_columns_through():
     """Session/timestamp/mode columns and other extras come out untouched."""
-    train = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    train = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(train)
     df = pd.DataFrame(
         {
             SESSION_COLUMN: ["s1", "s1"],
             TIMESTAMP_COLUMN: pd.date_range("2026-05-11", periods=2, tz="UTC"),
             MODE_COLUMN: ["idle", "idle"],
-            "x": [3.0, 5.0],
+            "obd:X": [3.0, 5.0],
             "notes": ["a", "b"],
         }
     )
@@ -132,39 +132,39 @@ def test_transform_passes_non_fitted_columns_through():
 
 def test_transform_rejects_missing_fitted_column():
     """The plan's explicit requirement: reject inference data with mismatched schema."""
-    scaler = ZScoreScaler.fit(pd.DataFrame({"x": [1.0, 2.0, 3.0]}))
-    bad = pd.DataFrame({"y": [10.0, 20.0]})
+    scaler = ZScoreScaler.fit(pd.DataFrame({"obd:X": [1.0, 2.0, 3.0]}))
+    bad = pd.DataFrame({"obd:Y": [10.0, 20.0]})
     with pytest.raises(SchemaMismatchError, match="missing fitted columns"):
         scaler.transform(bad)
 
 
 def test_transform_preserves_nan_values():
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(df)
-    inference = pd.DataFrame({"x": [3.0, np.nan, 5.0]})
+    inference = pd.DataFrame({"obd:X": [3.0, np.nan, 5.0]})
     out = scaler.transform(inference)
-    assert out["x"].iloc[0] == pytest.approx(0.0)
-    assert np.isnan(out["x"].iloc[1])
+    assert out["obd:X"].iloc[0] == pytest.approx(0.0)
+    assert np.isnan(out["obd:X"].iloc[1])
 
 
 def test_transform_constant_channel_centers_only():
     """When σ < std_floor, transform should reduce to (x - μ): no amplification."""
-    train = pd.DataFrame({"const": [5.0, 5.0, 5.0, 5.0]})
+    train = pd.DataFrame({"obd:CONST": [5.0, 5.0, 5.0, 5.0]})
     scaler = ZScoreScaler.fit(train)
-    assert scaler.stds["const"] == 0.0
-    inference = pd.DataFrame({"const": [5.0, 6.0, 4.0]})
+    assert scaler.stds["obd:CONST"] == 0.0
+    inference = pd.DataFrame({"obd:CONST": [5.0, 6.0, 4.0]})
     out = scaler.transform(inference)
     # Centering only: scaled = x - 5
-    assert out["const"].tolist() == pytest.approx([0.0, 1.0, -1.0])
+    assert out["obd:CONST"].tolist() == pytest.approx([0.0, 1.0, -1.0])
 
 
 def test_transform_input_unchanged_no_side_effects():
     """Caller's DataFrame should not be mutated by transform."""
-    df = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    df = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(df)
-    original_x = df["x"].copy()
+    original_x = df["obd:X"].copy()
     _ = scaler.transform(df)
-    assert (df["x"] == original_x).all()
+    assert (df["obd:X"] == original_x).all()
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +196,9 @@ def test_to_dict_is_json_safe():
 def test_from_dict_accepts_missing_std_floor():
     """Older manifests without std_floor should still load."""
     data = {
-        "means": {"x": 0.0},
-        "stds": {"x": 1.0},
-        "columns": ["x"],
+        "means": {"obd:X": 0.0},
+        "stds": {"obd:X": 1.0},
+        "columns": ["obd:X"],
     }
     restored = ZScoreScaler.from_dict(data)
     assert restored.std_floor == pytest.approx(1e-9)
@@ -206,7 +206,7 @@ def test_from_dict_accepts_missing_std_floor():
 
 def test_persist_then_apply_in_a_new_process():
     """Simulate the manifest workflow: fit → serialize → deserialize → transform."""
-    train = pd.DataFrame({"x": [1.0, 2.0, 3.0, 4.0, 5.0]})
+    train = pd.DataFrame({"obd:X": [1.0, 2.0, 3.0, 4.0, 5.0]})
     scaler = ZScoreScaler.fit(train)
 
     # Persist
@@ -215,10 +215,10 @@ def test_persist_then_apply_in_a_new_process():
     # ... time passes; process restarts ...
 
     loaded = ZScoreScaler.from_dict(json.loads(blob))
-    inference = pd.DataFrame({"x": [3.0]})
+    inference = pd.DataFrame({"obd:X": [3.0]})
     out = loaded.transform(inference)
     # Mean was 3 → scaled value is 0
-    assert out["x"].iloc[0] == pytest.approx(0.0)
+    assert out["obd:X"].iloc[0] == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------
@@ -228,17 +228,21 @@ def test_persist_then_apply_in_a_new_process():
 
 def test_post_init_rejects_negative_std_floor():
     with pytest.raises(ValueError, match="std_floor"):
-        ZScoreScaler(means={"x": 0.0}, stds={"x": 1.0}, columns=("x",), std_floor=-1.0)
+        ZScoreScaler(means={"obd:X": 0.0}, stds={"obd:X": 1.0}, columns=("obd:X",), std_floor=-1.0)
 
 
 def test_post_init_rejects_missing_means():
     with pytest.raises(ValueError, match="means missing"):
-        ZScoreScaler(means={"x": 0.0}, stds={"x": 1.0, "y": 1.0}, columns=("x", "y"))
+        ZScoreScaler(
+            means={"obd:X": 0.0}, stds={"obd:X": 1.0, "obd:Y": 1.0}, columns=("obd:X", "obd:Y")
+        )
 
 
 def test_post_init_rejects_missing_stds():
     with pytest.raises(ValueError, match="stds missing"):
-        ZScoreScaler(means={"x": 0.0, "y": 0.0}, stds={"x": 1.0}, columns=("x", "y"))
+        ZScoreScaler(
+            means={"obd:X": 0.0, "obd:Y": 0.0}, stds={"obd:X": 1.0}, columns=("obd:X", "obd:Y")
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -249,18 +253,18 @@ def test_post_init_rejects_missing_stds():
 def test_multiple_channels_have_independent_parameters():
     df = pd.DataFrame(
         {
-            "rpm": [800.0, 900.0, 1000.0, 1100.0, 1200.0],
-            "speed": [0.0, 10.0, 20.0, 30.0, 40.0],
+            "obd:RPM": [800.0, 900.0, 1000.0, 1100.0, 1200.0],
+            "obd:SPEED": [0.0, 10.0, 20.0, 30.0, 40.0],
         }
     )
     scaler = ZScoreScaler.fit(df)
-    assert scaler.means["rpm"] != scaler.means["speed"]
-    assert scaler.stds["rpm"] != scaler.stds["speed"]
+    assert scaler.means["obd:RPM"] != scaler.means["obd:SPEED"]
+    assert scaler.stds["obd:RPM"] != scaler.stds["obd:SPEED"]
 
     scaled = scaler.transform(df)
     # Both channels should sit at zero mean
-    assert scaled["rpm"].mean() == pytest.approx(0.0)
-    assert scaled["speed"].mean() == pytest.approx(0.0)
+    assert scaled["obd:RPM"].mean() == pytest.approx(0.0)
+    assert scaled["obd:SPEED"].mean() == pytest.approx(0.0)
 
 
 def test_scaler_is_global_across_sessions():
@@ -270,9 +274,17 @@ def test_scaler_is_global_across_sessions():
     df = pd.DataFrame(
         {
             SESSION_COLUMN: ["A"] * 3 + ["B"] * 3,
-            "x": [1.0, 2.0, 3.0, 100.0, 200.0, 300.0],
+            "obd:X": [1.0, 2.0, 3.0, 100.0, 200.0, 300.0],
         }
     )
     scaler = ZScoreScaler.fit(df)
     # Mean over all 6 rows is 101.0, not 2.0 (session A) or 200.0 (session B).
-    assert scaler.means["x"] == pytest.approx(101.0)
+    assert scaler.means["obd:X"] == pytest.approx(101.0)
+
+
+def test_default_column_discovery_never_picks_an_external_sensor() -> None:
+    """H01.1: with no column list, the scaler's discovery applies the source gate."""
+    df = pd.DataFrame(
+        {"obd:X": [1.0, 2.0, 3.0], "imu:ACCEL_X": [0.1, 0.2, 0.3], "gps:speed": [5.0, 6.0, 7.0]}
+    )
+    assert ZScoreScaler.fit(df).columns == ("obd:X",)
