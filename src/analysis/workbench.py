@@ -50,6 +50,7 @@ from src.analysis.tuning import (
 from src.analysis.tuning_frame import ProviderRegistry, build_tuning_frame
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.session import TAGS_FILENAME, load_tags
 
@@ -112,8 +113,8 @@ class WorkbenchInputs:
     floor, the ``idle`` operating mode); nothing vehicle-specific is coded.
     """
 
-    bindings_path: Path = Path("data/bindings.yaml")
-    dids_path: Path = Path("data/dids.yaml")
+    bindings_path: Path = BINDINGS_YAML
+    dids_path: Path = DIDS_YAML
     calibration: AfrCalibration | None = None
     providers: ProviderRegistry | None = None
     providers_path: Path | None = None

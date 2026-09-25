@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import shutil
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +27,9 @@ from src.dashboard.ups import (
 from src.decode.engineering import physical_value
 from src.models.feature_spec_health import load_audit_snapshot, structural_blindness_snapshot
 from src.models.health import HealthMonitor
+from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.storage.monitor import free_space_mb
+from src.storage.sidecar import read_json_object
 from src.timefmt import parse_iso_utc
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports the dashboard
@@ -49,9 +50,8 @@ VehicleStateName = Literal[
 _FRESHNESS_THRESHOLD_SECONDS = 10.0
 
 #: Below this RPM (with OBD fresh) we call it "ignition_only / KOEO" rather
-#: than "engine running" — most idle 4-cyl gas engines sit around 700–800,
-#: so 400 is well below any actually-running state but above sensor jitter.
-_RPM_RUNNING_THRESHOLD = 400.0
+#: than "engine running"; the one definition is ``src.operating`` (R01.7).
+_RPM_RUNNING_THRESHOLD = ENGINE_RUNNING_MIN_RPM
 
 
 @dataclass(frozen=True)
@@ -302,24 +302,21 @@ class StatusSnapshot:
 
 
 def _free_mb(path: Path) -> float:
-    """Free disk MB at ``path`` (or its first existing parent). 0 on failure."""
-    target = path
-    while not target.exists() and target != target.parent:
-        target = target.parent
+    """Free disk MB at ``path`` (or its first existing parent). 0 on failure.
+
+    :func:`src.storage.monitor.free_space_mb` does the walk and the division
+    (R01.5); ``/status`` must not raise, so a failed ``statvfs`` reads 0.
+    """
     try:
-        usage = shutil.disk_usage(target)
+        return free_space_mb(path)
     except OSError:
         return 0.0
-    return usage.free / (1024 * 1024)
 
 
 def _model_version(manifest_path: Path) -> str | None:
     """Read the version field from a model manifest JSON, or ``None``."""
-    if not manifest_path.exists():
-        return None
-    try:
-        data = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json_object(manifest_path)
+    if data is None:
         return None
     version = (
         data.get("model_version")
@@ -337,13 +334,8 @@ def _model_provenance(manifest_path: Path) -> dict[str, Any] | None:
     gate) — a malformed/partial manifest shouldn't take ``/status`` down, it
     should just show up as an absent field for an operator to notice.
     """
-    if not manifest_path.exists():
-        return None
-    try:
-        data = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not isinstance(data, dict):
+    data = read_json_object(manifest_path)
+    if data is None:
         return None
     return {
         "model_version": data.get("model_version"),

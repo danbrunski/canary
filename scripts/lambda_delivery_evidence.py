@@ -49,6 +49,7 @@ from src.analysis.lambda_delivery import (  # noqa: E402
 )
 from src.analysis.noise_floor import load_noise_floor  # noqa: E402
 from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds  # noqa: E402
+from src.paths import DIDS_YAML  # noqa: E402
 from src.preprocessing.loader import read_session  # noqa: E402
 
 
@@ -269,7 +270,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("sessions", nargs="+", type=Path)
     parser.add_argument("--declaration", type=Path, required=True)
-    parser.add_argument("--dids", type=Path, default=Path("data/dids.yaml"))
+    parser.add_argument("--dids", type=Path, default=DIDS_YAML)
     parser.add_argument("--providers", type=Path, default=None)
     parser.add_argument("--calibration", type=Path, default=None)
     parser.add_argument("--noise-floor", type=Path, default=None)

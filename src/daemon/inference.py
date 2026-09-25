@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
-from src.alerts.emitter import AnomalyEventEmitter, EmitterCounters, IsolationForestInferenceEngine
+from src.alerts.emitter import AnomalyEventEmitter, EmitterCounters
 from src.alerts.fusion import (
     FusionScorer,
     FusionSource,
@@ -21,9 +21,9 @@ from src.alerts.fusion import (
     lstm_source,
 )
 from src.alerts.tuning import AlertTuner
+from src.coerce import finite_float
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.dashboard.broadcast import Broadcaster
-from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.dashboard.status import VehicleState, classify_vehicle_state
 from src.decode.accepted_baselines import load_accepted_baselines
 from src.decode.behavior_decoder import deviation, deviation_for_override
@@ -40,6 +40,8 @@ from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
 from src.models.feature_spec_health import observe_reconciliation
 from src.models.health import HealthMonitor
+from src.models.inference import IsolationForestInferenceEngine
+from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     DEFAULT_DIDS_PATH,
@@ -69,6 +71,10 @@ if TYPE_CHECKING:
     from .plausibility_live import LivePlausibility
 
 log = logging.getLogger(__name__)
+
+#: Old private name, re-exported (``src.daemon`` exports it): the one
+#: definition is :func:`src.coerce.finite_float` (R01.3).
+_finite_or_none = finite_float
 
 #: Thread-name prefix of the one inference worker, so a test can assert the
 #: executor was shut down and no thread leaked (C08.10).
@@ -1571,16 +1577,6 @@ _IF_TOP_FEATURES = 5
 _SCHEMA_RECONCILIATION_WARNED: set[tuple[str, str]] = set()
 
 
-def _finite_or_none(value: Any) -> float | None:
-    """JSON has no NaN/Infinity — coerce non-finite scores to ``None`` so the
-    /ws/scores payload stays valid JSON the browser can parse."""
-    try:
-        f = float(value)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
-
-
 def _publish_score(
     scores: Broadcaster | None,
     *,
@@ -1612,8 +1608,8 @@ def _publish_score(
         {
             "type": "score",
             "source": source,
-            "score": _finite_or_none(score),
-            "threshold": _finite_or_none(threshold),
+            "score": finite_float(score),
+            "threshold": finite_float(threshold),
             "operating_mode": operating_mode,
             "model_version": model_version,
             "timestamp": ts_str,
@@ -1983,20 +1979,6 @@ def _score_and_emit(
     )
 
 
-def _num(value: object) -> float | None:
-    """Float-cast an operating-point value; ``None`` for NaN / non-numeric.
-
-    Mirrors ``behavior_decoder._scalar`` without reaching for a private
-    name — the daemon only needs it to pull the live axis values that
-    position the dashboard's "you are here" marker.
-    """
-    try:
-        f = float(value)  # type: ignore[arg-type]  # except handles non-numeric
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
-
-
 def _observe_behavior(
     source: LiveFeatureSource, behavior_live: BehaviorLiveState
 ) -> list[_BehaviorResidual]:
@@ -2048,7 +2030,7 @@ def _observe_behavior(
         # name falls back to the legacy decoded:<NAME>.
         actual_col = resolve_output_column(model.output)
         status = serving_status(model)
-        actual = _num(point.get(actual_col))
+        actual = finite_float(point.get(actual_col))
         # 2.2 — an active, non-expired override for this model recenters
         # the band (worse side trips, better side never alerts, per
         # `behavior_decoder._grade_directional`); `active_override_for`
@@ -2062,11 +2044,11 @@ def _observe_behavior(
         )
         result = deviation(model, actual, point, override=override)
         if isinstance(model, BehaviorModel1D):
-            x = _num(point.get(model.axis.channel))
+            x = finite_float(point.get(model.axis.channel))
             y = None
         else:
-            x = _num(point.get(model.axes[0].channel))
-            y = _num(point.get(model.axes[1].channel))
+            x = finite_float(point.get(model.axes[0].channel))
+            y = finite_float(point.get(model.axes[1].channel))
         mode_match = model.operating_mode is None or mode == model.operating_mode
         observations.append(
             BehaviorObservation(
@@ -2127,7 +2109,7 @@ def _observe_behavior(
                 if SOURCE_SEP in candidate.channel
                 else channel_key(DECODED_SOURCE, candidate.channel)
             )
-            actual = _num(point.get(actual_col))
+            actual = finite_float(point.get(actual_col))
             if actual is None:
                 continue
             result = deviation_for_override(channel_override, actual)

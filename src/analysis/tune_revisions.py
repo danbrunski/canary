@@ -16,17 +16,12 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 4.3.
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-#: Session directory names are ``YYYY-MM-DDTHHMMSS`` in UTC, optionally behind
-#: a ``_``-prefixed capture/quarantine marker (``_tuning-2026-08-05T142720``).
-_SESSION_STAMP = re.compile(r"(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})(\d{2})")
 
 
 class _Strict(BaseModel):

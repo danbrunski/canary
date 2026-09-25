@@ -58,14 +58,15 @@ from src.analysis.drives import (
     physical_drives,
     recording_units,
 )
-from src.analysis.refit import ENGINE_RUNNING_MIN_RPM
 from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.config import CanaryConfig
 from src.control.sessions import session_started_at
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
+from src.session import session_sort_key
 
 #: Longest step between rows that still counts as continuous engine time when
 #: integrating engine-hours (the 1 Hz grid with a few dropped ticks).
@@ -390,7 +391,7 @@ def holdout_by_drive(
         return tuple(
             sorted(
                 out.values(),
-                key=lambda p: (session_started_at(p) or datetime.min.replace(tzinfo=UTC), p.name),
+                key=session_sort_key,
             )
         )
 

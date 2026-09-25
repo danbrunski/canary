@@ -31,7 +31,6 @@ feature builder skips them and they are never trainable features.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Iterable
 from dataclasses import dataclass
 
@@ -39,6 +38,8 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.pairing import to_seconds
+from src.coerce import finite_float
+from src.dataframe_utils import numeric_values
 from src.decode.behavior_models import BehaviorModels, ColdStartRequirement
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -108,16 +109,6 @@ def start_context_specs(models: BehaviorModels | None) -> list[StartContextSpec]
     return specs
 
 
-def _finite(value: object) -> float | None:
-    if value is None:
-        return None
-    try:
-        out = float(value)  # type: ignore[arg-type]  # except handles non-numeric
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
 class EngineStartTracker:
     """Stateful start-evidence fold shared by the live and batch paths."""
 
@@ -162,9 +153,9 @@ class EngineStartTracker:
         start a first coolant reading may still stand in for the initial
         temperature when no run-time clock is available.
         """
-        rpm_v = _finite(rpm)
-        runtime_v = _finite(runtime)
-        coolant_v = _finite(coolant)
+        rpm_v = finite_float(rpm)
+        runtime_v = finite_float(runtime)
+        coolant_v = finite_float(coolant)
         if rpm_v is not None and rpm_v < self.spec.min_running_rpm:
             # Engine stopped (or KOEO): this run is over, and the next
             # running row is a start we actually watched happen.
@@ -217,12 +208,6 @@ class EngineStartTracker:
         return 0.0, float("nan")
 
 
-def _column_values(frame: pd.DataFrame, column: str) -> np.ndarray:
-    if column not in frame.columns:
-        return np.full(len(frame), np.nan)
-    return pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
-
-
 def append_start_context(frame: pd.DataFrame, specs: Iterable[StartContextSpec]) -> pd.DataFrame:
     """Batch fold of :class:`EngineStartTracker` over each session in time order.
 
@@ -258,9 +243,9 @@ def append_start_context(frame: pd.DataFrame, specs: Iterable[StartContextSpec])
         epoch_seconds = None
     out = frame.copy()
     for spec in specs:
-        rpm = _column_values(frame, spec.rpm_channel)
-        runtime = _column_values(frame, spec.runtime_channel)
-        coolant = _column_values(frame, spec.coolant_channel)
+        rpm = numeric_values(frame, spec.rpm_channel)
+        runtime = numeric_values(frame, spec.runtime_channel)
+        coolant = numeric_values(frame, spec.coolant_channel)
         observed = np.zeros(len(frame))
         start_coolant = np.full(len(frame), np.nan)
         tracker = EngineStartTracker(spec)

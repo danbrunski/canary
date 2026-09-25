@@ -41,6 +41,7 @@ from src.decode.bindings import (
     load_bindings,
     scaling_factors,
 )
+from src.paths import BINDINGS_YAML
 
 DECODED_PREFIX = "decoded:"
 
@@ -48,7 +49,7 @@ DECODED_PREFIX = "decoded:"
 #: build_live_feature_source``), the storage decoder, and the training feature
 #: pipeline load — so a mode rule scales a column with the binding that
 #: produced it.
-DEFAULT_BINDINGS_PATH = Path(__file__).resolve().parents[2] / "data" / "bindings.yaml"
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 
 _CACHE: dict[Path, tuple[int, Bindings]] = {}
 

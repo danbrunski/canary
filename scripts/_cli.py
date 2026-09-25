@@ -13,7 +13,6 @@ module instead of hand-rolling `sys.path.insert(0, str(Path(__file__)...))`.
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,6 +28,7 @@ from src.config import CanaryConfig  # noqa: E402
 from src.control.sessions import session_started_at  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
 
 
 def add_common_args(parser: argparse.ArgumentParser, *, help: str = "Path to canary.yaml.") -> None:
@@ -131,12 +131,6 @@ def filter_sessions_since(sessions: list[Path], since: datetime) -> list[Path]:
     return kept
 
 
-#: Live-session directory naming convention (matches `make_session_dir`).
-#: `_replay-*` / `_archive` are deliberately excluded — used by scripts that
-#: post-process real captures only (labeling, fingerprinting).
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
-
-
 def discover_live_session_dirs(root: Path) -> list[Path]:
     """Sorted live-session dirs directly under `root` matching the naming convention.
 
@@ -144,12 +138,12 @@ def discover_live_session_dirs(root: Path) -> list[Path]:
     training-corpus discovery and has its own underscore-prefix/telemetry
     rules) — this is the simpler "every well-formed live session" scan
     `label_sessions.py`/`fingerprint.py` both do post-hoc.
+
+    Plain live sessions only (`_replay-*` / `_archive` / captures are
+    deliberately excluded: these scripts post-process real drives), oldest
+    first by parsed start time (`src.session.iter_sessions`, R01.1).
     """
-    if not root.exists():
-        return []
-    return sorted(
-        child for child in root.iterdir() if child.is_dir() and _SESSION_DIR_RE.match(child.name)
-    )
+    return iter_sessions(root, kinds=LIVE_SESSION_KINDS)
 
 
 def resolve_sessions(args: argparse.Namespace, sessions_root: Path) -> list[Path]:

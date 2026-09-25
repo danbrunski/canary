@@ -43,6 +43,7 @@ from src.analysis.pairing import (
     to_seconds,
     weakest_basis,
 )
+from src.paths import BINDINGS_YAML, DIDS_YAML
 
 #: A probe must clear this to be worth a human's attention at all.
 MIN_R_SQUARED = 0.90
@@ -267,8 +268,8 @@ def sweep_session(
     can_ids: Sequence[int] | None = None,
     max_byte_length: int = 2,
     min_pairs: int = MIN_PAIRS,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     grid: object = None,
 ) -> list[ProbeFit]:
     """Regress every byte slice of every broadcast id against every reference.

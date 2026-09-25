@@ -44,6 +44,7 @@ from typing import Any
 
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, apply_scaling, decode_raw, is_plausible
+from src.storage.sidecar import read_json_object
 from src.telemetry import CAN_SOURCE, GPS_SOURCE, OBD_SOURCE, TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -711,7 +712,9 @@ class GpsTracker:
         if not self._state_path.exists():
             return
         try:
-            data = json.loads(self._state_path.read_text())
+            data = read_json_object(self._state_path)
+            if data is None:
+                raise ValueError("unreadable or not a JSON object")
             self._totals = TripTotals(
                 distance_km=float(data.get("distance_km", 0.0)),
                 moving_time_s=float(data.get("moving_time_s", 0.0)),

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from src.mcp_server.client import DaemonClient
-from src.mcp_server.parquet_query import (
+from src.storage.telemetry_query import (
     QueryValidationError,
     TelemetryQuery,
 )

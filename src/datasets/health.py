@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,14 @@ from src.preprocessing.feature_pipeline import segment_or_constant
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import GAP_SUFFIX, resample_config_for, resample_wide
 from src.preprocessing.segmenter import MODE_COLUMN
-from src.session import MANIFEST_FILENAME, TAGS_FILENAME, load_tags, session_paths
+from src.session import (
+    MANIFEST_FILENAME,
+    TAGS_FILENAME,
+    load_tags,
+    parse_session_timestamp,
+    session_paths,
+)
+from src.storage.sidecar import read_json_object
 
 log = logging.getLogger(__name__)
 
@@ -134,14 +141,8 @@ def _first_physical(wide: pd.DataFrame, names: tuple[str, ...]) -> pd.Series | N
 
 
 def _parse_error_ratio(session_dir: Path) -> float | None:
-    path = session_dir / MANIFEST_FILENAME
-    if not path.exists():
-        return None
-    try:
-        import json
-
-        meta = json.loads(path.read_text())
-    except (OSError, ValueError):
+    meta = read_json_object(session_dir / MANIFEST_FILENAME)
+    if meta is None:
         return None
     errors = meta.get("parse_errors")
     frames = meta.get("frames_recorded")
@@ -253,10 +254,8 @@ def _session_started_date(session_dir: Path) -> date | None:
     ``scripts/refit_behavior_models.py``'s ``_filter_sessions_by_age``).
     ``None`` for a non-conforming name (e.g. a manual import) — callers treat
     that as "can't place it in time", not as before/after the boundary."""
-    try:
-        return datetime.strptime(session_dir.name, "%Y-%m-%dT%H%M%S").date()
-    except ValueError:
-        return None
+    parsed = parse_session_timestamp(session_dir.name)
+    return None if parsed is None else parsed.date()
 
 
 def analyze_corpus(

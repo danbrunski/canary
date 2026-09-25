@@ -25,7 +25,7 @@ import pyarrow.parquet as pq
 from src.atomic_write import atomic_write_text
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.record_arming import RecordArmingGate
-from src.session import SessionPaths, make_session_dir, session_paths
+from src.session import SessionPaths, format_session_timestamp, make_session_dir, session_paths
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
 )
@@ -219,7 +219,7 @@ class ParquetTelemetryWriter:
         existing_names = {p.root.name for p in self.session_paths}
         attempt = clock_now
         for _ in range(60):
-            name = attempt.astimezone(UTC).strftime("%Y-%m-%dT%H%M%S")
+            name = format_session_timestamp(attempt.astimezone(UTC))
             if name not in existing_names and not (self._out_root / name).exists():
                 break
             attempt = attempt + timedelta(seconds=1)

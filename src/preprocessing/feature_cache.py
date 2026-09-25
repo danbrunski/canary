@@ -15,12 +15,16 @@ import pandas as pd
 from src.config import CanaryConfig
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.decode.dbc import DEFAULT_DBC_DIR
+from src.models.artifact_hash import sha256_file
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import PARQUET_PATTERN
 
 log = logging.getLogger(__name__)
 
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
-DEFAULT_DIDS_PATH = Path("data/dids.yaml")
+#: Repo-rooted (R01.2): the cache key must hash the file the build loads, not
+#: whatever ``data/dids.yaml`` happens to sit under the working directory.
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
+DEFAULT_DIDS_PATH = DIDS_YAML
 #: Bump whenever a *code* change alters the feature frame for unchanged inputs.
 #: The rest of the cache key hashes inputs only (session file stats, config,
 #: bindings/dbc/dids), so without this a preprocessing fix would silently serve
@@ -52,6 +56,7 @@ def build_feature_frame_cache_key(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     dbc_dir: Path = DEFAULT_DBC_DIR,
+    dids_path: Path = DEFAULT_DIDS_PATH,
 ) -> str:
     """Return the deterministic cache key for a feature-frame build."""
     return str(
@@ -61,6 +66,7 @@ def build_feature_frame_cache_key(
             bindings_path=bindings_path,
             behavior_models_path=behavior_models_path,
             dbc_dir=dbc_dir,
+            dids_path=dids_path,
         )["cache_key"]
     )
 
@@ -72,6 +78,7 @@ def _feature_frame_cache_metadata(
     bindings_path: Path,
     behavior_models_path: Path,
     dbc_dir: Path,
+    dids_path: Path = DEFAULT_DIDS_PATH,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "cache_version": FEATURE_FRAME_CACHE_VERSION,
@@ -82,7 +89,8 @@ def _feature_frame_cache_metadata(
         "dbc": _directory_cache_entry(dbc_dir, pattern="*.dbc"),
         # Hash the DID map so editing dids.yaml (new DID, fixed scale)
         # invalidates cached frames that decoded did:* columns.
-        "dids": _file_cache_entry(DEFAULT_DIDS_PATH),
+        # ``dids_path`` must be the file the build actually loads.
+        "dids": _file_cache_entry(dids_path),
     }
     return {**payload, "cache_key": _stable_hash(payload)}
 
@@ -124,16 +132,8 @@ def _file_cache_entry(path: Path) -> dict[str, Any]:
         "exists": True,
         "size": stat.st_size,
         "mtime_ns": stat.st_mtime_ns,
-        "sha256": _file_sha256(path),
+        "sha256": sha256_file(path),
     }
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _stable_path(path: Path) -> str:

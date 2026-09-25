@@ -20,14 +20,16 @@ Tags are written independently of the recorder process. That means:
 from __future__ import annotations
 
 import json
-import re
 import time
 from pathlib import Path
 from typing import Any
 
-from src.session import TAGS_FILENAME
+from src.session import TAGS_FILENAME, SessionKind, iter_sessions
 
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
+#: A tag records a physical action on the vehicle, so it belongs in a
+#: recording of the vehicle: never in ``_replay-*`` output, whose rows are
+#: re-emitted from another session.
+TAGGABLE_SESSION_KINDS = frozenset({SessionKind.LIVE, SessionKind.CAPTURE, SessionKind.TUNING})
 
 
 def write_tag(
@@ -105,16 +107,23 @@ def write_correction(
 
 
 def find_latest_session(sessions_root: Path) -> Path:
-    """Return the most recently created session directory under `sessions_root`.
+    """Return the session being recorded now under `sessions_root`.
 
     Used by the `tag` CLI so the user doesn't have to copy-paste the
-    timestamped path while a recording is in progress.
+    timestamped path while a recording is in progress. "Which session is
+    live?" includes captures (R01.1): the previous plain-name-only
+    ``max(name)`` tagged the *previous* session for the whole of a
+    ``_capture-*`` recording. Newest by parsed start time, over
+    :data:`TAGGABLE_SESSION_KINDS`.
+
+    Not :func:`src.control.sessions.latest_session`: that one requires a
+    flushed telemetry chunk, which a ``record.py`` session (``frames.log``)
+    never has and a just-started daemon session does not have yet, and a tag
+    written in those first seconds belongs in the new session.
     """
     if not sessions_root.is_dir():
         raise FileNotFoundError(f"sessions root does not exist: {sessions_root}")
-    candidates = [
-        d for d in sessions_root.iterdir() if d.is_dir() and _SESSION_DIR_RE.match(d.name)
-    ]
+    candidates = iter_sessions(sessions_root, kinds=TAGGABLE_SESSION_KINDS)
     if not candidates:
         raise FileNotFoundError(f"no session directories in {sessions_root}")
-    return max(candidates, key=lambda d: d.name)
+    return candidates[-1]

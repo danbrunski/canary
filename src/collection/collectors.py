@@ -390,9 +390,9 @@ def _kline_collectors(config: CanaryConfig) -> list[CollectorStarter]:
     kline = config.hardware.kline
     if not kline.enabled:
         return []
-    from src.collection.obd_scheduler import _DIDS_YAML_PATH
+    from src.paths import DIDS_YAML
 
-    collector = KlineCollector(kline, config.daemon.kline_profile, _DIDS_YAML_PATH)
+    collector = KlineCollector(kline, config.daemon.kline_profile, DIDS_YAML)
 
     async def kline_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
         await collector.run(queue, stop)

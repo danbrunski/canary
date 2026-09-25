@@ -32,7 +32,6 @@ retracted findings. The cost is stated, not hidden: zero alarms need about
 
 from __future__ import annotations
 
-import hashlib
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -40,6 +39,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from src.models.artifact_hash import sha256_file
 
 #: The incident every refusal names.
 ALERT_BUDGET_INCIDENT = (
@@ -343,12 +344,9 @@ def verdict_path_for(artifact_path: Path) -> Path:
     return artifact_path.with_name(artifact_path.name + ALERT_BUDGET_VERDICT_SUFFIX)
 
 
-def file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+#: Old name, re-exported for its importers (``role_gate``, ``scripts/retrain``);
+#: the one definition is :func:`src.models.artifact_hash.sha256_file` (R01.6).
+file_sha256 = sha256_file
 
 
 def evaluation_drives(report: Mapping[str, Any] | None) -> list[dict[str, Any]]:

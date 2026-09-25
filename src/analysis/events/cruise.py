@@ -11,7 +11,9 @@ from __future__ import annotations
 import pandas as pd
 
 from src.analysis.session_classifier import DetectedEvent, ModeSegment
+from src.operating import HIGHWAY_MODE
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp
 
 #: Speed below which we don't bother flagging cruise — that's idle / stop-and-go.
@@ -24,6 +26,19 @@ _BAND_KPH = 5.0
 
 #: Minimum sustained duration (s) for a cruise window to count.
 _MIN_DURATION_S = 30.0
+
+
+def _regime(segmented: pd.DataFrame, start: int, stop: int) -> str:
+    """``highway`` when the segmenter labelled most of the window highway.
+
+    Reads the segmenter's own band instead of restating it (R01.7): this said
+    >= 70 km/h while the segmenter's highway band starts at 80, so a 72 km/h
+    cruise was a highway cruise here and a city row everywhere else.
+    """
+    if MODE_COLUMN not in segmented.columns:
+        return "surface"
+    modes = segmented[MODE_COLUMN].iloc[start:stop]
+    return "highway" if bool((modes == HIGHWAY_MODE).mean() >= 0.5) else "surface"
 
 
 def detect_cruise(
@@ -66,7 +81,7 @@ def detect_cruise(
                     fields={
                         "mean_speed_kph": round(mean_speed, 1),
                         "duration_seconds": round(float(duration), 2),
-                        "regime": "highway" if mean_speed >= 70.0 else "surface",
+                        "regime": _regime(segmented, run_start, end_idx),
                     },
                 )
             )

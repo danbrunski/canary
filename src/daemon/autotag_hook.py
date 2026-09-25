@@ -35,6 +35,7 @@ from typing import Any
 
 import numpy as np
 
+from src.coerce import finite_float
 from src.collection.tags import write_tag
 from src.config import AutoTagConfig
 
@@ -142,10 +143,10 @@ class LiveAutoTagHook:
         if not self.config.live_enabled or point is None:
             return
 
-        obd_speed = _num(point.get("obd:SPEED"))
-        gps_speed = _num(point.get("gps:speed"))
-        accel_lon = _num(point.get("imu:ACCEL_LON_MAX"))
-        accel_lat = _num(point.get("imu:ACCEL_LAT_MAX"))
+        obd_speed = finite_float(point.get("obd:SPEED"))
+        gps_speed = finite_float(point.get("gps:speed"))
+        accel_lon = finite_float(point.get("imu:ACCEL_LON_MAX"))
+        accel_lat = finite_float(point.get("imu:ACCEL_LAT_MAX"))
         speed_accel = self._speed_accel_sign(obd_speed, now)
 
         if accel_lon is not None and speed_accel is not None:
@@ -182,11 +183,3 @@ class LiveAutoTagHook:
                 variance_ok = float(np.var(samples)) <= self.config.highway_max_accel_variance_g2
             if self._highway.tick(gps_speed >= self.config.highway_speed_min_kph and variance_ok):
                 self._write("highway_cruise", now, gps_speed_kph=gps_speed)
-
-
-def _num(value: object) -> float | None:
-    try:
-        f = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None  # NaN check without importing math for one use

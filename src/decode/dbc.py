@@ -31,6 +31,7 @@ from typing import Any
 import pandas as pd
 
 from src.can_ids import parse_can_channel
+from src.paths import DBC_DIR
 from src.telemetry import DBC_SOURCE, channel_key
 
 log = logging.getLogger(__name__)
@@ -39,7 +40,7 @@ log = logging.getLogger(__name__)
 #: DBC-decoded values — re-exported from :mod:`src.telemetry` so ``to_wide``
 #: produces ``dbc:<SIGNAL>`` without colliding with the bindings path's
 #: ``decoded:<SIGNAL>``. Kept importable here for back-compat.
-DEFAULT_DBC_DIR = Path("data/dbc")
+DEFAULT_DBC_DIR = DBC_DIR
 
 
 def dbc_channel(signal_name: str) -> str:

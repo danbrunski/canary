@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from src.coerce import finite_float
 from src.collection.gps_collector import reading_to_records
 from src.collection.gps_nmea import GpsReading
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
@@ -109,16 +110,6 @@ def gpsd_factory(spec: GpsdSpec) -> LineReader:
     return GpsdReader(sock)
 
 
-def _as_float(value: Any) -> float | None:
-    """Coerce a gpsd JSON field to float, or None if absent/unparseable."""
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _used_satellites(obj: dict[str, Any]) -> int | None:
     """Satellites *used in the fix* from a SKY report.
 
@@ -177,22 +168,22 @@ def update_reading_gpsd(reading: GpsReading, obj: dict[str, Any]) -> None:
         mode_value = mode if isinstance(mode, int) and not isinstance(mode, bool) else 0
         reading.has_fix = mode_value >= _MODE_HAS_FIX
         reading.fix_quality = 1 if reading.has_fix else 0
-        reading.latitude = _as_float(obj.get("lat"))
-        reading.longitude = _as_float(obj.get("lon"))
+        reading.latitude = finite_float(obj.get("lat"))
+        reading.longitude = finite_float(obj.get("lon"))
         # gpsd >= 3.20 splits altitude into MSL/HAE; GGA (and therefore the
         # serial path) reports MSL, so prefer it and fall back to legacy ``alt``.
-        altitude = _as_float(obj.get("altMSL"))
+        altitude = finite_float(obj.get("altMSL"))
         if altitude is None:
-            altitude = _as_float(obj.get("alt"))
+            altitude = finite_float(obj.get("alt"))
         reading.altitude_m = altitude
-        speed_ms = _as_float(obj.get("speed"))
+        speed_ms = finite_float(obj.get("speed"))
         reading.speed_kmh = None if speed_ms is None else speed_ms * 3.6
-        reading.heading_deg = _as_float(obj.get("track"))
+        reading.heading_deg = finite_float(obj.get("track"))
     elif kind == "SKY":
         satellites = _used_satellites(obj)
         if satellites is not None:
             reading.num_satellites = satellites
-        hdop = _as_float(obj.get("hdop"))
+        hdop = finite_float(obj.get("hdop"))
         if hdop is not None:
             reading.hdop = hdop
 

@@ -20,7 +20,7 @@ named.
 
 ---
 
-- [ ] **R01.1 One session-name module: kind, start time, ordering.**
+- [~] **R01.1 One session-name module: kind, start time, ordering.**
   *Drift bug.* Three things answer "what is this directory?", and they
   disagree:
   - The regex `^\d{4}-\d{2}-\d{2}T\d{6}$` is copied in `control/sessions.py`,
@@ -79,8 +79,52 @@ named.
     `src/session.py`.
   - Size **M**. Tests that pin today's order: `test_tags.py`,
     `test_storage_catalog.py`, the retention and replay tests.
+  *Partial 2026-09-25 (implementation done; one operator decision open).*
+  `src/session.py` gained `SessionKind`, `classify_session_name`,
+  `session_sort_key` (total: unparseable names sort first), `iter_sessions(root,
+  kinds=...)` (required `kinds`, ordered by parsed time), `session_kind`,
+  `format_session_timestamp`/`parse_session_timestamp` and
+  `SESSION_TIMESTAMP_FORMAT`. `control.sessions.session_started_at` /
+  `latest_session` / `is_session_dir_name` / `list_sessions` are wrappers;
+  catalog, retention, trends, classification, replay, tags, `datasets/health`,
+  `mcp_server` → `storage/telemetry_query`, `scripts/_cli`,
+  `migrate_to_profiles`, `tools/corpus_report` use the one parser.
+  `find_latest_session` returns the newest of live/capture/tuning by parsed
+  time (not `latest_session`, which needs a flushed parquet chunk that a
+  `record.py` `frames.log` session never has; replay output is excluded:
+  a tag is a physical action). Sort keys in `retrain.py`,
+  `evaluate_plausibility.py`, `evaluate_detectors.py` (`_spread_in_time`'s
+  `TypeError` gone), `workbench_jobs`, `models/evaluation` use
+  `session_sort_key`. Failing-first, shown failing on a HEAD worktree and
+  passing now: `test_tags.py::test_find_latest_session_returns_an_open_capture`,
+  `test_storage_catalog.py::test_a_capture_row_has_started_at`,
+  `test_session.py::test_list_sessions_with_captures_and_limit_returns_newest_by_time`
+  (HEAD returned `beta, zeta`). The grep returns only `src/session.py` (the
+  format constant and the stamp regex). The accept grep missed a dead copy
+  (`tune_revisions._SESSION_STAMP`, deleted); the widened form
+  `grep -rnE '\\d\{4\}-\\d\{2\}-\\d\{2\}|%Y-%m-%dT%H%M%S' src scripts tools`
+  catches it and now returns `src/session.py` plus two anomaly-log *date*
+  regexes (`mcp_server/resources.py`, `mcp_server/tools/search.py`), which are
+  not session names. `trip_end.trip_block` sorts by `session_sort_key` too
+  (its paths are writer-created, so unparseable-first vs last never applies).
+  **Behaviour changes:** `classify_session_name` / `session_started_at` /
+  `latest_session` are anchored (capture slugs `[a-z0-9-]+`) and return `None`
+  on an invalid calendar date instead of raising; a name merely *containing*
+  a stamp no longer parses. Callers: `analysis/drives.py`,
+  `tune_revisions.py`, `analysis/workbench.py`, `scripts/evaluate_detectors.py`,
+  `models/evaluation.py` (the verifier checked 268 real names: no regression).
+  `find_latest_session`'s change reaches `scripts/tag.py`,
+  `scripts/stop_recording.py`, `scripts/guided_session.py` and
+  `scripts/correct_tag.py`. Pinning suites green: `test_tags`,
+  `test_storage_catalog`, `test_retention_tick`, `test_replay_*`,
+  `test_vehicle_state`, `test_control_trends*`, `test_control_classification`.
+  **Remaining: the operator decision below.** Today's behaviour is kept:
+  `_tuning-*` is not in `src.session.RECORDED_SESSION_KINDS`, so HTTP reads
+  and sidecars still refuse it; either answer is adding or not adding
+  `SessionKind.TUNING` to that one constant (pinned by
+  `test_session.py::test_tuning_sessions_are_not_http_resolvable_pending_the_operator_decision`).
 
-- [ ] **R01.2 One repo-rooted home for default data paths.**
+- [~] **R01.2 One repo-rooted home for default data paths.**
   *Drift bug.* The same data files have several default paths, some rooted at
   the repo and some at the working directory:
   - `Path("data/dids.yaml")` / `Path("data/bindings.yaml")`, relative to the
@@ -116,8 +160,39 @@ named.
   - `grep -rn 'Path("data/' src` returns nothing.
   - Size **M**. Touches `src/models`/`src/preprocessing`, so the
     `ml_training` tier runs.
+  *Partial 2026-09-25.* `src/paths.py` (`REPO_ROOT`, `DATA_DIR`,
+  `DIDS_YAML`, `BINDINGS_YAML`, `DBC_DIR`, `TEST_PROFILES_DIR`);
+  `dashboard/paths.py`, `decode/engineering.py`, `preprocessing/decode.py`,
+  `feature_cache.py`, `models/spec_producibility.py`, `decode/dbc.py`,
+  `validation/{harness,evidence,synthetic_bus}.py` and the dids/bindings
+  defaults in `analysis/{compare,tuning,tuning_frame,lambda_delivery,workbench,
+  broadcast_discovery}.py` and `dashboard/routes/rom_maps.py` re-export or use
+  it; 16 scripts/tools' `--bindings`/`--dids` defaults too.
+  `build_feature_frame_cache_key` takes `dids_path` and hashes it.
+  `obd_scheduler._load_did_map` is now public `load_repo_did_map`; the copy in
+  `control/obd_request.py` is deleted and `collectors.py` no longer imports a
+  private name. `daemon/{runtime,inference}` import `src.paths`. Tests:
+  `tests/test_paths.py` (3 pass). The failing-first test
+  `test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory`
+  is committed as a strict xfail: run with `--runxfail` it fails exactly on the
+  bug (`[] == ['did:ECM_RPM', ...]` from a `tmp_path` cwd).
+  **Remaining:** (1) `src/preprocessing/feature_pipeline.py` (held by the
+  concurrent H01 agent): repo-root `DEFAULT_DIDS_PATH`/`DEFAULT_BINDINGS_PATH`,
+  add `build_feature_frame(dids_path=...)` and pass it to
+  `_feature_frame_cache_metadata`, then drop the xfail marker. (2) Moving the
+  DID-catalog accessors into `src/decode/dids.py` (held by another session's
+  uncommitted work); they stay in `obd_scheduler` for now. (3)
+  `src/analysis/channels.py` (same session): three dids/bindings defaults.
+  (4) `grep -rn 'Path("data/' src` still lists `config.py`'s runtime-state
+  defaults (`data/control/*`, `data/anomalies`, …) and the module constants
+  that mirror them (`reference_epoch`, `vehicle_ledger`, `alerts/tuning`,
+  `alerts/feedback`, `training_ledger`, `llm_assist/store`, `mcp_server/config`,
+  `custom_pids`, `accepted_baselines`, `feature_pipeline`'s cache dir):
+  `profiles.scope_config` rewrites those relative paths per vehicle and tests
+  pin them (`test_profiles`, `test_config`), so they wait for R05.1's
+  profile-relative helpers. `ml_training` not run here.
 
-- [ ] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
+- [~] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
   "number or `None`" helper has about ten copies with four behaviours:
   - `daemon/inference._finite_or_none` and `_num` (identical bodies, one
     file), `preprocessing/session_context._finite` and
@@ -135,8 +210,25 @@ named.
   _finite\|def _num\b\|def _to_float\|def _as_float\|def _float_or_none\|def
   _maybe_float" src` is empty or each hit is named here as deliberate. Size
   **S**.
+  *Partial 2026-09-25.* `src/coerce.finite_float` (beside the existing
+  `optional_str`): `None` for NaN, ±inf, `bool`, and anything `float()`
+  refuses. Migrated and deleted: `daemon/inference._finite_or_none` (kept as a
+  re-exported alias; `src.daemon` exports it) and `_num`,
+  `session_context._finite`, `behavior_decoder._scalar`,
+  `autotag_hook._num`, `events/cold_start._maybe_float`,
+  `replay_window._float_or_none`, `gps_gpsd._as_float`, `gps_nmea._to_float`,
+  `custom_pids._float_or_none`. **Behaviour changes:** `autotag_hook`,
+  `cold_start` and `replay_window` now refuse ±inf; `gps_gpsd` refuses NaN;
+  NMEA/CSV fields reading `nan`/`inf` parse to `None`; every migrated copy
+  except the two that already did (`gps_gpsd`, `gps_nmea` by input type) now
+  refuses `bool` where it returned `float(True)` — `daemon/inference`,
+  `session_context`, `behavior_decoder`, `autotag_hook`, `events/cold_start`
+  and `replay_window` (no caller passes one: all read numeric channels). Tests: `tests/test_coerce.py` (22). Remaining grep hits:
+  `cold_start_inventory._finite` is an array filter, not a scalar coercion
+  (deliberate); **`preprocessing/live._to_float` remains**: the file is held
+  by another session's uncommitted work.
 
-- [ ] **R01.4 One "numeric column or NaN" helper in
+- [x] **R01.4 One "numeric column or NaN" helper in
   `src/dataframe_utils.py`.** Six copies:
   - `behavior_input_inventory._values`
   - `cold_start_inventory._column`
@@ -149,8 +241,17 @@ named.
   **Do:** add `numeric_column(frame, name) -> pd.Series` (frame-length, NaN
   when absent). Read each caller of `fingerprint._numeric` before migrating
   it. **Accept:** the six copies are deleted. Size **S**.
+  *Done 2026-09-25.* `dataframe_utils.numeric_column` (frame-length, frame
+  index, NaN when absent, float dtype) plus `numeric_values` (its ndarray).
+  Deleted: `behavior_input_inventory._values`, `cold_start_inventory._column`,
+  `session_context._column_values`, `behavior_validation._column`,
+  `fingerprint._numeric`; `behavior_eligibility._FrameColumns.floats` is a
+  one-line call. `fingerprint._numeric`'s callers were read: every one
+  `dropna()`s or takes `first_valid_index()`, except `_add_voltage_stats`,
+  whose `voltage.empty` guard became `voltage.isna().all()` (same outcome).
+  Tests: `tests/test_dataframe_utils.py` (3), `test_fingerprint.py` green.
 
-- [ ] **R01.5 One JSON-sidecar module; one catalog re-index.** Per-session
+- [x] **R01.5 One JSON-sidecar module; one catalog re-index.** Per-session
   sidecar plumbing is copied everywhere:
   - `_update_catalog` has four copies (`analysis/digest.py`,
     `control/dtc_state.py`, `control/classification.py`,
@@ -186,8 +287,36 @@ named.
 
   **Accept:** the copies are deleted. The library gains WAL and a guarded
   `dir_size`, and the evidence names both as behaviour changes. Size **S–M**.
+  *Done 2026-09-25.* `src/storage/sidecar.py`: `read_json_object`
+  (isinstance-checked), `write_json_sidecar`, `require_telemetry`.
+  `catalog.record_session_best_effort` replaces the four `_update_catalog`
+  copies and `label_sessions.py`'s inline one (lazy import in `digest`,
+  `dtc_state`, `sessions`). Catalog reads the digest via `digest.read_digest*`
+  and dtc via `read_json_object`; its three `_read_*_sidecar` copies are gone.
+  Migrated readers: digest ×3, trip summary, session metadata, classification,
+  fingerprint, reference epoch, yaw offset, capture quality/epoch, trend alert
+  state, `status._model_version`/`_model_provenance`, `sequence_detector`,
+  `companion/library`, `datasets/{export,health}`, `analysis/tuning`'s
+  `capture_profile.json` read (crashed with `AttributeError` on non-object
+  JSON) and `gps_tracker._load` (same crash; now starts fresh,
+  `test_gps_tracker.py::test_non_object_state_file_starts_fresh`); writers:
+  11 sidecar sites.
+  Preflight: fingerprint, trip summary, classifier call `require_telemetry`.
+  `src.session.dir_size` replaces the four `_dir_size` copies;
+  `status._free_mb` calls `storage/monitor.free_space_mb`.
+  `storage/sqlite_store.SqliteStore` (WAL, busy timeout, `_tx`) is the base of
+  `SessionCatalog` and `CanaryLibrary`. **Behaviour changes:** the library
+  gains WAL + `busy_timeout` (so `library.db-wal`/`-shm` appear beside it) and
+  an `OSError`-guarded `dir_size`; valid non-object JSON in a sidecar now reads
+  as absent instead of raising (`test_storage_catalog.py::test_a_non_object_sidecar_reads_as_absent`,
+  failing on HEAD). Left deliberately: JSON reads that report their own errors
+  (`role_gate`, `models/manifest`, `training_ledger`, `companion/services`,
+  `mcp_server/tools/replay`, `promotion_gate`, `calibration`,
+  `behavior_inventory`, `read_capture_manifest`'s pydantic validation), and
+  `retention._delete_catalog_rows` / `trends` catalog reads (delete and read,
+  not a re-index).
 
-- [ ] **R01.6 One `sha256_file`.** `src/models/artifact_hash.sha256_file`
+- [x] **R01.6 One `sha256_file`.** `src/models/artifact_hash.sha256_file`
   says in its docstring that it is the only one. There are six more:
   `alert_budget.file_sha256`, `feature_cache._file_sha256`, one in
   `behavior_validation`, `scripts/retrain._file_sha256`,
@@ -196,8 +325,18 @@ named.
   `sha256_file_or_none(path)` beside it and migrate all six. **Accept:**
   `grep -rn "hashlib.sha256" src scripts tools` shows only `artifact_hash.py`
   and non-file uses. Size **S**.
+  *Done 2026-09-25.* `artifact_hash.sha256_file_or_none(path)` (None for
+  `None`/non-file/unreadable). `alert_budget.file_sha256`, `retrain._file_sha256`,
+  `evaluate_detectors.file_sha256` and `benchmark_live_pipeline._sha256`
+  (which read the whole file) are now aliases of the one function;
+  `feature_cache._file_sha256` is deleted; `behavior_validation.file_identity`
+  / `file_sha256` and `retrain._manifest_fingerprint` call it. Digests are
+  byte-identical (feature-cache keys unchanged). The grep shows only
+  `artifact_hash.py`, in-memory hashes, and composite multi-file/dataset
+  digests (`behavior_validation` dbc dir and session chunks, surface/IF/sequence
+  training hashes). Tests: `tests/test_artifact_hash.py` (3).
 
-- [ ] **R01.7 One home for operating constants.** Same-meaning constants in
+- [~] **R01.7 One home for operating constants.** Same-meaning constants in
   several places:
   - Engine-running 400 rpm is defined four times: `refit.ENGINE_RUNNING_MIN_RPM`,
     `fingerprint._RUNNING_RPM`, `cold_start_inventory.DEFAULT_MIN_RUNNING_RPM`
@@ -211,8 +350,25 @@ named.
   Make cruise read the segmenter's band. The vehicle-specific ones (the WOT
   floors in `tuning_digest`, `DEFAULT_RPM_BANDS` ending at the VQ40 redline)
   belong to R05.13, not here. **Accept:** one definition of each. Size **S**.
+  *Partial 2026-09-25.* `src/operating.py`: `ENGINE_RUNNING_MIN_RPM` and
+  `HIGHWAY_MODE`. `fingerprint._RUNNING_RPM`,
+  `cold_start_inventory.DEFAULT_MIN_RUNNING_RPM` and
+  `dashboard/status._RPM_RUNNING_THRESHOLD` alias it; `models/evaluation`,
+  `models/synthetic_fault_eval` and `behavior_input_inventory` import it
+  (neither `models` module imports `analysis.refit` any more). Cruise reads the
+  segmenter's label: `regime` is `highway` when most of the window is
+  segmenter-`highway`. **Behaviour change:** a 70–80 km/h cruise the segmenter
+  calls `city` is now `surface` (was `highway`);
+  `test_events.py::test_cruise_regime_is_the_segmenters_band_not_its_own`,
+  and the existing highway test now labels its rows `highway`.
+  `CLASSIFIER_VERSION` 0.3.0 → 0.3.1 so stale classification sidecars
+  recompute with the new regime.
+  **Remaining:** `refit.ENGINE_RUNNING_MIN_RPM = 400.0` is still its own
+  definition: `src/analysis/refit.py` is held by the concurrent H01 agent. The
+  fix is `from src.operating import ENGINE_RUNNING_MIN_RPM` there (it stays in
+  `refit.__all__`).
 
-- [ ] **R01.8 Fix the layering inversions.** Imports run both ways between
+- [~] **R01.8 Fix the layering inversions.** Imports run both ways between
   analysis and everything else:
   - `decode` imports `analysis`: `behavior_decoder` imports
     `surface_1d.evaluate_1d` / `surface_2d.evaluate_2d` (moved by R05.10).
@@ -238,3 +394,23 @@ named.
   single sources), so the test forbids edges and allows the rest, rather than
   imposing a strict layer order. That keeps the inversions from coming back.
   Size **S** after R01.2, R03.1 and R05.10.
+  *Partial 2026-09-25.* `TelemetryQuery` moved to
+  `src/storage/telemetry_query.py`; `mcp_server/parquet_query.py` is a
+  re-export shim; `control/{session_timeseries,binned_analysis}` and the MCP
+  server/tools import the new home. `IsolationForestInferenceEngine` moved to
+  `models/inference.py`; `alerts/emitter` re-exports it lazily (module
+  `__getattr__`), `daemon/inference` imports the new home.
+  `daemon/{runtime,inference}` take `DEFAULT_BINDINGS_PATH` from `src.paths`;
+  `models/{evaluation,synthetic_fault_eval}` take the rpm floor from
+  `src.operating`. `tests/test_layering.py` forbids `decode→analysis`,
+  `{daemon,control,models}→dashboard`, `control→mcp_server` and
+  `models→analysis.refit`; on a HEAD worktree it fails naming the six R01
+  edges. Two allowance tables are stale-checked (an allowance whose edge is
+  gone fails the test): **`OWED`**: `decode/behavior_decoder →
+  analysis.surface_1d/surface_2d` (R05.10) and `daemon/inference`,
+  `control/nonvolatile_write → dashboard.status` (R03.1). **`STANDING`**
+  (daemon→dashboard edges R01.8 does not name, recorded so a new one fails):
+  `daemon/server → dashboard.api` (composition root), `daemon/{components,
+  drain,inference} → dashboard.broadcast`, `daemon/{components,inference} →
+  dashboard.behavior_live`, `daemon/idle_shutdown → dashboard.ups`.
+  **Remaining:** the `OWED` edges, closed by R03.1 and R05.10.

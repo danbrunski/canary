@@ -17,6 +17,7 @@ from src.coerce import optional_str as _optional_str
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.jsonl_store import append_jsonl_line
+from src.session import format_session_timestamp
 
 JobKind = Literal[
     "retrain_if",
@@ -634,7 +635,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _corpus_report_name() -> str:
-    stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+    stamp = format_session_timestamp(datetime.now(UTC))
     return f"corpus-report-{stamp}.md"
 
 

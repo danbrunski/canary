@@ -339,18 +339,16 @@ def trip_block(trip: TripEnd, session_dir: Path) -> dict[str, Any]:
     stopped mid-drive, a daemon restart) is digested **on the session it
     ended in** — where the stop was seen — and this block names every session
     it touched, captures included, ordered by
-    :func:`src.control.sessions.session_started_at` (never by directory name:
+    :func:`src.session.session_sort_key` (never by directory name:
     ``_capture-…`` sorts before every live session by string). The digest's
     statistics (modes, anomalies, fingerprint) cover that one session;
     ``coverage`` says so, so no reader mistakes them for the whole drive.
     """
-    from src.control.sessions import session_started_at
+    from src.session import session_sort_key
 
-    never = datetime.max.replace(tzinfo=UTC)
-    spanned = sorted(
-        {*trip.sessions, session_dir},
-        key=lambda path: (session_started_at(path) or never, path.name),
-    )
+    # Every path here is a writer-created session directory, so every name
+    # parses; session_sort_key's "unparseable first" never applies (R01.1).
+    spanned = sorted({*trip.sessions, session_dir}, key=session_sort_key)
 
     def _stamp(epoch: float | None) -> str | None:
         return None if epoch is None else format_timestamp(datetime.fromtimestamp(epoch, tz=UTC))

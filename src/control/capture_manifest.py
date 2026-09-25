@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict
 
 from src.atomic_write import atomic_write_text
 from src.collection.capture_quality import normalize_quality_payload
+from src.storage.sidecar import read_json_object, write_json_sidecar
 
 CAPTURE_MANIFEST_FILENAME = "capture_profile.json"
 CAPTURE_QUALITY_FILENAME = "capture_quality.json"
@@ -101,11 +102,8 @@ def read_capture_quality(session_dir: Path) -> dict[str, Any] | None:
     60 s at stop against a cumulative drop counter, and nothing downstream may
     read it as a capture-wide verdict (C03.9).
     """
-    try:
-        payload = json.loads((Path(session_dir) / CAPTURE_QUALITY_FILENAME).read_text())
-    except (OSError, ValueError):
-        return None
-    return normalize_quality_payload(payload) if isinstance(payload, dict) else None
+    payload = read_json_object(Path(session_dir) / CAPTURE_QUALITY_FILENAME)
+    return None if payload is None else normalize_quality_payload(payload)
 
 
 def stamp_capture_end(
@@ -193,22 +191,18 @@ def latest_capture_summary(storage_root: Path) -> dict[str, Any] | None:
 
 def write_capture_quality(session_dir: Path, payload: dict[str, Any]) -> Path:
     path = Path(session_dir) / CAPTURE_QUALITY_FILENAME
-    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_sidecar(path, payload)
     return path
 
 
 def read_capture_epoch(session_dir: Path) -> dict[str, Any] | None:
     """The arm-time loss epoch, or ``None`` (a pre-C03 capture: counters unknown)."""
-    try:
-        payload = json.loads((Path(session_dir) / CAPTURE_EPOCH_FILENAME).read_text())
-    except (OSError, ValueError):
-        return None
-    return payload if isinstance(payload, dict) else None
+    return read_json_object(Path(session_dir) / CAPTURE_EPOCH_FILENAME)
 
 
 def write_capture_epoch(session_dir: Path, payload: dict[str, Any]) -> Path:
     path = Path(session_dir) / CAPTURE_EPOCH_FILENAME
-    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    write_json_sidecar(path, payload)
     return path
 
 

@@ -34,6 +34,7 @@ from src.decode.bindings import (
     is_plausible,
     load_bindings,
 )
+from src.paths import BINDINGS_YAML
 from src.session import session_paths
 
 _CONFIDENCE_ORDER = ("confirmed", "high", "medium", "low", "hypothesized")
@@ -222,7 +223,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bindings",
         type=Path,
-        default=Path("data/bindings.yaml"),
+        default=BINDINGS_YAML,
         help="Path to bindings.yaml (default: data/bindings.yaml).",
     )
     parser.add_argument(

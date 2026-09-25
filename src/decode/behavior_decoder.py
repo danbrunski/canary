@@ -33,6 +33,7 @@ import pandas as pd
 
 from src.analysis.surface_1d import evaluate_1d
 from src.analysis.surface_2d import evaluate_2d
+from src.coerce import finite_float
 from src.decode.accepted_baselines import AcceptedBaselineOverride
 from src.decode.behavior_eligibility import (
     ACTUAL_MISSING,
@@ -128,10 +129,10 @@ def _surface_value(
     model: BehaviorModel1D | BehaviorModel2D, operating_point: Mapping[str, object]
 ) -> float | None:
     if isinstance(model, BehaviorModel1D):
-        x = _scalar(operating_point.get(model.axis.channel))
+        x = finite_float(operating_point.get(model.axis.channel))
         return None if x is None else evaluate_1d(model, x)
-    x = _scalar(operating_point.get(model.axes[0].channel))
-    y = _scalar(operating_point.get(model.axes[1].channel))
+    x = finite_float(operating_point.get(model.axes[0].channel))
+    y = finite_float(operating_point.get(model.axes[1].channel))
     if x is None or y is None:
         return None
     cell = evaluate_2d(model, x, y)
@@ -172,7 +173,7 @@ def deviation(
         return DeviationResult(
             expected=None, actual=actual, deviation=None, severity="ok", reason=reason
         )
-    actual_value = _scalar(actual)
+    actual_value = finite_float(actual)
     if actual_value is None:
         output = serving_spec(model).output
         stale = point_flag(operating_point, gap_column(output))
@@ -249,7 +250,7 @@ def deviation_for_override(
     path.
     """
     expected = override.accepted_center
-    a = _scalar(actual)
+    a = finite_float(actual)
     if expected is None or a is None:
         return DeviationResult(expected=expected, actual=actual, deviation=None, severity="ok")
     delta = a - expected
@@ -446,19 +447,6 @@ def append_deviation_columns(
 # ---------------------------------------------------------------------------
 
 
-def _scalar(value: object) -> float | None:
-    """Cast to float; ``None`` for NaN / missing / non-numeric."""
-    if value is None:
-        return None
-    try:
-        f = float(value)  # type: ignore[arg-type]  # any-cast: handled by except
-    except (TypeError, ValueError):
-        return None
-    if not np.isfinite(f):
-        return None
-    return f
-
-
 def _grade_severity(
     model: BehaviorModel1D | BehaviorModel2D,
     operating_point: Mapping[str, float],
@@ -564,8 +552,8 @@ def _local_std(
     if isinstance(model, BehaviorModel1D):
         return dev_cfg.reference_std
     # 2D: use the cell's std
-    x = _scalar(operating_point.get(model.axes[0].channel))
-    y = _scalar(operating_point.get(model.axes[1].channel))
+    x = finite_float(operating_point.get(model.axes[0].channel))
+    y = finite_float(operating_point.get(model.axes[1].channel))
     if x is None or y is None:
         return None
     cell = evaluate_2d(model, x, y)

@@ -12,7 +12,6 @@ from collections import deque
 from collections.abc import Callable, Container, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from src.collection import bus_budget, capture_lifetime
@@ -30,6 +29,7 @@ from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
 from src.collection.request_eligibility import Eligibility, SessionPhase, evaluate
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig
 from src.decode.dids import MEMORY_SOURCE, plan_memory_reads
+from src.paths import DIDS_YAML
 
 if TYPE_CHECKING:
     from src.collection.custom_pids import CustomPid
@@ -209,23 +209,24 @@ TIER_RATE_FACTORS: dict[PollTier, float] = {
 _PID_IDS_BY_NAME: dict[str, int] = {name: pid for pid, (name, _decoder) in PID_DECODERS.items()}
 
 # DID name→identifier lives in data/dids.yaml (not a static table like PIDs), so
-# resolve it lazily and cache. Path is repo-root-relative so cwd doesn't matter.
-_DIDS_YAML_PATH = Path(__file__).resolve().parents[2] / "data" / "dids.yaml"
+# resolve it lazily and cache. Repo-rooted (``src.paths``) so cwd doesn't matter.
 
 
 @lru_cache(maxsize=1)
-def _load_did_map() -> DidMap | None:
+def load_repo_did_map() -> DidMap | None:
     """Parsed data/dids.yaml, or ``None`` when absent/unparseable.
 
     ``None`` keeps the collector running without DID metadata — callers fall
-    back to hex-only token parsing and session-less polling.
+    back to hex-only token parsing and session-less polling. The one cached
+    loader of the repo DID catalog (``control.obd_request`` kept a documented
+    copy; R01.2 retired it).
     """
     from src.decode.dids import load_did_map
 
-    if not _DIDS_YAML_PATH.exists():
+    if not DIDS_YAML.exists():
         return None
     try:
-        return load_did_map(_DIDS_YAML_PATH)
+        return load_did_map(DIDS_YAML)
     except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
         return None
 
@@ -238,7 +239,7 @@ def _did_ids_by_name() -> dict[str, int]:
     4-char hex, matching the pre-resolution behavior. Mirrors how
     ``parse_pid_token`` resolves PID names against ``_PID_IDS_BY_NAME``.
     """
-    did_map = _load_did_map()
+    did_map = load_repo_did_map()
     if did_map is None:
         return {}
     # Aliases resolve too, so renaming a DID cannot break a saved capture
@@ -260,7 +261,7 @@ def known_did_names() -> tuple[str, ...]:
 
 def did_access() -> DidAccess | None:
     """The access block of data/dids.yaml (gating session, keep-alive)."""
-    did_map = _load_did_map()
+    did_map = load_repo_did_map()
     return None if did_map is None else did_map.access
 
 
@@ -269,13 +270,13 @@ def memory_channels() -> tuple[MemoryChannel, ...]:
 
     Selecting the ones a capture profile names is the caller's job.
     """
-    did_map = _load_did_map()
+    did_map = load_repo_did_map()
     return () if did_map is None else tuple(did_map.memory)
 
 
 def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:
     """Provenance-backed full Mode-22 payload widths, keyed by DID."""
-    did_map = _load_did_map()
+    did_map = load_repo_did_map()
     if did_map is None:
         return {}, {}
     widths = {

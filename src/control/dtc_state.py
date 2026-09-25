@@ -17,16 +17,15 @@ pattern. Each update:
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from src.atomic_write import atomic_write_text
 from src.collection.obd_scheduler import FREEZE_FRAME_CHANNEL_PREFIX
 from src.decode.dtc_catalog import DtcReport, build_dtc_report, describe_dtc
+from src.storage.sidecar import write_json_sidecar
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -173,7 +172,10 @@ class DtcState:
         if session_dir is not None and signature != self._last_persisted_signature:
             _write_sidecar(session_dir, report)
             self._last_persisted_signature = signature
-            _update_catalog(self.catalog_db, session_dir)
+            # Lazy: src.storage.catalog imports this module's package at module level.
+            from src.storage.catalog import record_session_best_effort
+
+            record_session_best_effort(self.catalog_db, session_dir)
 
     def _diff_and_emit(
         self,
@@ -263,23 +265,7 @@ def _write_sidecar(session_dir: Path, report: DtcReport) -> None:
     """Atomic tmp+rename write, matching ``control.json``
     (``src.control.sessions.write_session_metadata``, Task 1.7)."""
     path = session_dir / SIDECAR_FILENAME
-    atomic_write_text(
-        path, json.dumps(report.to_dict(), indent=2, sort_keys=True, default=str) + "\n"
-    )
-
-
-def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
-    """Best-effort catalog re-index (Task 6.3) — never blocks the sidecar
-    write it rides along with. ``None`` (the default) skips it entirely."""
-    if catalog_db is None:
-        return
-    try:
-        from src.storage.catalog import SessionCatalog
-
-        with SessionCatalog(catalog_db) as catalog:
-            catalog.record_session(session_dir)
-    except Exception:  # noqa: BLE001 — see docstring
-        log.exception("catalog update failed for %s", session_dir.name)
+    write_json_sidecar(path, report.to_dict(), default=str)
 
 
 __all__ = [

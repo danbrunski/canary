@@ -3,11 +3,24 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from src.session import build_windows, load_tags
+from src.session import (
+    ALL_SESSION_KINDS,
+    RECORDED_SESSION_KINDS,
+    SessionKind,
+    build_windows,
+    classify_session_name,
+    dir_size,
+    format_session_timestamp,
+    iter_sessions,
+    load_tags,
+    parse_session_timestamp,
+    session_sort_key,
+)
 
 
 def test_build_windows_sorts_backfilled_tags() -> None:
@@ -161,3 +174,120 @@ def test_load_tags_invalidate_with_unparseable_target_t_falls_back_safely(
     # The invalidate is malformed — drop it but keep the event tag rather than
     # accidentally treating the malformed record as "invalidate all of label x".
     assert [t["label"] for t in load_tags(path)] == ["x"]
+
+
+# --------------------------------------------------------------------------- #
+# R01.1 — one session-name module
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [
+        ("2026-08-05T142720", SessionKind.LIVE),
+        ("_capture-fuel-map-2026-08-05T142720", SessionKind.CAPTURE),
+        ("_tuning-2026-08-05T142720", SessionKind.TUNING),
+        ("_replay-2026-08-05T142720", SessionKind.REPLAY),
+    ],
+)
+def test_classify_session_name_kinds(name: str, kind: SessionKind) -> None:
+    parsed = classify_session_name(name)
+    assert parsed is not None
+    assert parsed.kind is kind
+    assert parsed.started_at == datetime(2026, 8, 5, 14, 27, 20, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "_archive",
+        "scratch",
+        "2026-13-45T999999",
+        "_capture-2026-08-05T142720",
+        "x2026-08-05T142720",
+    ],
+)
+def test_classify_session_name_refuses_non_sessions(name: str) -> None:
+    assert classify_session_name(name) is None
+
+
+def test_format_and_parse_round_trip() -> None:
+    moment = datetime(2026, 9, 24, 7, 5, 9, tzinfo=UTC)
+    stamp = format_session_timestamp(moment)
+    assert stamp == "2026-09-24T070509"
+    assert parse_session_timestamp(stamp) == moment
+
+
+def test_session_sort_key_is_total_over_unparseable_names() -> None:
+    """``evaluate_detectors._spread_in_time`` keyed on
+    ``(session_started_at(n), n)`` and raised ``TypeError`` comparing ``None``
+    with a datetime."""
+    names = ["_tuning-2026-08-01T100000", "manual-import", "2026-07-01T100000"]
+    assert sorted(names, key=session_sort_key) == [
+        "manual-import",
+        "2026-07-01T100000",
+        "_tuning-2026-08-01T100000",
+    ]
+
+
+def test_iter_sessions_orders_by_time_and_filters_kinds(tmp_path: Path) -> None:
+    for name in (
+        "_tuning-2026-08-01T100000",
+        "_capture-fuel-map-2026-09-01T100000",
+        "2026-08-15T100000",
+        "_replay-2026-09-02T100000",
+        "_archive",
+    ):
+        (tmp_path / name).mkdir()
+    (tmp_path / "2026-10-01T100000").write_text("a file, not a session")
+
+    assert [p.name for p in iter_sessions(tmp_path, kinds=ALL_SESSION_KINDS)] == [
+        "_tuning-2026-08-01T100000",
+        "2026-08-15T100000",
+        "_capture-fuel-map-2026-09-01T100000",
+        "_replay-2026-09-02T100000",
+    ]
+    assert [p.name for p in iter_sessions(tmp_path, kinds=RECORDED_SESSION_KINDS)] == [
+        "2026-08-15T100000",
+        "_capture-fuel-map-2026-09-01T100000",
+    ]
+    assert iter_sessions(tmp_path / "missing", kinds=ALL_SESSION_KINDS) == []
+
+
+def test_list_sessions_with_captures_and_limit_returns_newest_by_time(tmp_path: Path) -> None:
+    """R01.1: sorted by ``session_id``, "newest N" was the lexically-last
+    profile slugs, not the newest captures."""
+    from src.control.sessions import filter_sessions, list_sessions
+
+    for name in (
+        "_capture-zeta-2026-08-01T100000",
+        "_capture-alpha-2026-09-01T100000",
+        "_capture-beta-2026-09-02T100000",
+    ):
+        (tmp_path / name).mkdir()
+
+    newest = filter_sessions(list_sessions(tmp_path, captures=True), limit=2)
+
+    assert [s.session_id for s in newest] == [
+        "_capture-alpha-2026-09-01T100000",
+        "_capture-beta-2026-09-02T100000",
+    ]
+
+
+def test_tuning_sessions_are_not_http_resolvable_pending_the_operator_decision() -> None:
+    """R01.1 leaves today's behaviour: ``_tuning-*`` is not in
+    ``RECORDED_SESSION_KINDS``, so ``resolve_session`` refuses it. When the
+    operator decides, this test and that one constant change together."""
+    from src.control.sessions import is_session_dir_name
+
+    assert SessionKind.TUNING not in RECORDED_SESSION_KINDS
+    assert not is_session_dir_name("_tuning-2026-08-05T142720")
+    assert is_session_dir_name("_capture-fuel-map-2026-08-05T142720")
+    assert not is_session_dir_name("_replay-2026-08-05T142720")
+
+
+def test_dir_size_counts_nested_files(tmp_path: Path) -> None:
+    (tmp_path / "a").write_bytes(b"123")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b").write_bytes(b"45")
+    assert dir_size(tmp_path) == 5

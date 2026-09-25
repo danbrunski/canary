@@ -53,6 +53,7 @@ from src.analysis.refit import default_recipes
 from src.analysis.tune_revisions import load_tune_revisions
 from src.decode.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.log import configure_logging
+from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.profiles import resolve_profile_for_tooling, scope_config
 
@@ -65,7 +66,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True, help="Preprocessing config.")
     parser.add_argument("--profile", required=True, help="Vehicle profile slug.")
     parser.add_argument("--recipe", action="append", default=None, help="Limit to recipe(s).")
-    parser.add_argument("--bindings", type=Path, default=Path("data/bindings.yaml"))
+    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
     parser.add_argument("--dids", type=Path, default=DEFAULT_DIDS_PATH)
     parser.add_argument("--out", type=Path, required=True, help="Report JSON path.")
     parser.add_argument(

@@ -18,13 +18,12 @@ from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
 from src.dashboard.security import _client_is_loopback, _require_control_auth
+from src.paths import DIDS_YAML
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
 
 
-def inspect_rom(
-    data: bytes, profile_dir: Path, dids_path: Path = Path("data/dids.yaml")
-) -> dict[str, Any]:
+def inspect_rom(data: bytes, profile_dir: Path, dids_path: Path = DIDS_YAML) -> dict[str, Any]:
     if not data or len(data) > MAX_ROM_UPLOAD:
         raise ValueError("ROM upload is empty or exceeds 2 MiB")
     definition = load_viewer_definition(profile_dir)
@@ -78,7 +77,7 @@ def register_rom_routes(
     *,
     config: CanaryConfig,
     resolved_control_token: str | None,
-    dids_path: Path = Path("data/dids.yaml"),
+    dids_path: Path = DIDS_YAML,
 ) -> None:
     def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
         _require_control_auth(

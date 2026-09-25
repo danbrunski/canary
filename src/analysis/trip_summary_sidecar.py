@@ -18,16 +18,15 @@ never see a differently-shaped frame than the other post-hoc sidecars.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from src.analysis.derived import TripSummary, summarize_trip
-from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
+from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
 TRIP_SUMMARY_FILENAME = "trip_summary.json"
@@ -69,9 +68,7 @@ def compute_trip_summary(session_dir: Path, config: CanaryConfig) -> TripSummary
     (mirrors ``compute_fingerprint`` / ``classify_session`` — caller treats
     it as "skip", not "quarantine").
     """
-    chunks = sorted(session_dir.glob("telemetry-*.parquet"))
-    if not chunks:
-        raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
+    require_telemetry(session_dir)
     frame = resample_and_segment([session_dir], config, value="value_number")
     return summarize_trip(frame, config.vehicle.parameters)
 
@@ -92,19 +89,13 @@ def write_trip_summary(
         summary=summary,
     )
     path = session_dir / TRIP_SUMMARY_FILENAME
-    atomic_write_text(path, json.dumps(sidecar.to_dict(), indent=2, sort_keys=True) + "\n")
+    write_json_sidecar(path, sidecar.to_dict())
     return path
 
 
 def read_trip_summary(session_dir: Path) -> dict[str, Any] | None:
     """Load the sidecar dict, or ``None`` if absent / unreadable."""
-    path = session_dir / TRIP_SUMMARY_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return read_json_object(session_dir / TRIP_SUMMARY_FILENAME)
 
 
 def get_or_compute_trip_summary(

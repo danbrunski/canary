@@ -20,9 +20,9 @@ from src.control.capture_manifest import (
     write_capture_quality,
 )
 from src.control.replay_control import ReplayController
-from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import load_bindings
 from src.decode.frame_decoder import FrameDecoder
+from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord

@@ -55,6 +55,7 @@ from src.analysis.compare import (
 )
 from src.analysis.pairing import to_seconds
 from src.log import configure_logging
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import read_session
 
 log = logging.getLogger(__name__)
@@ -88,8 +89,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Command must be unchanged for this long (before and after) to count as steady.",
     )
     parser.add_argument("--max-rpm-range", type=float, default=200.0)
-    parser.add_argument("--bindings", type=Path, default=Path("data/bindings.yaml"))
-    parser.add_argument("--dids", type=Path, default=Path("data/dids.yaml"))
+    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
+    parser.add_argument("--dids", type=Path, default=DIDS_YAML)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument(
         "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]

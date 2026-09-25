@@ -23,6 +23,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.coerce import finite_float
+
 #: Knots → km/h. 1 nautical mile = 1.852 km exactly.
 _KNOTS_TO_KMH = 1.852
 
@@ -108,10 +110,10 @@ def _apply_rmc(reading: GpsReading, f: list[str]) -> None:
         reading.latitude = lat
     if lon is not None:
         reading.longitude = lon
-    knots = _to_float(_get(f, 6))
+    knots = finite_float(_get(f, 6))
     if knots is not None:
         reading.speed_kmh = knots * _KNOTS_TO_KMH
-    course = _to_float(_get(f, 7))
+    course = finite_float(_get(f, 7))
     if course is not None:
         reading.heading_deg = course
 
@@ -128,7 +130,7 @@ def _apply_gga(reading: GpsReading, f: list[str]) -> None:
     sats = _to_int(_get(f, 6))
     if sats is not None:
         reading.num_satellites = sats
-    hdop = _to_float(_get(f, 7))
+    hdop = finite_float(_get(f, 7))
     if hdop is not None:
         reading.hdop = hdop
     lat = _parse_latlon(_get(f, 1), _get(f, 2))
@@ -137,7 +139,7 @@ def _apply_gga(reading: GpsReading, f: list[str]) -> None:
         reading.latitude = lat
     if lon is not None:
         reading.longitude = lon
-    alt = _to_float(_get(f, 8))
+    alt = finite_float(_get(f, 8))
     if alt is not None:
         reading.altitude_m = alt
 
@@ -146,17 +148,17 @@ def _apply_vtg(reading: GpsReading, f: list[str]) -> None:
     # f: course_true, T, course_mag, M, sog_knots, N, sog_kmh, K, ...
     if len(f) < 7:
         return
-    kmh = _to_float(_get(f, 6))
+    kmh = finite_float(_get(f, 6))
     if kmh is not None:
         reading.speed_kmh = kmh
-    course = _to_float(_get(f, 0))
+    course = finite_float(_get(f, 0))
     if course is not None:
         reading.heading_deg = course
 
 
 def _parse_latlon(value: str, hemisphere: str) -> float | None:
     """Convert NMEA ``ddmm.mmmm`` + hemisphere into signed decimal degrees."""
-    raw = _to_float(value)
+    raw = finite_float(value)
     if raw is None or not hemisphere:
         return None
     degrees = int(raw // 100)
@@ -169,15 +171,6 @@ def _parse_latlon(value: str, hemisphere: str) -> float | None:
 
 def _get(fields: list[str], index: int) -> str:
     return fields[index] if 0 <= index < len(fields) else ""
-
-
-def _to_float(value: str) -> float | None:
-    if not value:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
 
 
 def _to_int(value: str) -> int | None:

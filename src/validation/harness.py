@@ -70,6 +70,7 @@ from src.decode.bindings import load_bindings
 from src.decode.frame_decoder import FrameDecoder
 from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
+from src.paths import BINDINGS_YAML
 from src.profiles import resolve_profile_for_tooling, scope_config
 from src.storage.async_writer import ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -93,7 +94,7 @@ from src.validation.synthetic_bus import (
 
 log = logging.getLogger(__name__)
 
-REAL_BINDINGS = Path("data/bindings.yaml")
+REAL_BINDINGS = BINDINGS_YAML
 DRIVE_SLICE = Path("tests/fixtures/ground_truth/drive-slice")
 HEARTBEAT_INTERVAL_S = 0.01
 RECONNECT_POLICY = ReconnectPolicy(initial_delay_seconds=0.5, max_delay_seconds=1.0)

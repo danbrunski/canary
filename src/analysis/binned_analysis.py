@@ -11,7 +11,7 @@ behavior surface, but computed fresh over whatever scope the caller asks for
 aggregation (``surface_2d`` only ever computes mean/std/count).
 
 Callers (:mod:`src.control.binned_analysis`) hand in the raw long-format rows
-from :meth:`src.mcp_server.parquet_query.TelemetryQuery.fetch_channel_rows`
+from :meth:`src.storage.telemetry_query.TelemetryQuery.fetch_channel_rows`
 (one row per ``(timestamp, channel)`` sample). Channels sampled
 independently (OBD PIDs polled in sequence, CAN signals decoded off
 different frames) essentially never share an exact timestamp, so this pivots

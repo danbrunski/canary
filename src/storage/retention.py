@@ -11,6 +11,15 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from src.session import (
+    LIVE_SESSION_KINDS,
+    SessionKind,
+    classify_session_name,
+    dir_size,
+    iter_sessions,
+    session_kind,
+    session_sort_key,
+)
 from src.storage.monitor import free_space_mb as _default_free_space_mb
 
 log = logging.getLogger(__name__)
@@ -67,11 +76,14 @@ def _footer_state(path: Path, size: int) -> str:
 
 
 def _is_session_name(name: str) -> bool:
-    try:
-        datetime.strptime(name, "%Y-%m-%dT%H%M%S")
-    except ValueError:
-        return False
-    return True
+    """Plain live session names only: retention never sweeps a capture, a
+    ``_tuning-*`` or an ``_archive`` (replays have their own age sweep)."""
+    return session_kind(name) is SessionKind.LIVE
+
+
+def _live_started_at(name: str) -> datetime | None:
+    parsed = classify_session_name(name)
+    return parsed.started_at if parsed is not None and parsed.kind is SessionKind.LIVE else None
 
 
 @dataclass(frozen=True)
@@ -199,13 +211,8 @@ def delete_expired_sessions(
         days=retention_days
     )
     deleted: list[Path] = []
-    for child in sorted(sessions_root.iterdir()):
-        if not child.is_dir():
-            continue
-        try:
-            started_at = datetime.strptime(child.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
-            continue
+    for child in iter_sessions(sessions_root, kinds=LIVE_SESSION_KINDS):
+        started_at = session_sort_key(child)[0]
         if child.resolve() in protected:
             continue
         if (child / ".canary-pin").exists():
@@ -244,16 +251,9 @@ def delete_expired_replays(
     cutoff = (datetime.now(UTC) if now is None else now.astimezone(UTC)) - timedelta(
         days=replay_retention_days
     )
-    prefix = "_replay-"
     deleted: list[Path] = []
-    for child in sorted(sessions_root.iterdir()):
-        if not child.is_dir() or not child.name.startswith(prefix):
-            continue
-        replay_id = child.name[len(prefix) :]
-        try:
-            started_at = datetime.strptime(replay_id, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
-            continue
+    for child in iter_sessions(sessions_root, kinds={SessionKind.REPLAY}):
+        started_at = session_sort_key(child)[0]
         if child.resolve() in protected:
             continue
         if started_at < cutoff:
@@ -314,9 +314,8 @@ def delete_empty_sessions(
     for child in children:
         if not child.is_dir():
             continue
-        try:
-            started_at = datetime.strptime(child.name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-        except ValueError:
+        started_at = _live_started_at(child.name)
+        if started_at is None:
             continue
         if child.resolve() in protected or (child / ".canary-pin").exists():
             continue
@@ -365,18 +364,6 @@ def _newest_mtime_ns(paths: Iterable[Path]) -> int:
     return newest
 
 
-def _dir_tree_size(root: Path) -> int:
-    """Total size in bytes of every regular file under ``root`` (recursive)."""
-    total = 0
-    for child in root.rglob("*"):
-        try:
-            if child.is_file():
-                total += child.stat().st_size
-        except OSError:
-            continue
-    return total
-
-
 def enforce_storage_cap(
     sessions_root: Path,
     max_mb: int,
@@ -392,8 +379,8 @@ def enforce_storage_cap(
     session directories are measured and evicted — ``scratch`` / ``_archive``
     and other non-session entries are neither counted nor removed.
 
-    Eviction is oldest-first by directory name (ISO timestamp, so lexical
-    order is chronological — the same convention as ``delete_expired_sessions``).
+    Eviction is oldest-first by parsed start time
+    (:func:`src.session.iter_sessions`, R01.1).
     A directory containing ``.canary-pin`` or listed in ``protect`` (the live
     session dir) is never deleted, even if that means staying over the cap.
     Returns the deleted directories, oldest first. ``catalog_db`` (Task 6.3) —
@@ -410,15 +397,9 @@ def enforce_storage_cap(
     cap_bytes = max_mb * 1024 * 1024
 
     sessions: list[tuple[Path, int]] = []
-    for child in sorted(sessions_root.iterdir()):
-        if not child.is_dir():
-            continue
-        try:
-            datetime.strptime(child.name, "%Y-%m-%dT%H%M%S")
-        except ValueError:
-            continue
+    for child in iter_sessions(sessions_root, kinds=LIVE_SESSION_KINDS):
         size = sizes.get(child) if sizes is not None else None
-        sessions.append((child, _dir_tree_size(child) if size is None else size))
+        sessions.append((child, dir_size(child) if size is None else size))
 
     total = sum(size for _, size in sessions)
     deleted: list[Path] = []
@@ -467,15 +448,9 @@ def emergency_evict_for_free_space(
 
     protected = {path.resolve() for path in protect or ()}
     deleted: list[Path] = []
-    for child in sorted(sessions_root.iterdir()):
+    for child in iter_sessions(sessions_root, kinds=LIVE_SESSION_KINDS):
         if free_space_mb(sessions_root) >= warning_mb:
             break
-        if not child.is_dir():
-            continue
-        try:
-            datetime.strptime(child.name, "%Y-%m-%dT%H%M%S")
-        except ValueError:
-            continue
         if child.resolve() in protected:
             continue
         if (child / ".canary-pin").exists():

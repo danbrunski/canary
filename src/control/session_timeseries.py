@@ -3,7 +3,7 @@
 :mod:`src.analysis.session_timeseries` is pure pandas over already-fetched
 rows; this module resolves the session directory (so a bad id 404s cleanly
 instead of silently returning empty arrays) and drives the shared
-:class:`~src.mcp_server.parquet_query.TelemetryQuery` against it. ``root``
+:class:`~src.storage.telemetry_query.TelemetryQuery` against it. ``root``
 is passed in rather than assumed from ``CanaryConfig`` so the identical
 function serves both the daemon's ``GET /control/sessions/{id}/chart``
 (``config.collection.storage_path``) and the companion app's route over its
@@ -18,7 +18,7 @@ from typing import Any
 
 from src.analysis.session_timeseries import compute_time_series
 from src.control.sessions import resolve_session
-from src.mcp_server.parquet_query import TelemetryQuery
+from src.storage.telemetry_query import TelemetryQuery
 
 
 def session_time_series_response(

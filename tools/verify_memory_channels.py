@@ -20,6 +20,7 @@ from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.config import CanaryConfig
 from src.decode.dids import load_did_map
+from src.paths import DIDS_YAML
 from tools.did_log import (
     PASSIVE_REASON,
     _passive_problem,
@@ -50,7 +51,7 @@ def _open_client(
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
-    parser.add_argument("--dids", type=Path, default=Path("data/dids.yaml"))
+    parser.add_argument("--dids", type=Path, default=DIDS_YAML)
     parser.add_argument("--header", default="7E0", help="Request CAN id (hex).")
     parser.add_argument("--session", default="auto")
     parser.add_argument("--samples", type=int, default=20)

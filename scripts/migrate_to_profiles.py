@@ -22,7 +22,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 import sys
 from collections.abc import Sequence
@@ -40,11 +39,11 @@ from src.profiles import (
     save_registry,
     scope_config,
 )
+from src.session import SessionKind, session_kind
 
 # Session directories are ``YYYY-MM-DDTHHMMSS`` (UTC). The ``_``-prefixed dirs
 # (``_archive``, ``_replay-*``) stay at the top level — they're excluded from
 # training discovery and aren't vehicle-partitioned in v1.
-_SESSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
 
 
 @dataclass(frozen=True)
@@ -65,7 +64,7 @@ def _plan(config: CanaryConfig, profile: VehicleProfile) -> list[Move]:
         for child in sorted(base.iterdir()):
             if child.name == slug or child.name.startswith("_") or not child.is_dir():
                 continue
-            if _SESSION_RE.match(child.name):
+            if session_kind(child.name) is SessionKind.LIVE:
                 moves.append(Move(child, scoped_sessions / child.name))
 
     # Directory fields whose *contents* move under the slug subdir.

@@ -23,9 +23,7 @@ Two entry points:
 
 from __future__ import annotations
 
-import json
 import logging
-import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,31 +35,31 @@ from src.alerts.events import AnomalyEvent
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.trends import evaluate_trends
-from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
+from src.session import (
+    LIVE_SESSION_KINDS,
+    SessionKind,
+    iter_sessions,
+    session_kind,
+    session_sort_key,
+)
+from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
 log = logging.getLogger(__name__)
 
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
-
 
 def _iter_session_dirs(storage_path: Path) -> Iterable[Path]:
-    if not storage_path.exists():
-        return ()
-    return (
-        child
-        for child in sorted(storage_path.iterdir())
-        if child.is_dir() and _SESSION_DIR_RE.match(child.name)
-    )
+    """Plain live sessions, oldest first by parsed start time (R01.1)."""
+    return iter_sessions(storage_path, kinds=LIVE_SESSION_KINDS)
 
 
 def _ordered_fingerprints(
     storage_path: Path, catalog_db: Path | None = None
 ) -> list[tuple[str, dict[str, float]]]:
-    """Every session under ``storage_path`` that has a fingerprint, oldest-first
-    (session directory names are ISO timestamps, so lexical sort == chronological
-    order — same convention ``_iter_session_dirs`` already relies on).
+    """Every live session under ``storage_path`` that has a fingerprint,
+    oldest-first by parsed start time (``src.session.session_sort_key``, R01.1),
+    never by directory name.
 
     Task 6.4(c): prefer the catalog's ``fingerprint`` column over globbing
     sidecars directly, when the catalog is actually populated — an empty/
@@ -80,11 +78,15 @@ def _ordered_fingerprints(
             log.exception("catalog fingerprint read failed; falling back to sidecar walk")
             rows = []
         if rows:
-            return [
-                (session_id, stats)
-                for session_id, stats in rows
-                if _SESSION_DIR_RE.match(session_id) and (storage_path / session_id).is_dir()
-            ]
+            return sorted(
+                (
+                    (session_id, stats)
+                    for session_id, stats in rows
+                    if session_kind(session_id) is SessionKind.LIVE
+                    and (storage_path / session_id).is_dir()
+                ),
+                key=lambda row: session_sort_key(row[0]),
+            )
     ordered: list[tuple[str, dict[str, float]]] = []
     for session_dir in _iter_session_dirs(storage_path):
         fingerprint = read_fingerprint(session_dir)
@@ -128,19 +130,12 @@ def corpus_trend_summary(
 
 
 def _read_alert_state(path: Path) -> dict[str, str]:
-    if not path.exists():
-        return {}
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
+    data = read_json_object(path) or {}
     return {str(k): str(v) for k, v in data.items()}
 
 
 def _write_alert_state(path: Path, state: Mapping[str, str]) -> None:
-    atomic_write_text(path, json.dumps(dict(state), indent=2, sort_keys=True) + "\n", mkdir=True)
+    write_json_sidecar(path, dict(state), mkdir=True)
 
 
 def evaluate_and_alert_trends(

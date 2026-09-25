@@ -28,8 +28,9 @@ from src.analysis.broadcast_correlate import (
     correlate_broadcast,
     probes_from_bindings,
 )
+from src.paths import BINDINGS_YAML
 
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 
 
 def parse_probe(spec: str) -> ByteProbe:

@@ -54,7 +54,6 @@ verdict. Human-readable output goes to stdout.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import math
 import platform
@@ -79,6 +78,8 @@ from src.collection.can_obd_client import PID_DECODERS
 from src.config import CanaryConfig
 from src.dashboard.version import _git_sha
 from src.decode.bindings import Bindings, load_bindings
+from src.models.artifact_hash import sha256_file_or_none
+from src.paths import BINDINGS_YAML
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 
@@ -404,10 +405,8 @@ class Provenance:
     behavior_models: str | None = None
 
 
-def _sha256(path: Path | None) -> str | None:
-    if path is None or not path.is_file():
-        return None
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+#: R01.6: streamed, not ``read_bytes()`` (the old copy read the whole file).
+_sha256 = sha256_file_or_none
 
 
 def _manifest_summary(path: Path) -> dict[str, str | None]:
@@ -702,7 +701,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bindings",
         type=Path,
-        default=Path("data/bindings.yaml"),
+        default=BINDINGS_YAML,
         help="Path to bindings.yaml (optional). A missing path skips CAN decode.",
     )
     parser.add_argument(

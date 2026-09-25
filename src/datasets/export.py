@@ -36,6 +36,7 @@ from src.control.sessions import write_session_metadata
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.session import MANIFEST_FILENAME, build_windows, load_tags, session_paths
+from src.storage.sidecar import read_json_object
 
 log = logging.getLogger(__name__)
 
@@ -209,12 +210,8 @@ def build_dataset(
 
 
 def _note_parse_errors(session_dir: Path, session_id: str, warnings: list[str]) -> None:
-    manifest_path = session_dir / MANIFEST_FILENAME
-    if not manifest_path.exists():
-        return
-    try:
-        meta = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError):
+    meta = read_json_object(session_dir / MANIFEST_FILENAME)
+    if meta is None:
         return
     errors = meta.get("parse_errors")
     frames = meta.get("frames_recorded")

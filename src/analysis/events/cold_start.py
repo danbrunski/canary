@@ -13,6 +13,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.analysis.session_classifier import DetectedEvent, ModeSegment
+from src.coerce import finite_float
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
@@ -58,17 +59,8 @@ def detect_cold_starts(
             timestamp=format_timestamp(first_row[TIMESTAMP_COLUMN]),
             kind="cold_start",
             fields={
-                "coolant_temp_c": _maybe_float(first_row.get(coolant_col)),
-                "run_time_s": _maybe_float(first_row.get(runtime_col)),
+                "coolant_temp_c": finite_float(first_row.get(coolant_col)),
+                "run_time_s": finite_float(first_row.get(runtime_col)),
             },
         )
     ]
-
-
-def _maybe_float(value: object) -> float | None:
-    if value is None or (isinstance(value, float) and pd.isna(value)):
-        return None
-    try:
-        return float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None

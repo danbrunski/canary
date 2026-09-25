@@ -25,21 +25,21 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import sqlite3
-import threading
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.digest import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME
+from src.analysis.digest import read_digest, read_digest_skipped
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.session_classifier import read_classification
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_FILENAME
 from src.preprocessing.loader import count_session_rows
+from src.session import classify_session_name, dir_size
+from src.storage.sidecar import read_json_object
+from src.storage.sqlite_store import SqliteStore
 
 log = logging.getLogger(__name__)
 
@@ -76,39 +76,19 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 """
 
-#: Session directory names that are "live sessions" in the normal sense.
-_LIVE_SESSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
-#: Underscore-prefixed variants that carry a real timestamp after a known
-#: marker — ``_replay-<ts>`` (replay output) and ``_tuning-<ts>`` (engine-tuning
-#: captures, ``engine-tuning-support.md``). Anything else underscore-prefixed
-#: (e.g. bare ``_archive``, ``scratch``) has no timestamp of its own.
-_PREFIXED_SESSION_RE = re.compile(r"^_(?:replay|tuning)-(\d{4}-\d{2}-\d{2}T\d{6})$")
-
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
 def _parse_started_at(session_id: str) -> str | None:
-    """Best-effort ISO-8601 ``started_at`` from a session directory name."""
-    candidate = session_id
-    if match := _PREFIXED_SESSION_RE.match(session_id):
-        candidate = match.group(1)
-    try:
-        return datetime.strptime(candidate, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC).isoformat()
-    except ValueError:
-        return None
-
-
-def _dir_size(path: Path) -> int:
-    total = 0
-    for f in path.rglob("*"):
-        try:
-            if f.is_file():
-                total += f.stat().st_size
-        except OSError:
-            continue
-    return total
+    """ISO-8601 ``started_at`` from a session directory name, via the one
+    parser (:func:`src.session.classify_session_name`, R01.1). Covers every
+    kind, ``_capture-*`` included: the old local regex knew ``_replay-`` and
+    ``_tuning-`` only, so a digested or pinned capture's row had
+    ``started_at = NULL``."""
+    parsed = classify_session_name(session_id)
+    return None if parsed is None else parsed.started_at.isoformat()
 
 
 def _parquet_row_count(session_dir: Path) -> int | None:
@@ -117,36 +97,6 @@ def _parquet_row_count(session_dir: Path) -> int | None:
     :func:`src.preprocessing.loader.count_session_rows` — one implementation,
     since the replay emit path needs the same count (D02.9)."""
     return count_session_rows(session_dir)
-
-
-def _read_dtc_sidecar(session_dir: Path) -> dict[str, Any] | None:
-    path = session_dir / DTC_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _read_digest_sidecar(session_dir: Path) -> dict[str, Any] | None:
-    path = session_dir / DIGEST_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
-
-
-def _read_digest_skipped_sidecar(session_dir: Path) -> dict[str, Any] | None:
-    path = session_dir / DIGEST_SKIPPED_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
 
 
 @dataclass(frozen=True)
@@ -218,28 +168,18 @@ class CatalogSessionRow:
         )
 
 
-class SessionCatalog:
+class SessionCatalog(SqliteStore):
     """The session catalog: one SQLite file, one ``sessions`` table.
 
     Single-process-friendly (a private lock guards the shared connection,
     same as ``CanaryLibrary``); SQLite's own file lock covers the occasional
-    concurrent reader/writer across the daemon's async tasks.
+    concurrent reader/writer across the daemon's async tasks. Connection,
+    WAL, busy timeout and ``_tx`` come from
+    :class:`src.storage.sqlite_store.SqliteStore` (R01.5).
     """
 
     def __init__(self, db_path: Path) -> None:
-        self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        # WAL + a busy timeout: several independent processes can legitimately
-        # touch this file at once (the daemon's async tasks, a control-route
-        # request, scripts/catalog.py run by hand) — WAL lets readers proceed
-        # against an in-progress writer instead of hitting SQLITE_BUSY, and
-        # the timeout makes a genuine writer-vs-writer collision retry instead
-        # of erroring immediately.
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.execute("PRAGMA busy_timeout=5000")
+        super().__init__(db_path)
         self._migrate()
 
     def _migrate(self) -> None:
@@ -259,25 +199,6 @@ class SessionCatalog:
         )
         self._conn.commit()
 
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> SessionCatalog:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    @contextmanager
-    def _tx(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            try:
-                yield self._conn
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
-
     # -- incremental update ---------------------------------------------
 
     def record_session(self, session_dir: Path) -> CatalogSessionRow:
@@ -291,11 +212,11 @@ class SessionCatalog:
         session_id = session_dir.name
         classification = read_classification(session_dir)
         fingerprint = read_fingerprint(session_dir)
-        dtc = _read_dtc_sidecar(session_dir)
-        digest = _read_digest_sidecar(session_dir)
+        dtc = read_json_object(session_dir / DTC_FILENAME)
+        digest = read_digest(session_dir)
         # A written digest wins: ``persist_digest`` deletes the refusal, but a
         # catalog row must not depend on that delete having succeeded.
-        digest_skipped = None if digest is not None else _read_digest_skipped_sidecar(session_dir)
+        digest_skipped = None if digest is not None else read_digest_skipped(session_dir)
 
         duration_s = classification.duration_seconds if classification is not None else None
         row = CatalogSessionRow(
@@ -304,7 +225,7 @@ class SessionCatalog:
             started_at=_parse_started_at(session_id),
             duration_s=duration_s,
             row_count=_parquet_row_count(session_dir),
-            size_bytes=_dir_size(session_dir) if session_dir.is_dir() else None,
+            size_bytes=dir_size(session_dir) if session_dir.is_dir() else None,
             pinned=(session_dir / ".canary-pin").exists(),
             disposition=classification.disposition if classification is not None else None,
             classifier_version=(
@@ -422,6 +343,28 @@ class SessionCatalog:
         return [(row["session_id"], json.loads(row["fingerprint"])) for row in rows]
 
 
+def record_session_best_effort(catalog_db: Path | None, session_dir: Path) -> None:
+    """Best-effort catalog re-index for one session (Task 6.3, R01.5).
+
+    The one hook every sidecar write site calls after writing: the catalog
+    is a rebuildable index, never a second source of truth, so a failure here
+    is logged and never blocks the real write it rides along with. ``None``
+    (the default everywhere) skips the catalog entirely, so a caller that
+    never wires one up never touches that file.
+
+    Callers in ``src.analysis`` import this lazily (inside the function):
+    this module imports :mod:`src.analysis.digest` at module level, so a
+    module-level import back from there would cycle.
+    """
+    if catalog_db is None:
+        return
+    try:
+        with SessionCatalog(catalog_db) as catalog:
+            catalog.record_session(session_dir)
+    except Exception:  # noqa: BLE001 — see docstring
+        log.exception("catalog update failed for %s", Path(session_dir).name)
+
+
 def rebuild_catalog(catalog: SessionCatalog, session_dirs: Sequence[Path]) -> int:
     """Re-index every given session directory from its sidecars. Returns the
     count indexed. Callers (``scripts/catalog.py rebuild``) are responsible
@@ -438,4 +381,4 @@ def rebuild_catalog(catalog: SessionCatalog, session_dirs: Sequence[Path]) -> in
     return count
 
 
-__all__.append("rebuild_catalog")
+__all__ += ["rebuild_catalog", "record_session_best_effort"]

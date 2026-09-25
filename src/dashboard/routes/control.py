@@ -156,6 +156,7 @@ from src.models.health import HealthMonitor
 from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
 from src.profiles import load_registry, update_profile_name
+from src.session import format_session_timestamp
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 _T = TypeVar("_T")
@@ -766,7 +767,7 @@ def register_control_routes(
                     status_code=409,
                     detail="a different capture profile is already active",
                 )
-            capture_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+            capture_id = format_session_timestamp(datetime.now(UTC))
             requested_budget = request.bus_budget_requests_per_second
             if requested_budget is None:
                 requested_budget = profile.bus_budget_override
@@ -1143,7 +1144,7 @@ def register_control_routes(
         if storage_writer is not None and previous != request.enabled:
             try:
                 if request.enabled:
-                    tuning_id = datetime.now(UTC).strftime("%Y-%m-%dT%H%M%S")
+                    tuning_id = format_session_timestamp(datetime.now(UTC))
                     await storage_writer.enter_tuning_mode(tuning_id)
                     payload["output_session_dir"] = str(storage_writer.paths.root)
                 else:

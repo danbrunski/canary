@@ -54,6 +54,17 @@ def test_persistence_round_trip(tmp_path: Path) -> None:
     assert reloaded.trip_status()["moving_time_seconds"] == pytest.approx(3.0)
 
 
+def test_non_object_state_file_starts_fresh(tmp_path: Path) -> None:
+    """R01.5: valid JSON that is not an object raised ``AttributeError`` out of
+    ``data.get`` and crashed construction; it now starts a fresh trip."""
+    state = tmp_path / "trip.json"
+    state.write_text("[1, 2]\n")
+
+    tracker = GpsTracker(state_path=state)
+
+    assert tracker.trip_status()["distance_km"] == 0.0
+
+
 def test_gps_status_reports_latest_fix_and_age() -> None:
     tracker = GpsTracker()
     tracker.observe(TelemetryRecord.gps(1000.0, "fix_quality", 1, ""))

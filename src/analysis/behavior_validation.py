@@ -63,6 +63,7 @@ from src.analysis.pairing import to_seconds
 from src.analysis.surface_2d import containing_cell_indices, trusted_cell_mask
 from src.config import CanaryConfig
 from src.control.sessions import session_started_at
+from src.dataframe_utils import numeric_values
 from src.decode.behavior_decoder import band_half_widths, explain_expected_column, grade_deviation
 from src.decode.behavior_eligibility import (
     OFF_MAP,
@@ -84,6 +85,7 @@ from src.decode.behavior_models import (
     ValidationEvidence,
     contract_fingerprint,
 )
+from src.models.artifact_hash import sha256_file_or_none
 from src.preprocessing.resampler import (
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
@@ -269,15 +271,14 @@ def load_validation_document(path: Path) -> BehaviorValidationDocument | None:
 
 def file_identity(path: Path) -> str:
     """``<path>@sha256:<hex>`` or ``<path>@missing`` — for provenance records."""
-    if not path.exists() or not path.is_file():
-        return f"{path}@missing"
-    return f"{path}@sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    digest = sha256_file_or_none(path)
+    return f"{path}@missing" if digest is None else f"{path}@sha256:{digest}"
 
 
 def file_sha256(path: Path) -> str | None:
-    if not path.exists() or not path.is_file():
-        return None
-    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+    """``sha256:<hex>`` of ``path``, or ``None`` when it is not a file."""
+    digest = sha256_file_or_none(path)
+    return None if digest is None else "sha256:" + digest
 
 
 def decoder_identity(
@@ -687,12 +688,6 @@ class RowEvaluation:
         )
 
 
-def _column(frame: pd.DataFrame, name: str) -> np.ndarray:
-    if name not in frame.columns:
-        return np.full(len(frame), np.nan)
-    return np.asarray(pd.to_numeric(frame[name], errors="coerce"), dtype=float)
-
-
 def _seconds(frame: pd.DataFrame, interval: float) -> np.ndarray:
     """Epoch seconds per row.
 
@@ -745,7 +740,7 @@ def evaluate_rows(
     present = np.ones(len(work), dtype=bool)
     fresh = np.ones(len(work), dtype=bool)
     for channel in channels:
-        values = _column(work, channel)
+        values = numeric_values(work, channel)
         present &= np.isfinite(values)
         gap = gap_column(channel)
         if gap in work.columns:
@@ -755,7 +750,7 @@ def evaluate_rows(
     contract_reasons = eligibility_reasons(work, spec, include_actual=True)
     expected, model_reasons = explain_expected_column(work, model)
     reasons = np.where(pd.isna(contract_reasons), model_reasons, contract_reasons).astype(object)
-    actual = _column(work, output)
+    actual = numeric_values(work, output)
     evaluated = np.asarray(pd.isna(reasons), dtype=bool) & np.isfinite(expected)
     evaluated &= np.isfinite(actual)
     # A row the contract passed with a finite expected but no finite actual
@@ -768,7 +763,7 @@ def evaluate_rows(
         if isinstance(model, BehaviorModel1D)
         else [axis.channel for axis in model.axes]
     )
-    axis_values = [_column(work, channel) for channel in axis_channels]
+    axis_values = [numeric_values(work, channel) for channel in axis_channels]
     for i in np.flatnonzero(evaluated):
         point = {
             channel: float(values[i])
@@ -1156,7 +1151,7 @@ def regime_labels(
     if regimes is None:
         return out
     for name, axis in regimes.axes.items():
-        labels = _bin_labels(_column(frame, axis.channel), axis)
+        labels = _bin_labels(numeric_values(frame, axis.channel), axis)
         gap = gap_column(axis.channel)
         if gap in frame.columns:
             stale = frame[gap].fillna(True).astype(bool).to_numpy()
@@ -1170,7 +1165,7 @@ def regime_labels(
         transient = np.zeros(len(frame), dtype=bool)
         undefined = np.zeros(len(frame), dtype=bool)
         for channel, limit in steady.max_abs_rate_per_second.items():
-            rate = _column(rates, roc_column(channel))
+            rate = numeric_values(rates, roc_column(channel))
             undefined |= ~np.isfinite(rate)
             with np.errstate(invalid="ignore"):
                 transient |= np.abs(rate) > limit

@@ -48,7 +48,7 @@ from src.analysis.session_classifier import (
 )
 from src.control.trends import evaluate_and_alert_trends
 from src.log import configure_logging
-from src.storage.catalog import SessionCatalog
+from src.storage.catalog import record_session_best_effort
 
 log = logging.getLogger(__name__)
 
@@ -169,12 +169,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     evaluate_and_alert_trends(config, session_dir.name, sessions_root=sessions_root)
                 except Exception:  # noqa: BLE001 — trend alerting shouldn't block the batch
                     log.exception("trend evaluation failed for %s", session_dir.name)
-            if args.catalog_db is not None:
-                try:
-                    with SessionCatalog(args.catalog_db) as catalog:
-                        catalog.record_session(session_dir)
-                except Exception:  # noqa: BLE001 — catalog update shouldn't block the batch
-                    log.exception("catalog update failed for %s", session_dir.name)
+            record_session_best_effort(args.catalog_db, session_dir)
         summary[classification.disposition] += 1
         log.info(
             "%s: %s  duration=%ss  modes=%s  events=%s",

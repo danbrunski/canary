@@ -41,6 +41,7 @@ import yaml
 
 from src.collection.obd_registry import lookup
 from src.decode.dids import load_did_map
+from src.paths import DIDS_YAML
 from tests.capture_round_fakes import (
     DEFAULT_VALUES,
     ENGINE_ECU,
@@ -57,7 +58,7 @@ from tests.capture_round_fakes import (
 SYNTH_BROADCAST_ID = 0x6A0
 #: DID the signal model serves rpm on (``ECM_RPM`` in the catalogue, scale 1).
 RPM_DID = 0x1219
-DIDS_PATH = Path("data/dids.yaml")
+DIDS_PATH = DIDS_YAML
 
 #: PIDs the ECU answers, with the registry's payload widths asserted at
 #: construction so a batched response can never be split off the wrong bytes.

@@ -17,7 +17,6 @@ default in config.
 
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from src.models.manager import manager_for_artifact
 from src.models.manifest import manifest_path_for
 from src.models.sequence_registry import SEQUENCE_BACKENDS
+from src.storage.sidecar import read_json_object
 
 if TYPE_CHECKING:
     from src.daemon.components import DaemonComponents
@@ -126,12 +126,8 @@ class SequenceDetectorController:
 
 
 def _manifest_version(artifact_path: Path) -> str | None:
-    manifest_path = manifest_path_for(artifact_path)
-    if not manifest_path.exists():
-        return None
-    try:
-        data = json.loads(manifest_path.read_text())
-    except (OSError, ValueError):
+    data = read_json_object(manifest_path_for(artifact_path))
+    if data is None:
         return None
     version = data.get("model_version")
     return str(version) if version else None

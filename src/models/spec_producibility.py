@@ -39,18 +39,18 @@ import numpy as np
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.paths import BINDINGS_YAML, DBC_DIR, DIDS_YAML
 from src.telemetry import SOURCE_SEP
 
 if TYPE_CHECKING:
     from src.decode.behavior_models import BehaviorModels
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
 #: Catalog locations, anchored to the repo root (the live source loads the
 #: same files; see ``src.daemon.inference.build_live_feature_source``).
-DEFAULT_BINDINGS_PATH = _REPO_ROOT / "data" / "bindings.yaml"
-DEFAULT_DIDS_PATH = _REPO_ROOT / "data" / "dids.yaml"
-DEFAULT_DBC_DIR = _REPO_ROOT / "data" / "dbc"
+#: Re-exported from ``src.paths`` (R01.2).
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
+DEFAULT_DIDS_PATH = DIDS_YAML
+DEFAULT_DBC_DIR = DBC_DIR
 
 #: Namespaces whose channels come straight from a catalog/collector.
 #: External sensors never train or score a detector (operator decision,

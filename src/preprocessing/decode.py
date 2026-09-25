@@ -36,10 +36,11 @@ import pandas as pd
 
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, load_bindings
+from src.paths import BINDINGS_YAML
 from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
 from src.telemetry import channel_key
 
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 
 
 def decoded_channel(signal_name: str) -> str:

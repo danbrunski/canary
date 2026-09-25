@@ -68,7 +68,6 @@ from src.alerts.fusion import (
     isolation_forest_source,
     lstm_source,
 )
-from src.analysis.refit import ENGINE_RUNNING_MIN_RPM
 from src.config import CanaryConfig
 from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES
 from src.decode.bindings import Bindings
@@ -87,6 +86,7 @@ from src.models.isolation_forest import (
     served_verdicts,
 )
 from src.models.sequence_protocol import TrainedSequenceModel
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.resampler import TIMESTAMP_COLUMN, is_slow_channel, resample_config_for

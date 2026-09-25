@@ -29,7 +29,6 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 2.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NoReturn
@@ -42,6 +41,8 @@ from src.analysis.channels import read_aligned, read_channels
 from src.analysis.lambda_delivery import residual_pct
 from src.analysis.noise_floor import NoiseFloor
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.storage.sidecar import read_json_object
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
 #: from BFS, so it moves when fuelling moves; see the module docstring.
@@ -182,13 +183,11 @@ def _refuse_missing_inputs(
 
     detail = ""
     if isinstance(session, Path):
-        manifest = session / "capture_profile.json"
-        if manifest.exists():
-            try:
-                profile = json.loads(manifest.read_text())
-            except ValueError:
-                profile = {}
-            snapshot = profile.get("profile_snapshot") or profile
+        profile = read_json_object(session / "capture_profile.json")
+        if profile is not None:
+            snapshot = profile.get("profile_snapshot")
+            if not isinstance(snapshot, dict):
+                snapshot = profile
             if snapshot.get("mode01_enabled") is False:
                 detail = (
                     f" This session was captured with profile "
@@ -259,8 +258,8 @@ def delivery_semantic_frame(
     min_load: float | None = 85.0,
     grid: str = "1s",
     cell_agg: str = "last",
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
 ) -> pd.DataFrame:
     """The Mode-01 delivery inputs of one session as semantic roles.
 
@@ -329,8 +328,8 @@ def delivery_error(
     grid: str = "1s",
     cell_agg: str = "last",
     revisions: TuneRevisionRegistry | None = None,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
 ) -> DeliveryError:
     """Delivery error at enrichment, with every gate applied.
 
@@ -618,8 +617,8 @@ def compare_sessions(
     grid: str = "1s",
     calibration: AfrCalibration | None = None,
     afr_stoich: float = 14.7,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     noise_floor: NoiseFloor | float | None = None,
     floor_channel: str | None = None,
     revisions: TuneRevisionRegistry | None = None,

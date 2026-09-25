@@ -2,7 +2,7 @@
 
 :mod:`src.analysis.binned_analysis` is pure pandas/numpy over already-fetched
 rows; this module does the I/O — building the shared
-:class:`~src.mcp_server.parquet_query.TelemetryQuery`, scoping it to the
+:class:`~src.storage.telemetry_query.TelemetryQuery`, scoping it to the
 caller's session/date range, and closing it — the same split
 :mod:`src.control.trends` keeps against :mod:`src.analysis.trends`.
 """
@@ -14,7 +14,7 @@ from typing import Any
 from src.analysis.binned_analysis import DEFAULT_BIN_COUNT, Aggregation, compute_binned_analysis
 from src.analysis.channels import rescale_channel_rows
 from src.config import CanaryConfig
-from src.mcp_server.parquet_query import TelemetryQuery
+from src.storage.telemetry_query import TelemetryQuery
 
 
 def binned_analysis_response(

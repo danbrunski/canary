@@ -52,6 +52,7 @@ from src.collection.obd_collector import (
     supervise_obd_capture,
 )
 from src.log import configure_logging
+from src.paths import DIDS_YAML
 from src.session import PID_FILENAME
 from src.storage.monitor import free_space_mb
 
@@ -66,11 +67,10 @@ def _resolve_did_names_to_hex(dids: Sequence[str]) -> tuple[str, ...]:
     leftover garbage (typos that match neither a name nor a valid hex).
     Returns a tuple to match the ``ObdSpec.dids`` field type.
     """
-    from pathlib import Path
 
     from src.decode.dids import load_did_map
 
-    dids_path = Path("data/dids.yaml")
+    dids_path = DIDS_YAML
     if not dids_path.exists():
         return tuple(dids)
     try:

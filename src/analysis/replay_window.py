@@ -21,6 +21,7 @@ from typing import Any, cast
 
 import pandas as pd
 
+from src.coerce import finite_float
 from src.config import CanaryConfig
 from src.models.isolation_forest import (
     LABEL_COLUMN,
@@ -254,7 +255,7 @@ def _build_if_block(
         {
             "timestamp": _ts(row),
             "operating_mode": row.get(MODE_COLUMN),
-            "score": _float_or_none(row.get(SCORE_COLUMN)),
+            "score": finite_float(row.get(SCORE_COLUMN)),
             "label": _int_or_none(row.get(LABEL_COLUMN)),
         }
         for row in cast(list[dict[str, Any]], rows.to_dict(orient="records"))
@@ -493,15 +494,6 @@ def _ts(row: dict[str, Any]) -> str | None:
     if isinstance(value, pd.Timestamp):
         return value.isoformat()
     return str(value)
-
-
-def _float_or_none(value: Any) -> float | None:
-    if value is None or pd.isna(value):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def _int_or_none(value: Any) -> int | None:

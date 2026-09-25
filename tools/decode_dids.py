@@ -28,6 +28,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from src.decode.dids import apply_scaling, decode_did_raw, is_plausible, load_did_map
+from src.paths import DIDS_YAML
 
 _CONF_ORDER = ("confirmed", "high", "medium", "low", "hypothesized")
 
@@ -58,7 +59,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="Validate data/dids.yaml against captured DID snapshots.",
     )
     p.add_argument("paths", nargs="+", type=Path, help="Session dir(s) or dids_*.json file(s).")
-    p.add_argument("--dids", type=Path, default=Path("data/dids.yaml"))
+    p.add_argument("--dids", type=Path, default=DIDS_YAML)
     p.add_argument(
         "--confidence",
         default=None,

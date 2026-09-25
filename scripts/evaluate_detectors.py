@@ -65,6 +65,7 @@ from src.control.sessions import session_started_at
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
 from src.log import configure_logging
+from src.models.artifact_hash import sha256_file_or_none
 from src.models.evaluation import (
     AMBIENT_BANDS_C,
     AMBIENT_CHANNEL,
@@ -124,6 +125,7 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.session import session_sort_key
 
 log = logging.getLogger(__name__)
 
@@ -159,7 +161,7 @@ def discover_session_dirs(roots: Sequence[Path]) -> list[Path]:
             if session_started_at(child) is None:
                 continue
             found.setdefault(child.name, child)
-    return sorted(found.values(), key=lambda p: (session_started_at(p), p.name))
+    return sorted(found.values(), key=session_sort_key)
 
 
 def _load_one(args: tuple[Path, Path, str]) -> tuple[str, pd.DataFrame | None, str | None]:
@@ -292,14 +294,8 @@ def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> N
             seen.setdefault(parent_session(str(name)), {})[label] = role.removesuffix("_sessions")
 
 
-def file_sha256(path: Path) -> str | None:
-    if not path.exists():
-        return None
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+#: R01.6: the one definition is ``src.models.artifact_hash.sha256_file_or_none``.
+file_sha256 = sha256_file_or_none
 
 
 # ---------------------------------------------------------------------------
@@ -1274,7 +1270,9 @@ def _profile_data_dir(config: CanaryConfig, profile: str | None) -> Path:
 
 
 def _spread_in_time(names: Sequence[str], count: int) -> list[str]:
-    ordered = sorted(names, key=lambda n: (session_started_at(n), n))
+    # session_sort_key is total: the old (session_started_at(n), n) key raised
+    # TypeError comparing None with a datetime (R01.1).
+    ordered = sorted(names, key=session_sort_key)
     if count >= len(ordered):
         return ordered
     picks = np.linspace(0, len(ordered) - 1, count).round().astype(int)

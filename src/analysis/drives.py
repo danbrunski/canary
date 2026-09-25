@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 
 from src.control.sessions import is_session_dir_name, session_started_at
+from src.session import format_session_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def _utc(moment: datetime) -> datetime:
 
 
 def drive_id_for(start: datetime) -> str:
-    return f"drive-{_utc(start):%Y-%m-%dT%H%M%S}"
+    return f"drive-{format_session_timestamp(_utc(start))}"
 
 
 # ---------------------------------------------------------------------------

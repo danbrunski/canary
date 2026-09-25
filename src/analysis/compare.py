@@ -68,6 +68,7 @@ from src.analysis.pairing import (
     to_seconds,
     weakest_basis,
 )
+from src.paths import BINDINGS_YAML, DIDS_YAML
 
 #: Sub-windows used for the scale-stability check. Three is the fewest that
 #: can distinguish "drifting" from "one noisy window".
@@ -346,8 +347,8 @@ def align_pairs(
     b: str,
     *,
     policy: PairingPolicy,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     grid: object = None,
 ) -> AlignedPairs:
     """Pair real observations of ``a`` and ``b`` on the acquisition clock.
@@ -406,8 +407,8 @@ def binned_summary(
     b: str,
     *,
     grid: str = "1s",
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
 ) -> pd.DataFrame:
     """Per-bin means of each side, for plotting. **Not pairs. Not evidence.**
 
@@ -463,8 +464,8 @@ def compare_channels(
     *,
     policy: PairingPolicy,
     min_pairs: int = MIN_PAIRS,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     grid: object = None,
 ) -> ChannelComparison:
     """Compare two channels at the same instants. Refuses when it cannot.

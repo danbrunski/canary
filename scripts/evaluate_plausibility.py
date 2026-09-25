@@ -52,6 +52,7 @@ from src.config import CanaryConfig
 from src.control.sessions import session_started_at
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import DidMap, load_did_map
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.plausibility.evaluator import EvidenceRecord, PlausibilityEvaluator
 from src.plausibility.limits import (
     LimitsCatalog,
@@ -68,6 +69,7 @@ from src.plausibility.offline import (
     load_stream,
     run_evaluator,
 )
+from src.session import session_sort_key
 
 #: The 2026-09-20 benchmark's channels (``bench_new.json``).
 BENCHMARK_CHANNELS = (
@@ -125,8 +127,8 @@ def _context(config_path: Path, profile: str | None) -> Context:
     config = CanaryConfig.from_yaml(config_path)
     if config.profiles.enabled:
         config = scope_config(config, resolve_profile_for_tooling(config, profile))
-    bindings = load_bindings(Path("data/bindings.yaml"))
-    did_map = load_did_map(Path("data/dids.yaml"))
+    bindings = load_bindings(BINDINGS_YAML)
+    did_map = load_did_map(DIDS_YAML)
     catalog = resolve_limits_for_config(config, bindings=bindings, did_map=did_map)
     roles_path = plausibility_path(config).parent / "fault_injection.yaml"
     roles = load_fault_channel_roles(roles_path if roles_path.exists() else None)
@@ -505,7 +507,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     faults = {str(p) for p in args.fault_sessions}
     sessions = sorted(
         clean | faults,
-        key=lambda s: session_started_at(Path(s)) or datetime.min.replace(tzinfo=UTC),
+        key=lambda s: session_sort_key(Path(s)),
     )
     jobs = [
         Job(

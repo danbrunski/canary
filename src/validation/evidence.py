@@ -40,6 +40,7 @@ from src.collection.capture_losses import (
 )
 from src.decode.bindings import load_bindings
 from src.decode.frame_decoder import FrameDecoder
+from src.paths import DIDS_YAML
 from src.telemetry import CAPTURED_SOURCES, TelemetryRecord
 from src.validation.harness import RunArtifacts
 from src.validation.synthetic_bus import (
@@ -54,7 +55,7 @@ log = logging.getLogger(__name__)
 BROADCAST_CHANNEL = f"0x{SYNTH_BROADCAST_ID:X}".upper()
 RAW_SOURCES = ("can", "obd")
 MAX_LISTED_SEQUENCES = 50
-DIDS_PATH = Path("data/dids.yaml")
+DIDS_PATH = DIDS_YAML
 
 
 # ---------------------------------------------------------------------------

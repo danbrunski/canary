@@ -40,6 +40,8 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.pairing import to_seconds
+from src.dataframe_utils import numeric_values
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.session_context import EngineStartTracker, StartContextSpec
 
 #: The serving contract's channels, thresholds and cold ceiling. Defaults
@@ -48,7 +50,7 @@ from src.preprocessing.session_context import EngineStartTracker, StartContextSp
 DEFAULT_RPM_CHANNEL = "obd:RPM"
 DEFAULT_RUNTIME_CHANNEL = "obd:RUN_TIME"
 DEFAULT_COOLANT_CHANNEL = "obd:COOLANT_TEMP"
-DEFAULT_MIN_RUNNING_RPM = 400.0
+DEFAULT_MIN_RUNNING_RPM = ENGINE_RUNNING_MIN_RPM
 DEFAULT_MAX_START_RUNTIME_S = 60.0
 DEFAULT_MAX_INITIAL_COOLANT_C = 40.0
 
@@ -201,14 +203,14 @@ def runs_of_session(view: pd.DataFrame, spec: InventorySpec) -> list[EngineRun]:
     # microsecond datetimes in pandas 2.x, and that arithmetic silently
     # returned 1970 timestamps and one-second "runs".
     epoch = np.asarray(to_seconds(pd.to_datetime(view["timestamp"], utc=True)), dtype=float)
-    rpm = _column(view, spec.rpm_channel)
-    runtime = _column(view, spec.runtime_channel)
-    coolant = _column(view, spec.coolant_channel)
-    iat = _column(view, IAT_CHANNEL)
-    ambient = _column(view, AMBIENT_CHANNEL)
-    load = _column(view, LOAD_CHANNEL)
-    speed = _column(view, SPEED_CHANNEL)
-    catalyst = _column(view, CATALYST_CHANNEL)
+    rpm = numeric_values(view, spec.rpm_channel)
+    runtime = numeric_values(view, spec.runtime_channel)
+    coolant = numeric_values(view, spec.coolant_channel)
+    iat = numeric_values(view, IAT_CHANNEL)
+    ambient = numeric_values(view, AMBIENT_CHANNEL)
+    load = numeric_values(view, LOAD_CHANNEL)
+    speed = numeric_values(view, SPEED_CHANNEL)
+    catalyst = numeric_values(view, CATALYST_CHANNEL)
 
     tracker = EngineStartTracker(spec.tracker_spec())
     observed = np.zeros(len(view))
@@ -263,12 +265,6 @@ def runs_of_session(view: pd.DataFrame, spec: InventorySpec) -> list[EngineRun]:
                 continuous = False
             last_runtime = runtime[i]
     return runs
-
-
-def _column(view: pd.DataFrame, name: str) -> np.ndarray:
-    if name not in view.columns:
-        return np.full(len(view), np.nan)
-    return pd.to_numeric(view[name], errors="coerce").to_numpy(dtype=float)
 
 
 def _make_run(

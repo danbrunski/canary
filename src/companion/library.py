@@ -29,14 +29,14 @@ from __future__ import annotations
 import json
 import logging
 import shutil
-import sqlite3
-import threading
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from src.session import dir_size
+from src.storage.sidecar import read_json_object
+from src.storage.sqlite_store import SqliteStore
 
 log = logging.getLogger(__name__)
 
@@ -166,12 +166,12 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _dir_size(path: Path) -> int:
-    return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+class CanaryLibrary(SqliteStore):
+    """The local library: filesystem layout + SQLite index.
 
-
-class CanaryLibrary:
-    """The local library: filesystem layout + SQLite index."""
+    Connection, WAL, busy timeout and ``_tx`` come from
+    :class:`src.storage.sqlite_store.SqliteStore` (R01.5).
+    """
 
     def __init__(self, root: Path = DEFAULT_LIBRARY_ROOT) -> None:
         self.root = Path(root)
@@ -190,10 +190,7 @@ class CanaryLibrary:
             self.sync_dir,
         ):
             d.mkdir(parents=True, exist_ok=True)
-        self.db_path = self.root / "library.db"
-        self._lock = threading.RLock()
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        super().__init__(self.root / "library.db")
         self._migrate()
 
     def _migrate(self) -> None:
@@ -206,27 +203,6 @@ class CanaryLibrary:
                 (str(SCHEMA_VERSION),),
             )
             self._conn.commit()
-
-    # -- lifecycle ------------------------------------------------------
-
-    def close(self) -> None:
-        self._conn.close()
-
-    def __enter__(self) -> CanaryLibrary:
-        return self
-
-    def __exit__(self, *_exc: object) -> None:
-        self.close()
-
-    @contextmanager
-    def _tx(self) -> Iterator[sqlite3.Connection]:
-        with self._lock:
-            try:
-                yield self._conn
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
 
     # -- sessions -------------------------------------------------------
 
@@ -285,15 +261,11 @@ class CanaryLibrary:
             tags = []  # cheap path doesn't parse tag labels
             started_at = summary.started_at  # already an ISO string | None
 
-        manifest_path = target / "manifest.json"
-        if manifest_path.exists():
-            try:
-                meta = json.loads(manifest_path.read_text())
-                started_at = meta.get("started_at", started_at)
-            except (OSError, ValueError):
-                pass
+        meta = read_json_object(target / "manifest.json")
+        if meta is not None:
+            started_at = meta.get("started_at", started_at)
 
-        size_bytes = _dir_size(target)
+        size_bytes = dir_size(target)
         imported_at = _now()
         with self._tx() as conn:
             conn.execute(

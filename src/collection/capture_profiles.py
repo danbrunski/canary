@@ -54,7 +54,7 @@ _SAFE_NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 #: limit — the budget is, deliberately.
 MAX_TARGET_RATE_HZ = 200.0
 #: Session directories are discovered by name. A capture that does not match
-#: ``src.control.sessions._CAPTURE_DIR_RE`` still records telemetry but becomes
+#: ``src.session.classify_session_name`` as a capture still records telemetry but becomes
 #: unreachable through the sessions API — no listing, no export, no delete — so
 #: the prefix is constrained here rather than left to the operator.
 _SAFE_PREFIX = re.compile(r"^_capture-[a-z0-9][a-z0-9-]*$")

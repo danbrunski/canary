@@ -24,7 +24,7 @@ import functools
 import json
 from concurrent.futures import BrokenExecutor, Executor
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,7 @@ from src.control.trip_end import (
     limit_address_space,
 )
 from src.preprocessing.loader import count_session_rows
+from src.session import session_sort_key
 
 #: Most sessions one pooled request may name. Each is read in turn in the
 #: child, so this bounds wall time rather than memory.
@@ -133,10 +134,9 @@ def workbench_inputs(
     )
 
 
-def _started(session: Path) -> datetime:
-    """Sort key: parsed start time. Every resolvable session name carries one;
-    the floor only keeps the sort total."""
-    return session_started_at(session) or datetime.min.replace(tzinfo=UTC)
+def _started(session: Path) -> tuple[datetime, str]:
+    """Sort key: parsed start time (:func:`src.session.session_sort_key`)."""
+    return session_sort_key(session)
 
 
 def _all_session_dirs(root: Path) -> list[Path]:

@@ -549,69 +549,18 @@ def _seconds(timestamp: str) -> float:
     return dt.timestamp()
 
 
-# ---------------------------------------------------------------------------
-# Streaming IF inference — analogous to SequenceInferenceEngine
-# ---------------------------------------------------------------------------
+def __getattr__(name: str) -> Any:
+    """``IsolationForestInferenceEngine`` moved to :mod:`src.models.inference`
+    (R01.8), beside ``SequenceInferenceEngine``. Re-exported lazily so this
+    module stays pure wiring with no model-layer import at load time."""
+    if name == "IsolationForestInferenceEngine":
+        from src.models.inference import IsolationForestInferenceEngine
 
-
-class IsolationForestInferenceEngine:
-    """Streaming Isolation Forest inference over single rows.
-
-    Thin wrapper around ``TrainedIsolationForest.score`` that takes one
-    row at a time and returns the single scored row. Symmetric with
-    ``SequenceInferenceEngine.observe`` so the daemon can wire both detectors
-    through the same row-processing loop.
-    """
-
-    def __init__(self, trained: Any) -> None:
-        # `trained` is a TrainedIsolationForest; typed as Any to keep this
-        # module from importing sklearn at import time (the daemon may
-        # construct an emitter long before any model is loaded).
-        self.trained = trained
-        self.feature_columns: tuple[str, ...] = tuple(trained.feature_columns)
-        self.mode_column: str = trained.mode_column
-        self.model_version: str = trained.manifest.model_version
-
-    def observe(self, row: Mapping[str, Any] | pd.Series) -> pd.Series:
-        """Score one row; return the scored Series.
-
-        The caller passes the row to ``emit_isolation_forest_row`` to
-        decide whether it merits an event. Splitting score / emit lets
-        consumers log the score even when it didn't fire, useful for
-        backfilling distributions.
-        """
-        if isinstance(row, pd.Series):
-            frame = row.to_frame().T
-        else:
-            frame = pd.DataFrame([dict(row)])
-        scored = self.trained.score(frame)
-        out: pd.Series = scored.iloc[0]
-        return out
-
-    def feature_contributions(
-        self, row: Mapping[str, Any] | pd.Series, *, top_k: int
-    ) -> dict[str, float]:
-        """The scoring mode model's own features, ranked by how much each
-        raised this row's score (A04.2, occlusion — see
-        ``TrainedIsolationForest.feature_contributions``). Never the
-        ``feature_columns`` union: most of those are not features of the
-        model that scored the row."""
-        if isinstance(row, pd.Series):
-            frame = row.to_frame().T
-        else:
-            frame = pd.DataFrame([dict(row)])
-        contributions: dict[str, float] = self.trained.feature_contributions(frame, top_k=top_k)
-        return contributions
-
-    def contribution_reference(self, row: Mapping[str, Any] | pd.Series) -> str | None:
-        """``mode_median`` / ``pooled_mean``: what occlusion replaced features
-        with for this row's mode (A04.2)."""
-        reference: str | None = self.trained.contribution_reference(row.get(self.mode_column))
-        return reference
+        return IsolationForestInferenceEngine
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [
     "AnomalyEventEmitter",
     "EmitterCounters",
-    "IsolationForestInferenceEngine",
 ]

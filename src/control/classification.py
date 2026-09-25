@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,24 +23,18 @@ from src.analysis.session_classifier import (
 )
 from src.config import CanaryConfig
 from src.control.trends import evaluate_and_alert_trends
-from src.storage.catalog import SessionCatalog
+from src.session import LIVE_SESSION_KINDS, SessionKind, iter_sessions, session_kind
+from src.storage.catalog import record_session_best_effort
 
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
 
 log = logging.getLogger(__name__)
 
-_SESSION_DIR_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
-
 
 def _iter_session_dirs(storage_path: Path) -> Iterable[Path]:
-    if not storage_path.exists():
-        return ()
-    return (
-        child
-        for child in sorted(storage_path.iterdir())
-        if child.is_dir() and _SESSION_DIR_RE.match(child.name)
-    )
+    """Plain live sessions, oldest first by parsed start time (R01.1)."""
+    return iter_sessions(storage_path, kinds=LIVE_SESSION_KINDS)
 
 
 def get_session_classification(storage_path: Path, session_id: str) -> dict[str, Any] | None:
@@ -51,7 +44,7 @@ def get_session_classification(storage_path: Path, session_id: str) -> dict[str,
     can't request ``_replay-*`` or ``_archive``; those have their own
     flows.
     """
-    if not _SESSION_DIR_RE.match(session_id):
+    if session_kind(session_id) is not SessionKind.LIVE:
         return None
     session_dir = storage_path / session_id
     if not session_dir.is_dir():
@@ -80,7 +73,7 @@ def classify_one_session(
     it right after; ``None`` (the default) skips the catalog entirely so
     callers that never wire one up never touch that file.
     """
-    if not _SESSION_DIR_RE.match(session_id):
+    if session_kind(session_id) is not SessionKind.LIVE:
         raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
     session_dir = config.collection.storage_path / session_id
     if not session_dir.is_dir():
@@ -101,21 +94,8 @@ def classify_one_session(
             evaluate_and_alert_trends(config, session_id, emitter=emitter)
         except Exception:  # noqa: BLE001 — trend alerting must not block classification
             log.exception("trend evaluation failed for %s", session_id)
-    _update_catalog(catalog_db, session_dir)
+    record_session_best_effort(catalog_db, session_dir)
     return classification.to_dict()
-
-
-def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
-    """Best-effort catalog re-index (Task 6.3) — never blocks the sidecar
-    write it rides along with; the catalog is a rebuildable index, not a
-    second source of truth."""
-    if catalog_db is None:
-        return
-    try:
-        with SessionCatalog(catalog_db) as catalog:
-            catalog.record_session(session_dir)
-    except Exception:  # noqa: BLE001 — see docstring
-        log.exception("catalog update failed for %s", session_dir.name)
 
 
 def corpus_mode_summary(storage_path: Path) -> dict[str, Any]:

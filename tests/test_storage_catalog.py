@@ -268,3 +268,29 @@ def test_retention_without_catalog_db_never_touches_a_catalog_file(tmp_path: Pat
     )
     assert deleted == [session]
     assert not (tmp_path / "catalog.db").exists()
+
+
+def test_a_capture_row_has_started_at(tmp_path: Path) -> None:
+    """R01.1: the catalog's own regex knew ``_replay-``/``_tuning-`` but not
+    ``_capture-``, so a digested or pinned capture's row had ``started_at =
+    NULL`` and fell out of every date-bounded catalog read."""
+    session = _write_session(tmp_path, name="_capture-fuel-map-2026-09-20T101500")
+
+    with SessionCatalog(tmp_path / "catalog.db") as catalog:
+        row = catalog.record_session(session)
+
+    assert row.started_at == "2026-09-20T10:15:00+00:00"
+
+
+def test_a_non_object_sidecar_reads_as_absent(tmp_path: Path) -> None:
+    """R01.5: valid JSON that is not an object used to raise out of
+    ``dict(json.loads(...))`` and abort the whole row."""
+    session = _write_session(tmp_path)
+    (session / "dtc.json").write_text("[1, 2]\n")
+    (session / "digest.json").write_text('"not an object"\n')
+
+    with SessionCatalog(tmp_path / "catalog.db") as catalog:
+        row = catalog.record_session(session)
+
+    assert row.dtc is None
+    assert row.digest is None

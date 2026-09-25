@@ -29,6 +29,7 @@ from cantools.database.conversion import BaseConversion
 
 from src.decode.bindings import Signal as Binding
 from src.decode.bindings import load_bindings
+from src.paths import BINDINGS_YAML
 
 _CONF_RANK = {"hypothesized": 0, "low": 1, "medium": 2, "high": 3, "confirmed": 4}
 
@@ -116,7 +117,7 @@ def build_database(bindings_path: Path, min_rank: int = 0) -> Database:
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="emit_dbc", description="bindings.yaml → draft DBC.")
-    p.add_argument("--bindings", type=Path, default=Path("data/bindings.yaml"))
+    p.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
     p.add_argument("--out", type=Path, default=Path("data/dbc/xterra_2008.dbc"))
     p.add_argument(
         "--min-confidence",

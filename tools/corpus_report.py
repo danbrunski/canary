@@ -40,6 +40,8 @@ from statistics import median
 import numpy as np
 
 from src.decode.bindings import Bindings, Signal, load_bindings
+from src.paths import BINDINGS_YAML
+from src.session import parse_session_timestamp
 
 FRAME_RE = re.compile(r"^\(([\d.]+)\)\s+\S+\s+([0-9A-Fa-f]+)#([0-9A-Fa-f]+)")
 
@@ -101,10 +103,7 @@ def _iter_frames(path: Path) -> Iterator[tuple[float, int, bytes]]:
 def _scan_session(session: Path, ids: dict[int, CanIdSummary]) -> SessionInfo:
     info = SessionInfo(path=session)
     name = session.name
-    try:
-        info.started_at = datetime.strptime(name, "%Y-%m-%dT%H%M%S").replace(tzinfo=UTC)
-    except ValueError:
-        pass
+    info.started_at = parse_session_timestamp(name)
 
     frames_log = session / "frames.log"
     if frames_log.exists():
@@ -240,7 +239,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bindings",
         type=Path,
-        default=Path("data/bindings.yaml"),
+        default=BINDINGS_YAML,
         help="bindings.yaml path; used for the bound-vs-unbound coverage section.",
     )
     parser.add_argument(

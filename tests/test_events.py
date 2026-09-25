@@ -177,10 +177,23 @@ def test_hard_brake_skips_gentle_deceleration() -> None:
 
 def test_cruise_fires_on_sustained_steady_speed() -> None:
     frame = _base_frame(60)
-    frame["obd:SPEED"] = [70.0 + (i % 3) * 0.5 for i in range(60)]
+    frame["obd:SPEED"] = [85.0 + (i % 3) * 0.5 for i in range(60)]
+    frame[MODE_COLUMN] = "highway"
     events = detect_cruise(frame, [])
     assert len(events) >= 1
     assert events[0].fields["regime"] == "highway"
+
+
+def test_cruise_regime_is_the_segmenters_band_not_its_own() -> None:
+    """R01.7: the detector said highway at >= 70 km/h while the segmenter's
+    highway band starts at 80. A 72 km/h cruise the segmenter calls city is
+    a surface cruise."""
+    frame = _base_frame(60)
+    frame["obd:SPEED"] = [72.0 + (i % 3) * 0.5 for i in range(60)]
+    frame[MODE_COLUMN] = "city"
+    events = detect_cruise(frame, [])
+    assert len(events) >= 1
+    assert events[0].fields["regime"] == "surface"
 
 
 def test_cruise_does_not_fire_when_speed_swings() -> None:

@@ -52,6 +52,7 @@ import numpy as np
 import pandas as pd
 
 from src.atomic_write import atomic_write_text
+from src.storage.sidecar import read_json_object
 
 YAW_OFFSET_FILENAME = "imu_yaw_offset.json"
 
@@ -362,12 +363,8 @@ def write_yaw_offset(session_dir: Path, yaw_offset_rad: float) -> None:
 
 def read_yaw_offset(session_dir: Path) -> float | None:
     """Read back a previously persisted yaw offset, or ``None`` if absent/unreadable."""
-    path = Path(session_dir) / YAW_OFFSET_FILENAME
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json_object(Path(session_dir) / YAW_OFFSET_FILENAME)
+    if data is None:
         return None
     value = data.get("yaw_offset_rad")
     return float(value) if isinstance(value, (int, float)) else None

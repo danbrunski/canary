@@ -24,7 +24,6 @@ sidecars/logs the earlier phases of this doc already compute independently:
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from contextlib import suppress
@@ -39,10 +38,10 @@ from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.session_classifier import classify_session
 from src.analysis.vehicle_ledger import VehicleLedgerStore
-from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
 from src.preprocessing.loader import count_session_rows, resample_and_segment
+from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
 
@@ -103,7 +102,6 @@ _TOP_N = 5
 #: ``fingerprint._add_behavior_deviation_stats``).
 _BEHAVIOR_DEVIATION_STAT_PREFIX = "behavior_deviation_abs_mean:"
 
-_SESSION_DIR_FORMAT = "%Y-%m-%dT%H%M%S"
 _ONE_DAY = _timedelta(days=1)
 
 
@@ -266,10 +264,7 @@ def digest_preflight(
 def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
     """Persist the refusal sidecar (atomic tmp+rename, like every sibling)."""
     path = session_dir / DIGEST_SKIPPED_FILENAME
-    atomic_write_text(
-        path,
-        json.dumps(skipped.to_dict(), indent=2, sort_keys=True, default=_json_default) + "\n",
-    )
+    write_json_sidecar(path, skipped.to_dict(), default=_json_default)
     log.warning(
         "digest skipped for %s: %s (%s)",
         skipped.session_id,
@@ -282,13 +277,7 @@ def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
 
 def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
     """Load the refusal sidecar, or ``None`` if absent / unreadable."""
-    path = session_dir / DIGEST_SKIPPED_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return read_json_object(session_dir / DIGEST_SKIPPED_FILENAME)
 
 
 def clear_digest_skipped(session_dir: Path) -> None:
@@ -341,13 +330,7 @@ def _anomaly_counts_by_source(
 
 
 def _read_dtc_sidecar(session_dir: Path) -> dict[str, Any] | None:
-    path = session_dir / DTC_SIDECAR_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return read_json_object(session_dir / DTC_SIDECAR_FILENAME)
 
 
 def _new_dtcs(session_dir: Path) -> list[dict[str, Any]]:
@@ -500,10 +483,7 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     """Atomic tmp+rename write, matching ``classification.json`` /
     ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``."""
     path = session_dir / DIGEST_FILENAME
-    atomic_write_text(
-        path,
-        json.dumps(digest.to_dict(), indent=2, sort_keys=True, default=_json_default) + "\n",
-    )
+    write_json_sidecar(path, digest.to_dict(), default=_json_default)
     return path
 
 
@@ -515,13 +495,7 @@ def _json_default(value: Any) -> Any:
 
 def read_digest(session_dir: Path) -> dict[str, Any] | None:
     """Load the sidecar dict, or ``None`` if absent / unreadable."""
-    path = session_dir / DIGEST_FILENAME
-    if not path.exists():
-        return None
-    try:
-        return dict(json.loads(path.read_text()))
-    except (OSError, json.JSONDecodeError):
-        return None
+    return read_json_object(session_dir / DIGEST_FILENAME)
 
 
 def persist_digest(
@@ -538,7 +512,10 @@ def persist_digest(
     """
     write_digest(session_dir, digest)
     clear_digest_skipped(session_dir)
-    _update_catalog(catalog_db, session_dir)
+    # Lazy: src.storage.catalog imports this module's package at module level.
+    from src.storage.catalog import record_session_best_effort
+
+    record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
 
 
@@ -581,20 +558,6 @@ def get_or_compute_digest(
     except FileNotFoundError:
         return None
     return persist_digest(session_dir, digest, catalog_db=catalog_db)
-
-
-def _update_catalog(catalog_db: Path | None, session_dir: Path) -> None:
-    """Best-effort catalog re-index (Task 6.3) — never blocks the digest
-    write it rides along with. ``None`` (the default) skips it entirely."""
-    if catalog_db is None:
-        return
-    try:
-        from src.storage.catalog import SessionCatalog
-
-        with SessionCatalog(catalog_db) as catalog:
-            catalog.record_session(session_dir)
-    except Exception:  # noqa: BLE001 — see docstring
-        log.exception("catalog update failed for %s", session_dir.name)
 
 
 __all__ = [

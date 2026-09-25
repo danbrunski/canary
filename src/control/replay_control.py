@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +45,7 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
+from src.session import SessionKind, format_session_timestamp, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -56,8 +56,6 @@ if TYPE_CHECKING:
     from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
-
-_LIVE_SESSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{6}$")
 
 
 class ReplayError(RuntimeError):
@@ -154,7 +152,7 @@ def _utc_now() -> datetime:
 
 def _is_live_session_name(name: str) -> bool:
     """True for ``YYYY-MM-DDTHHMMSS`` directory names (real captures)."""
-    return bool(_LIVE_SESSION_RE.match(name))
+    return session_kind(name) is SessionKind.LIVE
 
 
 class ReplayController:
@@ -267,7 +265,7 @@ class ReplayController:
         if not source_dir.is_dir():
             raise ReplayNotFoundError(f"session {source_session_id!r} not found")
 
-        replay_id = _utc_now().strftime("%Y-%m-%dT%H%M%S")
+        replay_id = format_session_timestamp(_utc_now())
         await self._writer.enter_replay_mode(replay_id)
         try:
             anomalies_path = self._anomaly_logger.enter_replay_mode(replay_id)

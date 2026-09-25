@@ -55,6 +55,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from src.dataframe_utils import numeric_values
 from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
@@ -203,9 +204,7 @@ class _FrameColumns:
         return name in self._frame.columns
 
     def floats(self, name: str) -> np.ndarray:
-        if name not in self._frame.columns:
-            return np.full(self.size, np.nan)
-        return pd.to_numeric(self._frame[name], errors="coerce").to_numpy(dtype=float)
+        return numeric_values(self._frame, name)
 
     def flags(self, name: str) -> np.ndarray:
         """Boolean flag column; a missing (NaN/None) flag reads ``True``."""

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+import re
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from enum import StrEnum
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Any
@@ -56,13 +58,147 @@ def session_paths(root: Path) -> SessionPaths:
     )
 
 
-def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
-    """Create `out_root/<UTC-timestamp>/` and return the file layout.
+#: The UTC stamp every session directory name carries. ``T`` separator and
+#: no colons so the path is safe on every filesystem we care about (tmpfs,
+#: ext4, exFAT, NTFS via WSL). The only copy of this format in ``src``,
+#: ``scripts`` and ``tools`` (R01.1): format with
+#: :func:`format_session_timestamp`, parse with :func:`classify_session_name`.
+SESSION_TIMESTAMP_FORMAT = "%Y-%m-%dT%H%M%S"
+_STAMP = r"(\d{4}-\d{2}-\d{2}T\d{6})"
 
-    Timestamp uses `T` separator and no colons so the path is safe on every
-    filesystem we care about (tmpfs, ext4, exFAT, NTFS via WSL).
+
+class SessionKind(StrEnum):
+    """What a directory under the storage root is, decided by its name alone.
+
+    - ``live``: a plain session the writer rotates into (``2026-08-05T142720``).
+    - ``capture``: a profile-owned capture (``_capture-<slug>-<stamp>``).
+    - ``tuning``: legacy tuning mode (``_tuning-<stamp>``,
+      ``ParquetTelemetryWriter.enter_tuning_mode``).
+    - ``replay``: runtime replay output (``_replay-<stamp>``). Re-emitted rows,
+      never this vehicle's own recording.
     """
-    ts = started_at.strftime("%Y-%m-%dT%H%M%S")
+
+    LIVE = "live"
+    CAPTURE = "capture"
+    TUNING = "tuning"
+    REPLAY = "replay"
+
+
+_KIND_PATTERNS: tuple[tuple[SessionKind, re.Pattern[str]], ...] = (
+    (SessionKind.LIVE, re.compile(rf"^{_STAMP}$")),
+    (SessionKind.CAPTURE, re.compile(rf"^_capture-[a-z0-9-]+-{_STAMP}$")),
+    (SessionKind.TUNING, re.compile(rf"^_tuning-{_STAMP}$")),
+    (SessionKind.REPLAY, re.compile(rf"^_replay-{_STAMP}$")),
+)
+
+#: Every kind a name can classify as. "What is live right now?" answers over
+#: all of them (:func:`src.control.sessions.latest_session`).
+ALL_SESSION_KINDS: frozenset[SessionKind] = frozenset(SessionKind)
+#: This vehicle's own recordings that HTTP reads resolve and post-hoc sidecars
+#: are computed over (``is_session_dir_name``). ``_tuning-*`` is left out
+#: pending the operator decision recorded in R01.1; adding
+#: ``SessionKind.TUNING`` here is the whole change either way.
+RECORDED_SESSION_KINDS: frozenset[SessionKind] = frozenset({SessionKind.LIVE, SessionKind.CAPTURE})
+#: Plain live sessions only: the corpus-shaped directories the classifier,
+#: trends and retention walk.
+LIVE_SESSION_KINDS: frozenset[SessionKind] = frozenset({SessionKind.LIVE})
+
+
+@dataclass(frozen=True)
+class SessionName:
+    """A parsed session directory name."""
+
+    kind: SessionKind
+    started_at: datetime
+
+
+def format_session_timestamp(started_at: datetime) -> str:
+    """The directory stamp for ``started_at`` (formatted as given; pass UTC)."""
+    return started_at.strftime(SESSION_TIMESTAMP_FORMAT)
+
+
+def parse_session_timestamp(stamp: str) -> datetime | None:
+    """Parse a bare ``YYYY-MM-DDTHHMMSS`` stamp as UTC, or ``None``."""
+    try:
+        return datetime.strptime(stamp, SESSION_TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+    except ValueError:
+        return None
+
+
+def classify_session_name(name: str) -> SessionName | None:
+    """The one parser for session directory names: kind and UTC start time.
+
+    ``None`` for anything that is not a session (``_archive``, scratch
+    directories, a stamp that is not a real date). Ordering sessions any
+    other way (by directory name, by mtime) is a bug waiting for a capture
+    prefix to expose it: ``_capture-`` sorts before ``_tuning-`` whatever the
+    dates.
+    """
+    for kind, pattern in _KIND_PATTERNS:
+        match = pattern.match(name)
+        if match is None:
+            continue
+        started = parse_session_timestamp(match.group(1))
+        return None if started is None else SessionName(kind=kind, started_at=started)
+    return None
+
+
+def session_kind(name: str) -> SessionKind | None:
+    """The :class:`SessionKind` of a directory name, or ``None``."""
+    parsed = classify_session_name(name)
+    return None if parsed is None else parsed.kind
+
+
+_NEVER = datetime.min.replace(tzinfo=UTC)
+
+
+def session_sort_key(session: str | Path) -> tuple[datetime, str]:
+    """Chronological sort key, total over unparseable names.
+
+    Parsed start time first, then the name as a tie-break. A name that does
+    not parse sorts before every session (``datetime.min``) instead of raising
+    ``TypeError`` beside parseable ones.
+    """
+    name = session.name if isinstance(session, Path) else session
+    parsed = classify_session_name(name)
+    return (parsed.started_at if parsed is not None else _NEVER, name)
+
+
+def iter_sessions(root: Path, *, kinds: Iterable[SessionKind]) -> list[Path]:
+    """Session directories under ``root`` of the given ``kinds``, oldest first.
+
+    Ordered by parsed start time, never by name. ``kinds`` has no default on
+    purpose: "which sessions?" is a different question for training, live
+    reads and sidecars, and each caller states its answer.
+    """
+    wanted = frozenset(kinds)
+    if not root.is_dir():
+        return []
+    found = [
+        child
+        for child in root.iterdir()
+        if (parsed := classify_session_name(child.name)) is not None
+        and parsed.kind in wanted
+        and child.is_dir()
+    ]
+    return sorted(found, key=session_sort_key)
+
+
+def dir_size(path: Path) -> int:
+    """Total bytes of the regular files under ``path``; unreadable files count 0."""
+    total = 0
+    for child in path.rglob("*"):
+        try:
+            if child.is_file():
+                total += child.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
+def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
+    """Create `out_root/<UTC-timestamp>/` and return the file layout."""
+    ts = format_session_timestamp(started_at)
     root = out_root / ts
     root.mkdir(parents=True, exist_ok=False)
     return session_paths(root)

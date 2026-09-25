@@ -27,8 +27,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 import can
@@ -41,8 +39,9 @@ from src.collection.can_obd_client import (
     parse_dtc_payload,
 )
 from src.collection.isotp import nrc_name
+from src.collection.obd_scheduler import load_repo_did_map
 from src.config import CanBusConfig
-from src.decode.dids import DidMap, apply_scaling, decode_did_raw, did_entries_by_hex, load_did_map
+from src.decode.dids import apply_scaling, decode_did_raw, did_entries_by_hex
 
 log = logging.getLogger(__name__)
 
@@ -56,28 +55,9 @@ MAX_TIMEOUT_SECONDS = 10.0
 #: wire format `parse_dtc_payload` decodes.
 _DTC_SERVICES = frozenset({0x03, 0x07, 0x0A})
 
-_DIDS_YAML_PATH = Path(__file__).resolve().parents[2] / "data" / "dids.yaml"
-
 
 class AdHocRequestBusError(RuntimeError):
     """The bus couldn't be opened (port already exclusively held, etc.)."""
-
-
-@lru_cache(maxsize=1)
-def _load_did_map() -> DidMap | None:
-    """Parsed ``data/dids.yaml``, or ``None`` when absent/unparseable.
-
-    Mirrors ``obd_scheduler._load_did_map`` — same file, same "missing
-    metadata degrades gracefully" contract — kept as a separate small copy
-    rather than a cross-module import of that function's leading-underscore
-    name.
-    """
-    if not _DIDS_YAML_PATH.exists():
-        return None
-    try:
-        return load_did_map(_DIDS_YAML_PATH)
-    except Exception:  # noqa: BLE001 — bad YAML shouldn't break an ad-hoc read
-        return None
 
 
 @dataclass(frozen=True)
@@ -204,7 +184,7 @@ def _decode(service: int, identifier: int | None, payload: bytes) -> dict[str, A
         text = _try_ascii(payload)
         return {"ascii": text} if text is not None else None
     if service == 0x22 and identifier is not None:
-        did_map = _load_did_map()
+        did_map = load_repo_did_map()
         if did_map is None:
             return None
         did_entry = did_entries_by_hex(did_map).get(f"{identifier:04X}")

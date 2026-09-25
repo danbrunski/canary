@@ -42,6 +42,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.atomic_write import atomic_write_text
+from src.coerce import finite_float
 
 __all__ = [
     "DEFAULT_CUSTOM_PIDS_PATH",
@@ -354,16 +355,6 @@ def _parse_mode_and_pid(token: str) -> tuple[int, int]:
     return mode, pid
 
 
-def _float_or_none(text: str) -> float | None:
-    text = text.strip()
-    if not text:
-        return None
-    try:
-        return float(text)
-    except ValueError:
-        return None
-
-
 def torque_csv_to_custom_pids(text: str) -> tuple[list[CustomPid], list[str]]:
     """Parse a Torque custom-PID CSV into :class:`CustomPid` records.
 
@@ -390,8 +381,8 @@ def torque_csv_to_custom_pids(text: str) -> tuple[list[CustomPid], list[str]]:
                 pid=pid,
                 formula=row.get("equation", "").strip(),
                 unit=row.get("units", "").strip(),
-                minimum=_float_or_none(row.get("min value", "")),
-                maximum=_float_or_none(row.get("max value", "")),
+                minimum=finite_float(row.get("min value", "")),
+                maximum=finite_float(row.get("max value", "")),
                 header=(int(row["header"].strip(), 16) if row.get("header", "").strip() else None),
             )
         except (FormulaError, ValueError) as exc:

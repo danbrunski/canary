@@ -33,7 +33,6 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import gc
-import hashlib
 import json
 import logging
 import shutil
@@ -71,7 +70,6 @@ from src.analysis.training_disposition import (  # noqa: E402
 )
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
-from src.control.sessions import session_started_at  # noqa: E402
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.alert_budget import (  # noqa: E402
@@ -83,6 +81,7 @@ from src.models.alert_budget import (  # noqa: E402
     verdict_record,
     write_verdict,
 )
+from src.models.artifact_hash import sha256_file_or_none  # noqa: E402
 from src.models.evaluation import (  # noqa: E402
     HoldoutSplit,
     drives_of_sessions,
@@ -109,6 +108,7 @@ from src.models.training_ledger import (  # noqa: E402
     TrainingLedger,
     build_run_record_from_manifest,
 )
+from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
     DEFAULT_FEATURE_CACHE_DIR,
     build_feature_frame,
@@ -116,6 +116,7 @@ from src.preprocessing.feature_pipeline import (  # noqa: E402
     resolve_feature_policy,
 )
 from src.preprocessing.quality_gate import apply_quarantine_gate  # noqa: E402
+from src.session import session_sort_key  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -186,8 +187,9 @@ MIN_CALIBRATION_HOLDOUT_SESSIONS = MIN_CALIBRATION_SESSIONS
 
 def _started_at_key(session: Path) -> datetime:
     """Sort key by *parsed* start time (never by directory name — capture
-    prefixes sort first). Unparseable names keep their given order, oldest."""
-    return session_started_at(session) or datetime.min.replace(tzinfo=UTC)
+    prefixes sort first). Unparseable names keep their given order, oldest:
+    the time half of :func:`src.session.session_sort_key` (R01.1)."""
+    return session_sort_key(session)[0]
 
 
 def _pick_calibration_holdouts(
@@ -406,7 +408,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bindings",
         type=Path,
-        default=Path("data/bindings.yaml"),
+        default=BINDINGS_YAML,
         help="Path to bindings.yaml for CAN-signal decode.",
     )
     parser.add_argument(
@@ -1281,10 +1283,7 @@ def _compute_disposition_summary(
 
 def _manifest_fingerprint(out_dir: Path) -> str | None:
     """Content hash of ``out_dir``'s manifest, ``None`` when there is none."""
-    try:
-        return hashlib.sha256((out_dir / "model.manifest.json").read_bytes()).hexdigest()
-    except OSError:
-        return None
+    return sha256_file_or_none(out_dir / "model.manifest.json")
 
 
 def _ingest_ledger(
@@ -1666,14 +1665,8 @@ def _run_alert_budget_gate(
     return check
 
 
-def _file_sha256(path: Path | None) -> str | None:
-    if path is None or not path.exists():
-        return None
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+#: R01.6: the one definition is ``src.models.artifact_hash.sha256_file_or_none``.
+_file_sha256 = sha256_file_or_none
 
 
 def _mark_requested_failures(

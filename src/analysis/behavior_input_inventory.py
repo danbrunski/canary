@@ -33,13 +33,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.refit import ENGINE_RUNNING_MIN_RPM, RPM_COLUMN, Recipe, recipe_serving_spec
+from src.analysis.refit import RPM_COLUMN, Recipe, recipe_serving_spec
+from src.dataframe_utils import numeric_values
 from src.decode.behavior_eligibility import (
     eligibility_reasons,
     reason_code,
     required_channel_groups,
 )
 from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES, fuel_status_name
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.features import compute_rate_of_change
 from src.preprocessing.resampler import gap_column
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -57,14 +59,8 @@ TRIM_BANKS: Mapping[str, tuple[str, str]] = {
 FUEL_STATUS_COLUMN = "obd:FUEL_STATUS"
 
 
-def _values(frame: pd.DataFrame, column: str) -> np.ndarray:
-    if column not in frame.columns:
-        return np.full(len(frame), np.nan)
-    return pd.to_numeric(frame[column], errors="coerce").to_numpy(dtype=float)
-
-
 def _fresh(frame: pd.DataFrame, column: str) -> np.ndarray:
-    fresh = np.isfinite(_values(frame, column))
+    fresh = np.isfinite(numeric_values(frame, column))
     gap = gap_column(column)
     if gap in frame.columns:
         fresh &= ~frame[gap].fillna(True).astype(bool).to_numpy()
@@ -152,12 +148,13 @@ def recipe_input_inventory(frame: pd.DataFrame, recipe: Recipe) -> RecipeInvento
     channels = []
     for group in required_channel_groups(spec):
         recorded = any(
-            name in frame.columns and np.isfinite(_values(frame, name)).any() for name in group
+            name in frame.columns and np.isfinite(numeric_values(frame, name)).any()
+            for name in group
         )
         present = np.zeros(len(frame), dtype=bool)
         fresh = np.zeros(len(frame), dtype=bool)
         for name in group:
-            present |= np.isfinite(_values(frame, name))
+            present |= np.isfinite(numeric_values(frame, name))
             fresh |= _fresh(frame, name)
         channels.append(
             ChannelCoverage(
@@ -170,7 +167,7 @@ def recipe_input_inventory(frame: pd.DataFrame, recipe: Recipe) -> RecipeInvento
     reasons = eligibility_reasons(frame, spec, include_actual=True)
     eligible = np.asarray(pd.isna(reasons), dtype=bool)
     refusals = Counter(reason_code(str(r)) for r in reasons[~eligible])
-    rpm = _values(frame, RPM_COLUMN)
+    rpm = numeric_values(frame, RPM_COLUMN)
     with np.errstate(invalid="ignore"):
         running = int((rpm >= ENGINE_RUNNING_MIN_RPM).sum())
     return RecipeInventory(
@@ -192,7 +189,7 @@ def trim_bank_facts(frame: pd.DataFrame) -> dict[str, Any]:
     exist, reported instead of a zero difference. ``closed_loop`` uses the
     explicit membership :data:`CLOSED_LOOP_FUEL_STATES`.
     """
-    rpm = _values(frame, RPM_COLUMN)
+    rpm = numeric_values(frame, RPM_COLUMN)
     with np.errstate(invalid="ignore"):
         running = rpm >= ENGINE_RUNNING_MIN_RPM
     paired = {
@@ -200,7 +197,7 @@ def trim_bank_facts(frame: pd.DataFrame) -> dict[str, Any]:
         for bank, (stft, ltft) in TRIM_BANKS.items()
     }
     both = paired["b1"] & paired["b2"]
-    status = _values(frame, FUEL_STATUS_COLUMN)
+    status = numeric_values(frame, FUEL_STATUS_COLUMN)
     status_fresh = _fresh(frame, FUEL_STATUS_COLUMN) & running
     states = Counter(
         fuel_status_name(float(code)) for code in status[status_fresh] if np.isfinite(code)
@@ -211,7 +208,9 @@ def trim_bank_facts(frame: pd.DataFrame) -> dict[str, Any]:
         if MODE_COLUMN in frame.columns
         else np.full(len(frame), "unknown", dtype=object)
     )
-    bank_diff = _values(frame, "obd:SHORT_FUEL_TRIM_1") - _values(frame, "obd:SHORT_FUEL_TRIM_2")
+    bank_diff = numeric_values(frame, "obd:SHORT_FUEL_TRIM_1") - numeric_values(
+        frame, "obd:SHORT_FUEL_TRIM_2"
+    )
     return {
         "running_rows": int(running.sum()),
         "paired_b1": int(paired["b1"].sum()),
@@ -244,7 +243,7 @@ def trim_unit_checks(frame: pd.DataFrame) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for channels in TRIM_BANKS.values():
         for channel in channels:
-            values = _values(frame, channel)
+            values = numeric_values(frame, channel)
             finite = values[np.isfinite(values)]
             if not finite.size:
                 out[channel] = {"rows": 0, "recorded": False}

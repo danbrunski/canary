@@ -14,6 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.channels import ChannelSpecError, read_channels
 from src.control.capture_manifest import read_capture_manifest
+from src.paths import DIDS_YAML
 
 Role = Literal[
     "rpm",
@@ -165,7 +166,7 @@ def build_tuning_frame(
     calibration: AfrCalibration | None = None,
     allow_candidates: bool = False,
     afr_stoich: float = 14.7,
-    dids_path: Path = Path("data/dids.yaml"),
+    dids_path: Path = DIDS_YAML,
 ) -> TuningFrame:
     """Resolve semantic roles without embedding vehicle DID names in callers.
 

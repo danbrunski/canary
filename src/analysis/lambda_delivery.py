@@ -54,6 +54,7 @@ from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.compare import align_pairs
 from src.analysis.noise_floor import NoiseFloor
 from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
+from src.paths import BINDINGS_YAML, DIDS_YAML
 
 Quantity = Literal["phi", "lambda", "afr"]
 Regime = Literal["closed_loop", "enrichment", "lean_target"]
@@ -932,8 +933,8 @@ def target_source_agreement(
     policy: PairingPolicy,
     closed_loop_band: float,
     steady_window_s: float,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
 ) -> dict[str, Any]:
     """Per-sample agreement of two target channels, split by regime.
 

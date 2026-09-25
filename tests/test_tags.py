@@ -79,6 +79,35 @@ def test_find_latest_session_ignores_non_timestamp_directories(tmp_path: Path):
     assert find_latest_session(tmp_path) == sess
 
 
+def test_find_latest_session_returns_an_open_capture(tmp_path: Path):
+    """R01.1: "which session is live?" includes captures.
+
+    The plain-name-only ``max(name)`` tagged the *previous* session for the
+    whole of a ``_capture-*`` recording, which is exactly when an operator
+    tags physical actions.
+    """
+    (tmp_path / "2026-09-20T100000").mkdir()
+    capture = tmp_path / "_capture-fuel-map-2026-09-20T101500"
+    capture.mkdir()
+    assert find_latest_session(tmp_path) == capture
+
+
+def test_find_latest_session_orders_by_time_not_name(tmp_path: Path):
+    """``_capture-`` sorts before every plain name as a string."""
+    (tmp_path / "_capture-fuel-map-2026-09-20T101500").mkdir()
+    newer = tmp_path / "2026-09-20T110000"
+    newer.mkdir()
+    assert find_latest_session(tmp_path) == newer
+
+
+def test_find_latest_session_never_picks_replay_output(tmp_path: Path):
+    """A tag records a physical action; replay rows are re-emitted."""
+    sess = tmp_path / "2026-09-20T100000"
+    sess.mkdir()
+    (tmp_path / "_replay-2026-09-20T120000").mkdir()
+    assert find_latest_session(tmp_path) == sess
+
+
 def test_find_latest_session_errors_when_empty(tmp_path: Path):
     with pytest.raises(FileNotFoundError, match="no session"):
         find_latest_session(tmp_path)

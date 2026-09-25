@@ -18,7 +18,6 @@ Profile-scoped via ``src.profiles.scope_config`` like the sibling
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -27,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from src.atomic_write import atomic_write_text
+from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
 DEFAULT_REFERENCE_EPOCH_PATH = Path("data/control/reference_epoch.json")
@@ -136,19 +135,14 @@ def build_reference_epoch(
 def write_reference_epoch(path: Path, epoch: ReferenceEpoch) -> Path:
     """Overwrite the reference-epoch file. The only writer of this path — see
     module docstring; nothing else in the codebase calls this."""
-    atomic_write_text(
-        path, json.dumps(epoch.to_dict(), indent=2, sort_keys=True) + "\n", mkdir=True
-    )
+    write_json_sidecar(path, epoch.to_dict(), mkdir=True)
     return path
 
 
 def read_reference_epoch(path: Path) -> ReferenceEpoch | None:
     """Load the frozen epoch, or ``None`` if absent / unreadable."""
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json_object(path)
+    if data is None:
         return None
     try:
         return ReferenceEpoch.from_dict(data)

@@ -28,7 +28,6 @@ session," not "zero."
 
 from __future__ import annotations
 
-import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -39,14 +38,16 @@ import pandas as pd
 
 from src.analysis.committees import COMMITTEES, append_committee_residuals
 from src.analysis.derived import compute_anomaly_signals
-from src.atomic_write import atomic_write_text
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
+from src.dataframe_utils import numeric_column
 from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX, append_deviation_columns
 from src.decode.behavior_models import load_behavior_models
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.loader import resample_and_segment
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
 FINGERPRINT_FILENAME = "fingerprint.json"
@@ -70,10 +71,9 @@ _COLD_COOLANT_C = 50.0
 #: modes gate warm regimes at 70 °C; 80 °C is comfortably past that).
 _OPERATING_TEMP_C = 80.0
 
-#: Engine-running RPM threshold. Matches
-#: ``src.dashboard.status._RPM_RUNNING_THRESHOLD`` (the vehicle_state
-#: classifier's "ignition_only" vs "engine_running" cut).
-_RUNNING_RPM = 400.0
+#: Engine-running RPM threshold: the one definition (R01.7), shared with the
+#: vehicle_state classifier's "ignition_only" vs "engine_running" cut.
+_RUNNING_RPM = ENGINE_RUNNING_MIN_RPM
 
 _IDLE_MODE = "idle"
 #: Steady-speed driving modes used as the "cruise" fuel-trim sample.
@@ -143,9 +143,7 @@ def compute_fingerprint(
     caller treats it as "skip", not "quarantine"). Returns an empty dict for
     an otherwise-empty/unsegmentable session rather than raising further.
     """
-    chunks = sorted(session_dir.glob("telemetry-*.parquet"))
-    if not chunks:
-        raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
+    require_telemetry(session_dir)
 
     frame = (
         resample_and_segment([session_dir], config, value="value_number")
@@ -190,18 +188,14 @@ def write_fingerprint(
         stats=stats,
     )
     path = session_dir / FINGERPRINT_FILENAME
-    atomic_write_text(path, json.dumps(fingerprint.to_dict(), indent=2, sort_keys=True) + "\n")
+    write_json_sidecar(path, fingerprint.to_dict())
     return path
 
 
 def read_fingerprint(session_dir: Path) -> SessionFingerprint | None:
     """Load the sidecar, or ``None`` if absent / unreadable."""
-    path = session_dir / FINGERPRINT_FILENAME
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json_object(session_dir / FINGERPRINT_FILENAME)
+    if data is None:
         return None
     try:
         return SessionFingerprint.from_dict(data)
@@ -247,14 +241,8 @@ def _append_behavior_deviations(frame: pd.DataFrame, config: CanaryConfig) -> pd
 # --------------------------------------------------------------------------- #
 
 
-def _numeric(frame: pd.DataFrame, column: str) -> pd.Series:
-    if column not in frame.columns:
-        return pd.Series(dtype=float)
-    return pd.to_numeric(frame[column], errors="coerce")
-
-
 def _add_warmup_stat(frame: pd.DataFrame, stats: dict[str, float]) -> None:
-    coolant = _numeric(frame, _COOLANT_COLUMN)
+    coolant = numeric_column(frame, _COOLANT_COLUMN)
     first_valid = coolant.first_valid_index()
     if first_valid is None or coolant.loc[first_valid] > _COLD_COOLANT_C:
         return  # no cold start captured this session
@@ -276,15 +264,15 @@ def _add_idle_operating_temp_stats(frame: pd.DataFrame, stats: dict[str, float])
     idle = frame[frame[MODE_COLUMN] == _IDLE_MODE]
     if idle.empty:
         return
-    rpm = _numeric(idle, _RPM_COLUMN).dropna()
+    rpm = numeric_column(idle, _RPM_COLUMN).dropna()
     if not rpm.empty:
         stats["idle_rpm_mean"] = float(rpm.mean())
         if len(rpm) > 1:
             stats["idle_rpm_std"] = float(rpm.std())
-    maf = _numeric(idle, _MAF_COLUMN).dropna()
+    maf = numeric_column(idle, _MAF_COLUMN).dropna()
     if not maf.empty:
         stats["idle_maf_mean"] = float(maf.mean())
-    load = _numeric(idle, _ENGINE_LOAD_COLUMN).dropna()
+    load = numeric_column(idle, _ENGINE_LOAD_COLUMN).dropna()
     if not load.empty:
         stats["idle_engine_load_mean"] = float(load.mean())
 
@@ -293,7 +281,7 @@ def _mean_over_columns(frame: pd.DataFrame, columns: Sequence[str]) -> float | N
     present = [c for c in columns if c in frame.columns]
     if not present:
         return None
-    values = pd.concat([_numeric(frame, c) for c in present], ignore_index=True).dropna()
+    values = pd.concat([numeric_column(frame, c) for c in present], ignore_index=True).dropna()
     return float(values.mean()) if not values.empty else None
 
 
@@ -302,7 +290,7 @@ def _combined_trim(frame: pd.DataFrame) -> float | None:
     parts: list[pd.Series] = []
     for stft_col, ltft_col in zip(_STFT_COLUMNS, _LTFT_COLUMNS, strict=True):
         if stft_col in frame.columns and ltft_col in frame.columns:
-            parts.append(_numeric(frame, stft_col) + _numeric(frame, ltft_col))
+            parts.append(numeric_column(frame, stft_col) + numeric_column(frame, ltft_col))
     if not parts:
         return None
     combined = pd.concat(parts, ignore_index=True).dropna()
@@ -329,7 +317,7 @@ def _add_fuel_trim_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
 
 
 def _add_cranking_stat(frame: pd.DataFrame, stats: dict[str, float]) -> None:
-    rpm = _numeric(frame, _RPM_COLUMN)
+    rpm = numeric_column(frame, _RPM_COLUMN)
     first_valid = rpm.first_valid_index()
     if first_valid is None or rpm.loc[first_valid] >= _RUNNING_RPM:
         return  # no cranking transient captured (already running at first sample)
@@ -344,10 +332,10 @@ def _add_cranking_stat(frame: pd.DataFrame, stats: dict[str, float]) -> None:
 
 
 def _add_voltage_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
-    voltage = _numeric(frame, _VOLTAGE_COLUMN)
-    if voltage.empty:
-        return
-    rpm = _numeric(frame, _RPM_COLUMN)
+    voltage = numeric_column(frame, _VOLTAGE_COLUMN)
+    if voltage.isna().all():
+        return  # no voltage channel (or no readings): nothing to summarise
+    rpm = numeric_column(frame, _RPM_COLUMN)
     first_valid = rpm.first_valid_index()
     # Same precondition as _add_cranking_stat: only trust a "crank window" when
     # the session's telemetry genuinely starts mid-crank. Leading RPM NaNs from
@@ -371,7 +359,7 @@ def _add_voltage_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
 
 def _add_bank_balance_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     for column, suffix in _BANK_BALANCE_COLUMNS.items():
-        values = _numeric(frame, column).dropna()
+        values = numeric_column(frame, column).dropna()
         if values.empty:
             continue
         stats[f"bank_balance_mean:{suffix}"] = float(values.mean())
@@ -379,7 +367,7 @@ def _add_bank_balance_stats(frame: pd.DataFrame, stats: dict[str, float]) -> Non
 
 def _add_committee_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     for committee in COMMITTEES:
-        values = _numeric(frame, committee.output).dropna()
+        values = numeric_column(frame, committee.output).dropna()
         if values.empty:
             continue
         stats[f"committee_residual_mean:{committee.name.lower()}"] = float(values.mean())
@@ -389,7 +377,7 @@ def _add_behavior_deviation_stats(frame: pd.DataFrame, stats: dict[str, float]) 
     for column in frame.columns:
         if not str(column).startswith(DEVIATION_COLUMN_PREFIX):
             continue
-        values = _numeric(frame, str(column)).dropna()
+        values = numeric_column(frame, str(column)).dropna()
         if values.empty:
             continue
         name = str(column)[len(DEVIATION_COLUMN_PREFIX) :]
@@ -410,7 +398,7 @@ def _add_misfire_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     for column in frame.columns:
         if not str(column).startswith(prefix):
             continue
-        values = _numeric(frame, str(column)).dropna()
+        values = numeric_column(frame, str(column)).dropna()
         if values.empty:
             continue
         cylinder = str(column)[len(prefix) :]
@@ -427,7 +415,7 @@ def _add_cat_efficiency_stats(frame: pd.DataFrame, stats: dict[str, float]) -> N
     ``_add_bank_balance_stats`` above.
     """
     for bank in (1, 2):
-        values = _numeric(frame, f"derived:CAT_EFFICIENCY_B{bank}").dropna()
+        values = numeric_column(frame, f"derived:CAT_EFFICIENCY_B{bank}").dropna()
         if values.empty:
             continue
         stats[f"cat_efficiency_mean:b{bank}"] = float(values.mean())
@@ -478,7 +466,7 @@ def _add_o2_health_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
     if TIMESTAMP_COLUMN in frame.columns:
         ts_all = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
         for bank in (1, 2):
-            voltage = _numeric(frame, f"obd:O2_B{bank}S2")
+            voltage = numeric_column(frame, f"obd:O2_B{bank}S2")
             valid = voltage.notna()
             if valid.sum() < 2:
                 continue
@@ -495,7 +483,7 @@ def _add_o2_health_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
 
     if MODE_COLUMN in frame.columns:
         idle = frame[frame[MODE_COLUMN] == _IDLE_MODE]
-        idle_lambda = _numeric(idle, "obd:O2_WR_LAMBDA_S1").dropna()
+        idle_lambda = numeric_column(idle, "obd:O2_WR_LAMBDA_S1").dropna()
         if len(idle_lambda) > 1:
             stats["o2_upstream_wideband_lambda_noise_idle"] = float(idle_lambda.std())
             stats["o2_upstream_wideband_lambda_bias_idle"] = float(idle_lambda.mean() - 1.0)

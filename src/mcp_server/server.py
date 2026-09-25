@@ -29,7 +29,6 @@ from src.mcp_server.audit import MCPAuditLogger
 from src.mcp_server.auth import StaticBearerVerifier
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.config import MCPConfig, load_from_env
-from src.mcp_server.parquet_query import TelemetryQuery
 from src.mcp_server.tools import (
     analysis as analysis_tool,
 )
@@ -156,6 +155,7 @@ from src.mcp_server.write_tools import (
     vehicle_ledger as vehicle_ledger_write_tool,
 )
 from src.storage.catalog import SessionCatalog
+from src.storage.telemetry_query import TelemetryQuery
 
 logger = logging.getLogger(__name__)
 

@@ -37,7 +37,6 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig
 from src.preprocessing.loader import numeric_value_columns, resample_and_segment
 from src.preprocessing.resampler import (
@@ -48,6 +47,7 @@ from src.preprocessing.segmenter import (
     MODE_COLUMN,
     UNKNOWN_MODE,
 )
+from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
 CLASSIFICATION_FILENAME = "classification.json"
@@ -59,7 +59,9 @@ DERIVED_TAGS_FILENAME = "derived_tags.jsonl"
 #: 0.3.0: the segmenter scales ``decoded:`` mode candidates to engineering units
 #: (f8b7d38). 0.2.0 sidecars from 2026-08-06 on labelled broadcast-only rows from
 #: raw counts, so a plain ``label_sessions.py`` run must redo them (D03.22).
-CLASSIFIER_VERSION = "0.3.0"
+#: 0.3.1: the cruise event's ``regime`` follows the segmenter's highway band
+#: instead of its own >= 70 km/h cut (R01.7).
+CLASSIFIER_VERSION = "0.3.1"
 
 SCHEMA_VERSION = 1
 
@@ -205,9 +207,7 @@ def classify_session(
     Raises ``FileNotFoundError`` when the session has no Parquet chunks
     (caller should treat as "skip", not "quarantine").
     """
-    chunks = sorted(session_dir.glob("telemetry-*.parquet"))
-    if not chunks:
-        raise FileNotFoundError(f"no telemetry parquet under {session_dir}")
+    require_telemetry(session_dir)
 
     if segmented is None:
         segmented = resample_and_segment([session_dir], config, value="value_number")
@@ -250,19 +250,15 @@ def classify_session(
 def write_classification(session_dir: Path, classification: SessionClassification) -> Path:
     """Write the sidecar JSON and return its path. Idempotent."""
     path = session_dir / CLASSIFICATION_FILENAME
-    atomic_write_text(path, json.dumps(classification.to_dict(), indent=2, sort_keys=True) + "\n")
+    write_json_sidecar(path, classification.to_dict())
     _write_derived_tags(session_dir, classification)
     return path
 
 
 def read_classification(session_dir: Path) -> SessionClassification | None:
     """Load the sidecar, or ``None`` if absent / unreadable."""
-    path = session_dir / CLASSIFICATION_FILENAME
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    data = read_json_object(session_dir / CLASSIFICATION_FILENAME)
+    if data is None:
         return None
     try:
         return SessionClassification.from_dict(data)

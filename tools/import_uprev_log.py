@@ -58,6 +58,7 @@ from src.analysis.clock_align import Alignment, AlignmentError, align_clocks
 from src.analysis.tune_revisions import load_tune_revisions
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
+from src.session import format_session_timestamp
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -280,7 +281,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     config = CanaryConfig.from_yaml(args.config)
     out_root = config.collection.storage_path / "_uprev"
     out_root.mkdir(parents=True, exist_ok=True)
-    session_dir = out_root / started_at.strftime("%Y-%m-%dT%H%M%S")
+    session_dir = out_root / format_session_timestamp(started_at)
     try:
         writer = ParquetTelemetryWriter(out_root, session_started_at=started_at)
     except FileExistsError:
