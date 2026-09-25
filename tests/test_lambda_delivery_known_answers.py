@@ -133,7 +133,7 @@ def test_pid_0x44_follows_phi_above_stoich_and_the_sensor_below_it(
         measured_spec="obd:O2_WR_LAMBDA_S1",
         max_separation_s=0.25,
         steady_window_s=1.0,
-        holdoff_s=declaration.eligibility.post_fuel_cut_holdoff_s,
+        holdoff_s=declaration.eligibility.regimes.closed_loop.post_fuel_cut_holdoff_s,
     )
     above, below = out["above_1"], out["below_1"]
     assert above["verdict"] == "phi"
@@ -154,7 +154,7 @@ def test_the_convention_check_fails_on_a_channel_that_is_not_a_mixture(
         measured_spec="obd:O2_WR_LAMBDA_S1",
         max_separation_s=0.25,
         steady_window_s=1.0,
-        holdoff_s=declaration.eligibility.post_fuel_cut_holdoff_s,
+        holdoff_s=declaration.eligibility.regimes.closed_loop.post_fuel_cut_holdoff_s,
     )
     assert out["above_1"]["verdict"] == "neither"
     assert out["above_1"]["n_pairs_off_stoich"] == 244
@@ -182,20 +182,23 @@ def test_state_counts_account_for_every_target_observation(
     assert counts["fuel_cut"] == 151
     assert counts["measured_rail"] == 19
     assert counts["measured_missing"] == 1
-    assert counts["post_fuel_cut"] == 324
-    assert counts["target_transient"] == 29
-    assert counts[ELIGIBLE] == 554
+    # R05.16: enrichment rows are judged by the enrichment rule (0.6 s /
+    # 0.01 lambda dwell, 6 s holdoff, frozen 0.10 s delay); closed-loop rows
+    # by the unchanged closed-loop rule. Against the single global rule:
+    # post_fuel_cut 324 -> 316, target_transient 29 -> 31, eligible 554 -> 560.
+    assert counts["post_fuel_cut"] == 316
+    assert counts["target_transient"] == 31
+    assert counts[ELIGIBLE] == 560
     assert sum(counts[state] for state in samples.counts if state != "total") == counts["total"]
     frame = samples.frame
     assert frame.loc[frame["state"] != ELIGIBLE, "residual_pct"].isna().all()
-    # Enrichment that holds for the declared 3 s dwell is rare at a 1 Hz
-    # target poll: 2 of 554 eligible rows. That scarcity is the measurement,
-    # not a defect of the rule — it is why no enrichment result is claimed
-    # from this drive.
+    # Closed loop is untouched: its rule did not change. Enrichment rose from
+    # 2 rows (3 s dwell at a 1 Hz target poll) to 8. This slice's drive is in
+    # the enrichment rule's informed_by, so these are not held-out evidence.
     eligible = frame[frame["state"] == ELIGIBLE]
-    assert eligible["regime"].value_counts().to_dict() == {"closed_loop": 552, "enrichment": 2}
+    assert eligible["regime"].value_counts().to_dict() == {"closed_loop": 552, "enrichment": 8}
     assert eligible.loc[eligible["regime"] == "enrichment", "residual_pct"].to_numpy() == (
-        pytest.approx([1.944, 2.832], abs=1e-3)
+        pytest.approx([4.257, 3.163, 2.989, 3.149, 2.847, 2.864, 1.486, 2.403], abs=1e-3)
     )
 
 

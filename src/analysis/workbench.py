@@ -38,16 +38,23 @@ from src.analysis.channels import (
 from src.analysis.noise_floor import NoiseFloor, Significance, significance
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.analysis.tuning import (
+    DELIVERY_ENGINE_VERSION,
+    DeliveryRoute,
     GateError,
     GateReport,
     InputsNotCapturedError,
     _assert_axis_allowed,
+    bracket_ends,
+    delay_sensitivity,
     delivery_error_from_gated,
-    delivery_semantic_frame,
     gate_delivery_samples,
+    mode01_route,
+    pairing_block,
+    read_delivery_inputs,
+    semantic_route,
 )
 from src.analysis.tuning_context import TuningContext
-from src.analysis.tuning_frame import ProviderRegistry, build_tuning_frame
+from src.analysis.tuning_frame import ProviderRegistry
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -596,69 +603,88 @@ def noise_floor_payload(floor: NoiseFloor | None, channel: str) -> dict[str, Any
 MEASURED_SEMANTIC_PREFIX = "semantic:"
 
 
-def _semantic_delivery_frame(
-    session: Path, role: str, inputs: WorkbenchInputs
-) -> pd.DataFrame | Unavailable:
-    if inputs.providers_path is None:
-        return Unavailable(session.name, "refused", "no tuning_providers.yaml for this vehicle")
-    frame = build_tuning_frame(
-        session,
-        providers_path=inputs.providers_path,
-        calibration=inputs.calibration,
-        afr_stoich=inputs.afr_stoich,
-    )
-    needed = ("rpm", role, "commanded_afr", "fueling_active")
-    missing = [r for r in needed if not frame.capability.get(r, {}).get("available", False)]
-    if missing:
-        specs = [str(frame.capability.get(r, {}).get("provider") or r) for r in missing]
-        return Unavailable(
-            session.name,
-            "not_captured",
-            "This capture's profile does not poll " + ", ".join(specs),
-            missing=specs,
-        )
-    values = frame.values.rename(
-        columns={role: "measured_afr", f"{role}_censored": "measured_afr_censored"}
-    )
-    keep = ["timestamp", "rpm", "measured_afr", "commanded_afr", "fueling_active"]
-    if "measured_afr_censored" in values:
-        keep.append("measured_afr_censored")
-    # The target word's fuel-cut sentinel (build_tuning_frame), so cut samples
-    # are counted by the named `fuel_cut` gate instead of never starting.
-    if "fuel_cut" in values:
-        keep.append("fuel_cut")
-    return values.loc[:, keep]
+def delivery_route(
+    inputs: WorkbenchInputs, *, measured: str, min_load: float | None
+) -> DeliveryRoute:
+    """The declared route ``measured`` names.
 
-
-def _session_delivery_frame(
-    session: Path, inputs: WorkbenchInputs, *, measured: str, min_load: float | None
-) -> pd.DataFrame | Unavailable:
-    """One session's delivery inputs as semantic roles, or which kind of unavailable.
-
-    ``semantic:<role>`` reads the A/F voltage through the calibrated transfer
-    (:func:`_semantic_delivery_frame`); anything else is the Mode 01 path.
-    A session whose inputs were never captured is ``not_captured`` with the
-    absent inputs named (R05.11 — read from the error's fields, not its
-    text); any other gate refusal is ``refused``.
+    ``semantic:<role>`` is the all-DID route: the provider registry's
+    commanded target, rpm and ``<role>`` channel (the A/F voltage through the
+    calibrated transfer). Anything else is a Mode 01 measured spec against
+    PID 0x44. Refuses (:class:`GateError`) without a ``lambda_delivery.yaml``
+    or when ``measured`` is not a declared measured source.
     """
+    declaration = inputs.lambda_delivery
+    if declaration is None:
+        raise GateError(
+            "no lambda_delivery.yaml for this vehicle: nothing declares its commanded target "
+            "or what each measured source is, so delivery error is refused"
+        )
+    if measured.startswith(MEASURED_SEMANTIC_PREFIX):
+        if min_load is not None:
+            raise GateError(
+                "a load floor needs a validated load provider, and the semantic (A/F voltage) "
+                "path has none: calculated load is Mode 01 only. Clear min_load, or use the "
+                "Mode 01 measured source."
+            )
+        if inputs.providers is None:
+            raise GateError("no tuning_providers.yaml for this vehicle")
+        role = measured[len(MEASURED_SEMANTIC_PREFIX) :]
+        return semantic_route(declaration, inputs.providers, measured_role=role)
+    if inputs.calibration is None:
+        raise GateError("no afr_calibration.yaml for this vehicle; commanded AFR cannot resolve")
+    return mode01_route(declaration, measured_spec=measured, min_load=min_load)
+
+
+def _session_delivery(
+    session: Path,
+    inputs: WorkbenchInputs,
+    route: DeliveryRoute,
+    *,
+    bands: tuple[float, ...],
+    min_load: float | None,
+    ends: tuple[float, float] | None = None,
+) -> dict[float | None, tuple[pd.DataFrame, GateReport]] | Unavailable:
+    """One session's gated delivery samples, or which kind of unavailable.
+
+    Keyed by enrichment delay: ``None`` is the route's declared one, and each
+    bracket end in ``ends`` is the same session re-gated at that delay.
+
+    A session whose inputs were never captured (or never overlapped) is
+    ``not_captured`` with the absent inputs named (R05.11 — read from the
+    error's fields, not its text); any other refusal is ``refused``.
+    """
+    assert inputs.lambda_delivery is not None  # delivery_route refused otherwise
     try:
-        if measured.startswith(MEASURED_SEMANTIC_PREFIX):
-            role = measured[len(MEASURED_SEMANTIC_PREFIX) :]
-            return _semantic_delivery_frame(session, role, inputs)
-        assert inputs.calibration is not None
-        return delivery_semantic_frame(
+        read = read_delivery_inputs(
             session,
+            route,
+            inputs.lambda_delivery,
             calibration=inputs.calibration,
-            measured_spec=measured,
-            min_load=min_load,
             afr_stoich=inputs.afr_stoich,
             bindings_path=inputs.bindings_path,
             dids_path=inputs.dids_path,
             mode01_exclusion_note=inputs.mode01_exclusion_note,
         )
+        declaration = inputs.lambda_delivery
+        return {
+            delay: gate_delivery_samples(
+                read,
+                route,
+                declaration=declaration,
+                calibration=inputs.calibration,
+                afr_stoich=inputs.afr_stoich,
+                rpm_bands=bands,
+                min_load=min_load,
+                session=session,
+                mode01_exclusion_note=inputs.mode01_exclusion_note,
+                enrichment_delay_s=delay,
+            )
+            for delay in (None, *(ends or ()))
+        }
     except InputsNotCapturedError as exc:
         return Unavailable(session.name, "not_captured", str(exc), missing=list(exc.missing))
-    except ValueError as exc:  # GateError included
+    except ValueError as exc:  # GateError and clock refusals included
         return Unavailable(session.name, "refused", str(exc))
 
 
@@ -674,14 +700,15 @@ def pooled_delivery_error(
     """Delivery error by rpm band over several sessions, with every gate.
 
     ``measured`` names the measured-AFR source and is never chosen for the
-    caller: ``obd:O2_WR_LAMBDA_S1`` (the ECM's own λ, Mode 01 path) and
+    caller: ``obd:O2_WR_LAMBDA_S1`` (the ECM's own λ, Mode 01 route) and
     ``semantic:measured_afr_b1``/``_b2`` (the A/F sensor voltage through the
     calibrated transfer) disagree by ~3.8 %.
 
-    Samples are pooled *then* band-averaged in one
-    :func:`delivery_error_from_semantic_frame`, so the band average weighs
-    bands equally across the pool and per-session composition cannot
-    masquerade as an effect. Each session's own n is reported beside it.
+    Each session is paired and gated on its own acquisition clock
+    (:func:`src.analysis.tuning.gate_delivery_samples`, R05.16), then the
+    pool is band-averaged once, so the band average weighs bands equally
+    across the pool and per-session composition cannot masquerade as an
+    effect. Each session's own n is reported beside it.
     """
     skipped = list(unavailable or [])
     bands = rpm_bands if rpm_bands is not None else inputs.rpm_bands
@@ -690,32 +717,24 @@ def pooled_delivery_error(
             "no rpm bands for this vehicle: declare mode01_wot.rpm_bands in its "
             "tuning_providers.yaml (the top edge is the engine's redline)"
         )
-    semantic = measured.startswith(MEASURED_SEMANTIC_PREFIX)
-    if semantic and min_load is not None:
-        raise GateError(
-            "a load floor needs a validated load provider, and the semantic (A/F voltage) "
-            "path has none: calculated load is Mode 01 only. Clear min_load, or use the "
-            "Mode 01 measured source."
-        )
-    if inputs.calibration is None and not semantic:
-        raise GateError("no afr_calibration.yaml for this vehicle; commanded AFR cannot resolve")
+    route = delivery_route(inputs, measured=measured, min_load=min_load)
+    assert inputs.lambda_delivery is not None
+    pairing = pairing_block(route, inputs.lambda_delivery)
+    ends = bracket_ends(route, inputs.lambda_delivery)
+    end_parts: dict[float, list[tuple[pd.DataFrame, GateReport]]] = {e: [] for e in ends or ()}
     gated_parts: list[pd.DataFrame] = []
     pooled_report = GateReport()
     per_session: list[dict[str, Any]] = []
     for session in sessions:
-        frame = _session_delivery_frame(session, inputs, measured=measured, min_load=min_load)
-        if isinstance(frame, Unavailable):
-            skipped.append(frame)
-            continue
-        gate_name = "fueling_inactive" if semantic else "closed_loop"
-        # Gate each session on its own clock, then band-average the pool once.
-        gated, report = gate_delivery_samples(
-            frame,
-            afr_stoich=inputs.afr_stoich,
-            rpm_bands=bands,
-            min_load=min_load,
-            fueling_gate_name=gate_name,
+        outcome = _session_delivery(
+            session, inputs, route, bands=bands, min_load=min_load, ends=ends
         )
+        if isinstance(outcome, Unavailable):
+            skipped.append(outcome)
+            continue
+        gated, report = outcome[None]
+        for end in ends or ():
+            end_parts[end].append(outcome[end])
         own = delivery_error_from_gated(gated, report, measured_spec=measured, rpm_bands=bands)
         identity = session_revision(session, inputs.registry)
         per_session.append(
@@ -725,6 +744,8 @@ def pooled_delivery_error(
                 "gates": own.gates,
                 "revision": identity["revision"],
                 "band_averaged_pct": _clean(own.band_averaged_pct),
+                # Not independent evidence: this drive chose the constants.
+                "informed_constants": session.name in pairing["constants_informed_by"],
             }
         )
         gated_parts.append(gated)
@@ -733,25 +754,21 @@ def pooled_delivery_error(
     contributing = [Path(s) for s in sessions if s.name in {p["session_id"] for p in per_session}]
     floor = noise_floor_payload(inputs.noise_floor, "delivery_error_pct")
     base: dict[str, Any] = {
+        "engine_version": DELIVERY_ENGINE_VERSION,
         "measured": measured,
         "min_load": min_load,
         "rpm_bands": list(bands),
         "per_session": per_session,
         "unavailable": [item.as_dict() for item in skipped],
         "noise_floor": floor,
-        # What "same instant" means here, stated rather than implied. These
-        # gates pair inside a one-second cell (one target and one measurement
-        # per second, last of each), which bounds a *band average* but is not
-        # instantaneous target tracking: a residual against a target that
-        # moved inside the cell is not resolvable at this pairing. The
-        # acquisition-clock relationship (src/analysis/lambda_delivery.py)
-        # is the one that pairs real observations within a declared
-        # separation and names each ineligible state.
-        "pairing": {
-            "method": "1s grid, last observation per cell",
-            "claims_instantaneous_target_tracking": False,
-            "acquisition_time_path": "src.analysis.lambda_delivery.delivery_samples",
-        },
+        # What "same instant" means here, stated rather than implied: each
+        # commanded-target read is paired with at most one measured read
+        # within the declared acquisition separation, and only steady-target
+        # samples carry a residual (R05.16; it replaced a 1 s last-cell grid).
+        "pairing": pairing,
+        # The result at each end of the route's delay bracket; None when the
+        # route models no delay (R05.16).
+        "delay_sensitivity": None,
     }
     if not per_session:
         base.update(
@@ -767,9 +784,24 @@ def pooled_delivery_error(
         return base
     pooled = pd.concat(gated_parts, ignore_index=True)
     result = delivery_error_from_gated(
-        pooled, pooled_report, measured_spec=measured, rpm_bands=bands
+        pooled, pooled_report, measured_spec=measured, rpm_bands=bands, pairing=pairing
     )
     payload = result.as_dict()
+    if ends is not None:
+        at_ends = {}
+        for end, parts in end_parts.items():
+            report_at = GateReport()
+            for _frame, part_report in parts:
+                report_at.merge(part_report)
+            at_ends[end] = delivery_error_from_gated(
+                pd.concat([frame for frame, _ in parts], ignore_index=True),
+                report_at,
+                measured_spec=measured,
+                rpm_bands=bands,
+            )
+        base["delay_sensitivity"] = delay_sensitivity(
+            result, at_ends, float(pairing["transport_delay_s"])
+        )
     base.update(
         {
             "available": result.n > 0,
@@ -1212,6 +1244,7 @@ __all__ = [
     "Unavailable",
     "WorkbenchInputs",
     "conditions_block",
+    "delivery_route",
     "noise_floor_payload",
     "pooled_delivery_error",
     "pull_comparison",

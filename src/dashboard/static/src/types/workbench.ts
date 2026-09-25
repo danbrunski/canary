@@ -155,16 +155,70 @@ export interface DeliveryBand {
   commanded: number | null;
   measured: number | null;
   error_pct: number | null;
+  /** Per-sample spread inside the band (R05.16). */
+  p05_pct: number | null;
+  p95_pct: number | null;
+}
+
+/** How target and measurement were paired: by acquisition time, one read each,
+ *  within the vehicle's declared separation (R05.16). */
+export interface DeliveryPairing {
+  method: string;
+  max_separation_s: number;
+  target_source: string;
+  target_spec: string;
+  measured_source: string;
+  measured_spec: string;
+  /** The regime whose rule every surviving sample passed (delivery error is at enrichment). */
+  regime: "enrichment";
+  steady_target_dwell_s: number;
+  target_step_tolerance: number;
+  post_fuel_cut_holdoff_s: number;
+  /** False on a route whose delay is not estimated (PID 0x44 shares a batch with λ). */
+  transport_delay_modelled: boolean;
+  /** Frozen exhaust transport delay: the λ read nearest t + delay pairs. */
+  transport_delay_s: number | null;
+  transport_delay_bracket_s: [number, number] | null;
+  transport_delay_note: string;
+  /** Drives that chose these constants; a result on one of them is not held-out evidence. */
+  constants_informed_by: string[];
+  /** Single-session results only. */
+  session_informed_constants?: boolean;
+}
+
+/** The same result at each end of the delay bracket; unstable says why. */
+export interface DelaySensitivity {
+  at: Array<{
+    delay_s: number;
+    n: number;
+    band_averaged_pct: number | null;
+    pooled_pct: number | null;
+  }>;
+  stable: boolean;
+  reason: string | null;
+  spread_pct: number | null;
 }
 
 export interface DeliveryErrorResponse extends AnalysisBase {
+  /** 2 = acquisition-paired engine; absent on a pre-R05.16 result. */
+  engine_version?: number;
+  pairing: DeliveryPairing;
+  /** Null on a route that models no transport delay. */
+  delay_sensitivity: DelaySensitivity | null;
   measured: string;
   min_load: number | null;
   n: number;
   band_averaged_pct?: number | null;
   pooled_pct?: number | null;
   bands: DeliveryBand[];
-  per_session: Array<{ session_id: string; n: number; revision: string | null; gates: GateReport }>;
+  per_session: Array<{
+    session_id: string;
+    n: number;
+    revision: string | null;
+    gates: GateReport;
+    /** This drive chose the enrichment constants: not independent evidence. */
+    informed_constants: boolean;
+  }>;
   noise_floor: NoiseFloor;
 }
 

@@ -38,10 +38,26 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
-from src.analysis.channels import read_aligned, read_channels
-from src.analysis.lambda_delivery import residual_pct
+from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_aligned, read_channels
+from src.analysis.lambda_delivery import (
+    ELIGIBLE,
+    STATES,
+    CommandedSource,
+    LambdaDeliveryDeclaration,
+    MeasuredSource,
+    RegimeDelay,
+    delivery_samples,
+)
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor
+from src.analysis.pairing import (
+    PairingPolicy,
+    check_clock_support,
+    match_ordered,
+    to_seconds,
+    weakest_basis,
+)
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.analysis.tuning_frame import ProviderRegistry
 from src.control.capture_manifest import read_capture_manifest
 from src.decode.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -113,6 +129,18 @@ class GateReport:
         }
 
 
+#: The delivery-error engine the payloads carry (R05.16). 1 was the 1 s
+#: last-cell grid (``read_aligned``); 2 pairs target and measurement by
+#: acquisition time (:func:`src.analysis.lambda_delivery.delivery_samples`).
+#: A stored result without ``engine_version`` is engine 1.
+DELIVERY_ENGINE_VERSION = 2
+
+#: Raw PID 0x44, the Mode 01 commanded equivalence ratio. Read raw so a
+#: fuel-cut sample (ratio 0.0) is a named ``fuel_cut`` state rather than a
+#: row that vanishes.
+EQUIV_RATIO_SPEC = "obd:COMMANDED_EQUIV_RATIO"
+
+
 @dataclass
 class DeliveryError:
     """Measured-vs-commanded AFR, band-averaged, with its gate report."""
@@ -129,9 +157,15 @@ class DeliveryError:
     #: this is comparing two different engines.
     tune_revision: str | None = None
     tune_revision_source: str = "unknown"
+    #: How target and measurement were paired (:func:`pairing_block`).
+    pairing: dict[str, Any] = field(default_factory=dict)
+    #: The result at each end of the route's delay bracket
+    #: (:func:`delay_sensitivity`); ``None`` when the route models no delay.
+    delay_sensitivity: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
+            "engine_version": DELIVERY_ENGINE_VERSION,
             "tune_revision": self.tune_revision,
             "tune_revision_source": self.tune_revision_source,
             "band_averaged_pct": self.band_averaged_pct,
@@ -139,6 +173,8 @@ class DeliveryError:
             "n": self.n,
             "rpm_window": list(self.rpm_window),
             "measured_spec": self.measured_spec,
+            "pairing": dict(self.pairing),
+            "delay_sensitivity": self.delay_sensitivity,
             "gates": self.gates,
             "bands": self.bands.to_dict(orient="records"),
         }
@@ -160,57 +196,165 @@ def _assert_axis_allowed(axis: str, *, unsafe: bool) -> None:
         )
 
 
-def _refuse_missing_inputs(
-    session: Path | pd.DataFrame,
-    specs: list[str],
+@dataclass(frozen=True)
+class DeliveryRoute:
+    """Which declared sources answer delivery error, and the context channels.
+
+    The target and measured sources are *names* in the vehicle's
+    ``lambda_delivery.yaml``, so what each one is (phi, lambda, AFR, a
+    voltage through the calibrated transfer), how fuel cut shows on it and in
+    which regimes it is the final target all come from that declaration,
+    never from this module. ``rpm_spec`` bins the result; ``fuel_status_spec``
+    is the Mode 01 open-loop gate, needed only where the target is not the
+    final one in closed loop (PID 0x44 reads sensor-like values there);
+    ``load_spec`` backs a ``min_load`` floor.
+    """
+
+    target_source: str
+    measured_source: str
+    rpm_spec: str
+    #: What the result says it measured with (``measured_spec`` in payloads).
+    measured_label: str
+    fuel_status_spec: str | None = None
+    load_spec: str | None = None
+
+
+def _declared_measured(declaration: LambdaDeliveryDeclaration, spec: str) -> MeasuredSource:
+    for source in declaration.measured_sources:
+        if source.spec == spec:
+            return source
+    declared = ", ".join(f"{s.spec} ({s.name})" for s in declaration.measured_sources)
+    raise GateError(
+        f"{spec} is not a measured-mixture source this vehicle's lambda_delivery.yaml "
+        f"declares ({declared}). A measurement is compared against the commanded "
+        "target only once its quantity and conversion are declared with evidence: on "
+        "2026-09-21 a raw A/F sensor voltage (~1.5 V) was compared against a 12.6 AFR "
+        "target as-is and returned a confident -87 %."
+    )
+
+
+def _declared_target(declaration: LambdaDeliveryDeclaration, spec: str) -> CommandedSource:
+    for source in declaration.commanded_sources:
+        if source.spec == spec:
+            return source
+    refused = {r.spec: r.reason for r in declaration.refused_commanded}
+    if spec in refused:
+        raise GateError(f"{spec} is refused as a commanded target: {refused[spec]}")
+    raise GateError(
+        f"{spec} is not a commanded-mixture source this vehicle's lambda_delivery.yaml declares"
+    )
+
+
+def mode01_route(
+    declaration: LambdaDeliveryDeclaration,
     *,
-    bindings_path: Path,
-    dids_path: Path,
-    calibration: AfrCalibration | None = None,
-    afr_stoich: float,
-    mode01_exclusion_note: str | None = None,
+    measured_spec: str,
+    min_load: float | None,
+) -> DeliveryRoute:
+    """The Mode 01 route: PID 0x44 against ``measured_spec``, gated on open loop."""
+    target = _declared_target(declaration, EQUIV_RATIO_SPEC)
+    measured = _declared_measured(declaration, measured_spec)
+    return DeliveryRoute(
+        target_source=target.name,
+        measured_source=measured.name,
+        rpm_spec="obd:RPM",
+        measured_label=measured_spec,
+        fuel_status_spec="obd:FUEL_STATUS",
+        load_spec="obd:ENGINE_LOAD" if min_load is not None else None,
+    )
+
+
+def semantic_route(
+    declaration: LambdaDeliveryDeclaration,
+    providers: ProviderRegistry,
+    *,
+    measured_role: str,
+) -> DeliveryRoute:
+    """The all-DID route: the provider registry's ``commanded_afr``, ``rpm`` and
+    ``measured_role`` channels, each resolved to its declared source.
+
+    No open-loop gate: the declared target is the ECU's final one in every
+    regime it lists, and fuel cut is its sentinel state. No load floor
+    either: calculated load is Mode 01 only, and no validated semantic load
+    provider exists.
+    """
+    specs: dict[str, str] = {
+        str(provider.role): provider.spec
+        for provider in providers.providers
+        if provider.confidence == "confirmed"
+    }
+    missing = [role for role in ("commanded_afr", "rpm", measured_role) if role not in specs]
+    if missing:
+        raise GateError(
+            "this vehicle's tuning_providers.yaml confirms no provider for " + ", ".join(missing)
+        )
+    target = _declared_target(declaration, specs["commanded_afr"])
+    measured = _declared_measured(declaration, specs[measured_role])
+    return DeliveryRoute(
+        target_source=target.name,
+        measured_source=measured.name,
+        rpm_spec=specs["rpm"],
+        measured_label=f"semantic:{measured_role} ({measured.spec})",
+    )
+
+
+@dataclass(frozen=True)
+class DeliveryInputs:
+    """One session's delivery channels as long frames on the acquisition clock."""
+
+    target: pd.DataFrame
+    sentinel: pd.DataFrame | None
+    measured: pd.DataFrame
+    rpm: pd.DataFrame
+    fuel_status: pd.DataFrame | None
+    load: pd.DataFrame | None
+
+
+_EMPTY_LONG = ["timestamp", "spec", "value", "unit"]
+
+
+def _session_rows(session: Path | pd.DataFrame, specs: list[str]) -> Path | pd.DataFrame:
+    """The session read once, polled rows only when every spec is a polled one.
+
+    A whole-session read carries ~100k raw CAN frames per minute; every
+    delivery input on a Mode 01 or all-DID capture is a polled ``obd`` row.
+    """
+    if not isinstance(session, Path):
+        return session
+    from src.analysis.channels import parse_spec
+    from src.preprocessing.loader import read_session
+
+    if all(parse_spec(spec).source in ("obd", "did", "mem") for spec in specs):
+        return read_session(session, filters=[("source", "==", "obd")])
+    return read_session(session)
+
+
+def _refuse_not_captured(
+    session: Path | pd.DataFrame,
+    missing: list[str],
+    *,
+    mode01_exclusion_note: str | None,
+    kind: Literal["not_captured", "not_co_observed"] = "not_captured",
 ) -> NoReturn:
     """Say *why* there is nothing to analyse instead of reporting zero bands.
 
-    An empty aligned frame has two causes that demand opposite responses, and
+    An empty result has two causes that demand opposite responses, and
     reporting ``started: 0`` for both made them indistinguishable:
 
     * the gates filtered everything — a real answer about the drive, meaning
       go and capture the regime you care about;
-    * the inputs were never captured — not an answer at all, and no amount of
-      driving will change it.
+    * the inputs were never captured (or never overlapped) — not an answer at
+      all, and no amount of driving will change it.
 
     Measured 2026-08-06: a clean 25-minute all-DID capture, 18k samples per
-    channel at 14.93 Hz, returned ``started: 0``. That reads as "the gates
-    rejected everything". In fact the ``tuning-did`` profile disables Mode 01
-    (on that vehicle Mode 01 and Mode 22 are mutually exclusive), and
-    commanded AFR existed only as a Mode 01 PID. The question was unanswerable
-    before the truck moved.
+    channel at 14.93 Hz, returned ``started: 0``. The ``tuning-did`` profile
+    disables Mode 01, and commanded AFR existed only as a Mode 01 PID, so the
+    question was unanswerable before the truck moved.
 
     Raises :class:`InputsNotCapturedError`. Why a vehicle's all-DID captures
     lack Mode 01 is a vehicle fact, so it is ``mode01_exclusion_note`` from
     the profile's ``tuning_providers.yaml``, never a sentence in shared code.
     """
-    missing: list[str] = []
-    unresolvable: list[str] = []
-    for spec in specs:
-        try:
-            rows = read_channels(
-                session,
-                [spec],
-                bindings_path=bindings_path,
-                dids_path=dids_path,
-                calibration=calibration,
-                afr_stoich=afr_stoich,
-            )
-        except Exception as exc:  # unresolvable spec is itself a missing input
-            missing.append(spec)
-            unresolvable.append(f"{spec} ({type(exc).__name__}: {exc})")
-            continue
-        if rows.empty:
-            missing.append(spec)
-            unresolvable.append(spec)
-
     detail = ""
     if isinstance(session, Path):
         manifest = read_capture_manifest(session)
@@ -222,325 +366,332 @@ def _refuse_missing_inputs(
             )
             if mode01_exclusion_note:
                 detail += f" {mode01_exclusion_note.strip()}"
-
     raise InputsNotCapturedError(
         "this session cannot answer delivery error — its inputs were never "
         "captured, which is not the same as the gates rejecting every sample. "
         + (
-            "Empty in this session: " + ", ".join(unresolvable)
-            if missing
-            else "No two required channels overlapped in time."
+            "Empty in this session: " + ", ".join(missing)
+            if kind == "not_captured"
+            else "Every input is present, but no commanded-target read has a measured "
+            "read within the declared acquisition separation."
         )
         + detail
-        + " Use a Mode 01 capture for commanded-vs-measured fuelling, or feed a"
-        " semantic frame to delivery_error_from_semantic_frame() once a Mode 22"
-        " provider for commanded AFR exists.",
-        kind="not_captured" if missing else "not_co_observed",
+        + " Use a Mode 01 capture for commanded-vs-measured fuelling, or the semantic"
+        " route (the provider registry's commanded_afr) on an all-DID capture.",
+        kind=kind,
         missing=tuple(missing),
     )
 
 
-def _refuse_non_mixture_measurement(
-    session: Path | pd.DataFrame, measured_spec: str, *, dids_path: Path
-) -> None:
-    """Refuse a measured channel that is not a mixture reading.
-
-    This function compares the measured channel against a commanded AFR
-    as-is, so it must BE lambda or AFR. The A/F sensor's raw voltage is not:
-    on 2026-09-21 `did:ECM_AF_SENSOR_V_B1` was passed here and ~1.5 V was
-    compared against a 12.6 AFR target, returning a confident -87 % instead
-    of an error. Voltage needs the calibrated transfer, which is what the
-    semantic path does (`build_tuning_frame` with a `voltage_afr` provider,
-    then :func:`delivery_error_from_semantic_frame`).
-    """
-    from src.analysis.channels import parse_spec
-
-    spec = parse_spec(measured_spec)
-    if spec.source != "did":
-        return
-    from src.decode import dids as dids_decode
-
-    entries = {e.name: e for e in dids_decode.load_did_map(dids_path).dids}
-    entry = entries.get(spec.name)
-    if entry is not None and entry.unit in ("V", "mV"):
-        raise GateError(
-            f"{measured_spec} is a sensor voltage ({entry.unit}), not a mixture reading; "
-            "delivery_error compares it against commanded AFR as-is. Use the semantic "
-            "path, which applies the calibrated voltage-to-AFR transfer: build_tuning_frame "
-            "with a voltage_afr provider, then delivery_error_from_semantic_frame."
-        )
-
-
-#: Raw PID 0x44. Read raw rather than as the derived ``obd:COMMANDED_AFR``
-#: so a fuel-cut sample (ratio 0.0) survives the read and can be *counted* by
-#: the ``fuel_cut`` gate, instead of vanishing inside the alignment.
-EQUIV_RATIO_SPEC = "obd:COMMANDED_EQUIV_RATIO"
-
-
-def delivery_semantic_frame(
+def read_delivery_inputs(
     session: Path | pd.DataFrame,
+    route: DeliveryRoute,
+    declaration: LambdaDeliveryDeclaration,
     *,
-    calibration: AfrCalibration,
-    measured_spec: str = "obd:O2_WR_LAMBDA_S1",
-    measured_is_lambda: bool = True,
+    calibration: AfrCalibration | None,
     afr_stoich: float,
-    min_load: float | None,
-    grid: str = "1s",
-    cell_agg: str = "last",
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
     mode01_exclusion_note: str | None = None,
-) -> pd.DataFrame:
-    """The Mode-01 delivery inputs of one session as semantic roles.
+) -> DeliveryInputs:
+    """Read ``route``'s channels once, on the acquisition clock.
 
-    What :func:`delivery_error` feeds :func:`delivery_error_from_semantic_frame`,
-    exposed so several sessions can be pooled into one band average (the
-    workbench's Analysis page) with the same gates. Raises :class:`GateError`
-    naming the absent channels when the inputs were never captured.
-
-    ``fuel_cut`` marks cells whose commanded equivalence ratio is zero: decel
-    fuel cut, where the ECU commands no target at all. Those rows carry no
-    commanded AFR, and the semantic gate removes them *by name* — converting
-    them used to raise ``equivalence ratio must be positive, got 0.0`` and
-    cost four sessions on 2026-09-21.
+    Raises :class:`InputsNotCapturedError` naming every required channel the
+    session holds no reading of (an unresolvable spec counts as absent).
     """
-    specs = ["obd:RPM", "obd:FUEL_STATUS", EQUIV_RATIO_SPEC, measured_spec]
-    _refuse_non_mixture_measurement(session, measured_spec, dids_path=dids_path)
-    if min_load is not None:
-        specs.append("obd:ENGINE_LOAD")
-
-    frame = read_aligned(
-        session,
-        specs,
-        grid=grid,
-        require_all=True,
-        cell_agg=cell_agg,  # type: ignore[arg-type]
-        calibration=calibration,
-        afr_stoich=afr_stoich,
-        bindings_path=bindings_path,
-        dids_path=dids_path,
+    target = declaration.commanded(route.target_source)
+    measured = declaration.measured(route.measured_source)
+    wanted = {
+        "target": target.spec,
+        "measured": measured.spec,
+        "rpm": route.rpm_spec,
+    }
+    if target.sentinel_spec is not None:
+        wanted["sentinel"] = target.sentinel_spec
+    if route.fuel_status_spec is not None:
+        wanted["fuel_status"] = route.fuel_status_spec
+    if route.load_spec is not None:
+        wanted["load"] = route.load_spec
+    rows = _session_rows(session, list(wanted.values()))
+    frames: dict[str, pd.DataFrame] = {}
+    missing: list[str] = []
+    for role, spec in wanted.items():
+        try:
+            frame = read_channels(
+                rows,
+                [spec],
+                acquired_time=True,
+                calibration=calibration,
+                afr_stoich=afr_stoich,
+                bindings_path=bindings_path,
+                dids_path=dids_path,
+            )
+        except Exception as exc:  # an unresolvable spec is itself a missing input
+            frame = pd.DataFrame(columns=_EMPTY_LONG)
+            if role != "sentinel":
+                missing.append(f"{spec} ({type(exc).__name__}: {exc})")
+                continue
+        if frame.empty and role != "sentinel":
+            missing.append(spec)
+        frames[role] = frame
+    if missing:
+        _refuse_not_captured(session, missing, mode01_exclusion_note=mode01_exclusion_note)
+    return DeliveryInputs(
+        target=frames["target"],
+        sentinel=frames.get("sentinel"),
+        measured=frames["measured"],
+        rpm=frames["rpm"],
+        fuel_status=frames.get("fuel_status"),
+        load=frames.get("load"),
     )
-    if frame.empty:
-        _refuse_missing_inputs(
-            session,
-            specs,
-            bindings_path=bindings_path,
-            dids_path=dids_path,
-            calibration=calibration,
-            afr_stoich=afr_stoich,
-            mode01_exclusion_note=mode01_exclusion_note,
+
+
+def _check_clock(inputs: DeliveryInputs, policy: PairingPolicy) -> None:
+    """Refuse a declared separation the stored timestamps cannot carry."""
+    sides = [("target", inputs.target), ("measured", inputs.measured), ("rpm", inputs.rpm)]
+    sides += [
+        (name, frame)
+        for name, frame in (("fuel_status", inputs.fuel_status), ("load", inputs.load))
+        if frame is not None
+    ]
+    reference = inputs.target
+    ref_basis = weakest_basis(reference.get(TIMESTAMP_BASIS_COLUMN, pd.Series([], dtype=object)))
+    ref_times = to_seconds(pd.to_datetime(reference["timestamp"], utc=True))
+    for name, frame in sides[1:]:
+        check_clock_support(
+            policy,
+            basis_a=ref_basis,
+            times_a=ref_times,
+            basis_b=weakest_basis(frame.get(TIMESTAMP_BASIS_COLUMN, pd.Series([], dtype=object))),
+            times_b=to_seconds(pd.to_datetime(frame["timestamp"], utc=True)),
+            label_a="commanded target",
+            label_b=name,
         )
-    measured = frame[measured_spec].astype(float)
-    ratio = frame[EQUIV_RATIO_SPEC].astype(float)
-    semantic = pd.DataFrame(
-        {
-            "timestamp": frame["timestamp"],
-            "rpm": frame["obd:RPM"],
-            "measured_afr": measured * afr_stoich if measured_is_lambda else measured,
-            "commanded_afr": calibration.commanded_afr_series(ratio, afr_stoich=afr_stoich),
-            "fueling_active": frame["obd:FUEL_STATUS"].astype(float).eq(OPEN_LOOP),
-            "fuel_cut": ratio.le(0.0),
+
+
+def _attach(times: np.ndarray, frame: pd.DataFrame | None, policy: PairingPolicy) -> np.ndarray:
+    """Each target row's paired value from ``frame`` (NaN where none is in tolerance).
+
+    One-to-one acquisition pairing (:func:`match_ordered`), the same rule as
+    target against measurement: no reading is handed to two targets.
+    """
+    out = np.full(len(times), np.nan)
+    if frame is None or frame.empty or not len(times):
+        return out
+    ordered = frame.sort_values("timestamp", kind="stable")
+    other = to_seconds(pd.to_datetime(ordered["timestamp"], utc=True))
+    values = pd.to_numeric(ordered["value"], errors="coerce").to_numpy(dtype=float)
+    matched = match_ordered(times, other, policy)
+    out[matched.index_a] = values[matched.index_b]
+    return out
+
+
+#: Said on every result whose route has no frozen delay.
+DELAY_NOT_MODELLED = (
+    "transport delay is not modelled on this route: each target read pairs with the "
+    "measured read nearest it as acquired"
+)
+
+
+def _delay_fields(delay: RegimeDelay) -> dict[str, Any]:
+    modelled = delay.status == "frozen"
+    return {
+        "transport_delay_modelled": modelled,
+        "transport_delay_s": delay.seconds if modelled else None,
+        "transport_delay_bracket_s": (
+            list(delay.bracket_s) if modelled and delay.bracket_s is not None else None
+        ),
+        "transport_delay_note": delay.note if modelled else f"{DELAY_NOT_MODELLED}. {delay.note}",
+    }
+
+
+def bracket_ends(
+    route: DeliveryRoute, declaration: LambdaDeliveryDeclaration
+) -> tuple[float, float] | None:
+    """The route's enrichment delay bracket, when it has a frozen delay with one."""
+    delay = declaration.eligibility.regimes.delay("enrichment", route.target_source)
+    if delay.status != "frozen" or delay.bracket_s is None:
+        return None
+    return (float(delay.bracket_s[0]), float(delay.bracket_s[1]))
+
+
+def delay_sensitivity(
+    chosen: DeliveryError, ends: dict[float, DeliveryError], chosen_delay_s: float
+) -> dict[str, Any]:
+    """The same result at each end of the delay bracket, and whether it holds.
+
+    A frozen delay is a bracket, not a point (R05.16): a result is **unstable**
+    when its band-averaged sign changes across the bracket, or when it exists
+    at one end and not at another. It is reported, never smoothed over.
+    """
+
+    def entry(delay_s: float, result: DeliveryError) -> dict[str, Any]:
+        return {
+            "delay_s": delay_s,
+            "n": result.n,
+            "band_averaged_pct": result.band_averaged_pct if result.n else None,
+            "pooled_pct": result.pooled_pct if result.n else None,
         }
-    )
-    if min_load is not None:
-        semantic["load"] = frame["obd:ENGINE_LOAD"]
-    return semantic
+
+    rows = [entry(chosen_delay_s, chosen), *(entry(d, r) for d, r in sorted(ends.items()))]
+    values = [row["band_averaged_pct"] for row in rows if row["band_averaged_pct"] is not None]
+    reason: str | None = None
+    if any(row["n"] == 0 for row in rows) and any(row["n"] > 0 for row in rows):
+        reason = "the result exists at some delays in the bracket and not at others"
+    elif values and min(values) < 0 < max(values):
+        reason = "the band-averaged sign changes across the delay bracket"
+    return {
+        "at": rows,
+        "stable": reason is None,
+        "reason": reason,
+        "spread_pct": (max(values) - min(values)) if values else None,
+    }
 
 
-def delivery_error(
-    session: Path | pd.DataFrame,
-    *,
-    calibration: AfrCalibration,
-    measured_spec: str = "obd:O2_WR_LAMBDA_S1",
-    measured_is_lambda: bool = True,
-    afr_stoich: float,
-    rpm_bands: tuple[float, ...],
-    min_load: float | None,
-    grid: str = "1s",
-    cell_agg: str = "last",
-    revisions: TuneRevisionRegistry | None = None,
-    bindings_path: Path = BINDINGS_YAML,
-    dids_path: Path = DIDS_YAML,
-    mode01_exclusion_note: str | None = None,
-) -> DeliveryError:
-    """Delivery error at enrichment, with every gate applied.
-
-    ``measured_spec`` is a parameter on purpose. The ECM's own λ (PID 0x24)
-    and the A/F sensor voltage path disagree by ~3.8 % at WOT (2026-08-05,
-    commit 78592f4) and nobody knows which is right, so this function must not
-    quietly pick a side — the caller names the source and the answer carries it.
-
-    Gates, in order:
-
-    1. same-instant pairing (nothing stale-joined; :func:`read_aligned`)
-    2. open loop **and** an enrichment target strictly richer than stoich, so
-       decel fuel cut is excluded by construction rather than by threshold
-    3. optional load floor, for WOT-only questions
-    4. band-averaged over rpm, so band composition cannot masquerade as an effect
-    """
-    semantic = delivery_semantic_frame(
-        session,
-        calibration=calibration,
-        measured_spec=measured_spec,
-        measured_is_lambda=measured_is_lambda,
-        afr_stoich=afr_stoich,
-        min_load=min_load,
-        grid=grid,
-        cell_agg=cell_agg,
-        bindings_path=bindings_path,
-        dids_path=dids_path,
-        mode01_exclusion_note=mode01_exclusion_note,
-    )
-
-    revision = None
-    revision_source = "unknown"
-    if isinstance(session, Path):
-        revision, revision_source, _conflict = resolve_session_revision(session, revisions)
-    return delivery_error_from_semantic_frame(
-        semantic,
-        measured_spec=measured_spec,
-        afr_stoich=afr_stoich,
-        rpm_bands=rpm_bands,
-        min_load=min_load,
-        grid=grid,
-        fueling_gate_name="closed_loop",
-        tune_revision=revision,
-        tune_revision_source=revision_source,
-    )
+def pairing_block(route: DeliveryRoute, declaration: LambdaDeliveryDeclaration) -> dict[str, Any]:
+    """What "same instant" means in a delivery result, stated rather than implied."""
+    rule = declaration.eligibility.regimes.enrichment
+    return {
+        "method": "acquisition-time match_ordered",
+        "max_separation_s": declaration.acquisition.max_separation_s,
+        "target_source": route.target_source,
+        "target_spec": declaration.commanded(route.target_source).spec,
+        "measured_source": route.measured_source,
+        "measured_spec": declaration.measured(route.measured_source).spec,
+        # Delivery error is reported at enrichment, so the enrichment rule is
+        # the one every surviving sample passed (R05.16).
+        "regime": "enrichment",
+        "steady_target_dwell_s": rule.steady_target_dwell_s,
+        "target_step_tolerance": rule.target_step_tolerance,
+        "post_fuel_cut_holdoff_s": rule.post_fuel_cut_holdoff_s,
+        **_delay_fields(declaration.eligibility.regimes.delay("enrichment", route.target_source)),
+        "constants_informed_by": list(rule.informed_by),
+    }
 
 
-def delivery_error_from_semantic_frame(
-    frame: pd.DataFrame,
-    *,
-    measured_spec: str,
-    afr_stoich: float,
-    rpm_bands: tuple[float, ...],
-    min_load: float | None = None,
-    grid: str = "1s",
-    fueling_gate_name: str = "fueling_inactive",
-    tune_revision: str | None = None,
-    tune_revision_source: str = "semantic_frame",
-) -> DeliveryError:
-    """Apply delivery gates to semantic roles instead of transport names.
-
-    Required columns are ``timestamp``, ``rpm``, ``measured_afr``,
-    ``commanded_afr``, and boolean ``fueling_active``.  An optional boolean
-    ``fuel_cut`` column removes decel-fuel-cut cells (no commanded target) as
-    the named ``fuel_cut`` gate.  An optional
-    ``measured_afr_censored`` column removes transfer-boundary samples before
-    they can become a false mixture error.  ``load`` is optional and may only
-    be used when an independently validated load provider exists.
-
-    This is the all-DID adapter boundary: callers resolve/transform roles
-    before this function, so an A/F voltage can never be mislabeled as AFR by
-    a transport-specific shortcut.
-    """
-    values, report = gate_delivery_samples(
-        frame,
-        afr_stoich=afr_stoich,
-        rpm_bands=rpm_bands,
-        min_load=min_load,
-        grid=grid,
-        fueling_gate_name=fueling_gate_name,
-    )
-    return delivery_error_from_gated(
-        values,
-        report,
-        measured_spec=measured_spec,
-        rpm_bands=rpm_bands,
-        tune_revision=tune_revision,
-        tune_revision_source=tune_revision_source,
-    )
+#: Gate order after the per-sample states; each is reported by name.
+_CONTEXT_GATES = (
+    "not_enrichment",
+    "rpm_missing",
+    "fuel_status_missing",
+    "closed_loop",
+    "load_missing",
+    "below_min_load",
+    "outside_rpm_bands",
+)
 
 
 def gate_delivery_samples(
-    frame: pd.DataFrame,
+    inputs: DeliveryInputs,
+    route: DeliveryRoute,
     *,
+    declaration: LambdaDeliveryDeclaration,
+    calibration: AfrCalibration | None,
     afr_stoich: float,
     rpm_bands: tuple[float, ...],
-    min_load: float | None = None,
-    grid: str = "1s",
-    fueling_gate_name: str = "fueling_inactive",
+    min_load: float | None,
+    session: Path | pd.DataFrame | None = None,
+    mode01_exclusion_note: str | None = None,
+    enrichment_delay_s: float | None = None,
 ) -> tuple[pd.DataFrame, GateReport]:
-    """The gate half of :func:`delivery_error_from_semantic_frame`.
+    """One session's surviving samples and the report of what removed the rest.
 
-    Returns the surviving samples and the report of what each gate removed.
-    Separate so several sessions can be gated *each on its own clock* and then
-    band-averaged once (:func:`delivery_error_from_gated`): concatenating raw
-    frames first would let the grid grouping merge two sessions' samples that
-    happen to share a wall-clock cell.
+    Samples come from :func:`src.analysis.lambda_delivery.delivery_samples`:
+    one row per commanded-target observation (and per fuel-cut sentinel),
+    each paired with at most one measured read within the declaration's
+    acquisition separation, each in exactly one named state. Only
+    ``eligible`` rows — a steady target, outside the post-cut holdoff, a
+    source valid in its regime, a measurement neither railed nor censored —
+    carry a residual. Every other state is a named gate here, followed by:
+
+    1. ``not_enrichment``: an eligible target at stoich (closed loop dilutes
+       any fuelling effect toward zero by construction);
+    2. ``rpm_missing`` / ``fuel_status_missing`` / ``load_missing``: no read
+       of that context channel within the same separation;
+    3. ``closed_loop``: the Mode 01 route only — ``FUEL_STATUS`` not open
+       loop, where PID 0x44 is not the final target;
+    4. ``below_min_load``, then ``outside_rpm_bands`` (bands are
+       ``(lo, hi]``, so the gate keeps exactly what the bands bin).
+
+    Gated per session on its own clock, so several sessions can be pooled
+    and band-averaged once (:func:`delivery_error_from_gated`).
+    ``enrichment_delay_s`` replaces the route's declared enrichment delay (the
+    bracket-end check in :func:`delay_sensitivity`).
     """
-    required = {"timestamp", "rpm", "measured_afr", "commanded_afr", "fueling_active"}
-    missing = sorted(required - set(frame.columns))
-    if missing:
-        raise GateError("semantic delivery frame is missing roles: " + ", ".join(missing))
-    if min_load is not None and "load" not in frame:
+    if min_load is not None and route.load_spec is None:
         raise GateError(
-            "delivery load gate requested but no validated semantic load provider exists"
+            "a load floor needs a validated load provider, and this route has none: "
+            "calculated load is Mode 01 only. Clear min_load, or use the Mode 01 route."
         )
-
-    values = frame.copy()
-    values["timestamp"] = pd.to_datetime(values["timestamp"], utc=True)
-    # A row exists only when every required role was independently observed in
-    # the same grid cell. Grouping does not forward-fill across cells.
-    columns = ["rpm", "measured_afr", "commanded_afr", "fueling_active"]
-    if min_load is not None:
-        columns.append("load")
-    if "measured_afr_censored" in values:
-        columns.append("measured_afr_censored")
-    # A fuel-cut cell has no commanded target by definition, so with an
-    # explicit `fuel_cut` role it is kept long enough to be counted and
-    # removed by name rather than disappearing as a missing value.
-    has_cut = "fuel_cut" in values
-    if has_cut:
-        columns.append("fuel_cut")
-    observed = ["rpm", "measured_afr", "fueling_active"]
-    if not has_cut:
-        observed.append("commanded_afr")
-    values = (
-        values.loc[:, ["timestamp", *columns]]
-        .sort_values("timestamp", kind="stable")
-        .groupby(pd.Grouper(key="timestamp", freq=grid), sort=True)
-        .last()
-        .dropna(subset=observed)
-        .reset_index()
+    policy = PairingPolicy.within(
+        pd.Timedelta(seconds=declaration.acquisition.max_separation_s), reference="a"
     )
-    report = GateReport(started=len(values))
+    _check_clock(inputs, policy)
+    samples = delivery_samples(
+        target=inputs.target,
+        measured=inputs.measured,
+        sentinel=inputs.sentinel,
+        declaration=declaration,
+        target_source=route.target_source,
+        measured_source=route.measured_source,
+        calibration=calibration,
+        afr_stoich=afr_stoich,
+        regime_delays_s=None if enrichment_delay_s is None else {"enrichment": enrichment_delay_s},
+    )
+    frame = samples.frame
+    # At a bracket end (an override) no pair is an answer about that delay,
+    # counted as measured_missing, not a refusal of the session.
+    if enrichment_delay_s is None and len(frame) and frame["separation_s"].notna().sum() == 0:
+        target_spec = declaration.commanded(route.target_source).spec
+        measured_spec = declaration.measured(route.measured_source).spec
+        _refuse_not_captured(
+            session if session is not None else pd.DataFrame(),
+            [target_spec, measured_spec],
+            mode01_exclusion_note=mode01_exclusion_note,
+            kind="not_co_observed",
+        )
+    times = to_seconds(frame["timestamp"])
+    frame = frame.assign(
+        rpm=_attach(times, inputs.rpm, policy),
+        fuel_status=_attach(times, inputs.fuel_status, policy),
+        load=_attach(times, inputs.load, policy),
+    )
+    report = GateReport(started=samples.counts["total"])
+    for state in STATES:
+        if state != ELIGIBLE:
+            report.drop(state, samples.counts.get(state, 0), 0)
+    values = frame[frame["state"] == ELIGIBLE]
 
-    if has_cut:
-        before = len(values)
-        values = values[~values["fuel_cut"].fillna(False).astype(bool)]
-        report.drop("fuel_cut", before, len(values))
-        before = len(values)
-        values = values.dropna(subset=["commanded_afr"])
-        report.drop("no_commanded_target", before, len(values))
-
-    before = len(values)
-    values = values[values["fueling_active"].astype(bool)]
-    report.drop(fueling_gate_name, before, len(values))
-
-    # Enrichment, not overrun. A semantic fueling-active role is deliberately
-    # separate from the mixture target: a future DID decoder can identify fuel
-    # cut without carrying Mode-01's overloaded `FUEL_STATUS == 4` convention.
-    before = len(values)
-    values = values[values["commanded_afr"].astype(float) < afr_stoich]
-    report.drop("not_enrichment", before, len(values))
-
+    masks: dict[str, Any] = {
+        "not_enrichment": lambda v: v["regime"] == "enrichment",
+        "rpm_missing": lambda v: v["rpm"].notna(),
+    }
+    if route.fuel_status_spec is not None:
+        masks["fuel_status_missing"] = lambda v: v["fuel_status"].notna()
+        masks["closed_loop"] = lambda v: v["fuel_status"].eq(OPEN_LOOP)
     if min_load is not None:
+        masks["load_missing"] = lambda v: v["load"].notna()
+        masks["below_min_load"] = lambda v: v["load"] > min_load
+    masks["outside_rpm_bands"] = lambda v: (v["rpm"] > rpm_bands[0]) & (v["rpm"] <= rpm_bands[-1])
+    for gate in _CONTEXT_GATES:
+        keep = masks.get(gate)
+        if keep is None:
+            continue
         before = len(values)
-        values = values[values["load"].astype(float) > min_load]
-        report.drop("below_min_load", before, len(values))
-
-    if "measured_afr_censored" in values:
-        before = len(values)
-        values = values[~values["measured_afr_censored"].astype(bool)]
-        report.drop("censored_measured_afr", before, len(values))
-
-    before = len(values)
-    values = values[(values["rpm"] >= rpm_bands[0]) & (values["rpm"] <= rpm_bands[-1])]
-    report.drop("outside_rpm_bands", before, len(values))
+        values = values[keep(values)]
+        report.drop(gate, before, len(values))
     report.remaining = len(values)
-    return values, report
+    out = pd.DataFrame(
+        {
+            "timestamp": values["timestamp"],
+            "rpm": values["rpm"].astype(float),
+            "commanded_afr": values["target_lambda"].astype(float) * afr_stoich,
+            "measured_afr": values["measured_lambda"].astype(float) * afr_stoich,
+            "error_pct": values["residual_pct"].astype(float),
+            "separation_s": values["separation_s"].astype(float),
+        }
+    ).reset_index(drop=True)
+    return out, report
 
 
 def delivery_error_from_gated(
@@ -549,13 +700,21 @@ def delivery_error_from_gated(
     *,
     measured_spec: str,
     rpm_bands: tuple[float, ...],
+    pairing: dict[str, Any] | None = None,
     tune_revision: str | None = None,
-    tune_revision_source: str = "semantic_frame",
+    tune_revision_source: str = "unknown",
 ) -> DeliveryError:
-    """Band-average already-gated samples (one session or a pool of them)."""
+    """Band-average already-gated samples (one session or a pool of them).
+
+    ``error_pct`` is the one delivery residual (B06.4,
+    :func:`src.analysis.lambda_delivery.residual_pct`): positive = leaner than
+    commanded. Each band reports its per-sample spread (``p05_pct`` /
+    ``p95_pct``) beside its mean.
+    """
+    columns = ["rpm_band", "n", "commanded", "measured", "error_pct", "p05_pct", "p95_pct"]
     if values.empty:
         return DeliveryError(
-            bands=pd.DataFrame(columns=["rpm_band", "n", "commanded", "measured", "error_pct"]),
+            bands=pd.DataFrame(columns=columns),
             band_averaged_pct=float("nan"),
             pooled_pct=float("nan"),
             n=0,
@@ -564,29 +723,20 @@ def delivery_error_from_gated(
             measured_spec=measured_spec,
             tune_revision=tune_revision,
             tune_revision_source=tune_revision_source,
+            pairing=dict(pairing or {}),
         )
-
-    # The one delivery residual (B06.4): the same definition, sign and
-    # refusal of phi as the lambda-delivery relationship, so analysis and any
-    # serving path cannot drift apart. Positive = leaner than commanded.
-    values = values.assign(
-        error_pct=residual_pct(
-            values["measured_afr"].astype(float),
-            values["commanded_afr"].astype(float),
-            quantity="afr",
-        )
-    )
     binned = values.groupby(pd.cut(values["rpm"], list(rpm_bands)), observed=True)
     bands = binned.agg(
         n=("error_pct", "size"),
         commanded=("commanded_afr", "mean"),
         measured=("measured_afr", "mean"),
         error_pct=("error_pct", "mean"),
+        p05_pct=("error_pct", lambda v: float(np.quantile(v, 0.05))),
+        p95_pct=("error_pct", lambda v: float(np.quantile(v, 0.95))),
     ).reset_index(names="rpm_band")
     bands["rpm_band"] = bands["rpm_band"].astype(str)
-
     return DeliveryError(
-        bands=bands,
+        bands=bands.loc[:, columns],
         band_averaged_pct=float(bands["error_pct"].mean()),
         pooled_pct=float(values["error_pct"].mean()),
         n=int(len(values)),
@@ -595,7 +745,102 @@ def delivery_error_from_gated(
         measured_spec=measured_spec,
         tune_revision=tune_revision,
         tune_revision_source=tune_revision_source,
+        pairing=dict(pairing or {}),
     )
+
+
+def delivery_error(
+    session: Path | pd.DataFrame,
+    *,
+    declaration: LambdaDeliveryDeclaration | None,
+    calibration: AfrCalibration | None,
+    afr_stoich: float,
+    rpm_bands: tuple[float, ...],
+    min_load: float | None,
+    measured_spec: str = "obd:O2_WR_LAMBDA_S1",
+    route: DeliveryRoute | None = None,
+    revisions: TuneRevisionRegistry | None = None,
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
+    mode01_exclusion_note: str | None = None,
+) -> DeliveryError:
+    """Delivery error at enrichment, with every gate applied.
+
+    ``route`` defaults to the Mode 01 route (:func:`mode01_route`) with
+    ``measured_spec``; the all-DID path passes :func:`semantic_route`.
+    ``measured_spec`` is a parameter on purpose: the ECM's own λ (PID 0x24)
+    and the A/F sensor voltage path disagree by ~3.8 % at WOT (2026-08-05,
+    commit 78592f4), so this function must not quietly pick a side — the
+    caller names the source and the answer carries it.
+
+    Pairing is by acquisition time (R05.16): each commanded-target read meets
+    at most one measured read within the declaration's separation, and only
+    steady-target samples carry a residual. It replaced a 1 s last-value grid
+    whose cells joined a target and a measurement up to a second apart, so a
+    target that stepped inside the cell was scored as a delivery error.
+    """
+    if declaration is None:
+        raise GateError(
+            "this vehicle has no lambda_delivery.yaml, so nothing declares which channel is "
+            "the commanded target, what quantity each source is, or how fuel cut shows. "
+            "Delivery error is refused rather than guessed."
+        )
+    chosen = route or mode01_route(declaration, measured_spec=measured_spec, min_load=min_load)
+    inputs = read_delivery_inputs(
+        session,
+        chosen,
+        declaration,
+        calibration=calibration,
+        afr_stoich=afr_stoich,
+        bindings_path=bindings_path,
+        dids_path=dids_path,
+        mode01_exclusion_note=mode01_exclusion_note,
+    )
+
+    def gated(delay_s: float | None) -> tuple[pd.DataFrame, GateReport]:
+        return gate_delivery_samples(
+            inputs,
+            chosen,
+            declaration=declaration,
+            calibration=calibration,
+            afr_stoich=afr_stoich,
+            rpm_bands=rpm_bands,
+            min_load=min_load,
+            session=session,
+            mode01_exclusion_note=mode01_exclusion_note,
+            enrichment_delay_s=delay_s,
+        )
+
+    values, report = gated(None)
+    revision = None
+    revision_source = "unknown"
+    if isinstance(session, Path):
+        revision, revision_source, _conflict = resolve_session_revision(session, revisions)
+    pairing = pairing_block(chosen, declaration)
+    if isinstance(session, Path):
+        # Not independent evidence: this drive chose the enrichment constants.
+        pairing["session_informed_constants"] = session.name in pairing["constants_informed_by"]
+    result = delivery_error_from_gated(
+        values,
+        report,
+        measured_spec=chosen.measured_label,
+        rpm_bands=rpm_bands,
+        pairing=pairing,
+        tune_revision=revision,
+        tune_revision_source=revision_source,
+    )
+    ends = bracket_ends(chosen, declaration)
+    if ends is not None:
+        at_ends = {
+            end: delivery_error_from_gated(
+                *gated(end), measured_spec=chosen.measured_label, rpm_bands=rpm_bands
+            )
+            for end in ends
+        }
+        result.delay_sensitivity = delay_sensitivity(
+            result, at_ends, float(pairing["transport_delay_s"])
+        )
+    return result
 
 
 @dataclass
@@ -797,17 +1042,25 @@ def compare_sessions(
 
 
 __all__ = [
+    "DELIVERY_ENGINE_VERSION",
+    "EQUIV_RATIO_SPEC",
     "FORBIDDEN_AXES",
     "DeliveryError",
+    "DeliveryInputs",
+    "DeliveryRoute",
     "GateError",
+    "GateReport",
     "InputsNotCapturedError",
     "SessionComparison",
+    "DELAY_NOT_MODELLED",
+    "bracket_ends",
     "compare_sessions",
-    "EQUIV_RATIO_SPEC",
-    "GateReport",
+    "delay_sensitivity",
     "delivery_error",
     "delivery_error_from_gated",
-    "delivery_error_from_semantic_frame",
     "gate_delivery_samples",
-    "delivery_semantic_frame",
+    "mode01_route",
+    "pairing_block",
+    "read_delivery_inputs",
+    "semantic_route",
 ]

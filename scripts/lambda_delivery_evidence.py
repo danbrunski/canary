@@ -41,10 +41,15 @@ from src.analysis.afr import AfrCalibration, load_afr_calibration  # noqa: E402
 from src.analysis.channels import read_channels  # noqa: E402
 from src.analysis.derived import FUEL_PROPERTIES  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
+    DriveInputs,
     LambdaDeliveryDeclaration,
     check_target_convention,
+    delay_bracket,
     delivery_samples,
+    estimate_transport_delay,
     load_lambda_delivery,
+    per_pair_bracket,
+    per_pair_delay_support,
     steady_neighbours,
     target_source_agreement,
 )
@@ -269,6 +274,81 @@ def state_counts(
     return out
 
 
+#: Candidate delays for the enrichment scan: 0-0.6 s in 50 ms steps.
+DELAY_CANDIDATES = tuple(round(0.05 * i, 2) for i in range(13))
+
+
+def enrichment_delay_scan(
+    sessions: Sequence[Path],
+    declaration: LambdaDeliveryDeclaration,
+    *,
+    calibration: AfrCalibration | None,
+    afr_stoich: float,
+) -> dict[str, Any]:
+    """The enrichment transport-delay scan each route's declared delay rests on.
+
+    Per commanded source, on exactly the drives its declaration names — the
+    frozen delay's ``fitted_on``, or the rule's ``informed_by`` for a source
+    whose delay is not estimated — refusing when ``sessions`` lacks one: the
+    mean-|residual| scan (:func:`estimate_transport_delay`, enrichment rows),
+    its 5 % bracket, and the per-read sign test of every candidate against
+    the arg-min and against 0 s (:func:`per_pair_delay_support`), with the
+    per-pair bracket. A difference of means alone can be carried by a few
+    large reads.
+    """
+    rule = declaration.eligibility.regimes.enrichment
+    by_name = {path.name: path for path in sessions}
+    sensor = declaration.measured("ecm_lambda_pid_0x24")
+    out: dict[str, Any] = {}
+    for source in declaration.commanded_sources:
+        declared = rule.transport_delays[source.name]
+        names = declared.fitted_on if declared.status == "frozen" else rule.informed_by
+        missing = sorted(set(names) - set(by_name))
+        if missing:
+            raise SystemExit(
+                f"--fit-enrichment-delay: {source.name} is declared on {sorted(names)}; "
+                f"missing {missing}"
+            )
+        drives: dict[str, DriveInputs] = {}
+        for name in names:
+            rows = read_session(by_name[name], filters=[("source", "==", "obd")])
+            target = _long(rows, source.spec)
+            if target.empty:
+                continue
+            drives[name] = DriveInputs(
+                target=target,
+                measured=_long(rows, sensor.spec),
+                sentinel=_long(rows, source.sentinel_spec) if source.sentinel_spec else None,
+            )
+        common: dict[str, Any] = {
+            "declaration": declaration,
+            "target_source": source.name,
+            "measured_source": sensor.name,
+            "calibration": calibration,
+            "afr_stoich": afr_stoich,
+        }
+        delay = estimate_transport_delay(
+            drives, candidates=DELAY_CANDIDATES, regimes=["enrichment"], **common
+        )
+        entry: dict[str, Any] = {
+            "drives": sorted(drives),
+            **delay.as_dict(),
+            "mean_bracket_5pct_s": list(delay_bracket(delay, margin=0.05)),
+        }
+        for label, reference in (("vs_best", delay.seconds), ("vs_zero", 0.0)):
+            supports = per_pair_delay_support(
+                drives,
+                candidates=DELAY_CANDIDATES,
+                reference_s=reference,
+                regimes=["enrichment"],
+                **common,
+            )
+            entry[f"per_pair_{label}"] = [item.as_dict() for item in supports]
+            entry[f"per_pair_bracket_{label}_s"] = list(per_pair_bracket(supports))
+        out[source.name] = entry
+    return out
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("sessions", nargs="+", type=Path)
@@ -278,6 +358,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calibration", type=Path, default=None)
     parser.add_argument("--noise-floor", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--fit-enrichment-delay",
+        action="store_true",
+        help="Also run the enrichment transport-delay scan per commanded source on the "
+        "drives its declaration names (fitted_on, else informed_by): mean-residual scan, "
+        "per-read sign tests against the arg-min and 0 s, and both brackets (R05.16).",
+    )
     parser.add_argument(
         "--fuel-type",
         choices=sorted(FUEL_PROPERTIES),
@@ -305,6 +392,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         # and a whole-session read carries ~100k raw CAN frames per minute.
         session = read_session(session_dir, filters=[("source", "==", "obd")])
         entry: dict[str, Any] = {}
+        if _long(session, ram.spec).empty:
+            # A Mode 01-only drive (it can still inform the PID 0x44 route's
+            # delay scan): the RAM-target checks have nothing to read.
+            entry["available"] = False
+            entry["reason"] = f"{ram.spec} not captured; RAM-target checks skipped"
+            report["sessions"][session_dir.name] = entry
+            continue
         policy = PairingPolicy.within(pd.Timedelta(seconds=tol))
         entry["ram_vs_pid_0x44"] = target_source_agreement(
             session,
@@ -327,7 +421,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             measured_spec=sensor.spec,
             max_separation_s=tol,
             steady_window_s=1.0,
-            holdoff_s=elig.post_fuel_cut_holdoff_s,
+            holdoff_s=elig.regimes.closed_loop.post_fuel_cut_holdoff_s,
         )
         # The 78592f4 known answer reproduced on these drives: PID 0x44 is
         # polled ~4x faster, so it holds steady through enrichment often
@@ -339,7 +433,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             measured_spec=sensor.spec,
             max_separation_s=tol,
             steady_window_s=1.0,
-            holdoff_s=elig.post_fuel_cut_holdoff_s,
+            holdoff_s=elig.regimes.closed_loop.post_fuel_cut_holdoff_s,
         )
         entry["convention_negative_control_timing_ram"] = convention_evidence(
             session,
@@ -348,7 +442,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             measured_spec=sensor.spec,
             max_separation_s=tol,
             steady_window_s=1.0,
-            holdoff_s=elig.post_fuel_cut_holdoff_s,
+            holdoff_s=elig.regimes.closed_loop.post_fuel_cut_holdoff_s,
         )
         entry["post_cut_recovery"] = post_cut_recovery(session, declaration)
         entry["acquisition_ram_vs_lambda_sensor"] = acquisition_separation(
@@ -365,6 +459,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             afr_stoich=stoich,
         )
         report["sessions"][session_dir.name] = entry
+    if args.fit_enrichment_delay:
+        report["enrichment_transport_delay"] = enrichment_delay_scan(
+            args.sessions, declaration, calibration=calibration, afr_stoich=stoich
+        )
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, default=_json_default) + "\n")
     print(json.dumps(report, indent=1, default=_json_default)[:20000])

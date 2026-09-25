@@ -70,7 +70,6 @@ from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_a
 from src.analysis.session_classifier import read_classification
 from src.analysis.tune_revisions import (
     TuneRevisionRegistry,
-    load_tune_revisions,
     resolve_session_revision,
 )
 from src.control.capture_manifest import read_capture_manifest
@@ -88,7 +87,7 @@ from src.decode.dbc import DEFAULT_DBC_DIR
 from src.log import configure_logging
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
 from src.preprocessing.loader import has_telemetry
-from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
+from src.profiles import active_registry, resolve_profile_for_tooling, scope_config
 from src.session import format_session_timestamp, session_sort_key
 
 log = logging.getLogger(__name__)
@@ -428,7 +427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not sessions:
         print("error: every session is excluded by a provenance resolution", file=sys.stderr)
         return 1
-    revision_registry = load_tune_revisions(active_registry_path(scoped))
+    revision_registry = active_registry(scoped)
     try:
         tune_revision = _consistent_tune_revision(sessions, revision_registry, validation_document)
     except ValueError as exc:

@@ -369,3 +369,12 @@ measurement in hand.
   area and not investigated here: `useControlResource.test.ts` (3 tests, 1 run;
   the file was being edited at the time) and `TuningContextBar.test.tsx`
   (1 test, 2 of 3 runs).
+
+- [ ] **T01.11 `tests/test_passive_restart.py::test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first`
+  fails under full-suite load and passes alone.** Seen 2026-09-25 in the
+  isolated fast-tier run of the R05.16 commit (`-n 6`, 5875 other tests
+  passing); passed 3 of 3 alone (`-n0`) and beside `test_daemon.py` +
+  `test_tx_gate.py` (`-n 6`). The test came in with D03.30 (`96edfcf`) and
+  drives a real restart. Reproduce beside the per-core burners (T01.1's
+  method), record which wait expires, and replace it with a condition the test
+  controls.

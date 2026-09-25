@@ -9,7 +9,10 @@
 # Evidence for every number below:
 #   data/analyses/2026-09-22-lambda-delivery-and-warmup-inventory.md
 # reproduced by scripts/lambda_delivery_evidence.py and pinned on a committed
-# slice by tests/test_lambda_delivery_known_answers.py.
+# slice by tests/test_lambda_delivery_known_answers.py. The enrichment rule and
+# its frozen transport delay (R05.16) are in
+# docs/roadmap/tasks/R05-analysis-and-decode.md; the delay scan reproduces with
+# `scripts/lambda_delivery_evidence.py --fit-enrichment-delay <informed_by>`.
 schema_version: 1
 
 residual:
@@ -122,29 +125,146 @@ eligibility:
   # enriching, so +-0.01 separates stoich from the smallest enrichment step
   # (1/64 phi above 1.0 is the coarsest the RAM word has shown).
   closed_loop_band: 0.01
-  steady_target_dwell_s: 3.0
-  target_step_tolerance: 0.005
   max_target_gap_s: 2.5
-  post_fuel_cut_holdoff_s: 15.0
-  informed_by:
-    - _capture-fuel-target-research-2026-09-21T195844
-    - _capture-tuning-2026-09-21T223734
-    - _capture-tuning-2026-09-21T232153
-  justification: >-
-    Dwell: the RAM target is polled at ~1 Hz and the sensor sits downstream of
-    the exhaust, so a sample is steady only when the target has held for at
-    least three polls; transitions inside that window are the tip-in lag a
-    delivery residual must not report. Post-cut holdoff: after decel fuel cut
-    the ECM leaves the target at 1.0 while measured lambda runs rich for
-    several seconds (post-cut recovery with PID 0x44 at 0.8707). Measured
-    settling times (lambda within 3 % of target and staying there 2 s) over
-    112 cut episodes on the three informing drives: median 5.6-8.5 s, p90
-    12.2-17.6 s, max 18.4-22.9 s, and 39 episodes never settled before the
-    next cut or a 30 s horizon. 15 s is about the pooled p90; it does not
-    make every post-cut sample steady, and the residuals that remain are
-    reported as measurements, not as a clean floor.
-    These three drives chose the constants and are therefore NOT independent
-    evidence for any evaluation of this rule.
+  # One rule per regime (R05.16). The closed-loop numbers applied to WOT pulls
+  # left every enrichment result empty: the target ramps with rpm through a
+  # pull and a lift or shift cuts fuel just before it, so a 3 s / 0.005 dwell
+  # and a 15 s holdoff admit nothing.
+  regimes:
+    closed_loop:
+      conditions: >-
+        Closed-loop cruise and idle on the RAM target (~1 Hz), 2026-09-21.
+      steady_target_dwell_s: 3.0
+      target_step_tolerance: 0.005
+      post_fuel_cut_holdoff_s: 15.0
+      transport_delays:
+        ram_final_target:
+          status: not_estimated
+          seconds: null
+          note: >-
+            Not fitted for closed loop: the target holds exactly 1.0 there, so a
+            lag scan has no steps to resolve; the 3 s dwell stands in for it.
+        mode01_pid_0x44:
+          status: not_estimated
+          seconds: null
+          note: >-
+            PID 0x44 is not a closed-loop target (source_not_valid_in_regime);
+            nothing to fit.
+      informed_by:
+        - _capture-fuel-target-research-2026-09-21T195844
+        - _capture-tuning-2026-09-21T223734
+        - _capture-tuning-2026-09-21T232153
+      held_out: []
+      justification: >-
+        Dwell: the RAM target is polled at ~1 Hz and the sensor sits downstream
+        of the exhaust, so a sample is steady only when the target has held for
+        at least three polls; transitions inside that window are the tip-in lag
+        a delivery residual must not report. Post-cut holdoff: after decel fuel
+        cut the ECM leaves the target at 1.0 while measured lambda runs rich for
+        several seconds (post-cut recovery with PID 0x44 at 0.8707). Measured
+        settling times (lambda within 3 % of target and staying there 2 s) over
+        112 cut episodes on the three informing drives: median 5.6-8.5 s, p90
+        12.2-17.6 s, max 18.4-22.9 s, and 39 episodes never settled before the
+        next cut or a 30 s horizon. 15 s is about the pooled p90; it does not
+        make every post-cut sample steady, and the residuals that remain are
+        reported as measurements, not as a clean floor. No held-out judgement
+        was made for these constants.
+    enrichment:
+      conditions: >-
+        Power enrichment (commanded lambda below 1 - closed_loop_band), mostly
+        WOT pulls in 2nd-3rd with shift lifts, 2026-09-17..23, calibration
+        ZS44A; PID 0x44 at ~3.8 Hz, RAM target at ~0.9 Hz, PID 0x24 lambda at
+        ~3.8 Hz, all on stored acquisition clocks.
+      steady_target_dwell_s: 0.6
+      target_step_tolerance: 0.01
+      post_fuel_cut_holdoff_s: 6.0
+      # One delay per commanded source, each fitted on its own route. Every
+      # consumer's default (Mode 01) route uses PID 0x44, which models none.
+      transport_delays:
+        ram_final_target:
+          status: frozen
+          seconds: 0.1
+          # Per-pair bracket: every candidate the per-read sign test cannot
+          # tell from 0.10 s at alpha 0.05 (per_pair_bracket). Consumers
+          # re-run at both ends and flag a result that changes (R05.16).
+          bracket_s: [0.0, 0.5]
+          fitted_on:
+            - _capture-fuel-target-research-2026-09-20T222101
+            - _capture-fuel-target-research-2026-09-20T224503
+            - _capture-fuel-target-research-2026-09-21T195844
+            - _capture-tuning-2026-09-21T223734
+            - _capture-tuning-2026-09-21T232153
+          method: >-
+            estimate_transport_delay(regimes=[enrichment]) — mean |residual|
+            over 161 enrichment RAM-target reads against PID 0x24, candidates
+            0-0.6 s by 0.05 s, smallest arg-min — then per_pair_delay_support /
+            per_pair_bracket (exact two-sided sign test per read) for its
+            uncertainty.
+          note: >-
+            WEAKLY SUPPORTED. Mean |residual| is 4.28 % at 0 s and 3.56 % at
+            0.10 s (3.60 % at 0.05 and 0.20, 4.65 % at 0.30), but that gain is
+            a difference of means carried by a few large reads. Read by read,
+            0.10 s against 0 s is better on 58, worse on 41 and identical on 62
+            (sign test p = 0.11), and no candidate from 0 to 0.5 s is
+            distinguishable from 0.10 s (per-pair bracket 0.0-0.5 s). Adding
+            _capture-tuning-2026-09-23T164007 gives 70 / 54 / 69, p = 0.18.
+            Still preferred over 0 s because exhaust transport is strictly
+            positive, and on this route (the RAM read has its own acquisition
+            time, ~110 ms after the lambda read, p10-p90 80-250 ms) the reads
+            that change favour it; on the PID 0x44 route the same comparison
+            favours 0 s. The ~0.9 Hz RAM poll dates a target step only to its
+            poll gap, which biases any fitted lag short; separate tip-in and
+            lift delays are not resolvable from 161 reads. Enrichment only:
+            transport delay falls as exhaust flow rises.
+        mode01_pid_0x44:
+          status: not_estimated
+          seconds: null
+          note: >-
+            Not modelled: PID 0x44 and 0x24 share a Mode 01 batch (~0-14 ms
+            apart, ~250 ms cycle), so a shift only changes which lambda read
+            pairs at multiples of the cycle, and a 0.10 s shift lands between
+            the same-batch read and the next, making the pairing depend on poll
+            jitter (D04.3). Read by read on the seven informing drives (3412
+            enrichment reads), every shift from 0.10 to 0.60 s is worse than
+            0 s (0.10 s: 1041 better / 1150 worse, p = 0.02; 0.25 s, one cycle:
+            1507 / 1681, p = 0.002), so no batch-multiple delay is justified;
+            each target read pairs with the lambda read nearest it as
+            acquired.
+      informed_by:
+        - _capture-fuel-target-research-2026-09-20T222101
+        - _capture-fuel-target-research-2026-09-20T224503
+        - _capture-fuel-target-research-2026-09-21T195844
+        - _capture-tuning-2026-09-21T223734
+        - _capture-tuning-2026-09-21T232153
+        # Evaluated under candidate constants in the first pass, so not
+        # held out (R05.16 verification).
+        - _capture-tuning-2026-09-23T164007
+        - _capture-tuning-hybrid-research-2026-09-17T184821
+      held_out:
+        - _capture-tuning-2026-09-22T170459
+        - _capture-tuning-2026-09-22T235224
+        - _capture-tuning-2026-09-23T142926
+        - _capture-tuning-hybrid-research-2026-09-17T191712
+        - _capture-tuning-hybrid-research-2026-09-17T201000
+      justification: >-
+        Measured on the seven informing drives, PID 0x44 route, no delay
+        (as every Mode 01 consumer pairs). Tolerance 0.01 lambda over a 0.6 s
+        dwell: on their 682 WOT open-loop reads the residual median is +2.45 /
+        +2.54 % where the target moved < 0.0005 / 0.005-0.01 lambda over the
+        prior 0.6 s, +2.32 % at 0.01-0.02, and +3.11 / +4.34 % at 0.02-0.05 /
+        more — the lean reading of a target still ramping with rpm while the
+        sensor lags it. A 0.01 lambda move is worth at most 0.01/0.85 = 1.2 %,
+        under the 1.49 % WOT delivery noise floor. 0.6 s covers one plausible
+        transport delay (the RAM route's weakly supported 0.10 s, bracket to
+        0.5 s) plus pairing within one Mode 01 cycle. Holdoff 6 s: across 3412
+        enrichment reads the residual quartiles drift with seconds since the
+        last fuel cut until 6 s (medians -0.91 / +0.54 / +1.32 / +1.27 % in
+        the 2-6 s bins, p25 to -5.2 %) and hold from there (+2.09, +1.79,
+        +1.78, +1.91, +2.25 % at 6-8, 8-10, 10-15, 15-30, 30+ s). On WOT reads
+        alone it settles by about 4 s; 6 s is the pooled figure. The
+        closed-loop 15 s holdoff measures the ECM leaving its target at 1.0
+        through a rich recovery, which does not happen when the target itself
+        is rich. Judged on held_out (R05-analysis-and-decode.md, R05.16).
 
 acquisition:
   max_separation_s: 0.25
@@ -154,14 +274,6 @@ acquisition:
     separation is median 0.093-0.104 s, p95 0.130-0.142 s, and 1085/1085,
     926/927 and 1375/1376 target reads are inside 0.25 s on the three
     drives. This is polling skew, not exhaust transport.
-
-transport_delay:
-  status: not_estimated
-  note: >-
-    No lag model is fitted. estimate_transport_delay() may only choose one on
-    named training drives and the frozen TransportDelay then refuses those
-    drives; until then the dwell rule stands in for it (B06.3). Deferred:
-    needs the operator's corpus choice (2026-09-22).
 
 noise_floors:
   # The only measured delivery floor is WOT-only; it is refused for closed

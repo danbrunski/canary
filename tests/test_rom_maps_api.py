@@ -71,9 +71,7 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(rom_maps.TargetEditor, "from_bytes", lambda data, path: fake)
     before = set(tmp_path.iterdir())
-    result = rom_maps.inspect_rom(
-        b"synthetic", tmp_path, registry_path=tmp_path / "tune_revisions.yaml"
-    )
+    result = rom_maps.inspect_rom(b"synthetic", tmp_path, revisions=None)
     assert set(tmp_path.iterdir()) == before
     assert result["map_slots"] == [1, 2, 3, 4, 5]
     assert len(result["tables"]) == 10
@@ -93,4 +91,4 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     assert trace["y"]["axis_mapping"] == "verified"
     assert all(t["trace"] is None for t in result["tables"] if t["status"] == "tbd")
     with pytest.raises(ValueError, match="empty"):
-        rom_maps.inspect_rom(b"", tmp_path, registry_path=tmp_path / "tune_revisions.yaml")
+        rom_maps.inspect_rom(b"", tmp_path, revisions=None)

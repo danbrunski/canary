@@ -14,14 +14,14 @@ from src.analysis.rom_trace import (
     load_viewer_definition,
     trace_payload,
 )
-from src.analysis.tune_revisions import load_tune_revisions
+from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
 from src.dashboard.security import (
     control_auth_dependency,
 )
 from src.paths import DIDS_YAML
-from src.profiles import active_registry_path
+from src.profiles import active_registry
 from src.profiles import profile_dir as vehicle_profile_dir
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
@@ -32,14 +32,14 @@ def inspect_rom(
     profile_dir: Path,
     dids_path: Path = DIDS_YAML,
     *,
-    registry_path: Path,
+    revisions: TuneRevisionRegistry | None,
 ) -> dict[str, Any]:
     """Decode one uploaded ROM against the vehicle's map definitions.
 
-    ``registry_path`` is required, not derived from ``profile_dir``: the live
-    flash registry is :func:`src.profiles.active_registry_path` — the
-    operational copy once a flash was recorded from the dashboard — and the
-    tracked file beside the profile data would miss that flash (R05.1).
+    ``revisions`` is required, not derived from ``profile_dir``: the live
+    flash history is :func:`src.profiles.active_registry` — the operational
+    copy merged with the tracked file — and the tracked file alone would miss
+    a flash recorded from the dashboard (R05.1, R05.17).
     """
     if not data or len(data) > MAX_ROM_UPLOAD:
         raise ValueError("ROM upload is empty or exceeds 2 MiB")
@@ -74,7 +74,6 @@ def inspect_rom(
         live[role] = (
             provider.model_dump() if provider and provider.confidence == "confirmed" else None
         )
-    revisions = load_tune_revisions(registry_path)
     current = revisions.at(datetime.now(UTC)) if revisions else None
     return {
         "source_sha256": sha256(data),
@@ -114,7 +113,7 @@ def register_rom_routes(
                 bytes(body),
                 vehicle_profile_dir(config),
                 dids_path,
-                registry_path=active_registry_path(config),
+                revisions=active_registry(config),
             )
         except FileNotFoundError as exc:
             raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc

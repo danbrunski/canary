@@ -61,12 +61,11 @@ from src.analysis.behavior_validation import (
     validation_document_path,
 )
 from src.analysis.refit import default_recipes
-from src.analysis.tune_revisions import load_tune_revisions
 from src.decode.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.log import configure_logging
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.preprocessing.loader import has_telemetry
-from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
+from src.profiles import active_registry, resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 
@@ -114,7 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         recipes = [r for r in recipes if r.name in set(args.recipe)]
     document = load_validation_document(validation_document_path(scoped.daemon.behavior_models))
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
-    registry = load_tune_revisions(active_registry_path(scoped))
+    registry = active_registry(scoped)
     sessions, duplicates = _unique_sessions(args.sessions)
     empty = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[])
 

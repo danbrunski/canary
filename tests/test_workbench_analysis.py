@@ -21,9 +21,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from src.analysis.afr import AfrCalibration
+from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
 from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
 from src.analysis.tuning import GateError
+from src.analysis.tuning_frame import load_provider_registry
 from src.analysis.workbench import (
     WorkbenchInputs,
     pooled_delivery_error,
@@ -56,10 +58,14 @@ FLOOR = NoiseFloor(
         "timing_advance_deg": ChannelFloor(unit="deg", conditions="WOT", sd=0.5, n_cells=5),
     }
 )
+PROFILE = Path("data/nissan-xterra-2008")
 INPUTS = WorkbenchInputs(
     bindings_path=BINDINGS,
     dids_path=DIDS,
     calibration=PHI,
+    # Delivery error runs on the vehicle's declared sources (R05.16).
+    lambda_delivery=load_lambda_delivery(PROFILE / "lambda_delivery.yaml"),
+    providers=load_provider_registry(PROFILE / "tuning_providers.yaml"),
     noise_floor=FLOOR,
     idle_spec={"rpm_min": 400.0, "rpm_max": 900.0, "speed_max": 0.0},
     afr_stoich=14.7,
@@ -207,8 +213,10 @@ def test_session_span_reads_footers(tmp_path: Path) -> None:
 
 
 def test_pooled_delivery_error_pools_and_names_not_captured(tmp_path: Path) -> None:
-    a = _write(tmp_path, "2026-09-18T120000", [_enrich(3200)] * 4)
-    b = _write(tmp_path, "2026-09-18T130000", [_enrich(4200)] * 3)
+    # Each session's first read cannot show the enrichment rule's 0.6 s dwell
+    # (R05.16: nothing earlier to judge it against).
+    a = _write(tmp_path, "2026-09-18T120000", [_enrich(3200)] * 5)
+    b = _write(tmp_path, "2026-09-18T130000", [_enrich(4200)] * 4)
     no_mode01 = _write(tmp_path, "2026-09-18T140000", [{"RPM": 3000.0}] * 3)
     result = pooled_delivery_error(
         [a, b, no_mode01], inputs=INPUTS, min_load=85.0, rpm_bands=RPM_BANDS
@@ -221,6 +229,10 @@ def test_pooled_delivery_error_pools_and_names_not_captured(tmp_path: Path) -> N
     assert skipped["kind"] == "not_captured"
     assert "obd:COMMANDED_EQUIV_RATIO" in skipped["missing"]
     assert result["noise_floor"]["conditions"] == "WOT: throttle>=85"
+    assert result["pairing"]["method"] == "acquisition-time match_ordered"
+    assert result["engine_version"] == 2
+    assert result["gates"]["filtered"] == {"target_transient": 2}
+    assert [s["informed_constants"] for s in result["per_session"]] == [False, False]
     assert result["conditions"]["n_sessions"] == 2
     assert result["conditions"]["baro"]["min_kpa"] == 80.0
 

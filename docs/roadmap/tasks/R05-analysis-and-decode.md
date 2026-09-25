@@ -792,7 +792,7 @@ code:
   A registry-less legacy dir on a Pi with more than one registered profile is
   reported, not adopted.
 
-- [ ] **R05.16 One delivery-error engine: the acquisition-paired
+- [~] **R05.16 One delivery-error engine: the acquisition-paired
   `match_ordered`.** *Operator decision 2026-09-25 (R05.3): converge; numbers
   will shift.*
   - Two engines answer "how far is measured AFR from commanded":
@@ -820,7 +820,233 @@ code:
   tests updated to the new numbers deliberately, not re-pinned blind.
   Size **L**.
 
-- [ ] **R05.17 A flash hand-added to the tracked registry after migration is
+  *Engine converged 2026-09-25; two remainders below (an operator decision
+  and a digest recompute path).* `tuning.delivery_error` now reads the
+  declared target/measured sources (`read_delivery_inputs`, one filtered
+  read, acquisition clock), runs `lambda_delivery.delivery_samples`
+  (`match_ordered` at the declaration's 250 ms, steady-target dwell,
+  post-cut holdoff, regime validity, rails, censoring), attaches rpm /
+  `FUEL_STATUS` / load by the same one-to-one pairing, checks the clock basis
+  (`check_clock_support`), then gates `not_enrichment`, `closed_loop` (Mode 01
+  only), `below_min_load` and `outside_rpm_bands` (now `(lo, hi]`, matching
+  the bins). Two routes, both declared: `mode01_route` (PID 0x44) and
+  `semantic_route` (provider registry's `commanded_afr`/`rpm`/A/F role).
+  `delivery_semantic_frame`, `delivery_error_from_semantic_frame`, the grid
+  `gate_delivery_samples`, `cell_agg` (MCP + `--cell-agg`) are deleted; an
+  undeclared measured spec refuses listing the declared ones; no
+  `lambda_delivery.yaml` refuses. Payloads carry `engine_version: 2`, a
+  `pairing` block and per-band `p05_pct`/`p95_pct`; the digest's tuning
+  section carries `schema_version: 2`. Consumers switched: digest (`_delivery`,
+  `_previous`), MCP `get_delivery_error`, `tuning_report.py delivery-error`,
+  workbench `pooled_delivery_error` (dashboard Analysis page, `PairingNote`).
+  `compare_tuning_sessions` never used the delivery engine (`compare_sessions`
+  is a per-cell grid comparison) and is unchanged.
+
+  **Before → after**, `obd:O2_WR_LAMBDA_S1`, profile rpm bands. MCP, report
+  CLI and digest make the identical call (min_load 85 = profile floor); the
+  workbench page defaults to no load floor.
+
+  | capture | consumer | before (1 s last-cell) | after (engine 2) |
+  |---|---|---|---|
+  | `_capture-tuning-2026-09-21T232153` | MCP/CLI/digest | n 56, band-avg +2.90 %, pooled +2.73 % | n 0 |
+  | | workbench | n 65, band-avg +1.97 % | n 0 (`gates_removed_everything`) |
+  | `_capture-tuning-2026-09-23T164007` | MCP/CLI/digest | n 28, +2.99 %, pooled +2.87 % | n 0 |
+  | | workbench | n 34, +3.29 % | n 0 |
+  | `sessions-0917/_capture-tuning-hybrid-research-2026-09-17T184821` | MCP/CLI/digest | n 12, +1.09 %, pooled +0.50 % | n 0 |
+  | | workbench | n 16, +0.56 % | n 0 |
+  | `sessions/…/_tuning-2026-08-05T142720` (digest reference test) | digest | n 16 | n 1 |
+
+  Before, per band (MCP call, n / mean / p95 %): 232153 — 2500-3000 8 / 4.99 /
+  14.38, 3000-3500 18 / 2.33 / 3.62, 3500-4000 5 / 2.89 / 4.29, 4000-4500 13 /
+  1.63 / 2.89, 4500-5000 7 / 3.66 / 5.03, 5000-6500 5 / 1.93 / 2.77; 164007 —
+  1 / 2.34 / 2.34, 6 / 2.77 / 4.00, 6 / 3.49 / 5.12, 7 / 2.00 / 4.26, 6 / 2.96 /
+  4.60, 2 / 4.35 / 5.70; hybrid — (3000-3500) 2 / 7.26 / 12.08, 1 / 2.22, 4 /
+  -0.29 / 4.42, 3 / -2.15 / -0.96, 2 / -1.58 / -1.50. After: no band has a
+  sample. Gates after (232153): started 5808 PID 0x44 reads (3.8 Hz, against
+  1496 one-second cells), `fuel_cut` 712, `measured_missing` 1,
+  `measured_rail` 78, `post_fuel_cut` 2111, `target_transient` 2364,
+  `source_not_valid_in_regime` 465, `closed_loop` 77. 164007: 2747 /
+  190 / 0 / 35 / 876 / 1080 / 560 / 6. Hybrid: 3920 / 201 / 313 / 18 / 840 /
+  1825 / 723 / 0.
+
+  **Why.** The pairing is not what moved: WOT reads pair within 0-25 ms
+  median (max 30 / 48 / 229 ms), and with the declared dwell and holdoff set
+  to 0 the same engine gives n 223 / 107 / 32 at band-avg +2.92 / +3.11 /
+  +0.23 % against the old +2.90 / +2.99 / +1.09 % (n rises ~4x: every 3.8 Hz
+  read, not one per second). The declared eligibility empties it. Of the WOT
+  open-loop reads (`FUEL_STATUS` 4, load > 85: 235 / 110 / 32), 136 / 55 / 20
+  fall inside the 15 s post-fuel-cut holdoff (a lift or shift in the manual
+  truck cuts fuel just before the pull) and 99 / 55 / 12 sit on a target that
+  moved more than the 0.005 λ step tolerance over the prior 3 s (median 0.13 /
+  0.14 / 0.15 λ: the target ramps from stoich into enrichment as the pull
+  starts, and keeps moving with rpm); 15 / 0 / 0 held for 3 s. Sensitivity:
+  dwell 1 s → n 6 / 3 / 0; dwell 1 s and tolerance 0.02 λ → n 58 / 25 / 6,
+  band-avg +2.51 / +3.41 / -0.94 %. Those constants were chosen on
+  closed-loop / RAM-target (~1 Hz) data (`eligibility.informed_by`), not on
+  WOT.
+
+  Tests, updated to the new numbers deliberately: `tests/test_analysis_tuning.py`
+  (closed-loop, open-loop gate, lean target → `target_invalid`, band-average,
+  pairing block, `not_co_observed` at 600 ms skew, semantic route converts
+  voltage and names a censored sample, semantic load floor refuses, no
+  declaration refuses, undeclared measurement refuses, clock basis refuses,
+  fuel cut + 15 s holdoff); `tests/test_lambda_delivery.py`
+  (`test_delivery_error_uses_the_same_residual_as_the_relationship` now runs
+  `gate_delivery_samples`); `tests/test_workbench_analysis.py` (dwell rows,
+  `pairing`, `engine_version`); `tests/test_tuning_digest.py`
+  (`schema_version` 2, n 7 of 10 with `target_transient` 3; reference capture
+  16 → 1 with the breakdown); MCP snapshot regenerated (`cell_agg` gone, new
+  description); CLI snapshot's `tuning_report.py` entry drops `--cell-agg`;
+  `AnalysisPage.test.tsx` asserts the pairing note. Ground-truth suite green.
+
+  **Operator decision 2026-09-25:** hold R05.16; measure the enrichment
+  eligibility first (option (b) informed by (c)). Done the same day, desk
+  only, then reworked after verification (per-route delays, per-pair
+  support, a clean held-out set).
+
+  *Schema.* `lambda_delivery.Eligibility.regimes` has `closed_loop` and
+  `enrichment` (`RegimeRules`, both required), each a `RegimeEligibility`
+  with required `conditions`, dwell, tolerance, holdoff, `informed_by` and
+  `held_out` (no defaults; overlap refused), and `transport_delays`: one
+  `RegimeDelay` **per commanded source**, fitted on its own route (the
+  declaration refuses a missing or unknown source; a frozen delay needs
+  `seconds`, `bracket_s` containing it, `fitted_on` ⊆ `informed_by`, and
+  `method`). One global rule, or one delay for every source, is no longer
+  representable. `delivery_samples` judges each read by its regime's rule and
+  shifts only by its own source's delay. Tools: `estimate_transport_delay(
+  regimes=…)`, `delay_bracket` (mean-residual width),
+  `per_pair_delay_support` / `per_pair_bracket` / `sign_test_p` (read-by-read
+  exact sign test).
+
+  *Transport delay, per route* (reproduce: `scripts/lambda_delivery_evidence.py
+  --fit-enrichment-delay <sessions>`, which scans each source on exactly the
+  drives its declaration names; reproduced 2026-09-25):
+  - **RAM target (`ram_final_target`): frozen 0.10 s, weakly supported.** Its
+    reads have their own acquisition time (~110 ms after the 0x24 read,
+    p10-p90 80-250 ms). On five 2026-09-20..21 drives, 161 enrichment reads:
+    mean |residual| 4.28 % at 0 s, 3.56 % at 0.10 s, 3.60 % at 0.20 s, 4.65 %
+    at 0.30 s (mean-residual 5 % bracket 0.05-0.20 s) — a comparison of
+    means. Read by read, 0.10 s vs 0 s: 58 better / 41 worse / 62 identical,
+    sign test p = 0.11; no candidate 0-0.5 s is distinguishable from 0.10 s,
+    so the declared `bracket_s` is the **per-pair bracket 0.0-0.5 s**.
+    Kept over 0 s because exhaust transport is strictly positive and the
+    reads that change favour it on this route; quantised to ~0.15 s at best
+    (the ~0.9 Hz poll dates a step only to its gap, biasing short).
+  - **PID 0x44 (`mode01_pid_0x44`, every consumer's default route):
+    `not_estimated`.** 0x44 and 0x24 share a Mode 01 batch, so a shift only
+    changes pairs at batch multiples, and 0.10 s lands between the same-batch
+    read and the next (the verifier's 235224: +0.74 % at 0 s, −0.19 % at
+    0.10 s, −0.36 % at 0.20 s). Read by read on seven informing drives (3412
+    reads) every shift 0.10-0.60 s is *worse* than 0 s (0.10 s: 1041 / 1150,
+    p = 0.02; one cycle, 0.25 s: 1507 / 1681, p = 0.002), so no batch-multiple
+    delay is justified; reads pair as acquired, and every result says
+    `transport_delay_modelled: false` with the reason (`DELAY_NOT_MODELLED`).
+    The "every figure is per-pair" claim in the first pass was wrong for the
+    delay choice; it was a comparison of means, now reported beside the
+    per-read test.
+
+  *Robustness guard.* Where a route has a frozen delay with a bracket,
+  `delivery_error` and `pooled_delivery_error` re-run at both bracket ends and
+  return `delay_sensitivity` (`at`: n / band-average / pooled per delay;
+  `stable`; `reason`; `spread_pct`). Unstable = the band-averaged sign changes
+  across the bracket, or the result exists at one delay and not another. The
+  digest adds a note, the CLI prints `UNSTABLE: …`, the Analysis page shows an
+  alert. The PID 0x44 route has none (`null`: no delay modelled).
+
+  *Enrichment rule* (re-derived on the informing drives at the route's own
+  pairing, PID 0x44 / no delay; full justification in the YAML): dwell 0.6 s
+  at 0.01 λ — on 682 WOT open-loop reads the residual median is +2.45 /
+  +2.54 % where the target moved < 0.0005 / 0.005-0.01 λ over the prior
+  0.6 s, +2.32 % at 0.01-0.02, +3.11 / +4.34 % beyond (the lean reading of a
+  ramping target the sensor lags). Holdoff 6 s — across 3412 enrichment reads
+  the quartiles drift with time since the last cut until 6 s and hold after.
+
+  *Split.* Informing: `_capture-fuel-target-research-2026-09-20T222101`,
+  `-20T224503`, `-21T195844`; `_capture-tuning-2026-09-21T223734`,
+  `-21T232153`; plus `_capture-tuning-2026-09-23T164007` and
+  `_capture-tuning-hybrid-research-2026-09-17T184821`, which the first pass
+  evaluated under candidate constants (so not held out). **Clean held out:**
+  `_capture-tuning-2026-09-22T170459`, `-22T235224`, `-23T142926`,
+  `_capture-tuning-hybrid-research-2026-09-17T191712`, `-17T201000`.
+
+  *Held-out before → after* (`obd:O2_WR_LAMBDA_S1`; n / band-average %
+  (pooled %)). MCP `get_delivery_error`, `tuning_report.py delivery-error`
+  and the digest were each run and agree exactly (min_load 85, profile
+  floor); workbench = Analysis page default (no load floor). Default route =
+  PID 0x44, delay not modelled, so there is no bracket to re-run:
+
+  | clean held-out capture | old 1 s grid, MCP/CLI/digest | new, MCP/CLI/digest | old workbench | new workbench |
+  |---|---|---|---|---|
+  | `_capture-tuning-2026-09-22T170459` | 12 / +1.27 (+1.02) | 22 / +0.17 (−0.02) | 12 / +1.27 | 22 / +0.17 |
+  | `_capture-tuning-2026-09-22T235224` | 21 / +1.10 (+1.05) | 21 / +0.74 (+0.51) | 28 / +2.61 | 22 / +0.63 |
+  | `_capture-tuning-2026-09-23T142926` | 12 / +0.68 (+0.14) | 24 / −1.14 (−1.14) | 15 / −0.14 | 24 / −1.14 |
+  | `…hybrid-research-2026-09-17T191712` | 49 / +0.30 (−0.10) | 67 / −0.46 (−0.31) | 55 / −0.04 | 71 / −0.45 |
+  | `…hybrid-research-2026-09-17T201000` | 23 / +0.27 (−0.25) | 46 / −0.66 (−0.68) | 30 / −1.81 | 46 / −0.66 |
+
+  Per band (new, MCP, n / mean / p95 %): 170459 — 2500-3000 20 / −0.05 /
+  1.69, 4000-4500 1 / −0.43, 4500-5000 1 / 0.99; 235224 — 3 / 1.99 / 2.21,
+  3500-4000 1 / 1.34, 8 / 0.55 / 1.22, 7 / −0.14 / 0.99, 5000-6500 2 / −0.06
+  / 1.03; 142926 — 4000-4500 8 / −0.87 / −0.35, 8 / −1.05 / 0.19, 8 / −1.50 /
+  −0.43; 191712 — 3000-3500 16 / 1.81 / 2.97, 10 / 0.56 / 3.12, 19 / −0.48 /
+  1.52, 9 / −2.12 / −0.92, 13 / −2.09 / −0.27; 201000 — 4000-4500 11 / −0.29 /
+  2.90, 23 / −0.73 / 0.29, 12 / −0.95 / 0.43.
+
+  *Why each moved* (MCP call, one step at a time, n / band-average %):
+
+  | capture | old grid | new pairing only | + 6 s holdoff | + 0.6 s / 0.01 λ steady (final) |
+  |---|---|---|---|---|
+  | 170459 | 12 / +1.27 | 46 / +1.16 | 44 / +1.08 | 22 / +0.17 |
+  | 235224 | 21 / +1.10 | 80 / +1.16 | 58 / +1.22 | 21 / +0.74 |
+  | 142926 | 12 / +0.68 | 41 / +0.91 | 41 / +0.91 | 24 / −1.14 |
+  | 191712 | 49 / +0.30 | 133 / +0.35 | 99 / +0.26 | 67 / −0.46 |
+  | 201000 | 23 / +0.27 | 72 / +0.31 | 71 / +0.28 | 46 / −0.66 |
+
+  Acquisition pairing alone keeps the old answers within ±0.25 pt and gives
+  2.7-4x the samples (every 3.8 Hz PID 0x44 read, not one per 1 s cell). The
+  holdoff moves little. The steady-target rule is the mover (−0.5…−2.1 pt):
+  the old grid had no steady-target test, and the reads it now drops are
+  those on a target still moving — pooled residual of the dropped reads, from
+  the rung counts (n × pooled): +0.9 (170459), +1.7 (235224), +1.8 (142926),
+  +0.7 (191712), −0.4 % (201000): lean on four of five, i.e. the sensor
+  lagging a target ramping richer. Where so, the old WOT figure was partly
+  that lag.
+
+  *At bracket ends* — the RAM-target route (frozen 0.10 s, bracket 0.0 /
+  0.5 s), same gates, the three clean held-out captures that carry it
+  (n / band-average % at 0.10 | 0.0 | 0.5 s): 170459 4 / −0.03 | 4 / +0.17 |
+  4 / +0.44 → `stable: false` (sign flips around zero, spread 0.46 pt);
+  235224 6 / −6.51 | 6 / −1.55 | 6 / +4.06 → `stable: false` (spread
+  10.6 pt); 142926 5 / −1.11 | 5 / −1.00 | 5 / −1.30 → `stable: true`. So the
+  RAM route's answer holds on one of three and is flagged on two — the guard
+  doing its job on a weakly supported delay. For contrast only (not a
+  declared delay), the PID 0x44 route at 0 | 0.10 | 0.25 s: 170459 +0.17 |
+  +0.17 | −4.60; 235224 +0.74 | −0.19 | −0.36; 142926 −1.14 | −1.14 | −1.87;
+  191712 −0.46 | −0.67 | −0.74; 201000 −0.66 | −0.66 | −2.54 %, which is why
+  that route models none.
+
+  Tests: `tests/test_lambda_delivery.py` (single global rule not
+  representable; provenance fields required incl. `transport_delays`; every
+  commanded source declares its own delay; PID 0x44 pairs as acquired;
+  inform-and-judge refused; frozen delay in bracket with drives; enrichment
+  delay pairs the later read on the RAM route; 6 s holdoff; `delay_bracket`;
+  sign test counts reads and does not overflow; regime-scoped scan);
+  `tests/test_analysis_tuning.py` (the Mode 01 payload says the delay is not
+  modelled and has no `delay_sensitivity`; the semantic/RAM route carries
+  sensitivity at 0.1 / 0.0 / 0.5 s and flags a result that does not survive;
+  `test_a_result_whose_sign_flips_across_the_delay_bracket_is_unstable`);
+  known-answer slice (RAM route, unchanged delay) post_fuel_cut 324 → 316,
+  target_transient 29 → 31, eligible 554 → 560, enrichment 2 → 8 (an
+  informing drive); workbench / digest tests updated; reference digest
+  1 → 15; `AnalysisPage.test.tsx` (not-modelled wording, stability alert).
+  Ground-truth suite green.
+
+  **Remaining.** (1) Held for deploy by the operator (2026-09-25).
+  (2) Stored `digest.json` files do not recompute: nothing re-reads a digest
+  once written (A06.5), so the tuning `schema_version` 2 makes a stale
+  section identifiable but not refreshed; a refresh belongs to
+  `src/control/trip_end.py` / the digest route.
+
+- [x] **R05.17 A flash hand-added to the tracked registry after migration is
   never seen.** *Found by R05.15's rework, 2026-09-25; pre-existing.* Once the
   per-vehicle operational registry exists it wins over the tracked
   `data/<profile>/tune_revisions.yaml`, so a revision committed to the tracked
@@ -830,6 +1056,57 @@ code:
   ordered by `flashed_at`; a conflicting revision with the same name refuses and
   names both), or make the tracked file the single source and have
   `append_flash` write there. Pick one; test both directions. Size **S-M**.
+
+  *Done 2026-09-25 (merge on read).* Merge, not single-source: the tracked file lives in the Pi's
+  git checkout, so making `append_flash` write there would dirty it on every
+  dashboard flash and orphan the flashes already in the operational copy.
+  `tune_revisions.merge_tune_registries` appends tracked revisions the
+  operational copy lacks, sorted by `flashed_at`; a name present in both must
+  agree on `calibration_id`, `flashed_at`, `k`, `rom_file`, `rom_sha256` or it
+  raises `RegistryConflictError` carrying both paths and the differing
+  fields (a notes-only edit is not a conflict; the tracked notes win).
+  `profiles.active_registry(config)` is the merged history and
+  `active_registry_sources` the files it read; `active_registry_path` is
+  documented as a file identity only. Swept to `active_registry`:
+  `control.calibration` (`calibration_status` turns a conflict into
+  `calibration_alert` with the reason instead of failing `/status`;
+  `calibration_payload`; `memory_channels_payload`; `append_flash` refuses a
+  duplicate of a tracked-only name and writes the merged history through),
+  `collection.collectors` (a conflict logs ERROR and runs with the revision
+  unknown), `tuning_context`, `behavior_inventory`, `control.logs`,
+  `control.workbench_jobs`, `dashboard/routes/calibration` and `rom_maps`
+  (`inspect_rom(revisions=…)`), `scripts/{inventory_behavior_inputs,
+  refit_behavior_models,evaluate_behavior_models}.py`,
+  `tools/import_uprev_log.py`. Tests (`tests/test_tune_registry_merge.py`, 10):
+  `test_a_flash_hand_added_to_the_tracked_file_after_migration_is_seen`,
+  `test_dashboard_flashes_survive_a_tracked_file_that_never_heard_of_them`,
+  `test_one_name_recorded_as_two_flashes_refuses_naming_both_files`,
+  `test_a_conflict_is_a_loud_status_alert_not_a_broken_status`,
+  `test_append_flash_refuses_a_name_only_the_tracked_file_holds`,
+  `test_append_flash_writes_the_merged_history_through` and ordering /
+  notes / one-side cases; `test_operational_calibration_scope.py` and
+  `test_rom_maps_api.py` still pass. *Completed after verification:*
+  `labelled_events.load_labelled_events` takes `tune_registry` (the history
+  already read) and `tune_sources` (cited in each flash event's provenance)
+  instead of a single path, and `flash_events` cites every source;
+  `scripts/evaluate_detectors.py` reads `active_registry(scoped)` +
+  `active_registry_sources(scoped)` (an explicit `--tune-revisions` file
+  still wins, read as given); `memory_channels_payload` catches
+  `RegistryConflictError` like `calibration_payload` (the alert is carried by
+  `calibration_status`). Tests:
+  `test_labelled_flash_events_come_from_the_merged_history`,
+  `test_the_memory_channel_payload_survives_a_registry_conflict`;
+  `tests/test_evaluate_detectors_*` pass. `active_registry_path` remains only
+  as a file identity for provenance (`behavior_inventory`,
+  `evaluate_behavior_models`). **Raise on conflict (by design, naming both
+  files):** `TuningContext.from_config` (so the digest's tuning section, MCP
+  tuning tools, `tuning_report.py` and the workbench child refuse),
+  `control.logs.list_logs`, `workbench_jobs` revision selection,
+  `rom_maps.inspect_rom`'s route, the calibration route's
+  `record_revision` check, and the offline scripts. Caught and surfaced:
+  `calibration_status` (as `calibration_alert`), `calibration_payload`,
+  `memory_channels_payload`, the collectors' startup (ERROR log, revision
+  unknown).
 
 ## Looked at and fine
 

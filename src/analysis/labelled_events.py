@@ -21,6 +21,7 @@ the single source of truth for flash times.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -28,7 +29,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
+from src.analysis.tune_revisions import TuneRevisionRegistry
 
 LabelKind = Literal["fault", "novelty", "intervention"]
 
@@ -95,8 +96,13 @@ class LabelledEventRegistry(_Strict):
         return sorted(event.start for event in self.events if event.corpus_boundary)
 
 
-def flash_events(registry: TuneRevisionRegistry, *, source: Path) -> list[LabelledEvent]:
-    """One ``intervention`` per flashed revision (all but the factory floor)."""
+def flash_events(registry: TuneRevisionRegistry, *, sources: Sequence[Path]) -> list[LabelledEvent]:
+    """One ``intervention`` per flashed revision (all but the factory floor).
+
+    ``sources`` are the registry files the history was read from (the tracked
+    and operational ones, merged — R05.17), cited in each event's provenance.
+    """
+    source = " + ".join(str(path) for path in sources) or "tune revision registry"
     events: list[LabelledEvent] = []
     for revision in registry.revisions[1:]:
         events.append(
@@ -116,9 +122,17 @@ def flash_events(registry: TuneRevisionRegistry, *, source: Path) -> list[Labell
 
 
 def load_labelled_events(
-    path: Path, *, tune_revisions_path: Path | None = None
+    path: Path,
+    *,
+    tune_registry: TuneRevisionRegistry | None = None,
+    tune_sources: Sequence[Path] = (),
 ) -> LabelledEventRegistry:
     """Labels from ``path`` plus a flash per tune revision, oldest first.
+
+    ``tune_registry`` is the flash history already read — normally
+    :func:`src.profiles.active_registry`, which merges the tracked and
+    operational registries (R05.17); taking a single path let a caller read
+    only one of them. ``tune_sources`` names the files it came from.
 
     A missing label file yields only the derived flashes (an empty registry
     when there is no tune registry either) — "no labels recorded" is a fact
@@ -127,10 +141,8 @@ def load_labelled_events(
     events: list[LabelledEvent] = []
     if path.exists():
         events.extend(LabelledEventRegistry.model_validate(yaml.safe_load(path.read_text())).events)
-    if tune_revisions_path is not None:
-        tune_registry = load_tune_revisions(tune_revisions_path)
-        if tune_registry is not None:
-            events.extend(flash_events(tune_registry, source=tune_revisions_path))
+    if tune_registry is not None:
+        events.extend(flash_events(tune_registry, sources=tune_sources))
     return LabelledEventRegistry(events=sorted(events, key=lambda event: event.start))
 
 

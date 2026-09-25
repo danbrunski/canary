@@ -46,17 +46,18 @@ def get_delivery_error(
     session: str,
     measured_spec: str = "obd:O2_WR_LAMBDA_S1",
     min_load: float | None = None,
-    cell_agg: str = "last",
     profile: str | None = None,
 ) -> dict[str, Any]:
     """Measured-vs-commanded AFR at enrichment, with the gates applied.
 
-    Gates, each reported in the response's ``gates`` block so a diluted result
-    is visible rather than silent: same-instant pairing (no stale joins), open
-    loop **and** a commanded mixture richer than stoich (so decel fuel cut is
-    excluded by construction, not by a guessed threshold), a load floor, and
-    band-averaging over rpm so band composition cannot masquerade
-    as an effect.
+    Pairing is by acquisition time (``pairing`` in the response, R05.16):
+    each commanded-target read meets at most one measured read within the
+    vehicle's declared separation (``lambda_delivery.yaml``), and only a
+    steady target outside the post-fuel-cut holdoff carries a residual.
+    Every other sample is a named gate in ``gates`` — fuel cut, target
+    transient, closed loop, below the load floor, outside the rpm bands and
+    the rest — so a diluted result is visible rather than silent. Bands
+    carry their per-sample p05/p95 beside the mean.
 
     ``measured_spec`` is explicit on purpose: the ECM's own λ (PID 0x24) and
     the A/F sensor voltage path disagree by ~3.8 % at WOT and nobody yet knows
@@ -96,10 +97,10 @@ def get_delivery_error(
         floor = context.resolve_min_load(min_load)
         result = delivery_error(
             session_dir,
+            declaration=context.lambda_delivery,
             calibration=context.calibration,
             measured_spec=measured_spec,
             min_load=floor,
-            cell_agg=cell_agg,
             revisions=context.registry,
             afr_stoich=context.afr_stoich,
             mode01_exclusion_note=context.mode01_exclusion_note,

@@ -114,7 +114,12 @@ from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.preprocessing.features import ROC_SUFFIX
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
-from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
+from src.profiles import (
+    active_registry,
+    active_registry_path,
+    resolve_profile_for_tooling,
+    scope_config,
+)
 
 log = logging.getLogger(__name__)
 
@@ -657,7 +662,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     policy = EventPolicy.from_config(scoped, document)
     revisions_path: Path = args.tune_revisions or active_registry_path(scoped)
-    revisions = load_tune_revisions(revisions_path)
+    # R05.17: the default history is the tracked and operational registries
+    # merged; an explicit --tune-revisions file is read as given.
+    revisions = (
+        load_tune_revisions(args.tune_revisions) if args.tune_revisions else active_registry(scoped)
+    )
 
     frame = build_evaluation_frame(
         sessions,

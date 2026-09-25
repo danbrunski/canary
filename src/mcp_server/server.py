@@ -575,22 +575,23 @@ def _register_read_tools(
             session: str,
             measured_spec: str = "obd:O2_WR_LAMBDA_S1",
             min_load: float | None = None,
-            cell_agg: str = "last",
         ) -> dict[str, Any]:
             """Measured-vs-commanded AFR at enrichment for one stored session,
             with the methodology gates applied and reported (local, no daemon
-            call). Closed-loop samples and decel fuel cut are excluded by
-            construction, and results are band-averaged over rpm so uneven
-            coverage cannot masquerade as an effect. ``measured_spec`` is
-            explicit because the ECM lambda and A/F-voltage paths disagree by
-            ~3.8% at WOT and neither is established as truth. ``min_load``
-            defaults to the vehicle profile's WOT load floor."""
+            call). Target and measured reads are paired by acquisition time
+            within the vehicle's declared separation, and only steady-target
+            samples count; closed loop, fuel cut and every other exclusion is
+            a named gate, and results are band-averaged over rpm so uneven
+            coverage cannot masquerade as an effect. ``measured_spec`` must be
+            a measured source the vehicle's lambda_delivery.yaml declares: the
+            ECM lambda and A/F-voltage paths disagree by ~3.8% at WOT and
+            neither is established as truth. ``min_load`` defaults to the
+            vehicle profile's WOT load floor."""
             return tuning_analysis_tool.get_delivery_error(
                 config_path,
                 session=session,
                 measured_spec=measured_spec,
                 min_load=min_load,
-                cell_agg=cell_agg,
             )
 
         @mcp.tool()

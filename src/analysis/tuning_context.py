@@ -24,12 +24,16 @@ from typing import Any
 
 from src.analysis.afr import AfrCalibration, load_afr_calibration
 from src.analysis.derived import fuel_properties
-from src.analysis.lambda_delivery import RegimeFloor, load_lambda_delivery
+from src.analysis.lambda_delivery import (
+    LambdaDeliveryDeclaration,
+    RegimeFloor,
+    load_lambda_delivery,
+)
 from src.analysis.noise_floor import NoiseFloor, load_noise_floor
-from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
+from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.tuning_frame import LoadWotCriterion, ProviderRegistry, load_provider_registry
 from src.config import CanaryConfig
-from src.profiles import active_registry_path, profile_dir
+from src.profiles import active_registry, profile_dir
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -52,8 +56,12 @@ class TuningContext:
     #: speed_max …), or ``None`` when this vehicle's config defines no idle.
     idle_spec: dict[str, float | None] | None = None
     #: The vehicle's ``lambda_delivery.yaml`` declaration, when it has one.
-    #: A path, not the loaded model: loading cross-checks the DID catalog.
     lambda_delivery_path: Path | None = None
+    #: That declaration, loaded (without the catalog cross-check, which the
+    #: evidence script and its tests run): which channel is the commanded
+    #: target and what each measured source is. Delivery error refuses
+    #: without it (R05.16).
+    lambda_delivery: LambdaDeliveryDeclaration | None = None
     #: Which measured noise floor each fuelling regime may quote, and under
     #: what conditions (the declaration's ``noise_floors``). The only source a
     #: tuning comparison takes its ``conditions`` from (R05.2): a regime with
@@ -116,7 +124,7 @@ def context_fields(config: CanaryConfig) -> dict[str, Any]:
         ),
         "providers": load_provider_registry(providers_path) if providers_path.exists() else None,
         "providers_path": providers_path if providers_path.exists() else None,
-        "registry": load_tune_revisions(active_registry_path(config)),
+        "registry": active_registry(config),
         "noise_floor": load_noise_floor(data / "noise_floor.yaml"),
         "idle_spec": (
             None
@@ -124,6 +132,7 @@ def context_fields(config: CanaryConfig) -> dict[str, Any]:
             else {"rpm_min": idle.rpm_min, "rpm_max": idle.rpm_max, "speed_max": idle.speed_max}
         ),
         "lambda_delivery_path": lambda_path if lambda_path.exists() else None,
+        "lambda_delivery": declaration,
         "regime_floors": {} if declaration is None else dict(declaration.noise_floors),
         "profile_data": data,
     }

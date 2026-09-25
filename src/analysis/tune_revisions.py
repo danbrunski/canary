@@ -131,11 +131,85 @@ def load_tune_revisions(path: Path) -> TuneRevisionRegistry | None:
     return TuneRevisionRegistry.model_validate(yaml.safe_load(path.read_text()))
 
 
+#: What makes two entries with one ``revision`` name the same flash. ``notes``
+#: is free text a hand edit may reword, so it is not identity.
+_IDENTITY_FIELDS: tuple[str, ...] = ("calibration_id", "flashed_at", "k", "rom_file", "rom_sha256")
+
+
+class RegistryConflictError(ValueError):
+    """One revision name recorded as two different flashes, in two registries.
+
+    Carries both paths and the fields that differ, so a caller can name the
+    two files without parsing the message.
+    """
+
+    def __init__(self, revision: str, first: Path, second: Path, fields: tuple[str, ...]) -> None:
+        super().__init__(
+            f"revision {revision!r} is recorded differently in {first} and {second} "
+            f"({', '.join(fields)} differ). One name cannot be two flashes: correct one "
+            "of the two files."
+        )
+        self.revision = revision
+        self.paths = (first, second)
+        self.fields = fields
+
+
+def _aware(moment: datetime) -> datetime:
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+def merge_tune_registries(
+    operational: TuneRevisionRegistry | None,
+    operational_path: Path,
+    tracked: TuneRevisionRegistry | None,
+    tracked_path: Path,
+) -> TuneRevisionRegistry | None:
+    """The operational registry plus every tracked revision it lacks (R05.17).
+
+    The operational copy holds dashboard-recorded flashes; the tracked file is
+    hand-edited and committed. Either may know a flash the other does not, so
+    neither may simply win. Revisions are merged by name and ordered by
+    ``flashed_at``. A name present in both must be the same flash (every
+    field in :data:`_IDENTITY_FIELDS` equal); otherwise this raises
+    :class:`RegistryConflictError` naming both files. For a name present in
+    both, the tracked ``notes`` are kept: the tracked file is where notes are
+    hand-edited.
+    """
+    if operational is None:
+        return tracked
+    if tracked is None:
+        return operational
+    by_name = {item.revision: item for item in operational.revisions}
+    merged = list(operational.revisions)
+    for item in tracked.revisions:
+        own = by_name.get(item.revision)
+        if own is None:
+            merged.append(item)
+            continue
+        differ = tuple(
+            name
+            for name in _IDENTITY_FIELDS
+            if (
+                _aware(getattr(own, name)) != _aware(getattr(item, name))
+                if name == "flashed_at"
+                else getattr(own, name) != getattr(item, name)
+            )
+        )
+        if differ:
+            raise RegistryConflictError(item.revision, operational_path, tracked_path, differ)
+        if own.notes != item.notes:
+            merged[merged.index(own)] = own.model_copy(update={"notes": item.notes})
+    merged.sort(key=lambda revision: _aware(revision.flashed_at))
+    return TuneRevisionRegistry(schema_version=operational.schema_version, revisions=merged)
+
+
 __all__ = [
     "calibration_matches",
+    "RegistryConflictError",
     "TuneRevision",
     "TuneRevisionRegistry",
     "load_tune_revisions",
+    "merge_tune_registries",
     "resolve_session_revision",
     "session_started_at",
 ]

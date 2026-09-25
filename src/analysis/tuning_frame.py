@@ -337,11 +337,11 @@ def _fuel_cut_rows(session_dir: Path, target_spec: str, *, dids_path: Path) -> p
     produces no numeric row at all, so a frame built from the target alone
     lets every cut sample vanish before a gate can count it — an empty result
     that cannot say which kind of empty it is (B06.2). This emits ``True`` at
-    each sentinel observation so :func:`src.analysis.tuning.
-    gate_delivery_samples` removes them as the named ``fuel_cut`` gate, and
-    every consumer of the frame gets the column without having to remember to
-    ask for it. ``None`` when the target is not a memory channel with a
-    declared sentinel.
+    each sentinel observation so every consumer of the frame gets the column
+    without having to remember to ask for it. (Delivery error reads the
+    sentinel itself since R05.16: :func:`src.analysis.tuning.
+    read_delivery_inputs` counts it as the ``fuel_cut`` state.) ``None`` when
+    the target is not a memory channel with a declared sentinel.
     """
     source, _, name = target_spec.partition(":")
     if source != "mem" or not dids_path.exists():

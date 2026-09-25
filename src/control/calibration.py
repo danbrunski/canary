@@ -11,17 +11,19 @@ from typing import Any
 import yaml
 
 from src.analysis.tune_revisions import (
+    RegistryConflictError,
     TuneRevision,
     TuneRevisionRegistry,
     calibration_matches,
-    load_tune_revisions,
 )
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
 from src.profiles import (
+    active_registry,
     active_registry_path,
+    active_registry_sources,
     legacy_operational_dir,
     operational_dir,
     operational_file,
@@ -55,7 +57,13 @@ def calibration_status(config: CanaryConfig) -> dict[str, Any]:
     the flash history. The registry is re-read each call: an appended flash
     or a pulled registry edit shows up without a restart.
     """
-    registry = load_tune_revisions(active_registry_path(config))
+    conflict: str | None = None
+    try:
+        registry = active_registry(config)
+    except RegistryConflictError as exc:
+        # R05.17: the two registries disagree about one flash. Which revision
+        # is running is then unknown; say so on /status rather than failing it.
+        registry, conflict = None, str(exc)
     running = None if registry is None else registry.at(datetime.now(UTC))
     ecu = tuning_profile.calibration_snapshot()
     calibration_id = ecu["ecu_calibration_id"]
@@ -63,7 +71,9 @@ def calibration_status(config: CanaryConfig) -> dict[str, Any]:
     matches = calibration_matches(calibration_id, registry_id)
     changed = bool(ecu["ecu_calibration_changed"])
     reason: str | None = None
-    if matches is False:
+    if conflict is not None:
+        reason = f"flash history refused: {conflict}"
+    elif matches is False:
         reason = (
             f"ECU reports {calibration_id}, flash history's running revision "
             f"{running.revision if running is not None else '?'} records {registry_id}"
@@ -88,7 +98,10 @@ def calibration_status(config: CanaryConfig) -> dict[str, Any]:
 
 
 def calibration_payload(config: CanaryConfig) -> dict[str, Any]:
-    registry = load_tune_revisions(active_registry_path(config))
+    try:
+        registry = active_registry(config)
+    except RegistryConflictError:
+        registry = None  # calibration_status names the conflict as the alert
     return {
         **calibration_status(config),
         "history": []
@@ -111,7 +124,10 @@ def memory_channel_state(channel: MemoryChannel, running_revision: str | None) -
 def memory_channels_payload(config: CanaryConfig, source: Path) -> dict[str, Any]:
     path = active_memory_path(config, source)
     did_map = load_did_map(path)
-    registry = load_tune_revisions(active_registry_path(config))
+    try:
+        registry = active_registry(config)
+    except RegistryConflictError:
+        registry = None  # calibration_status names the conflict as the alert
     running = None if registry is None else registry.at(datetime.now(UTC))
     revision = None if running is None else running.revision
     channels = []
@@ -134,13 +150,12 @@ def memory_channels_payload(config: CanaryConfig, source: Path) -> dict[str, Any
 
 
 def append_flash(config: CanaryConfig, revision: TuneRevision) -> TuneRevisionRegistry:
-    # Seed from what readers see now: the legacy shared copy this vehicle owns
-    # (R05.15 migration) or the tracked registry.
-    source = active_registry_path(config)
+    # Start from what readers see now (R05.17): the operational copy — this
+    # vehicle's own, or the legacy shared one it owns (R05.15) — merged with
+    # the tracked registry, so a revision hand-added to the tracked file is
+    # both a duplicate here and written through, not orphaned.
     destination = operational_registry_path(config)
-    if source.exists() and source != destination:
-        _seed(source, destination)
-    registry = load_tune_revisions(destination) or TuneRevisionRegistry()
+    registry = active_registry(config) or TuneRevisionRegistry()
     if any(item.revision == revision.revision for item in registry.revisions):
         raise ValueError(f"revision {revision.revision!r} already exists")
     updated = TuneRevisionRegistry(revisions=[*registry.revisions, revision])
@@ -222,7 +237,9 @@ def seed_operational_memory(config: CanaryConfig, source: Path) -> Path:
 
 __all__ = [
     "active_memory_path",
+    "active_registry",
     "active_registry_path",
+    "active_registry_sources",
     "append_flash",
     "calibration_payload",
     "calibration_status",

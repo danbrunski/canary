@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.analysis.afr import AfrCalibration
+from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import (
     FloorRefusal,
     NoiseFloor,
@@ -24,11 +25,13 @@ from src.analysis.noise_floor import (
     significance,
 )
 from src.analysis.tuning import (
+    DeliveryError,
     GateError,
     compare_sessions,
     delivery_error,
-    delivery_error_from_semantic_frame,
+    semantic_route,
 )
+from src.analysis.tuning_frame import load_provider_registry
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -38,6 +41,33 @@ RPM_BANDS = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
 PHI = AfrCalibration(commanded_equiv_ratio_convention="phi")
+#: The dev vehicle's lambda-delivery declaration: which channel is the target,
+#: what each measured source is, and one eligibility rule per regime. Delivery
+#: error runs on it since R05.16, so each synthetic row here is one
+#: acquisition-paired target read. Closed loop: 3 s dwell, 15 s post-cut
+#: holdoff. Enrichment: 0.6 s dwell at 0.01 lambda, 6 s holdoff, and a frozen
+#: 0.10 s transport delay (the lambda read 0.1 s after the target pairs).
+DECLARATION = load_lambda_delivery(Path("data/nissan-xterra-2008/lambda_delivery.yaml"))
+#: Rows at the head of a constant closed-loop target that cannot show 3 s of dwell.
+DWELL_ROWS = 3
+#: Rows at the head of a constant enrichment target that cannot show 0.6 s of
+#: dwell at one read per second: only the first (nothing earlier, or an earlier
+#: target more than 0.01 lambda away).
+ENRICH_DWELL_ROWS = 1
+
+
+def _mode01(session: Path | pd.DataFrame, **overrides: object) -> DeliveryError:
+    kwargs: dict[str, object] = {
+        "declaration": DECLARATION,
+        "calibration": PHI,
+        "bindings_path": BINDINGS,
+        "dids_path": DIDS,
+        "afr_stoich": 14.7,
+        "rpm_bands": RPM_BANDS,
+        "min_load": 85.0,
+    }
+    kwargs.update(overrides)
+    return delivery_error(session, **kwargs)  # type: ignore[arg-type]
 
 
 def _rows(
@@ -70,48 +100,49 @@ def test_closed_loop_samples_are_excluded_and_the_count_is_reported(tmp_path: Pa
     In closed loop the ECU corrects to target whatever K is, so pooling those
     samples is how a real +0.95 % K step read as "unchanged" — 92 % of the
     samples were at stoich. The gate must both drop them and *say* it did.
+    PID 0x44 is declared valid only for enrichment, so its stoich reads are
+    ``source_not_valid_in_regime``; the enrichment block's first read is the
+    tip-in step (``target_transient``).
     """
     session = _rows(
         tmp_path,
         [(3000, 90, 2, 1.0, 1.0)] * 20  # closed loop, stoich
-        + [(3000, 90, 4, 1.2, 0.83)] * 5,  # open loop enrichment
+        + [(3000, 90, 4, 1.2, 0.83)] * 8,  # open loop enrichment
     )
-    result = delivery_error(
-        session,
-        calibration=PHI,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-        min_load=85.0,
-    )
-    assert result.n == 5
-    assert result.gates["filtered"]["closed_loop"] == 20
+    result = _mode01(session)
+    assert result.n == 8 - ENRICH_DWELL_ROWS
+    filtered = result.gates["filtered"]
+    assert filtered["source_not_valid_in_regime"] == 20 - DWELL_ROWS
+    assert filtered["target_transient"] == DWELL_ROWS + ENRICH_DWELL_ROWS
+    assert result.gates["started"] == 28
 
 
-def test_decel_fuel_cut_is_excluded_structurally(tmp_path: Path) -> None:
+def test_an_enrichment_reading_in_closed_loop_is_removed_by_the_open_loop_gate(
+    tmp_path: Path,
+) -> None:
+    """PID 0x44 is not the final target in closed loop: it reads sensor-like
+    values off 1.0 there (declaration limitations). FUEL_STATUS still gates it."""
+    session = _rows(tmp_path, [(3000, 90, 2, 1.1, 0.9)] * 6 + [(3000, 90, 4, 1.1, 0.9)] * 4)
+    result = _mode01(session)
+    assert result.n == 4
+    assert result.gates["filtered"]["closed_loop"] == 6 - ENRICH_DWELL_ROWS
+
+
+def test_a_lean_commanded_target_is_not_a_delivery_sample(tmp_path: Path) -> None:
     """`FUEL_STATUS == 4` is open loop, which covers DFCO as well as enrichment.
 
-    A bare `fs == 4` filter over the July corpus is 88 % overrun. The gate keys
-    on the commanded mixture being richer than stoich, so overrun is excluded
-    by construction rather than by a guessed lean threshold.
+    A bare `fs == 4` filter over the July corpus is 88 % overrun. A commanded
+    phi of 0.5 (λ 2.0) is outside the declared plausible target range, so it
+    is a named ``target_invalid`` state rather than a lean "delivery error".
     """
     session = _rows(
         tmp_path,
-        [(3000, 90, 4, 1.2, 0.83)] * 4  # enrichment: commanded ~12.25 AFR
-        + [(3000, 90, 4, 0.5, 1.9)] * 6,  # DFCO: commanded ~29 AFR, way lean
+        [(3000, 90, 4, 1.2, 0.83)] * 7  # enrichment: commanded ~12.25 AFR
+        + [(3000, 90, 4, 0.5, 1.9)] * 6,  # commanded ~29 AFR, way lean
     )
-    result = delivery_error(
-        session,
-        calibration=PHI,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-        min_load=85.0,
-    )
-    assert result.n == 4
-    assert result.gates["filtered"]["not_enrichment"] == 6
+    result = _mode01(session)
+    assert result.n == 7 - ENRICH_DWELL_ROWS
+    assert result.gates["filtered"]["target_invalid"] == 6
 
 
 def test_delivery_error_reports_band_average_and_pooled_separately(tmp_path: Path) -> None:
@@ -123,64 +154,172 @@ def test_delivery_error_reports_band_average_and_pooled_separately(tmp_path: Pat
     """
     session = _rows(
         tmp_path,
-        # 10 samples in one band, 2 in another: pooled is dominated by the first.
+        # 9 eligible samples in one band, 2 in another: pooled is dominated by the first.
         [(2600, 90, 4, 1.2, 0.90)] * 10 + [(4600, 90, 4, 1.2, 0.80)] * 2,
     )
-    result = delivery_error(
-        session,
-        calibration=PHI,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-        min_load=85.0,
-    )
-    assert len(result.bands) == 2
+    result = _mode01(session)
+    assert list(result.bands["n"]) == [10 - ENRICH_DWELL_ROWS, 2]
     assert result.pooled_pct != pytest.approx(result.band_averaged_pct)
     # Band-averaging weights the sparse high-rpm band equally, so it must sit
     # between the two band values rather than tracking the dense one.
     band_values = sorted(result.bands["error_pct"])
     assert band_values[0] < result.band_averaged_pct < band_values[1]
+    # Each band carries its per-sample spread beside the mean.
+    assert set(result.bands.columns) >= {"p05_pct", "p95_pct"}
 
 
-def test_measured_source_is_carried_in_the_result(tmp_path: Path) -> None:
+def test_measured_source_and_pairing_are_carried_in_the_result(tmp_path: Path) -> None:
     """The lambda path and the voltage path disagree 3.8 %; neither is default truth."""
-    session = _rows(tmp_path, [(3000, 90, 4, 1.2, 0.83)] * 4)
+    session = _rows(tmp_path, [(3000, 90, 4, 1.2, 0.83)] * 5)
+    result = _mode01(session)
+    assert result.measured_spec == "obd:O2_WR_LAMBDA_S1"
+    payload = result.as_dict()
+    assert payload["engine_version"] == 2
+    assert payload["pairing"]["method"] == "acquisition-time match_ordered"
+    assert payload["pairing"]["target_source"] == "mode01_pid_0x44"
+    assert payload["pairing"]["max_separation_s"] == 0.25
+    # R05.16 verification: PID 0x44 shares a batch with the lambda read, so no
+    # delay is modelled on this route, and the result says so.
+    assert payload["pairing"]["transport_delay_modelled"] is False
+    assert payload["pairing"]["transport_delay_s"] is None
+    assert "not modelled on this route" in payload["pairing"]["transport_delay_note"]
+    assert payload["delay_sensitivity"] is None
+
+
+def test_a_target_and_measurement_further_apart_than_declared_do_not_pair(
+    tmp_path: Path,
+) -> None:
+    """R05.16: the 1 s last-cell grid joined a target and a measurement up to a
+    second apart. The acquisition-paired engine refuses anything past the
+    declared 250 ms, and says the inputs never overlapped."""
+    from src.analysis.tuning import InputsNotCapturedError
+
+    records: list[TelemetryRecord] = []
+    for i in range(8):
+        ts = T0 + timedelta(seconds=i)
+        late = ts + timedelta(milliseconds=600)
+        records += [
+            TelemetryRecord(timestamp=ts, source="obd", channel="RPM", value=3000),
+            TelemetryRecord(timestamp=ts, source="obd", channel="ENGINE_LOAD", value=90),
+            TelemetryRecord(timestamp=ts, source="obd", channel="FUEL_STATUS", value=4),
+            TelemetryRecord(timestamp=ts, source="obd", channel="COMMANDED_EQUIV_RATIO", value=1.2),
+            TelemetryRecord(timestamp=late, source="obd", channel="O2_WR_LAMBDA_S1", value=0.83),
+        ]
+    session = tmp_path / "2026-08-05T120000"
+    write_records_to_parquet(records, session)
+    with pytest.raises(InputsNotCapturedError) as caught:
+        _mode01(session)
+    assert caught.value.kind == "not_co_observed"
+
+
+def _all_did_session(tmp_path: Path, voltages: list[str]) -> Path:
+    """RAM target + sentinel, DID rpm and DID A/F voltage, one read per second."""
+    records: list[TelemetryRecord] = []
+    for i, volts in enumerate(voltages):
+        ts = T0 + timedelta(seconds=i)
+        records += [
+            TelemetryRecord(timestamp=ts, source="obd", channel="DID_1219", value="0bb8"),
+            TelemetryRecord(
+                timestamp=ts, source="obd", channel="mem:ECM_TARGET_EQUIV_RATIO", value=1.17
+            ),
+            TelemetryRecord(timestamp=ts, source="obd", channel="DID_1225", value=volts),
+        ]
+    session = tmp_path / "_capture-tuning-did-2026-08-05T120000"
+    write_records_to_parquet(records, session)
+    return session
+
+
+def test_the_semantic_route_converts_voltage_and_names_censored_samples(tmp_path: Path) -> None:
+    """All-DID analysis pairs the declared RAM target with the declared A/F
+    voltage source through the calibrated transfer, never the raw volts."""
+    from src.analysis.afr import load_afr_calibration
+
+    calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
+    providers = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
+    # 0x0152 = 1.690 V -> 13.75 AFR; 0x0000 is below the transfer's censoring floor.
+    session = _all_did_session(tmp_path, ["0152"] * 6 + ["0000"] + ["0152"])
     result = delivery_error(
         session,
-        calibration=PHI,
+        declaration=DECLARATION,
+        route=semantic_route(DECLARATION, providers, measured_role="measured_afr_b1"),
+        calibration=calibration,
         bindings_path=BINDINGS,
         dids_path=DIDS,
         afr_stoich=14.7,
         rpm_bands=RPM_BANDS,
-        min_load=85.0,
+        min_load=None,
     )
-    assert result.measured_spec == "obd:O2_WR_LAMBDA_S1"
+    assert result.gates["filtered"]["measured_censored"] == 1
+    assert result.n == 8 - ENRICH_DWELL_ROWS - 1
+    assert result.measured_spec == "semantic:measured_afr_b1 (did:ECM_AF_SENSOR_V_B1)"
+    # 13.75 AFR against a 14.7/1.17 = 12.56 AFR target: lean by ~9 %, not the
+    # confident -87 % a raw 1.69 V against 12.6 AFR once produced.
+    assert 5.0 < result.pooled_pct < 15.0
+    # The RAM route models a frozen 0.10 s delay, so the result is re-run at
+    # both ends of its bracket (0.0 / 0.5 s). At one read per second a 0.5 s
+    # shift pairs nothing, so the answer does not survive the bracket and says so.
+    assert result.pairing["transport_delay_modelled"] is True
+    assert result.pairing["transport_delay_s"] == 0.1
+    sensitivity = result.delay_sensitivity
+    assert sensitivity is not None
+    assert [row["delay_s"] for row in sensitivity["at"]] == [0.1, 0.0, 0.5]
+    assert [row["n"] for row in sensitivity["at"]][:2] == [result.n, result.n]
+    assert sensitivity["at"][2]["n"] == 0
+    assert sensitivity["stable"] is False
+    assert "exists at some delays" in sensitivity["reason"]
 
 
-def test_semantic_delivery_adapter_excludes_censored_samples_without_mode01() -> None:
-    """All-DID analysis consumes transformed roles, never raw transport values."""
-    frame = pd.DataFrame(
-        {
-            "timestamp": [T0 + timedelta(seconds=offset) for offset in range(4)],
-            "rpm": [3000.0] * 4,
-            "measured_afr": [12.4, 12.6, 18.2, 12.5],
-            "commanded_afr": [12.5] * 4,
-            "fueling_active": [True, True, True, False],
-            "measured_afr_censored": [False, False, True, False],
-        }
+def test_the_semantic_route_refuses_a_load_floor(tmp_path: Path) -> None:
+    providers = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
+    session = _all_did_session(tmp_path, ["0152"] * 4)
+    with pytest.raises(GateError, match="load floor"):
+        delivery_error(
+            session,
+            declaration=DECLARATION,
+            route=semantic_route(DECLARATION, providers, measured_role="measured_afr_b1"),
+            calibration=PHI,
+            afr_stoich=14.7,
+            rpm_bands=RPM_BANDS,
+            min_load=85.0,
+        )
+
+
+def test_a_clock_that_cannot_carry_the_declared_separation_refuses() -> None:
+    """A frame with no timestamp provenance may be a round stamp a second
+    wide; pairing it at 250 ms would claim a simultaneity it cannot show."""
+    from src.analysis.pairing import ComparisonRefusedError
+    from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
+
+    stamps = pd.to_datetime([T0 + timedelta(seconds=i) for i in range(5)], utc=True)
+
+    def long(value: float) -> pd.DataFrame:
+        return pd.DataFrame({"timestamp": stamps, "value": [value] * 5})  # no basis column
+
+    inputs = DeliveryInputs(
+        target=long(1.2),
+        sentinel=None,
+        measured=long(0.83),
+        rpm=long(3000.0),
+        fuel_status=long(4.0),
+        load=None,
     )
+    route = mode01_route(DECLARATION, measured_spec="obd:O2_WR_LAMBDA_S1", min_load=None)
+    with pytest.raises(ComparisonRefusedError, match="cannot support a 250 ms"):
+        gate_delivery_samples(
+            inputs,
+            route,
+            declaration=DECLARATION,
+            calibration=PHI,
+            afr_stoich=14.7,
+            rpm_bands=RPM_BANDS,
+            min_load=None,
+        )
 
-    result = delivery_error_from_semantic_frame(
-        frame,
-        measured_spec="did:ECM_AF_SENSOR_V_B1 (voltage_afr)",
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-    )
 
-    assert result.n == 2
-    assert result.gates["filtered"] == {"fueling_inactive": 1, "censored_measured_afr": 1}
-    assert result.measured_spec.endswith("(voltage_afr)")
+def test_delivery_error_refuses_without_a_declaration(tmp_path: Path) -> None:
+    session = _rows(tmp_path, [(3000, 90, 4, 1.2, 0.83)] * 5)
+    with pytest.raises(GateError, match="no lambda_delivery.yaml"):
+        _mode01(session, declaration=None)
 
 
 def test_compare_sessions_refuses_load_as_an_axis(tmp_path: Path) -> None:
@@ -549,69 +688,44 @@ def test_the_shipped_floor_records_its_regime() -> None:
         assert entry.conditions != "unspecified"
 
 
-def test_delivery_error_refuses_a_voltage_channel_as_the_measurement() -> None:
+def test_delivery_error_refuses_an_undeclared_measurement() -> None:
     """2026-09-21: ~1.5 V was compared against a 12.6 AFR target and the
-    function returned a confident -87 % instead of refusing."""
-    from pathlib import Path
-
-    import pandas as pd
-
-    from src.analysis.afr import AfrCalibration
-    from src.analysis.tuning import GateError, delivery_error
-
-    with pytest.raises(GateError, match="sensor voltage"):
-        delivery_error(
-            pd.DataFrame(),
-            calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
-            measured_spec="did:ECM_AF_SENSOR_V_B1",
-            measured_is_lambda=False,
-            dids_path=Path("data/dids.yaml"),
-            afr_stoich=14.7,
-            rpm_bands=RPM_BANDS,
-            min_load=85.0,
-        )
+    function returned a confident -87 % instead of refusing. A measurement is
+    now used only as a source the vehicle's declaration names, with its
+    conversion; anything else refuses, listing the declared sources."""
+    with pytest.raises(GateError, match="is not a measured-mixture source") as caught:
+        _mode01(pd.DataFrame(), measured_spec="obd:SHORT_FUEL_TRIM_1")
+    assert "obd:O2_WR_LAMBDA_S1 (ecm_lambda_pid_0x24)" in str(caught.value)
 
 
 def test_fuel_cut_samples_are_gated_not_fatal(tmp_path: Path) -> None:
     """W04.8: commanded phi 0.0 is decel fuel cut, and must be gated by name.
 
     Converting it raised ``equivalence ratio must be positive, got 0.0`` and
-    cost four sessions on 2026-09-21. The cut cells are now removed as the
-    ``fuel_cut`` gate — counted, so a session that is mostly overrun says so —
-    and the enrichment samples beside them still answer.
+    cost four sessions on 2026-09-21. The cut reads are the named
+    ``fuel_cut`` state — counted, so a session that is mostly overrun says so
+    — and the enrichment rule's 6 s after a cut are ``post_fuel_cut``
+    recovery; enrichment samples past it still answer.
     """
     session = _rows(
         tmp_path,
         [(3000, 20, 4, 0.0, 5.0)] * 3  # opens on decel fuel cut
-        + [(3000, 90, 4, 1.2, 0.83)] * 4  # enrichment
+        + [(3000, 90, 4, 1.2, 0.83)] * 20  # enrichment, rows 3..22
         + [(3000, 20, 4, 0.0, 5.0)] * 2,  # and cuts again
     )
-    result = delivery_error(
-        session,
-        calibration=PHI,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-        min_load=85.0,
-    )
-    assert result.n == 4
+    result = _mode01(session)
+    # The last cut is at t=2 s: enrichment rows at t = 3..7 s are inside the 6 s
+    # holdoff (the closed-loop rule's 15 s would have taken 14 of them).
     assert result.gates["filtered"]["fuel_cut"] == 5
-    assert result.gates["started"] == 9
+    assert result.gates["filtered"]["post_fuel_cut"] == 5
+    assert result.n == 20 - 5
+    assert result.gates["started"] == 25
 
 
 def test_an_all_fuel_cut_session_is_gates_removed_everything(tmp_path: Path) -> None:
     """Every sample in fuel cut is an answer about the drive, not missing inputs."""
     session = _rows(tmp_path, [(3000, 20, 4, 0.0, 5.0)] * 5)
-    result = delivery_error(
-        session,
-        calibration=PHI,
-        bindings_path=BINDINGS,
-        dids_path=DIDS,
-        afr_stoich=14.7,
-        rpm_bands=RPM_BANDS,
-        min_load=85.0,
-    )
+    result = _mode01(session)
     assert result.n == 0
     assert result.gates == {"started": 5, "filtered": {"fuel_cut": 5}, "remaining": 0}
 
@@ -685,16 +799,7 @@ def test_uncaptured_inputs_raise_a_structured_refusal(tmp_path: Path) -> None:
         )
     )
     with pytest.raises(InputsNotCapturedError) as caught:
-        delivery_error(
-            session,
-            calibration=PHI,
-            bindings_path=BINDINGS,
-            dids_path=DIDS,
-            afr_stoich=14.7,
-            mode01_exclusion_note="VEHICLE-NOTE",
-            rpm_bands=RPM_BANDS,
-            min_load=85.0,
-        )
+        _mode01(session, mode01_exclusion_note="VEHICLE-NOTE")
     err = caught.value
     assert err.kind == "not_captured"
     assert "obd:COMMANDED_EQUIV_RATIO" in err.missing
@@ -703,3 +808,25 @@ def test_uncaptured_inputs_raise_a_structured_refusal(tmp_path: Path) -> None:
     # no ECM-specific claim.
     assert "VEHICLE-NOTE" in str(err)
     assert "this ECM" not in str(err)
+
+
+def test_a_result_whose_sign_flips_across_the_delay_bracket_is_unstable() -> None:
+    from src.analysis.tuning import DeliveryError, delay_sensitivity
+
+    def result(n: int, value: float) -> DeliveryError:
+        return DeliveryError(
+            bands=pd.DataFrame(),
+            band_averaged_pct=value,
+            pooled_pct=value,
+            n=n,
+            gates={},
+            rpm_window=(0.0, 0.0),
+            measured_spec="x",
+        )
+
+    flips = delay_sensitivity(result(20, 0.7), {0.0: result(22, -0.3), 0.5: result(18, 1.1)}, 0.1)
+    assert flips["stable"] is False
+    assert "sign changes" in flips["reason"]
+    assert flips["spread_pct"] == pytest.approx(1.4)
+    holds = delay_sensitivity(result(20, 2.1), {0.0: result(22, 2.6), 0.5: result(18, 1.9)}, 0.1)
+    assert holds["stable"] is True and holds["reason"] is None

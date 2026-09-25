@@ -13,10 +13,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
+from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.workbench import revision_boundaries, session_revision, session_span
 from src.config import CanaryConfig
-from src.control.calibration import active_registry_path
+from src.control.calibration import active_registry
 from src.control.capture_manifest import read_capture_manifest, read_capture_quality
 from src.control.sessions import is_session_dir_name, session_started_at
 from src.session import TAGS_FILENAME
@@ -78,7 +78,7 @@ def list_logs(
 ) -> dict[str, Any]:
     """Captures (and, when asked, ordinary sessions), newest first."""
     root = config.collection.storage_path
-    registry = load_tune_revisions(active_registry_path(config))
+    registry = active_registry(config)
     candidates: list[tuple[datetime, Path]] = []
     if root.exists():
         for child in root.iterdir():

@@ -75,6 +75,18 @@ def test_capture_reports_wot_inventory_and_the_pair_count(
         "(2500.0, 3000.0]",
         "(3500.0, 4000.0]",
     }
+    # R05.16: the delivery section is the acquisition-paired engine, and the
+    # section says so, so a stored 1 s last-cell digest is distinguishable.
+    payload = digest.to_dict()
+    assert payload["schema_version"] == 2
+    assert payload["delivery"]["engine_version"] == 2
+    assert payload["delivery"]["pairing"]["target_source"] == "mode01_pid_0x44"
+    # 10 target reads; the first cannot show the enrichment rule's 0.6 s dwell.
+    assert payload["delivery"]["n"] == 9
+    assert payload["delivery"]["gates"]["filtered"] == {"target_transient": 1}
+    # The Mode 01 route (PID 0x44) models no transport delay.
+    assert payload["delivery"]["pairing"]["transport_delay_modelled"] is False
+    assert payload["delivery"]["pairing"]["session_informed_constants"] is False
 
 
 def test_capture_resolves_its_tune_revision(tmp_path: Path, config: CanaryConfig) -> None:
@@ -219,9 +231,17 @@ def test_digest_reproduces_the_reference_capture(config: CanaryConfig) -> None:
     assert digest.tune_revision == "ZS44A-k106"
     assert digest.wot.seconds == 27
     assert digest.delivery is not None
-    assert digest.delivery["n"] == 16
-    # The closed-loop gate is what makes this number meaningful at all.
-    assert digest.delivery["gates"]["filtered"]["closed_loop"] > 1000
+    # R05.16: acquisition-paired, judged by the enrichment rule (0.6 s /
+    # 0.01 lambda dwell, 6 s post-cut holdoff, frozen 0.10 s delay). The 1 s
+    # last-cell engine found 16; the closed-loop rule applied to enrichment
+    # found 1; the enrichment rule finds 15 (band-avg +1.43 %).
+    assert digest.delivery["engine_version"] == 2
+    assert digest.delivery["n"] == 15
+    filtered = digest.delivery["gates"]["filtered"]
+    # Closed loop is still what makes the number meaningful at all: PID 0x44
+    # is declared valid only for enrichment.
+    assert filtered["source_not_valid_in_regime"] > 1000
+    assert filtered["target_transient"] > 0 and filtered["post_fuel_cut"] > 0
 
 
 def test_previous_capture_orders_by_time_not_directory_name(

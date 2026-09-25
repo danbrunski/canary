@@ -153,6 +153,37 @@ opportunistic on any sustained climb.
   control (only `obd_batch_max_pids`), so that means either a profile variant
   with `obd_batch_max_pids: 1` for the pull, or a batch-split feature first;
   no local session can resolve it.
+  **2026-09-25 (R05.16, desk): the RAM-target route, enrichment only.** The
+  RAM final target `mem:ECM_TARGET_EQUIV_RATIO` is read by service 0x23 with
+  its own acquisition time (~110 ms after the 0x24 read in the poll cycle,
+  p10-p90 80-250 ms), so it is not locked to the lambda read the way 0x44 is.
+  `estimate_transport_delay(regimes=[enrichment])` on five 2026-09-20..21
+  drives (161 enrichment target reads, candidates 0-0.6 s by 50 ms): mean
+  |residual| 4.28 % at 0 s, 3.56 % at 0.10 s, 3.60 % at 0.20 s, 4.65 % at
+  0.30 s. **Frozen 0.10 s for the RAM route in `lambda_delivery.yaml`, weakly
+  supported:** read by read, 0.10 s beats 0 s on 58 reads, loses on 41, ties
+  on 62 (sign test p = 0.11), and nothing from 0 to 0.5 s is distinguishable
+  from 0.10 s per read (per-pair bracket 0.0-0.5 s); the mean-residual 5 %
+  bracket is 0.05-0.20 s. It is **quantised to ~0.15 s at best**: the RAM
+  target is polled at ~0.9 Hz, so a step is dated only to within its poll
+  gap, which also biases any fitted lag short. No tip-in / lift split (too
+  few reads).
+  - **Why not the PM "500 ms tip-in":** that scan paired 0x44 with 0x24, which
+    can only express lags near multiples of the ~250 ms batch cycle (0, 250,
+    500, 750 ms), and scored only tagged transients, where wall-film and
+    sensor response add to pure transport; it did not replicate that evening.
+    The RAM scan scores every enrichment read and is not batch-locked, but its
+    ~1 s target sampling pulls short. Neither is a transport-delay measurement
+    to 50 ms.
+  - **The 0x44/0x24 route remains unresolved:** on seven drives (3412
+    enrichment reads) every shift from 0.10 to 0.60 s is worse than 0 s read by
+    read (0.10 s: 1041 better / 1150 worse, p = 0.02; 0.25 s: 1507 / 1681,
+    p = 0.002). That says the same-batch pair is the best this route can do,
+    not that the delay is zero; `lambda_delivery.yaml` declares it
+    `not_estimated` and delivery error pairs it as acquired.
+  - Still waits on a capture with 0x44 and 0x24 in separate batches (or the
+    RAM target polled faster) for a 50 ms answer. Reproduce the above with
+    `scripts/lambda_delivery_evidence.py --fit-enrichment-delay`.
 
 - [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the

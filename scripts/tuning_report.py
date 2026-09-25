@@ -57,16 +57,33 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
         raise GateError("no mode01_wot.rpm_bands in this vehicle's tuning_providers.yaml")
     result = delivery_error(
         _session_dir(config, args.session),
+        declaration=context.lambda_delivery,
         calibration=context.calibration,
         measured_spec=args.measured,
         min_load=context.resolve_min_load(args.min_load),
-        cell_agg=args.cell_agg,
         revisions=context.registry,
         afr_stoich=context.afr_stoich,
         mode01_exclusion_note=context.mode01_exclusion_note,
         rpm_bands=context.rpm_bands,
     )
     print(f"delivery error — measured from {result.measured_spec}")
+    pairing = result.pairing
+    print(
+        f"  paired by acquisition time within {pairing['max_separation_s'] * 1000:g} ms: "
+        f"target {pairing['target_source']}, measured {pairing['measured_source']}"
+    )
+    if not pairing["transport_delay_modelled"]:
+        print("  transport delay not modelled on this route (pairs as acquired)")
+    sensitivity = result.delay_sensitivity
+    if sensitivity is not None:
+        ends = ", ".join(
+            f"{row['delay_s']:g} s: n={row['n']} "
+            + ("-" if row["band_averaged_pct"] is None else f"{row['band_averaged_pct']:+.2f} %")
+            for row in sensitivity["at"]
+        )
+        print(f"  across the delay bracket: {ends}")
+        if not sensitivity["stable"]:
+            print(f"  UNSTABLE: {sensitivity['reason']}")
     if result.n == 0:
         print("  no samples survived the gates:")
         for gate, count in result.gates["filtered"].items():
@@ -190,7 +207,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Engine-load floor, %%. Default: the profile's mode01_wot.load_floor_pct.",
     )
-    de.add_argument("--cell-agg", choices=("last", "mean"), default="last")
     de.set_defaults(func=_run_delivery_error)
 
     cmp_ = sub.add_parser("compare", help="A/B two sessions on a matched grid.")

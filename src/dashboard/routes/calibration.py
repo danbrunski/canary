@@ -11,13 +11,13 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.analysis.memory_verification import plan_restamp, restamp, verify_channel
-from src.analysis.tune_revisions import TuneRevision, load_tune_revisions
+from src.analysis.tune_revisions import TuneRevision
 from src.collection import tuning_profile
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.config import CanaryConfig
 from src.control.calibration import (
-    active_registry_path,
+    active_registry,
     append_flash,
     calibration_payload,
     memory_channels_payload,
@@ -125,7 +125,7 @@ def register_calibration_routes(
         notes: list[str] = []
         changed = 0
         if body.record_revision is not None:
-            registry = load_tune_revisions(active_registry_path(config))
+            registry = active_registry(config)
             if registry is None or not any(
                 revision.revision == body.record_revision for revision in registry.revisions
             ):

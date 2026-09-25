@@ -34,9 +34,10 @@ from src.analysis.tune_revisions import (
     session_started_at,
 )
 from src.analysis.tuning import (
+    DeliveryError,
     GateError,
     delivery_error,
-    delivery_error_from_semantic_frame,
+    semantic_route,
 )
 from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import (
@@ -103,6 +104,14 @@ class WotInventory:
         }
 
 
+#: The tuning section's own schema, inside ``digest.json`` (whose
+#: ``SCHEMA_VERSION`` is the whole sidecar's). 2 (R05.16): ``delivery`` comes
+#: from the acquisition-paired engine and carries ``engine_version`` and
+#: ``pairing``. A section without ``schema_version`` is 1, the 1 s last-cell
+#: engine; its delivery numbers are not comparable with a 2.
+TUNING_SCHEMA_VERSION = 2
+
+
 @dataclass
 class TuningDigest:
     """Tuning section of a capture session's digest."""
@@ -146,6 +155,7 @@ class TuningDigest:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schema_version": TUNING_SCHEMA_VERSION,
             "session_id": self.session_id,
             "capture_profile": self.capture_profile,
             "tune_revision": self.tune_revision,
@@ -1085,11 +1095,12 @@ def _rates(inputs: _DigestInputs) -> tuple[dict[str, float], dict[str, Any]]:
 
 
 def _delivery(inputs: _DigestInputs) -> tuple[dict[str, Any] | None, list[str]]:
-    """Delivery error by whichever path the capture supports.
+    """Delivery error by whichever route the capture supports.
 
     Three branches: an all-DID capture without the semantic roles (named as
-    unavailable), an all-DID capture through the semantic frame, and a
-    Mode 01 capture through :func:`delivery_error`.
+    unavailable), an all-DID capture through the semantic route (the provider
+    registry's target and A/F channels), and a Mode 01 capture. Both routes
+    run the one acquisition-paired engine (R05.16).
     """
     context = inputs.context
     notes: list[str] = []
@@ -1101,61 +1112,76 @@ def _delivery(inputs: _DigestInputs) -> tuple[dict[str, Any] | None, list[str]]:
             "delivery error unavailable: no mode01_wot (rpm bands, load floor) is declared "
             "in this vehicle's tuning_providers.yaml"
         )
-    elif inputs.did_continuous and not section.get("available", False):
+        return None, notes
+    if inputs.did_continuous and not section.get("available", False):
         missing = section.get("missing_roles", [])
         notes.append(
             "delivery error unavailable: all-DID capture lacks confirmed semantic roles "
             + ", ".join(map(str, missing))
         )
-    elif inputs.did_continuous and inputs.semantic is not None:
-        values = inputs.semantic.values.rename(
-            columns={
-                "measured_afr_b1": "measured_afr",
-                "measured_afr_b1_censored": "measured_afr_censored",
-            }
-        )
-        provider = inputs.roles.get("measured_afr_b1", {}).get("provider")
-        try:
-            result = delivery_error_from_semantic_frame(
-                values,
-                measured_spec=f"semantic:measured_afr_b1 ({provider})",
+        return None, notes
+    semantic = inputs.did_continuous and inputs.semantic is not None
+    if not semantic and context.calibration is None:
+        return None, notes
+    try:
+        if semantic:
+            if context.lambda_delivery is None or context.providers is None:
+                raise GateError(
+                    "this vehicle has no lambda_delivery.yaml declaring its target and "
+                    "measured sources"
+                )
+            result = delivery_error(
+                inputs.session_dir,
+                declaration=context.lambda_delivery,
+                route=semantic_route(
+                    context.lambda_delivery, context.providers, measured_role="measured_afr_b1"
+                ),
+                calibration=context.calibration,
+                revisions=context.registry,
+                afr_stoich=context.afr_stoich,
+                rpm_bands=load_wot.rpm_bands,
                 # The ROM's Base Fuel Schedule axis is not yet observable, so
                 # an all-DID delivery result cannot claim the Mode-01 load
                 # gate. Physical pull tags remain the evidence for demand.
                 min_load=None,
-                tune_revision=inputs.revision,
-                tune_revision_source=inputs.revision_source,
-                afr_stoich=context.afr_stoich,
-                rpm_bands=load_wot.rpm_bands,
             )
-            delivery = result.as_dict() if result.n else None
-            if result.n == 0:
-                notes.append(
+        else:
+            result = _mode01_delivery(inputs.session_dir, context)
+        delivery = result.as_dict() if result.n else None
+        sensitivity = result.delay_sensitivity
+        if sensitivity is not None and not sensitivity["stable"]:
+            notes.append(
+                "delivery error is unstable across the transport-delay bracket: "
+                f"{sensitivity['reason']}"
+            )
+        if result.n == 0:
+            notes.append(
+                (
                     "no samples survived the semantic delivery-error gates: "
-                    + ", ".join(f"{k} -{v}" for k, v in result.gates["filtered"].items())
+                    if semantic
+                    else "no samples survived the delivery-error gates: "
                 )
-        except (GateError, ValueError) as exc:
-            notes.append(f"delivery error unavailable: {exc}")
-    elif context.calibration is not None:
-        try:
-            result = delivery_error(
-                inputs.session_dir,
-                calibration=context.calibration,
-                revisions=context.registry,
-                afr_stoich=context.afr_stoich,
-                mode01_exclusion_note=context.mode01_exclusion_note,
-                rpm_bands=load_wot.rpm_bands,
-                min_load=load_wot.load_floor_pct,
+                + ", ".join(f"{k} -{v}" for k, v in result.gates["filtered"].items())
             )
-            delivery = result.as_dict() if result.n else None
-            if result.n == 0:
-                notes.append(
-                    "no samples survived the delivery-error gates: "
-                    + ", ".join(f"{k} -{v}" for k, v in result.gates["filtered"].items())
-                )
-        except (GateError, ValueError) as exc:
-            notes.append(f"delivery error unavailable: {exc}")
+    except (GateError, ValueError) as exc:
+        notes.append(f"delivery error unavailable: {exc}")
     return delivery, notes
+
+
+def _mode01_delivery(session_dir: Path, context: TuningContext) -> DeliveryError:
+    """The Mode 01 delivery error at the profile's WOT load floor."""
+    load_wot = context.mode01_wot
+    assert load_wot is not None
+    return delivery_error(
+        session_dir,
+        declaration=context.lambda_delivery,
+        calibration=context.calibration,
+        revisions=context.registry,
+        afr_stoich=context.afr_stoich,
+        mode01_exclusion_note=context.mode01_exclusion_note,
+        rpm_bands=load_wot.rpm_bands,
+        min_load=load_wot.load_floor_pct,
+    )
 
 
 def _coverage_notes(complete_tuples: dict[str, Any], wot: WotInventory) -> list[str]:
@@ -1235,15 +1261,7 @@ def _previous(
     if delivery is None or context.calibration is None or load_wot is None:
         return previous, notes
     try:
-        before = delivery_error(
-            earlier,
-            calibration=context.calibration,
-            revisions=context.registry,
-            afr_stoich=context.afr_stoich,
-            mode01_exclusion_note=context.mode01_exclusion_note,
-            rpm_bands=load_wot.rpm_bands,
-            min_load=load_wot.load_floor_pct,
-        )
+        before = _mode01_delivery(earlier, context)
     except (GateError, ValueError):
         before = None
     if before is not None and before.n:
@@ -1348,4 +1366,4 @@ def compute_tuning_digest(
     )
 
 
-__all__ = ["TuningDigest", "compute_tuning_digest"]
+__all__ = ["TUNING_SCHEMA_VERSION", "TuningDigest", "compute_tuning_digest"]

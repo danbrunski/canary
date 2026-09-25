@@ -36,12 +36,15 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig, VehicleParameters
+
+if TYPE_CHECKING:
+    from src.analysis.tune_revisions import TuneRevisionRegistry
 
 log = logging.getLogger(__name__)
 
@@ -802,11 +805,45 @@ def operational_registry_path(config: CanaryConfig) -> Path:
 
 
 def active_registry_path(config: CanaryConfig) -> Path:
-    """The flash registry every reader uses: the operational copy once one exists.
+    """The operational registry file once one exists, else the tracked one.
 
-    ``append_flash`` seeds the operational copy from the source and appends to
-    it, so a reader of the source file never sees a dashboard-recorded flash
-    (R05.1: the trip-end digest and the MCP tuning tools did exactly that).
+    A *file identity*, not the flash history: the operational copy lacks any
+    revision hand-added to the tracked file after it was seeded (R05.17).
+    Read the history with :func:`active_registry`, which merges both; cite
+    the files it read with :func:`active_registry_sources`.
     """
     override = operational_file(config, "tune_revisions.yaml")
     return override if override is not None else source_registry_path(config)
+
+
+def active_registry_sources(config: CanaryConfig) -> tuple[Path, ...]:
+    """The existing registry files :func:`active_registry` reads, operational first."""
+    tracked = source_registry_path(config)
+    operational = operational_file(config, "tune_revisions.yaml")
+    paths = [p for p in (operational, tracked) if p is not None and p.exists()]
+    return tuple(dict.fromkeys(paths))
+
+
+def active_registry(config: CanaryConfig) -> TuneRevisionRegistry | None:
+    """The vehicle's flash history: the operational registry merged with the tracked one.
+
+    R05.17: once ``append_flash`` created the operational copy it used to win
+    outright, so a revision committed to the tracked
+    ``data/<profile>/tune_revisions.yaml`` afterwards (the hand-edit workflow)
+    was invisible to every reader, while making the tracked file the only
+    source would have dropped the dashboard-recorded flashes. Both are read;
+    tracked revisions the operational copy lacks are merged in by
+    ``flashed_at``, and one name recorded as two different flashes raises
+    :class:`src.analysis.tune_revisions.RegistryConflictError` naming both
+    files. ``None`` when neither file exists.
+    """
+    from src.analysis.tune_revisions import load_tune_revisions, merge_tune_registries
+
+    tracked_path = source_registry_path(config)
+    operational_path = operational_file(config, "tune_revisions.yaml")
+    tracked = load_tune_revisions(tracked_path)
+    if operational_path is None or operational_path == tracked_path:
+        return tracked
+    return merge_tune_registries(
+        load_tune_revisions(operational_path), operational_path, tracked, tracked_path
+    )

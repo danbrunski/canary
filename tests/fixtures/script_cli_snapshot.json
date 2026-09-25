@@ -3188,6 +3188,18 @@
         "required": false,
         "type": "Path"
       },
+      "--fit-enrichment-delay": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "fit_enrichment_delay",
+        "nargs": 0,
+        "option_strings": [
+          "--fit-enrichment-delay"
+        ],
+        "required": false,
+        "type": null
+      },
       "--fuel-type": {
         "action": "_StoreAction",
         "choices": [
@@ -6501,21 +6513,6 @@
       },
       "delivery-error": {
         "options": {
-          "--cell-agg": {
-            "action": "_StoreAction",
-            "choices": [
-              "last",
-              "mean"
-            ],
-            "default": "last",
-            "dest": "cell_agg",
-            "nargs": null,
-            "option_strings": [
-              "--cell-agg"
-            ],
-            "required": false,
-            "type": null
-          },
           "--measured": {
             "action": "_StoreAction",
             "choices": null,

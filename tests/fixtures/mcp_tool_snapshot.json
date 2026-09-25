@@ -617,14 +617,9 @@
     }
   },
   "get_delivery_error": {
-    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Closed-loop samples and decel fuel cut are excluded by\n            construction, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` is\n            explicit because the ECM lambda and A/F-voltage paths disagree by\n            ~3.8% at WOT and neither is established as truth. ``min_load``\n            defaults to the vehicle profile's WOT load floor.",
+    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Target and measured reads are paired by acquisition time\n            within the vehicle's declared separation, and only steady-target\n            samples count; closed loop, fuel cut and every other exclusion is\n            a named gate, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` must be\n            a measured source the vehicle's lambda_delivery.yaml declares: the\n            ECM lambda and A/F-voltage paths disagree by ~3.8% at WOT and\n            neither is established as truth. ``min_load`` defaults to the\n            vehicle profile's WOT load floor.",
     "inputSchema": {
       "properties": {
-        "cell_agg": {
-          "default": "last",
-          "title": "Cell Agg",
-          "type": "string"
-        },
         "measured_spec": {
           "default": "obd:O2_WR_LAMBDA_S1",
           "title": "Measured Spec",

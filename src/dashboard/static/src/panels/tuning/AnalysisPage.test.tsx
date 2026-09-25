@@ -58,9 +58,44 @@ function delivery(overrides: Partial<DeliveryErrorResponse> = {}): DeliveryError
     n: 20,
     band_averaged_pct: 1.9,
     pooled_pct: 2.1,
+    engine_version: 2,
+    pairing: {
+      method: "acquisition-time match_ordered",
+      max_separation_s: 0.25,
+      target_source: "mode01_pid_0x44",
+      target_spec: "obd:COMMANDED_EQUIV_RATIO",
+      measured_source: "ecm_lambda_pid_0x24",
+      measured_spec: "obd:O2_WR_LAMBDA_S1",
+      regime: "enrichment",
+      steady_target_dwell_s: 0.6,
+      target_step_tolerance: 0.01,
+      post_fuel_cut_holdoff_s: 6,
+      transport_delay_modelled: false,
+      transport_delay_s: null,
+      transport_delay_bracket_s: null,
+      transport_delay_note: "transport delay is not modelled on this route",
+      constants_informed_by: ["_capture-tuning-2026-09-21T232153"],
+    },
+    delay_sensitivity: null,
     bands: [
-      { rpm_band: "(2500.0, 3000.0]", n: 12, commanded: 12.5, measured: 12.7, error_pct: 2.0 },
-      { rpm_band: "(3000.0, 3500.0]", n: 8, commanded: 12.4, measured: 12.6, error_pct: 1.8 },
+      {
+        rpm_band: "(2500.0, 3000.0]",
+        n: 12,
+        commanded: 12.5,
+        measured: 12.7,
+        error_pct: 2.0,
+        p05_pct: 0.5,
+        p95_pct: 3.5,
+      },
+      {
+        rpm_band: "(3000.0, 3500.0]",
+        n: 8,
+        commanded: 12.4,
+        measured: 12.6,
+        error_pct: 1.8,
+        p05_pct: 0.4,
+        p95_pct: 3.1,
+      },
     ],
     per_session: [],
     gates: CONDITIONS.gates,
@@ -135,11 +170,51 @@ describe("AnalysisPage", () => {
     expect(container.querySelector('[data-floor="sd"]')).not.toBeNull();
     expect(container.querySelector('[data-floor="range"]')).not.toBeNull();
     expect(screen.getByText(/Measured under: WOT: throttle>=85/)).toBeInTheDocument();
+    // R05.16: the pairing the numbers rest on is stated, not implied.
+    expect(screen.getByRole("note", { name: "Pairing" })).toHaveTextContent(
+      "within 250 ms; transport delay is not modelled on this route; " +
+        "only a target steady within 0.01 λ for 0.6 s and 6 s clear of fuel cut counts",
+    );
+    expect(screen.queryByRole("alert", { name: "Delay sensitivity" })).toBeNull();
     const conditions = screen.getByLabelText("Conditions");
     expect(conditions).toHaveTextContent("2 pooled");
     expect(conditions).toHaveTextContent("63.1–80.4 kPa");
     expect(conditions).toHaveTextContent(
       "20 of 120 samples passed: closed loop removed 90, fuel cut removed 10",
+    );
+  });
+
+  it("states a modelled delay and flags a result that does not survive its bracket", async () => {
+    const base = delivery();
+    route({
+      "/analysis/delivery-error": delivery({
+        pairing: {
+          ...base.pairing,
+          target_source: "ram_final_target",
+          target_spec: "mem:ECM_TARGET_EQUIV_RATIO",
+          transport_delay_modelled: true,
+          transport_delay_s: 0.1,
+          transport_delay_bracket_s: [0, 0.5],
+        },
+        delay_sensitivity: {
+          at: [
+            { delay_s: 0.1, n: 20, band_averaged_pct: 0.7, pooled_pct: 0.6 },
+            { delay_s: 0, n: 22, band_averaged_pct: -0.3, pooled_pct: -0.2 },
+            { delay_s: 0.5, n: 18, band_averaged_pct: 1.1, pooled_pct: 1.0 },
+          ],
+          stable: false,
+          reason: "the band-averaged sign changes across the delay bracket",
+          spread_pct: 1.4,
+        },
+      }),
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    await chooseRunningAndSource();
+    expect(await screen.findByRole("note", { name: "Pairing" })).toHaveTextContent(
+      "with the λ read nearest t + 100 ms (transport delay, 0–0.5 s supported)",
+    );
+    expect(screen.getByRole("alert", { name: "Delay sensitivity" })).toHaveTextContent(
+      "the band-averaged sign changes across the delay bracket (0.1 s: 0.70 %, 0 s: -0.30 %, 0.5 s: 1.10 %)",
     );
   });
 

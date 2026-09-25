@@ -30,7 +30,7 @@ from src.analysis.lambda_delivery import (
     to_lambda,
 )
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
-from src.analysis.tuning import GateReport, delivery_error_from_gated
+from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
 
 T0 = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 PROFILE = Path("data/nissan-xterra-2008")
@@ -87,23 +87,52 @@ def test_residual_is_signed_lean_positive_and_refuses_phi() -> None:
 
 
 def test_delivery_error_uses_the_same_residual_as_the_relationship() -> None:
-    values = pd.DataFrame(
-        {
-            "rpm": [3000.0, 4000.0],
-            "measured_afr": [12.0, 13.0],
-            "commanded_afr": [12.6, 12.6],
-        }
+    """Since R05.16 delivery error *is* this relationship: its samples are
+    :func:`delivery_samples` rows, so its residual cannot drift in sign or
+    definition from :func:`residual_pct`."""
+    from src.analysis.lambda_delivery import load_lambda_delivery
+
+    declaration = load_lambda_delivery(DECLARATION_PATH)
+    start = datetime(2026, 9, 21, 12, tzinfo=UTC)
+    stamps = [start + timedelta(seconds=i) for i in range(6)]
+
+    def long(values: list[float]) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(stamps, utc=True),
+                "value": values,
+                "timestamp_basis": "acquired",
+            }
+        )
+
+    measured_lambda = [0.85, 0.85, 0.85, 0.80, 0.90, 0.86]
+    inputs = DeliveryInputs(
+        target=long([1.2] * 6),
+        sentinel=None,
+        measured=long(measured_lambda),
+        rpm=long([3200.0] * 3 + [4200.0] * 3),
+        fuel_status=long([4.0] * 6),
+        load=None,
     )
-    result = delivery_error_from_gated(
-        values,
-        GateReport(started=2, remaining=2),
-        measured_spec="obd:O2_WR_LAMBDA_S1",
+    route = mode01_route(declaration, measured_spec="obd:O2_WR_LAMBDA_S1", min_load=None)
+    values, report = gate_delivery_samples(
+        inputs,
+        route,
+        declaration=declaration,
+        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
+        afr_stoich=14.7,
         rpm_bands=(2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0),
+        min_load=None,
     )
+    # The first read has no earlier target to show the 0.6 s enrichment dwell.
+    assert report.remaining == 5
     expected = residual_pct(
         values["measured_afr"].to_numpy(), values["commanded_afr"].to_numpy(), quantity="afr"
     )
-    assert result.pooled_pct == pytest.approx(float(np.mean(expected)))
+    assert values["error_pct"].to_numpy() == pytest.approx(expected)
+    assert values["error_pct"].to_numpy() == pytest.approx(
+        [(m * 1.2 - 1.0) * 100.0 for m in measured_lambda[1:]]
+    )
 
 
 def test_convention_cannot_be_judged_at_stoich() -> None:
@@ -212,7 +241,7 @@ def test_post_fuel_cut_recovery_is_not_a_rich_delivery_finding() -> None:
         afr_stoich=14.7,
     )
     frame = samples.frame
-    holdoff = doc.eligibility.post_fuel_cut_holdoff_s
+    holdoff = doc.eligibility.regimes.closed_loop.post_fuel_cut_holdoff_s
     within = frame[
         frame["timestamp"] < frame["timestamp"].iloc[0] + pd.Timedelta(seconds=2 + holdoff)
     ]
@@ -462,9 +491,238 @@ def test_a_commanded_source_must_say_how_fuel_cut_appears_on_it(tmp_path: Path) 
 def test_the_provider_registry_and_the_declaration_must_name_one_target(tmp_path: Path) -> None:
     doc = yaml.safe_load(DECLARATION_PATH.read_text())
     doc["commanded_sources"] = [doc["commanded_sources"][1]]
+    for rule in doc["eligibility"]["regimes"].values():
+        del rule["transport_delays"]["ram_final_target"]
     path = tmp_path / "lambda_delivery.yaml"
     path.write_text(yaml.safe_dump(doc))
     with pytest.raises(LambdaDeliveryError, match="which .* does not declare"):
         load_lambda_delivery(
             path, dids_path=Path("data/dids.yaml"), providers_path=PROFILE / "tuning_providers.yaml"
         )
+
+
+# ---------------------------------------------------------------------------
+# R05.16 — one eligibility rule per regime, each with its own provenance
+
+
+def _doc_with(path: tuple[str, ...], value: Any) -> dict[str, Any]:
+    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    node = doc
+    for key in path[:-1]:
+        node = node[key]
+    if value is _DROP:
+        del node[path[-1]]
+    else:
+        node[path[-1]] = value
+    return doc
+
+
+_DROP = object()
+
+
+def test_a_single_global_eligibility_rule_is_not_representable() -> None:
+    """The closed-loop numbers on WOT pulls emptied every enrichment result.
+    Each regime states its own rule; a declaration missing one refuses."""
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
+
+    with pytest.raises(ValidationError, match="enrichment"):
+        LambdaDeliveryDeclaration.model_validate(
+            _doc_with(("eligibility", "regimes", "enrichment"), _DROP)
+        )
+    with pytest.raises(ValidationError, match="regimes"):
+        LambdaDeliveryDeclaration.model_validate(_doc_with(("eligibility", "regimes"), _DROP))
+
+
+@pytest.mark.parametrize("field", ["informed_by", "held_out", "conditions", "transport_delays"])
+def test_a_regime_rule_must_state_its_provenance(field: str) -> None:
+    """A measured constraint is a required field: which drives chose it, which
+    judged it, and under what conditions — never a default."""
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
+
+    with pytest.raises(ValidationError, match=field):
+        LambdaDeliveryDeclaration.model_validate(
+            _doc_with(("eligibility", "regimes", "enrichment", field), _DROP)
+        )
+
+
+def test_a_drive_cannot_both_inform_and_judge_a_rule() -> None:
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
+
+    doc = yaml.safe_load(DECLARATION_PATH.read_text())
+    rule = doc["eligibility"]["regimes"]["enrichment"]
+    rule["held_out"] = [*rule["held_out"], rule["informed_by"][0]]
+    with pytest.raises(ValidationError, match="both informed and held out"):
+        LambdaDeliveryDeclaration.model_validate(doc)
+
+
+def test_a_frozen_delay_names_its_drives_and_sits_inside_its_bracket() -> None:
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
+
+    path = ("eligibility", "regimes", "enrichment", "transport_delays", "ram_final_target")
+    delay = yaml.safe_load(DECLARATION_PATH.read_text())
+    for key in path:
+        delay = delay[key]
+    with pytest.raises(ValidationError, match="outside its bracket"):
+        LambdaDeliveryDeclaration.model_validate(_doc_with(path, {**delay, "seconds": 0.7}))
+    with pytest.raises(ValidationError, match="needs seconds, bracket_s, fitted_on"):
+        LambdaDeliveryDeclaration.model_validate(_doc_with(path, {**delay, "fitted_on": []}))
+    with pytest.raises(ValidationError, match="not in informed_by"):
+        LambdaDeliveryDeclaration.model_validate(
+            _doc_with(path, {**delay, "fitted_on": ["_capture-elsewhere-2026-01-01T000000"]})
+        )
+    with pytest.raises(ValidationError, match="carries no seconds"):
+        LambdaDeliveryDeclaration.model_validate(
+            _doc_with(path, {**delay, "status": "not_estimated", "fitted_on": []})
+        )
+
+
+def test_the_enrichment_delay_pairs_a_later_reading_and_closed_loop_does_not() -> None:
+    """The frozen enrichment delay shifts only enrichment rows: a target read at
+    t pairs with the lambda read near t + delay, still inside 250 ms."""
+    doc = declaration()
+    delay = doc.eligibility.regimes.delay("enrichment", "ram_final_target").seconds
+    assert delay == pytest.approx(0.1)
+    # Measured reads at t (the "same instant" one, wrong) and t + 0.1 (right).
+    target = _long([1.2] * 4 + [1.0] * 4)  # phi: enrichment, then stoich
+    early = _long([0.83] * 4 + [1.0] * 4)
+    late = _long([0.80] * 4 + [1.0] * 4, start=delay)
+    measured = pd.concat([early, late], ignore_index=True)
+    frame = delivery_samples(
+        target=target,
+        measured=measured,
+        declaration=doc,
+        target_source="ram_final_target",
+        measured_source="ecm_lambda_pid_0x24",
+        afr_stoich=14.7,
+    ).frame
+    enrich = frame[frame["regime"] == "enrichment"]
+    closed = frame[frame["regime"] == "closed_loop"]
+    assert enrich["measured_lambda"].tolist() == pytest.approx([0.80] * 4)
+    assert enrich["separation_s"].max() == pytest.approx(0.0, abs=1e-6)
+    assert closed["separation_s"].max() == pytest.approx(0.0, abs=1e-6)
+
+
+def test_the_enrichment_rule_keeps_a_ramping_pull_the_closed_loop_rule_would_drop() -> None:
+    """A WOT target ramps with rpm and a shift cuts fuel just before it: 6 s
+    after the cut and 0.6 s of target within 0.01 lambda is steady enough at
+    WOT, where the closed-loop 15 s / 3 s rule admitted nothing (R05.16)."""
+    doc = declaration()
+    cut_then_pull = [0.0] + [1.18] * 12  # cut at t=0, then a steady rich target
+    frame = delivery_samples(
+        target=_long(cut_then_pull),
+        measured=_long([2.0] + [1 / 1.18] * 12, start=0.1),
+        declaration=doc,
+        target_source="mode01_pid_0x44",
+        measured_source="ecm_lambda_pid_0x24",
+        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
+        afr_stoich=14.7,
+    ).frame
+    states = frame["state"].tolist()
+    assert states[0] == "fuel_cut"
+    assert states[1:6] == ["post_fuel_cut"] * 5  # 1..5 s after the cut
+    assert states[6:] == [ELIGIBLE] * 7
+
+
+def test_delay_bracket_is_every_candidate_near_the_best() -> None:
+    from src.analysis.lambda_delivery import TransportDelay, delay_bracket
+
+    delay = TransportDelay(
+        seconds=0.1,
+        fitted_on=("a",),
+        method="scan",
+        candidates=(0.0, 0.05, 0.1, 0.15, 0.2, 0.3),
+        scores=(4.28, 3.60, 3.56, 3.56, 3.60, 4.65),
+        n_rows=161,
+    )
+    assert delay_bracket(delay, margin=0.05) == (0.05, 0.2)
+
+
+def test_a_regime_scoped_delay_scan_scores_only_that_regime() -> None:
+    """Closed-loop rows (target exactly 1.0) must not dilute an enrichment
+    delay: with them excluded the drive is too thin to score."""
+    doc = declaration()
+    inputs = _lagged_drive(1.0)
+    with pytest.raises(LambdaDeliveryError, match="insufficient training evidence"):
+        estimate_transport_delay(
+            {"driveA": DriveInputs(target=_long([1.0] * 40), measured=_long([1.0] * 40))},
+            declaration=doc,
+            candidates=[0.0, 1.0],
+            target_source="ram_final_target",
+            measured_source="ecm_lambda_pid_0x24",
+            min_rows=10,
+            afr_stoich=14.7,
+            regimes=["enrichment"],
+        )
+    scoped = estimate_transport_delay(
+        {"driveA": inputs},
+        declaration=doc,
+        candidates=[0.0, 0.5, 1.0, 1.5],
+        target_source="ram_final_target",
+        measured_source="ecm_lambda_pid_0x24",
+        min_rows=5,
+        afr_stoich=14.7,
+        regimes=["enrichment"],
+    )
+    assert scoped.seconds == pytest.approx(1.0)
+    assert "enrichment rows" in scoped.method
+
+
+def test_every_commanded_source_declares_its_own_delay() -> None:
+    """R05.16 verification: a delay fitted on the RAM route was applied to PID
+    0x44, whose reads share a batch with the lambda read. Each source now
+    carries its own entry, and a missing one refuses."""
+    from pydantic import ValidationError
+
+    from src.analysis.lambda_delivery import LambdaDeliveryDeclaration
+
+    with pytest.raises(ValidationError, match="must name every commanded source"):
+        LambdaDeliveryDeclaration.model_validate(
+            _doc_with(
+                ("eligibility", "regimes", "enrichment", "transport_delays", "mode01_pid_0x44"),
+                _DROP,
+            )
+        )
+
+
+def test_the_pid_0x44_route_pairs_as_acquired() -> None:
+    """Its delay is not estimated: the same-batch lambda read pairs, not the
+    one nearest ``t + 0.10 s``."""
+    doc = declaration()
+    assert doc.eligibility.regimes.delay("enrichment", "mode01_pid_0x44").status == "not_estimated"
+    target = _long([1.2] * 4)
+    same_batch = _long([0.83] * 4, start=0.006)
+    next_batch = _long([0.80] * 4, start=0.25)
+    samples = delivery_samples(
+        target=target,
+        measured=pd.concat([same_batch, next_batch], ignore_index=True),
+        declaration=doc,
+        target_source="mode01_pid_0x44",
+        measured_source="ecm_lambda_pid_0x24",
+        calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
+        afr_stoich=14.7,
+    )
+    assert samples.delays_s == {"closed_loop": 0.0, "enrichment": 0.0}
+    assert samples.frame["measured_lambda"].tolist() == pytest.approx([0.83] * 4)
+
+
+def test_the_sign_test_counts_reads_not_means() -> None:
+    from src.analysis.lambda_delivery import PairwiseDelaySupport, per_pair_bracket, sign_test_p
+
+    # The RAM-route 0.10 s vs 0 s split on the informing drives.
+    assert sign_test_p(58, 41) == pytest.approx(0.107, abs=0.002)
+    assert sign_test_p(0, 0) == 1.0
+    assert sign_test_p(1681, 1507) < 0.01  # large n does not overflow
+    supports = [
+        PairwiseDelaySupport(0.1, 0.0, 41, 58, 62, sign_test_p(41, 58)),
+        PairwiseDelaySupport(0.1, 0.1, 0, 0, 161, 1.0),
+        PairwiseDelaySupport(0.1, 0.55, 62, 96, 1, sign_test_p(62, 96)),
+    ]
+    assert per_pair_bracket(supports) == (0.0, 0.1)

@@ -15,9 +15,10 @@ contract that relationship has to satisfy before anything is fitted on it:
   a convention verified from stoich-only data.
 * **One residual.** :func:`residual_pct` is the single signed residual,
   ``100 * (measured / target - 1)`` in lambda or AFR (positive = lean of
-  target). :func:`src.analysis.tuning.delivery_error_from_gated` uses it too,
-  so analysis and any later serving path cannot drift apart in sign or
-  definition. It refuses phi, whose ratio inverts the sign.
+  target). Since R05.16 :func:`src.analysis.tuning.delivery_error` (MCP, the
+  digest, the workbench, the report CLI) is built on :func:`delivery_samples`,
+  so analysis and any later serving path cannot drift apart in sign,
+  definition or pairing. It refuses phi, whose ratio inverts the sign.
 * **Named states, never manufactured numbers.** Fuel cut (the RAM word's
   ``_SENTINEL`` or PID 0x44 = 0), invalid targets, sensor rails, missing
   pairs, an unverified convention and a source used outside the regime it
@@ -176,24 +177,114 @@ class SourceDisagreement(_Strict):
     evidence: str = Field(min_length=1)
 
 
-class Eligibility(_Strict):
-    """The steady-target / steady-operation rule and where its numbers came from."""
+class RegimeDelay(_Strict):
+    """Exhaust transport + sensor response delay for one regime (R05.16).
 
-    #: ``|lambda_target - 1| <= closed_loop_band`` is the closed-loop regime.
-    closed_loop_band: float = Field(gt=0)
+    Transport delay falls as exhaust flow rises, so a value measured on WOT
+    pulls is a fact about enrichment and nothing else. ``frozen`` names the
+    drives that chose it and the bracket the data supports; a value finer
+    than the bracket is not a claim this data can make.
+    """
+
+    status: Literal["not_estimated", "frozen"]
+    #: Applied to the measured clock (measured read at ``t + seconds`` pairs
+    #: with the target read at ``t``). ``None`` exactly when not estimated.
+    seconds: float | None
+    #: ``[lo, hi]``: every candidate whose score is within the stated margin
+    #: of the best. Required when frozen.
+    bracket_s: tuple[float, float] | None = None
+    fitted_on: list[str] = Field(default_factory=list)
+    method: str | None = None
+    note: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> RegimeDelay:
+        if self.status == "not_estimated":
+            if self.seconds is not None or self.fitted_on:
+                raise ValueError("a not_estimated delay carries no seconds and no fitted_on")
+            return self
+        if self.seconds is None or self.bracket_s is None or not self.fitted_on or not self.method:
+            raise ValueError("a frozen delay needs seconds, bracket_s, fitted_on and method")
+        lo, hi = self.bracket_s
+        if not 0 <= lo <= self.seconds <= hi:
+            raise ValueError(f"frozen delay {self.seconds} s lies outside its bracket {lo}..{hi} s")
+        return self
+
+
+class RegimeEligibility(_Strict):
+    """The steady-target / steady-operation rule for one target regime.
+
+    Every number is a measured constraint of the regime it was measured in,
+    so each regime states its own, with the drives that chose them
+    (``informed_by``) and the drives it was judged on (``held_out``). The
+    closed-loop numbers on a WOT pull emptied every enrichment result
+    (R05.16); one global rule cannot be written any more.
+    """
+
+    #: The operating condition these constants were measured under.
+    conditions: str = Field(min_length=1)
     #: The target must have held within ``target_step_tolerance`` (lambda)
     #: for this long before a sample is eligible.
     steady_target_dwell_s: float = Field(ge=0)
     target_step_tolerance: float = Field(ge=0)
-    #: Target observations further apart than this cannot establish a dwell.
-    max_target_gap_s: float = Field(gt=0)
     #: Samples this soon after the last fuel-cut observation are the
     #: post-cut recovery, not steady delivery.
     post_fuel_cut_holdoff_s: float = Field(ge=0)
-    #: Sessions whose data informed these constants. They are not
-    #: independent evidence for any evaluation that uses them.
-    informed_by: list[str] = Field(default_factory=list)
+    #: One delay per commanded source (by name), each fitted on its own route:
+    #: sources differ in how their reads sit against the measured read in the
+    #: poll cycle, so a delay one route supports can be unresolvable on
+    #: another (R05.16 — PID 0x44 shares a Mode 01 batch with PID 0x24).
+    #: The declaration requires an entry for every commanded source.
+    transport_delays: dict[str, RegimeDelay]
+    #: Sessions whose data chose these constants. They are not independent
+    #: evidence for any evaluation that uses them. Required, never defaulted.
+    informed_by: list[str]
+    #: Sessions the constants were judged on and did not see. Required; an
+    #: empty list states that no held-out judgement was made.
+    held_out: list[str]
     justification: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _split(self) -> RegimeEligibility:
+        both = sorted(set(self.informed_by) & set(self.held_out))
+        if both:
+            raise ValueError(f"sessions both informed and held out: {both}")
+        fitted = {name for delay in self.transport_delays.values() for name in delay.fitted_on}
+        stray = sorted(fitted - set(self.informed_by))
+        if stray:
+            raise ValueError(f"transport delay fitted on sessions not in informed_by: {stray}")
+        return self
+
+
+class RegimeRules(_Strict):
+    """One rule per regime a delivery residual may be computed in. Both required."""
+
+    closed_loop: RegimeEligibility
+    enrichment: RegimeEligibility
+
+    def delay(self, regime: str, source: str) -> RegimeDelay:
+        """The transport delay ``source``'s reads get in ``regime``."""
+        return self.for_regime(regime).transport_delays[source]
+
+    def for_regime(self, regime: str) -> RegimeEligibility:
+        """The enrichment rule for enrichment rows; closed loop's for every other."""
+        return self.enrichment if regime == "enrichment" else self.closed_loop
+
+
+class Eligibility(_Strict):
+    """Regime boundaries, target gap limit, and each regime's own rule."""
+
+    #: ``|lambda_target - 1| <= closed_loop_band`` is the closed-loop regime.
+    closed_loop_band: float = Field(gt=0)
+    #: Target observations further apart than this cannot establish a dwell.
+    max_target_gap_s: float = Field(gt=0)
+    regimes: RegimeRules
+
+    @property
+    def informed_by(self) -> list[str]:
+        """Every session that informed any regime's constants."""
+        seen = [*self.regimes.closed_loop.informed_by, *self.regimes.enrichment.informed_by]
+        return list(dict.fromkeys(seen))
 
 
 class Acquisition(_Strict):
@@ -205,11 +296,6 @@ class Acquisition(_Strict):
 
     max_separation_s: float = Field(gt=0)
     evidence: str = Field(min_length=1)
-
-
-class TransportDelayDeclaration(_Strict):
-    status: Literal["not_estimated", "frozen"]
-    note: str = Field(min_length=1)
 
 
 class RegimeFloor(_Strict):
@@ -230,7 +316,6 @@ class LambdaDeliveryDeclaration(_Strict):
     source_disagreements: list[SourceDisagreement] = Field(default_factory=list)
     eligibility: Eligibility
     acquisition: Acquisition
-    transport_delay: TransportDelayDeclaration
     noise_floors: dict[Regime, RegimeFloor] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -238,6 +323,15 @@ class LambdaDeliveryDeclaration(_Strict):
         names = [s.name for s in self.commanded_sources] + [s.name for s in self.measured_sources]
         if len(names) != len(set(names)):
             raise ValueError("source names must be unique")
+        sources = {s.name for s in self.commanded_sources}
+        for regime in ("closed_loop", "enrichment"):
+            declared = set(getattr(self.eligibility.regimes, regime).transport_delays)
+            if declared != sources:
+                raise ValueError(
+                    f"eligibility.regimes.{regime}.transport_delays must name every commanded "
+                    f"source exactly once: missing {sorted(sources - declared)}, "
+                    f"unknown {sorted(declared - sources)}"
+                )
         refused = {r.spec for r in self.refused_commanded}
         clash = sorted(refused & {s.spec for s in self.commanded_sources})
         if clash:
@@ -465,7 +559,8 @@ class DeliverySamples:
     frame: pd.DataFrame
     target_source: str
     measured_source: str
-    delay_s: float
+    #: Transport delay applied per regime (``closed_loop``/``enrichment``).
+    delays_s: dict[str, float]
     acquisition_max_separation_s: float
     counts: dict[str, int] = field(default_factory=dict)
 
@@ -490,7 +585,7 @@ class DeliverySamples:
             "target_source": self.target_source,
             "measured_source": self.measured_source,
             "residual": declaration.residual.definition,
-            "transport_delay_s": self.delay_s,
+            "transport_delay_s": dict(self.delays_s),
             "acquisition": {
                 "max_separation_s": self.acquisition_max_separation_s,
                 "median_separation_s": float(np.median(separations)) if len(separations) else None,
@@ -756,6 +851,7 @@ def delivery_samples(
     delay: TransportDelay | None = None,
     drive_id: str | None = None,
     evaluation: bool = False,
+    regime_delays_s: Mapping[str, float] | None = None,
 ) -> DeliverySamples:
     """Pair each target observation with one measured observation and name its state.
 
@@ -766,17 +862,25 @@ def delivery_samples(
 
     One row per target observation *and* per fuel-cut observation, so a cut
     is counted as ``fuel_cut`` instead of disappearing. ``residual_pct`` is
-    set only on ``eligible`` rows. ``delay`` shifts the measured clock back by
-    a frozen transport delay before pairing; the acquisition tolerance still
-    bounds how far apart the two reads may be after that shift.
+    set only on ``eligible`` rows.
 
-    ``evaluation=True`` additionally refuses drives that informed the
-    declared eligibility constants.
+    Each row is judged by its own regime's rule
+    (``eligibility.regimes``, R05.16): its dwell, tolerance and post-cut
+    holdoff, and its frozen transport delay — the target read at ``t`` is
+    paired with a measured read near ``t + delay``, still within the
+    acquisition tolerance. The delay is the declared one for this commanded
+    source in the row's regime; ``not_estimated`` pairs with no shift.
+    ``delay`` overrides every regime's (the lag scan in
+    :func:`estimate_transport_delay`), and refuses a drive it was fitted on;
+    ``regime_delays_s`` overrides per regime (a bracket-end robustness check).
+    ``evaluation=True`` additionally refuses drives that informed any
+    regime's constants.
     """
     commanded = declaration.commanded(target_source)
     instrument = declaration.measured(measured_source)
     _refuse_dependent_drive(drive_id, declaration, delay, evaluation=evaluation)
     elig = declaration.eligibility
+    rules = elig.regimes
     quantity = resolve_quantity(commanded, calibration)
 
     target_side = _target_side(
@@ -788,12 +892,23 @@ def delivery_samples(
     measured_side = _measured_side(
         measured, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
     )
+    regime = regime_of(target_lambda, elig.closed_loop_band)
+    enriching = regime == "enrichment"
 
-    delay_s = 0.0 if delay is None else float(delay.seconds)
+    if delay is not None:
+        delays_s = {"closed_loop": float(delay.seconds), "enrichment": float(delay.seconds)}
+    else:
+        delays_s = {
+            name: float(rules.delay(name, commanded.name).seconds or 0.0)
+            for name in ("closed_loop", "enrichment")
+        }
+        if regime_delays_s is not None:
+            delays_s.update({k: float(v) for k, v in regime_delays_s.items()})
+    shift = np.where(enriching, delays_s["enrichment"], delays_s["closed_loop"])
     policy = PairingPolicy.within(
         pd.Timedelta(seconds=declaration.acquisition.max_separation_s), reference="a"
     )
-    matched = match_ordered(times, measured_side.times - delay_s, policy)
+    matched = match_ordered(times + shift, measured_side.times, policy)
     paired = np.full(n, -1, dtype=np.intp)
     separation = np.full(n, np.nan)
     paired[matched.index_a] = matched.index_b
@@ -803,14 +918,21 @@ def delivery_samples(
     pair_railed = has_pair & measured_side.railed[np.maximum(paired, 0)]
     pair_censored = has_pair & measured_side.censored[np.maximum(paired, 0)]
 
-    regime = regime_of(target_lambda, elig.closed_loop_band)
-    steady = _steady_target_mask(
-        times,
-        target_lambda,
-        cut,
-        dwell_s=elig.steady_target_dwell_s,
-        max_gap_s=elig.max_target_gap_s,
-        tolerance=elig.target_step_tolerance,
+    def steady_under(rule: RegimeEligibility) -> np.ndarray:
+        return _steady_target_mask(
+            times,
+            target_lambda,
+            cut,
+            dwell_s=rule.steady_target_dwell_s,
+            max_gap_s=elig.max_target_gap_s,
+            tolerance=rule.target_step_tolerance,
+        )
+
+    steady = np.where(enriching, steady_under(rules.enrichment), steady_under(rules.closed_loop))
+    holdoff = np.where(
+        enriching,
+        rules.enrichment.post_fuel_cut_holdoff_s,
+        rules.closed_loop.post_fuel_cut_holdoff_s,
     )
     since_cut = _seconds_since_cut(times, cut)
 
@@ -824,7 +946,7 @@ def delivery_samples(
             ("measured_missing", ~has_pair),
             ("measured_rail", pair_railed),
             ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
-            ("post_fuel_cut", since_cut < elig.post_fuel_cut_holdoff_s),
+            ("post_fuel_cut", since_cut < holdoff),
             ("target_transient", ~steady),
             (
                 "source_not_valid_in_regime",
@@ -858,7 +980,7 @@ def delivery_samples(
         frame=frame,
         target_source=commanded.name,
         measured_source=instrument.name,
-        delay_s=delay_s,
+        delays_s=delays_s,
         acquisition_max_separation_s=declaration.acquisition.max_separation_s,
         counts=counts,
     )
@@ -883,8 +1005,16 @@ def estimate_transport_delay(
     calibration: AfrCalibration | None = None,
     afr_stoich: float,
     min_rows: int = 30,
+    regimes: Sequence[Regime] | None = None,
 ) -> TransportDelay:
     """Choose one delay on training drives only and freeze it.
+
+    ``regimes`` restricts scoring to rows whose target is in those regimes
+    (R05.16: transport delay shortens as exhaust flow rises, so an enrichment
+    delay is fitted on enrichment rows). Those rows are scored whether or not
+    they sit inside the post-cut holdoff, since the holdoff is itself one of
+    the constants being chosen; fuel cut, rails, censoring and missing pairs
+    are never scored.
 
     Each candidate shifts the measured clock; the score is the *mean*
     absolute residual over every row that has both a target and a
@@ -920,7 +1050,13 @@ def estimate_transport_delay(
                 delay=frozen,
                 drive_id="__training__",
             ).frame
-            rows = samples[samples["state"].isin([ELIGIBLE, "target_transient"])]
+            if regimes is None:
+                rows = samples[samples["state"].isin([ELIGIBLE, "target_transient"])]
+            else:
+                rows = samples[
+                    samples["state"].isin([ELIGIBLE, "target_transient", "post_fuel_cut"])
+                    & samples["regime"].isin(list(regimes))
+                ]
             values.append(
                 np.abs(
                     residual_pct(
@@ -951,11 +1087,153 @@ def estimate_transport_delay(
     return TransportDelay(
         seconds=chosen,
         fitted_on=tuple(sorted(train)),
-        method="mean_abs_residual_at_target_transitions",
+        method="mean_abs_residual_at_target_transitions"
+        + ("" if regimes is None else f" ({'+'.join(regimes)} rows)"),
         candidates=tuple(ordered),
         scores=tuple(scores),
         n_rows=rows_used,
     )
+
+
+@dataclass(frozen=True)
+class PairwiseDelaySupport:
+    """One candidate delay against a reference, compared read by read.
+
+    Each commanded-target read is scored at both delays; ``better`` counts the
+    reads whose |residual| is smaller at the candidate by more than the
+    tie tolerance, ``worse`` larger, ``same`` within it (usually the same
+    measured read paired both times). ``p_value`` is the exact two-sided sign
+    test on ``better`` vs ``worse``: the per-pair answer to "does this delay
+    fit better", where a difference of means can be carried by a few tails.
+    """
+
+    reference_s: float
+    candidate_s: float
+    better: int
+    worse: int
+    same: int
+    p_value: float
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "reference_s": self.reference_s,
+            "candidate_s": self.candidate_s,
+            "better": self.better,
+            "worse": self.worse,
+            "same": self.same,
+            "p_value": self.p_value,
+        }
+
+
+def sign_test_p(better: int, worse: int) -> float:
+    """Exact two-sided binomial sign test (ties excluded before calling)."""
+    from fractions import Fraction
+    from math import comb
+
+    n = better + worse
+    if n == 0:
+        return 1.0
+    k = min(better, worse)
+    tail = Fraction(sum(comb(n, i) for i in range(k + 1)), 2**n)
+    return float(min(Fraction(1), 2 * tail))
+
+
+def per_pair_delay_support(
+    train: Mapping[str, DriveInputs],
+    *,
+    declaration: LambdaDeliveryDeclaration,
+    candidates: Sequence[float],
+    reference_s: float,
+    regimes: Sequence[Regime],
+    target_source: str | None = None,
+    measured_source: str | None = None,
+    calibration: AfrCalibration | None = None,
+    afr_stoich: float,
+    tie_pct: float = 0.01,
+) -> list[PairwiseDelaySupport]:
+    """Each candidate against ``reference_s``, read by read (see :class:`PairwiseDelaySupport`).
+
+    Only reads scored at both delays count: target read in ``regimes`` and in
+    a state :func:`estimate_transport_delay` scores (eligible, transient or
+    inside the post-cut holdoff). The target side does not depend on the
+    delay, so row ``i`` is the same target read at every candidate.
+    """
+    scored_states = [ELIGIBLE, "target_transient", "post_fuel_cut"]
+
+    def residuals(lag: float) -> list[np.ndarray]:
+        frozen = TransportDelay(lag, tuple(), "candidate", tuple(), tuple(), 0)
+        out: list[np.ndarray] = []
+        for inputs in train.values():
+            frame = delivery_samples(
+                target=inputs.target,
+                measured=inputs.measured,
+                sentinel=inputs.sentinel,
+                declaration=declaration,
+                target_source=target_source,
+                measured_source=measured_source,
+                calibration=calibration,
+                afr_stoich=afr_stoich,
+                delay=frozen,
+                drive_id="__training__",
+            ).frame
+            ok = frame["state"].isin(scored_states) & frame["regime"].isin(list(regimes))
+            value = np.abs(
+                residual_pct(
+                    frame["measured_lambda"].to_numpy(dtype=float),
+                    frame["target_lambda"].to_numpy(dtype=float),
+                    quantity="lambda",
+                )
+            )
+            out.append(np.where(ok.to_numpy(), value, np.nan))
+        return out
+
+    reference = residuals(reference_s)
+    supports: list[PairwiseDelaySupport] = []
+    for lag in sorted({float(c) for c in candidates}):
+        better = worse = same = 0
+        for ref, cand in zip(reference, residuals(lag), strict=True):
+            both = np.isfinite(ref) & np.isfinite(cand)
+            diff = cand[both] - ref[both]
+            better += int((diff < -tie_pct).sum())
+            worse += int((diff > tie_pct).sum())
+            same += int((np.abs(diff) <= tie_pct).sum())
+        supports.append(
+            PairwiseDelaySupport(reference_s, lag, better, worse, same, sign_test_p(better, worse))
+        )
+    return supports
+
+
+def per_pair_bracket(
+    supports: Sequence[PairwiseDelaySupport], *, alpha: float = 0.05
+) -> tuple[float, float]:
+    """Candidates the per-pair sign test cannot tell from the reference, as ``(lo, hi)``.
+
+    A candidate is inside when it is not significantly *worse* than the
+    reference (``p >= alpha`` or more reads better than worse).
+    """
+    inside = [s.candidate_s for s in supports if s.p_value >= alpha or s.better >= s.worse]
+    if not inside:
+        raise LambdaDeliveryError("no candidate is indistinguishable from the reference")
+    return (min(inside), max(inside))
+
+
+def delay_bracket(delay: TransportDelay, *, margin: float) -> tuple[float, float]:
+    """Every candidate scoring within ``margin`` (a fraction) of the best, as ``(lo, hi)``.
+
+    The width the data supports. A scan whose candidates only change which
+    measured read pairs at multiples of the polling cycle has a flat bottom;
+    quoting the arg-min alone would claim a resolution the clock never had.
+    """
+    scored = [
+        (score, lag)
+        for score, lag in zip(delay.scores, delay.candidates, strict=True)
+        if score is not None
+    ]
+    if not scored:
+        raise LambdaDeliveryError("a delay without scores has no bracket")
+    best = min(score for score, _ in scored)
+    near = [lag for score, lag in scored if score <= best * (1.0 + margin)]
+    return (min(near), max(near))
 
 
 # ---------------------------------------------------------------------------
@@ -1136,6 +1414,11 @@ __all__ = [
     "TransportDelay",
     "check_target_convention",
     "delivery_samples",
+    "PairwiseDelaySupport",
+    "delay_bracket",
+    "per_pair_bracket",
+    "per_pair_delay_support",
+    "sign_test_p",
     "estimate_transport_delay",
     "load_lambda_delivery",
     "regime_noise_floor",

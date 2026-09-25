@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
-from src.analysis.tune_revisions import load_tune_revisions, resolve_session_revision
+from src.analysis.tune_revisions import resolve_session_revision
 from src.analysis.tuning_context import context_fields
 from src.analysis.workbench import (
     Unavailable,
@@ -53,7 +53,7 @@ from src.control.trip_end import (
     limit_address_space,
 )
 from src.preprocessing.loader import count_session_rows
-from src.profiles import active_registry_path, profile_dir
+from src.profiles import active_registry, profile_dir
 from src.session import session_sort_key
 
 #: Most sessions one pooled request may name. Each is read in turn in the
@@ -194,7 +194,7 @@ def select_sessions(
         )
     omitted: list[str] = []
     if revision is not None:
-        registry = load_tune_revisions(active_registry_path(config))
+        registry = active_registry(config)
         on_revision = [
             session
             for session in _all_session_dirs(root)

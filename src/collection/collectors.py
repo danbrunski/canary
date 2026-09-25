@@ -21,7 +21,7 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.analysis.tune_revisions import load_tune_revisions
+from src.analysis.tune_revisions import RegistryConflictError
 from src.collection import tuning_profile
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
@@ -45,7 +45,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.collection.supply_voltage_collector import collect_supply_voltage_from_config
 from src.config import CanaryConfig
-from src.control.calibration import active_registry_path
+from src.control.calibration import active_registry
 from src.telemetry import TelemetryRecord
 
 if TYPE_CHECKING:
@@ -109,7 +109,13 @@ def default_collectors(
     if config.collection.obd_source == "canable":
         # The operational registry (a flash recorded through the daemon, W06.5)
         # wins over the tracked profile copy, same as /control/calibration.
-        registry = load_tune_revisions(active_registry_path(config))
+        try:
+            registry = active_registry(config)
+        except RegistryConflictError as exc:
+            # Collection does not need the flash history; /status carries the
+            # refusal as a calibration alert (R05.17).
+            log.error("running tune revision unknown: %s", exc)
+            registry = None
         current = None if registry is None else registry.at(datetime.now(UTC))
         tuning_profile.configure_running_tune_revision(
             None if current is None else current.revision,

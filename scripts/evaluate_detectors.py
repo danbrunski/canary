@@ -156,7 +156,7 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
-from src.profiles import active_registry_path
+from src.profiles import active_registry, active_registry_sources
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 
 log = logging.getLogger(__name__)
@@ -1413,11 +1413,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     by_name = {path.name: path for path in recorded}
     by_name.update({path.name: path for path in args.sessions})
 
-    # R05.1: the profile's active flash registry (operational copy first).
-    tune_path = args.tune_revisions or active_registry_path(_scoped(config, args.profile))
+    # R05.1/R05.17: the profile's flash history, tracked and operational
+    # registries merged; an explicit --tune-revisions file is read as given.
+    if args.tune_revisions:
+        tune_registry = load_tune_revisions(args.tune_revisions)
+        tune_sources: tuple[Path, ...] = (args.tune_revisions,)
+    else:
+        scoped = _scoped(config, args.profile)
+        tune_registry = active_registry(scoped)
+        tune_sources = active_registry_sources(scoped)
     labels_path = args.labels or data_dir / LABELLED_EVENTS_FILENAME
-    registry = load_labelled_events(labels_path, tune_revisions_path=tune_path)
-    tune_registry = load_tune_revisions(tune_path)
+    registry = load_labelled_events(
+        labels_path, tune_registry=tune_registry, tune_sources=tune_sources
+    )
     flash_times = {r.flashed_at for r in (tune_registry.revisions if tune_registry else [])}
     hardware = [
         e.start for e in registry.events if e.corpus_boundary and e.start not in flash_times
