@@ -953,3 +953,88 @@ def test_client_is_loopback_detects_socket_peer() -> None:
     assert _client_is_loopback(req(("10.0.0.2", 1))) is False
     assert _client_is_loopback(req(("testclient", 1))) is False  # unparseable
     assert _client_is_loopback(req(None)) is False  # no client (e.g. raw ASGI)
+
+
+def test_delete_refuses_the_session_the_writer_is_filling(tmp_path: Path) -> None:
+    """R03.3: with no capture active, the plain live session could be
+    ``rmtree``'d under the writer; retention protects it, the route did not."""
+    from src.storage.async_writer import AsyncParquetTelemetryWriter
+    from src.storage.parquet_writer import ParquetTelemetryWriter
+
+    storage = tmp_path / "storage"
+    older = storage / "2026-05-16T120000"
+    older.mkdir(parents=True)
+    cfg_path = tmp_path / "canary.yaml"
+    cfg_path.write_text(_config_yaml(storage))
+    config = CanaryConfig.from_yaml(cfg_path)
+    writer = AsyncParquetTelemetryWriter(ParquetTelemetryWriter(storage))
+    live = writer.paths.root
+    live.mkdir(parents=True, exist_ok=True)
+    app = create_app(
+        config,
+        anomalies_dir=tmp_path / "anomalies",
+        capture_controller=CaptureController(lambda: live),
+        control_token="secret",
+        storage_writer=writer,
+    )
+    client = TestClient(app)
+
+    blocked = client.delete(f"/control/sessions/{live.name}", headers=_auth())
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"] == "cannot delete the session being written"
+    assert live.exists()
+
+    # Any other session still deletes.
+    assert client.delete(f"/control/sessions/{older.name}", headers=_auth()).status_code == 200
+    assert not older.exists()
+
+
+def test_control_websocket_refuses_a_wrong_or_missing_token(tmp_path: Path) -> None:
+    """R03.4: ``/ws/control`` goes through the shared control-auth rule; a
+    refusal still closes the handshake with 1008."""
+    from starlette.websockets import WebSocketDisconnect
+
+    client, _session = _client(tmp_path)
+    for url in ("/ws/control?token=wrong", "/ws/control"):
+        with pytest.raises(WebSocketDisconnect) as refused:
+            with client.websocket_connect(url):
+                pass
+        assert refused.value.code == 1008
+
+
+async def test_control_websocket_rule_matches_the_http_rule() -> None:
+    """Constant-time token check, and the loopback exemption only while no
+    token is configured — the HTTP control routes' rule, which ``/ws/control``
+    (``token != expected``, never loopback) used to diverge from."""
+    from fastapi import WebSocketException
+    from starlette.websockets import WebSocket
+
+    from src.dashboard.security import websocket_control_auth_dependency
+
+    def _ws(host: str, query: bytes) -> WebSocket:
+        scope = {
+            "type": "websocket",
+            "client": (host, 50000),
+            "query_string": query,
+            "headers": [],
+            "path": "/ws/control",
+        }
+
+        async def _receive() -> dict[str, Any]:
+            return {}
+
+        async def _send(_message: dict[str, Any]) -> None:
+            return None
+
+        return WebSocket(scope, _receive, _send)
+
+    configured = websocket_control_auth_dependency("secret")
+    await configured(_ws("10.0.0.5", b"token=secret"))
+    for host, query in (("10.0.0.5", b"token=nope"), ("127.0.0.1", b"")):
+        with pytest.raises(WebSocketException):
+            await configured(_ws(host, query))
+
+    unconfigured = websocket_control_auth_dependency(None)
+    await unconfigured(_ws("127.0.0.1", b""))
+    with pytest.raises(WebSocketException):
+        await unconfigured(_ws("10.0.0.5", b""))

@@ -2801,3 +2801,17 @@ def test_obd_collector_handoff_stats_reach_health_as_obd_collect() -> None:
     assert sink["derived_records"] == 5003 and sink["raw_responses"] == 900
     assert sink["reconnects"] == 1
     assert stats.to_dict()["accepted"] == 5000
+
+
+async def test_cancel_all_cancels_in_order_and_skips_absent_tasks() -> None:
+    """R03.11: the teardown helper cancels each started task and awaits it."""
+    from src.daemon.runtime import _cancel_all
+
+    async def forever() -> None:
+        await asyncio.Event().wait()
+
+    first = asyncio.create_task(forever())
+    second = asyncio.create_task(forever())
+    await asyncio.sleep(0)
+    await _cancel_all((first, None, second))
+    assert first.cancelled() and second.cancelled()

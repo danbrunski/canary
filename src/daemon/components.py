@@ -41,6 +41,7 @@ from src.models.sequence_registry import resolve_sequence_backend
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 if TYPE_CHECKING:
+    from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
     from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
@@ -140,6 +141,13 @@ class DaemonComponents:
     #: effective with the reason. ``None`` in tests that build components by
     #: hand (the configured roles then apply as before).
     role_gate: DetectorRoleGate | None = None
+    #: R03.5 — the profile-capture lifecycle (start/stop/pause/quality) and
+    #: the autostart that drives it, built by ``run_daemon`` once the writer
+    #: and live source exist. The dashboard routes and daemon shutdown share
+    #: these instances, so a capture ended by shutdown is judged against the
+    #: same in-memory start epoch a manual stop would use.
+    profile_capture: ProfileCaptureSession | None = None
+    capture_autostart: CaptureAutostart | None = None
 
 
 def build_components(config: CanaryConfig, *, load_models: bool = True) -> DaemonComponents:

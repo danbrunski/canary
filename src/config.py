@@ -764,12 +764,18 @@ class DetectorRolesConfig(_Strict):
         return {"isolation_forest": self.isolation_forest, "lstm_autoencoder": self.sequence}
 
 
-class LSTMAutoencoderConfig(_Strict):
-    enabled: bool
-    sequence_length: int
-    hidden_size: int = 64
-    num_layers: int = 1
-    latent_dim: int
+class _SequenceTrainingConfig(_Strict):
+    """What both sequence-detector backbones train, calibrate and score with.
+
+    LSTM and TCN carried 17 identical copies of these fields (R03.10), so a
+    new training knob could reach one backbone and not the other. Defaults
+    are the TCN's; :class:`LSTMAutoencoderConfig` redeclares ``enabled``,
+    ``sequence_length``, ``latent_dim`` and ``threshold_k`` as required.
+    """
+
+    enabled: bool = False
+    sequence_length: int = 30
+    latent_dim: int = 32
     dropout: float = 0.0
     batch_size: int = 64
     #: Overlapping training windows are highly redundant. Calibration remains
@@ -789,7 +795,7 @@ class LSTMAutoencoderConfig(_Strict):
     early_stopping_patience: int = 10
     min_delta: float = 0.0
     random_state: int = 42
-    threshold_k: float
+    threshold_k: float = 3.0
     #: When set (0–1), calibrate thresholds as this quantile of the
     #: reconstruction-error distribution instead of ``mean + k·σ``.
     #: Reconstruction errors are right-skewed and stride-1 windows heavily
@@ -812,7 +818,16 @@ class LSTMAutoencoderConfig(_Strict):
     suppress_channels: tuple[str, ...] = ()
 
 
-class TCNAutoencoderConfig(_Strict):
+class LSTMAutoencoderConfig(_SequenceTrainingConfig):
+    enabled: bool
+    sequence_length: int
+    latent_dim: int
+    threshold_k: float
+    hidden_size: int = 64
+    num_layers: int = 1
+
+
+class TCNAutoencoderConfig(_SequenceTrainingConfig):
     """Dilated causal TCN autoencoder — the alternate sequence-detector backbone.
 
     Fully defaulted (and ``enabled: false`` by default) so configs without a
@@ -820,38 +835,14 @@ class TCNAutoencoderConfig(_Strict):
     ``sequence_detector: tcn`` and ``enabled: true``.
     """
 
-    enabled: bool = False
-    sequence_length: int = 30
+    # The training fields are ``_SequenceTrainingConfig``'s, shared with the
+    # LSTM (R03.10). Not in the docstring: that is the JSON-schema description.
     channels: int = 64
     kernel_size: int = 3
     num_levels: int = 4
-    latent_dim: int = 32
-    dropout: float = 0.0
     #: Feed a bounded per-channel Δt decay as extra conv input channels (the
     #: GRU-D freshness gate). When false the TCN sees value+mask only.
     use_delta_decay: bool = True
-    batch_size: int = 64
-    training_stride: int = Field(default=5, ge=1)
-    calibration_stride: int = Field(default=1, ge=1)
-    dataloader_workers: int | None = Field(default=None, ge=0)
-    mixed_precision: bool = True
-    compile_model: bool = False
-    min_window_observed_fraction: float = Field(default=0.01, gt=0.0, le=1.0)
-    min_usable_window_fraction: float = Field(default=0.9, gt=0.0, le=1.0)
-    learning_rate: float = 0.001
-    max_epochs: int = 100
-    validation_fraction: float = 0.2
-    early_stopping_patience: int = 10
-    min_delta: float = 0.0
-    random_state: int = 42
-    threshold_k: float = 3.0
-    #: Same contract as ``LSTMAutoencoderConfig.threshold_quantile``
-    #: (Task 3.2: defaults to 0.999).
-    threshold_quantile: float | None = Field(default=0.999, gt=0.0, lt=1.0)
-    #: Feature columns to exclude from anomaly scoring (same contract as
-    #: ``LSTMAutoencoderConfig.suppress_channels`` — each entry expands to
-    #: its rolling-derivative siblings). Applied at train + serve.
-    suppress_channels: tuple[str, ...] = ()
 
 
 class ModelsConfig(_Strict):

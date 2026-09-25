@@ -709,10 +709,11 @@ def test_diagnostic_only_model_is_shown_but_never_alerts(
     assert residuals[0].alerting is False
 
     # Detector: the diagnostic-only residual never reaches fusion or emit.
-    import src.daemon.inference as inference
+    # R03.9: the behavior detector's own module, where it looks these up.
+    import src.daemon.detectors.behavior as behavior_detector
 
-    monkeypatch.setattr(inference, "gate_and_collect", lambda *a, **k: True)
-    monkeypatch.setattr(inference, "_publish_score", lambda *a, **k: None)
+    monkeypatch.setattr(behavior_detector, "gate_and_collect", lambda *a, **k: True)
+    monkeypatch.setattr(behavior_detector, "_publish_score", lambda *a, **k: None)
     emitted: list[str] = []
     sources_seen: list[str] = []
     components = SimpleNamespace(

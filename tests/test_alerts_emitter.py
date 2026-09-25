@@ -675,3 +675,16 @@ def test_emit_dtc_dedupe_key_distinguishes_code_and_status(tmp_path: Path) -> No
     assert second is not None
     assert third is not None
     assert emitter.counters.emitted == 3
+
+
+def test_skipped_capture_profile_resets_restores_and_serializes(tmp_path: Path) -> None:
+    """R03.12 — the capture-profile counter travels like every other one."""
+    logger = AnomalyEventLogger(tmp_path)
+    emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0)
+    emitter.counters.skipped_capture_profile = 4
+    snapshot = emitter.counters.snapshot()
+    assert emitter.counters.to_dict()["skipped_capture_profile"] == 4
+    emitter.counters.reset()
+    assert emitter.counters.skipped_capture_profile == 0
+    emitter.counters.restore(snapshot)
+    assert emitter.counters.skipped_capture_profile == 4

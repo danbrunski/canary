@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query
 
 from src.analysis.channels import ChannelSpecError
 from src.analysis.rom_trace import load_viewer_definition, mapping_refusal
@@ -40,7 +40,9 @@ from src.control.workbench_jobs import (
     run_off_loop,
     select_sessions,
 )
-from src.dashboard.security import _client_is_loopback, _require_control_auth
+from src.dashboard.security import (
+    control_auth_dependency,
+)
 
 DEFAULT_MEASURED = "obd:O2_WR_LAMBDA_S1"
 
@@ -66,12 +68,7 @@ def register_workbench_routes(
     dids_path: Path,
     resolved_control_token: str | None,
 ) -> None:
-    def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
-        _require_control_auth(
-            resolved_control_token,
-            authorization,
-            client_is_loopback=_client_is_loopback(request),
-        )
+    authorize = control_auth_dependency(resolved_control_token)
 
     async def run(kind: str, params: dict[str, Any], names: list[str]) -> dict[str, Any]:
         try:

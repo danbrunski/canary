@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import can
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.analysis.memory_verification import plan_restamp, restamp, verify_channel
@@ -24,7 +24,9 @@ from src.control.calibration import (
     record_verify_results,
     seed_operational_memory,
 )
-from src.dashboard.security import _client_is_loopback, _require_control_auth
+from src.dashboard.security import (
+    control_auth_dependency,
+)
 from src.decode.dids import load_did_map
 
 
@@ -52,12 +54,7 @@ def register_calibration_routes(
     dids_path: Path,
     resolved_control_token: str | None,
 ) -> None:
-    def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
-        _require_control_auth(
-            resolved_control_token,
-            authorization,
-            client_is_loopback=_client_is_loopback(request),
-        )
+    authorize = control_auth_dependency(resolved_control_token)
 
     @app.get("/control/calibration", dependencies=[Depends(authorize)])
     def get_calibration() -> dict[str, Any]:

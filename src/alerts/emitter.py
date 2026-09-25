@@ -63,6 +63,12 @@ class EmitterCounters:
     #: engine wasn't running (Phase 1.5) — e.g. key-out, KOEO, no data.
     #: Behavior surfaces are unaffected; they keep their own mode-gating.
     skipped_vehicle_state: int = 0
+    #: IF/sequence ticks withheld because the active capture profile (or,
+    #: during a replay, the replayed session's) is not corpus-eligible
+    #: (R03.12, operator decision 2026-09-24: tuning logs are not in the
+    #: anomaly detectors). Counted only when vehicle state allowed the tick,
+    #: so the two counters never double-count one tick.
+    skipped_capture_profile: int = 0
     #: A06.5 — events stored from an ``evidence``-role detector. Counted
     #: apart from ``emitted`` because they are not alerts: the dashboard's
     #: "N emitted" and the alert budget both mean alerts.
@@ -76,6 +82,7 @@ class EmitterCounters:
         self.suppressed_tuning = 0
         self.suppressed_persistence = 0
         self.skipped_vehicle_state = 0
+        self.skipped_capture_profile = 0
 
     def snapshot(self) -> EmitterCounters:
         """Independent copy — the base for :meth:`restore` (Phase 7.1)."""
@@ -92,6 +99,7 @@ class EmitterCounters:
         self.suppressed_tuning = snapshot.suppressed_tuning
         self.suppressed_persistence = snapshot.suppressed_persistence
         self.skipped_vehicle_state = snapshot.skipped_vehicle_state
+        self.skipped_capture_profile = snapshot.skipped_capture_profile
 
     def to_dict(self) -> dict[str, int]:
         """JSON-safe snapshot — what ``GET /status`` exposes per detector."""
@@ -103,6 +111,7 @@ class EmitterCounters:
             "suppressed_tuning": self.suppressed_tuning,
             "suppressed_persistence": self.suppressed_persistence,
             "skipped_vehicle_state": self.skipped_vehicle_state,
+            "skipped_capture_profile": self.skipped_capture_profile,
         }
 
 

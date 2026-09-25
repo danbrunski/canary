@@ -46,8 +46,6 @@ _IMPORTERS = frozenset(importer for importer, _target in FORBIDDEN)
 OWED: dict[tuple[str, str], str] = {
     ("decode/behavior_decoder.py", "src.analysis.surface_1d"): "R05.10 moves surface eval",
     ("decode/behavior_decoder.py", "src.analysis.surface_2d"): "R05.10 moves surface eval",
-    ("daemon/inference.py", "src.dashboard.status"): "R03.1 moves the vehicle-state classifier",
-    ("control/nonvolatile_write.py", "src.dashboard.status"): "R03.1 moves VehicleState",
 }
 
 #: Existing daemon -> dashboard edges that R01.8 does not name. Recorded so a
@@ -57,8 +55,18 @@ STANDING: dict[tuple[str, str], str] = {
     ("daemon/components.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
     ("daemon/drain.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
     ("daemon/inference.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
+    # R03.9 moved these two edges out of daemon/inference.py with the detectors.
+    (
+        "daemon/detectors/common.py",
+        "src.dashboard.broadcast",
+    ): "live broadcaster owned by dashboard",
+    ("daemon/detectors/isolation_forest.py", "src.dashboard.broadcast"): (
+        "live broadcaster owned by dashboard"
+    ),
     ("daemon/components.py", "src.dashboard.behavior_live"): "behavior-live state in dashboard",
-    ("daemon/inference.py", "src.dashboard.behavior_live"): "behavior-live state in dashboard",
+    ("daemon/detectors/behavior.py", "src.dashboard.behavior_live"): (
+        "behavior-live state in dashboard"
+    ),
     ("daemon/idle_shutdown.py", "src.dashboard.ups"): "UPS keep-alive reader in dashboard",
 }
 

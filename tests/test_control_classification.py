@@ -7,6 +7,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
+
+import pytest
+from fastapi.testclient import TestClient
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
@@ -91,6 +95,9 @@ def _config_with_alarm_epoch(tmp_path: Path) -> CanaryConfig:
                     "reference_epoch": tmp_path / "reference_epoch.json",
                     "trend_alert_state": tmp_path / "trend_alert_state.json",
                     "anomalies_dir": tmp_path / "anomalies",
+                    # Trend evaluation reads the catalog; keep it off the
+                    # repo tree (R07.2).
+                    "catalog_db": tmp_path / "catalog.db",
                 }
             ),
         }
@@ -134,3 +141,108 @@ def test_classify_one_session_routes_trend_alert_through_given_emitter(tmp_path:
 
     assert not config.daemon.anomalies_dir.exists()
     assert list(other_dir.glob("anomalies-*.jsonl"))
+
+
+# --------------------------------------------------------------------------- #
+# R03.2 — the route runs the whole-session half in the bounded child
+# --------------------------------------------------------------------------- #
+
+
+def _route_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, row_budget: int | None = None
+) -> tuple[TestClient, CanaryConfig, list[str]]:
+    """App with the classify route; the child pool is a thread (the spawn path
+    is ``test_workbench_analysis``'s real-child test) and records each job."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from src.control import workbench_jobs
+    from src.dashboard.api import create_app
+
+    config = _config_with_alarm_epoch(tmp_path)
+    config = config.model_copy(
+        update={
+            "daemon": config.daemon.model_copy(
+                update={"catalog_db": tmp_path / "catalog.db", "digest_row_budget": row_budget}
+            )
+        }
+    )
+    jobs: list[str] = []
+    real = workbench_jobs.run_workbench_job
+
+    def recording(kind: str, *args: Any, **kwargs: Any) -> Any:
+        jobs.append(kind)
+        return real(kind, *args, **kwargs)
+
+    monkeypatch.setattr(workbench_jobs, "run_workbench_job", recording)
+    monkeypatch.setattr(workbench_jobs, "_spawn_pool", lambda: ThreadPoolExecutor(max_workers=1))
+    # The child caps its own RLIMIT_AS; in a thread it would cap the test process.
+    monkeypatch.setattr(workbench_jobs, "limit_address_space", lambda nbytes: (nbytes, nbytes))
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")
+    return TestClient(app), config, jobs
+
+
+_AUTH = {"Authorization": "Bearer secret"}
+
+
+def test_classification_route_computes_in_the_bounded_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _write_session(tmp_path)
+    client, config, jobs = _route_client(tmp_path, monkeypatch)
+
+    response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
+
+    assert response.status_code == 201, response.text
+    assert response.json()["classification"]["session_id"] == session.name
+    assert jobs == ["classify"]
+    assert (session / FINGERPRINT_FILENAME).exists()
+    # The parent half ran too: the trend alert and the catalog row.
+    assert list(config.daemon.anomalies_dir.glob("anomalies-*.jsonl"))
+    assert config.daemon.catalog_db.exists()
+
+
+def test_classification_route_defers_while_a_capture_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from src.control import workbench_jobs
+
+    session = _write_session(tmp_path)
+    client, _config, jobs = _route_client(tmp_path, monkeypatch)
+    monkeypatch.setattr(workbench_jobs.tuning_profile, "is_active", lambda: True)
+
+    response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["error"] == "analysis_deferred"
+    assert jobs == []
+    assert not (session / FINGERPRINT_FILENAME).exists()
+
+
+def test_classification_route_refuses_over_the_row_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = _write_session(tmp_path)  # 180 rows
+    client, _config, jobs = _route_client(tmp_path, monkeypatch, row_budget=10)
+
+    response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["reason"] == "over_budget"
+    assert jobs == []
+
+
+def test_classification_route_keeps_its_400_and_404(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _config, jobs = _route_client(tmp_path, monkeypatch)
+
+    bad = client.post("/control/sessions/_replay-2026-05-20T120000/classification", headers=_AUTH)
+    missing = client.post("/control/sessions/2026-05-20T130000/classification", headers=_AUTH)
+
+    assert bad.status_code == 400
+    assert missing.status_code == 404
+    # Plain-string details, as before the route moved into the child.
+    assert "non-live-session" in bad.json()["detail"]
+    assert "not found" in missing.json()["detail"]
+    assert jobs == []

@@ -78,6 +78,7 @@ from src.models.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
+    from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
     from src.daemon.inference_metrics import InferenceTimingRecorder
 
 log = logging.getLogger(__name__)
@@ -132,6 +133,10 @@ def create_app(
     #: ``detectors.inference`` (``None`` in tests that don't run inference).
     inference_timing: InferenceTimingRecorder | None = None,
     live_source: Any = None,
+    #: R03.5 — the daemon's capture lifecycle and autostart, shared with its
+    #: shutdown path. ``None`` builds them over the components above.
+    profile_capture: ProfileCaptureSession | None = None,
+    capture_autostart: CaptureAutostart | None = None,
 ) -> FastAPI:
     """Build a stateless FastAPI app over the configured paths.
 
@@ -161,6 +166,9 @@ def create_app(
     resolved_control_token = (
         os.environ.get(config.daemon.control_token_env) if control_token is None else control_token
     )
+    if capture_profile_store is None and profile_capture is not None:
+        # One store for the routes and the lifecycle they drive.
+        capture_profile_store = profile_capture.profile_store
     resolved_capture_profile_store = capture_profile_store or CaptureProfileStore(
         config.daemon.capture_profiles,
         config.collection,
@@ -232,6 +240,8 @@ def create_app(
         ups_keepalive_path=ups_keepalive_path,
         emitter=emitter,
         live_source=live_source,
+        profile_capture=profile_capture,
+        capture_autostart=capture_autostart,
         publish_control_event=publish_control_event,
     )
     register_rom_routes(

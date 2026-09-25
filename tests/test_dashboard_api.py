@@ -150,6 +150,7 @@ def test_build_status_surfaces_emitter_counters(config: CanaryConfig, tmp_path: 
         "suppressed_tuning": 0,
         "suppressed_persistence": 0,
         "skipped_vehicle_state": 0,
+        "skipped_capture_profile": 0,
     }
 
 

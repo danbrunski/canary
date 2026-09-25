@@ -69,7 +69,15 @@ JOB_KINDS = (
     "timing",
     "pull_comparison",
     "cell_residency",
+    # R03.2: POST /control/sessions/{id}/classification. The only kind that
+    # writes (the classification + fingerprint sidecars); it needs neither
+    # the bindings nor the DID catalog.
+    "classify",
 )
+
+#: Kinds that compute from the session and ``config`` alone, without the
+#: profile's workbench inputs.
+_CONFIG_ONLY_KINDS = frozenset({"classify"})
 
 
 class WorkbenchRefusedError(Exception):
@@ -252,8 +260,8 @@ def run_workbench_job(
     params: dict[str, Any],
     config: CanaryConfig,
     *,
-    bindings_path: Path,
-    dids_path: Path,
+    bindings_path: Path | None,
+    dids_path: Path | None,
     address_space_bytes: int | None = None,
 ) -> dict[str, Any]:
     """The child-process entry point: cap, load the profile data, compute.
@@ -264,6 +272,12 @@ def run_workbench_job(
     """
     if address_space_bytes is not None:
         limit_address_space(address_space_bytes)
+    if kind == "classify":
+        from src.control.classification import classify_and_write
+
+        return classify_and_write(config, str(params["session_id"]))
+    if bindings_path is None or dids_path is None:
+        raise ValueError(f"workbench job {kind!r} needs bindings_path and dids_path")
     inputs = workbench_inputs(config, bindings_path=bindings_path, dids_path=dids_path)
     sessions = [Path(p) for p in params.get("sessions", [])]
     skipped = [Unavailable(**item) for item in params.get("unavailable", [])]
@@ -348,12 +362,15 @@ async def run_off_loop(
     params: dict[str, Any],
     config: CanaryConfig,
     *,
-    bindings_path: Path,
-    dids_path: Path,
+    bindings_path: Path | None = None,
+    dids_path: Path | None = None,
     executor: Executor | None = None,
     timeout: float = DIGEST_TIMEOUT_SECONDS,
 ) -> dict[str, Any]:
     """Run one job in the bounded child; the only way a route may compute one.
+
+    ``bindings_path`` and ``dids_path`` are required by every kind except
+    those in ``_CONFIG_ONLY_KINDS``; the child refuses without them.
 
     Single-flight: the same request already running is awaited and shared;
     a different one (or a digest) running raises ``analysis_busy``. The child
@@ -361,6 +378,8 @@ async def run_off_loop(
     """
     if kind not in JOB_KINDS:
         raise ValueError(f"unknown workbench job {kind!r}")
+    if kind not in _CONFIG_ONLY_KINDS and (bindings_path is None or dids_path is None):
+        raise ValueError(f"workbench job {kind!r} needs bindings_path and dids_path")
     key = _job_key(kind, params)
     existing = _IN_FLIGHT.get(key)
     if existing is not None:
@@ -404,8 +423,8 @@ async def _compute(
     params: dict[str, Any],
     config: CanaryConfig,
     *,
-    bindings_path: Path,
-    dids_path: Path,
+    bindings_path: Path | None,
+    dids_path: Path | None,
     executor: Executor | None,
     timeout: float,
 ) -> dict[str, Any]:

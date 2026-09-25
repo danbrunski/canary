@@ -222,7 +222,7 @@ class _WorkerState:
     """
 
     def __init__(self, managers: Mapping[str, Any], config: Any) -> None:
-        from src.daemon.inference import _build_sequence_engine, _suppress_channels_for
+        from src.daemon.detectors.sequence import _build_sequence_engine, _suppress_channels_for
 
         self._build_engine = _build_sequence_engine
         self._suppress_for = _suppress_channels_for
@@ -297,7 +297,8 @@ class _WorkerState:
 
     def score(self, msg: WorkerTick) -> WorkerReply:
         """Score one tick against the models this child holds."""
-        from src.daemon.inference import _if_compute, _sequence_observe
+        from src.daemon.detectors.isolation_forest import _if_compute
+        from src.daemon.detectors.sequence import _sequence_observe
 
         durations: dict[str, float] = {}
         if_computed: Any = None

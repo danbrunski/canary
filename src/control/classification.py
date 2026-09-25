@@ -53,6 +53,69 @@ def get_session_classification(storage_path: Path, session_id: str) -> dict[str,
     return None if classification is None else classification.to_dict()
 
 
+def classify_and_write(config: CanaryConfig, session_id: str) -> dict[str, Any]:
+    """The whole-session half of a classify pass: classify, fingerprint, write.
+
+    This is the part that reads the session (``resample_and_segment``, then
+    ``compute_fingerprint`` — the loads ``control/trip_end.py`` measures at
+    5.4 GB for 2.6 M rows), so the daemon runs it in the bounded
+    single-flight child (``workbench_jobs`` kind ``classify``, R03.2). It
+    returns only what the parent needs: the classification payload, whether
+    the fingerprint sidecar was written, and the session directory. Nothing
+    here touches the emitter or the catalog.
+
+    Raises ``ValueError`` for invalid session ids or non-live names;
+    ``FileNotFoundError`` when the session has no telemetry parquet.
+    """
+    if session_kind(session_id) is not SessionKind.LIVE:
+        raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
+    session_dir = config.collection.storage_path / session_id
+    if not session_dir.is_dir():
+        raise FileNotFoundError(f"session {session_id!r} not found under {session_dir.parent}")
+    classification = classify_session(session_dir, config)
+    write_classification(session_dir, classification)
+    # Fingerprint (Task 4.1/4.2) rides the same on-demand classify pass —
+    # one post-session compute, not a separate corpus walk.
+    fingerprint_written = False
+    try:
+        fingerprint_stats = compute_fingerprint(session_dir, config)
+        write_fingerprint(session_dir, fingerprint_stats)
+        fingerprint_written = True
+    except Exception:  # noqa: BLE001 — fingerprinting must not block classification
+        log.exception("fingerprint failed for %s", session_id)
+    return {
+        "classification": classification.to_dict(),
+        "fingerprint_written": fingerprint_written,
+        "session_dir": str(session_dir),
+    }
+
+
+def finish_classification(
+    config: CanaryConfig,
+    session_id: str,
+    written: dict[str, Any],
+    *,
+    emitter: AnomalyEventEmitter | None = None,
+    catalog_db: Path | None = None,
+) -> dict[str, Any]:
+    """The parent half: trend alerting and the catalog, from sidecars only.
+
+    ``written`` is :func:`classify_and_write`'s return value. Runs in the
+    daemon process because the emitter is the live (broadcasting) one; it
+    reads sidecars, never the session's telemetry.
+    """
+    if written.get("fingerprint_written"):
+        # Trend evaluation + alerting (Task 4.4/4.6) rides the same pass, right
+        # after the fingerprint that feeds it — never blocks classification.
+        try:
+            evaluate_and_alert_trends(config, session_id, emitter=emitter)
+        except Exception:  # noqa: BLE001 — trend alerting must not block classification
+            log.exception("trend evaluation failed for %s", session_id)
+    record_session_best_effort(catalog_db, Path(written["session_dir"]))
+    payload: dict[str, Any] = written["classification"]
+    return payload
+
+
 def classify_one_session(
     config: CanaryConfig,
     session_id: str,
@@ -60,7 +123,11 @@ def classify_one_session(
     emitter: AnomalyEventEmitter | None = None,
     catalog_db: Path | None = None,
 ) -> dict[str, Any]:
-    """Run the classifier on one session and persist the sidecar.
+    """Run the classifier on one session and persist the sidecar, in-process.
+
+    :func:`classify_and_write` then :func:`finish_classification`. For
+    scripts and tests; the daemon route runs the first half in the bounded
+    child instead (R03.2).
 
     Raises ``ValueError`` for invalid session ids or non-live names;
     ``FileNotFoundError`` when the session has no telemetry parquet.
@@ -73,29 +140,10 @@ def classify_one_session(
     it right after; ``None`` (the default) skips the catalog entirely so
     callers that never wire one up never touch that file.
     """
-    if session_kind(session_id) is not SessionKind.LIVE:
-        raise ValueError(f"refusing to classify non-live-session id {session_id!r}")
-    session_dir = config.collection.storage_path / session_id
-    if not session_dir.is_dir():
-        raise FileNotFoundError(f"session {session_id!r} not found under {session_dir.parent}")
-    classification = classify_session(session_dir, config)
-    write_classification(session_dir, classification)
-    # Fingerprint (Task 4.1/4.2) rides the same on-demand classify pass —
-    # one post-session compute, not a separate corpus walk.
-    try:
-        fingerprint_stats = compute_fingerprint(session_dir, config)
-        write_fingerprint(session_dir, fingerprint_stats)
-    except Exception:  # noqa: BLE001 — fingerprinting must not block classification
-        log.exception("fingerprint failed for %s", session_id)
-    else:
-        # Trend evaluation + alerting (Task 4.4/4.6) rides the same pass, right
-        # after the fingerprint that feeds it — never blocks classification.
-        try:
-            evaluate_and_alert_trends(config, session_id, emitter=emitter)
-        except Exception:  # noqa: BLE001 — trend alerting must not block classification
-            log.exception("trend evaluation failed for %s", session_id)
-    record_session_best_effort(catalog_db, session_dir)
-    return classification.to_dict()
+    written = classify_and_write(config, session_id)
+    return finish_classification(
+        config, session_id, written, emitter=emitter, catalog_db=catalog_db
+    )
 
 
 def corpus_mode_summary(storage_path: Path) -> dict[str, Any]:

@@ -19,7 +19,7 @@ from typing import Any, Protocol, TypeVar
 
 from src.config import NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
-from src.dashboard.status import VehicleState
+from src.vehicle_state import VehicleState
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _Block = TypeVar("_Block")

@@ -14,14 +14,18 @@ from src.dashboard.status import classify_vehicle_state
 
 
 def _common_telemetry(**overrides: object) -> dict[str, object]:
+    """Classifier kwargs; ``rpm`` is shorthand for the Mode 01 ``obd_rpm``."""
     base: dict[str, object] = {
-        "rpm": None,
+        "obd_rpm": None,
+        "broadcast_rpm": None,
         "coolant_temp": None,
         "run_time": None,
         "obd_freshness_seconds": None,
         "can_freshness_seconds": None,
         "replay_id": None,
     }
+    if "rpm" in overrides:
+        overrides["obd_rpm"] = overrides.pop("rpm")
     base.update(overrides)
     return base
 
@@ -442,3 +446,110 @@ def test_fresh_obd_still_wins_over_the_broadcast(tmp_path: Path) -> None:
     state = _derive_vehicle_state(storage, replay_controller=None, now=now, session_dir=session)
     assert state.rpm == 900.0
     assert state.state == "engine_running"
+
+
+# ---------------------------------------------------------------------------
+# R03.1 — the broadcast-RPM fallback lives in the classifier's signature
+# ---------------------------------------------------------------------------
+
+
+def test_broadcast_rpm_is_a_required_argument() -> None:
+    """No caller can skip the fallback: leaving ``broadcast_rpm`` out is a
+    TypeError, not a silent OBD-only classification (the inference copy's
+    bug)."""
+    import pytest
+
+    kwargs = _common_telemetry(rpm=800.0, obd_freshness_seconds=0.2)
+    del kwargs["broadcast_rpm"]
+    with pytest.raises(TypeError):
+        classify_vehicle_state(**kwargs)  # type: ignore[arg-type]
+
+
+def test_classifier_uses_a_fresh_broadcast_when_obd_is_stale() -> None:
+    """The all-DID capture: Mode 01 dark by design, the broadcast live."""
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            rpm=750.0,
+            broadcast_rpm=2500.0,
+            obd_freshness_seconds=40.0,
+            can_freshness_seconds=0.05,
+        )
+    )
+    assert state.state == "engine_running"
+    assert state.rpm == 2500.0
+
+
+def test_classifier_uses_the_broadcast_when_obd_rpm_is_absent() -> None:
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            broadcast_rpm=2500.0, obd_freshness_seconds=None, can_freshness_seconds=0.05
+        )
+    )
+    assert state.state == "engine_running"
+
+
+def test_fresh_obd_rpm_outranks_the_broadcast() -> None:
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            rpm=900.0,
+            broadcast_rpm=2500.0,
+            obd_freshness_seconds=0.2,
+            can_freshness_seconds=0.05,
+        )
+    )
+    assert state.rpm == 900.0
+
+
+def test_a_stale_broadcast_is_not_engine_evidence() -> None:
+    """The freshness rule R03.1 chose: the fallback needs CAN freshness.
+
+    The Parquet derivation used to take a stale decoded rpm whenever the OBD
+    rpm was unusable; with OBD fresh but RPM never polled, a minutes-old
+    broadcast rpm then read ``engine_running``.
+    """
+    state = classify_vehicle_state(
+        **_common_telemetry(
+            broadcast_rpm=2500.0, obd_freshness_seconds=0.2, can_freshness_seconds=60.0
+        )
+    )
+    assert state.state == "ignition_only"
+    assert state.rpm is None
+
+
+def test_the_three_derivations_agree_on_an_all_did_capture(tmp_path: Path) -> None:
+    """Parquet, live-source and inference-gate derivations of one instant."""
+    from datetime import UTC, datetime
+
+    from src.dashboard.status import derive_vehicle_state_from_storage
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+    from src.vehicle_state import derive_from_inputs
+
+    now = datetime(2026, 9, 24, 12, 0, 30, tzinfo=UTC)
+    storage = tmp_path / "vehicle"
+    capture = storage / "_capture-tuning-did-2026-09-24T120000"
+    write_records_to_parquet(
+        [
+            TelemetryRecord(
+                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=20000.0
+            ),
+        ],
+        capture,
+    )
+    parquet = derive_vehicle_state_from_storage(
+        storage, replay_controller=None, now=now, session_dir=capture
+    )
+    live = derive_from_inputs(
+        {
+            "rpm": None,
+            "broadcast_rpm": 2500.0,
+            "coolant_temp": None,
+            "run_time": None,
+            "obd_freshness_seconds": None,
+            "can_freshness_seconds": 1.0,
+        },
+        None,
+        now,
+    )
+    assert parquet.state == live.state == "engine_running"
+    assert parquet.rpm == live.rpm == 2500.0

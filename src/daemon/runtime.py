@@ -10,14 +10,19 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.collection import tuning_profile
+from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
-from src.control.capture_finalize import finalize_capture, recompute_quality_off_loop
+from src.control.capture_finalize import recompute_quality_off_loop
 from src.control.capture_manifest import (
     recover_interrupted_capture,
-    stamp_capture_end,
     write_capture_quality,
+)
+from src.control.profile_capture import (
+    AUTOSTART_TICK_SECONDS,
+    CaptureAutostart,
+    ProfileCaptureSession,
 )
 from src.control.replay_control import ReplayController
 from src.decode.bindings import load_bindings
@@ -287,6 +292,18 @@ async def _build_live_source_off_loop(
         return None
 
 
+async def _cancel_all(tasks: Sequence[asyncio.Task[Any] | None]) -> None:
+    """Cancel and await each task in order, ignoring ``None`` (not started)
+    and the task's own ``CancelledError``; any other exception propagates.
+    ``run_daemon``'s teardown repeated this block seven times (R03.11)."""
+    for task in tasks:
+        if task is None:
+            continue
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+
 async def run_daemon(
     config: CanaryConfig,
     stop_event: asyncio.Event,
@@ -371,6 +388,18 @@ async def run_daemon(
     # drain_queue_with_broadcast wires into run_storage_sink below, so derived
     # channels land in the same Parquet session as everything else.
     components.storage_writer = storage_writer
+    # R03.5: one capture lifecycle, shared by the routes and the shutdown
+    # below, so a capture shutdown ends is judged against its start epoch.
+    components.profile_capture = ProfileCaptureSession(
+        storage_writer=storage_writer,
+        capture_controller=components.capture_controller,
+        profile_store=CaptureProfileStore(
+            config.daemon.capture_profiles,
+            config.collection,
+            config.daemon.behavior_models,
+        ),
+        health_monitor=components.health_monitor,
+    )
 
     interrupted = recover_interrupted_capture(config.collection.storage_path)
     if interrupted is not None:
@@ -546,6 +575,12 @@ async def run_daemon(
                 components, enabled=enable_live_inference
             )
             components.live_source = live_source
+            components.capture_autostart = CaptureAutostart(
+                components.profile_capture,
+                live_source,
+                components.replay_controller,
+                tick_seconds=lambda: AUTOSTART_TICK_SECONDS,
+            )
             if live_source_ready is not None:
                 live_source_ready.set_result(live_source)
                 if live_source is not None:
@@ -618,15 +653,13 @@ async def run_daemon(
                 drain_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await drain_task
+            if components.capture_autostart is not None:
+                await components.capture_autostart.aclose()
             if tuning_profile.is_active():
-                capture_dir = Path(storage_writer.paths.root)
-                await finalize_capture(
-                    capture_dir,
-                    health=components.health_monitor,
-                    writer=storage_writer,
-                    start=None,
-                )
-                stamp_capture_end(capture_dir, "daemon_shutdown")
+                # The same stop the routes use, so the verdict reconciles
+                # against the capture's own start epoch (R03.5); before, this
+                # path passed `start=None` and reported no loss_epoch_start.
+                await components.profile_capture.stop("daemon_shutdown")
             # Task 5.4 fallback trip-end trigger: the drive can end because
             # the daemon stopped (Pi shutdown) rather than a clean
             # GPS-detected stop. Settle whatever the GPS edge already
@@ -657,44 +690,17 @@ async def run_daemon(
                         )
             except Exception:  # noqa: BLE001 — shutdown must never fail on this
                 log.exception("trip-end fallback (shutdown) failed")
-            poll_task.cancel()
-            try:
-                await poll_task
-            except asyncio.CancelledError:
-                pass
-            passive_ttl_task.cancel()
-            try:
-                await passive_ttl_task
-            except asyncio.CancelledError:
-                pass
-            bus_budget_ttl_task.cancel()
-            try:
-                await bus_budget_ttl_task
-            except asyncio.CancelledError:
-                pass
-            retention_task.cancel()
-            try:
-                await retention_task
-            except asyncio.CancelledError:
-                pass
-            if online_training_task is not None:
-                online_training_task.cancel()
-                try:
-                    await online_training_task
-                except asyncio.CancelledError:
-                    pass
-            if behavior_models_task is not None:
-                behavior_models_task.cancel()
-                try:
-                    await behavior_models_task
-                except asyncio.CancelledError:
-                    pass
-            if config_task is not None:
-                config_task.cancel()
-                try:
-                    await config_task
-                except asyncio.CancelledError:
-                    pass
+            await _cancel_all(
+                (
+                    poll_task,
+                    passive_ttl_task,
+                    bus_budget_ttl_task,
+                    retention_task,
+                    online_training_task,
+                    behavior_models_task,
+                    config_task,
+                )
+            )
             for task in inference_tasks:
                 # Each inference task observes stop_event and returns on its
                 # own; this is the join + cancel safety net.

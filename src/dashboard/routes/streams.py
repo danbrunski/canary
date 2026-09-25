@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import FastAPI, WebSocket
+from fastapi import Depends, FastAPI, WebSocket
 
 from src.dashboard.broadcast import Broadcaster
+from src.dashboard.security import websocket_control_auth_dependency
 from src.dashboard.websockets import _run_websocket
 
 
@@ -31,11 +32,10 @@ def register_stream_routes(
         # the live per-model score readout.
         await _run_websocket(websocket, scores_bus)
 
-    @app.websocket("/ws/control")
+    @app.websocket(
+        "/ws/control",
+        dependencies=[Depends(websocket_control_auth_dependency(resolved_control_token))],
+    )
     async def ws_control(websocket: WebSocket) -> None:
-        token = websocket.query_params.get("token")
-        if not resolved_control_token or token != resolved_control_token:
-            await websocket.close(code=1008)
-            return
         app.state.control_loop = asyncio.get_running_loop()
         await _run_websocket(websocket, control_bus)

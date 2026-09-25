@@ -9,51 +9,34 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
-from src.alerts.emitter import AnomalyEventEmitter, EmitterCounters
 from src.alerts.fusion import (
     FusionScorer,
     FusionSource,
-    PersistenceGate,
-    downgrade_unsustained,
-    isolation_forest_source,
-    lstm_source,
 )
-from src.alerts.tuning import AlertTuner
 from src.coerce import finite_float
-from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
+from src.collection import tuning_profile
 from src.dashboard.broadcast import Broadcaster
-from src.dashboard.status import VehicleState, classify_vehicle_state
 from src.decode.accepted_baselines import load_accepted_baselines
-from src.decode.behavior_decoder import deviation, deviation_for_override
-from src.decode.behavior_eligibility import resolve_output_column
 from src.decode.behavior_models import (
-    BehaviorModel1D,
     diagnostic_only_models,
     load_behavior_models,
-    serving_status,
     unknown_operating_modes,
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
-from src.models.feature_spec_health import observe_reconciliation
-from src.models.health import HealthMonitor
-from src.models.inference import IsolationForestInferenceEngine
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     DEFAULT_DIDS_PATH,
-    FeatureSpecReconciliation,
-    reconcile_feature_frame_to_spec,
 )
 from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
-from src.preprocessing.resampler import is_flag_column
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.async_writer import AsyncParquetTelemetryWriter
-from src.telemetry import DECODED_SOURCE, SOURCE_SEP, TelemetryRecord, channel_key, channel_of
+from src.telemetry import TelemetryRecord, channel_of
 from src.timefmt import format_timestamp
+from src.vehicle_state import VehicleState, derive_from_live_source
 
 from .autotag_hook import LiveAutoTagHook
 from .components import DaemonComponents
@@ -69,6 +52,106 @@ from .inference_worker import (
 if TYPE_CHECKING:
     # Annotation only: loaded on demand when ``plausibility.enabled``.
     from .plausibility_live import LivePlausibility
+
+
+# R03.9: the detectors live in src.daemon.detectors; re-exported here so
+# older imports keep working.
+from src.daemon.detectors.behavior import (
+    BehaviorDetector as BehaviorDetector,
+)
+from src.daemon.detectors.behavior import (
+    _BehaviorResidual as _BehaviorResidual,
+)
+from src.daemon.detectors.behavior import (
+    _observe_behavior as _observe_behavior,
+)
+from src.daemon.detectors.common import (
+    _SCHEMA_RECONCILIATION_WARNED as _SCHEMA_RECONCILIATION_WARNED,
+)
+from src.daemon.detectors.common import (
+    Detector as Detector,
+)
+from src.daemon.detectors.common import (
+    TickContext as TickContext,
+)
+from src.daemon.detectors.common import (
+    _log_schema_reconciliation_once as _log_schema_reconciliation_once,
+)
+from src.daemon.detectors.common import (
+    _log_structural_verdict as _log_structural_verdict,
+)
+from src.daemon.detectors.common import (
+    _persistence_sustained as _persistence_sustained,
+)
+from src.daemon.detectors.common import (
+    _publish_score as _publish_score,
+)
+from src.daemon.detectors.common import (
+    _with_effective_role as _with_effective_role,
+)
+from src.daemon.detectors.common import (
+    gate_and_collect as gate_and_collect,
+)
+from src.daemon.detectors.isolation_forest import (
+    _IF_TOP_FEATURES as _IF_TOP_FEATURES,
+)
+from src.daemon.detectors.isolation_forest import (
+    IsolationForestDetector as IsolationForestDetector,
+)
+from src.daemon.detectors.isolation_forest import (
+    _if_apply as _if_apply,
+)
+from src.daemon.detectors.isolation_forest import (
+    _if_compute as _if_compute,
+)
+from src.daemon.detectors.isolation_forest import (
+    _IFComputed as _IFComputed,
+)
+from src.daemon.detectors.isolation_forest import (
+    _IFComputeJob as _IFComputeJob,
+)
+from src.daemon.detectors.isolation_forest import (
+    _IFFusionInput as _IFFusionInput,
+)
+from src.daemon.detectors.isolation_forest import (
+    _rank_feature_contributors as _rank_feature_contributors,
+)
+from src.daemon.detectors.isolation_forest import (
+    _record_if_health as _record_if_health,
+)
+from src.daemon.detectors.isolation_forest import (
+    _schema_for_loaded as _schema_for_loaded,
+)
+from src.daemon.detectors.isolation_forest import (
+    _score_and_emit as _score_and_emit,
+)
+from src.daemon.detectors.sequence import (
+    SequenceDetector as SequenceDetector,
+)
+from src.daemon.detectors.sequence import (
+    _build_sequence_engine as _build_sequence_engine,
+)
+from src.daemon.detectors.sequence import (
+    _engine_model_type as _engine_model_type,
+)
+from src.daemon.detectors.sequence import (
+    _engine_version as _engine_version,
+)
+from src.daemon.detectors.sequence import (
+    _publish_sequence_suppression as _publish_sequence_suppression,
+)
+from src.daemon.detectors.sequence import (
+    _schema_for_engine as _schema_for_engine,
+)
+from src.daemon.detectors.sequence import (
+    _sequence_observe as _sequence_observe,
+)
+from src.daemon.detectors.sequence import (
+    _SequenceComputeJob as _SequenceComputeJob,
+)
+from src.daemon.detectors.sequence import (
+    _suppress_channels_for as _suppress_channels_for,
+)
 
 log = logging.getLogger(__name__)
 
@@ -91,29 +174,63 @@ FEATURE_BUILD_STARTUP_TIMEOUT_SECONDS = 15.0
 _SCORABLE_VEHICLE_STATES = frozenset({"engine_running", "replay"})
 
 
-def _live_vehicle_state(
-    source: LiveFeatureSource, components: DaemonComponents, now: datetime
-) -> VehicleState:
-    """No-I/O ``classify_vehicle_state`` for the inference hot loop.
+@dataclass(frozen=True)
+class CaptureProfileGate:
+    """R03.12 — may IF and the sequence detector score under this profile?
 
-    Mirrors ``dashboard.status._derive_vehicle_state`` but reads
-    ``source.vehicle_state_inputs`` (in-memory) instead of re-reading the
-    latest session's Parquet — safe to call every tick.
+    Operator decision 2026-09-24: tuning logs are not in the anomaly
+    detectors. Both learned "normal" under the default profile's channels and
+    rates, so scoring a capture that polls a different set measures the
+    profile change, not the engine. Only a corpus-eligible profile scores.
+
+    ``source`` says whose profile was read: the daemon's live one, or — during
+    a replay — the replayed session's capture manifest. A replay is judged by
+    what it replays, never by what the daemon happens to be polling.
     """
-    replay_id: str | None = None
+
+    scoring_allowed: bool
+    profile: str | None
+    source: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "scoring_allowed": self.scoring_allowed,
+            "profile": self.profile,
+            "source": self.source,
+        }
+
+
+def capture_profile_gate(components: DaemonComponents) -> CaptureProfileGate:
+    """The profile half of the IF/sequence gate; no I/O (read every tick)."""
     if components.replay_controller is not None:
         replay_state = components.replay_controller.status()
         if replay_state.running:
-            replay_id = replay_state.replay_id
-    inputs = source.vehicle_state_inputs(now)
-    return classify_vehicle_state(
-        rpm=inputs["rpm"],
-        coolant_temp=inputs["coolant_temp"],
-        run_time=inputs["run_time"],
-        obd_freshness_seconds=inputs["obd_freshness_seconds"],
-        can_freshness_seconds=inputs["can_freshness_seconds"],
-        replay_id=replay_id,
+            return CaptureProfileGate(
+                scoring_allowed=replay_state.source_corpus_eligible,
+                profile=replay_state.source_capture_profile,
+                source="replay_manifest",
+            )
+    profile = tuning_profile.active_profile()
+    return CaptureProfileGate(
+        scoring_allowed=profile.corpus_eligible,
+        profile=profile.name,
+        source="live_profile",
     )
+
+
+def _live_vehicle_state(
+    source: LiveFeatureSource, components: DaemonComponents, now: datetime
+) -> VehicleState:
+    """No-I/O vehicle state for the inference hot loop.
+
+    The same derivation ``/status`` uses when a live source is wired
+    (:func:`src.vehicle_state.derive_from_live_source`), broadcast-RPM
+    fallback included. This copy used to pass only the OBD rpm to the
+    classifier, so during an all-DID capture it read ``engine_off`` while
+    ``/status`` read ``engine_running`` (R03.1). Tuning captures stay unscored
+    through the capture-profile gate (R03.12), not through this state.
+    """
+    return derive_from_live_source(source, replay_controller=components.replay_controller, now=now)
 
 
 def _current_generation(components: DaemonComponents) -> GenerationToken:
@@ -137,95 +254,6 @@ def _current_generation(components: DaemonComponents) -> GenerationToken:
     return GenerationToken(
         replay_id=replay_id, capture_id=capture_id, model_versions=tuple(versions)
     )
-
-
-def _persistence_sustained(
-    persistence: PersistenceGate,
-    key: str,
-    firing: bool | None,
-    *,
-    tuner: AlertTuner | None,
-    source: str,
-    mode: str | None,
-    now: float,
-) -> bool:
-    """Advance ``key`` through the persistence gate, honouring 6.3's
-    debounce-ownership rule: when an operator ``DebouncePolicy`` is active
-    for ``(source, mode)``, it fully OWNS that key's persistence
-    requirement (applied later, inside the emitter, via
-    ``AlertTuner.min_consecutive``) — the built-in gate's own M-of-N is
-    bypassed (every trustworthy tick passes straight through) rather than
-    stacking a second, redundant requirement on top of the tuner's.
-
-    A missing verdict (``firing=None``, see ``PersistenceGate``'s docstring)
-    always goes through the gate itself, bypass or not — there's no tuner
-    debounce state to "pass through" for a tick that produced no verdict at
-    all, and doing so keeps the gate's own streak correctly frozen (not
-    reset to False) for the ticks where the bypass isn't in effect.
-    """
-    if firing is not None and tuner is not None and tuner.has_debounce_override(source, mode):
-        return firing
-    return persistence.observe(key, firing, now=now)
-
-
-def gate_and_collect(
-    persistence: PersistenceGate,
-    key: str,
-    firing: bool | None,
-    *,
-    tuner: AlertTuner | None,
-    source: str,
-    mode: str | None,
-    now: float,
-    counters: EmitterCounters,
-) -> bool:
-    """Advance ``key`` through the persistence gate and account for a
-    tick that fired but didn't survive it (Task 3.1).
-
-    The three per-tick detectors (IF, sequence, behavior) each used to
-    open-code the same "was this tick's verdict actually sustained, and if
-    it fired-but-not-sustained bump ``suppressed_persistence``" pairing
-    around their own :func:`_persistence_sustained` call — this is that
-    shared tail. Callers still apply :func:`~src.alerts.fusion.downgrade_unsustained`
-    themselves (IF defers it a layer up, in ``IsolationForestDetector.tick``,
-    since ``_score_and_emit`` needs the raw ``sustained`` flag to decide
-    whether to withhold its own per-source emit too).
-    """
-    sustained = _persistence_sustained(
-        persistence, key, firing, tuner=tuner, source=source, mode=mode, now=now
-    )
-    if firing and not sustained:
-        counters.suppressed_persistence += 1
-    return sustained
-
-
-@dataclass(frozen=True)
-class TickContext:
-    """Per-tick state every :class:`Detector` needs, computed once by
-    ``run_live_inference`` instead of re-derived by each detector (Task 3.1).
-    """
-
-    now: datetime
-    operating_mode: str | None
-    timestamp_str: str | None
-    #: Phase 1.5 vehicle-state gate — ``False`` means IF/sequence must not
-    #: score this tick (neither was trained on a non-running regime); the
-    #: behavior overlay ignores this and keeps its own per-model gating.
-    scoring_allowed: bool
-
-
-class Detector(Protocol):
-    """One per-tick anomaly detector (Task 3.1).
-
-    Implementations own their detector's full observe → per-source emit →
-    persistence → fusion-source shape, so ``run_live_inference`` reduces to
-    "tick every detector, collect fusion sources, fuse." A detector may
-    return zero, one, or several :class:`FusionSource` instances for one
-    tick (IF/sequence contribute at most one; behavior contributes one per
-    fired model).
-    """
-
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]: ...
 
 
 #: Instantaneous performance channels (Task 1.1) — the row-local subset
@@ -304,325 +332,6 @@ async def _publish_derived_channels(
             await storage_writer.write_many(records)
         except Exception:  # noqa: BLE001 — storage is best-effort, must not kill the tick
             log.exception("failed to persist derived channels to storage")
-
-
-@dataclass(frozen=True)
-class _IFComputeJob:
-    """Loop-snapshotted inputs for one IF scoring pass (C08.4): the pinned
-    model bundle and the one-row feature frame."""
-
-    loaded: Any
-    row: Any
-
-
-@dataclass(frozen=True)
-class _SequenceComputeJob:
-    """Loop-snapshotted inputs for one sequence forward pass (C08.4)."""
-
-    engine: Any
-    row: Any
-    #: Clear the window before appending ``row`` (A01.3): the generation
-    #: changed since the last job, so nothing before this row belongs with it.
-    reset: bool = False
-
-
-class IsolationForestDetector:
-    """IF per-tick scoring → per-source event → IF fusion source (Task 3.1).
-
-    Thin ``Detector`` wrapper around ``_score_and_emit``, which already owns
-    the scoring/health/missing-feature-fail-safe/contributor-ranking/
-    persistence/emit shape — this class adds only what ``_score_and_emit``
-    can't build itself: the calibrated-threshold ``FusionSource``, downgraded
-    by the persistence verdict ``_score_and_emit`` already computed (a second
-    ``persistence.observe`` call here would double-drive the M-of-N streak).
-    """
-
-    def __init__(self, components: DaemonComponents) -> None:
-        self._components = components
-        self._manager = components.model_managers.get("isolation_forest")
-        #: Last-scored model version, read by ``run_live_inference`` for the
-        #: fused event's ``if=...`` version tag — ``None`` before the first
-        #: tick or while no artifact is loaded.
-        self.model_version: str | None = None
-
-    def prepare(self, row: Any, ctx: TickContext) -> _IFComputeJob | None:
-        """Loop side (C08.4): pin the model generation and decide whether
-        this tick scores at all. ``None`` means nothing to compute."""
-        loaded = self._manager.current if self._manager is not None else None
-        # serving_version, not the sidecar manifest's claim — on a partial
-        # deploy (stale binary + fresh manifest) the fused event's version
-        # tag must name the model actually scoring.
-        self.model_version = loaded.serving_version if loaded is not None else None
-        if loaded is None or row is None or not ctx.scoring_allowed:
-            return None
-        return _IFComputeJob(loaded=loaded, row=row)
-
-    @staticmethod
-    def compute(job: _IFComputeJob) -> _IFComputed:
-        """Worker side: the sklearn forward pass + contributor ranking, over
-        inputs pinned by :meth:`prepare`. Touches no shared state."""
-        return _if_compute(job.loaded, job.row)
-
-    def apply(self, computed: _IFComputed, ctx: TickContext) -> list[FusionSource]:
-        """Loop side: health, ``/ws/scores``, persistence, per-source emit,
-        and the IF fusion source."""
-        if_input = _if_apply(
-            computed,
-            self._components.emitter,
-            self._components.health_monitor,
-            scores=self._components.scores_broadcaster,
-            persistence=self._components.persistence_gate,
-            tuner=self._components.alert_tuner,
-            now=ctx.now.timestamp(),
-        )
-        if if_input is None:
-            return []
-        return [
-            _with_effective_role(
-                self._components,
-                downgrade_unsustained(
-                    isolation_forest_source(
-                        if_input.score, if_input.threshold, scale=if_input.scale
-                    ),
-                    if_input.sustained,
-                ),
-            )
-        ]
-
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
-        """Synchronous prepare → compute → apply, all on the caller's thread."""
-        job = self.prepare(row, ctx)
-        if job is None:
-            return []
-        return self.apply(self.compute(job), ctx)
-
-
-class SequenceDetector:
-    """Sequence-autoencoder (LSTM|TCN, Task 2.1) per-tick scoring → per-source
-    ``lstm_autoencoder`` event → sequence fusion source (Task 3.1).
-
-    Backbone-agnostic: drives whichever ``components.sequence_model_type``
-    selected. Owns the engine hot-swap-on-version-change bookkeeping that
-    used to live as loop-local state in ``run_live_inference``.
-    """
-
-    def __init__(self, components: DaemonComponents) -> None:
-        self._components = components
-        self._manager = (
-            components.model_managers.get(components.sequence_model_type)
-            if components.sequence_model_type is not None
-            else None
-        )
-        self._engine: Any = None
-        self._engine_version: str | None = None
-        #: Generation of the last job handed out; a different one on the next
-        #: job means a replay, capture or model change happened in between.
-        self._last_generation: GenerationToken | None = None
-        #: Last-scored model version, read by ``run_live_inference`` for the
-        #: fused event's ``lstm=...`` version tag.
-        self.model_version: str | None = None
-
-    def prepare(
-        self, row: Any, ctx: TickContext, *, generation: GenerationToken | None = None
-    ) -> _SequenceComputeJob | None:
-        """Loop side (C08.4): version bookkeeping and the engine hot-swap.
-        The engine is rebuilt *here*, on the loop, never while a worker
-        pass over the old one could still be running (the pipeline only
-        snapshots when no compute job is in flight).
-
-        ``generation`` is the pipeline's token for this tick. When it differs
-        from the last job's, the job asks for the window to be cleared first
-        (A01.3) — in this process and in the scoring child alike — so a replay
-        starting or stopping, a capture change or a model swap never shares a
-        window with what came before."""
-        loaded = self._manager.current if self._manager is not None else None
-        # serving_version — see IsolationForestDetector.prepare.
-        self.model_version = loaded.serving_version if loaded is not None else None
-        if loaded is None or row is None or not ctx.scoring_allowed:
-            return None
-        if self._engine_version != self.model_version:
-            self._engine = _build_sequence_engine(
-                loaded, suppress_channels=_suppress_channels_for(self._components, loaded)
-            )
-            self._engine_version = self.model_version if self._engine is not None else None
-            _publish_sequence_suppression(self._components, self._engine)
-        if self._engine is None:
-            return None
-        reset = (
-            generation is not None
-            and self._last_generation is not None
-            and generation != self._last_generation
-        )
-        if generation is not None:
-            self._last_generation = generation
-        return _SequenceComputeJob(engine=self._engine, row=row, reset=reset)
-
-    @staticmethod
-    def compute(job: _SequenceComputeJob) -> Any:
-        """Worker side: window append + torch forward pass. The engine's
-        window buffer is detector-owned and only ever advanced from here,
-        one job at a time (C08.6 bounds in-flight jobs to one)."""
-        if job.reset:
-            job.engine.reset()
-        return _sequence_observe(job.engine, job.row)
-
-    def apply(self, result: Any, ctx: TickContext) -> list[FusionSource]:
-        """Loop side: ``/ws/scores``, persistence, per-source emit, fusion
-        source. ``result`` is ``None`` until the window is full."""
-        if result is None:
-            return []
-        _publish_score(
-            self._components.scores_broadcaster,
-            source="lstm_autoencoder",
-            score=result.global_score,
-            threshold=result.global_threshold,
-            operating_mode=ctx.operating_mode,
-            model_version=result.model_version,
-            timestamp=result.timestamp,
-            missing_features=False,
-        )
-        # 6.3/3.1: a tuner override for (lstm_autoencoder, mode) fully owns
-        # persistence for this key instead of stacking on the gate's own
-        # M-of-N — see `gate_and_collect`, shared with the IF + behavior
-        # detectors.
-        sustained = gate_and_collect(
-            self._components.persistence_gate,
-            "lstm_autoencoder",
-            result.is_anomaly,
-            tuner=self._components.alert_tuner,
-            source="lstm_autoencoder",
-            mode=ctx.operating_mode,
-            now=ctx.now.timestamp(),
-            counters=self._components.emitter.counters,
-        )
-        if not (result.is_anomaly and not sustained):
-            self._components.emitter.emit_lstm(result, operating_mode=ctx.operating_mode)
-        return [
-            _with_effective_role(
-                self._components,
-                downgrade_unsustained(
-                    lstm_source(result.global_score, result.global_threshold), sustained
-                ),
-            )
-        ]
-
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
-        """Synchronous prepare → compute → apply, all on the caller's thread."""
-        job = self.prepare(row, ctx)
-        if job is None:
-            return []
-        return self.apply(self.compute(job), ctx)
-
-
-class BehaviorDetector:
-    """Behavior/physics-model residual overlay → first-class behavior events
-    + fusion sources (Task 3.1; Phase 7.4).
-
-    Unlike IF/sequence, one tick can contribute zero, one, or several
-    ``FusionSource`` instances — one per fired behavior model, since sibling
-    models graded on the same output channel share a fusion group but models
-    on different channels are independent voices. Reads
-    ``source.latest_operating_point`` (via ``_observe_behavior``), not
-    ``row`` — the live overlay predates the shared per-tick ``row`` and
-    already has everything it needs off the feature source directly.
-    """
-
-    def __init__(
-        self, components: DaemonComponents, fusion: FusionScorer, source: LiveFeatureSource
-    ) -> None:
-        self._components = components
-        self._fusion = fusion
-        self._source = source
-
-    def prepare(self, row: Any, ctx: TickContext) -> list[_BehaviorResidual]:
-        """Loop side (C08.4): grade every behavior model off the source's
-        ``latest_operating_point`` and feed the live overlay. This reads
-        loop-owned ``LiveFeatureSource`` state, so it stays on the loop —
-        there is no worker-side half for the behavior detector (the
-        surfaces are small interpolations, far cheaper than the feature
-        stage; see docs/inference-scheduling.md)."""
-        del row, ctx
-        return _observe_behavior(self._source, self._components.behavior_live)
-
-    def apply(self, residuals: list[_BehaviorResidual], ctx: TickContext) -> list[FusionSource]:
-        """Loop side: persistence, ``/ws/scores``, per-model emit, fusion
-        sources — one per fired model."""
-        sources: list[FusionSource] = []
-        warn_severity = self._components.config.models.fusion.behavior_warning_severity
-        persistence = self._components.persistence_gate
-        tuner = self._components.alert_tuner
-        for residual in residuals:
-            # B01.6 — a diagnostic-only model never raises a trusted alert or
-            # a fusion vote; it stays visible on the overlay with its reason.
-            if not residual.alerting:
-                continue
-            # Surfaces over one measurement (same output channel, or one
-            # family such as MAF airflow or fuel trim) share a fusion group,
-            # derived inside ``behavior_source``: one agreeing voice, not two.
-            behavior = self._fusion.behavior_source(
-                f"behavior:{residual.name}",
-                residual.severity,
-                channel=residual.channel,
-            )
-            # 6.1 — off-mode is a missing verdict (the model didn't evaluate
-            # this tick at all), not a miss: freeze the M-of-N window instead
-            # of pushing a False that would decay real evidence accumulated
-            # the last time this model was in-mode. On-mode-but-not-deviating
-            # is a genuine miss and still displaces a stale hit (flood
-            # protection intact).
-            # B01.4 — likewise any tick the model refused (ineligible,
-            # off-map, missing actual): no measurement is not a clean one.
-            verdict: bool | None = (
-                behavior.fired if residual.mode_match and residual.reason is None else None
-            )
-            # 6.3/3.1: a tuner override for (behavior, mode) fully owns
-            # persistence for this key instead of stacking — see
-            # `gate_and_collect`, shared with the IF + sequence detectors.
-            sustained = gate_and_collect(
-                persistence,
-                f"behavior:{residual.name}",
-                verdict,
-                tuner=tuner,
-                source="behavior",
-                mode=residual.operating_mode,
-                now=ctx.now.timestamp(),
-                counters=self._components.emitter.counters,
-            )
-            if verdict is not True or not sustained:
-                continue
-            sources.append(behavior)
-            ev_ts = ctx.timestamp_str or residual.timestamp
-            if ev_ts is None:
-                continue
-            _publish_score(
-                self._components.scores_broadcaster,
-                source="behavior",
-                score=behavior.severity,
-                threshold=warn_severity,
-                operating_mode=residual.operating_mode,
-                model_version=f"behavior/{residual.name}",
-                timestamp=ev_ts,
-                missing_features=False,
-            )
-            self._components.emitter.emit_behavior(
-                model=residual.name,
-                kind=residual.kind,
-                channel=residual.channel,
-                timestamp=ev_ts,
-                severity_band=residual.severity,
-                score=behavior.severity,
-                threshold=warn_severity,
-                actual=residual.actual,
-                expected=residual.expected,
-                deviation=residual.deviation,
-                operating_mode=residual.operating_mode,
-                override_reason=residual.override_reason,
-            )
-        return sources
-
-    def tick(self, row: Any, ctx: TickContext) -> list[FusionSource]:
-        """Synchronous prepare → apply on the caller's thread."""
-        return self.apply(self.prepare(row, ctx), ctx)
 
 
 @dataclass(frozen=True)
@@ -996,8 +705,17 @@ class LiveInferencePipeline:
         if row is not None:
             vehicle_state = _live_vehicle_state(source, components, now)
             scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
+            # R03.12 — two gates, two counters, so an empty score stream says
+            # which kind of empty it is. Vehicle state is asked first: a
+            # profile refusal therefore means "the engine was running, and
+            # the capture profile is why nothing scored".
+            profile_gate = capture_profile_gate(components)
+            components.health_monitor.observe_capture_profile_gate(profile_gate.to_dict())
             if not scoring_allowed:
                 components.emitter.counters.skipped_vehicle_state += 1
+            elif not profile_gate.scoring_allowed:
+                scoring_allowed = False
+                components.emitter.counters.skipped_capture_profile += 1
 
         # Spec §3.7.6 — escalate a sustained parked-with-power state to a
         # poweroff. Ships disabled; `idle_shutdown` is None unless the
@@ -1301,6 +1019,13 @@ async def run_live_inference(
     noise. The behavior overlay is unaffected — it keeps its own
     per-model ``operating_mode`` gating and still observes every tick.
 
+    **Capture-profile gating (R03.12).** A tick the vehicle state allows is
+    still withheld from IF and the sequence detector while the active profile
+    is not corpus-eligible (:func:`capture_profile_gate`; during a replay, the
+    replayed session's manifest). Counted in
+    ``emitter.counters.skipped_capture_profile``. Behavior models and the
+    plausibility checks are not gated by it.
+
     Best-effort: every error inside the loop is caught + logged.
     """
     interval = tick_seconds or 1.0 / max(components.config.preprocessing.resample_hz, 1.0)
@@ -1370,774 +1095,6 @@ def _start_feature_executor(components: DaemonComponents) -> Executor | None:
         max_workers=1,
         mp_context=multiprocessing.get_context("spawn"),
     )
-
-
-def _with_effective_role(components: Any, source: FusionSource) -> FusionSource:
-    """A06.5 — stamp the detector's *effective* role on its fusion source.
-
-    ``FusionScorer`` holds the configured roles and never promotes an
-    ``evidence`` source, so an ``alert``-configured detector serving an
-    artifact without an accepted alert-budget verdict is demoted here, from
-    ``components.role_gate`` (which re-resolves at a hot-swap), without the
-    scorer knowing about artifacts.
-    """
-    gate = getattr(components, "role_gate", None)
-    if gate is None or source.role == "evidence":
-        return source
-    if gate.get(source.name, "alert") == "evidence":
-        return replace(source, role="evidence")
-    return source
-
-
-def _build_sequence_engine(loaded: Any, *, suppress_channels: tuple[str, ...] = ()) -> Any:
-    """Build a ``SequenceInferenceEngine`` for a freshly-swapped model, or
-    ``None`` on a bad checkpoint (retried next tick). Backbone-agnostic: the
-    engine drives whichever sequence detector the manager loaded.
-
-    ``suppress_channels`` is forwarded so config-listed noise channels (fuel
-    level, HVAC, etc.) get their mask zeroed at every window — keeps the
-    runtime mask knob honoured from *every* engine-construction path.
-    """
-    try:
-        from src.models.inference import SequenceInferenceEngine
-
-        return SequenceInferenceEngine(loaded.artifact, suppress_channels=suppress_channels)
-    except Exception:  # noqa: BLE001 — bad checkpoint shouldn't kill the task
-        log.exception("failed to build SequenceInferenceEngine; will retry next tick")
-        return None
-
-
-def _publish_sequence_suppression(components: Any, engine: Any) -> None:
-    """Put the engine's training-vs-serving suppress comparison on ``/status``
-    (A01.5, ``health.sequence_suppression``). The parent builds its engine
-    from the same artifact and config the scoring child does, so its
-    comparison stands for both."""
-    health = getattr(components, "health_monitor", None)
-    if health is None:
-        return
-    comparison = getattr(engine, "suppression", None)
-    health.observe_sequence_suppression(comparison.to_dict() if comparison is not None else None)
-
-
-def _suppress_channels_for(components: Any, loaded: Any) -> tuple[str, ...]:
-    """Pick the right backbone's ``suppress_channels`` for the loaded
-    artifact's ``model_type``, so an LSTM↔TCN switch honours its own knob."""
-    artifact_manifest = getattr(loaded.artifact, "manifest", None)
-    model_type = getattr(artifact_manifest, "model_type", None)
-    if model_type == "tcn_autoencoder":
-        seq_cfg = components.config.models.tcn_autoencoder
-    else:
-        seq_cfg = components.config.models.lstm_autoencoder
-    return tuple(getattr(seq_cfg, "suppress_channels", ()))
-
-
-def _sequence_observe(engine: Any, row: Any) -> Any:
-    """Align ``row`` to the sequence engine's expected feature columns and observe.
-
-    ``SequenceWindowBuffer.append`` already handles missing-column / non-finite
-    cases by clearing the buffer (return False, no result), so we don't need
-    to pre-validate — we just present the columns the engine asks for. The
-    return value is ``SequenceInferenceResult`` once a full window is ready,
-    ``None`` otherwise.
-
-    The GRU-D backbone needs each value column's ``<channel>__gap`` flag, and
-    (A03.1) its ``<channel>__arrived`` flag, to derive the observed-mask.
-    ``reconcile_feature_frame_to_spec`` only keeps structural + value columns
-    (it's shared with the IF path), so re-attach the flag columns from the
-    original live row after reconciling.
-    """
-    schema = _schema_for_engine(engine)
-    aligned, report = reconcile_feature_frame_to_spec(row, schema)
-    _log_schema_reconciliation_once(
-        _engine_model_type(engine),
-        _engine_version(engine),
-        report,
-    )
-    observed = aligned.iloc[0].to_dict()
-    # A06.2: the novelty screen reads its driving-condition columns from the
-    # row whether or not the artifact takes them as inputs.
-    conditions = set(getattr(engine, "condition_columns", ()) or ())
-    for column in row.columns:
-        name = str(column)
-        if (is_flag_column(name) or name in conditions) and name not in observed:
-            observed[name] = row.iloc[0][column]
-    return engine.observe(observed)
-
-
-def _schema_for_engine(engine: Any) -> dict[str, Any]:
-    trained = getattr(engine, "trained", None)
-    manifest = getattr(trained, "manifest", None)
-    schema = getattr(manifest, "schema", None)
-    if isinstance(schema, dict):
-        return schema
-    return {"feature_columns": list(getattr(engine, "feature_columns", ()))}
-
-
-def _schema_for_loaded(loaded: Any) -> dict[str, Any]:
-    artifact_manifest = getattr(getattr(loaded, "artifact", None), "manifest", None)
-    schema = getattr(artifact_manifest, "schema", None)
-    if isinstance(schema, dict) and schema.get("feature_columns"):
-        return schema
-    manager_schema = getattr(getattr(loaded, "manifest", None), "schema_", None)
-    if isinstance(manager_schema, dict) and manager_schema.get("feature_columns"):
-        return manager_schema
-    artifact = getattr(loaded, "artifact", None)
-    return {
-        "feature_columns": list(getattr(artifact, "feature_columns", ())),
-        "mode_column": getattr(artifact, "mode_column", "operating_mode"),
-    }
-
-
-def _engine_version(engine: Any) -> str:
-    trained = getattr(engine, "trained", None)
-    manifest = getattr(trained, "manifest", None)
-    version = getattr(manifest, "model_version", None) or getattr(engine, "model_version", None)
-    return str(version or "unknown")
-
-
-def _engine_model_type(engine: Any) -> str:
-    """``model_type`` of the engine's loaded model, for log attribution. Falls
-    back to a generic label for test doubles without a manifest."""
-    trained = getattr(engine, "trained", None)
-    manifest = getattr(trained, "manifest", None)
-    return str(getattr(manifest, "model_type", None) or "sequence_autoencoder")
-
-
-def _log_schema_reconciliation_once(
-    model_type: str,
-    model_version: str,
-    report: FeatureSpecReconciliation,
-    *,
-    now: float | None = None,
-) -> None:
-    """Feed the structural-blindness tracker and log only on verdict changes.
-
-    Every report is folded into :func:`observe_reconciliation` (a column is
-    structural only if absent from *every* report over a sustained window —
-    the first window after start lacks GPS and slow-tier PIDs, which is
-    sparsity, not a retrain signal). Logging is bounded: one WARNING per
-    (model_type, version) on first divergence, one line when the structural
-    verdict is established, and one per later change to it.
-    """
-    update = observe_reconciliation(model_type, model_version, report, now=now)
-    if update.transition is not None and update.verdict and update.verdict["absent_count"]:
-        _log_structural_verdict(model_type, model_version, update.verdict, update.transition)
-    elif update.transition is not None:
-        log.info(
-            "model feature spec is fully satisfiable by the live pipeline",
-            extra={"model_type": model_type, "model_version": model_version},
-        )
-    if not report.has_divergence:
-        return
-    key = (model_type, model_version)
-    if key in _SCHEMA_RECONCILIATION_WARNED:
-        return
-    _SCHEMA_RECONCILIATION_WARNED.add(key)
-    log.warning(
-        "live feature schema reconciled to model feature spec",
-        extra={
-            "model_type": model_type,
-            "model_version": model_version,
-            "schema_reconciliation": report.to_dict(),
-        },
-    )
-
-
-def _log_structural_verdict(
-    model_type: str,
-    model_version: str,
-    verdict: dict[str, Any],
-    transition: str,
-) -> None:
-    """Log a structural-blindness verdict. Not the same event as "schema
-    reconciled": an ERROR means the model cannot score a single row until it
-    is retrained, and the only prior symptom was a `missing_feature_rate` of
-    1.0 with no cause attached (D02.5). For a per-mode model the wording is
-    about which mode models are blind (A04.5), from
-    :func:`src.models.feature_spec_health.describe_structural_verdict`."""
-    from src.models.feature_spec_health import describe_structural_verdict
-
-    extra = {
-        "model_type": model_type,
-        "model_version": model_version,
-        "structural_blindness": verdict,
-        "transition": transition,
-    }
-    level, message = describe_structural_verdict(verdict, transition)
-    if level == "error":
-        log.error("%s", message, extra=extra)
-    else:
-        log.warning("%s", message, extra=extra)
-
-
-#: Phase 7.2a — how many top IF feature contributors (by score effect, A04.2) the
-#: emitter attaches as ``detail.feature_contributors``. Keeps the per-event
-#: payload bounded for IF models with dozens of features.
-_IF_TOP_FEATURES = 5
-_SCHEMA_RECONCILIATION_WARNED: set[tuple[str, str]] = set()
-
-
-def _publish_score(
-    scores: Broadcaster | None,
-    *,
-    source: str,
-    score: Any,
-    threshold: Any,
-    operating_mode: str | None,
-    model_version: str,
-    timestamp: Any,
-    missing_features: bool,
-) -> None:
-    """Fan one inference tick's score onto /ws/scores.
-
-    Published every tick — not just anomalies — so the dashboard can show
-    each model's live current value (including a normal 0). A non-finite
-    score (a missing-feature tick) serializes as ``null`` alongside the
-    ``missing_features`` flag rather than a misleading number.
-    """
-    if scores is None:
-        return
-    if isinstance(timestamp, str):
-        ts_str = timestamp
-    else:
-        try:
-            ts_str = format_timestamp(timestamp)
-        except (ValueError, TypeError):
-            ts_str = str(timestamp)
-    scores.publish(
-        {
-            "type": "score",
-            "source": source,
-            "score": finite_float(score),
-            "threshold": finite_float(threshold),
-            "operating_mode": operating_mode,
-            "model_version": model_version,
-            "timestamp": ts_str,
-            "missing_features": bool(missing_features),
-        }
-    )
-
-
-@dataclass(frozen=True)
-class _IFFusionInput:
-    """The IF half of one fused tick (Phase 7.2). ``threshold``/``scale`` are
-    ``None`` for an uncalibrated mode, so the IF source can't fire in fusion —
-    nor does it emit its own per-source event any more (2.3: uncalibrated
-    modes are non-emitting, score-only). ``sustained`` (6.3) is this tick's
-    already-computed persistence verdict — carried through instead of the
-    caller re-deriving it via ``persistence.active`` so a tuner-bypassed key
-    (see ``_persistence_sustained``) downgrades the fusion source correctly
-    even though the gate's own streak state was never touched for it."""
-
-    score: float
-    threshold: float | None
-    scale: float | None
-    sustained: bool = True
-
-
-@dataclass(frozen=True)
-class _BehaviorResidual:
-    """One behavior/physics model's graded deviation for a tick (Phase 7.4).
-
-    Carries everything the first-class behavior detector needs to emit an
-    event *and* feed the fusion path, computed once off the same operating
-    point the overlay uses."""
-
-    name: str
-    kind: str
-    channel: str
-    actual: float | None
-    expected: float | None
-    deviation: float | None
-    severity: str
-    mode_match: bool
-    operating_mode: str | None
-    timestamp: str | None
-    #: 2.2 — the active accepted-baseline override's provenance reason when
-    #: this tick's severity was graded against a recentered one-sided band
-    #: instead of the model's own static config; ``None`` otherwise.
-    override_reason: str | None = None
-    #: B01.4 — why no deviation was produced this tick (``None`` when one
-    #: was). A refused tick is a missing verdict, never a healthy miss.
-    reason: str | None = None
-    #: B01.6 — ``False`` for a diagnostic-only model (legacy artifact without
-    #: a serving contract, or no held-out validation): still graded and
-    #: shown, never emitted or fused.
-    alerting: bool = True
-
-
-def _record_if_health(
-    health: HealthMonitor | None,
-    *,
-    latency_ms: float,
-    missing: bool,
-    score: Any,
-    timestamp: Any,
-    mode_str: str | None,
-    model_version: str,
-) -> None:
-    """Task 3.1: the health-bookkeeping slice of ``_score_and_emit``, split
-    out because it's a pure side effect (no bearing on the returned
-    ``_IFFusionInput``) — a few dict reads + a perf-counter delta against a
-    wired ``HealthMonitor``, silently skipped when ``health`` is ``None``.
-
-    2.1: per-mode blindness is edge-triggered off the same tick health
-    already records, so a mode transitioning into it logs a fresh warning
-    instead of the old once-per-process one keyed on model version.
-    ``blind_modes``/``missing_feature_rate_by_mode`` are then visible on
-    ``/status`` for every tick, not just the transition.
-    """
-    import pandas as pd
-
-    if health is None:
-        return
-    try:
-        ts_epoch = pd.Timestamp(timestamp).timestamp()
-    except (ValueError, TypeError):
-        ts_epoch = None
-    newly_blind = health.observe_inference(
-        latency_ms=latency_ms,
-        missing_features=missing,
-        score=float(score) if score is not None and pd.notna(score) else None,
-        data_timestamp_epoch=ts_epoch,
-        operating_mode=mode_str,
-    )
-    if newly_blind:
-        log.warning(
-            "isolation_forest mode %r transitioned into blindness — a "
-            "trained feature column has gone permanently missing from "
-            "the live stream; anomaly emits are suppressed for this mode "
-            "until it recovers. See /status "
-            "detectors.isolation_forest.blind_modes.",
-            mode_str,
-            extra={"model_version": model_version, "operating_mode": mode_str},
-        )
-
-
-def _rank_feature_contributors(
-    engine: IsolationForestInferenceEngine, aligned: Any
-) -> tuple[dict[str, float], tuple[str, ...], str | None]:
-    """A04.2 — IF attribution over the *scoring mode model's own* features, by
-    their effect on the score (occlusion, one batched ``decision_function``).
-    The earlier |z| ranking over the artifact's feature union named a feature
-    the scoring model did not have on 60 of 62 city rows. Best-effort and
-    side-effect-free; keeps the top :data:`_IF_TOP_FEATURES`. The third value
-    says what each feature was replaced with: ``mode_median``, or
-    ``pooled_mean`` on an artifact that recorded no per-mode medians.
-    """
-    try:
-        row = aligned.iloc[0]
-        contributions = engine.feature_contributions(row, top_k=_IF_TOP_FEATURES)
-        reference = engine.contribution_reference(row)
-    except Exception:  # noqa: BLE001 — attribution is best-effort, never blocks an emit
-        log.exception("isolation_forest feature_contributors ranking failed")
-        return {}, (), None
-    return contributions, tuple(contributions), reference
-
-
-@dataclass(frozen=True)
-class _IFComputed:
-    """Everything the IF worker pass produced for one tick (C08.4) — pure
-    data, applied on the loop by :func:`_if_apply`. Carries the reconciliation
-    report so the once-per-version schema warning is logged from the loop."""
-
-    #: The version that actually scored. Was the whole engine until the
-    #: scoring pass moved out-of-process: shipping a model back across a
-    #: pipe every tick to read one string defeats the point, and this
-    #: dataclass already documented itself as "pure data".
-    model_version: str
-    report: FeatureSpecReconciliation
-    scored: Any  # pd.Series
-    latency_ms: float
-    timestamp: Any
-    missing: bool
-    mode_str: str | None
-    calibrated_threshold: float | None
-    scale: float | None
-    score_val: Any
-    feature_contributors: dict[str, float]
-    affected_channels: tuple[str, ...]
-    #: A04.2 — ``mode_median`` / ``pooled_mean`` (see _rank_feature_contributors).
-    feature_contributors_reference: str | None = None
-
-
-def _if_compute(loaded: Any, row: Any) -> _IFComputed:
-    """The worker half of :func:`_score_and_emit`: schema alignment, the
-    sklearn forward pass, threshold/scale lookup, and contributor ranking.
-    No shared state is read or written — safe off the loop (C08.4)."""
-    import pandas as pd
-
-    from src.models.isolation_forest import (
-        CALIBRATED_THRESHOLD_COLUMN,
-        MISSING_FEATURES_COLUMN,
-        MODEL_MODE_COLUMN,
-        SCORE_COLUMN,
-    )
-
-    engine = IsolationForestInferenceEngine(loaded.artifact)
-    aligned, report = reconcile_feature_frame_to_spec(row, _schema_for_loaded(loaded))
-    started = time.perf_counter()
-    scored = engine.observe(aligned.iloc[0])
-    latency_ms = (time.perf_counter() - started) * 1000.0
-    timestamp = row["timestamp"].iloc[0]
-    missing = bool(scored.get(MISSING_FEATURES_COLUMN, False))
-    mode_val = row["operating_mode"].iloc[0] if "operating_mode" in row else None
-    mode_str = None if mode_val is None or pd.isna(mode_val) else str(mode_val)
-    raw_threshold = scored.get(CALIBRATED_THRESHOLD_COLUMN)
-    calibrated_threshold = (
-        float(raw_threshold) if raw_threshold is not None and pd.notna(raw_threshold) else None
-    )
-    model_mode = scored.get(MODEL_MODE_COLUMN)
-    scale = (
-        getattr(loaded.artifact, "score_scales", {}).get(str(model_mode))
-        if model_mode is not None and pd.notna(model_mode)
-        else None
-    )
-    # A04.2 — occlusion attribution, only for a row that can emit (calibrated
-    # and at/over its threshold): the persistence gate and emitter only ever
-    # read it there, and it costs one batched forward pass. Skipped for a
-    # missing-feature row: its verdict is suppressed below.
-    score_now = scored.get(SCORE_COLUMN)
-    over_threshold = (
-        calibrated_threshold is not None
-        and score_now is not None
-        and pd.notna(score_now)
-        and float(score_now) >= calibrated_threshold
-    )
-    reference: str | None = None
-    if missing or not over_threshold:
-        feature_contributors: dict[str, float] = {}
-        affected_channels: tuple[str, ...] = ()
-    else:
-        feature_contributors, affected_channels, reference = _rank_feature_contributors(
-            engine, aligned
-        )
-    return _IFComputed(
-        model_version=engine.model_version,
-        report=report,
-        scored=scored,
-        latency_ms=latency_ms,
-        timestamp=timestamp,
-        missing=missing,
-        mode_str=mode_str,
-        calibrated_threshold=calibrated_threshold,
-        scale=scale if scale is None else float(scale),
-        score_val=scored.get(SCORE_COLUMN),
-        feature_contributors=feature_contributors,
-        affected_channels=affected_channels,
-        feature_contributors_reference=reference,
-    )
-
-
-def _if_apply(
-    computed: _IFComputed,
-    emitter: AnomalyEventEmitter,
-    health: HealthMonitor | None = None,
-    *,
-    scores: Broadcaster | None = None,
-    persistence: PersistenceGate | None = None,
-    tuner: AlertTuner | None = None,
-    now: float | None = None,
-) -> _IFFusionInput | None:
-    """The loop half of :func:`_score_and_emit`: health bookkeeping,
-    ``/ws/scores``, the persistence gate and the per-source emit."""
-    import pandas as pd
-
-    model_version = computed.model_version
-    _log_schema_reconciliation_once("isolation_forest", model_version, computed.report)
-    _record_if_health(
-        health,
-        latency_ms=computed.latency_ms,
-        missing=computed.missing,
-        score=computed.score_val,
-        timestamp=computed.timestamp,
-        mode_str=computed.mode_str,
-        model_version=model_version,
-    )
-    calibrated_threshold = computed.calibrated_threshold
-    _publish_score(
-        scores,
-        source="isolation_forest",
-        score=computed.score_val,
-        threshold=calibrated_threshold,  # 7.2 per-mode calibrated boundary
-        operating_mode=computed.mode_str,
-        model_version=model_version,
-        timestamp=computed.timestamp,
-        missing_features=computed.missing,
-    )
-    # Layer 3 fail-safe: an IF verdict computed from a feature vector with
-    # missing trained columns is untrustworthy. Suppress the emit (symmetric
-    # with the LSTM path, which already withholds output until a clean
-    # window) rather than alerting off a half-blind model. Health still
-    # recorded above, so the degraded state is visible on /status — silent
-    # but observable beats confidently wrong. The raw score still went onto
-    # /ws/scores above so the live readout shows the degraded state.
-    if computed.missing:
-        return None
-    score_val = computed.score_val
-    calibrated = calibrated_threshold is not None
-    suppress_emit = False
-    sustained = True
-    if persistence is not None:
-        # Same firing rule the fusion source uses: calibrated over-threshold.
-        # Uncalibrated rows (no threshold) can never raise this — they're
-        # non-emitting entirely now (2.3, below) — but still flow through so
-        # the gate's internal streak state and the emitter's
-        # suppressed_not_anomaly accounting stay truthful.
-        raw_fired = (
-            score_val is not None
-            and pd.notna(score_val)
-            and calibrated_threshold is not None
-            and float(score_val) >= calibrated_threshold
-        )
-        # 6.3/3.1: a tuner debounce override for (isolation_forest, mode_str),
-        # if any, fully owns persistence for this key instead of stacking —
-        # see `gate_and_collect`, shared with the sequence + behavior detectors.
-        sustained = gate_and_collect(
-            persistence,
-            "isolation_forest",
-            raw_fired,
-            tuner=tuner,
-            source="isolation_forest",
-            mode=computed.mode_str,
-            now=now if now is not None else time.monotonic(),
-            counters=emitter.counters,
-        )
-        suppress_emit = raw_fired and not sustained
-    # 2.2/2.3: a mode with no calibrated threshold is either too sparse to
-    # trust (skipped at training, 2.2) or hasn't accumulated enough holdout
-    # yet — either way its raw sklearn contamination label no longer reaches
-    # the emitter. This retires the legacy path that used to bypass the
-    # persistence gate entirely and fire straight off that label; the score
-    # is still recorded above (health + /ws/scores) so the degraded mode
-    # stays observable, just non-emitting.
-    if calibrated and not suppress_emit:
-        emitter.emit_isolation_forest_row(
-            computed.scored,
-            model_version=model_version,
-            timestamp=format_timestamp(computed.timestamp),
-            affected_channels=computed.affected_channels,
-            feature_contributors=computed.feature_contributors or None,
-            feature_contributors_reference=computed.feature_contributors_reference,
-        )
-    if score_val is None or pd.isna(score_val):
-        return None
-    return _IFFusionInput(
-        score=float(score_val),
-        threshold=calibrated_threshold,
-        scale=computed.scale,
-        sustained=sustained,
-    )
-
-
-def _score_and_emit(
-    loaded: Any,
-    row: Any,  # pd.DataFrame, one row
-    emitter: AnomalyEventEmitter,
-    health: HealthMonitor | None = None,
-    *,
-    scores: Broadcaster | None = None,
-    persistence: PersistenceGate | None = None,
-    tuner: AlertTuner | None = None,
-    now: float | None = None,
-) -> _IFFusionInput | None:
-    """Run one feature row through IF.score → emitter, synchronously on the
-    caller's thread. Best-effort.
-
-    Composition of :func:`_if_compute` (pure scoring, what the live pipeline
-    runs in its worker) and :func:`_if_apply` (every side effect, what it
-    runs on the loop) — kept as one call for offline callers and tests.
-
-    Returns the IF fusion input on a trustworthy tick, or ``None`` when the
-    verdict was suppressed (missing-feature schema warmup) and so must not
-    contribute to fusion either — the per-source emit policy is unchanged.
-
-    ``persistence`` (when given) is advanced once per trustworthy tick with
-    the calibrated over-threshold verdict (6.3: through ``tuner``'s
-    debounce-ownership rule, see ``_persistence_sustained``); the per-source
-    event is withheld until the streak is sustained. The caller reads the
-    returned ``sustained`` flag to downgrade the fusion source consistently.
-
-    The model's expected ``feature_columns`` are a subset of what the
-    live source produces; missing columns surface as NaN, which
-    ``TrainedIsolationForest.score`` flags as ``missing_features`` rather
-    than crashing. That behavior is exactly what we want during the
-    schema-warmup window immediately after startup.
-
-    When a ``HealthMonitor`` is wired, the per-tick latency / missing-feature
-    flag / score / data freshness are recorded for ``/status`` (Task 6.27) —
-    a few dict reads + a perf-counter delta, negligible against scoring.
-    """
-    return _if_apply(
-        _if_compute(loaded, row),
-        emitter,
-        health,
-        scores=scores,
-        persistence=persistence,
-        tuner=tuner,
-        now=now,
-    )
-
-
-def _observe_behavior(
-    source: LiveFeatureSource, behavior_live: BehaviorLiveState
-) -> list[_BehaviorResidual]:
-    """Feed one tick of per-model deviations into the live overlay state.
-
-    Returns one :class:`_BehaviorResidual` per model so the caller can both
-    emit the first-class behavior detector event (Phase 7.4) and feed the
-    fusion path (Phase 7.2) off the exact graded deviation the overlay shows
-    — ``deviation()`` already returns ``"ok"`` for an off-mode or no-signal
-    model, so a returned band is mode-safe.
-
-    Reads the exact wide row the feature pipeline used (the source's
-    ``latest_operating_point``) and runs every behavior model through the
-    same ``behavior_decoder.deviation`` the preprocessing path uses. The
-    Models▸Behavior overlay therefore shows backend truth — mode-gated,
-    domain-clamped, empty-cell aware — not a client-side re-derivation that
-    could silently drift from what the IF/LSTM actually see.
-
-    Also grades any ``channel``-targeted accepted-baseline override (2.2) —
-    unlike a ``behavior_model``-targeted one, there is no surface backing a
-    raw channel, so these never appear in ``source.behavior_models`` and
-    need their own residual straight off ``deviation_for_override``; see
-    the loop below. Doesn't touch ``observations``/the live overlay — that
-    panel is surface-model-shaped (x/y axis position) and a raw channel
-    has no axis to place a "you are here" marker at.
-
-    Best-effort: the caller wraps this in the live-inference try/except, so
-    one malformed row can't kill the inference stream.
-    """
-    models = source.behavior_models
-    point = source.latest_operating_point
-    if point is None:
-        return []
-    residuals: list[_BehaviorResidual] = []
-    raw_mode = point.get(MODE_COLUMN)
-    mode = raw_mode if isinstance(raw_mode, str) else None
-    ts = point.get("timestamp")
-    if ts is None:
-        timestamp = None
-    else:
-        try:
-            timestamp = format_timestamp(ts)
-        except (ValueError, TypeError):
-            timestamp = str(ts)
-    observations: list[BehaviorObservation] = []
-    for model in models.models if models is not None else []:
-        # Same actual-column resolution as append_deviation_columns: a
-        # qualified source:channel output is verbatim; a bare CAN signal
-        # name falls back to the legacy decoded:<NAME>.
-        actual_col = resolve_output_column(model.output)
-        status = serving_status(model)
-        actual = finite_float(point.get(actual_col))
-        # 2.2 — an active, non-expired override for this model recenters
-        # the band (worse side trips, better side never alerts, per
-        # `behavior_decoder._grade_directional`); `active_override_for`
-        # already returns `None` past `review_by`, so an expired override
-        # is silently inert here — the model grades against its own static
-        # config (if any) exactly as if no override existed.
-        override = (
-            source.accepted_baselines.active_override_for(model.name, mode)
-            if source.accepted_baselines is not None
-            else None
-        )
-        result = deviation(model, actual, point, override=override)
-        if isinstance(model, BehaviorModel1D):
-            x = finite_float(point.get(model.axis.channel))
-            y = None
-        else:
-            x = finite_float(point.get(model.axes[0].channel))
-            y = finite_float(point.get(model.axes[1].channel))
-        mode_match = model.operating_mode is None or mode == model.operating_mode
-        observations.append(
-            BehaviorObservation(
-                name=model.name,
-                kind=model.kind,
-                x=x,
-                y=y,
-                actual=actual,
-                expected=result.expected,
-                deviation=result.deviation,
-                severity=result.severity,
-                mode_match=mode_match,
-                reason=result.reason,
-                status=status.state,
-                status_reasons=status.reasons,
-                lifecycle=status.lifecycle,
-                permitted_uses=tuple(sorted(use.value for use in status.permitted_uses)),
-                artifact_version=model.version,
-            )
-        )
-        residuals.append(
-            _BehaviorResidual(
-                name=model.name,
-                kind=model.kind,
-                channel=actual_col,
-                actual=actual,
-                expected=result.expected,
-                deviation=result.deviation,
-                severity=result.severity,
-                mode_match=mode_match,
-                operating_mode=mode,
-                timestamp=timestamp,
-                override_reason=None if override is None else override.provenance.reason,
-                reason=result.reason,
-                alerting=status.alerting,
-            )
-        )
-    # 2.2 — raw-channel overrides (e.g. `obd:SHORT_FUEL_TRIM_1`) have no
-    # behavior_model/surface behind them, so they're never covered by the
-    # loop above; grade each distinct channel target directly against
-    # `deviation_for_override` instead of `deviation()`. Skips cleanly (no
-    # residual) when no override is active for this tick's mode (expired,
-    # or scoped to a different mode — `active_override_for` already
-    # encodes both) or the channel isn't present/decoded this tick — same
-    # "missing signal ⇒ no residual" posture as the behavior_model branch.
-    baselines = source.accepted_baselines
-    if baselines is not None:
-        seen_channels: set[str] = set()
-        for candidate in baselines.overrides:
-            if candidate.channel is None or candidate.channel in seen_channels:
-                continue
-            seen_channels.add(candidate.channel)
-            channel_override = baselines.active_override_for(candidate.channel, mode)
-            if channel_override is None:
-                continue
-            actual_col = (
-                candidate.channel
-                if SOURCE_SEP in candidate.channel
-                else channel_key(DECODED_SOURCE, candidate.channel)
-            )
-            actual = finite_float(point.get(actual_col))
-            if actual is None:
-                continue
-            result = deviation_for_override(channel_override, actual)
-            residuals.append(
-                _BehaviorResidual(
-                    name=f"override:{candidate.channel}",
-                    kind="channel_override",
-                    channel=actual_col,
-                    actual=actual,
-                    expected=result.expected,
-                    deviation=result.deviation,
-                    severity=result.severity,
-                    # `active_override_for` already matched this tick's mode
-                    # (or the override is unscoped) to get here, so this
-                    # residual always speaks for the current tick.
-                    mode_match=True,
-                    operating_mode=mode,
-                    timestamp=timestamp,
-                    override_reason=channel_override.provenance.reason,
-                )
-            )
-    # Only touch the overlay when there were surface models to report on —
-    # a channel-override-only tick (no behavior_models.yaml models at all)
-    # has nothing overlay-shaped to add, same no-op posture as before 2.2's
-    # channel-override branch existed.
-    if models is not None and models.models:
-        behavior_live.observe(timestamp, mode, observations)
-    return residuals
 
 
 def build_live_feature_source(

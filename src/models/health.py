@@ -447,6 +447,11 @@ class HealthMonitor:
         #: 4.7 — latest live tick's segmenter-fallback state (edge-triggered
         #: like ``if_blind_modes``, same pattern).
         self._segmenter_fallback_active: bool = False
+        #: R03.12 — the latest tick's capture-profile gate verdict
+        #: (``{scoring_allowed, profile, source}``), or ``None`` before the
+        #: first scorable row. ``/status`` detectors surface it so a withheld
+        #: IF/sequence stream names the profile that withheld it.
+        self._capture_profile_gate: dict[str, Any] | None = None
         #: Task 6.8 — the counters as first observed (baseline "since this
         #: monitor started watching"), so a delta is visible without needing
         #: a second daemon to remember the counter's value at boot.
@@ -565,6 +570,15 @@ class HealthMonitor:
         """Whether the live segmenter is currently constant-mode-fallback
         (4.7) — ``/status`` surfaces this alongside ``if_blind_modes``."""
         return self._segmenter_fallback_active
+
+    def observe_capture_profile_gate(self, verdict: dict[str, Any]) -> None:
+        """Record this tick's R03.12 capture-profile gate verdict."""
+        self._capture_profile_gate = dict(verdict)
+
+    @property
+    def capture_profile_gate(self) -> dict[str, Any] | None:
+        """The latest capture-profile gate verdict, or ``None`` before one."""
+        return None if self._capture_profile_gate is None else dict(self._capture_profile_gate)
 
     def note_swap(self, kind: str, *, version: str | None = None) -> None:
         self._swaps[kind] = self._swaps.get(kind, 0) + 1

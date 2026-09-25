@@ -1,0 +1,311 @@
+{
+ "lstm": {
+  "additionalProperties": false,
+  "properties": {
+   "enabled": {
+    "title": "Enabled",
+    "type": "boolean"
+   },
+   "sequence_length": {
+    "title": "Sequence Length",
+    "type": "integer"
+   },
+   "hidden_size": {
+    "default": 64,
+    "title": "Hidden Size",
+    "type": "integer"
+   },
+   "num_layers": {
+    "default": 1,
+    "title": "Num Layers",
+    "type": "integer"
+   },
+   "latent_dim": {
+    "title": "Latent Dim",
+    "type": "integer"
+   },
+   "dropout": {
+    "default": 0.0,
+    "title": "Dropout",
+    "type": "number"
+   },
+   "batch_size": {
+    "default": 64,
+    "title": "Batch Size",
+    "type": "integer"
+   },
+   "training_stride": {
+    "default": 5,
+    "minimum": 1,
+    "title": "Training Stride",
+    "type": "integer"
+   },
+   "calibration_stride": {
+    "default": 1,
+    "minimum": 1,
+    "title": "Calibration Stride",
+    "type": "integer"
+   },
+   "dataloader_workers": {
+    "anyOf": [
+     {
+      "minimum": 0,
+      "type": "integer"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Dataloader Workers"
+   },
+   "mixed_precision": {
+    "default": true,
+    "title": "Mixed Precision",
+    "type": "boolean"
+   },
+   "compile_model": {
+    "default": false,
+    "title": "Compile Model",
+    "type": "boolean"
+   },
+   "min_window_observed_fraction": {
+    "default": 0.01,
+    "exclusiveMinimum": 0.0,
+    "maximum": 1.0,
+    "title": "Min Window Observed Fraction",
+    "type": "number"
+   },
+   "min_usable_window_fraction": {
+    "default": 0.9,
+    "exclusiveMinimum": 0.0,
+    "maximum": 1.0,
+    "title": "Min Usable Window Fraction",
+    "type": "number"
+   },
+   "learning_rate": {
+    "default": 0.001,
+    "title": "Learning Rate",
+    "type": "number"
+   },
+   "max_epochs": {
+    "default": 100,
+    "title": "Max Epochs",
+    "type": "integer"
+   },
+   "validation_fraction": {
+    "default": 0.2,
+    "title": "Validation Fraction",
+    "type": "number"
+   },
+   "early_stopping_patience": {
+    "default": 10,
+    "title": "Early Stopping Patience",
+    "type": "integer"
+   },
+   "min_delta": {
+    "default": 0.0,
+    "title": "Min Delta",
+    "type": "number"
+   },
+   "random_state": {
+    "default": 42,
+    "title": "Random State",
+    "type": "integer"
+   },
+   "threshold_k": {
+    "title": "Threshold K",
+    "type": "number"
+   },
+   "threshold_quantile": {
+    "anyOf": [
+     {
+      "exclusiveMaximum": 1.0,
+      "exclusiveMinimum": 0.0,
+      "type": "number"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": 0.999,
+    "title": "Threshold Quantile"
+   },
+   "suppress_channels": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "title": "Suppress Channels",
+    "type": "array"
+   }
+  },
+  "required": [
+   "enabled",
+   "sequence_length",
+   "latent_dim",
+   "threshold_k"
+  ],
+  "title": "LSTMAutoencoderConfig",
+  "type": "object"
+ },
+ "tcn": {
+  "additionalProperties": false,
+  "description": "Dilated causal TCN autoencoder \u2014 the alternate sequence-detector backbone.\n\nFully defaulted (and ``enabled: false`` by default) so configs without a\n``tcn_autoencoder`` block keep loading; selecting it requires both\n``sequence_detector: tcn`` and ``enabled: true``.",
+  "properties": {
+   "enabled": {
+    "default": false,
+    "title": "Enabled",
+    "type": "boolean"
+   },
+   "sequence_length": {
+    "default": 30,
+    "title": "Sequence Length",
+    "type": "integer"
+   },
+   "channels": {
+    "default": 64,
+    "title": "Channels",
+    "type": "integer"
+   },
+   "kernel_size": {
+    "default": 3,
+    "title": "Kernel Size",
+    "type": "integer"
+   },
+   "num_levels": {
+    "default": 4,
+    "title": "Num Levels",
+    "type": "integer"
+   },
+   "latent_dim": {
+    "default": 32,
+    "title": "Latent Dim",
+    "type": "integer"
+   },
+   "dropout": {
+    "default": 0.0,
+    "title": "Dropout",
+    "type": "number"
+   },
+   "use_delta_decay": {
+    "default": true,
+    "title": "Use Delta Decay",
+    "type": "boolean"
+   },
+   "batch_size": {
+    "default": 64,
+    "title": "Batch Size",
+    "type": "integer"
+   },
+   "training_stride": {
+    "default": 5,
+    "minimum": 1,
+    "title": "Training Stride",
+    "type": "integer"
+   },
+   "calibration_stride": {
+    "default": 1,
+    "minimum": 1,
+    "title": "Calibration Stride",
+    "type": "integer"
+   },
+   "dataloader_workers": {
+    "anyOf": [
+     {
+      "minimum": 0,
+      "type": "integer"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": null,
+    "title": "Dataloader Workers"
+   },
+   "mixed_precision": {
+    "default": true,
+    "title": "Mixed Precision",
+    "type": "boolean"
+   },
+   "compile_model": {
+    "default": false,
+    "title": "Compile Model",
+    "type": "boolean"
+   },
+   "min_window_observed_fraction": {
+    "default": 0.01,
+    "exclusiveMinimum": 0.0,
+    "maximum": 1.0,
+    "title": "Min Window Observed Fraction",
+    "type": "number"
+   },
+   "min_usable_window_fraction": {
+    "default": 0.9,
+    "exclusiveMinimum": 0.0,
+    "maximum": 1.0,
+    "title": "Min Usable Window Fraction",
+    "type": "number"
+   },
+   "learning_rate": {
+    "default": 0.001,
+    "title": "Learning Rate",
+    "type": "number"
+   },
+   "max_epochs": {
+    "default": 100,
+    "title": "Max Epochs",
+    "type": "integer"
+   },
+   "validation_fraction": {
+    "default": 0.2,
+    "title": "Validation Fraction",
+    "type": "number"
+   },
+   "early_stopping_patience": {
+    "default": 10,
+    "title": "Early Stopping Patience",
+    "type": "integer"
+   },
+   "min_delta": {
+    "default": 0.0,
+    "title": "Min Delta",
+    "type": "number"
+   },
+   "random_state": {
+    "default": 42,
+    "title": "Random State",
+    "type": "integer"
+   },
+   "threshold_k": {
+    "default": 3.0,
+    "title": "Threshold K",
+    "type": "number"
+   },
+   "threshold_quantile": {
+    "anyOf": [
+     {
+      "exclusiveMaximum": 1.0,
+      "exclusiveMinimum": 0.0,
+      "type": "number"
+     },
+     {
+      "type": "null"
+     }
+    ],
+    "default": 0.999,
+    "title": "Threshold Quantile"
+   },
+   "suppress_channels": {
+    "default": [],
+    "items": {
+     "type": "string"
+    },
+    "title": "Suppress Channels",
+    "type": "array"
+   }
+  },
+  "title": "TCNAutoencoderConfig",
+  "type": "object"
+ }
+}

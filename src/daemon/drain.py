@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -338,6 +338,44 @@ async def run_telemetry_broadcast_sink(
             _observe_queue(health_monitor, "broadcast", queue)
 
 
+async def _run_record_sink(
+    name: str,
+    queue: asyncio.Queue[TelemetryRecord],
+    handle: Callable[[TelemetryRecord], None],
+    stop_event: asyncio.Event,
+    *,
+    failure: str,
+    poll_interval: float = 0.5,
+    queue_warning_fraction: float = 0.8,
+    health_monitor: HealthMonitor | None = None,
+) -> None:
+    """The per-record sink loop: drain ``queue`` into ``handle`` until stopped.
+
+    Best-effort per record: a failing ``handle`` is counted against ``name``
+    and logged as ``"<failure> failed; skipping record"``, and the loop keeps
+    going. Drains what is queued after ``stop_event`` before returning. The
+    live, DTC and monitor sinks were three copies of this loop (R03.8).
+    """
+    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
+    while not stop_event.is_set() or not queue.empty():
+        queue_monitor.observe(queue)
+        _observe_queue(health_monitor, name, queue)
+        try:
+            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
+        except TimeoutError:
+            continue
+
+        try:
+            handle(record)
+        except Exception as exc:  # noqa: BLE001 — every record sink is best-effort
+            _note_error(health_monitor, name, exc)
+            log.exception("%s failed; skipping record", failure)
+        finally:
+            queue.task_done()
+            queue_monitor.observe(queue)
+            _observe_queue(health_monitor, name, queue)
+
+
 async def run_live_source_sink(
     queue: asyncio.Queue[TelemetryRecord],
     live_source: LiveFeatureSource,
@@ -348,24 +386,16 @@ async def run_live_source_sink(
     health_monitor: HealthMonitor | None = None,
 ) -> None:
     """Feed the live feature source without depending on storage progress."""
-    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
-    while not stop_event.is_set() or not queue.empty():
-        queue_monitor.observe(queue)
-        _observe_queue(health_monitor, "live", queue)
-        try:
-            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
-        except TimeoutError:
-            continue
-
-        try:
-            live_source.observe(record)
-        except Exception as exc:  # noqa: BLE001 — live inference is best-effort
-            _note_error(health_monitor, "live", exc)
-            log.exception("live_source.observe failed; skipping record")
-        finally:
-            queue.task_done()
-            queue_monitor.observe(queue)
-            _observe_queue(health_monitor, "live", queue)
+    await _run_record_sink(
+        "live",
+        queue,
+        live_source.observe,
+        stop_event,
+        failure="live_source.observe",
+        poll_interval=poll_interval,
+        queue_warning_fraction=queue_warning_fraction,
+        health_monitor=health_monitor,
+    )
 
 
 async def run_gps_sink(  # noqa: PLR0915 — one loop, three event kinds
@@ -532,31 +562,27 @@ async def run_dtc_sink(
     (Task 1.7) instead of pinning it to whatever session was active at
     sink-startup.
     """
-    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
-    while not stop_event.is_set() or not queue.empty():
-        queue_monitor.observe(queue)
-        _observe_queue(health_monitor, "dtc", queue)
-        try:
-            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
-        except TimeoutError:
-            continue
 
-        try:
-            session_dir = active_session_path() if active_session_path is not None else None
-            dtc_state.observe(
-                record,
-                session_id=session_dir.name if session_dir is not None else None,
-                session_dir=session_dir,
-                emitter=emitter,
-                vehicle_ledger=vehicle_ledger,
-            )
-        except Exception as exc:  # noqa: BLE001 — DTC bookkeeping is best-effort
-            _note_error(health_monitor, "dtc", exc)
-            log.exception("dtc_state.observe failed; skipping record")
-        finally:
-            queue.task_done()
-            queue_monitor.observe(queue)
-            _observe_queue(health_monitor, "dtc", queue)
+    def _observe(record: TelemetryRecord) -> None:
+        session_dir = active_session_path() if active_session_path is not None else None
+        dtc_state.observe(
+            record,
+            session_id=session_dir.name if session_dir is not None else None,
+            session_dir=session_dir,
+            emitter=emitter,
+            vehicle_ledger=vehicle_ledger,
+        )
+
+    await _run_record_sink(
+        "dtc",
+        queue,
+        _observe,
+        stop_event,
+        failure="dtc_state.observe",
+        poll_interval=poll_interval,
+        queue_warning_fraction=queue_warning_fraction,
+        health_monitor=health_monitor,
+    )
 
 
 async def run_monitor_sink(
@@ -577,29 +603,25 @@ async def run_monitor_sink(
     per-session misfire baseline instead of pinning it to whatever session
     was active at sink-startup.
     """
-    queue_monitor = QueueDepthMonitor(warning_fraction=queue_warning_fraction)
-    while not stop_event.is_set() or not queue.empty():
-        queue_monitor.observe(queue)
-        _observe_queue(health_monitor, "monitor", queue)
-        try:
-            record = await asyncio.wait_for(queue.get(), timeout=poll_interval)
-        except TimeoutError:
-            continue
 
-        try:
-            session_dir = active_session_path() if active_session_path is not None else None
-            monitor_state.observe(
-                record,
-                session_id=session_dir.name if session_dir is not None else None,
-                emitter=emitter,
-            )
-        except Exception as exc:  # noqa: BLE001 — monitor bookkeeping is best-effort
-            _note_error(health_monitor, "monitor", exc)
-            log.exception("monitor_state.observe failed; skipping record")
-        finally:
-            queue.task_done()
-            queue_monitor.observe(queue)
-            _observe_queue(health_monitor, "monitor", queue)
+    def _observe(record: TelemetryRecord) -> None:
+        session_dir = active_session_path() if active_session_path is not None else None
+        monitor_state.observe(
+            record,
+            session_id=session_dir.name if session_dir is not None else None,
+            emitter=emitter,
+        )
+
+    await _run_record_sink(
+        "monitor",
+        queue,
+        _observe,
+        stop_event,
+        failure="monitor_state.observe",
+        poll_interval=poll_interval,
+        queue_warning_fraction=queue_warning_fraction,
+        health_monitor=health_monitor,
+    )
 
 
 async def drain_queue_with_broadcast(
@@ -658,66 +680,68 @@ async def drain_queue_with_broadcast(
     sink_queue_size = _sink_queue_size(queue)
     sinks: list[TelemetrySink] = []
     sink_tasks: list[asyncio.Task[None]] = []
+    #: What every sink loop takes besides its queue, target and stop event.
+    common: dict[str, Any] = {
+        "poll_interval": poll_interval,
+        "queue_warning_fraction": queue_warning_fraction,
+        "health_monitor": health_monitor,
+    }
+
+    def add_sink(
+        name: str,
+        overflow: TelemetryOverflowPolicy,
+        runner: Callable[[asyncio.Queue[TelemetryRecord]], Coroutine[Any, Any, None]],
+        accepts: Callable[[TelemetryRecord], bool] | None = None,
+    ) -> None:
+        """One queue, its fanout subscription and its task (R03.8).
+
+        The fanout reads ``sinks`` afresh for every batch, and the shutdown
+        path below joins and cancels ``sink_tasks`` by reference, so a sink
+        added while the drain is running is fed and torn down like any other.
+        """
+        sink_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
+        sinks.append(TelemetrySink(name, sink_queue, overflow, accepts=accepts))
+        sink_tasks.append(asyncio.create_task(runner(sink_queue)))
 
     async_writer = ensure_async_writer(writer)
-    storage_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-    sinks.append(TelemetrySink("storage", storage_queue, "drop_newest"))
-    sink_tasks.append(
-        asyncio.create_task(
-            run_storage_sink(
-                storage_queue,
-                async_writer,
-                stop_event,
-                poll_interval=poll_interval,
-                storage_path=storage_path,
-                storage_warning_mb=storage_warning_mb,
-                queue_warning_fraction=queue_warning_fraction,
-                health_monitor=health_monitor,
-                decode=storage_decode,
-            )
-        )
+    add_sink(
+        "storage",
+        "drop_newest",
+        lambda q: run_storage_sink(
+            q,
+            async_writer,
+            stop_event,
+            storage_path=storage_path,
+            storage_warning_mb=storage_warning_mb,
+            decode=storage_decode,
+            **common,
+        ),
     )
 
     if telemetry_broadcaster is not None:
-        broadcast_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("broadcast", broadcast_queue, "drop_oldest"))
-        sink_tasks.append(
-            asyncio.create_task(
-                run_telemetry_broadcast_sink(
-                    broadcast_queue,
-                    telemetry_broadcaster,
-                    stop_event,
-                    live_source=live_source,
-                    live_source_getter=(
-                        (lambda: _resolved_live_source(live_source_ready))
-                        if live_source_ready is not None
-                        else None
-                    ),
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                )
-            )
+        broadcaster = telemetry_broadcaster
+        add_sink(
+            "broadcast",
+            "drop_oldest",
+            lambda q: run_telemetry_broadcast_sink(
+                q,
+                broadcaster,
+                stop_event,
+                live_source=live_source,
+                live_source_getter=(
+                    (lambda: _resolved_live_source(live_source_ready))
+                    if live_source_ready is not None
+                    else None
+                ),
+                **common,
+            ),
         )
 
     def _add_live_sink(source: LiveFeatureSource) -> None:
-        live_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        # The fanout reads ``sinks`` afresh for every batch, and the shutdown
-        # path below joins and cancels ``sink_tasks`` by reference, so a sink
-        # appended while the drain is running is fed and torn down like any
-        # other.
-        sinks.append(TelemetrySink("live", live_queue, "drop_oldest"))
-        sink_tasks.append(
-            asyncio.create_task(
-                run_live_source_sink(
-                    live_queue,
-                    source,
-                    stop_event,
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                )
-            )
+        add_sink(
+            "live",
+            "drop_oldest",
+            lambda q: run_live_source_sink(q, source, stop_event, **common),
         )
 
     if live_source is not None:
@@ -732,10 +756,7 @@ async def drain_queue_with_broadcast(
         live_source_ready.add_done_callback(_on_live_source_ready)
 
     if gps_tracker is not None:
-        gps_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(
-            TelemetrySink("gps", gps_queue, "drop_oldest", accepts=_trip_sink_filter(gps_tracker))
-        )
+        tracker = gps_tracker
 
         def _trip_ended(session_dir: Path | None, end: TripEnd) -> None:
             if session_dir is None:
@@ -747,59 +768,52 @@ async def drain_queue_with_broadcast(
             elif on_trip_ended is not None:
                 on_trip_ended(session_dir)
 
-        sink_tasks.append(
-            asyncio.create_task(
-                run_gps_sink(
-                    gps_queue,
-                    gps_tracker,
-                    stop_event,
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                    on_trip_ended=_trip_ended,
-                    active_session_path=active_session_path,
-                    on_trip_unobservable=on_trip_unobservable,
-                )
-            )
+        add_sink(
+            "gps",
+            "drop_oldest",
+            lambda q: run_gps_sink(
+                q,
+                tracker,
+                stop_event,
+                on_trip_ended=_trip_ended,
+                active_session_path=active_session_path,
+                on_trip_unobservable=on_trip_unobservable,
+                **common,
+            ),
+            accepts=_trip_sink_filter(tracker),
         )
 
     if dtc_state is not None:
-        dtc_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(TelemetrySink("dtc", dtc_queue, "drop_oldest", accepts=accepts_source("obd")))
-        sink_tasks.append(
-            asyncio.create_task(
-                run_dtc_sink(
-                    dtc_queue,
-                    dtc_state,
-                    stop_event,
-                    emitter=dtc_emitter,
-                    vehicle_ledger=vehicle_ledger,
-                    active_session_path=active_session_path,
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                )
-            )
+        dtc = dtc_state
+        add_sink(
+            "dtc",
+            "drop_oldest",
+            lambda q: run_dtc_sink(
+                q,
+                dtc,
+                stop_event,
+                emitter=dtc_emitter,
+                vehicle_ledger=vehicle_ledger,
+                active_session_path=active_session_path,
+                **common,
+            ),
+            accepts=accepts_source("obd"),
         )
 
     if monitor_state is not None:
-        monitor_queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=sink_queue_size)
-        sinks.append(
-            TelemetrySink("monitor", monitor_queue, "drop_oldest", accepts=accepts_source("obd"))
-        )
-        sink_tasks.append(
-            asyncio.create_task(
-                run_monitor_sink(
-                    monitor_queue,
-                    monitor_state,
-                    stop_event,
-                    emitter=monitor_emitter,
-                    active_session_path=active_session_path,
-                    poll_interval=poll_interval,
-                    queue_warning_fraction=queue_warning_fraction,
-                    health_monitor=health_monitor,
-                )
-            )
+        monitors = monitor_state
+        add_sink(
+            "monitor",
+            "drop_oldest",
+            lambda q: run_monitor_sink(
+                q,
+                monitors,
+                stop_event,
+                emitter=monitor_emitter,
+                active_session_path=active_session_path,
+                **common,
+            ),
+            accepts=accepts_source("obd"),
         )
 
     fanout_task = asyncio.create_task(

@@ -29,6 +29,18 @@ def _build_app(components: DaemonComponents) -> Any:
     from src.alerts.feedback import FeedbackStore
     from src.dashboard.api import create_app
 
+    # R03.5: the routes must drive the *same* capture lifecycle the shutdown
+    # path stops, or an HTTP-started capture's start epoch lives in a session
+    # shutdown never sees (loss_epoch_start: None). `run_daemon` builds both
+    # right after the writer; with a writer wired, refuse rather than let
+    # create_app build a private pair. (No writer: captures are unavailable
+    # anyway, as in a bare component record.)
+    if components.storage_writer is not None and (
+        components.profile_capture is None or components.capture_autostart is None
+    ):
+        raise RuntimeError(
+            "daemon app built before run_daemon wired profile_capture/capture_autostart"
+        )
     return create_app(
         components.config,
         anomalies_dir=components.config.daemon.anomalies_dir,
@@ -57,6 +69,8 @@ def _build_app(components: DaemonComponents) -> Any:
         force_poll_trigger=components.force_poll_trigger,
         inference_timing=components.inference_timing,
         live_source=components.live_source,
+        profile_capture=components.profile_capture,
+        capture_autostart=components.capture_autostart,
     )
 
 

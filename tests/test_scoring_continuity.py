@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 from src.daemon import inference as inference_mod
+from src.daemon.detectors import sequence as sequence_mod
 from src.daemon.inference import (
     LiveInferencePipeline,
     SequenceDetector,
@@ -227,8 +228,8 @@ class _FakeEngine:
 
 
 def _detector(monkeypatch: Any, engine: _FakeEngine) -> SequenceDetector:
-    monkeypatch.setattr(inference_mod, "_build_sequence_engine", lambda *_a, **_k: engine)
-    monkeypatch.setattr(inference_mod, "_suppress_channels_for", lambda *_a, **_k: ())
+    monkeypatch.setattr(sequence_mod, "_build_sequence_engine", lambda *_a, **_k: engine)
+    monkeypatch.setattr(sequence_mod, "_suppress_channels_for", lambda *_a, **_k: ())
     loaded = SimpleNamespace(serving_version="seq-v1")
     components = SimpleNamespace(
         sequence_model_type="lstm_autoencoder",
@@ -272,7 +273,7 @@ def test_a_generation_change_asks_for_a_window_reset(monkeypatch) -> None:
 def test_in_process_compute_clears_the_window_when_asked(monkeypatch) -> None:
     engine = _FakeEngine()
     observed: list[Any] = []
-    monkeypatch.setattr(inference_mod, "_sequence_observe", lambda e, r: observed.append(r))
+    monkeypatch.setattr(sequence_mod, "_sequence_observe", lambda e, r: observed.append(r))
 
     SequenceDetector.compute(_SequenceComputeJob(engine=engine, row="row-a", reset=False))
     SequenceDetector.compute(_SequenceComputeJob(engine=engine, row="row-b", reset=True))
@@ -518,8 +519,8 @@ def test_the_child_loads_then_acknowledges_a_swap(monkeypatch) -> None:
         built.append(_FakeEngine())
         return built[-1]
 
-    monkeypatch.setattr(inference_mod, "_build_sequence_engine", build)
-    monkeypatch.setattr(inference_mod, "_suppress_channels_for", lambda *_a, **_k: ())
+    monkeypatch.setattr(sequence_mod, "_build_sequence_engine", build)
+    monkeypatch.setattr(sequence_mod, "_suppress_channels_for", lambda *_a, **_k: ())
     forest = _FakeManager("if-v1")
     sequence = _FakeManager("seq-v1", "seq-v2")
     state = _WorkerState({"isolation_forest": forest, "lstm_autoencoder": sequence}, object())

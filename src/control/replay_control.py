@@ -45,6 +45,7 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
+from src.control.capture_manifest import read_capture_manifest
 from src.session import SessionKind, format_session_timestamp, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -116,6 +117,14 @@ class ReplayStatus:
     rederivable: bool | None = None
     rederivable_reason: str | None = None
     skipped_sources: tuple[str, ...] | None = None
+    #: R03.12 — the replayed session's capture profile and whether it may be
+    #: scored by IF/sequence, read once from its ``capture_profile.json`` at
+    #: start. A session without a capture manifest is plain default-profile
+    #: collection and is eligible. The inference gate reads this during a
+    #: replay, never the daemon's own live profile, so a replayed tuning
+    #: capture stays unscored however the daemon is configured.
+    source_capture_profile: str | None = None
+    source_corpus_eligible: bool = True
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -265,6 +274,7 @@ class ReplayController:
         if not source_dir.is_dir():
             raise ReplayNotFoundError(f"session {source_session_id!r} not found")
 
+        manifest = read_capture_manifest(source_dir)
         replay_id = format_session_timestamp(_utc_now())
         await self._writer.enter_replay_mode(replay_id)
         try:
@@ -313,6 +323,8 @@ class ReplayController:
             loop=loop,
             output_session_dir=str(self._storage_root / f"_replay-{replay_id}"),
             output_anomalies_path=str(anomalies_path),
+            source_capture_profile=None if manifest is None else manifest.profile,
+            source_corpus_eligible=True if manifest is None else manifest.corpus_eligible,
         )
         log.info(
             "replay started",

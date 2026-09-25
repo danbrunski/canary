@@ -58,7 +58,7 @@ def test_status_uses_live_state_without_reading_parquet(monkeypatch: Any) -> Non
     def disk_read(*_args: Any, **_kwargs: Any) -> Any:
         raise AssertionError("live status fell back to a Parquet scan")
 
-    monkeypatch.setattr(status, "_derive_vehicle_state", disk_read)
+    monkeypatch.setattr(status, "derive_vehicle_state_from_storage", disk_read)
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
     sources = status.gather_status_sources(config, live_source=_Live())
 

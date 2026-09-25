@@ -1,0 +1,1252 @@
+{
+  "companion": [
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/anomalies",
+      "query": [
+        "since"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/companion/actions",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "POST",
+      "path": "/companion/actions/{action_id}/retry",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/companion/models",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/companion/models/{model_type}/publish",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/companion/sessions/import",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/companion/status",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/companion/sync/sessions/{session_id}",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/companion/sync/state",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/datasets",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/datasets/health",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/feedback",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/feedback",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/jobs",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "POST",
+      "path": "/control/jobs/{job_id}/cancel",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}/logs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}/result",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/models/{model_type}/artifact",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/models/{model_type}/manifest",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/sessions/{session_id}",
+      "query": [
+        "force"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/chart",
+      "query": [
+        "channels",
+        "resample_hz"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/export",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/export/checksum",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/gps.gpx",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/gps.kml",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/metadata",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/pin",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/unpin",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": false,
+      "method": "GET",
+      "path": "/control/training-runs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "companion",
+      "body": true,
+      "method": "POST",
+      "path": "/control/training-runs/{run_id}/approve",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/telemetry/latest",
+      "query": [
+        "n",
+        "per_channel"
+      ],
+      "status_code": null
+    }
+  ],
+  "dashboard": [
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/binned",
+      "query": [
+        "agg",
+        "session",
+        "since",
+        "units",
+        "until",
+        "value",
+        "x",
+        "x_bins",
+        "y",
+        "y_bins"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/delivery-error",
+      "query": [
+        "measured",
+        "min_load",
+        "revision",
+        "sessions"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/llm-assist/cards",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/pull-comparison",
+      "query": [
+        "airflow",
+        "floor_channel",
+        "min_n",
+        "revision_a",
+        "revision_b",
+        "rpm",
+        "sessions",
+        "value"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/timing",
+      "query": [
+        "airflow",
+        "min_n",
+        "revision",
+        "rpm",
+        "sessions",
+        "timing"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/analysis/trim-surface",
+      "query": [
+        "airflow",
+        "min_n",
+        "revision",
+        "rpm",
+        "sessions"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/anomalies",
+      "query": [
+        "limit",
+        "mode",
+        "since",
+        "source"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/bindings",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/can/coverage",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/config",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/bus-budget",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/bus-budget",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/calibration",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/calibration",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/can_activity",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/capture",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/capture",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/capture/autostart",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/capture/autostart",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/capture/autostart",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/capture/pause",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/capture/profiles",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "PUT",
+      "path": "/control/capture/profiles",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/capture/profiles/{name}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/capture/quality",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/capture/quality/{session_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/capture/stop",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/captures",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/captures/current",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/captures/current/stop",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/captures/current/tags",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/classifications/events",
+      "query": [
+        "kind",
+        "limit"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/classifications/summary",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/custom-pids",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/custom-pids",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/custom-pids/import",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/custom-pids/{name}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/datasets/health",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/feedback",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/feedback",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/jobs",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/jobs/{job_id}/cancel",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}/logs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/jobs/{job_id}/result",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/logs",
+      "query": [
+        "include_sessions",
+        "limit"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/memory-channels",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/memory-channels/verify",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/models/{model_type}/artifact",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/models/{model_type}/manifest",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/obd_discovery",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/obd_discovery/reset",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/obd_request",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/passive",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/passive",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/power",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/power/keepalive",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/preflight",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/profiles",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/profiles/{slug}/name",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/replay",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/replay",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/replay/stop",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/rom/inspect",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sequence-detector",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/sequence-detector",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions",
+      "query": [
+        "captures",
+        "limit",
+        "since",
+        "until"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "DELETE",
+      "path": "/control/sessions/{session_id}",
+      "query": [
+        "force"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/cell-residency",
+      "query": [
+        "table"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/chart",
+      "query": [
+        "channels",
+        "resample_hz"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/classification",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/classification",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/digest",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/export",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/export/checksum",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/frame",
+      "query": [
+        "grid",
+        "max_rows",
+        "offset",
+        "regime",
+        "specs"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/gps.gpx",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/sessions/{session_id}/gps.kml",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/metadata",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/pin",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "POST",
+      "path": "/control/sessions/{session_id}/unpin",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/training-runs",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/training-runs/{run_id}/approve",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/trends",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/trigger_poll",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/tuning",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/tuning",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/tuning-mode",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/tuning-mode",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/tuning/estimate",
+      "query": [
+        "since"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/tuning/revert",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/vehicle-ledger",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": true,
+      "method": "POST",
+      "path": "/control/vehicle-ledger",
+      "query": [],
+      "status_code": 201
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
+      "path": "/control/version",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/dids",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/models/behavior",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/models/behavior/live",
+      "query": [
+        "series"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/obd/coverage",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/obd/dtc",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/obd/monitors",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/sessions/{session_id}/trip-summary",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/status",
+      "query": [
+        "view"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/telemetry/latest",
+      "query": [
+        "n",
+        "per_channel"
+      ],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "GET",
+      "path": "/test-profiles",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "WEBSOCKET",
+      "path": "/ws/anomalies",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "WEBSOCKET",
+      "path": "/ws/control",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "WEBSOCKET",
+      "path": "/ws/scores",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": null,
+      "body": false,
+      "method": "WEBSOCKET",
+      "path": "/ws/telemetry",
+      "query": [],
+      "status_code": null
+    }
+  ]
+}

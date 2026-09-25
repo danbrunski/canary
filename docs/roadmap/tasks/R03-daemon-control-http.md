@@ -28,7 +28,7 @@ Three problems carry most of the weight here:
 
 ## Correctness first
 
-- [ ] **R03.12 Withhold IF and sequence scoring while a non-default profile
+- [x] **R03.12 Withhold IF and sequence scoring while a non-default profile
   polls.** *Operator decision 2026-09-24, serve path. Added after the review;
   it goes before R03.1.*
 
@@ -89,7 +89,28 @@ Three problems carry most of the weight here:
 
   Size **S–M**.
 
-- [ ] **R03.1 One vehicle-state module. The inference copy has lost the
+  **Done 2026-09-25 (implementer).** `daemon/inference.capture_profile_gate`
+  runs beside the vehicle-state gate; a tick the state allows but the profile
+  refuses counts `emitter_counters.skipped_capture_profile` (never both
+  counters for one tick). `/status` `detectors.capture_profile_gate` =
+  `{scoring_allowed, profile, source}`, `source` `live_profile` or
+  `replay_manifest`. `ReplayController.start` reads the source's
+  `capture_profile.json` once (`ReplayStatus.source_corpus_eligible`, not in
+  the `/control/replay` payload). Conservative option taken on the open
+  questions: IF + sequence only; behavior models and plausibility unchanged;
+  `corpus_eligible: true` still allowed for non-default profiles (the gate
+  honours it). Tests (`tests/test_inference_profile_gate.py`, failing before
+  — no counter, IF emitted): non-eligible profile + `engine_running` emits
+  nothing and counts; return to `default` resumes scoring; replay of a
+  non-eligible manifest scores nothing; `_capture-tuning-*` is refused by the
+  replay controller outright; a default-manifest replay scores under a live
+  tuning profile; sequence `prepare` builds no job when withheld.
+  **Replay not run:** under replay the gate reads the source manifest, which
+  a default-profile session lacks, so a default-profile replay is unchanged
+  by construction; `test_daemon.py` replay-scoring tests pass unchanged.
+  Operator questions above stay open (listed to the operator 2026-09-25).
+
+- [x] **R03.1 One vehicle-state module. The inference copy has lost the
   broadcast-RPM fallback.** *Drift bug, serve path. Land R03.12 first:
   without it, this fix turns scoring **on** during all-DID tuning
   captures.* `VehicleState` is derived three times:
@@ -142,7 +163,37 @@ Three problems carry most of the weight here:
 
   Size **M**.
 
-- [ ] **R03.2 Route session classification through the bounded child.**
+  **Done 2026-09-25 (implementer).** `src/vehicle_state.py` holds
+  `VehicleState`, the thresholds (from `src.operating`),
+  `classify_vehicle_state(obd_rpm=…, broadcast_rpm=…, …)` (`broadcast_rpm` a
+  required keyword: omitting it is a `TypeError`), `derive_from_inputs`,
+  `derive_from_live_source`, the Parquet variant `derive_from_latest_rows`
+  (the read stays in `status.derive_vehicle_state_from_storage`),
+  `running_replay_id` and `VehicleStateCache`. `status.py` re-exports every
+  old name (`_derive_vehicle_state`, `_derive_vehicle_state_live`,
+  `_active_session_dir` kept as aliases); `daemon/inference.py` and
+  `control/nonvolatile_write.py` import `src.vehicle_state`, and both OWED
+  allowances are gone from `tests/test_layering.py`. `routes/control.py` now
+  imports public names (`active_session_dir`,
+  `derive_vehicle_state_from_storage`, `control.sessions.latest_session`).
+  **Freshness rule (provisional — the operator question stays open):** the
+  broadcast fallback needs CAN freshness (the live copy's rule); the Parquet
+  copy used to take a stale decoded rpm whenever the OBD rpm was unusable.
+  Conservative: never claims `engine_running` on stale evidence. Tests:
+  `test_inference_gate_reads_engine_running_from_the_broadcast` (failed
+  before: gate said `engine_off`, status said `engine_running`),
+  `test_all_did_capture_is_withheld_by_the_profile_not_the_state`
+  (`skipped_capture_profile` counts, `skipped_vehicle_state` stays 0), and
+  six new classifier tests in `test_vehicle_state.py` (required argument,
+  stale-OBD/fresh-broadcast, stale broadcast is not evidence, the three
+  derivations agree). `test_vehicle_state.py`, `test_daemon.py`,
+  `test_decoded_mode_signals.py`, `test_dashboard_status_cache.py`,
+  `test_layering.py` pass. Monkeypatch target retargeted:
+  `status._derive_vehicle_state` → `status.derive_vehicle_state_from_storage`
+  (`test_dashboard_status_cache.py`). Replay not run: a replay classifies
+  `replay` before any rpm rule, so it cannot observe this change.
+
+- [x] **R03.2 Route session classification through the bounded child.**
   *Serve-path OOM risk.*
   - `POST /control/sessions/{id}/classification` calls
     `control/classification.classify_one_session` synchronously in the
@@ -166,7 +217,23 @@ Three problems carry most of the weight here:
 
   Size **M**.
 
-- [ ] **R03.3 `DELETE /control/sessions/{id}` must not remove the session
+  **Done 2026-09-25 (implementer).** `classification.classify_one_session`
+  split into `classify_and_write` (child: classify, fingerprint, write
+  sidecars; returns payload + `fingerprint_written` + `session_dir`) and
+  `finish_classification` (parent: trend alerting with the live emitter, the
+  catalog). `workbench_jobs` kind `classify` (config-only: no bindings/DID
+  inputs). The route is async: 400 non-live id and 404 missing dir (same
+  string details as before), then `capture_deferral`, the row preflight via
+  `select_sessions` (409 `over_budget`), then `run_off_loop`. Tests
+  (`tests/test_control_classification.py`): computes in the child
+  (`jobs == ["classify"]`, trend alert + catalog written in the parent),
+  defers while a capture records (409 `analysis_deferred`, no job), refuses
+  over the row budget (409, no job), keeps its 400/404. A real `spawn` child
+  ran the `classify` kind once (0.7 s, sidecars written). The MCP
+  `classify_session` tool posts to this route; `test_mcp_tools.py`,
+  `test_control_api.py`, `test_storage_catalog.py` pass.
+
+- [x] **R03.3 `DELETE /control/sessions/{id}` must not remove the session
   being written.** *Drift bug.*
   - `_guard_active_capture` refuses only when the id equals
     `capture_controller.current_capture().session_id` (verified 2026-09-24).
@@ -180,7 +247,14 @@ Three problems carry most of the weight here:
   lands here first. **Accept:** a failing test first: deleting the writer's
   current session returns 409. Size **S**.
 
-- [ ] **R03.4 Pin the route table before moving anything.** This is the
+  **Done 2026-09-25 (implementer).** `_guard_active_capture` also refuses the
+  writer's directory, now through `ProfileCaptureSession.is_writer_session`
+  (R03.5): 409 "cannot delete the session being written".
+  `test_delete_refuses_the_session_the_writer_is_filling`
+  (`tests/test_control_api.py`; returned 200 and deleted before). Replay not
+  run: the guard is a route refusal, not on the telemetry path.
+
+- [x] **R03.4 Pin the route table before moving anything.** This is the
   safety net for R03.5 and R03.6, in the style of
   `tests/test_mcp_tool_snapshot.py`. **Do:** add
   `tests/test_route_table_snapshot.py`, which builds the app with every
@@ -196,9 +270,31 @@ Three problems carry most of the weight here:
   **Accept:** the snapshot is committed and `/ws/control` uses the shared
   check. Size **S**.
 
+  **Done 2026-09-25 (implementer).** `tests/test_route_table_snapshot.py` +
+  `tests/fixtures/route_table_snapshot.json` pin, per route, method, path,
+  auth rule, declared status code, query-parameter names and body presence,
+  for the dashboard (110 rows) and the companion (35 rows), built with the
+  optional components present (a bare app is asserted to have the same
+  table). Auth is read from a `canary_auth` marker on the shared dependency,
+  so a route guarded by a copy reads as unauthenticated. The fixture was
+  generated from the tree *before* the auth change, identifying the four old
+  closures by name, and the marker-based table after the change matches it
+  byte for byte; the one hand edit was `/ws/control`, which authenticated
+  inline and is now `control`. Also: every `/control/*` and `/ws/control`
+  route is `control`, the dashboard has exactly one auth rule, and no route
+  is shadowed by an earlier registration (order is not in the snapshot).
+  `security.control_auth_dependency(token)` replaced the four identical
+  closures (`control.py`, `calibration.py`, `workbench.py`, `rom_maps.py`);
+  `/ws/control` uses `security.websocket_control_auth_dependency(token)`
+  (constant-time, loopback-exempt only while no token is configured, 1008 on
+  refusal). Tests: `test_control_websocket_refuses_a_wrong_or_missing_token`,
+  `test_control_websocket_rule_matches_the_http_rule`
+  (`tests/test_control_api.py`). The companion's deliberately different
+  optional bearer is marked `companion`.
+
 ## Structure
 
-- [ ] **R03.5 Extract the profile-capture lifecycle out of the route
+- [x] **R03.5 Extract the profile-capture lifecycle out of the route
   closures.**
   - `register_control_routes` holds 7 pieces of `nonlocal` state:
     `budget_before_capture`, `last_ended_capture`, `superseded_window`,
@@ -237,7 +333,54 @@ Three problems carry most of the weight here:
 
   Size **L**.
 
-- [ ] **R03.6 Split `register_control_routes` into per-domain `APIRouter`s
+  **Done 2026-09-25 (implementer).** `src/control/profile_capture.py`:
+  `ProfileCaptureSession(storage_writer, capture_controller, profile_store,
+  health_monitor)` with `async start(ProfileCaptureStart)`,
+  `async stop(reason)`, `pause()`, `live_quality()`, `is_writer_session()`;
+  `CaptureAutostart(session, live_source, replay_controller, tick_seconds=)`
+  owns the decider and its task (`arm`/`disarm`/`snapshot`/`tick`/`aclose`).
+  Refusals are `ProfileCaptureError(status, detail)` carrying the routes'
+  exact codes and bodies; control events stay at the edges (route, or the
+  autostart with the publisher captured at arm). The seven `nonlocal`s are
+  gone from `register_control_routes`; the autostart no longer calls route
+  handlers with `_auth=None`. Both hang on `DaemonComponents`
+  (`profile_capture`, `capture_autostart`, built in `run_daemon`) and reach
+  the routes through new `create_app(profile_capture=, capture_autostart=)`
+  keywords (signature otherwise unchanged; `None` builds them). Runtime
+  shutdown calls `profile_capture.stop("daemon_shutdown")`: finalize against
+  the in-memory epoch + stamp, then — as before — leaves the window, writer
+  and profile alone. The dead `CaptureProfileStore(… behavior_models)`
+  fallback is deleted (`capture_profile_store` is now required by
+  `register_control_routes`; `create_app` always resolved one).
+  `AUTOSTART_TICK_SECONDS` lives in `profile_capture`; `routes.control`
+  keeps an alias that an app built without an injected autostart reads per
+  tick (the `test_capture_profiles.py` monkeypatch target still works).
+  Tests (`tests/test_profile_capture.py`): start → stop without `TestClient`
+  (idempotent restart/stop, manifest `operator_stop`, writer back on a live
+  session); a shutdown-ended capture reports `persistence.loss_epoch_start`
+  in the returned and stored sidecar (the old path passed `start=None`);
+  refusal codes 404/409/503; `run_daemon` shutdown stops through the session
+  with `daemon_shutdown`. Route snapshot unchanged. `test_capture_autostart`,
+  `test_capture_finalize`, `test_canaryctl_script`, `test_mcp_tools`,
+  `test_daemon`, `test_daemon_startup_order` pass. `test_capture_profiles.py`
+  41/41 on a clean `git archive HEAD` export with only this diff applied; in
+  the shared tree `test_capture_profile_api_crud_and_auth` fails (45.01 vs
+  45.0 `channel_reads_per_second`) from the concurrent R02 edit to
+  `src/collection/capture_profiles.py`, not from this change.
+  **Verifier fix 2026-09-25:** `daemon/server._build_app` (the daemon's only
+  `create_app` call) now passes `profile_capture=` / `capture_autostart=`
+  from the components, and refuses to build the app when a writer is wired
+  but the pair is not, so the routes can no longer drive a private session
+  that shutdown never stops. Test:
+  `test_an_http_started_capture_ended_by_daemon_shutdown_reports_its_epoch`
+  (`tests/test_profile_capture.py`): full `run_daemon`, capture started by
+  `POST /control/capture` on the daemon's own app, shutdown, then the stored
+  sidecar has `persistence.loss_epoch_start` and the manifest
+  `daemon_shutdown`; also asserts `app.state.control_context.session is
+  components.profile_capture` (and the autostart). Fails on HEAD's
+  `server.py` (two different sessions).
+
+- [x] **R03.6 Split `register_control_routes` into per-domain `APIRouter`s
   with router-level auth.**
   - The dashboard has 106 routes, 78 of them in `control.py`.
     `Depends(require_control_auth)` is repeated 77 times, plus 12
@@ -261,7 +404,29 @@ Three problems carry most of the weight here:
   **Accept:** the route snapshot is unchanged, one auth definition remains,
   and no route file is over ~400 lines. Size **L** (M after R03.5).
 
-- [ ] **R03.7 Share the session-read routes between the companion and the
+  **Done 2026-09-25 (implementer).** `src/dashboard/routes/control.py` is now
+  the package `src/dashboard/routes/control/`: `context.py`
+  (`ControlContext`, frozen; `router()` = `APIRouter(dependencies=[Depends(
+  require_auth)])`; `resolve_session` with the 404 mapping; `SessionDir =
+  Annotated[Path, Depends(...)]`, reading the context from
+  `app.state.control_context`) and one `build_router(ctx)` module each for
+  `system`, `captures`, `replay`, `sessions`, `bus`, `profile_capture`,
+  `classification` (classification/digest/trends/events), `jobs`, `models`,
+  `feedback`, `tuning`, `custom_pids`. Route bodies moved verbatim by a
+  generator (decorator `@app.`→`@router.`, the 77 per-route
+  `_auth: None = Depends(require_control_auth)` parameters dropped for
+  router-level auth, free names bound from the context).
+  `register_control_routes` keeps its signature (`create_app` unchanged) and
+  includes the routers in registration order; the SPA mount stays last. One
+  auth definition: `security.control_auth_dependency` (R03.4). Largest route
+  file 216 lines (`profile_capture.py`); `public.py` 393 (untouched). The
+  route snapshot is unchanged and no route is shadowed
+  (`tests/test_route_table_snapshot.py`, 5 passed). The routes' logger keeps
+  the name `src.dashboard.routes.control`. Every test file importing the
+  dashboard app (33 files, fast tier) was run; see the report for the one
+  foreign failure.
+
+- [~] **R03.7 Share the session-read routes between the companion and the
   dashboard.**
   - Companion `routes.py`'s gpx/kml/chart routes are near-copies of
     `control.py`'s, differing only in root and auth. They post-date the July
@@ -275,7 +440,21 @@ Three problems carry most of the weight here:
   semantics (on the laptop, no token means open). **Accept:** the companion
   tests and `test_session_chart_route.py` pass. Size **M**.
 
-- [ ] **R03.8 `drain.py`: one sink-registration helper and one per-record
+  **Partial 2026-09-25 (implementer).** Done:
+  `src/dashboard/routes/session_reads.build_session_read_router(resolve_root,
+  auth)` serves `…/chart`, `…/gps.gpx` and `…/gps.kml`; the dashboard
+  includes it over the storage root with the control dependency, the
+  companion over `lib.sessions_dir` with `require_local_auth` (its optional
+  bearer, marked `companion`, unchanged). The two copies of the three routes
+  are gone. Route snapshot unchanged for both apps; `test_companion_api.py`,
+  `test_companion_services.py`, `test_companion_library.py`,
+  `test_session_chart_route.py` pass (50). **Remaining:** the
+  hook-parameterized `companion/services.*_response` functions (session
+  list/get/export/checksum/metadata/pin/unpin/delete) are still called from
+  both apps with per-app hooks (`finalize`, `after_delete`, `guard`,
+  `serialize`); turning them into shared handlers is not done.
+
+- [x] **R03.8 `drain.py`: one sink-registration helper and one per-record
   loop.**
   - In `drain_queue_with_broadcast` (221 lines), sink registration is the
     same queue + `TelemetrySink` + `create_task(… poll_interval,
@@ -289,7 +468,23 @@ Three problems carry most of the weight here:
   `test_trip_speed_sources.py` and the validation harness pass. The
   validation harness reuses the same factories: see R04.13. Size **S–M**.
 
-- [ ] **R03.9 Split `daemon/inference.py` by detector.**
+  **Done 2026-09-25 (implementer).** `_run_record_sink(name, queue, handle,
+  stop_event, *, failure, poll_interval, queue_warning_fraction,
+  health_monitor)` is the one per-record loop; `run_live_source_sink`,
+  `run_dtc_sink` and `run_monitor_sink` keep their public signatures and pass
+  their callback (log text unchanged: `"<x>.observe failed; skipping
+  record"`). `drain_queue_with_broadcast` registers all six sinks through a
+  local `add_sink(name, overflow, runner, accepts=None)` with one `common`
+  kwargs dict. Net size is about flat (992 → 1006 lines): the three wrappers
+  and their docstrings stay, so the ~150-line estimate did not materialise.
+  `test_daemon.py`, `test_daemon_startup_order.py`,
+  `test_trip_speed_sources.py`, `test_replay_row_accounting.py`,
+  `test_frame_decoder.py` and `test_sustained_validation.py` (the C10
+  validation harness, slow tier included: whole scenarios through the real
+  fanout) pass — 157 passed, 1 xfailed. Replay not run separately; the
+  harness drives the same sinks end to end.
+
+- [~] **R03.9 Split `daemon/inference.py` by detector.**
   - The file is 2,214 lines, laid out as: gating/generation;
     `Detector` protocol + the IF, Sequence and Behavior classes (their two
     `tick` methods are AST-identical); the pipeline; executors; sequence
@@ -308,7 +503,31 @@ Three problems carry most of the weight here:
   "_build_sequence_engine")` sites. Replay before and after with the event
   diff. Size **M**; mostly navigability.
 
-- [ ] **R03.10 One base for the LSTM/TCN config models.**
+  **Partial 2026-09-25 (implementer).** Done: `src/daemon/detectors/`
+  `common.py` (`TickContext`, `Detector`, `_PreparedDetector[Job, Computed]`
+  owning the one `tick`, `_persistence_sustained`, `gate_and_collect`,
+  `_publish_score`, `_with_effective_role`, the schema-reconciliation log),
+  `isolation_forest.py` (465 lines), `sequence.py` (252), `behavior.py`
+  (`_observe_behavior` split into `_grade_surface_models` and
+  `_grade_channel_overrides`). Bodies moved verbatim by a generator.
+  `inference.py` (2,222 → 1,179 lines) keeps gating, the pipeline, executors
+  and `build_live_feature_source`, and re-exports every moved name (`X as X`);
+  the moved code logs under `src.daemon.inference` as before.
+  `inference_worker`'s lazy imports now name the detector modules. The 9
+  monkeypatch sites were retargeted: 4 in `test_behavior_lifecycle.py` /
+  `test_behavior_serving_contracts.py` → `src.daemon.detectors.behavior`,
+  5 in `test_scoring_continuity.py` → `src.daemon.detectors.sequence`.
+  `test_layering.py` STANDING allowances moved with the edges (inference's
+  `dashboard.behavior_live` edge is now `detectors/behavior.py`'s; two
+  `dashboard.broadcast` edges added for `detectors/common.py` and
+  `detectors/isolation_forest.py` — moved, not new). The 15 test files that
+  import `src.daemon.inference` pass (324 passed, 1 xfailed).
+  **Remaining:** the before/after replay event diff was not run. Offline, the
+  live pipeline ticks on the wall clock, so two replays of one session differ
+  by timing alone; a meaningful diff needs the operator's replay protocol
+  (`start_replay` on a quiet daemon) or a deterministic tick driver.
+
+- [x] **R03.10 One base for the LSTM/TCN config models.**
   `config.LSTMAutoencoderConfig` and `TCNAutoencoderConfig` share 17
   identical training fields and validators, so a new training knob can reach
   one backbone and not the other. **Do:** create a `_SequenceTrainingConfig`
@@ -316,7 +535,23 @@ Three problems carry most of the weight here:
   required. **Accept:** the dumped JSON schema of both models is unchanged.
   Size **S**.
 
-- [ ] **R03.11 Small cleanups (batch them).**
+  **Done 2026-09-25 (implementer).** `config._SequenceTrainingConfig(_Strict)`
+  holds the 17 shared training fields plus `enabled`, `sequence_length`,
+  `latent_dim`, `threshold_k` at the TCN defaults; `LSTMAutoencoderConfig`
+  redeclares those four as required and adds `hidden_size`/`num_layers`;
+  `TCNAutoencoderConfig` adds `channels`, `kernel_size`, `num_levels`,
+  `use_delta_decay` (its docstring is its schema `description`, so it is
+  unchanged). `tests/test_sequence_config_base.py` compares both models'
+  `model_json_schema()` to `tests/fixtures/sequence_config_schemas.json`,
+  recorded from the classes before the change: equal as JSON objects (only
+  property key order moved: subclass-only fields now follow the shared
+  ones). Also pins the shared-field split and LSTM's required set. The 44
+  test files that construct either config pass apart from R07.2 repo-guard
+  errors in `test_daemon.py`/`test_control_trends_route.py` (daemon state
+  written under `data/control`, pre-existing) and one failure in the
+  R07-dirty `test_retrain_script.py`.
+
+- [~] **R03.11 Small cleanups (batch them).**
   - `run_daemon` teardown repeats the cancel/await/suppress block 7 times.
     Add `_cancel_all(tasks)`.
   - `--collection-only` keeps a second, synchronous drain
@@ -328,6 +563,15 @@ Three problems carry most of the weight here:
     `alerts/emitter.IsolationForestInferenceEngine` are covered by R01.8.
 
   Size **S**.
+
+  **Partial 2026-09-25 (implementer).** Done: `runtime._cancel_all(tasks)`
+  (in order, skips `None`, suppresses only the task's own `CancelledError`)
+  replaces the seven teardown blocks;
+  `test_cancel_all_cancels_in_order_and_skips_absent_tasks`
+  (`tests/test_daemon.py`); `test_daemon.py` passes. **Remaining:** the
+  `--collection-only` drain is untouched pending the operator decision
+  (keep through `drain.run_storage_sink`, or retire); the conservative
+  option — no change — is what ships until then.
 
 ## Looked at and fine
 

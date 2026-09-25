@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
 from src.analysis.rom_targets import TargetEditor, sha256
@@ -17,7 +17,9 @@ from src.analysis.rom_trace import (
 from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
-from src.dashboard.security import _client_is_loopback, _require_control_auth
+from src.dashboard.security import (
+    control_auth_dependency,
+)
 from src.paths import DIDS_YAML
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
@@ -79,10 +81,7 @@ def register_rom_routes(
     resolved_control_token: str | None,
     dids_path: Path = DIDS_YAML,
 ) -> None:
-    def authorize(request: Request, authorization: str | None = Header(default=None)) -> None:
-        _require_control_auth(
-            resolved_control_token, authorization, client_is_loopback=_client_is_loopback(request)
-        )
+    authorize = control_auth_dependency(resolved_control_token)
 
     @app.post("/control/rom/inspect", dependencies=[Depends(authorize)])
     async def post_rom_inspect(request: Request) -> dict[str, Any]:

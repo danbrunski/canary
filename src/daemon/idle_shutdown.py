@@ -4,7 +4,7 @@ The rig has no ignition sense and no 12 V sense of its own
 (``docs/CANary-HAT-Circuits.md`` §3.7.6), so the accepted consequences were
 either "unplug it when not in use" or "let the daemon infer engine-off from
 bus activity and command a shutdown". This is the second half, which did not
-exist: :func:`~src.dashboard.status.classify_vehicle_state` already names the
+exist: :func:`~src.vehicle_state.classify_vehicle_state` already names the
 parked states and ``RecordArmingConfig.disarm_after_seconds`` already detects
 the quiet period, but nothing escalated either to ``systemctl poweroff``.
 

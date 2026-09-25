@@ -245,10 +245,11 @@ def test_a_new_catalyst_fit_is_not_covered_by_the_quarantine(tmp_path: Path) -> 
 def test_demoted_model_contributes_no_fusion_vote(
     config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import src.daemon.inference as inference
+    # R03.9: the behavior detector's own module, where it looks these up.
+    import src.daemon.detectors.behavior as behavior_detector
 
-    monkeypatch.setattr(inference, "gate_and_collect", lambda *a, **k: True)
-    monkeypatch.setattr(inference, "_publish_score", lambda *a, **k: None)
+    monkeypatch.setattr(behavior_detector, "gate_and_collect", lambda *a, **k: True)
+    monkeypatch.setattr(behavior_detector, "_publish_score", lambda *a, **k: None)
 
     def run(models: BehaviorModels) -> tuple[list[str], list[Any], dict[str, Any]]:
         source = LiveFeatureSource(config=config, behavior_models=models)
