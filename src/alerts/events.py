@@ -20,6 +20,7 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
     import pandas as pd
 
     from src.alerts.fusion import FusedResult
+    from src.analysis.committees import CommitteeFlag
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
 
@@ -34,7 +35,10 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: per-cylinder misfire count *increase* from the periodic Mode 06 poll.
 #: ``plausibility`` (A05.9) is a *confirmed* per-channel plausibility failure
 #: (range/slew/stuck/freshness) from ``src.plausibility`` — never a pending
-#: one. All are emitted alongside the per-detector events, not instead of them.
+#: one. ``committee`` (H04.2) is a sustained departure between two instruments of
+#: one quantity from their measured relation (``src.analysis.committees``) — a
+#: sensor fault, not an engine one. All are emitted alongside the per-detector
+#: events, not instead of them.
 AnomalySource = Literal[
     "isolation_forest",
     "lstm_autoencoder",
@@ -44,6 +48,7 @@ AnomalySource = Literal[
     "trend",
     "misfire",
     "plausibility",
+    "committee",
 ]
 
 
@@ -534,6 +539,32 @@ class AnomalyEvent(BaseModel):
         )
 
     @classmethod
+    def from_committee(cls, flag: CommitteeFlag) -> AnomalyEvent:
+        """Build a sensor-committee disagreement event (H04.2).
+
+        ``score`` is the departure over the tolerance (``threshold`` 1.0), the
+        same over-threshold contract as the other scored sources, so a flag
+        is always >= 1. ``detail`` names both members, their values, the
+        expected relation with its evidence, and the departure;
+        ``detail.detector`` is ``committee:<name>``. ``dedupe_key`` is per
+        (committee, member): one member's episode never suppresses another's.
+        """
+        return cls(
+            timestamp=_epoch_iso(flag.detected_at),
+            source="committee",
+            model_version=f"committee/{flag.committee}",
+            score=abs(flag.departure) / flag.max_departure,
+            threshold=1.0,
+            affected_channels=(flag.member, flag.reference),
+            operating_mode=flag.operating_mode,
+            session=flag.session,
+            window_start_timestamp=_epoch_iso(flag.started_at),
+            window_end_timestamp=_epoch_iso(flag.detected_at),
+            detail={"cause": flag.text, **flag.to_dict()},
+            dedupe_key=f"{flag.detector}:{flag.member}",
+        )
+
+    @classmethod
     def from_isolation_forest_row(
         cls,
         row: pd.Series,
@@ -577,6 +608,14 @@ class AnomalyEvent(BaseModel):
             latency_ms=None,
             detail=detail,
         )
+
+
+def _epoch_iso(epoch_seconds: float) -> str:
+    from datetime import UTC, datetime
+
+    from src.timefmt import format_timestamp
+
+    return format_timestamp(datetime.fromtimestamp(epoch_seconds, tz=UTC))
 
 
 def behavior_cause(

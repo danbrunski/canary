@@ -13,7 +13,7 @@ from typing import Any, Literal, Self, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR
+from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR, DATA_DIR
 
 
 class _Strict(BaseModel):
@@ -189,7 +189,7 @@ class SensorCanConfig(_Strict):
     interface: str = "socketcan"
     channel: str = "can1"
     bitrate: int = 500_000
-    signals: Path = Path("data/sensor_can_signals.yaml")
+    signals: Path = DATA_DIR / "sensor_can_signals.yaml"
 
 
 class ImuConfig(_Strict):
@@ -761,10 +761,24 @@ class DetectorRolesConfig(_Strict):
     #: ``lstm_autoencoder`` event source.
     sequence: DetectorRole = "evidence"
 
+    #: H04.2 sensor committees (``source: committee``). ``evidence`` until a
+    #: committee has a confirmed real catch — the same bar the 2026-09-23
+    #: decision set for the learned detectors; set ``alert`` to promote.
+    #: Deterministic, so no artifact or alert-budget verdict applies: it is
+    #: *not* in :meth:`by_source` (the artifact role gate would demote an
+    #: ``alert`` with "no artifact loaded") but in :meth:`deterministic_by_source`.
+    committee: DetectorRole = "evidence"
+
     def by_source(self) -> dict[str, DetectorRole]:
         """Role keyed by the ``AnomalyEvent.source`` / fusion-source name the
         detector publishes under — the only form the emitter and fusion need."""
         return {"isolation_forest": self.isolation_forest, "lstm_autoencoder": self.sequence}
+
+    def deterministic_by_source(self) -> dict[str, DetectorRole]:
+        """Roles of sources with no model artifact, applied as configured
+        (never through the artifact role gate). Emitter-only: none of these is
+        a fusion source."""
+        return {"committee": self.committee}
 
 
 class _SequenceTrainingConfig(_Strict):
@@ -939,27 +953,28 @@ class DaemonConfig(_Strict):
     trend_alert_state: Path = CONTROL_DIR / "trend_alert_state.json"
     #: Behavior-model surfaces (hand-edited / refit-written). A config field
     #: rather than a hardcoded path so it can be scoped per vehicle profile
-    #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
-    #: systemd unit ``cd``s to the clone so the default resolves there.
-    behavior_models: Path = Path("data/behavior_models.yaml")
+    #: (see ``src/profiles.py``). Rooted at the checkout like the sibling
+    #: paths (R01.2), so a tool started from another directory reads the same
+    #: file the daemon does.
+    behavior_models: Path = DATA_DIR / "behavior_models.yaml"
     #: Directional, provenanced accepted-fault overrides (Task 1.3,
     #: online-training-strategy.md) — sibling to ``behavior_models`` above,
     #: same profile-scoping rationale (a second vehicle must never inherit
     #: this one's overrides). Optional: absent file ⇒ zero overrides
     #: (``load_accepted_baselines`` handles that gracefully).
-    accepted_baselines: Path = Path("data/accepted_baselines.yaml")
+    accepted_baselines: Path = DATA_DIR / "accepted_baselines.yaml"
     #: User-defined custom-PID formulas (Task 6.8, wired in by Task 2.6) —
     #: schema documented in ``custom_pids.example.yaml``. Optional: absent
     #: file ⇒ zero custom PIDs polled (``load_custom_pids`` handles that
     #: gracefully), same posture as ``behavior_models`` above.
-    custom_pids: Path = Path("data/custom_pids.yaml")
+    custom_pids: Path = DATA_DIR / "custom_pids.yaml"
     #: Operator-selectable collection modes, scoped per vehicle.
-    capture_profiles: Path = Path("data/capture_profiles.yaml")
+    capture_profiles: Path = DATA_DIR / "capture_profiles.yaml"
     #: Per-vehicle, per-tune AFR voltage transfer and target-table exports.
-    afr_calibration: Path = Path("data/afr_calibration.yaml")
+    afr_calibration: Path = DATA_DIR / "afr_calibration.yaml"
     #: Per-vehicle K-line facts (addresses, wake-up, framing, timing) for the
     #: CANary-HAT's native K-line path; absent means K-line is not configured.
-    kline_profile: Path = Path("data/kline.yaml")
+    kline_profile: Path = DATA_DIR / "kline.yaml"
     #: Session catalog (Task 6.1, eval-longitudinal-and-dtc.md) — SQLite index
     #: over session sidecars. Rebuildable from disk at any time
     #: (``scripts/catalog.py rebuild``); never a second source of truth.
@@ -1204,6 +1219,18 @@ class PlausibilityConfig(_Strict):
     enabled: bool = False
 
 
+class CommitteesConfig(_Strict):
+    """Sensor committees in the live tick (H04.2).
+
+    On by default: with no ``committees.yaml`` in the profile data directory
+    every committee reports ``not_configured`` and nothing flags, so the file
+    — not this switch — is what arms a vehicle. ``enabled: false`` removes the
+    evaluator entirely and ``/status`` says so.
+    """
+
+    enabled: bool = True
+
+
 class CanaryConfig(_Strict):
     vehicle: VehicleConfig
     hardware: HardwareConfig
@@ -1222,6 +1249,7 @@ class CanaryConfig(_Strict):
     autotag: AutoTagConfig = AutoTagConfig()
     llm_assist: LLMAssistConfig = LLMAssistConfig()
     plausibility: PlausibilityConfig = PlausibilityConfig()
+    committees: CommitteesConfig = CommitteesConfig()
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

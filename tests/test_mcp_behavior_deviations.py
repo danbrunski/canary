@@ -11,7 +11,7 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 
-def _cfg_yaml(storage: Path) -> str:
+def _cfg_yaml(storage: Path, behavior_models: Path) -> str:
     return f"""
 vehicle: {{make: Nissan, model: Xterra, year: 2008, vin: ""}}
 hardware:
@@ -30,6 +30,7 @@ models:
   isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
   lstm_autoencoder: {{enabled: false, sequence_length: 60, latent_dim: 16, threshold_k: 3.0}}
 dashboard: {{host: 127.0.0.1, port: 8000}}
+daemon: {{behavior_models: {behavior_models}}}
 """
 
 
@@ -78,22 +79,18 @@ def _write_env(tmp_path: Path, *, session_id: str = "2026-07-19T000000") -> Path
     write_records_to_parquet(records, session_dir, max_rows=10_000)
 
     cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_cfg_yaml(storage))
-    # daemon.behavior_models defaults to the relative "data/behavior_models.yaml"
-    # (src/config.py); scope_config nests it under the profile slug ->
-    # "data/nissan-xterra-2008/behavior_models.yaml", resolved against CWD
-    # (the test chdir()s into tmp_path).
+    # The config names the behavior-models file (R01.2: the default is the
+    # repo's own data/behavior_models.yaml, never the working directory's);
+    # scope_config nests it under the profile slug.
+    cfg_path.write_text(_cfg_yaml(storage, tmp_path / "data" / "behavior_models.yaml"))
     bm_path = tmp_path / "data" / "nissan-xterra-2008" / "behavior_models.yaml"
     bm_path.parent.mkdir(parents=True, exist_ok=True)
     bm_path.write_text(yaml.safe_dump(_behavior_models_yaml()))
     return cfg_path
 
 
-def test_get_behavior_deviations_returns_surfaces(tmp_path: Path, monkeypatch) -> None:
+def test_get_behavior_deviations_returns_surfaces(tmp_path: Path) -> None:
     cfg_path = _write_env(tmp_path)
-    # daemon.behavior_models defaults relative to CWD; point it at our fixture
-    # instead of relying on DEFAULT_BEHAVIOR_MODELS_PATH (the real repo file).
-    monkeypatch.chdir(tmp_path)
     out = behavior_tool.get_behavior_deviations(cfg_path, session="2026-07-19T000000")
     assert out["ok"] is True
     assert out["n_rows"] == 10
@@ -102,11 +99,8 @@ def test_get_behavior_deviations_returns_surfaces(tmp_path: Path, monkeypatch) -
     assert surface["mean_deviation"] == 5.0
 
 
-def test_get_behavior_deviations_mode_filter_excludes_ungated_surface(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_behavior_deviations_mode_filter_excludes_ungated_surface(tmp_path: Path) -> None:
     cfg_path = _write_env(tmp_path)
-    monkeypatch.chdir(tmp_path)
     out = behavior_tool.get_behavior_deviations(
         cfg_path, session="2026-07-19T000000", mode="warmup"
     )
@@ -114,22 +108,16 @@ def test_get_behavior_deviations_mode_filter_excludes_ungated_surface(
     assert out["surfaces"] == []
 
 
-def test_get_behavior_deviations_unknown_session_returns_ok_false(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_behavior_deviations_unknown_session_returns_ok_false(tmp_path: Path) -> None:
     cfg_path = _write_env(tmp_path)
-    monkeypatch.chdir(tmp_path)
     out = behavior_tool.get_behavior_deviations(cfg_path, session="2099-01-01T000000")
     assert out["ok"] is False
     assert "not found" in out["error"]
 
 
-def test_get_behavior_deviations_missing_behavior_models_returns_ok_false(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_get_behavior_deviations_missing_behavior_models_returns_ok_false(tmp_path: Path) -> None:
     cfg_path = _write_env(tmp_path)
     (tmp_path / "data" / "nissan-xterra-2008" / "behavior_models.yaml").unlink()
-    monkeypatch.chdir(tmp_path)
     out = behavior_tool.get_behavior_deviations(cfg_path, session="2026-07-19T000000")
     assert out["ok"] is False
     assert "behavior_models.yaml" in out["error"]

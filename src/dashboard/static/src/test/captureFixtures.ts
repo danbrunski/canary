@@ -1,7 +1,15 @@
 // Shared fixtures for the capture runner and profile editor tests (R08.6).
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
 import type { vi } from "vitest";
 
-import type { CaptureProfile, StatusResponse } from "../types";
+import type {
+  CaptureProfile,
+  ObdSchedulerRequestStatus,
+  ResolvedPlanMember,
+  StatusResponse,
+} from "../types";
 
 type Mock = ReturnType<typeof vi.fn>;
 export type CaptureMocks = Record<
@@ -217,3 +225,26 @@ export function installCaptureMocks(mocks: CaptureMocks): void {
     warnings: [],
   }));
 }
+
+/** A slice of `/status.health.obd_scheduler` for one windowed DID, built by
+ *  the backend's own rate policy: `tests/test_dashboard_scheduler_fixture.py`
+ *  regenerates it and fails when the policy moves. `window_period_seconds` is
+ *  the period that governs (cycle before interval), for assertions only. */
+export interface WindowedDidScenario {
+  requests: ObdSchedulerRequestStatus[];
+  /** As the daemon reports it: the interval and the cycle separately. */
+  did_profile: {
+    window_interval_seconds: number;
+    cycle: { timing_policy: "cycle" | "interval"; cycle_seconds: number | null };
+  };
+  resolved_plan: { members: ResolvedPlanMember[] };
+  window_period_seconds: number;
+}
+
+// Read from disk (vitest's root is the dashboard directory).
+export const WINDOWED_DID_SCHEDULER = JSON.parse(
+  readFileSync(resolve(process.cwd(), "src/test/fixtures/windowedDidScheduler.json"), "utf8"),
+) as Record<
+  "config-cycle-beats-profile-interval" | "profile-cycle-every-window",
+  WindowedDidScenario
+>;

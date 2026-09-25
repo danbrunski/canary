@@ -461,3 +461,77 @@ def abs_scan_tool_frames(
     frames += [KLINE_WAKE, bytes.fromhex("8110FC810E"), bytes.fromhex("83FC10C15D8F3C")]
     frames += _kline_read(0x1210, b"\x00\x1a")
     return frames
+
+
+# ---------------------------------------------------------------------------
+# Benchmark reports (R06.5: the evaluate_detectors protocol the gates read)
+# ---------------------------------------------------------------------------
+
+#: Engine hours on the one fixture drive: a rate of r false alarms per
+#: engine-hour is ``r * 100`` episodes, exact for the rates the tests use.
+_REPORT_ENGINE_HOURS = 100.0
+
+
+def evaluation_report(
+    recall: dict[str, float | None],
+    per_hour: dict[str, float | None],
+    *,
+    fault_kind: str = "maf_gain",
+    severity: float = 0.1,
+    graded: int = 20,
+    drive: str = "2026-09-23T150658",
+) -> dict[str, Any]:
+    """A minimal ``scripts/evaluate_detectors.py`` report for the gates.
+
+    ``per_hour`` names the scored detectors: a rate becomes false-alarm
+    episodes on one drive; ``None`` scores the detector with no engine time
+    (no rate). ``recall`` gives each detector's graded share of ``graded``
+    injections at one (fault, severity); ``None`` or absent is no graded row
+    (a withheld detector).
+    """
+    from src.models.benchmark_gate import PROTOCOL_NAME, PROTOCOL_VERSION
+
+    return {
+        "protocol": {
+            "name": PROTOCOL_NAME,
+            "version": PROTOCOL_VERSION,
+            "seed": 42,
+            "faults": [fault_kind],
+            "injections_per_drive": 2,
+            "window_seconds": 240.0,
+            "lead_seconds": 240.0,
+            "grace_seconds": 60.0,
+            "persistence": {"required": 3, "window": 5, "window_seconds": 10.0},
+        },
+        "detectors": list(per_hour),
+        "withheld_detectors": {},
+        "drives": [
+            {
+                "drive": drive,
+                "sessions": [drive],
+                "cross_era": False,
+                "engine_hours": _REPORT_ENGINE_HOURS,
+                "detectors": {
+                    name: {"false_alarm_episodes": round(rate * _REPORT_ENGINE_HOURS)}
+                    for name, rate in per_hour.items()
+                    if rate is not None
+                },
+            }
+        ],
+        "recall": {
+            name: {
+                fault_kind: {
+                    str(severity): {
+                        "graded": graded,
+                        "detected": round(share * graded),
+                        "injections": graded,
+                        "withheld": 0,
+                        "masked": 0,
+                        "median_time_to_detect_seconds": 1.0,
+                    }
+                }
+            }
+            for name, share in recall.items()
+            if share is not None
+        },
+    }

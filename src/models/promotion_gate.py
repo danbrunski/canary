@@ -9,12 +9,16 @@ never auto-``active``"). This module builds the *gate* — the mechanics an
 explicit operator action (a CLI flag today, a dashboard action later) calls
 through before flipping ``publish_status`` — never the trigger itself.
 
-The gate reuses the existing fault-injection benchmark
-(``src/models/synthetic_fault_eval.py`` / ``scripts/detector_benchmark.py``,
-already landed) rather than re-deriving detector quality: both the candidate
-and the golden run already carry a ``detector_benchmark_report_path`` (the
-Task 2.6 regression-gate report `scripts/retrain.py` writes every run), and
-this gate diffs the two reports' ``table``/``nominal_fp`` blocks.
+The gate reuses the fault-injection benchmark rather than re-deriving
+detector quality: both the candidate and the golden run carry a
+``detector_benchmark_report_path`` (the Task 2.6 regression-gate report
+`scripts/retrain.py` writes every run). Since R06.5 that report is A02's
+``scripts/evaluate_detectors.py`` protocol, and this gate reads both through
+:func:`src.models.benchmark_gate.gate_view`: per (detector, fault, severity)
+recall and per-detector false alarms per engine-hour. A report from the
+retired ``detector_benchmark`` grid is refused by name on either side — its
+faults, channels and alert rate are not this protocol's, so comparing the two
+would grade a candidate against a different test.
 
 Four checks, ANY of which blocks promotion:
 
@@ -57,6 +61,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from src.models.benchmark_gate import GateView, RetiredProtocolError, gate_view
+
 if TYPE_CHECKING:
     from src.models.training_ledger import TrainingLedger, TrainingRunRecord
 
@@ -75,13 +81,13 @@ __all__ = [
     "promote_challenger",
 ]
 
-#: Same order of magnitude as `detector_benchmark.DEFAULT_TOLERANCE` (0.15) —
-#: this gate's recall-regression check is the same relative-tolerance shape.
+#: Same as `benchmark_gate.DEFAULT_TOLERANCE` (0.15) — this gate's
+#: recall-regression check is the same relative-tolerance shape.
 DEFAULT_RECALL_TOLERANCE = 0.15
-#: Alerts/hour ceiling on the held-out fault-injection benchmark's clean pass.
-#: Deliberately generous (a hard sanity ceiling, not a tuned operating
-#: threshold) — the real per-detector alert budget lives in
-#: `alerts.persistence_*`/fusion config, not here.
+#: False-alarm episodes per engine-hour ceiling on the benchmark's clean
+#: drives (R06.5: the grid's unit was alerts per scored hour). Deliberately
+#: generous (a hard sanity ceiling, not a tuned operating threshold) — the
+#: alert-role budget is A06.5's 1 per engine-hour, enforced at publish.
 DEFAULT_FP_BUDGET_PER_HOUR = 5.0
 #: Symmetric holdout-score-agreement band vs golden (fraction of golden's
 #: rate) — a challenger whose held-out clean-data alert rate is either much
@@ -116,6 +122,19 @@ class PromotionGateResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {"eligible": self.eligible, "reasons": list(self.reasons), "checks": self.checks}
+
+
+def _gate_views(
+    candidate_report: Mapping[str, Any], golden_report: Mapping[str, Any]
+) -> tuple[GateView, GateView] | str:
+    """Both reports' graded cells, or why either cannot be read (R06.5)."""
+    views: list[GateView] = []
+    for side, report in (("candidate", candidate_report), ("golden", golden_report)):
+        try:
+            views.append(gate_view(report))
+        except RetiredProtocolError as exc:
+            return f"{side} benchmark report: {exc}"
+    return views[0], views[1]
 
 
 def _load_report(path_str: str | None) -> dict[str, Any] | None:
@@ -263,33 +282,33 @@ def _check_quarantine_trend(
 
 
 def _check_recall(
-    candidate_report: Mapping[str, Any],
-    golden_report: Mapping[str, Any],
+    candidate: GateView,
+    golden: GateView,
     *,
     recall_tolerance: float,
 ) -> _CheckOutcome:
-    """Recall non-regression per (detector, fault) cell the golden graded.
+    """Recall non-regression per (detector, fault, severity) cell the golden graded.
 
     A cell the golden graded and the candidate did not -- no row (a withheld
-    detector: ``detector_benchmark`` emits none) or no recall -- **fails** and
-    is named (R04.5). It used to be skipped, so a candidate whose sequence
-    detector was withheld passed against a golden where it was graded. A cell
-    the golden never graded has nothing to regress from and is skipped.
+    detector reports none) or no graded injection -- **fails** and is named
+    (R04.5). It used to be skipped, so a candidate whose sequence detector was
+    withheld passed against a golden where it was graded. A cell the golden
+    never graded has nothing to regress from and is skipped.
     """
     candidate_table = {
-        (row["detector"], row["fault_kind"]): row for row in candidate_report.get("table", [])
+        (row["detector"], row["fault_kind"], row["severity"]): row for row in candidate.table
     }
     golden_table = {
-        (row["detector"], row["fault_kind"]): row for row in golden_report.get("table", [])
+        (row["detector"], row["fault_kind"], row["severity"]): row for row in golden.table
     }
     cells: list[dict[str, Any]] = []
     missing: list[str] = []
     regressed_any = False
-    for (detector, fault_kind), golden_row in sorted(golden_table.items()):
+    for (detector, fault_kind, severity), golden_row in sorted(golden_table.items()):
         golden_recall = golden_row.get("recall")
         if golden_recall is None:
             continue
-        candidate_row = candidate_table.get((detector, fault_kind))
+        candidate_row = candidate_table.get((detector, fault_kind, severity))
         candidate_recall = candidate_row.get("recall") if candidate_row is not None else None
         floor = golden_recall * (1 - recall_tolerance)
         if candidate_recall is None:
@@ -297,6 +316,7 @@ def _check_recall(
                 {
                     "detector": detector,
                     "fault_kind": fault_kind,
+                    "severity": severity,
                     "golden_recall": golden_recall,
                     "candidate_recall": None,
                     "floor": floor,
@@ -304,13 +324,14 @@ def _check_recall(
                     "missing": True,
                 }
             )
-            missing.append(f"{detector}/{fault_kind}")
+            missing.append(f"{detector}/{fault_kind}@{severity:g}")
             continue
         regressed = candidate_recall < floor
         cells.append(
             {
                 "detector": detector,
                 "fault_kind": fault_kind,
+                "severity": severity,
                 "golden_recall": golden_recall,
                 "candidate_recall": candidate_recall,
                 "floor": floor,
@@ -480,9 +501,10 @@ def evaluate_promotion_gate(
     """Evaluate whether ``candidate`` is eligible for promotion to ``active``.
 
     ``candidate_report``/``golden_report`` let a caller (tests, a
-    long-running dashboard process) pass the already-parsed fault-injection
-    benchmark JSON directly; otherwise each is loaded from the record's own
-    ``detector_benchmark_report_path``. Pure computation — never mutates the
+    long-running dashboard process) pass the already-parsed benchmark JSON
+    (an ``evaluate_detectors`` report) directly; otherwise each is loaded from
+    the record's own ``detector_benchmark_report_path``. A report from the
+    retired grid on either side fails the gate, named (R06.5). Pure computation — never mutates the
     ledger; see :func:`promote_challenger` for the gated write.
 
     Every check is a ``_check_*`` function returning ``(ok, reason,
@@ -536,17 +558,19 @@ def evaluate_promotion_gate(
         }
         reasons.append("cannot evaluate recall/FP-budget without both benchmark reports")
         return PromotionGateResult(eligible=False, reasons=tuple(reasons), checks=checks)
+    views = _gate_views(resolved_candidate_report, resolved_golden_report)
+    if isinstance(views, str):
+        checks["benchmark"] = {"ok": False, "reason": views}
+        reasons.append(views)
+        return PromotionGateResult(eligible=False, reasons=tuple(reasons), checks=checks)
+    candidate_view, golden_view = views
 
     record(
         "recall_non_regression",
-        _check_recall(
-            resolved_candidate_report,
-            resolved_golden_report,
-            recall_tolerance=recall_tolerance,
-        ),
+        _check_recall(candidate_view, golden_view, recall_tolerance=recall_tolerance),
     )
-    candidate_nominal = resolved_candidate_report.get("nominal_fp", {})
-    golden_nominal = resolved_golden_report.get("nominal_fp", {})
+    candidate_nominal = candidate_view.nominal_fp
+    golden_nominal = golden_view.nominal_fp
     record(
         "fp_budget",
         _check_fp_budget(candidate_nominal, golden_nominal, fp_budget_per_hour=fp_budget_per_hour),
@@ -638,8 +662,9 @@ def compute_golden_divergence(
 
     Per-detector divergence between the frozen ``golden`` run and whatever
     ``current`` run is live now, compared on the same held-out clean-data
-    alert rate (``nominal_fp`` from each run's fault-injection benchmark
-    report) both were graded against. Pure computation; a CLI
+    false-alarm rate (``benchmark_gate.gate_view(...).nominal_fp`` of each
+    run's benchmark report). A grid-era report on either side yields no
+    per-detector numbers and an ``incomparable`` reason (R06.5). Pure computation; a CLI
     (``scripts/ledger.py golden-status``) or a future dashboard panel is
     responsible for surfacing it — this function only produces the
     JSON-safe numbers.
@@ -654,8 +679,15 @@ def compute_golden_divergence(
         if current_report is not None
         else (_load_report(current.detector_benchmark_report_path) or {})
     )
-    golden_nominal = resolved_golden_report.get("nominal_fp", {})
-    current_nominal = resolved_current_report.get("nominal_fp", {})
+    golden_nominal: Mapping[str, Any] = {}
+    current_nominal: Mapping[str, Any] = {}
+    unreadable: str | None = None
+    if resolved_golden_report and resolved_current_report:
+        views = _gate_views(resolved_current_report, resolved_golden_report)
+        if isinstance(views, str):
+            unreadable = views
+        else:
+            current_nominal, golden_nominal = views[0].nominal_fp, views[1].nominal_fp
 
     per_detector: dict[str, Any] = {}
     for detector in sorted(set(golden_nominal) | set(current_nominal)):
@@ -678,9 +710,12 @@ def compute_golden_divergence(
             "relative_delta": relative_delta,
         }
 
-    return {
+    out: dict[str, Any] = {
         "golden_run_id": golden.run_id,
         "current_run_id": current.run_id,
         "model_type": golden.model_type,
         "per_detector": per_detector,
     }
+    if unreadable is not None:
+        out["incomparable"] = unreadable
+    return out

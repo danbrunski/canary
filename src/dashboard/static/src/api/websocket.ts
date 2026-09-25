@@ -62,7 +62,7 @@ export function openReconnectingSocket<T>(
     onState("connecting");
     try {
       socket = new WebSocket(absoluteUrl);
-    } catch (err) {
+    } catch {
       onState("error");
       scheduleReconnect();
       return;
@@ -71,7 +71,10 @@ export function openReconnectingSocket<T>(
       delay = initialDelayMs;
       onState("open");
     };
-    socket.onmessage = (event) => {
+    socket.onmessage = (event: MessageEvent<unknown>) => {
+      // Text frames only: a binary frame never parsed (JSON.parse of a Blob
+      // throws), so it is skipped before the attempt rather than inside it.
+      if (typeof event.data !== "string") return;
       try {
         onMessage(JSON.parse(event.data) as T);
       } catch {

@@ -21,6 +21,22 @@ export function numberArray(value: unknown): number[] {
     : [];
 }
 
+/** A scalar (string, finite or not number, boolean, bigint) as text, else
+ *  null. Labels read out of untyped detail blobs go through this so an object
+ *  reads as missing instead of rendering as "[object Object]". */
+export function scalarText(value: unknown): string | null {
+  switch (typeof value) {
+    case "string":
+      return value;
+    case "number":
+    case "boolean":
+    case "bigint":
+      return String(value);
+    default:
+      return null;
+  }
+}
+
 /** Every entry stringified; `[]` for non-arrays. */
 export function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];

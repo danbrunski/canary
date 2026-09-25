@@ -44,11 +44,13 @@ interface ControlPanelProps {
  *  reads `token` to gate its own actions. */
 export function ControlPanel({ token, companion }: ControlPanelProps) {
   const controlStream = useControlStream(token);
-  const [preflight, setPreflight] = useState<PreflightResponse | null>(null);
-  const [version, setVersion] = useState<VersionResponse | null>(null);
-  const [capture, setCapture] = useState<CaptureState | null>(null);
-  const [jobs, setJobs] = useState<JobRecord[]>([]);
-  const [sequenceDetector, setSequenceDetector] = useState<SequenceDetectorStatus | null>(null);
+  // One snapshot, written by one setter: every read replaces all five.
+  const [control, setControl] = useState<ControlSnapshot | null>(null);
+  const preflight = control?.preflight ?? null;
+  const version = control?.version ?? null;
+  const capture = control?.capture ?? null;
+  const jobs = control?.jobs ?? NO_JOBS;
+  const sequenceDetector = control?.sequenceDetector ?? null;
   const { notice, setNotice, busy, run: runAction } = useAsyncAction();
   const [purpose, setPurpose] = useState("");
   const [protocol, setProtocol] = useState("drive");
@@ -58,41 +60,36 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
 
   const refreshControl = useCallback(async () => {
     if (!token) return;
-    const [nextPreflight, nextVersion, nextCapture, nextJobs, nextSequence] = await Promise.all([
-      getPreflight(token),
-      getControlVersion(token),
-      getCurrentCapture(token),
-      listJobs(token),
-      getSequenceDetector(token),
-    ]);
-    setPreflight(nextPreflight);
-    setVersion(nextVersion);
-    setCapture(nextCapture.capture);
-    setJobs(nextJobs.jobs.slice().reverse());
-    setSequenceDetector(nextSequence.sequence_detector);
+    setControl(await readControl(token));
   }, [token]);
 
+  // Clearing the token clears what it read: on the change, while rendering,
+  // rather than in the effect a commit later.
+  const [readToken, setReadToken] = useState(token);
+  if (token !== readToken) {
+    setReadToken(token);
+    if (!token) setControl(null);
+  }
+
   useEffect(() => {
-    if (!token) {
-      setPreflight(null);
-      setVersion(null);
-      setCapture(null);
-      setJobs([]);
-      setSequenceDetector(null);
-      return;
-    }
-    const controller = new AbortController();
-    refreshControl().catch((err: unknown) => {
-      setNotice({ kind: "error", text: errorText(err) });
-    });
-    const timer = window.setInterval(() => {
-      refreshControl().catch(() => undefined);
-    }, 5000);
+    if (!token) return;
+    let cancelled = false;
+    // The first read reports its failure; the 5 s re-reads stay quiet.
+    const load = async (report: boolean): Promise<void> => {
+      try {
+        const next = await readControl(token);
+        if (!cancelled) setControl(next);
+      } catch (err) {
+        if (!cancelled && report) setNotice({ kind: "error", text: errorText(err) });
+      }
+    };
+    void load(true);
+    const timer = window.setInterval(() => void load(false), 5000);
     return () => {
-      controller.abort();
+      cancelled = true;
       window.clearInterval(timer);
     };
-  }, [refreshControl, token]);
+  }, [setNotice, token]);
 
   // Every mutating control gates on the token and refreshes afterwards;
   // wrapping the shared runner here keeps all call sites (including the
@@ -272,3 +269,30 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
 // Status-aware messaging (Task 6.14): 401/403 → token problem, 503 →
 // feature not wired, etc. — never a raw stack-ish string.
 const errorText = describeError;
+
+const NO_JOBS: JobRecord[] = [];
+
+interface ControlSnapshot {
+  preflight: PreflightResponse;
+  version: VersionResponse;
+  capture: CaptureState | null;
+  jobs: JobRecord[];
+  sequenceDetector: SequenceDetectorStatus | null;
+}
+
+async function readControl(token: string): Promise<ControlSnapshot> {
+  const [preflight, version, capture, jobs, sequence] = await Promise.all([
+    getPreflight(token),
+    getControlVersion(token),
+    getCurrentCapture(token),
+    listJobs(token),
+    getSequenceDetector(token),
+  ]);
+  return {
+    preflight,
+    version,
+    capture: capture.capture,
+    jobs: jobs.jobs.slice().reverse(),
+    sequenceDetector: sequence.sequence_detector,
+  };
+}

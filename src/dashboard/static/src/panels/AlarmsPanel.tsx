@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Panel } from "../components/Panel";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
+import { useNow } from "../hooks/useNow";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, dangerButtonClass, inputClass, placeholderClass } from "../styles";
 
@@ -135,7 +136,8 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
   const toggleRule = (id: string) =>
     setRules((r) => r.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)));
 
-  const recent = history.filter((e) => Date.now() - e.at < 60_000);
+  const now = useNow();
+  const recent = history.filter((e) => now - e.at < 60_000);
 
   return (
     <Panel

@@ -462,7 +462,27 @@ export interface ObdSchedulerStatus {
   resolved_plan?: ResolvedPollingPlan | null;
 }
 
+/** One unique `(service, ECU request id, identifier)` in a resolved plan. Its
+ *  `rate_hz` comes from the same rate policy as the scheduler row's
+ *  `configured_rate_hz` (R02.3); for a windowed DID that is its window cadence. */
+export interface ResolvedPlanMember {
+  kind: string;
+  service: string;
+  request_id: string;
+  identifier: string;
+  channel: string;
+  profile_channel: string | null;
+  rate_hz: number;
+  configured_rate_hz: number;
+  priority: boolean;
+  required: boolean;
+  response_payload_bytes: number | null;
+  decoded_rows_per_read: number;
+  capture_selected: boolean;
+}
+
 export interface ResolvedPollingPlan {
+  members?: ResolvedPlanMember[];
   member_count: number;
   aliases_deduplicated: number;
   channel_reads_per_second: number;

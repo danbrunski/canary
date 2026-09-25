@@ -596,8 +596,9 @@ verified against, as amended by the validity check above.
   `src/models/promotion_gate.py::evaluate_promotion_gate` — calibration-
   stamp hard reject (unconditional, first-checked, can't be offset by
   other passing checks), contamination sanity, recall non-regression
-  vs golden on the real fault-injection benchmark (`detector_benchmark.py`
-  report schema, verified field-for-field, not a stub), held-out FP/hr
+  vs golden on the real fault-injection benchmark (then `detector_benchmark.py`'s
+  report; since R06.5, 2026-09-25, the `evaluate_detectors` protocol report read
+  through `src/models/benchmark_gate.py`), held-out FP/hr
   budget, holdout score agreement. `promote_challenger` verified as the
   ONLY path to `active` besides the pre-existing manual `publish` CLI —
   never called from `retrain.py` or the scheduler. Tests cover gate

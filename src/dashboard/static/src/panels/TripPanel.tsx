@@ -1,9 +1,10 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useState } from "react";
 
 import { getSessionDigest, getTripSummary } from "../api/http";
 import { Panel } from "../components/Panel";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
+import { useNow } from "../hooks/useNow";
 import {
   cn,
   definitionListClass,
@@ -14,7 +15,7 @@ import {
 } from "../styles";
 import type { SessionDigestResponse, StatusResponse, TripSummaryFields } from "../types";
 import { formatPercent, KM_PER_MILE } from "../util/format";
-import { numberOrNull } from "../util/json";
+import { numberOrNull, scalarText } from "../util/json";
 import { formatDuration } from "../util/time";
 
 interface TripPanelProps {
@@ -76,8 +77,9 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
   // open" — an honest, if partial, denominator rather than a fabricated
   // one. The last-drive summary below carries the precise backend-computed
   // idle_fraction instead.
-  const openedAtRef = useRef<number>(Date.now());
-  const observedSeconds = (Date.now() - openedAtRef.current) / 1000;
+  const [openedAt] = useState(() => Date.now());
+  const now = useNow();
+  const observedSeconds = (now - openedAt) / 1000;
   const idleFraction =
     idleTimeS != null && observedSeconds > 1 ? Math.min(idleTimeS / observedSeconds, 1) : null;
 
@@ -221,7 +223,7 @@ function DigestSummary({ digest }: { digest: SessionDigestResponse }) {
         <dd className={definitionValueClass}>
           {digest.new_dtcs.length === 0
             ? "none"
-            : digest.new_dtcs.map((entry) => String(entry.code ?? "?")).join(", ")}
+            : digest.new_dtcs.map((entry) => scalarText(entry.code) ?? "?").join(", ")}
         </dd>
       </div>
       <div className={definitionRowClass}>

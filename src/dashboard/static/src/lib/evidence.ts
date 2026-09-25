@@ -4,7 +4,14 @@
 // no React dependency and the panel is just presentation.
 
 import type { AnomalyEvent } from "../types";
-import { numberArray, numberMap, numberOrNull, numberSeriesMap, record } from "../util/json";
+import {
+  numberArray,
+  numberMap,
+  numberOrNull,
+  numberSeriesMap,
+  record,
+  scalarText,
+} from "../util/json";
 
 export type EvidenceSource = "isolation_forest" | "lstm_autoencoder";
 
@@ -190,7 +197,7 @@ export function extractResiduals(detail: Record<string, unknown>): ResidualEvide
       const obj = record(item);
       if (!obj) continue;
       out.push({
-        name: String(obj.name ?? obj.channel ?? obj.model ?? "residual"),
+        name: scalarText(obj.name ?? obj.channel ?? obj.model) ?? "residual",
         severity: typeof obj.severity === "string" ? obj.severity : null,
         actual: numberOrNull(obj.actual),
         expected: numberOrNull(obj.expected),

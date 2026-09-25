@@ -13,7 +13,7 @@ scripts/train_anomaly_model.py
 scripts/retrain.py
 scripts/sequence_bakeoff.py
 scripts/fp_benchmark.py
-scripts/detector_benchmark.py
+scripts/evaluate_detectors.py
 tests/test_lstm_inference.py
 tests/test_lstm_training.py
 tests/test_tcn_training.py

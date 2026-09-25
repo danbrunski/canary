@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from src.paths import ANOMALIES_DIR, CONTROL_DIR
+
 DEFAULT_DAEMON_URL = "http://127.0.0.1:8000"
 DEFAULT_BIND_HOST = "0.0.0.0"
 DEFAULT_BIND_PORT = 8001
@@ -91,7 +93,7 @@ def _anomalies_dir_from_config_yaml(config_path: str | None) -> Path | None:
     if isinstance(raw, str) and raw:
         return Path(raw)
     # Daemon default when nothing is set.
-    return Path("data/anomalies") if config_path else None
+    return ANOMALIES_DIR if config_path else None
 
 
 def _catalog_db_from_config_yaml(config_path: str | None) -> Path | None:
@@ -108,7 +110,7 @@ def _catalog_db_from_config_yaml(config_path: str | None) -> Path | None:
     if isinstance(raw, str) and raw:
         return Path(raw)
     # Daemon default when nothing is set.
-    return Path("data/control/catalog.db") if config_path else None
+    return CONTROL_DIR / "catalog.db" if config_path else None
 
 
 def load_from_env() -> MCPConfig:

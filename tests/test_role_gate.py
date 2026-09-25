@@ -277,7 +277,11 @@ def test_the_daemon_wires_the_gate_into_components(tmp_path: Path) -> None:
     components = build_components(config, load_models=False)
 
     assert components.role_gate is not None
-    assert components.emitter._roles is components.role_gate
+    # The emitter reads the gate for the learned detectors, and the configured
+    # role for deterministic sources (H04.2 committees), never the gate's.
+    assert components.emitter._roles.gate is components.role_gate  # type: ignore[attr-defined]
+    assert components.emitter._roles["isolation_forest"] == "evidence"
+    assert components.emitter._roles["committee"] == config.models.roles.committee
     roles = components.health_monitor.snapshot()["detector_roles"]
     assert (roles["isolation_forest"]["configured"], roles["isolation_forest"]["effective"]) == (
         "alert",

@@ -41,12 +41,13 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.decode.behavior_models import DeviationConfig
+from src.paths import DATA_DIR
 
 #: Default (unscoped) location — always resolve the real path through
 #: ``src.profiles.scope_config`` (``DaemonConfig.accepted_baselines``); this
 #: constant exists only as the field default / for tooling that runs with
 #: profiles disabled.
-DEFAULT_ACCEPTED_BASELINES_PATH = Path("data/accepted_baselines.yaml")
+DEFAULT_ACCEPTED_BASELINES_PATH = DATA_DIR / "accepted_baselines.yaml"
 
 CURRENT_SCHEMA_VERSION = 1
 

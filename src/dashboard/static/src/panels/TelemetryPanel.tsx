@@ -117,11 +117,11 @@ export function TelemetryPanel({
 
   // Seed default pins once (only with channels that exist). A decoded
   // replay has none of the OBD defaults → stays empty → equal grid of all.
-  useEffect(() => {
-    if (pinned !== null || displayChannels.length === 0) return;
+  // Seeded while rendering: once set, `pinned` is non-null and this stops.
+  if (pinned === null && displayChannels.length > 0) {
     const seed = DEFAULT_PIN_CANDIDATES.filter((k) => channels.has(k));
     if (seed.length > 0) setPinned(seed);
-  }, [channels, displayChannels.length, pinned]);
+  }
 
   const activePinned = useMemo(() => pinned ?? [], [pinned]);
   const pinnedSet = useMemo(() => new Set(activePinned), [activePinned]);
@@ -471,7 +471,7 @@ function channelFreshness(
   const ageMs = Number.isFinite(timestampMs) ? Math.max(0, now - timestampMs) : null;
   const request = matchingRequest(snapshot.latest.channel, scheduler);
   const achievedHz = scheduler?.achieved_hz_60s?.[snapshot.latest.channel] ?? null;
-  const targetHz = effectiveTargetHz(request, scheduler);
+  const targetHz = effectiveTargetHz(request);
   const intervalMs = targetHz !== null && targetHz > 0 ? 1_000 / targetHz : null;
   const staleAfterMs = intervalMs === null ? STALE_THRESHOLD_MS : Math.max(3_000, intervalMs * 3);
   return {

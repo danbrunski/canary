@@ -1,0 +1,126 @@
+{
+  "config-cycle-beats-profile-interval": {
+    "requests": [
+      {
+        "kind": "pid",
+        "channel": "RPM",
+        "profile_channel": "RPM",
+        "configured_rate_hz": 1.0,
+        "backed_off": false,
+        "last_response_age_seconds": null
+      },
+      {
+        "kind": "did",
+        "channel": "DID_1208",
+        "profile_channel": "ECM_AIR_CHARGE",
+        "configured_rate_hz": 0.3333,
+        "backed_off": false,
+        "last_response_age_seconds": null
+      }
+    ],
+    "did_profile": {
+      "window_interval_seconds": 2.0,
+      "cycle": {
+        "timing_policy": "cycle",
+        "cycle_seconds": 1.5
+      }
+    },
+    "resolved_plan": {
+      "members": [
+        {
+          "kind": "pid",
+          "service": "0x01",
+          "request_id": "0x7DF",
+          "identifier": "0x000C",
+          "channel": "RPM",
+          "profile_channel": "RPM",
+          "rate_hz": 1.0,
+          "configured_rate_hz": 1.0,
+          "priority": true,
+          "required": false,
+          "response_payload_bytes": 2,
+          "decoded_rows_per_read": 1,
+          "capture_selected": true
+        },
+        {
+          "kind": "did",
+          "service": "0x22",
+          "request_id": "0x7E0",
+          "identifier": "0x1208",
+          "channel": "DID_1208",
+          "profile_channel": "ECM_AIR_CHARGE",
+          "rate_hz": 0.333333,
+          "configured_rate_hz": 0.333333,
+          "priority": false,
+          "required": false,
+          "response_payload_bytes": 2,
+          "decoded_rows_per_read": 1,
+          "capture_selected": true
+        }
+      ]
+    },
+    "window_period_seconds": 1.5
+  },
+  "profile-cycle-every-window": {
+    "requests": [
+      {
+        "kind": "pid",
+        "channel": "RPM",
+        "profile_channel": "RPM",
+        "configured_rate_hz": 1.0,
+        "backed_off": false,
+        "last_response_age_seconds": null
+      },
+      {
+        "kind": "did",
+        "channel": "DID_1208",
+        "profile_channel": "ECM_AIR_CHARGE",
+        "configured_rate_hz": 2.0,
+        "backed_off": false,
+        "last_response_age_seconds": null
+      }
+    ],
+    "did_profile": {
+      "window_interval_seconds": 60.0,
+      "cycle": {
+        "timing_policy": "cycle",
+        "cycle_seconds": 0.5
+      }
+    },
+    "resolved_plan": {
+      "members": [
+        {
+          "kind": "pid",
+          "service": "0x01",
+          "request_id": "0x7DF",
+          "identifier": "0x000C",
+          "channel": "RPM",
+          "profile_channel": "RPM",
+          "rate_hz": 1.0,
+          "configured_rate_hz": 1.0,
+          "priority": true,
+          "required": false,
+          "response_payload_bytes": 2,
+          "decoded_rows_per_read": 1,
+          "capture_selected": true
+        },
+        {
+          "kind": "did",
+          "service": "0x22",
+          "request_id": "0x7E0",
+          "identifier": "0x1208",
+          "channel": "DID_1208",
+          "profile_channel": "ECM_AIR_CHARGE",
+          "rate_hz": 2.0,
+          "configured_rate_hz": 2.0,
+          "priority": false,
+          "required": false,
+          "response_payload_bytes": 2,
+          "decoded_rows_per_read": 1,
+          "capture_selected": true
+        }
+      ]
+    },
+    "window_period_seconds": 0.5
+  }
+}

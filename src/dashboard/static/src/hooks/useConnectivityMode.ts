@@ -43,9 +43,10 @@ export function useConnectivityMode(statusOk: boolean, intervalMs = 5000): Conne
           setCompanionReachable(false);
         }
       }
-      if (!cancelled) timer = setTimeout(tick, intervalMs);
+      if (!cancelled) timer = setTimeout(() => void tick(), intervalMs);
     };
-    tick();
+    // `tick` catches everything it awaits, so it never rejects.
+    void tick();
 
     return () => {
       cancelled = true;

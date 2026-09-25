@@ -35,29 +35,47 @@ export function SessionsPanel({ token, companion }: SessionsPanelProps) {
     setSessions(next.sessions);
   }, [token, showCaptures]);
 
+  // Clearing the token clears the list: on the change, while rendering,
+  // rather than in the effect a commit later.
+  const [listedToken, setListedToken] = useState(token);
+  if (token !== listedToken) {
+    setListedToken(token);
+    if (!token) setSessions([]);
+  }
+
   useEffect(() => {
-    if (!token) {
-      setSessions([]);
-      return;
-    }
-    refreshSessions().catch((err: unknown) => {
-      setNotice({ kind: "error", text: describeError(err) });
-    });
-    const timer = window.setInterval(() => {
-      refreshSessions().catch(() => undefined);
-    }, 5000);
-    return () => window.clearInterval(timer);
-  }, [refreshSessions, token, setNotice]);
+    if (!token) return;
+    let cancelled = false;
+    // The first read reports its failure; the 5 s re-reads stay quiet.
+    const load = async (report: boolean): Promise<void> => {
+      try {
+        const next = await listSessions(token, undefined, undefined, showCaptures);
+        if (!cancelled) setSessions(next.sessions);
+      } catch (err) {
+        if (!cancelled && report) setNotice({ kind: "error", text: describeError(err) });
+      }
+    };
+    void load(true);
+    const timer = window.setInterval(() => void load(false), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [token, showCaptures, setNotice]);
 
   // Keep the selection valid as the polled list changes; default to the
   // latest session once one becomes available (same rule `SessionsCard`
   // used to own privately, moved up here so `ReplayCard` shares it).
-  useEffect(() => {
-    setSelectedSessionId((current) => {
-      if (current && sessions.some((s) => s.session_id === current)) return current;
-      return sessions.at(-1)?.session_id ?? "";
-    });
-  }, [sessions]);
+  // Adjusted while rendering, on a new list, so it lands in the same commit.
+  const [selectionList, setSelectionList] = useState(sessions);
+  if (selectionList !== sessions) {
+    setSelectionList(sessions);
+    const kept =
+      selectedSessionId && sessions.some((s) => s.session_id === selectedSessionId)
+        ? selectedSessionId
+        : (sessions.at(-1)?.session_id ?? "");
+    if (kept !== selectedSessionId) setSelectedSessionId(kept);
+  }
 
   const run = useCallback(
     (label: string, action: () => Promise<void>) =>

@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useState } from "react";
 
 import { getMonitors } from "../api/http";
 import { Panel } from "../components/Panel";
@@ -52,9 +52,11 @@ export function MonitorsPanel() {
   // refresh mid-drive re-baselines to whatever the ECU reports then; that's
   // the best this client-only state can do without a server-side session
   // marker, and still correctly highlights any *new* misfires since.
-  const baselineRef = useRef<Record<string, number> | null>(null);
-  if (data && baselineRef.current === null) {
-    baselineRef.current = { ...data.misfire_counts };
+  // State set while rendering, not a ref: React re-renders at once with it,
+  // so the first frame with data already diffs against itself.
+  const [baseline, setBaseline] = useState<Record<string, number> | null>(null);
+  if (data && baseline === null) {
+    setBaseline({ ...data.misfire_counts });
   }
 
   if (loading) {
@@ -72,7 +74,7 @@ export function MonitorsPanel() {
     );
   }
 
-  const cylinders = computeMisfireRows(data.misfire_counts, baselineRef.current ?? {});
+  const cylinders = computeMisfireRows(data.misfire_counts, baseline ?? data.misfire_counts);
   const maxCount = Math.max(1, ...cylinders.map((c) => c.count));
 
   return (

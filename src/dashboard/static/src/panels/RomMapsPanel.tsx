@@ -23,6 +23,13 @@ import { buttonClass, inputClass } from "../styles";
 import type { StatusResponse, WorkbenchItem } from "../types";
 import { MapTable } from "./MapTable";
 
+/** ECM-vs-inferred cell agreement over the samples stepped so far (W05.3). */
+interface EcmTally {
+  checks: number;
+  disagreements: number;
+  streakSince: number | null;
+}
+
 interface Props {
   token: string;
   channels: Map<string, ChannelSnapshot>;
@@ -57,11 +64,15 @@ export function RomMapsPanel({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [now, setNow] = useState(() => Date.now());
-  const [tally, setTally] = useState<
-    Record<string, { checks: number; disagreements: number; streakSince: number | null }>
-  >({});
+  // Per table: the last ECM sample stepped (its X timestamp) and the
+  // disagreement tally (W05.3). Render state, not a ref, because the step
+  // happens while rendering (below).
+  const [ecmSteps, setEcmSteps] = useState<{
+    seen: Record<string, number>;
+    tally: Record<string, EcmTally>;
+  }>({ seen: {}, tally: {} });
+  const tally = ecmSteps.tally;
   const [drive, setDrive] = useState(false);
-  const lastEcmSample = useRef<Record<string, number>>({});
   const request = useRef<AbortController | null>(null);
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 250);
@@ -172,38 +183,36 @@ export function RomMapsPanel({
   }
 
   // One step per new ECM sample: the disagreement tally (W05.3) and, during
-  // a capture, the client-side live coverage (W05.8).
-  useEffect(() => {
-    for (const table of slotTables) {
-      const key = tableKey(table);
-      const state = ecm.get(key);
-      if (
-        !state?.position ||
-        state.xTimestamp === null ||
-        lastEcmSample.current[key] === state.xTimestamp
-      )
-        continue;
-      lastEcmSample.current[key] = state.xTimestamp;
+  // a capture, the client-side live coverage (W05.8). Stepped while
+  // rendering, guarded by `seen`, so the next render finds nothing new and
+  // stops; both writes are absolute values from this render (StrictMode-safe).
+  const fresh = slotTables.flatMap((table) => {
+    const key = tableKey(table);
+    const state = ecm.get(key);
+    if (!state?.position || state.xTimestamp === null || ecmSteps.seen[key] === state.xTimestamp)
+      return [];
+    return [{ table, key, position: state.position, xTimestamp: state.xTimestamp }];
+  });
+  if (fresh.length > 0) {
+    const seen = { ...ecmSteps.seen };
+    const nextTally = { ...ecmSteps.tally };
+    for (const { table, key, position, xTimestamp } of fresh) {
+      seen[key] = xTimestamp;
       const inferred =
         !traceReason && rpm && bfs ? tracePosition(table, rpm.value, bfs.value) : null;
-      if (inferred) {
-        const differs =
-          inferred.row !== state.position.row || inferred.column !== state.position.column;
-        setTally((prev) => {
-          const old = prev[key] ?? { checks: 0, disagreements: 0, streakSince: null };
-          return {
-            ...prev,
-            [key]: {
-              checks: old.checks + 1,
-              disagreements: old.disagreements + (differs ? 1 : 0),
-              streakSince: differs ? (old.streakSince ?? state.xTimestamp) : null,
-            },
-          };
-        });
-      }
-      overlay.recordLive(table, state.position);
+      if (!inferred) continue;
+      const differs = inferred.row !== position.row || inferred.column !== position.column;
+      const old = nextTally[key] ?? { checks: 0, disagreements: 0, streakSince: null };
+      nextTally[key] = {
+        checks: old.checks + 1,
+        disagreements: old.disagreements + (differs ? 1 : 0),
+        streakSince: differs ? (old.streakSince ?? xTimestamp) : null,
+      };
     }
-  });
+    setEcmSteps({ seen, tally: nextTally });
+    overlay.recordLive(fresh);
+  }
+
   function renderTable(table: RomTable, large = false) {
     const key = tableKey(table);
     const inferred = !traceReason && rpm && bfs ? tracePosition(table, rpm.value, bfs.value) : null;

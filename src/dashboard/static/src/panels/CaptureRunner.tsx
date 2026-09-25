@@ -10,9 +10,10 @@ import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useCaptureCatalog } from "../hooks/useCaptureCatalog";
+import { useNow } from "../hooks/useNow";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { streamKey } from "../lib/romMaps";
-import { requestedRateHz } from "../lib/scheduler";
+import { effectiveTargetHz } from "../lib/scheduler";
 import { buttonClass, inputClass } from "../styles";
 import type { CaptureProfileState, CaptureQuality, StatusResponse } from "../types";
 import { formatReading } from "../util/format";
@@ -398,11 +399,7 @@ function liveValues(
 
 /** Seconds since `startedAt`, ticking once a second. */
 function useCaptureAge(startedAt: string | null): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const now = useNow();
   return startedAt ? Math.max(0, (now - Date.parse(startedAt)) / 1000) : 0;
 }
 
@@ -502,7 +499,7 @@ function RecordingReadout({
                     >
                       <td>{row.displayChannel}</td>
                       <td className="text-center">{row.kind}</td>
-                      <td className="text-right">{requestedRateHz(row).toFixed(2)}</td>
+                      <td className="text-right">{effectiveTargetHz(row)?.toFixed(2) ?? "—"}</td>
                       <td className="text-right">{row.achievedHz.toFixed(2)}</td>
                       <td className="text-right">{row.requests_sent ?? 0}</td>
                       <td className="text-right">{row.responses ?? 0}</td>

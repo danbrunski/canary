@@ -33,6 +33,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.jsonl_store import JsonlStore, latest_by_key
+from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ __all__ = [
     "feedback_to_csv",
 ]
 
-DEFAULT_FEEDBACK_PATH = Path("data/control/anomaly_feedback.jsonl")
+#: Mirror of ``DaemonConfig.feedback_log`` (R01.2: ``src.paths.CONTROL_DIR``).
+DEFAULT_FEEDBACK_PATH = CONTROL_DIR / "anomaly_feedback.jsonl"
 
 FeedbackLabel = Literal["true_positive", "false_positive", "ignored", "needs_review"]
 #: The valid verdicts, as a set, for request validation at the API edge.

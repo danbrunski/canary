@@ -111,21 +111,19 @@ export function useCoverageOverlay({
     if (source === "log") forget(table);
   };
 
-  /** One new ECM sample during a capture. */
-  const recordLive = useCallback(
-    (table: RomTable, position: CellPosition) => {
-      if (captureKey === null) return;
+  /** This render's new ECM samples during a capture. Called while rendering
+   *  (RomMapsPanel), so it writes an absolute value computed from this
+   *  render's grids rather than an updater: a StrictMode double render then
+   *  records each sample once, not twice. */
+  const recordLive = (samples: { table: RomTable; position: CellPosition }[]) => {
+    if (captureKey === null || samples.length === 0) return;
+    const grids = { ...liveGrids };
+    for (const { table, position } of samples) {
       const key = tableKey(table);
-      setLive((prev) => {
-        const grids = prev.capture === captureKey ? prev.grids : {};
-        return {
-          capture: captureKey,
-          grids: { ...grids, [key]: addCoverage(grids[key] ?? emptyCoverage(table), position) },
-        };
-      });
-    },
-    [captureKey],
-  );
+      grids[key] = addCoverage(grids[key] ?? emptyCoverage(table), position);
+    }
+    setLive({ capture: captureKey, grids });
+  };
 
   /** What the overlay shows for `table`, or null while it is off. */
   const view = (table: RomTable): CoverageView | null => {

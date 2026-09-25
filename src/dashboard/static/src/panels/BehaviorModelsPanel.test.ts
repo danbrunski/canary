@@ -110,7 +110,7 @@ function liveEntry(kind: "surface_1d" | "surface_2d", severity: BehaviorSeverity
   };
 }
 
-const LIVE: BehaviorLiveResponse = {
+const LIVE = {
   observed: 128,
   timestamp: "2026-08-01T00:19:23.347526Z",
   operating_mode: "all",

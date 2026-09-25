@@ -1,17 +1,23 @@
 // Reading the OBD scheduler's per-request status (R08.6). TelemetryPanel's
-// freshness chips and the capture runner's scheduler table both read a
-// "requested" rate off `/status.health.obd_scheduler.requests`, and they read
-// it differently for DIDs:
+// freshness chips and the capture runner's scheduler table both show a
+// "requested" rate off `/status.health.obd_scheduler.requests`, and both read
+// it here, through `effectiveTargetHz`.
 //
-// - `effectiveTargetHz` (TelemetryPanel): a DID is only polled inside the
-//   Mode 22 window, so its target is `1 / window_interval_seconds` when the
-//   daemon reports a window interval, else `configured_rate_hz`.
-// - `requestedRateHz` (capture runner table): `configured_rate_hz` as the
-//   scheduler holds it, for every kind.
+// For a windowed DID the requested rate is the window cadence it is actually
+// polled at (operator decision 2026-09-25, R00). The daemon already reports
+// exactly that as `configured_rate_hz`: since R02.3 one rate policy
+// (`_request_rate_hz`) serves the live scheduler, the resolved plan and the
+// capture preview, and for a DID in a Mode 22 window it is one read per
+// window period (profile cycle, then config cycle, then profile interval,
+// then config interval), scaled down by a fractional rate weight.
 //
-// Which of the two is *the* requested rate is an open operator decision
-// (R08.6, after R02.3 settles the backend preview/live precedence). Both live
-// here, side by side, so unifying them is a one-line change once it is made.
+// The dashboard used to re-derive it as `1 / did_profile.window_interval_seconds`.
+// That field is the end-to-start *interval* only, so under a cycle it named a
+// cadence nothing polls at (a 60 s interval beside a 0.5 s cycle read as
+// 0.017 Hz for a DID read at 2 Hz), and it ignored the weight. Re-deriving a
+// backend policy here is how the two drifted; `scheduler.test.ts` pins this
+// against a resolved plan the backend generates
+// (`tests/test_dashboard_scheduler_fixture.py`).
 
 import type { ObdSchedulerRequestStatus, ObdSchedulerStatus } from "../types";
 
@@ -25,22 +31,10 @@ export function matchingRequest(
   return scheduler?.requests?.find((request) => request.channel.toUpperCase() === wanted);
 }
 
-/** TelemetryPanel's target rate for a request: the DID window cadence for a
- *  windowed DID, else the configured rate. Null when unscheduled. */
-export function effectiveTargetHz(
-  request: ObdSchedulerRequestStatus | undefined,
-  scheduler?: ObdSchedulerStatus | null,
-): number | null {
-  if (!request || request.configured_rate_hz <= 0) return null;
-  if (request.kind === "did") {
-    const interval = scheduler?.did_profile?.window_interval_seconds;
-    if (interval != null && interval > 0) return 1 / interval;
-  }
-  return request.configured_rate_hz;
-}
-
-/** The capture runner's "requested" column: the configured rate as held by
- *  the scheduler, for every kind (see the module note). */
-export function requestedRateHz(request: ObdSchedulerRequestStatus): number {
+/** The requested rate for a scheduler request: the rate the daemon resolved,
+ *  which for a windowed DID is its window cadence (see the module note).
+ *  Null when the request is unscheduled. */
+export function effectiveTargetHz(request: ObdSchedulerRequestStatus | undefined): number | null {
+  if (!request || !(request.configured_rate_hz > 0)) return null;
   return request.configured_rate_hz;
 }

@@ -278,7 +278,7 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
     `format.test.ts` (13), `DataSourcesPanel.test` (8) and `TripPanel.test`
     (9) pass.
 
-- [~] **R08.6 Split `CaptureProfilesPanel` (840 lines) into runner and
+- [x] **R08.6 Split `CaptureProfilesPanel` (840 lines) into runner and
   editor.**
   - The panel does two jobs, switched by flags, and production renders
     exactly one half each: Workbench uses `authoring showRunner={false}`,
@@ -329,9 +329,33 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
     time, the tag-status error, the KOEO and storage warnings, and
     navigation. The four effects that set state are gone from the split, so it
     is lint-clean without suppressions.
-  - **Remaining:** unify the "requested" rate (`requestedRateHz` vs
-    `effectiveTargetHz` for DIDs) once the operator decides which is right,
-    after R02.3.
+  - ~~Remaining: unify the "requested" rate once the operator decides.~~
+
+  **Rate unified 2026-09-25** (operator decision, R00: a windowed DID's
+  "requested" rate is the window cadence it is actually polled at).
+  - Both panels now read `effectiveTargetHz(request)`; `requestedRateHz` is
+    gone. It returns the daemon's `configured_rate_hz`: since R02.3 one policy
+    (`_request_rate_hz`) feeds the scheduler rows, the resolved plan and the
+    preview, and for a windowed DID that is one read per window *period*
+    (profile cycle → config cycle → profile interval → config interval),
+    scaled by a fractional weight.
+  - The old `effectiveTargetHz` re-derived `1 / did_profile.window_interval_seconds`.
+    That field is the end-to-start *interval* only, so it disagreed with the
+    plan whenever a cycle governs. Example: a 0.5 s profile cycle beside the
+    config's 60 s interval showed 0.017 Hz for a DID read at 2 Hz. It also
+    ignored the weight: 0.5 Hz shown against a plan of 0.333 Hz. The runner
+    table was already right. TelemetryPanel's freshness chips were the ones
+    that drifted.
+  - Pinned against the backend: `src/test/fixtures/windowedDidScheduler.json`
+    is a status slice (request rows, `did_profile`, `resolved_plan.members`)
+    for two scenarios: config cycle beats profile interval at weight 0.5, and
+    a profile cycle at weight 1. `tests/test_dashboard_scheduler_fixture.py` (2)
+    rebuilds it from the live policy and fails if the policy moves.
+    `lib/scheduler.test.ts` (5) asserts that the requested rate equals the
+    plan member's `rate_hz` (4 dp), is at most one read per window, and is
+    not `1 / interval`. `CaptureRunner.test.ts` "requests a windowed DID at its
+    window cadence…" renders the runner table and reads `2.00` in the
+    requested column.
 
 - [x] **R08.7 One chart palette that follows the theme.**
   - There are 30+ hex literals across 12 files for canvas and SVG. Some are
@@ -531,7 +555,7 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
   clean; `vitest run src/panels/ControlPanel.test.tsx
   src/panels/panelShells.test.tsx` 11 passed.
 
-- [~] **R08.13 A linter and a formatter for the dashboard.** *Operator,
+- [x] **R08.13 A linter and a formatter for the dashboard.** *Operator,
   2026-09-24: "seems like we should use a linter right".* The dashboard had
   no linter and no formatter: 154 lines ran over 140 characters, and nothing
   checked promise handling or hook dependencies. The first ESLint run found
@@ -602,6 +626,44 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
   | `no-redundant-type-constituents` | 1 | AnomalyPanel |
 
   None of these is deliberate yet.
+
+  **Baseline burned to zero 2026-09-25: 35 → 0 violations.**
+  `eslint-suppressions.json` is `{}` after `pnpm lint:prune`, and `pnpm lint`
+  is clean with no suppressions. By rule:
+  - `set-state-in-effect`: state is now adjusted while rendering, on the
+    change itself (React's previous-value pattern, as `usePolling` already
+    does). This covers ControlPanel, SessionsPanel, useControlStream (token
+    clear), ReplayCard (selection follow, poll mirror), TestSessionPanel
+    (profile settle, purpose prefill keyed on whether a capture is open),
+    TelemetryPanel (pin seed) and TuningPanel (seed keyed on version).
+    ControlPanel's and SessionsPanel's polls are now effect-local loads with
+    a `cancelled` guard. ControlPanel's five states are one `ControlSnapshot`.
+    RomMapsPanel's per-sample tally and live coverage step while rendering,
+    guarded by a `seen` state, with absolute writes. `useCoverageOverlay.recordLive`
+    now takes a batch.
+  - `refs`: MonitorsPanel's baseline and RescoreControl's last event key
+    are now state.
+  - `purity`: new `hooks/useNow`, used by AlarmsPanel, TripPanel and
+    CaptureRunner's `useCaptureAge`.
+  - promise rules: `void` where the promise cannot reject (useConnectivityMode,
+    ProfilesPanel's Enter key).
+  - `no-base-to-string`: new `util/json.scalarText` (evidence,
+    trainingQuality, TripPanel's DTC codes).
+  - `preserve-caught-error`: ReplayCard rethrows with `{ cause }`.
+  - The rest: websocket (text frames only, unused binding), AnomalyPanel
+    (`string` for `string | "all"`), and the two test-file assertions.
+
+  New tests:
+  - `util/json.test.ts` (2).
+  - `RomMapsPanel.test.tsx` "steps each ECM sample once under StrictMode's
+    double render".
+  - `TuningFeedback.test.ts` "keeps an in-progress edit across a same-version
+    re-read; re-seeds on a new version". It fails on the old code: the old
+    seeding effect depended on the polled object, so every 30 s poll
+    overwrote the operator's edit.
+
+  Gate: `pnpm typecheck`, `pnpm lint`, `pnpm format:check` clean; `pnpm test`
+  64 files / 472 tests; `pnpm e2e` 6 passed.
 
 ## Looked at and fine
 

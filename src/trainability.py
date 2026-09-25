@@ -13,6 +13,10 @@ and behavior-model recipes and artifacts. It is an allowlist:
 * a ``derived:`` channel trains only when every input declared for it in
   :data:`src.analysis.derived.DERIVED_CHANNEL_INPUTS` (and
   ``DERIVED_CHANNEL_OPTIONAL_INPUTS``) does — an undeclared one does not;
+* a committee channel — a ``derived:<NAME>`` spread or a member transform of
+  :mod:`src.analysis.committees` — never does, whatever its inputs: committees
+  are detectors, not features (H04.1). This holds even for
+  ``derived:OBD_SPEED_ACCEL_G``, whose inputs are all ECU data;
 * anything else (an unclassified namespace, a bare unprefixed name) does not.
 
 External sensors (``gps``, ``imu``, ``sensor``, the HAT's 12 V and barometer
@@ -98,7 +102,12 @@ def _detail(base: str, seen: frozenset[str]) -> str | None:
 def _derived_detail(channel: str, seen: frozenset[str]) -> str | None:
     # Lazy: src.analysis.derived pulls pandas and the decode catalog, and this
     # module is imported by the behavior-model schema.
+    from src.analysis.committees import committee_channel_reason
     from src.analysis.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
+
+    committee = committee_channel_reason(channel)
+    if committee is not None:
+        return committee
 
     groups = DERIVED_CHANNEL_INPUTS.get(channel)
     if groups is None:

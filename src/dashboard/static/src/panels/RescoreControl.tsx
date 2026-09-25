@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { getJob, getJobResult, submitJob } from "../api/http";
 import { describeError } from "../hooks/useControlResource";
@@ -33,10 +33,12 @@ export function RescoreControl({ token, event }: RescoreControlProps) {
   const [state, setState] = useState<RescoreState>(IDLE);
   // Reset whenever the operator inspects a different event — a stale
   // report from the last window must never look like it answers this one.
-  const lastEventKey = useRef<string>("");
+  // The previous key is render state (React's "adjust state on a prop
+  // change" pattern), not a ref, so the reset happens before this commits.
   const eventKey = `${event.timestamp}|${event.source}|${event.model_version}`;
-  if (eventKey !== lastEventKey.current) {
-    lastEventKey.current = eventKey;
+  const [shownEventKey, setShownEventKey] = useState(eventKey);
+  if (eventKey !== shownEventKey) {
+    setShownEventKey(eventKey);
     if (state.status !== "idle") setState(IDLE);
   }
 

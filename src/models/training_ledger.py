@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from src.jsonl_store import JsonlStore, latest_by_key
 from src.models.artifact_hash import sha256_file
 from src.models.manifest import ManifestValidationError, validate_manifest_common
+from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +48,8 @@ __all__ = [
     "build_run_record_from_manifest",
 ]
 
-DEFAULT_TRAINING_LEDGER_PATH = Path("data/control/training_runs.jsonl")
+#: Mirror of ``DaemonConfig.training_ledger`` (R01.2: ``src.paths.CONTROL_DIR``).
+DEFAULT_TRAINING_LEDGER_PATH = CONTROL_DIR / "training_runs.jsonl"
 
 PublishStatus = Literal["unpublished", "published", "active", "rolled_back"]
 RunStatus = Literal["succeeded", "failed"]
@@ -82,9 +84,11 @@ class TrainingRunRecord(BaseModel):
     artifact_sha256: str | None = None
     job_id: str | None = None
     job_log_path: str | None = None
-    #: `data/analyses/benchmark-<ts>.json` produced by `scripts/detector_benchmark.py`
-    #: against this run's artifact (the Task 2.6 pre-deploy regression gate), when
-    #: the retrain flow ran one — the report itself carries the baseline diff.
+    #: `data/analyses/benchmark-<ts>.json`: retrain's post-train regression gate
+    #: (Task 2.6) against this run's artifact, when the retrain flow ran one — an
+    #: ``scripts/evaluate_detectors.py`` report since R06.5 (older rows may point
+    #: at a retired-grid report, which the promotion gate refuses by name). The
+    #: report itself carries the baseline diff. Name kept for ledger compatibility.
     detector_benchmark_report_path: str | None = None
     #: Task 1.4 (online-training-strategy.md) — the disposition screen's
     #: per-run summary (``training_disposition.DispositionSummary.to_dict()``:
@@ -276,8 +280,9 @@ def build_run_record_from_manifest(
     ``modes``). The sibling artifact (``model.pt`` / ``model.joblib``) is
     recorded if present. An optional false-positive benchmark JSON
     (``scripts/fp_benchmark.py`` output) is merged into ``metrics``.
-    ``detector_benchmark_report_path`` (``scripts/detector_benchmark.py``
-    output, Task 2.6) is recorded as-is — unlike the FP benchmark it isn't
+    ``detector_benchmark_report_path`` (retrain's benchmark gate report, an
+    ``scripts/evaluate_detectors.py`` report since R06.5) is recorded as-is —
+    unlike the FP benchmark it isn't
     read/merged here, since callers (the retrain flow) already have the
     parsed report in hand and just need the path linked for provenance.
 

@@ -43,6 +43,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.atomic_write import atomic_write_text
 from src.coerce import finite_float
+from src.paths import DATA_DIR
 
 __all__ = [
     "DEFAULT_CUSTOM_PIDS_PATH",
@@ -57,7 +58,7 @@ __all__ = [
     "torque_csv_to_custom_pids",
 ]
 
-DEFAULT_CUSTOM_PIDS_PATH = Path("data/custom_pids.yaml")
+DEFAULT_CUSTOM_PIDS_PATH = DATA_DIR / "custom_pids.yaml"
 
 #: Services that can define a custom *polled value*. The legacy public name is
 #: retained for compatibility; 0x04 (clear DTC), 0x2E (write data), and 0x2F

@@ -1,5 +1,5 @@
 import { createElement } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { AnomalyEvent, TuningResponse } from "../types";
@@ -42,10 +42,9 @@ describe("TuningPanel", () => {
     });
     render(createElement(TuningPanel, { token: "secret" }));
     expect(await screen.findByText(/v3 ·/)).toBeInTheDocument();
-    // The editor is seeded by an effect *after* the config renders — clicking
-    // before it flushes used to parse "" and flake the suite under load
-    // (Estimate is also disabled until the draft is non-empty now, so an
-    // early click would silently no-op instead of erroring).
+    // The editor used to be seeded by an effect *after* the config rendered —
+    // clicking before it flushed parsed "" and flaked the suite under load.
+    // It is seeded while rendering now; the wait stays as a guard.
     await waitFor(() =>
       expect(screen.getByLabelText("Alert threshold config JSON")).not.toHaveValue(""),
     );
@@ -53,6 +52,36 @@ describe("TuningPanel", () => {
     expect(await screen.findByText(/Before \/ after estimate/)).toBeInTheDocument();
     expect(screen.getByText(/\+2 newly muted/)).toBeInTheDocument();
     expect(mocks.estimateTuning).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an in-progress edit across a same-version re-read; re-seeds on a new version", async () => {
+    // R08.13: the seeding effect depended on the polled object, new on every
+    // read, so each 30 s poll overwrote the operator's edit.
+    mocks.getTuning.mockResolvedValue(TUNING);
+    mocks.revertTuning.mockResolvedValue(undefined);
+    render(createElement(TuningPanel, { token: "secret" }));
+    const editor = await screen.findByLabelText("Alert threshold config JSON");
+    await waitFor(() => expect(editor).toHaveValue(JSON.stringify(TUNING.tuning, null, 2)));
+    fireEvent.change(editor, { target: { value: '{"edited": true}' } });
+
+    // Re-read through Revert's refresh, and settle the read inside `act` so
+    // every render and effect it causes has run before the assertion.
+    const reread = async (next: TuningResponse) => {
+      let settle: ((value: TuningResponse) => void) | undefined;
+      mocks.getTuning.mockImplementationOnce(
+        () => new Promise<TuningResponse>((resolve) => (settle = resolve)),
+      );
+      fireEvent.change(screen.getByLabelText("Revert to version"), { target: { value: "1" } });
+      fireEvent.click(screen.getByRole("button", { name: "Revert" }));
+      await waitFor(() => expect(settle).toBeDefined());
+      await act(async () => settle?.(structuredClone(next)));
+    };
+    await reread(TUNING);
+    expect(editor).toHaveValue('{"edited": true}');
+
+    const v4 = { tuning: { ...TUNING.tuning, version: 4 } };
+    await reread(v4);
+    expect(editor).toHaveValue(JSON.stringify(v4.tuning, null, 2));
   });
 });
 

@@ -397,6 +397,9 @@ models:
   roles:
     isolation_forest: evidence
     sequence: evidence
+    # Sensor committees (H04): stored, never pushed, until one has a confirmed
+    # real catch. Deterministic — set `alert` to promote, no verdict needed.
+    committee: evidence
 
 # Phase 7.5 / 6.1: shared emission policy. A detector must be over threshold
 # for at least min_consecutive_ticks (M) ticks within the trailing
@@ -496,3 +499,11 @@ dashboard:
 # is measured on the Pi.
 # plausibility:
 #   enabled: false
+
+# Sensor committees (H04): two instruments of one quantity (ECU speed vs GPS)
+# checked against the relation measured for this vehicle in
+# data/<profile>/committees.yaml; a sustained departure is a `committee`
+# anomaly event, state in /status detectors.inference.committees. On by
+# default; without the profile file every committee reads `not_configured`.
+# committees:
+#   enabled: true

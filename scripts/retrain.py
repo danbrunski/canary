@@ -98,12 +98,10 @@ from src.models.alert_budget import (
     evaluation_drives,
 )
 from src.models.artifact_hash import sha256_file_or_none
-from src.models.detector_benchmark import (
+from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
-    build_report,
     diff_reports,
-    load_trained_sequence,
-    run_grid,
+    regression_summary,
 )
 from src.models.evaluation import (
     MIN_CALIBRATION_HOLDOUT_SESSIONS,
@@ -113,7 +111,6 @@ from src.models.evaluation import (
     pick_evaluation_holdouts,
 )
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines
-from src.models.isolation_forest import load_isolation_forest_model
 from src.models.manifest import ManifestValidationError
 from src.models.publish import (
     ISOLATION_FOREST_SOURCE,
@@ -133,7 +130,7 @@ from src.models.retraining_policy import (
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
 )
-from src.models.sequence_registry import SequenceTrainingBackend
+from src.models.sequence_registry import SequenceTrainingBackend, resolve_sequence_backend
 from src.models.sequence_training import (
     configure_torch_threads,
     default_training_device,
@@ -150,15 +147,15 @@ from src.preprocessing.feature_pipeline import (
     build_feature_frame,
     candidate_feature_columns,
     disposition_screen_frames,
-    load_resampled_session,
     resolve_feature_policy,
 )
 from src.preprocessing.quality_gate import apply_quarantine_gate
 
 log = logging.getLogger(__name__)
 
-#: A02's harness, run as its own process by the alert-budget gate. Scripts do
-#: not import each other (R06.4); this one is a CLI with a JSON report.
+#: A02's harness, run as its own process by the benchmark and alert-budget
+#: gates. Scripts do not import each other (R06.4); this one is a CLI with a
+#: JSON report.
 EVALUATE_DETECTORS_SCRIPT = Path(__file__).resolve().with_name("evaluate_detectors.py")
 
 
@@ -441,7 +438,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--skip-benchmark",
         action="store_true",
-        help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
+        help="Skip the post-retrain benchmark regression gate (Task 2.6; A02's "
+        "evaluate_detectors protocol since R06.5).",
     )
     add_override_reason_arg(
         parser,
@@ -482,9 +480,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--analyses-dir",
         type=Path,
         default=Path("data/analyses"),
-        help="Directory for detector_benchmark.py reports (Task 2.6 regression gate). "
-        "Also where the most recent prior report is discovered as the --baseline "
-        "when --benchmark-baseline isn't given.",
+        help="Directory for the benchmark gate's evaluate_detectors reports "
+        "(benchmark-<ts>.json, Task 2.6 / R06.5) and the alert-budget reports. Also "
+        "where prior benchmark reports are discovered as the baseline when "
+        "--benchmark-baseline isn't given.",
     )
     parser.add_argument(
         "--benchmark-baseline",
@@ -1283,9 +1282,10 @@ def _ingest_ledger(
 
 
 def _prior_benchmark_reports(analyses_dir: Path) -> list[Path]:
-    """Prior `detector_benchmark.py` reports, newest first — the gate diffs
-    against the newest one that scored the same sessions with the same
-    decode chain (`detector_benchmark.incomparable_reason`)."""
+    """Prior benchmark reports, newest first — the gate diffs against the
+    newest one of the same drives under the same protocol parameters
+    (`benchmark_gate.incomparable_reason`). Grid-era reports (retired, R06.5)
+    share the name and are passed over as incomparable, by name."""
     if not analyses_dir.is_dir():
         return []
     return sorted(analyses_dir.glob("benchmark-*.json"), reverse=True)
@@ -1296,10 +1296,12 @@ def _run_benchmark_gate(
     evaluation_sessions: Sequence[Path],
     run: RetrainRun,
 ) -> tuple[Path | None, dict[str, Any] | None]:
-    """Post-retrain regression gate (Task 2.6): benchmark the freshly-trained
-    artifacts on held-out sessions and diff against the most recent prior
-    report. Returns ``(report_path, diff)``, or ``(None, None)`` when the
-    gate didn't run (skipped, or nothing to compare it against).
+    """Post-retrain regression gate (Task 2.6): score the freshly-trained
+    artifacts on the evaluation holdout with A02's protocol
+    (``scripts/evaluate_detectors.py``: realistic faults swept over severities,
+    false alarms per engine-hour; R06.5 retired the synthetic-fault grid it
+    used to run) and diff against the newest comparable prior report. Returns
+    ``(report_path, diff)``, or ``(None, None)`` when the gate didn't run.
 
     Scores the *evaluation* holdout only (A02.1). It used to score the
     calibration sessions — the sessions the thresholds were cut from — so the
@@ -1311,7 +1313,8 @@ def _run_benchmark_gate(
     calibration or training data.
 
     Scores the artifacts where they were trained (the staging directory of an
-    alert-role source, before the budget gate publishes it).
+    alert-role source, before the budget gate publishes it), with the
+    sequence artifact's own backend (LSTM or TCN, from its manifest).
 
     Never raises: like the trainers themselves, an unexpected failure here is
     logged and treated as "gate didn't run", not a retrain-flow crash.
@@ -1325,39 +1328,36 @@ def _run_benchmark_gate(
         return None, None
 
     if_model_path = run.train_dir(ISOLATION_FOREST_SOURCE) / "model.joblib"
-    try:
-        trained_if = load_isolation_forest_model(if_model_path)
-    except FileNotFoundError:
+    if not if_model_path.exists():
         log.warning("no isolation forest artifact at %s; skipping benchmark gate", if_model_path)
         return None, None
 
-    # The benchmark's default artifact path is UNSCOPED
-    # (``models_dir/<type>/model.pt``), but retrain writes to the
-    # profile-scoped sequence output. Passing ``None`` here let it look in
-    # the pre-profile-migration location, miss, and silently skip the sequence
-    # detector — so the 2026-07-26 retrain produced a benchmark report with no
-    # LSTM coverage at all. Pass the path we actually just wrote.
-    sequence_artifact_path = run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(
-        config, run.seq_model_type
+    # The artifact this run wrote (profile-scoped), never the unscoped default:
+    # the 2026-07-26 retrain looked in the pre-migration location, missed, and
+    # produced a benchmark with no LSTM coverage at all. A sequence detector
+    # disabled in config is not scored, as before.
+    written = run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(config, run.seq_model_type)
+    sequence_path = (
+        written if resolve_sequence_backend(config) is not None and written.exists() else None
     )
     try:
-        trained_sequence = load_trained_sequence(config, sequence_artifact_path, skip=False)
-
-        sessions_loaded: list[tuple[str, Any]] = []
-        for session_dir in evaluation_sessions:
-            try:
-                resampled = load_resampled_session(session_dir, config, bindings_path=args.bindings)
-            except FileNotFoundError as exc:
-                log.warning("benchmark gate: skipping unreadable session %s: %s", session_dir, exc)
-                continue
-            sessions_loaded.append((session_dir.name, resampled))
-        if not sessions_loaded:
-            log.warning("benchmark gate: no readable held-out sessions; skipping")
-            return None, None
-
-        cells = run_grid(sessions_loaded, config, trained_if, trained_sequence=trained_sequence)
+        # Listed before this run writes its own report into the same directory.
+        candidates = (
+            [Path(args.benchmark_baseline)]
+            if args.benchmark_baseline is not None
+            else _prior_benchmark_reports(args.analyses_dir)
+        )
         timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        report = build_report(cells, seed=42, n_injections=5, generated_at=timestamp)
+        args.analyses_dir.mkdir(parents=True, exist_ok=True)
+        report_path = args.analyses_dir / f"benchmark-{timestamp}.json"
+        report = _evaluate_on_drives(
+            evaluation_sessions,
+            run,
+            if_model=if_model_path,
+            sequence_model=sequence_path,
+            out=report_path,
+            injections=True,
+        )
         split = run.holdout_split
         report["holdout"] = (
             split.to_dict()
@@ -1366,11 +1366,6 @@ def _run_benchmark_gate(
         )
 
         diff: dict[str, Any] | None = None
-        candidates = (
-            [Path(args.benchmark_baseline)]
-            if args.benchmark_baseline is not None
-            else _prior_benchmark_reports(args.analyses_dir)
-        )
         first_reason: str | None = None
         for baseline_path in candidates:
             try:
@@ -1384,8 +1379,9 @@ def _run_benchmark_gate(
                 break
             first_reason = first_reason or f"{Path(baseline_path).name}: {attempt['reason']}"
         if diff is None and first_reason is not None:
-            # A02: a baseline from other drives or another decode chain is not
-            # a regression check; say so and do not fail the retrain on it.
+            # A02: a baseline from other drives, another protocol or the
+            # retired grid is not a regression check; say so and do not fail
+            # the retrain on it.
             log.warning(
                 "benchmark gate: no comparable prior report (%s); nothing to regress against",
                 first_reason,
@@ -1399,10 +1395,10 @@ def _run_benchmark_gate(
             }
         if diff is not None:
             report["regressions"] = diff
+            for line in regression_summary(diff) if diff["regressed"] else ():
+                log.error("benchmark gate: %s", line)
 
-        args.analyses_dir.mkdir(parents=True, exist_ok=True)
-        report_path = args.analyses_dir / f"benchmark-{timestamp}.json"
-        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True, default=str) + "\n")
         return report_path, diff
     except Exception as exc:  # noqa: BLE001 — the gate is best-effort, not a retrain crash
         log.exception("benchmark gate failed", extra={"error": str(exc)})
@@ -1420,6 +1416,11 @@ def run_evaluate_detectors(argv: Sequence[str]) -> int:
     ).returncode
 
 
+#: The benchmark gate's injection seed: fixed, so two retrains of the same
+#: holdout inject the same windows and their reports are comparable.
+BENCHMARK_SEED = 42
+
+
 def _evaluate_on_drives(
     evaluation_sessions: Sequence[Path],
     run: RetrainRun,
@@ -1427,10 +1428,15 @@ def _evaluate_on_drives(
     if_model: Path,
     sequence_model: Path | None,
     out: Path,
+    injections: bool = False,
 ) -> dict[str, Any]:
-    """A02's harness on the evaluation drives, clean scoring only: no
-    baselines, injections or shift test, which the budget does not read.
-    Returns its JSON report."""
+    """A02's harness on the evaluation drives; returns its JSON report.
+
+    Never the A02.5 baselines or the A04.1 shift test: neither gate reads
+    them. ``injections=False`` (the alert-budget gate) scores clean rows only;
+    ``injections=True`` (the benchmark gate) also sweeps every realistic fault
+    at the harness's default severities and repetitions, with a fixed seed.
+    """
     args = run.args
     argv = [
         *(str(path) for path in evaluation_sessions),
@@ -1441,13 +1447,18 @@ def _evaluate_on_drives(
         "--if-model",
         str(if_model),
         "--baselines",
-        "--faults",
-        "--injections-per-drive",
-        "0",
         "--no-shift-test",
+        "--seed",
+        str(BENCHMARK_SEED),
         "--out",
         str(out),
     ]
+    if not injections:
+        argv += ["--faults", "--injections-per-drive", "0"]
+    if args.feature_cache is not None:
+        # Beside the trainers' feature-frame cache (the harness's default when
+        # that is the default too), so a test run's cache stays in its tree.
+        argv += ["--cache-dir", str(Path(args.feature_cache).parent / "evaluation_frames")]
     if args.profile:
         argv += ["--profile", str(args.profile)]
     argv += (

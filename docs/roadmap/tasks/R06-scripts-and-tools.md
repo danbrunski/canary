@@ -331,8 +331,9 @@ have grown into library code with a CLI attached.
     (incl. `test_train_lstm.py`, `test_train_tcn.py`,
     `test_false_positive_benchmark.py`, `test_sequence_bakeoff.py`): 889 passed.
 
-- [~] **R06.5 Operator decision: one corpus benchmark harness?** *Awaiting the
-  operator's answer (2026-09-25); nothing implemented.*
+- [x] **R06.5 Operator decision: one corpus benchmark harness?** *Answered
+  2026-09-25 (R00): yes — fold the baseline diff into `evaluate_detectors`
+  and retire the grid. Implemented 2026-09-25, below.*
   - `detector_benchmark` is retrain's regression gate, with a documented
     blind spot for behavior-deviation features.
   - `evaluate_detectors` (A02.4) calls itself "one protocol".
@@ -340,6 +341,108 @@ have grown into library code with a CLI attached.
   Should `detector_benchmark`'s baseline diff fold into `evaluate_detectors`
   and the older grid retire? Record the answer here. If yes, it is a
   separate **M** item after R04.5 fixes the promotion gate.
+
+  *Done 2026-09-25.*
+  - **One protocol.** `src/models/benchmark_gate.py` (new) is the regression
+    view of an `evaluate_detectors` report: `gate_view` (per detector x
+    realistic fault x severity recall = detected/graded, median time to
+    detect; per detector false-alarm episodes per engine-hour over the
+    in-era drives, computed for every *served* detector whatever its role),
+    `diff_reports`, `incomparable_reason` (protocol name/version, the scored
+    drives, seed/faults/injections/window/lead/grace/persistence, holdout),
+    `regression_summary`, and `load_sequence_artifact` (the backend the
+    artifact's manifest names). `evaluate_detectors` stamps
+    `report["protocol"]` and gained `--baseline`/`--tolerance` (exit 3 on a
+    regression, 2 on an unreadable baseline; a "Regression compare" section
+    in the Markdown).
+  - **Retired:** `scripts/detector_benchmark.py`,
+    `src/models/detector_benchmark.py` and `tests/test_detector_benchmark.py`
+    are deleted; `scripts/ml_paths.txt` lists `evaluate_detectors.py` in
+    their place. A grid-era report is refused *by name* everywhere
+    (`RetiredProtocolError`: "report is from the retired detector_benchmark
+    grid (R06.5)"): the gate diff calls it incomparable, the promotion gate
+    fails on it (either side), `compute_golden_divergence` returns
+    `incomparable` instead of numbers.
+    `synthetic_fault_eval.evaluate_detectors` (the per-frame harness the grid
+    looped) stays: `test_synthetic_fault_eval.py`'s acceptance floor uses it.
+  - **Retrain** (phase structure unchanged; `_run_benchmark_gate` still sits
+    between the trainers and the alert-budget gate): the gate runs the
+    harness in its own process (`_evaluate_on_drives(..., injections=True)`:
+    every realistic fault at the harness defaults, `BENCHMARK_SEED = 42`, no
+    baselines, no shift test, `--cache-dir` beside `--feature-cache`) on the
+    evaluation holdout, with the IF and sequence artifacts this run wrote,
+    writes `benchmark-<ts>.json` (+ `.md`), and diffs the newest comparable
+    prior report. Still skips (logged) with no holdout or no IF artifact;
+    still exits 1 on a regression. `--skip-benchmark`,
+    `--benchmark-baseline`, `--benchmark-tolerance` unchanged.
+  - **Stricter than the grid:** a cell the baseline graded and the current run
+    did not (withheld detector, every window masked) is `missing` and
+    **regresses** — R04.5's fail-on-missing semantics, now in the retrain diff
+    too (the grid recorded `removed` and passed).
+  - **Promotion gate** (`promotion_gate.py`) reads both reports through
+    `gate_view`: `_check_recall` keys cells `(detector, fault, severity)`;
+    `_check_fp_budget`/`_check_agreement` read false alarms per engine-hour
+    (the 5.0 ceiling's unit changed from the grid's alerts per scored hour).
+    R04.5's fail-on-missing is kept: `test_promotion_gate.py` (27 pass,
+    fixtures rebuilt as `tests.builders.evaluation_report`) still has
+    `test_gate_fails_a_candidate_whose_detector_was_withheld_where_golden_was_graded`,
+    `..._with_no_recorded_false_positive_rate`,
+    `..._missing_a_nominal_detector_the_golden_has`, plus
+    `test_gate_refuses_a_grid_era_report_on_either_side_by_name` and
+    `test_golden_divergence_names_a_grid_era_report_instead_of_numbers`.
+  - **Blind spot closed.** The grid featurized with no behavior models, so an
+    IF trained on `deviation:*` columns could not be scored as served. The
+    harness now featurizes every frame (clean, injected slices) with the
+    profile-scoped `daemon.behavior_models` (or `--behavior-models`), records
+    `report["behavior_models"]` (path, sha256, B03.4 provenance per consumed
+    model), and refuses (exit 2) an IF whose deviation column's model is
+    absent. `test_rows_are_featurized_with_the_behavior_models`,
+    `test_an_if_whose_deviation_columns_cannot_be_produced_is_refused`. (No
+    artifact on disk consumes a deviation column today, so no number moves.)
+  - **TCN.** The harness loaded LSTM artifacts only; it now loads through the
+    registry by manifest `model_type`, so a TCN retrain keeps sequence
+    coverage in the gate. Smoke: `models/_bakeoff/tcn_autoencoder` + the `na`
+    IF on `2026-09-23T162918`: `sequence`/`sequence_global`/`fused` scored
+    620 of 649 rows.
+  - **Tests:** `tests/test_benchmark_gate.py` (new, 12 pass);
+    `test_evaluate_detectors_script.py` (+3:
+    `test_baseline_compare_exits_3_on_a_regression_and_names_incomparable_baselines`
+    and the two above); `test_retrain_script.py`:
+    `test_benchmark_gate_asks_the_harness_for_every_fault_on_a_fixed_seed`
+    and `test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline`
+    (real harness subprocess: grid-era report passed over by name, newest
+    comparable found, a baseline-graded cell the run lacks regresses), 41
+    pass; `test_training_ledger.py` 35 pass; R06.2's
+    `test_script_cli_snapshot.py` 83 pass with the snapshot regenerated
+    deliberately (`detector_benchmark.py` removed; `evaluate_detectors`
+    `--baseline`/`--tolerance`/`--behavior-models`; `--cache-dir` default
+    repo-rooted) and `test_job_argv_parses_with_the_real_parser` unchanged.
+    `-m ml_training` on `test_train_lstm.py`, `test_train_tcn.py`,
+    `test_false_positive_benchmark.py`, `test_sequence_bakeoff.py`: 52 pass.
+  - **Before/after on a real corpus** (scratchpad only): the three
+    2026-09-23 NA candidates (`models/_candidates/2026-09-23-{na,na-r2,na-r3}`,
+    IF only) plus two derived from `na` (thresholds set to -1e6, "flood", and
+    +1e6, "blind"), on held-out `2026-09-23T{145645,150658,162918}` (one
+    physical drive, 0.40 engine-h, same era as the candidates' training).
+    Retrain gate, baseline → candidate, grid | evaluate_detectors:
+    na→na-r2 pass|pass, na-r2→na-r3 pass|pass, na→na-r3 pass|pass (the
+    deploy order); X→flood REGRESSED|REGRESSED for every X (grid: 0 → 214.6
+    alerts/h; eval: 0 → 22.7 FA/engine-h and every graded cell now masked);
+    na↔blind pass|pass; self-compares pass|pass. Promotion gate (golden,
+    candidate): the same eligible/refused verdict in 21 of 25 pairs; the 4
+    others are golden na-r2/na-r3 with candidate na/blind (difference 1).
+    Of the 25 retrain-gate pairs 17 agree; the 8 that differ are the two
+    families below. Differences, explained: (1) {na-r2,na-r3}→{na,blind}
+    regress on the grid, not on eval: grid drift recall 1/50 → 0/50, one injection, the
+    noise the grid's own tolerance comment describes (all three candidates
+    grade 0/28 on the realistic faults; the IF withholds 85 % of these rows).
+    (2) flood→{na,na-r2,na-r3,blind} regresses on the grid (recall 0.44-0.54
+    → 0), not on
+    eval: the grid counted a detector already firing on every clean row as
+    catching the fault; eval grades those windows `masked`, so there is no
+    recall to lose (the promotion gate refuses both ways on agreement).
+    Timing (IF only): grid 540-640 s per artifact uncontended; harness 430 s cold, 70-124
+    s with its frame cache warm.
 
 - [~] **R06.6 Small de-duplications (batch them).**
   - `scripts/replay.py:_format_timestamp` is identical to

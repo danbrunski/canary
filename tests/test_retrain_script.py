@@ -16,7 +16,7 @@ from src.config import CanaryConfig
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
 from src.preprocessing.feature_pipeline import load_resampled_session
-from tests.builders import write_fixture_session
+from tests.builders import IFConfig, write_fixture_session
 from tests.configs import retrain_argv
 from tests.repo_guard import RepoTreeGuard
 
@@ -705,6 +705,64 @@ def test_run_benchmark_gate_skips_cleanly_with_no_evaluation_sessions(
     assert "no evaluation holdout" in caplog.text
 
 
+def test_benchmark_gate_asks_the_harness_for_every_fault_on_a_fixed_seed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R06.5: the gate is A02's protocol with injections (every realistic
+    fault at the harness defaults), a fixed seed so two retrains of one
+    holdout inject the same windows, the artifacts this run wrote (the
+    sequence one by its own path), and neither baselines nor the shift test."""
+    from tests.builders import evaluation_report
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config.models.lstm_autoencoder.enabled = True
+    if_out, seq_out = tmp_path / "if", tmp_path / "seq"
+    (if_out / "model.joblib").parent.mkdir(parents=True)
+    (if_out / "model.joblib").write_bytes(b"x")
+    session = tmp_path / "sessions" / "2026-05-12T000000"
+    args = retrain.parse_args(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--if-out",
+            str(if_out),
+            "--sequence-out",
+            str(seq_out),
+            "--sequence-model",
+            "lstm",
+            "--analyses-dir",
+            str(tmp_path / "analyses"),
+            "--no-feature-cache",
+        ]
+    )
+    run = retrain._start_run(args, config)
+    seq_artifact = run.train_dir(retrain.SEQUENCE_SOURCE) / "model.pt"
+    seq_artifact.parent.mkdir(parents=True)
+    seq_artifact.write_bytes(b"x")
+    calls: list[list[str]] = []
+
+    def harness(argv: list[str]) -> int:
+        calls.append(argv)
+        out = Path(argv[argv.index("--out") + 1])
+        out.write_text(json.dumps(evaluation_report({}, {"isolation_forest": 0.0})))
+        return 0
+
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", harness)
+    report_path, diff = retrain._run_benchmark_gate(config, [session], run)
+
+    (argv,) = calls
+    assert report_path is not None and diff is None  # nothing prior to compare
+    assert argv[0] == str(session)
+    assert "--injections-per-drive" not in argv and "--faults" not in argv
+    assert argv[argv.index("--seed") + 1] == str(retrain.BENCHMARK_SEED)
+    assert argv[argv.index("--baselines") + 1].startswith("--")  # none requested
+    assert "--no-shift-test" in argv
+    assert argv[argv.index("--if-model") + 1] == str(if_out / "model.joblib")
+    assert argv[argv.index("--sequence-model") + 1] == str(seq_artifact)
+    assert "--cache-dir" not in argv  # --no-feature-cache: the harness default
+    assert json.loads(report_path.read_text())["holdout"]["evaluation"] == [session.name]
+
+
 def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -728,37 +786,31 @@ def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
     assert "no isolation forest artifact" in caplog.text
 
 
-def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
+def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline(
     tmp_path: Path,
 ) -> None:
-    """End-to-end: a tiny fixture session + a real trained IF artifact + a
-    prior benchmark-*.json already on disk. Confirms the gate runs the real
-    grid, auto-discovers the prior report as --benchmark-baseline (not
-    given explicitly here), and returns a real report/diff pair."""
+    """End-to-end (R06.5): a fixture session + a real trained IF artifact +
+    prior benchmark-*.json reports on disk. The gate runs A02's harness
+    (scripts/evaluate_detectors.py) in its own process, passes over a
+    grid-era report by name, finds the newest comparable report, and a cell
+    the baseline graded and this run did not is a regression."""
+    from src.models.benchmark_gate import PROTOCOL_NAME
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    # The gate always attempts to load the configured sequence backend (Task
-    # 2.6 has no --no-sequence knob); disable it here so this test doesn't
-    # pick up the real Torch LSTM artifact that lives under
-    # models/lstm_autoencoder in this working tree.
+    # A sequence detector disabled in config is not scored (the gate would
+    # otherwise look for this run's sequence artifact).
     config.models.lstm_autoencoder.enabled = False
-    # This fixture session is a tiny 120-row single-mode frame (96 fit rows
-    # after the 20 % calibration holdout) — well under the production
-    # min_samples_per_mode floor (Task 2.2). Lower it so the gate still
-    # trains a real model instead of skipping the only mode present.
-    config.models.isolation_forest.min_samples_per_mode = 5
-    # ...and the per-mode drive floors (A04.4): one synthetic drive.
-    config.models.isolation_forest.min_training_drives_per_mode = 1
-    config.models.isolation_forest.min_calibration_drives_per_mode = 1
 
+    # Trained on one session, gated on another: the harness skips a drive
+    # any scored artifact trained on (A02.1).
+    training = write_fixture_session(tmp_path / "train", "2026-05-11T000000", seed=2, n=120)
     session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
-    long = load_resampled_session(session, config)
-    features = featurize_wide_frame(long, config).features
+    features = featurize_wide_frame(load_resampled_session(training, config), config).features
     trained = fit_isolation_forest(
         features,
-        config.models.isolation_forest,
+        IFConfig(n_estimators=40),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -768,8 +820,8 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
 
     analyses_dir = tmp_path / "analyses"
     analyses_dir.mkdir(parents=True)
-    prior_report = analyses_dir / "benchmark-20260101-000000.json"
-    prior_report.write_text(
+    grid_report = analyses_dir / "benchmark-20260101-000000.json"
+    grid_report.write_text(
         json.dumps({"generated_at": "20260101-000000", "table": [], "cells": []})
     )
 
@@ -777,10 +829,14 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
         [
             "--config",
             "canary.example.yaml",
+            "--profile",
+            "nissan-xterra-2008",
             "--if-out",
             str(if_out),
             "--analyses-dir",
             str(analyses_dir),
+            "--feature-cache",
+            str(tmp_path / "cache" / "feature_frames"),
         ]
     )
 
@@ -788,29 +844,46 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
         config, [session], retrain._start_run(args, config)
     )
 
-    assert report_path is not None
-    assert report_path.exists()
-    assert report_path.parent == analyses_dir
+    assert report_path is not None and report_path.parent == analyses_dir
     report = json.loads(report_path.read_text())
-    assert report["cells"]  # the real grid produced per-(session, channel) cells
-    assert diff is not None  # baseline auto-discovered from prior_report on disk
-    # A02: that prior report came from the pre-A02 decode chain and other
-    # sessions — not a regression baseline. Reported, never failed on.
-    assert diff["comparable"] is False
-    assert diff["regressed"] is False
-    assert "loader_version" in diff["reason"]
+    assert report["protocol"]["name"] == PROTOCOL_NAME
+    assert report["detectors"] == ["isolation_forest"]
+    assert [d["sessions"] for d in report["drives"]] == [[session.name]]
     assert report["holdout"]["evaluation"] == [session.name]
+    # The harness's frame cache sits beside the trainers' feature cache.
+    assert list((tmp_path / "cache" / "evaluation_frames").glob("*-resampled.pkl"))
+    assert diff is not None  # baseline auto-discovered from the report on disk
+    # A grid-era report is not a regression baseline: reported, never failed on.
+    assert diff["comparable"] is False and diff["regressed"] is False
+    assert "retired detector_benchmark grid" in diff["reason"]
 
-    # A report that scored the same sessions with the same chain is found and
-    # compared, even when an incomparable one is newer.
-    comparable = analyses_dir / "benchmark-20260102-000000.json"
-    comparable.write_text(report_path.read_text())
+    # The same drives under the same protocol are found and compared, even
+    # when an incomparable one is newer: newest comparable wins, which is the
+    # first run's own report, not the 2099 one or the older copy.
+    older = analyses_dir / "benchmark-20260102-000000.json"
+    older.write_text(report_path.read_text())
     newer_other = analyses_dir / "benchmark-20990101-000000.json"
-    newer_other.write_text(json.dumps({**report, "sessions": ["some-other-drive"], "table": []}))
-    _, diff = retrain._run_benchmark_gate(config, [session], retrain._start_run(args, config))
+    newer_other.write_text(json.dumps({**report, "drives": []}))
+    report_path_2, diff = retrain._run_benchmark_gate(
+        config, [session], retrain._start_run(args, config)
+    )
     assert diff is not None and diff["comparable"] is True
-    # Newest comparable wins: the first run's own report, not the 2099 one.
+    assert diff["regressed"] is False
     assert diff["baseline"].endswith(report_path.name)
+
+    # A cell the baseline graded and this run did not is a regression.
+    assert report_path_2 is not None
+    report_path_2.unlink()
+    graded = json.loads(report_path.read_text())
+    graded["recall"] = {
+        "isolation_forest": {"maf_gain": {"0.1": {"graded": 2, "detected": 2, "injections": 2}}}
+    }
+    report_path.write_text(json.dumps(graded))
+    _, diff = retrain._run_benchmark_gate(config, [session], retrain._start_run(args, config))
+    assert diff is not None and diff["regressed"] is True
+    assert diff["baseline"].endswith(report_path.name)
+    (missing,) = [c for c in diff["cells"] if c["status"] == "missing"]
+    assert (missing["detector"], missing["fault_kind"]) == ("isolation_forest", "maf_gain")
 
 
 def test_retrain_auto_holds_out_most_recent_session_for_calibration(

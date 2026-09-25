@@ -16,11 +16,16 @@ export function useControlStream(token: string): ControlStreamState {
     events: [],
   });
 
+  // Clearing the token closes the stream: reset while rendering, on the
+  // change itself, rather than in the effect a commit later.
+  const [streamToken, setStreamToken] = useState(token);
+  if (token !== streamToken) {
+    setStreamToken(token);
+    if (!token) setState({ connection: "closed", events: [] });
+  }
+
   useEffect(() => {
-    if (!token) {
-      setState({ connection: "closed", events: [] });
-      return;
-    }
+    if (!token) return;
 
     const socket = openReconnectingSocket<ControlEvent>({
       url: `/ws/control?token=${encodeURIComponent(token)}`,

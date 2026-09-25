@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from src.config import DaemonConfig
 from src.mcp_server.config import (
     DEFAULT_AUDIT_PATH,
     DEFAULT_BIND_PORT,
     DEFAULT_DAEMON_URL,
     load_from_env,
 )
+from src.paths import ANOMALIES_DIR
 
 
 def test_load_from_env_uses_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -174,7 +176,7 @@ def test_config_path_round_trips(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 def test_anomalies_dir_falls_back_to_daemon_default(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """No YAML key → the daemon's default (``data/anomalies``) is used.
+    """No YAML key → the daemon's default (the checkout's ``data/anomalies``) is used.
 
     Matches the daemon's own behavior in :mod:`src.config` so the resource
     works against a stock dev tree without extra env wiring.
@@ -184,4 +186,8 @@ def test_anomalies_dir_falls_back_to_daemon_default(
     monkeypatch.delenv("CANARY_ANOMALIES_DIR", raising=False)
     monkeypatch.setenv("CANARY_CONFIG", str(config_file))
     cfg = load_from_env()
-    assert cfg.anomalies_dir == Path("data/anomalies")
+    # R01.2: the same repo-rooted default as DaemonConfig.anomalies_dir,
+    # never a working-directory-relative ``data/anomalies``.
+    assert cfg.anomalies_dir == ANOMALIES_DIR
+    assert cfg.anomalies_dir == DaemonConfig().anomalies_dir
+    assert cfg.catalog_db == DaemonConfig().catalog_db

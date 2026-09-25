@@ -108,11 +108,15 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
     return () => ctrl.abort();
   }, [setNotice]);
 
-  // Settle the selection once profiles arrive.
-  useEffect(() => {
-    if (profiles.length === 0) return;
-    setSelectedProfileId((cur) => (profiles.some((p) => p.id === cur) ? cur : profiles[0].id));
-  }, [profiles]);
+  // Settle the selection once profiles arrive (while rendering, on the new
+  // list, so the picker and the persisted id agree in the same commit).
+  const [settledProfiles, setSettledProfiles] = useState(profiles);
+  if (settledProfiles !== profiles) {
+    setSettledProfiles(profiles);
+    if (profiles.length > 0 && !profiles.some((p) => p.id === selectedProfileId)) {
+      setSelectedProfileId(profiles[0].id);
+    }
+  }
 
   // 1 Hz tick so the elapsed clock stays live.
   useEffect(() => {
@@ -124,9 +128,18 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
     if (selectedProfileId) writeString(PROFILE_KEY, selectedProfileId);
   }, [selectedProfileId]);
 
-  useEffect(() => {
-    if (!capture && selectedProfile) setPurpose(selectedProfile.purpose);
-  }, [selectedProfile, capture]);
+  // Prefill the purpose from the profile whenever the profile changes or a
+  // capture ends. Keyed on whether a capture is open, not on the polled
+  // object, which is new every 5 s and changes nothing while one is.
+  const capturing = capture !== null;
+  const [purposeFor, setPurposeFor] = useState<{
+    profile: TestProfile | null;
+    capturing: boolean;
+  } | null>(null);
+  if (purposeFor?.profile !== selectedProfile || purposeFor.capturing !== capturing) {
+    setPurposeFor({ profile: selectedProfile, capturing });
+    if (!capturing && selectedProfile) setPurpose(selectedProfile.purpose);
+  }
 
   // --- actions ------------------------------------------------------------
   const tapEvent = (ev: TestEvent) => enqueue(ev.tag, ev.kind);

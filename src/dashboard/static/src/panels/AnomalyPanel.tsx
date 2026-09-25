@@ -47,7 +47,7 @@ function eventKey(e: AnomalyEvent): string {
  *  trending hotter?" without parsing timestamps. */
 export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
   const [sourceFilter, setSourceFilter] = useState<AnomalyEvent["source"] | "all">("all");
-  const [modeFilter, setModeFilter] = useState<string | "all">("all");
+  const [modeFilter, setModeFilter] = useState<string>("all");
   // The live readout up top now answers "what's it doing right now", so the
   // historical list shows everything by default (operators didn't want events
   // hidden). The toggle still lets them collapse the near-zero IF boundary

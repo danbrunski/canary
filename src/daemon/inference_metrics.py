@@ -270,6 +270,10 @@ class InferenceTiming:
     #: A06.2 — scored sequence windows against the served artifact's training
     #: envelope (:class:`EnvelopeCoverageMeter`).
     sequence_envelope: Mapping[str, Any] | None = None
+    #: H04.2 — per-committee state (``agree`` / ``disagree`` / ``no_verdict``
+    #: with its reason), events and the relation in force; ``None`` before the
+    #: first tick.
+    committees: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -292,6 +296,7 @@ class InferenceTiming:
             "sequence_envelope": (
                 dict(self.sequence_envelope) if self.sequence_envelope is not None else None
             ),
+            "committees": dict(self.committees) if self.committees is not None else None,
         }
 
 
@@ -323,6 +328,7 @@ class InferenceTimingRecorder:
     _windows_stretched: int = field(default=0, repr=False)
     _windows_unmeasured: int = field(default=0, repr=False)
     _plausibility: Mapping[str, Any] | None = field(default=None, repr=False)
+    _committees: Mapping[str, Any] | None = field(default=None, repr=False)
     _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
 
     def __post_init__(self) -> None:
@@ -385,6 +391,10 @@ class InferenceTimingRecorder:
     def set_plausibility(self, block: Mapping[str, Any] | None) -> None:
         """Publish the plausibility evaluator's live block (A05.9)."""
         self._plausibility = dict(block) if block is not None else None
+
+    def set_committees(self, block: Mapping[str, Any] | None) -> None:
+        """Publish the sensor-committee evaluator's live block (H04.2)."""
+        self._committees = dict(block) if block is not None else None
 
     def note_sequence_window(
         self,
@@ -459,6 +469,7 @@ class InferenceTimingRecorder:
             window=self.window,
             plausibility=self._plausibility,
             sequence_envelope=self._envelope.to_dict(),
+            committees=self._committees,
         )
 
 

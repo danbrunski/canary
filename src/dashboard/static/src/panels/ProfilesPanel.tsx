@@ -113,7 +113,7 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
                             autoFocus
                             onChange={(e) => setDraftName(e.target.value)}
                             onKeyDown={(e) => {
-                              if (e.key === "Enter") onSave(profile.slug);
+                              if (e.key === "Enter") void onSave(profile.slug);
                               if (e.key === "Escape") setEditingSlug(null);
                             }}
                           />

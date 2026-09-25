@@ -40,6 +40,7 @@ from src.alerts.tuning import AlertTuner
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
     from src.alerts.notifier import Notifier
+    from src.analysis.committees import CommitteeFlag
     from src.config import DetectorRole
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
@@ -452,6 +453,16 @@ class AnomalyEventEmitter:
             self.counters.suppressed_not_anomaly += 1
             return None
         return self._emit(AnomalyEvent.from_plausibility(record))
+
+    def emit_committee(self, flag: CommitteeFlag) -> AnomalyEvent | None:
+        """Emit a sustained sensor-committee disagreement (H04.2).
+
+        The live committee evaluator's sink. No persistence gate here: the
+        evaluator's ``sustain_seconds``/``min_verdicts`` run *is* the debounce,
+        and it latches one flag per episode. Tuning, dedupe (per committee and
+        member), role and the notification push apply as for every source.
+        """
+        return self._emit(AnomalyEvent.from_committee(flag))
 
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
         # Operator tuning gate (6.25) runs before dedupe: a tuned-out event

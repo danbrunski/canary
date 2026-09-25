@@ -22,6 +22,14 @@ A drive is *skipped* (with the reason) when a detector trained or calibrated
 on any of its sessions, when it straddles a tune or hardware boundary, or
 when it has no telemetry. Captures are scored: modes come from the same
 segmenter the daemon runs (``featurize_wide_frame``), never from sidecars.
+Rows are featurized with the profile's behavior models, as the trainers and
+the daemon featurize them, so an artifact trained on ``deviation:*`` columns
+is scored on those columns (the retired grid's blind spot, R06.5).
+
+It is also retrain's post-train regression gate (R06.5, replacing the retired
+``detector_benchmark`` grid): ``--baseline <report.json>`` diffs this run
+against an earlier report of the same drives under the same protocol
+parameters (:mod:`src.models.benchmark_gate`) and exits 3 on a regression.
 """
 
 from __future__ import annotations
@@ -69,10 +77,19 @@ from src.analysis.labelled_events import (
 from src.analysis.tune_revisions import load_tune_revisions
 from src.config import CanaryConfig
 from src.control.sessions import recorded_sessions, session_started_at
+from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
 from src.log import configure_logging
 from src.models.artifact_hash import sha256_file_or_none
+from src.models.benchmark_gate import (
+    DEFAULT_TOLERANCE,
+    PROTOCOL_NAME,
+    PROTOCOL_VERSION,
+    diff_reports,
+    load_sequence_artifact,
+    regression_summary,
+)
 from src.models.evaluation import (
     AMBIENT_BANDS_C,
     AMBIENT_CHANNEL,
@@ -118,6 +135,11 @@ from src.models.evaluation_detectors import (
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.models.isolation_forest import TrainedIsolationForest, load_isolation_forest_model
 from src.models.sequence_protocol import TrainedSequenceModel
+from src.models.spec_producibility import (
+    BEHAVIOR_PROVENANCE_ABSENT,
+    behavior_fingerprint_provenance,
+    manifest_behavior_fingerprints,
+)
 from src.models.synthetic_fault_eval import (
     REALISTIC_FAULT_ROLES,
     REALISTIC_FAULTS,
@@ -125,6 +147,7 @@ from src.models.synthetic_fault_eval import (
     inject_realistic_fault,
     load_fault_channel_roles,
 )
+from src.paths import DATA_DIR
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
     DEFAULT_DIDS_PATH,
@@ -139,7 +162,7 @@ from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 log = logging.getLogger(__name__)
 
 #: Resampled frames are gitignored, regenerable, and keyed on every input.
-DEFAULT_CACHE_DIR = Path("data/cache/evaluation_frames")
+DEFAULT_CACHE_DIR = DATA_DIR / "cache" / "evaluation_frames"
 #: Clean rows before an injected window: the segmenter's lookback plus the
 #: rolling window and one sequence window, so every scorer is warm.
 DEFAULT_LEAD_SECONDS = 240.0
@@ -479,6 +502,7 @@ def injection_sweep(
     window_seconds: float,
     grace_seconds: float,
     raw: Sequence[tuple[RawStreamDetector, Any]] = (),
+    behavior_models: BehaviorModels | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
     """Inject every (kind, severity) into the same windows of one session.
 
@@ -522,7 +546,9 @@ def injection_sweep(
             ]
             clean = score_session(
                 detectors,
-                featurize_wide_frame(piece, config, bindings=bindings).features,
+                featurize_wide_frame(
+                    piece, config, bindings=bindings, behavior_models=behavior_models
+                ).features,
                 persistence,
                 raw=raw_clean,
             )
@@ -550,7 +576,9 @@ def injection_sweep(
                     continue
                 faulted = score_session(
                     detectors,
-                    featurize_wide_frame(faulted_frame, config, bindings=bindings).features,
+                    featurize_wide_frame(
+                        faulted_frame, config, bindings=bindings, behavior_models=behavior_models
+                    ).features,
                     persistence,
                     raw=[
                         (
@@ -1145,6 +1173,18 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         lines.append(f"- injection {entry}")
     for name, reason in report.get("withheld_detectors", {}).items():
         lines.append(f"- detector {name} withheld: {reason}")
+    regressions = report.get("regressions")
+    if regressions:
+        lines += [
+            "",
+            f"## Regression compare (tolerance {regressions['tolerance']:.0%})",
+            "",
+            f"Baseline: `{regressions.get('baseline')}`",
+            "",
+        ]
+        lines += [f"- {line}" for line in regression_summary(regressions)] or [
+            "- no regressions beyond tolerance"
+        ]
     load_errors = report.get("load_errors") or {}
     if load_errors:
         lines += ["", "## Not loaded", ""]
@@ -1222,6 +1262,28 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--parity-rows", type=int, default=200)
     parser.add_argument("--budget", type=float, default=V1_ALERTS_PER_HOUR_BUDGET)
+    parser.add_argument(
+        "--behavior-models",
+        type=Path,
+        default=None,
+        help="Behavior-model surfaces the rows are featurized with (default: the "
+        "profile-scoped daemon.behavior_models, as the trainers and the daemon use).",
+    )
+    parser.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="An earlier report of the same drives under the same protocol parameters "
+        "(R06.5): diff this run against it and exit 3 on a regression beyond --tolerance.",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=DEFAULT_TOLERANCE,
+        # A literal "%" in argparse help must be doubled.
+        help=f"Relative regression tolerance for --baseline (default "
+        f"{DEFAULT_TOLERANCE * 100:.0f}%%; see benchmark_gate.DEFAULT_TOLERANCE).",
+    )
     parser.add_argument("--out", type=Path, required=True, help="JSON report path.")
     parser.add_argument("--markdown", type=Path, default=None, help="Default: --out with .md.")
     parser.add_argument(
@@ -1284,6 +1346,31 @@ def _spread_in_time(names: Sequence[str], count: int) -> list[str]:
     return [ordered[i] for i in sorted(set(picks.tolist()))]
 
 
+def _behavior_record(
+    path: Path,
+    behavior: BehaviorModels | None,
+    trained_if: TrainedIsolationForest | None,
+    if_path: Path,
+) -> dict[str, Any]:
+    """Which behavior models the rows were featurized with, and whether each
+    one the IF consumes is the artifact it was trained against (B03.4)."""
+    provenance: dict[str, dict[str, Any]] = {}
+    if trained_if is not None:
+        try:
+            manifest = json.loads(if_path.with_name("model.manifest.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        provenance = behavior_fingerprint_provenance(
+            trained_if.feature_columns, manifest_behavior_fingerprints(manifest), behavior
+        )
+    return {
+        "path": str(path),
+        "loaded": behavior is not None,
+        "sha256": file_sha256(path) if behavior is not None else None,
+        "provenance": provenance,
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
@@ -1301,9 +1388,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     trained_seq: TrainedSequenceModel | None = None
     seq_path = args.sequence_model or models_dir / "lstm_autoencoder" / "model.pt"
     if not args.no_sequence and seq_path.exists():
-        from src.models.lstm_training import load_lstm_autoencoder_model
-
-        trained_seq = load_lstm_autoencoder_model(seq_path)
+        # The backend the artifact's manifest names (LSTM or TCN), not a
+        # hard-coded LSTM loader (R06.5: retrain's gate scores either).
+        trained_seq = load_sequence_artifact(seq_path)
     artifacts: dict[str, Any] = {}
     seen: dict[str, dict[str, str]] = {}
     for label, path, manifest in (
@@ -1435,6 +1522,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name in needed:
             print(f"load {by_name[name]}")
         return 0
+    behavior_path = args.behavior_models or _scoped(config, args.profile).daemon.behavior_models
+    behavior = load_behavior_models(behavior_path) if behavior_path.exists() else None
+    behavior_record = _behavior_record(behavior_path, behavior, trained_if, if_path)
+    absent = {
+        name: entry["reason"]
+        for name, entry in behavior_record["provenance"].items()
+        if entry["status"] == BEHAVIOR_PROVENANCE_ABSENT
+    }
+    if absent:
+        # The IF would be scored with those columns empty: not the detector
+        # the daemon serves. Refuse rather than report its numbers.
+        for reason in absent.values():
+            print(f"error: {reason} ({behavior_path})", file=sys.stderr)
+        return 2
     frames, load_errors = load_resampled_sessions(
         [by_name[n] for n in needed],
         config,
@@ -1444,7 +1545,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_only=args.cache_only,
     )
     features = {
-        name: featurize_wide_frame(frame, config, bindings=bindings).features
+        name: featurize_wide_frame(
+            frame, config, bindings=bindings, behavior_models=behavior
+        ).features
         for name, frame in frames.items()
     }
 
@@ -1615,6 +1718,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 window_seconds=args.window_seconds,
                 grace_seconds=args.grace_seconds,
                 raw=[(r, streams[(r.names[0], longest)]) for r in raw_detectors],
+                behavior_models=behavior,
             )
             outcomes.extend(found)
             skipped_injections.extend(skip)
@@ -1625,6 +1729,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "command": " ".join(sys.argv),
         "config": str(args.config),
+        # R06.5: what makes two reports comparable (benchmark_gate): the
+        # protocol, and every parameter that decides which windows are
+        # injected, with what, and when an alert counts.
+        "protocol": {
+            "name": PROTOCOL_NAME,
+            "version": PROTOCOL_VERSION,
+            "seed": args.seed,
+            "faults": sorted(args.faults),
+            "injections_per_drive": args.injections_per_drive,
+            "window_seconds": args.window_seconds,
+            "lead_seconds": args.lead_seconds,
+            "grace_seconds": args.grace_seconds,
+            "persistence": {
+                "required": persistence.required,
+                "window": persistence.window,
+                "window_seconds": persistence.window_seconds,
+            },
+        },
+        "behavior_models": behavior_record,
         "artifacts": artifacts,
         "persistence": {
             "required": persistence.required,
@@ -1684,6 +1807,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         "skipped_injections": skipped_injections,
         "load_errors": load_errors,
     }
+    regression: dict[str, Any] | None = None
+    if args.baseline is not None:
+        try:
+            baseline_report = json.loads(args.baseline.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"error: cannot read baseline report {args.baseline}: {exc}", file=sys.stderr)
+            return 2
+        # Round-trip through JSON first: the diff reads the report as written.
+        regression = diff_reports(
+            baseline_report,
+            json.loads(json.dumps(report, default=str)),
+            tolerance=args.tolerance,
+        )
+        report["regressions"] = {**regression, "baseline": str(args.baseline)}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, default=str) + "\n")
     markdown = args.markdown or args.out.with_suffix(".md")
@@ -1693,6 +1830,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{len(records)} held-out drive(s) scored, {len(skipped)} skipped; "
         f"{len(outcomes)} injection outcome(s)"
     )
+    if regression is not None:
+        lines = regression_summary(regression)
+        print(f"regression compare vs {args.baseline} (tolerance {args.tolerance:.0%}):")
+        for line in lines or ["no regressions beyond tolerance"]:
+            print(f"  {line}")
+        if regression["regressed"]:
+            print("error: regression(s) detected vs baseline", file=sys.stderr)
+            return 3
     return 0
 
 

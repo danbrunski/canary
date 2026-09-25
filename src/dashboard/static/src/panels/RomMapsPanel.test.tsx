@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlJson } from "../api/core";
@@ -583,6 +584,38 @@ describe("ROM maps — coverage (W05.7–W05.9)", () => {
     expect(
       screen.getByText(/Live coverage for this capture: [01] ECM samples/),
     ).toBeInTheDocument();
+  });
+
+  it("steps each ECM sample once under StrictMode's double render (R08.13)", async () => {
+    // The tally and the live grid are stepped while rendering; both write
+    // absolute values, so the discarded second render cannot count twice.
+    routeControl(withTrace(true));
+    const status = polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]);
+    const view = render(
+      <StrictMode>
+        <RomMapsPanel {...traceProps(11.46, 1200, status)} />
+      </StrictMode>,
+    );
+    await upload();
+    await confirm();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" }));
+    });
+    for (let i = 1; i <= 3; i += 1) {
+      const at = new Date(now.getTime() + i * 125);
+      act(() => {
+        vi.setSystemTime(at);
+      });
+      const p = traceProps(11.46, 1200, status);
+      p.channels = new Map([...p.channels, memRow(X, 11.46, at), memRow(Y, 1200, at)]);
+      view.rerender(
+        <StrictMode>
+          <RomMapsPanel {...p} />
+        </StrictMode>,
+      );
+    }
+    expect(screen.getByText(/Live coverage for this capture: 4 ECM samples/)).toBeInTheDocument();
+    expect(screen.getByText(/Disagreed on 4 of 4 ECM samples/)).toBeInTheDocument();
   });
 
   it("opens and closes a drive presentation of one table", async () => {

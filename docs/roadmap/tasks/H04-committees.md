@@ -40,7 +40,7 @@ members on rows where the gates hold, designed as an IF/LSTM feature
 
 ## Desk
 
-- [ ] **H04.1 Committees become detectors, not features.** **Do:** remove
+- [x] **H04.1 Committees become detectors, not features.** **Do:** remove
   `trainable` from `SensorCommittee` (H01.1's source gate excludes every
   member anyway) and stop emitting committee residuals into the feature
   frame; keep computing them for the fingerprint and for flags. Add the
@@ -50,14 +50,76 @@ members on rows where the gates hold, designed as an IF/LSTM feature
   **Accept:** feature lists unchanged for the current corpus (committees were
   all non-trainable); a test that a profile with no committee data runs every
   committee as "not configured", named, rather than with defaults.
-- [ ] **H04.2 A committee event path.** **Do:** evaluate committees on the
+  - [x] 2026-09-25: `trainable` removed from `SensorCommittee`; every committee
+    channel (the `derived:<NAME>` spreads and the H04.4 member transforms) is
+    refused by name in `src/trainability.py` via
+    `committees.committee_channel_reason` — even ECU-only
+    `derived:OBD_SPEED_ACCEL_G`. Relations are data in
+    `data/nissan-xterra-2008/committees.yaml` (strict schema
+    `CommitteeProfile`: `reference`, per-member `ratio`/`offset` + required
+    `evidence`, `tolerance` with required `conditions`, validated against the
+    declared committees). No deployed manifest names a committee column
+    (`models/nissan-xterra-2008/{isolation_forest,lstm_autoencoder}/model.manifest.json`
+    checked), so nothing served changes. Accept:
+    `test_trainability.py::test_committee_channels_leave_the_trained_feature_list_unchanged`
+    (candidate list identical with and without the committee columns);
+    `test_committee_checks.py::test_no_committee_data_runs_every_committee_as_not_configured_named`
+    and `::test_a_partial_profile_leaves_the_rest_not_configured`.
+    Not rolled into the feature frame: `featurize_wide_frame` computes the
+    committee channels into `operating_frame` (evaluator, fingerprint) and
+    hands `compute_features` the frame without them
+    (`committee_channel_reason(base_channel(c)) is not None`).
+    `tests/test_replay_script.py::test_replay_sessions_builds_preprocessing_report`
+    passes unmodified (rolling count 12, as before). Fingerprint of
+    2026-09-21T143331, HEAD vs this tree: identical except the documented
+    `committee_residual_mean:speed_source_divergence` 8.024 → 8.423 (6F7
+    member, engineering units) and new
+    `committee_residual_mean:lon_accel_source_divergence` 0.038.
+- [x] **H04.2 A committee event path.** **Do:** evaluate committees on the
   live tick and in replay, and emit an event when the departure exceeds the
   tolerance for a sustained window (debounced, like behavior events), into the
   anomaly log with `detector: committee:<name>`, and a per-committee state in
   `/status` (`agree` / `disagree` / `no_verdict: <reason>`). **Accept:**
   synthetic tests for agree, disagree, and each no-verdict reason; the MCP
   `get_recent_anomalies` payload carries committee events.
-- [ ] **H04.3 Speed committee: OBD ↔ GPS.** **Do:** members `obd:SPEED` and
+  - [x] 2026-09-25: `CommitteeEvaluator` (`src/analysis/committees.py`) runs on
+    every live tick over the operating point (`src/daemon/committees_live.py`,
+    wired in `LiveInferencePipeline._snapshot`, timed as stage `committees`);
+    replay is the same path and the event lands in the replay's log, never
+    pushed. Debounce: departed verdicts spanning `sustain_seconds` over
+    `min_verdicts`, gaps ≤ `max_verdict_gap_seconds`, one flag per episode,
+    re-armed by `agree`. Events: `source: committee`,
+    `model_version: committee/<NAME>`, `detail.detector: committee:<NAME>`,
+    both members + values + relation (with evidence) + departure in
+    `detail.cause`; score = departure / tolerance, threshold 1.0; dedupe per
+    committee+member; roles/tuning/ntfy via `AnomalyEventEmitter._emit`.
+    **Role `evidence` by default** (`models.roles.committee`, stored, never
+    pushed) until a committee has a confirmed real catch, the bar the
+    2026-09-23 IF/sequence decision set; `alert` promotes it with no
+    artifact verdict (deterministic: applied beside, not through, the
+    artifact role gate — `DetectorRolesConfig.deterministic_by_source`).
+    `committees.enabled` (default true) removes the evaluator; `/status`
+    then reads `{"enabled": false}`. Tests:
+    `test_committees_live.py::test_committee_events_default_to_the_evidence_role`,
+    `::test_committees_can_be_switched_off`,
+    `test_role_gate.py::test_the_daemon_wires_the_gate_into_components`.
+    `/status` `detectors.inference.committees.committees.<NAME>`: `state`,
+    `reason`, `detail`, `alerting`, `events`, `counts`, relations.
+    **R03.12 decision by analogy (operator may overrule):** not
+    capture-profile gated — a committee compares two instruments against a
+    relation measured once, learns no normal, so like plausibility it runs
+    under `tuning` (reasoning in `docs/sensor-committees.md` and the module
+    docstring). Tests: `tests/test_committee_checks.py` (agree, sustained
+    disagree fires once and re-arms, isolated spikes silent, verdict-gap reset,
+    session reset, each no-verdict reason parametrized: reference_missing,
+    member_missing, stale, gate, gate-channel absent, condition slow,
+    condition accel; event and emitter shape);
+    `tests/test_committees_live.py` (real `build_components` +
+    `LiveFeatureSource` under a tuning capture: one event, one push, `/status`
+    block, dashboard `/anomalies` → MCP `get_recent_anomalies(source="committee")`
+    carries it, replay stores without pushing; malformed file withheld and
+    named).
+- [x] **H04.3 Speed committee: OBD ↔ GPS.** **Do:** members `obd:SPEED` and
   broadcast `decoded:WHEEL_SPEED_6F7_A` (whichever is present, since the
   `tuning` profile does not poll SPEED) against `gps:speed`; gates: satellites
   ≥ 7, HDOP ≤ 2, speed ≥ 20 km/h, and not accelerating hard (GPS speed lags);
@@ -66,13 +128,67 @@ members on rows where the gates hold, designed as an IF/LSTM feature
   **Accept:** replaying the ground-truth drive slice and two other known-good
   drives gives zero events; a synthetic 25 % VSS drop fires within the
   debounce window.
-- [ ] **H04.4 Longitudinal-acceleration committee members.** **Do:** compute
+  - [x] 2026-09-25: members `obd:SPEED`, `decoded:WHEEL_SPEED_6F7_A` (scaled
+    through its binding) vs `gps:speed`, ratio 0.9203 each; gates sats ≥ 7,
+    HDOP ≤ 2 (code), conditions GPS ≥ 20 km/h, |`derived:GPS_SPEED_ACCEL_G`|
+    ≤ 0.05 g and |`derived:OBD_SPEED_ACCEL_G`| ≤ 0.05 g (profile). The last
+    was added after verification: on held-out
+    `_capture-tuning-2026-09-22T235224` a launch at 30-40 km/h
+    (00:09:12-00:09:22Z) fired a false event — GPS lagged the wheels 3-5 s,
+    so the GPS derivative stayed under 0.05 g while the wheels read 0.13 g;
+    with the ECU condition 1 → 0 events, 318 agree
+    (`test_committee_checks.py::test_a_launch_with_gps_lagging_the_wheels_is_not_an_event`,
+    which also shows the event returns without that condition). Re-measured
+    with all three conditions, |departure| p95/p99: default-profile drives
+    0.044-0.104 / 0.058-0.183; tuning captures (6F7 member only)
+    21T223734 0.094/0.197, 21T232153 0.085/0.176, 22T170459 0.066/0.171,
+    22T235224 0.105/0.220; 0 events on all 17 drives listed in the YAML
+    evidence (23T022831, 23T142926, 23T164007, 08-04T162651: no verdicts). Measured with the evaluator on gated same-tick pairs
+    (~/canary-data/sessions/nissan-xterra-2008): median obd/gps
+    0.9152-0.9248 across 9 drives (known answer 0.9203 reproduced);
+    |departure| p95 0.075-0.118, p99 0.139-0.232, single-tick tails to 0.84.
+    Tolerance 0.15 / 10 s / ≥ 5 verdicts / gap ≤ 3 s. Calibration drives
+    (07-28T164657, 07-30T210101, 07-31T145209, 08-04T162651, 08-06T162657):
+    0 events, and already 0 at 0.10. Held out, 0 events at 0.10 and 0.15:
+    08-03T163440 (the ground-truth drive's source), 09-20T152758,
+    09-20T175050, 09-21T143331. At 0.10 g the accel condition let
+    09-23T150658 fire twice (HAT GNSS lagging ~5 s into a stop); at 0.05 g it
+    does not. Synthetic 25 % drop injected mid-drive into the real sessions:
+    fires 10-13 s after onset where the truck is cruising (07-28, 07-30,
+    07-31, 09-20T175050, tuning 22T235224; the step itself reads as a hard
+    deceleration for ~2 ticks), at the next qualifying cruise otherwise. Ground-truth slice: offline (`evaluate_committee_frame`, the
+    `scripts/replay.py` resample path) 0 events — as committed every tick is
+    `no_verdict:gate`, the slice was cut without sats/HDOP; with a good fix
+    asserted, 104 `agree`, 0 `disagree`, 0 events. The same slice pushed
+    through the *live* path (records → `LiveFeatureSource`, CAN decoded live,
+    1 Hz `tick` → `LiveCommittees`, fix-health injected; scratch script, not a
+    test — 419 s): 0 events, 199 `agree`, 1 `disagree` (the live decode adds
+    `WHEEL_SPEED_6F7_A` verdicts the offline slice lacks). Tests:
+    `test_committee_checks.py::test_a_25_percent_vss_drop_fires_within_the_debounce_window`,
+    `::test_the_ground_truth_slice_gives_no_event_and_says_why`,
+    `::test_the_ground_truth_slice_agrees_when_its_fix_is_trusted`,
+    `::test_either_ecu_member_gives_a_verdict`.
+- [~] **H04.4 Longitudinal-acceleration committee members.** **Do:** compute
   the missing `derived:` members as upstream transforms: `OBD_SPEED_ACCEL_G`
   (prefer the 100 Hz `0x2D1` speed, scaled by the profile ratio, over the
   1 km/h-quantised PID), `GPS_SPEED_ACCEL_G`, against `imu:ACCEL_LON` from
   H02.4. **Accept:** synthetic known-acceleration tests; with H02.6 data,
   zero events on the known-answer drive. Catches a loose IMU mount or a
   wandering frame estimate, which H07 depends on.
+  - [~] 2026-09-25: `derived:OBD_SPEED_ACCEL_G` (first present of
+    `decoded:VEHICLE_SPEED_2D1` → `decoded:WHEEL_SPEED_6F7_A` → `obd:SPEED`,
+    per frame, never mixed per row) and `derived:GPS_SPEED_ACCEL_G`, 2 s
+    trailing difference over real elapsed time, NaN across holes > 5 s,
+    computed in `append_committee_member_transforms` (called at the existing
+    committee seam in `featurize_wide_frame`, so live and offline agree). The
+    ECU derivative stays ECU-relative; the relation's `ratio` carries the
+    ECU/ground factor. The GPS one already serves as the speed committee's
+    accel condition. Tests: `test_committee_checks.py::test_speed_accel_g_recovers_a_known_constant_acceleration`,
+    `::test_speed_accel_g_uses_real_elapsed_time_and_refuses_holes`,
+    `::test_member_transforms_prefer_the_100hz_broadcast_speed`.
+    **Remaining:** the `imu:ACCEL_LON` member (H02.4) and the relation +
+    tolerance in `committees.yaml`, measured on the H02.6 known-answer drive;
+    until then `LON_ACCEL_SOURCE_DIVERGENCE` reports `not_configured`.
 
 ## Hardware
 

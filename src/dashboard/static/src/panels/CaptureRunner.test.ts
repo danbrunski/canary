@@ -8,6 +8,7 @@ import {
   installCaptureMocks,
   liveChannels,
   status,
+  WINDOWED_DID_SCHEDULER,
 } from "../test/captureFixtures";
 import { mockHttp } from "../test/harness";
 
@@ -139,6 +140,52 @@ describe("CaptureRunner — Engine Tuning → Logging (capture-profiles.md 3.2)"
     expect(screen.getByText(/fast exit unavailable/)).toBeInTheDocument();
     expect(screen.getByText("3.95")).toBeInTheDocument();
     expect(screen.getByText("0.31 s")).toBeInTheDocument();
+  });
+
+  it("requests a windowed DID at its window cadence, as the resolved plan says (R08.6)", async () => {
+    // Operator decision 2026-09-25: the "requested" column shows the cadence
+    // the DID is polled at. Under a 0.5 s cycle that is 2 Hz; the reported
+    // 60 s interval (0.02 Hz) is not what governs.
+    const scenario = WINDOWED_DID_SCHEDULER["profile-cycle-every-window"];
+    const member = scenario.resolved_plan.members.find((m) => m.kind === "did");
+    const hybridStatus = status("tuning-hybrid-research");
+    hybridStatus.capture_profile = {
+      ...hybridStatus.capture_profile!,
+      ...HYBRID,
+      active: true,
+      source: "control",
+      channels: Object.keys(HYBRID.mode01),
+      started_at: "2026-08-07T12:00:00+00:00",
+      session_dir: "_capture-tuning-hybrid-research-2026-08-07T120000",
+      paused: false,
+    };
+    hybridStatus.health = {
+      observed: 1,
+      inference_latency_ms: { mean: null, p95: null, max: null },
+      missing_feature_rate: null,
+      data_freshness_seconds: 0.1,
+      model_swaps: {},
+      active_model_version: null,
+      system: {},
+      obd_scheduler: {
+        requests: scenario.requests.map((row) => ({ ...row, capture_selected: true })),
+        did_profile: {
+          window_interval_seconds: scenario.did_profile.window_interval_seconds,
+          phase: "mode01",
+          fast_exits: 0,
+          fast_exit_failures: 0,
+          fast_exit_supported: true,
+          windows_opened: 1,
+          windows_completed: 1,
+        },
+      },
+    };
+    renderPanel("tuning-hybrid-research", { status: hybridStatus });
+
+    const row = (await screen.findByText("ECM_AIR_CHARGE")).closest("tr");
+    const cells = [...(row?.querySelectorAll("td") ?? [])].map((cell) => cell.textContent);
+    expect(cells.slice(0, 3)).toEqual(["ECM_AIR_CHARGE", "did", member?.rate_hz.toFixed(2)]);
+    expect(cells[2]).toBe("2.00");
   });
 
   it("says a disabled fast exit is recovering, not dead", async () => {

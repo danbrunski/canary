@@ -1305,224 +1305,6 @@
       }
     }
   },
-  "detector_benchmark.py": {
-    "options": {
-      "--baseline": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "baseline",
-        "nargs": null,
-        "option_strings": [
-          "--baseline"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--bindings": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": "Path(<repo>/data/bindings.yaml)",
-        "dest": "bindings",
-        "nargs": null,
-        "option_strings": [
-          "--bindings"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--channels": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": [
-          "obd:RPM",
-          "obd:SPEED",
-          "obd:COOLANT_TEMP",
-          "obd:THROTTLE_POS",
-          "obd:ENGINE_LOAD"
-        ],
-        "dest": "channels",
-        "nargs": "+",
-        "option_strings": [
-          "--channels"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--config": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": "Path(canary.yaml)",
-        "dest": "config",
-        "nargs": null,
-        "option_strings": [
-          "--config"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--fault-kinds": {
-        "action": "_StoreAction",
-        "choices": [
-          "drift",
-          "dropout",
-          "intermittent",
-          "scale",
-          "spike",
-          "stuck"
-        ],
-        "default": [
-          "spike",
-          "drift",
-          "dropout",
-          "stuck",
-          "scale"
-        ],
-        "dest": "fault_kinds",
-        "nargs": "+",
-        "option_strings": [
-          "--fault-kinds"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--if-model": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "if_model",
-        "nargs": null,
-        "option_strings": [
-          "--if-model"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--log-level": {
-        "action": "_StoreAction",
-        "choices": [
-          "DEBUG",
-          "INFO",
-          "WARNING",
-          "ERROR"
-        ],
-        "default": "INFO",
-        "dest": "log_level",
-        "nargs": null,
-        "option_strings": [
-          "--log-level"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--n-injections": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": 5,
-        "dest": "n_injections",
-        "nargs": null,
-        "option_strings": [
-          "--n-injections"
-        ],
-        "required": false,
-        "type": "int"
-      },
-      "--no-sequence": {
-        "action": "_StoreTrueAction",
-        "choices": null,
-        "default": false,
-        "dest": "no_sequence",
-        "nargs": 0,
-        "option_strings": [
-          "--no-sequence"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--out": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "out",
-        "nargs": null,
-        "option_strings": [
-          "--out"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--seed": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": 42,
-        "dest": "seed",
-        "nargs": null,
-        "option_strings": [
-          "--seed"
-        ],
-        "required": false,
-        "type": "int"
-      },
-      "--sequence-model": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "sequence_model",
-        "nargs": null,
-        "option_strings": [
-          "--sequence-model"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--sessions-root": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": "Path(data/sessions)",
-        "dest": "sessions_root",
-        "nargs": null,
-        "option_strings": [
-          "--sessions-root"
-        ],
-        "required": false,
-        "type": "Path"
-      },
-      "--timestamp": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "timestamp",
-        "nargs": null,
-        "option_strings": [
-          "--timestamp"
-        ],
-        "required": false,
-        "type": null
-      },
-      "--tolerance": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": 0.15,
-        "dest": "tolerance",
-        "nargs": null,
-        "option_strings": [
-          "--tolerance"
-        ],
-        "required": false,
-        "type": "float"
-      },
-      "sessions": {
-        "action": "_StoreAction",
-        "choices": null,
-        "default": null,
-        "dest": "sessions",
-        "nargs": "*",
-        "option_strings": [],
-        "required": true,
-        "type": "Path"
-      }
-    }
-  },
   "disposition_report.py": {
     "options": {
       "--all": {
@@ -1588,7 +1370,7 @@
       "--ledger": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/control/training_runs.jsonl)",
+        "default": "Path(<repo>/data/control/training_runs.jsonl)",
         "dest": "ledger",
         "nargs": null,
         "option_strings": [
@@ -1881,6 +1663,18 @@
   },
   "evaluate_detectors.py": {
     "options": {
+      "--baseline": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "baseline",
+        "nargs": null,
+        "option_strings": [
+          "--baseline"
+        ],
+        "required": false,
+        "type": "Path"
+      },
       "--baseline-fit-sessions": {
         "action": "_StoreAction",
         "choices": null,
@@ -1917,6 +1711,18 @@
         "required": false,
         "type": null
       },
+      "--behavior-models": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "behavior_models",
+        "nargs": null,
+        "option_strings": [
+          "--behavior-models"
+        ],
+        "required": false,
+        "type": "Path"
+      },
       "--bindings": {
         "action": "_StoreAction",
         "choices": null,
@@ -1944,7 +1750,7 @@
       "--cache-dir": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/cache/evaluation_frames)",
+        "default": "Path(<repo>/data/cache/evaluation_frames)",
         "dest": "cache_dir",
         "nargs": null,
         "option_strings": [
@@ -2245,6 +2051,18 @@
         ],
         "required": false,
         "type": "_utc_date"
+      },
+      "--tolerance": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 0.15,
+        "dest": "tolerance",
+        "nargs": null,
+        "option_strings": [
+          "--tolerance"
+        ],
+        "required": false,
+        "type": "float"
       },
       "--tune-revisions": {
         "action": "_StoreAction",
@@ -3439,7 +3257,7 @@
       "--ledger": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/control/training_runs.jsonl)",
+        "default": "Path(<repo>/data/control/training_runs.jsonl)",
         "dest": "ledger",
         "nargs": null,
         "option_strings": [
@@ -4593,7 +4411,7 @@
       "--feature-cache": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/cache/feature_frames)",
+        "default": "Path(<repo>/data/cache/feature_frames)",
         "dest": "feature_cache",
         "nargs": null,
         "option_strings": [
@@ -4605,7 +4423,7 @@
       "--feedback": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/control/anomaly_feedback.jsonl)",
+        "default": "Path(<repo>/data/control/anomaly_feedback.jsonl)",
         "dest": "feedback",
         "nargs": null,
         "option_strings": [
@@ -4653,7 +4471,7 @@
       "--ledger": {
         "action": "_StoreAction",
         "choices": null,
-        "default": "Path(data/control/training_runs.jsonl)",
+        "default": "Path(<repo>/data/control/training_runs.jsonl)",
         "dest": "ledger",
         "nargs": null,
         "option_strings": [

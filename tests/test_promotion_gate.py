@@ -10,6 +10,7 @@ from src.models.promotion_gate import (
     promote_challenger,
 )
 from src.models.training_ledger import TrainingLedger, TrainingRunRecord
+from tests.builders import evaluation_report
 
 _CLEAN_DISPOSITIONS = {
     "groups": [],
@@ -19,23 +20,8 @@ _CLEAN_DISPOSITIONS = {
 
 
 def _report(*, recall: float, per_hour: float) -> dict:
-    return {
-        "table": [
-            {
-                "detector": "isolation_forest",
-                "fault_kind": "spike",
-                "runs": 5,
-                "detected": round(recall * 5),
-                "recall": recall,
-                "precision": 0.9,
-                "median_time_to_detect_seconds": 1.0,
-                "alerts_per_hour_clean": per_hour,
-            }
-        ],
-        "nominal_fp": {
-            "isolation_forest": {"alerts": 1, "rows": 100, "hours": 1.0, "per_hour": per_hour}
-        },
-    }
+    """An evaluate_detectors report (R06.5) grading one IF cell and rate."""
+    return evaluation_report({"isolation_forest": recall}, {"isolation_forest": per_hour})
 
 
 def _record(
@@ -399,26 +385,14 @@ def test_compute_golden_divergence_handles_zero_golden_rate() -> None:
 
 
 def _two_detector_report(*, sequence_recall: float | None, sequence_per_hour: float | None) -> dict:
-    report = _report(recall=1.0, per_hour=1.0)
-    if sequence_recall is not None:
-        report["table"].append(
-            {
-                "detector": "sequence",
-                "fault_kind": "spike",
-                "runs": 5,
-                "detected": 5,
-                "recall": sequence_recall,
-            }
-        )
-    block: dict = {"alerts": 1, "rows": 100, "hours": 1.0}
-    if sequence_per_hour is not None:
-        block["per_hour"] = sequence_per_hour
-    report["nominal_fp"]["sequence"] = block
-    return report
+    return evaluation_report(
+        {"isolation_forest": 1.0, "sequence": sequence_recall},
+        {"isolation_forest": 1.0, "sequence": sequence_per_hour},
+    )
 
 
 def test_gate_fails_a_candidate_whose_detector_was_withheld_where_golden_was_graded() -> None:
-    """detector_benchmark emits no row for a withheld detector; the gate used to
+    """A withheld detector reports no graded row; the gate used to
     ``continue`` past the missing recall and pass "recall non-regression"."""
     result = evaluate_promotion_gate(
         _record("candidate"),
@@ -430,8 +404,10 @@ def test_gate_fails_a_candidate_whose_detector_was_withheld_where_golden_was_gra
     check = result.checks["recall_non_regression"]
     assert check["ok"] is False
     missing = [cell for cell in check["cells"] if cell.get("missing")]
-    assert [(c["detector"], c["fault_kind"]) for c in missing] == [("sequence", "spike")]
-    assert any("sequence" in reason and "spike" in reason for reason in result.reasons)
+    assert [(c["detector"], c["fault_kind"], c["severity"]) for c in missing] == [
+        ("sequence", "maf_gain", 0.1)
+    ]
+    assert any("sequence/maf_gain@0.1" in reason for reason in result.reasons)
 
 
 def test_gate_fails_a_candidate_with_no_recorded_false_positive_rate() -> None:
@@ -452,7 +428,7 @@ def test_gate_fails_a_candidate_with_no_recorded_false_positive_rate() -> None:
 
 def test_gate_fails_a_candidate_missing_a_nominal_detector_the_golden_has() -> None:
     candidate_report = _two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0)
-    del candidate_report["nominal_fp"]["sequence"]
+    candidate_report["detectors"].remove("sequence")
     result = evaluate_promotion_gate(
         _record("candidate"),
         _record("golden"),
@@ -491,3 +467,45 @@ def test_gate_fails_agreement_when_the_golden_recorded_no_rate() -> None:
     (cell,) = [c for c in agreement["cells"] if c["detector"] == "sequence"]
     assert cell["missing"] is True and cell["golden_per_hour"] is None
     assert any("golden recorded no held-out per_hour" in r for r in result.reasons)
+
+
+# ---------------------------------------------------------------------------
+# R06.5 — the gate reads the evaluate_detectors protocol only
+# ---------------------------------------------------------------------------
+
+_GRID_REPORT = {
+    "table": [{"detector": "isolation_forest", "fault_kind": "spike", "recall": 1.0}],
+    "nominal_fp": {"isolation_forest": {"per_hour": 1.0}},
+    "cells": [],
+}
+
+
+def test_gate_refuses_a_grid_era_report_on_either_side_by_name() -> None:
+    """The retired grid injected other faults into other channels and counted
+    alerts per scored hour: a grid table beside this protocol's grades the
+    candidate against a different test. It fails, and says which side."""
+    for candidate_report, golden_report, side in (
+        (_GRID_REPORT, _report(recall=1.0, per_hour=1.0), "candidate"),
+        (_report(recall=1.0, per_hour=1.0), _GRID_REPORT, "golden"),
+    ):
+        result = evaluate_promotion_gate(
+            _record("candidate"),
+            _record("golden"),
+            candidate_report=candidate_report,
+            golden_report=golden_report,
+        )
+        assert not result.eligible
+        assert result.checks["benchmark"]["ok"] is False
+        (reason,) = [r for r in result.reasons if "benchmark report" in r]
+        assert reason.startswith(side) and "retired detector_benchmark grid" in reason
+
+
+def test_golden_divergence_names_a_grid_era_report_instead_of_numbers() -> None:
+    divergence = compute_golden_divergence(
+        _record("golden"),
+        _record("current"),
+        golden_report=_GRID_REPORT,
+        current_report=_report(recall=1.0, per_hour=1.0),
+    )
+    assert divergence["per_detector"] == {}
+    assert "retired" in divergence["incomparable"]

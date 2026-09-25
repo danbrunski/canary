@@ -39,6 +39,7 @@ from src.timefmt import format_timestamp
 from src.vehicle_state import VehicleState, derive_from_live_source
 
 from .autotag_hook import LiveAutoTagHook
+from .committees_live import build_live_committees
 from .components import DaemonComponents
 from .inference_metrics import MISSED_COMPUTE_BUSY, InferenceTimingRecorder
 from .inference_scheduling import GenerationToken, TickScheduler, TickSlot
@@ -477,6 +478,9 @@ class LiveInferencePipeline:
         #: A05.9 — deterministic plausibility checks over arrived samples.
         #: ``None`` unless ``plausibility.enabled`` (default off).
         self._plausibility = _build_plausibility(components, source, recorder)
+        #: H04.2 — sensor committees: instrument cross-checks that flag. Run
+        #: under every capture profile (R03.12 reasoning in committees_live).
+        self._committees = build_live_committees(components, source, recorder)
         #: Tick period, for naming a compute that outran it (D02.3).
         self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
@@ -683,6 +687,16 @@ class LiveInferencePipeline:
                 self._plausibility.tick_live(components, now, operating_mode)
             except Exception:  # noqa: BLE001 — plausibility is best-effort
                 log.exception("plausibility tick failed")
+
+        if self._committees is not None:
+            stage_started = time.perf_counter()
+            try:
+                self._committees.tick_live(
+                    components, source.latest_operating_point, now, operating_mode
+                )
+            except Exception:  # noqa: BLE001 — committees are best-effort
+                log.exception("sensor committee tick failed")
+            recorder.record_stage("committees", time.perf_counter() - stage_started)
 
         # 4.7 — the segmenter falling back to constant "all" mode means
         # every mode-gated behavior surface silently never fires; make

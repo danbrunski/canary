@@ -37,6 +37,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.atomic_write import atomic_write_text
+from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
 
@@ -56,8 +57,10 @@ __all__ = [
     "save_tuning_config",
 ]
 
-DEFAULT_TUNING_PATH = Path("data/control/tuning.yaml")
-DEFAULT_TUNING_AUDIT_PATH = Path("data/control/tuning_audit.jsonl")
+#: Mirrors of ``DaemonConfig.tuning_config`` / ``tuning_audit`` (R01.2: one
+#: repo-rooted home, ``src.paths.CONTROL_DIR``).
+DEFAULT_TUNING_PATH = CONTROL_DIR / "tuning.yaml"
+DEFAULT_TUNING_AUDIT_PATH = CONTROL_DIR / "tuning_audit.jsonl"
 
 #: Wildcard for "any operating mode" / "any source" in a scope match.
 ANY = "*"

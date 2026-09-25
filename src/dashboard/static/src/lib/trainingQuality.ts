@@ -6,7 +6,7 @@
 
 import type { TrainingRun } from "../types";
 import { formatSigned, formatSignedPercent } from "../util/format";
-import { arrayOrNull, numberOrNull, objectValues, record } from "../util/json";
+import { arrayOrNull, numberOrNull, objectValues, record, scalarText } from "../util/json";
 
 export interface RunQuality {
   hasQuality: boolean;
@@ -201,7 +201,7 @@ export function validationSlices(validation: Record<string, unknown> | null): Va
       const row = record(item);
       if (!row) return null;
       const metrics = record(row.metrics) ?? row;
-      const label = String(row.fault_type ?? row.kind ?? row.mode ?? row.name ?? "slice");
+      const label = scalarText(row.fault_type ?? row.kind ?? row.mode ?? row.name) ?? "slice";
       return {
         label,
         precision: numberOrNull(metrics.precision),

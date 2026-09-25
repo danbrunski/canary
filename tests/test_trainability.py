@@ -238,9 +238,12 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
 def test_external_sensors_and_their_derived_channels_yield_no_feature() -> None:
     config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())
-    features = featurize_wide_frame(wide, config).features
-    # The derived channel built from gps: is actually computed...
-    assert features["derived:SPEED_SOURCE_DIVERGENCE"].notna().any()
+    featurized = featurize_wide_frame(wide, config)
+    features = featurized.features
+    # The derived channel built from gps: is actually computed (for the
+    # committee evaluator and fingerprint), but never enters the feature frame.
+    assert featurized.operating_frame["derived:SPEED_SOURCE_DIVERGENCE"].notna().any()
+    assert "derived:SPEED_SOURCE_DIVERGENCE" not in features.columns
     columns = candidate_feature_columns(features)
     external = ("gps:", "imu:", "sensor:", "baro:", "derived:SPEED_SOURCE_DIVERGENCE")
     assert [c for c in columns if c.startswith(external)] == []
@@ -252,8 +255,43 @@ def test_external_sensors_and_their_derived_channels_yield_no_feature() -> None:
     excluded = feature_policy_exclusions(features)
     for base in ("gps:speed", "imu:ACCEL_X", "sensor:FUEL_PRESSURE", "baro:pressure"):
         assert excluded[base].startswith(SOURCE_NOT_TRAINABLE)
-    assert "gps:speed" in excluded["derived:SPEED_SOURCE_DIVERGENCE"]
     assert "session" not in excluded and "timestamp" not in excluded
+
+
+def test_committee_channels_leave_the_trained_feature_list_unchanged() -> None:
+    """H04.1 acceptance: committees are detectors, not features. The pipeline
+    still computes every committee channel into the operating frame (the
+    committee evaluator and the fingerprint read them) but never rolls one
+    into the feature frame, so the trained list is exactly what it is without
+    them — committees were all non-trainable, so the corpus's lists do not move.
+    The source gate refuses them anyway, should one ever reach a feature frame."""
+    from src.analysis.committees import (
+        GPS_SPEED_ACCEL_G,
+        OBD_SPEED_ACCEL_G,
+        committee_channel_reason,
+    )
+    from src.preprocessing.features import base_channel
+
+    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    wide = _session_frame(_external_sensor_channels())
+    featurized = featurize_wide_frame(wide, config)
+    committee = ("derived:SPEED_SOURCE_DIVERGENCE", OBD_SPEED_ACCEL_G, GPS_SPEED_ACCEL_G)
+    for channel in committee:
+        assert featurized.operating_frame[channel].notna().any(), channel
+    features = featurized.features
+    assert [
+        c for c in features.columns if committee_channel_reason(base_channel(str(c))) is not None
+    ] == []
+    columns = candidate_feature_columns(features)
+    rolled = features.assign(
+        **{
+            f"{channel}{suffix}": 0.1
+            for channel in committee
+            for suffix in ("", "__mean", "__std", "__roc")
+        }
+    )
+    assert candidate_feature_columns(rolled) == columns
+    assert "detectors, not features" in feature_policy_exclusions(rolled)[OBD_SPEED_ACCEL_G]
 
 
 # ---------------------------------------------------------------------------

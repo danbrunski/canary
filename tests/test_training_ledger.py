@@ -20,6 +20,7 @@ from src.models.training_ledger import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.builders import evaluation_report
 from tests.configs import retrain_argv
 
 
@@ -332,32 +333,8 @@ def test_ledger_cli_ingest_list_publish_show(
 
 
 def _benchmark_report(*, recall: float, per_hour: float) -> dict:
-    detected = round(recall * 5)
-    return {
-        "generated_at": "T",
-        "seed": 42,
-        "n_injections": 5,
-        "grid_cells": 1,
-        "sessions": ["s0"],
-        "channels": ["obd:RPM"],
-        "fault_kinds": ["spike"],
-        "nominal_fp": {
-            "isolation_forest": {"alerts": 1, "rows": 100, "hours": 1.0, "per_hour": per_hour}
-        },
-        "table": [
-            {
-                "detector": "isolation_forest",
-                "fault_kind": "spike",
-                "runs": 5,
-                "detected": detected,
-                "recall": recall,
-                "precision": 0.9,
-                "median_time_to_detect_seconds": 1.0,
-                "alerts_per_hour_clean": per_hour,
-            }
-        ],
-        "cells": [],
-    }
+    """An evaluate_detectors report (R06.5: the protocol the gates read)."""
+    return evaluation_report({"isolation_forest": recall}, {"isolation_forest": per_hour})
 
 
 _CLEAN_DISPOSITIONS = {

@@ -145,7 +145,7 @@ named.
   `test_physical_drives`, `test_mcp_logs`, `test_recorded_sessions`,
   `test_stored_sessions_router`.
 
-- [~] **R01.2 One repo-rooted home for default data paths.**
+- [x] **R01.2 One repo-rooted home for default data paths.**
   *Drift bug.* The same data files have several default paths, some rooted at
   the repo and some at the working directory:
   - `Path("data/dids.yaml")` / `Path("data/bindings.yaml")`, relative to the
@@ -261,6 +261,35 @@ named.
   catalog fallbacks) and `preprocessing/feature_pipeline`'s cache dir. Each is
   `from src.paths import CONTROL_DIR` (etc.) and one line. The catalog mirrors
   `decode/accepted_baselines` and `collection/custom_pids` move with (a).
+  *Remainder done 2026-09-25 (with R06.5); `grep -rn 'Path("data/' src` is
+  empty.* (a) `DaemonConfig.behavior_models`, `accepted_baselines`,
+  `custom_pids`, `capture_profiles`, `afr_calibration`, `kline_profile` and
+  `SensorCanConfig.signals` default to `src.paths.DATA_DIR / …`;
+  `tests/test_mcp_behavior_deviations.py` no longer `chdir`s: its YAML sets
+  `daemon.behavior_models` (the missing-file test still fails as it should, so
+  the fixture file, not the repo's, is the one read). (b) The mirrors import
+  `src.paths`: `alerts/feedback.DEFAULT_FEEDBACK_PATH`,
+  `alerts/tuning.DEFAULT_TUNING_PATH`/`DEFAULT_TUNING_AUDIT_PATH`,
+  `models/training_ledger.DEFAULT_TRAINING_LEDGER_PATH` (`CONTROL_DIR`),
+  `mcp_server/config`'s anomalies and catalog fallbacks (`ANOMALIES_DIR`,
+  `CONTROL_DIR / "catalog.db"`), `feature_pipeline.DEFAULT_FEATURE_CACHE_DIR`,
+  `decode/accepted_baselines.DEFAULT_ACCEPTED_BASELINES_PATH` and
+  `collection/custom_pids.DEFAULT_CUSTOM_PIDS_PATH` (`DATA_DIR`).
+  Tests: `tests/test_paths.py` 9 pass, including
+  `test_mirror_constants_and_per_vehicle_catalogs_are_repo_rooted` (each mirror
+  equals its `DaemonConfig` field; each catalog default is absolute under
+  `DATA_DIR`), `test_mcp_fallbacks_are_the_daemon_defaults` and
+  `test_no_working_directory_relative_data_path_in_src` (the acceptance grep,
+  kept as a test); `test_mcp_config.py` asserts the MCP fallback equals
+  `DaemonConfig().anomalies_dir`/`catalog_db`; `test_mcp_behavior_deviations.py`,
+  `test_config.py`, `test_profiles.py`, `test_capture_profiles.py`,
+  `test_custom_pids.py`, `test_accepted_baselines.py`, `test_feedback.py`,
+  `test_tuning.py`, `test_training_ledger.py`, `test_sensor_can.py`,
+  `test_main.py` pass. The CLI snapshot's `--ledger`/`--feedback`/
+  `--feature-cache` defaults now read `<repo>/data/...` (regenerated
+  deliberately). `ml_training` run on `test_train_lstm.py`,
+  `test_train_tcn.py`, `test_false_positive_benchmark.py`,
+  `test_sequence_bakeoff.py`: see R06.5's evidence line.
 
 - [x] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
   "number or `None`" helper has about ten copies with four behaviours:

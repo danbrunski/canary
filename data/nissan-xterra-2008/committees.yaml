@@ -1,0 +1,81 @@
+# Sensor-committee relations for the 2008 Nissan Xterra — H04.
+#
+# Loaded by src/analysis/committees.py (strict schema). A committee checks that
+# two instruments of one quantity keep the relation measured on THIS vehicle,
+# and flags a sustained departure from it. It never flags the relation itself:
+# ECU speed reads ~8 % under GPS here, and that is a fact about the truck, not
+# a fault. A committee with no entry below is reported `not_configured` and
+# never runs on defaults.
+#
+# Every number cites where it was measured. Departures are relative:
+# (member - ratio * reference) / (ratio * reference).
+
+schema_version: 1
+
+committees:
+  SPEED_SOURCE_DIVERGENCE:
+    reference: gps:speed
+    relations:
+      - member: obd:SPEED
+        ratio: 0.9203
+        evidence: >-
+          Per-row median obd/gps = 0.9203 over 2185 paired seconds of
+          2026-08-06T162657, flat across speed bands (data/bindings.yaml 0x6F7
+          notes; distance integrals confirm 8.2 % under). Re-measured by the
+          committee evaluator itself (H04.3, 2026-09-25) on gated, same-tick
+          pairs: medians 0.9204 (08-06T162657, n=1537), 0.9213 (07-30T210101,
+          n=645), 0.9225 (07-28T164657, n=549), 0.9152 (08-03T163440, n=472),
+          0.9186 (09-20T175050, n=773), 0.9244 (09-21T143331, n=363).
+      - member: decoded:WHEEL_SPEED_6F7_A
+        ratio: 0.9203
+        evidence: >-
+          The ABS broadcast copy agrees with the Mode 01 PID to 0.55 %
+          (bindings.yaml 0x6F7), so it inherits the same under-read. Measured by
+          the committee evaluator (H04.3, 2026-09-25) on gated, same-tick pairs:
+          medians 0.9226 (09-20T152758, n=500), 0.9210 (09-20T175050, n=3336),
+          0.9236 (09-21T143331, n=382). Used when the capture profile does not
+          poll the PID (`tuning` does not).
+    tolerance:
+      kind: relative
+      max_departure: 0.15
+      sustain_seconds: 10
+      min_verdicts: 5
+      max_verdict_gap_seconds: 3
+      conditions:
+        - channel: gps:speed
+          min: 20
+          reason: >-
+            below 20 km/h GPS Doppler jitter and the PID's 1 km/h step are a
+            large fraction of the reading, and at rest the ratio is undefined
+        - channel: derived:GPS_SPEED_ACCEL_G
+          max_abs: 0.05
+          reason: >-
+            GPS speed lags the wheels; while accelerating or braking the lag
+            alone moves the ratio. At 0.10 g the 2026-09-23T150658 drive (HAT
+            GNSS, a ~5 s lag into a stop) fired twice; at 0.05 g it does not
+        - channel: derived:OBD_SPEED_ACCEL_G
+          max_abs: 0.05
+          reason: >-
+            GPS lags the wheels, so the GPS derivative alone misses a launch:
+            pulling away at 30-40 km/h on _capture-tuning-2026-09-22T235224
+            (00:09:12-00:09:22Z) the wheels read 0.13 g while GPS, 3-5 s
+            behind, still read under 0.05 g, and the departure held +16.6 %
+            for 10 s — a false event. Both derivatives must be quiet
+      evidence: >-
+        H04.3, 2026-09-25, same-tick gated pairs (satellites >= 7, HDOP <= 2,
+        both members arrived that tick, all three conditions above), |departure|
+        p95 / p99 per drive. Calibration (default profile): 2026-07-28T164657
+        0.058/0.140, 07-30T210101 0.048/0.071, 07-31T145209 0.104/0.183,
+        08-06T162657 0.058/0.101 (08-04T162651: no verdicts). Isolated
+        single-tick tails remain; sustained runs are what separate a fault:
+        the calibration drives give zero events at 0.10 / 10 s / 5 verdicts /
+        3 s gap already, so 0.15 keeps a margin while a 25 % VSS drop
+        (departure 0.25) clears it, firing 10-13 s after onset at cruise.
+        Held out, zero events: default-profile 08-03T163440 (the ground-truth
+        drive) 0.059/0.083, 09-20T152758 0.053/0.102, 09-20T175050
+        0.047/0.074, 09-21T143331 0.045/0.058, 09-23T150658 (HAT GNSS, 21
+        verdicts); tuning captures (6F7 member only)
+        _capture-tuning-2026-09-21T223734 0.094/0.197, 09-21T232153
+        0.085/0.176, 09-22T170459 0.066/0.171, 09-22T235224 0.105/0.220
+        (318 agree; one false event before the OBD-acceleration condition),
+        09-23T022831 / 09-23T142926 / 09-23T164007 (no verdicts).

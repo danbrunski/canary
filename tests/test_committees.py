@@ -1,4 +1,6 @@
-"""Tests for sensor-committee divergence residuals."""
+"""Tests for sensor committees: spread residuals, member transforms, relations
+(H04.1), the verdict/debounce evaluator (H04.2) and the speed committee on real
+drives (H04.3)."""
 
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ from src.analysis.committees import (
     MemberGate,
     SensorCommittee,
     append_committee_residuals,
+    committee_channel_reason,
     non_trainable_committee_outputs,
 )
 
@@ -88,8 +91,12 @@ def test_min_members_requires_enough_present() -> None:
     assert pd.isna(out[committee.output].iloc[0])
 
 
-def test_speed_committee_is_non_trainable() -> None:
-    assert SPEED_COMMITTEE.output in non_trainable_committee_outputs()
+def test_no_committee_channel_trains() -> None:
+    """H04.1: no per-committee ``trainable`` switch; every channel is refused."""
+    assert not hasattr(SPEED_COMMITTEE, "trainable")
+    for committee in COMMITTEES:
+        assert committee.output in non_trainable_committee_outputs()
+        assert committee_channel_reason(committee.output) is not None
 
 
 def test_member_gate_mask_bounds() -> None:

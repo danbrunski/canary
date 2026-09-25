@@ -24,7 +24,11 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.afr import append_afr_channels, load_afr_calibration
-from src.analysis.committees import append_committee_residuals, non_trainable_committee_outputs
+from src.analysis.committees import (
+    append_committee_residuals,
+    committee_channel_reason,
+    non_trainable_committee_outputs,
+)
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
@@ -40,7 +44,7 @@ from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bin
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.decode.dids import decode_did_rows, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
-from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
@@ -83,7 +87,7 @@ DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 DEFAULT_DIDS_PATH = DIDS_YAML
 
 #: Default retrain-time cache for model-ready feature frames.
-DEFAULT_FEATURE_CACHE_DIR = Path("data/cache/feature_frames")
+DEFAULT_FEATURE_CACHE_DIR = DATA_DIR / "cache" / "feature_frames"
 
 #: Mode label used when no OBD PIDs are present and the threshold segmenter
 #: can't run — everything becomes one mode and the model fits a single global
@@ -943,8 +947,8 @@ def load_resampled_session(
     gate, so it scored the sequence detector on frames with every ``did:``
     channel absent: rows the artifact never saw that way in training or
     serving (A02). A missing bindings file or DID map is skipped, not an
-    error, as in training. Used by ``scripts/detector_benchmark.py``,
-    ``scripts/evaluate_detectors.py`` and retrain's benchmark gate.
+    error, as in training. Used by ``scripts/evaluate_detectors.py`` (and so
+    by retrain's benchmark and alert-budget gates).
     """
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
@@ -1103,10 +1107,11 @@ def featurize_wide_frame(
     framed = compute_instantaneous_channels(
         framed, config.vehicle.parameters, calibration=afr_calibration
     )
-    # Sensor-committee divergence residuals (redundant sensors of one quantity,
-    # e.g. OBD↔GPS speed). Distinct from the physical residuals above; gated on
-    # input quality. Non-trainable committees are emitted here but excluded from
-    # the trained feature set below — see analysis.committees.
+    # Sensor-committee channels (H04.1): the member transforms and the spread
+    # residuals of redundant sensors of one quantity (e.g. OBD↔GPS speed).
+    # Committees are detectors, not features — they stay in the operating
+    # frame for the committee evaluator and the fingerprint, and are never
+    # rolled into the feature frame (see analysis.committees).
     framed = append_committee_residuals(framed)
     cfg = feature_config or FeatureConfig(
         window_seconds=config.preprocessing.rolling_window_seconds
@@ -1115,7 +1120,12 @@ def featurize_wide_frame(
         framed = append_deviation_columns(
             framed, behavior_models, rate_window_seconds=cfg.window_seconds
         )
-    features = compute_features(framed, config=cfg)
+    committee_columns = [
+        column
+        for column in framed.columns
+        if committee_channel_reason(base_channel(str(column))) is not None
+    ]
+    features = compute_features(framed.drop(columns=committee_columns), config=cfg)
     return FeaturizedFrame(
         features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
     )

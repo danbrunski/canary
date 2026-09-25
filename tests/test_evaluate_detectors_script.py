@@ -149,10 +149,9 @@ def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
 
 
 def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> None:
-    from scripts.detector_benchmark import load_resampled_session
     from src.config import CanaryConfig
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame
+    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     root = tmp_path / "sessions"
@@ -315,3 +314,155 @@ def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
     assert summary["isolation_forest"]["false_alarms_per_engine_hour"]["estimate"] == 2.0
     assert summary["sequence"]["role"] == "evidence"
     assert summary["sequence"]["false_alarms_per_engine_hour"]["estimate"] is None
+
+
+# ---------------------------------------------------------------------------
+# R06.5: the regression compare folded in from the retired grid, and rows
+# featurized with the behavior models (the grid's blind spot)
+# ---------------------------------------------------------------------------
+
+
+def _unseen_drive_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    """One training session (not scored) and one unseen session under
+    ``sessions/``; returns ``(sessions root, IF artifact)``."""
+    from src.config import CanaryConfig
+    from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
+    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    trained = fit_isolation_forest(
+        featurize_wide_frame(load_resampled_session(training, config), config).features,
+        IFConfig(n_estimators=40),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    artifact = tmp_path / "models" / "model.joblib"
+    trained.save(artifact, default_manifest_path(artifact))
+    return root, artifact
+
+
+def test_baseline_compare_exits_3_on_a_regression_and_names_incomparable_baselines(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, artifact = _unseen_drive_fixture(tmp_path)
+    first = tmp_path / "first.json"
+    assert main([*_main_args(root, artifact, tmp_path), "--out", str(first)]) == 0
+    report = json.loads(first.read_text())
+    assert report["protocol"]["name"] == "evaluate_detectors"
+    assert report["protocol"]["faults"] == ["bank_imbalance"]
+
+    # The same drives, the same protocol: compared, nothing regressed.
+    again = tmp_path / "again.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--baseline", str(first)]
+    assert main([*argv, "--out", str(again)]) == 0
+    assert json.loads(again.read_text())["regressions"]["comparable"] is True
+    assert "no regressions beyond tolerance" in again.with_suffix(".md").read_text()
+
+    # A baseline that graded a cell this run cannot grade: exit 3, named.
+    report["recall"] = {
+        "isolation_forest": {"bank_imbalance": {"0.1": {"graded": 2, "detected": 2}}}
+    }
+    tampered = tmp_path / "tampered.json"
+    tampered.write_text(json.dumps(report))
+    regressed = tmp_path / "regressed.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--baseline", str(tampered)]
+    assert main([*argv, "--out", str(regressed)]) == 3
+    assert "isolation_forest bank_imbalance @0.1: graded in the baseline" in capsys.readouterr().out
+
+    # A retired-grid report is incomparable: reported, not a failure.
+    grid = tmp_path / "grid.json"
+    grid.write_text(json.dumps({"table": [], "cells": []}))
+    out = tmp_path / "vs-grid.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--baseline", str(grid)]
+    assert main([*argv, "--out", str(out)]) == 0
+    regressions = json.loads(out.read_text())["regressions"]
+    assert regressions["comparable"] is False
+    assert "retired detector_benchmark grid" in regressions["reason"]
+
+    unreadable = tmp_path / "missing.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--baseline", str(unreadable)]
+    assert main([*argv, "--out", str(tmp_path / "x.json")]) == 2
+
+
+def _behavior_models_file(path: Path) -> Path:
+    import yaml
+
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "models": [
+                    {
+                        "name": "speed_vs_rpm",
+                        "kind": "surface_2d",
+                        "output": "obd:SPEED",
+                        "axes": [
+                            {"name": "rpm", "channel": "obd:RPM", "bin_edges": [0.0, 3000.0]},
+                            {"name": "rpm2", "channel": "obd:RPM", "bin_edges": [0.0, 3000.0]},
+                        ],
+                        "fit": {
+                            "kind": "grid_binned_mean",
+                            "cells": [{"mean": 30.0, "std": 3.0, "count": 50}],
+                            "sample_count": 50,
+                            "fitted_at": "2026-01-01T00:00:00Z",
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    return path
+
+
+def test_rows_are_featurized_with_the_behavior_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The retired grid featurized with no behavior models, so an IF trained
+    on ``deviation:*`` columns could not be scored as served. Every
+    featurization here carries the profile's (or ``--behavior-models``) set,
+    and the report says which file."""
+    import scripts.evaluate_detectors as harness
+    from src.preprocessing import feature_pipeline
+
+    root, artifact = _unseen_drive_fixture(tmp_path)
+    models_path = _behavior_models_file(tmp_path / "behavior_models.yaml")
+    seen: list[object] = []
+
+    def spy(*args: object, **kwargs: object) -> object:
+        seen.append(kwargs.get("behavior_models"))
+        return feature_pipeline.featurize_wide_frame(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(harness, "featurize_wide_frame", spy)
+    out = tmp_path / "report.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--behavior-models", str(models_path)]
+    assert main([*argv, "--out", str(out)]) == 0
+    assert seen and all(models is not None for models in seen)
+    record = json.loads(out.read_text())["behavior_models"]
+    assert record["path"] == str(models_path) and record["loaded"] is True
+    assert record["sha256"]
+    # This IF consumes no deviation column: nothing to trace.
+    assert record["provenance"] == {}
+
+
+def test_an_if_whose_deviation_columns_cannot_be_produced_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Scoring it with those columns empty would report a detector the daemon
+    does not serve."""
+    import scripts.evaluate_detectors as harness
+
+    root, artifact = _unseen_drive_fixture(tmp_path)
+    monkeypatch.setattr(
+        harness,
+        "behavior_fingerprint_provenance",
+        lambda *_a, **_k: {
+            "speed_vs_rpm": {"status": "absent", "reason": "no behavior model 'speed_vs_rpm'"}
+        },
+    )
+    argv = [*_main_args(root, artifact, tmp_path), "--behavior-models", str(tmp_path / "none")]
+    assert main([*argv, "--out", str(tmp_path / "r.json")]) == 2
+    assert "no behavior model 'speed_vs_rpm'" in capsys.readouterr().err
+    assert not (tmp_path / "r.json").exists()

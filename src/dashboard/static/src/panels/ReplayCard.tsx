@@ -50,22 +50,31 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
   // Follow the Sessions list's selection until the operator picks a
   // different one for the replay itself (or the selection disappears from
   // the polled list, e.g. after a delete).
-  useEffect(() => {
-    setSessionId((current) => {
-      if (current && sessions.some((s) => s.session_id === current)) return current;
-      return selectedSessionId || sessions.at(-1)?.session_id || "";
-    });
-  }, [selectedSessionId, sessions]);
+  // Adjusted while rendering whenever either input changes (and on mount),
+  // not in an effect, so the picker holds its value in the same commit.
+  const [followed, setFollowed] = useState<{ selected: string; list: SessionSummary[] } | null>(
+    null,
+  );
+  if (followed?.selected !== selectedSessionId || followed.list !== sessions) {
+    setFollowed({ selected: selectedSessionId, list: sessions });
+    const kept =
+      sessionId && sessions.some((s) => s.session_id === sessionId)
+        ? sessionId
+        : selectedSessionId || sessions.at(-1)?.session_id || "";
+    if (kept !== sessionId) setSessionId(kept);
+  }
 
   const fetcher = useCallback((signal: AbortSignal) => getReplay(token, signal), [token]);
   const replayRes = useControlResource(fetcher, { enabled: Boolean(token), intervalMs: 3000 });
   // The 3 s poll is the source of truth once it's landed at least once; a
   // mutation's own response updates this immediately in between polls so
   // Start/Stop don't wait out a stale poll to reflect in the UI.
-  const [replay, setReplay] = useState<ReplayStatus | null>(null);
-  useEffect(() => {
+  const [replay, setReplay] = useState<ReplayStatus | null>(replayRes.data?.replay ?? null);
+  const [polled, setPolled] = useState(replayRes.data);
+  if (replayRes.data !== polled) {
+    setPolled(replayRes.data);
     if (replayRes.data) setReplay(replayRes.data.replay);
-  }, [replayRes.data]);
+  }
 
   const start = () =>
     run("replay start", async () => {
@@ -78,7 +87,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
           loop,
         });
       } catch (err) {
-        throw new Error(replayErrorMessage(err));
+        throw new Error(replayErrorMessage(err), { cause: err });
       }
       setReplay(result.replay);
     });
@@ -89,7 +98,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
       try {
         result = await stopReplay(token);
       } catch (err) {
-        throw new Error(replayErrorMessage(err));
+        throw new Error(replayErrorMessage(err), { cause: err });
       }
       setReplay(result.replay);
     });

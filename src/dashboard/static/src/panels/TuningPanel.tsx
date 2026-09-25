@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 import { estimateTuning, getTuning, revertTuning, updateTuning } from "../api/http";
 import { Notice } from "../components/Notice";
@@ -32,11 +32,16 @@ export function TuningPanel({ token }: TuningPanelProps) {
   const [revertVersion, setRevertVersion] = useState("");
 
   // Seed the editor from the live config the first time it loads / changes
-  // version (don't clobber an in-progress edit on every poll).
-  const liveVersion = data?.tuning.version;
-  useEffect(() => {
-    if (data) setDraft(JSON.stringify(data.tuning, null, 2));
-  }, [liveVersion, data]);
+  // version (don't clobber an in-progress edit on every poll). Keyed on the
+  // version itself: the effect this replaces also depended on `data`, a new
+  // object every 30 s poll, so it re-seeded on every poll after all.
+  const [seededVersion, setSeededVersion] = useState<number | null>(null);
+  if (data && data.tuning.version !== seededVersion) {
+    setSeededVersion(data.tuning.version);
+    setDraft(JSON.stringify(data.tuning, null, 2));
+  } else if (!data && seededVersion !== null) {
+    setSeededVersion(null);
+  }
 
   const parseDraft = (): TuningConfig => {
     const parsed = JSON.parse(draft) as unknown;
@@ -98,10 +103,9 @@ export function TuningPanel({ token }: TuningPanelProps) {
             />
 
             <div className="mt-2 flex flex-wrap gap-2">
-              {/* Also gated on a non-empty draft: the editor is seeded by an
-                  effect one tick after the config renders, and an empty draft
-                  can never be valid JSON — without this, a click in that gap
-                  surfaces a bare "Unexpected end of JSON input". */}
+              {/* Also gated on a non-empty draft: an empty draft can never be
+                  valid JSON, and a click on one surfaces a bare "Unexpected
+                  end of JSON input". */}
               <button
                 type="button"
                 className={buttonClass}

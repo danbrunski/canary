@@ -4,7 +4,7 @@ import functools
 import logging
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -175,7 +175,9 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
         notifier=notifier,
         notify_min_severity=config.notifications.min_severity,
         notify_max_pushes_per_session=config.notifications.max_pushes_per_session,
-        roles=role_gate,
+        # Learned detectors through the artifact role gate; deterministic
+        # sources (committees) at their configured role.
+        roles=_LayeredRoles(role_gate, config.models.roles.deterministic_by_source()),
     )
     model_managers = _load_model_managers(config, load=load_models)
     alerts_cfg = config.alerts
@@ -240,6 +242,33 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
         on_change=components.health_monitor.observe_detector_roles,
     )
     return components
+
+
+class _LayeredRoles(Mapping[str, DetectorRole]):
+    """The artifact role gate's effective roles, then deterministic sources'
+    configured roles (``DetectorRolesConfig.deterministic_by_source``)."""
+
+    def __init__(
+        self, gate: Mapping[str, DetectorRole], deterministic: Mapping[str, DetectorRole]
+    ) -> None:
+        self._gate = gate
+        self._deterministic = dict(deterministic)
+
+    @property
+    def gate(self) -> Mapping[str, DetectorRole]:
+        return self._gate
+
+    def __getitem__(self, source: str) -> DetectorRole:
+        if source in self._deterministic:
+            return self._deterministic[source]
+        return self._gate[source]
+
+    def __iter__(self) -> Iterator[str]:
+        yield from self._gate
+        yield from (s for s in self._deterministic if s not in self._gate)
+
+    def __len__(self) -> int:
+        return len(set(self._gate) | set(self._deterministic))
 
 
 def _loaded_for_source(components: DaemonComponents, source: str) -> Any:

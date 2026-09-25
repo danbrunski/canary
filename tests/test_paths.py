@@ -141,3 +141,63 @@ def test_runtime_state_defaults_do_not_depend_on_the_working_directory() -> None
     assert DEFAULT_REFERENCE_EPOCH_PATH == daemon.reference_epoch
     assert DEFAULT_VEHICLE_LEDGER_PATH == daemon.vehicle_ledger
     assert DEFAULT_LLM_ASSIST_CARDS_PATH == LLMAssistConfig().cards_path
+
+
+def test_mirror_constants_and_per_vehicle_catalogs_are_repo_rooted() -> None:
+    """R01.2 remainder: every module constant that mirrors a ``DaemonConfig``
+    default is that default, and the per-vehicle catalog defaults
+    (``behavior_models`` and its siblings) are rooted at the checkout, so a
+    tool started from another directory reads the daemon's own files."""
+    from src.alerts.feedback import DEFAULT_FEEDBACK_PATH
+    from src.alerts.tuning import DEFAULT_TUNING_AUDIT_PATH, DEFAULT_TUNING_PATH
+    from src.collection.custom_pids import DEFAULT_CUSTOM_PIDS_PATH
+    from src.config import DaemonConfig, SensorCanConfig
+    from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+    from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH
+    from src.preprocessing.feature_pipeline import DEFAULT_FEATURE_CACHE_DIR
+
+    daemon = DaemonConfig()
+    assert DEFAULT_FEEDBACK_PATH == daemon.feedback_log
+    assert DEFAULT_TUNING_PATH == daemon.tuning_config
+    assert DEFAULT_TUNING_AUDIT_PATH == daemon.tuning_audit
+    assert DEFAULT_TRAINING_LEDGER_PATH == daemon.training_ledger
+    assert DEFAULT_ACCEPTED_BASELINES_PATH == daemon.accepted_baselines
+    assert DEFAULT_CUSTOM_PIDS_PATH == daemon.custom_pids
+    assert DEFAULT_FEATURE_CACHE_DIR == paths.DATA_DIR / "cache" / "feature_frames"
+    for name in (
+        "behavior_models",
+        "accepted_baselines",
+        "custom_pids",
+        "capture_profiles",
+        "afr_calibration",
+        "kline_profile",
+    ):
+        value = getattr(daemon, name)
+        assert value.is_absolute() and value.is_relative_to(paths.DATA_DIR), name
+    assert SensorCanConfig().signals == paths.DATA_DIR / "sensor_can_signals.yaml"
+    assert SensorCanConfig().signals.exists()
+
+
+def test_mcp_fallbacks_are_the_daemon_defaults(tmp_path: Path) -> None:
+    """The MCP server's no-YAML-key fallbacks are the daemon's own defaults."""
+    from src.config import DaemonConfig
+    from src.mcp_server.config import (
+        _anomalies_dir_from_config_yaml,
+        _catalog_db_from_config_yaml,
+    )
+
+    config = tmp_path / "canary.yaml"
+    config.write_text("collection: {}\n")
+    assert _anomalies_dir_from_config_yaml(str(config)) == DaemonConfig().anomalies_dir
+    assert _catalog_db_from_config_yaml(str(config)) == DaemonConfig().catalog_db
+
+
+def test_no_working_directory_relative_data_path_in_src() -> None:
+    """The R01.2 acceptance, kept: ``grep -rn 'Path("data/' src`` is empty."""
+    offenders = [
+        f"{path.relative_to(REPO_ROOT)}:{number}"
+        for path in sorted((REPO_ROOT / "src").rglob("*.py"))
+        for number, line in enumerate(path.read_text().splitlines(), start=1)
+        if 'Path("data/' in line or "Path('data/" in line
+    ]
+    assert offenders == []

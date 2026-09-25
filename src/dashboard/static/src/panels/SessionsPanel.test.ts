@@ -24,7 +24,7 @@ const COMPANION = {
  *  empty picker throws "Select a session first." and never calls
  *  startReplay. Wait for the state the next step depends on. */
 async function pickerHolds(sessionId: string): Promise<void> {
-  const picker = screen.getByRole("combobox") as HTMLSelectElement;
+  const picker = screen.getByRole<HTMLSelectElement>("combobox");
   await waitFor(() => expect(picker.value).toBe(sessionId));
 }
 
