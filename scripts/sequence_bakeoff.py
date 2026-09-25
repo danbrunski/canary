@@ -32,31 +32,44 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-# Reuse the per-backbone training CLIs as importable libraries (same pattern as
-# retrain.py); they expose identical train()/build_dataset() signatures.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import retrain  # noqa: E402 — reuse its auto-holdout picker (Task 3.3)
-import train_lstm as lstm_trainer  # noqa: E402
-import train_tcn as tcn_trainer  # noqa: E402
-from _cli import add_common_args, add_override_reason_arg, load_config  # noqa: E402
-from train_sequence import nothing_left_to_train  # noqa: E402
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_override_reason_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.sequence_bakeoff` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_override_reason_arg,
+        load_config,
+    )
 
-from src.config import CanaryConfig  # noqa: E402
-from src.log import configure_logging  # noqa: E402
-from src.models.evaluation import holdout_by_drive  # noqa: E402
-from src.models.false_positive_benchmark import (  # noqa: E402
-    FalsePositiveBenchmarkReport,
-    benchmark_false_positives,
+from src.config import CanaryConfig
+from src.log import configure_logging
+from src.models.evaluation import (
+    holdout_by_drive,
+    nothing_left_to_train,
+    pick_calibration_holdouts,
 )
-from src.models.sequence_dataset import observation_mask_from_schema  # noqa: E402
-from src.models.sequence_training import (  # noqa: E402
+from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
+from src.models.sequence_registry import SequenceTrainingBackend
+from src.models.sequence_training import (
     configure_torch_threads,
     default_training_device,
 )
-from src.models.tcn import MissingTCNDependencyError  # noqa: E402
-from src.preprocessing import discover_sessions  # noqa: E402
-from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH  # noqa: E402
-from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
+from src.models.tcn import MissingTCNDependencyError
+from src.models.training_entry import (
+    SEQUENCE_BACKBONES,
+    benchmark_held_out,
+    train_sequence_detector,
+)
+from src.preprocessing import discover_sessions
+from src.preprocessing.feature_pipeline import DEFAULT_BINDINGS_PATH
 
 log = logging.getLogger(__name__)
 
@@ -69,16 +82,15 @@ SLOW_CHANNEL_PREFIXES = ("obd", "did", "gps")
 
 @dataclass(frozen=True)
 class _Backbone:
-    """One selectable backbone: its model_type + the trainer CLI module."""
+    """One selectable backbone: its key, model_type and training backend."""
 
     key: str
     model_type: str
-    trainer: object  # train_lstm or train_tcn module (duck-typed train/build_dataset)
+    backend: SequenceTrainingBackend
 
 
 _BACKBONES: dict[str, _Backbone] = {
-    "lstm": _Backbone("lstm", "lstm_autoencoder", lstm_trainer),
-    "tcn": _Backbone("tcn", "tcn_autoencoder", tcn_trainer),
+    key: _Backbone(key, backend.model_type, backend) for key, backend in SEQUENCE_BACKBONES.items()
 }
 
 
@@ -175,8 +187,8 @@ def run_backbone(
     so the bake-off's FPR reflects production firing on unseen drives instead
     of the in-sample memorization artifact.
     """
-    trainer = backbone.trainer
-    trained = trainer.train(  # type: ignore[attr-defined]
+    trained = train_sequence_detector(
+        backbone.backend,
         train_sessions,
         config,
         out_dir,
@@ -186,24 +198,19 @@ def run_backbone(
         calibration_override=calibration_override,
     )
     artifact_path = out_dir / "model.pt"
-    # Z-score the held-out frame with the freshly trained model's own scaler so
-    # benchmark reconstruction error matches the calibrated-threshold domain
-    # (same scaling the live serve path applies per window).
-    scaler = (
-        ZScoreScaler.from_dict(dict(trained.manifest.scaler))
-        if trained.manifest.scaler is not None
-        else None
-    )
-    eval_dataset = trainer.build_dataset(  # type: ignore[attr-defined]
+    # The served rule on the held-out sessions: the model's own scaler and
+    # mask, and the configured suppress_channels (R04.1).
+    report = benchmark_held_out(
+        backbone.backend,
+        trained,
         eval_sessions,
         config,
         bindings_path=bindings_path,
-        sequence_length=int(trained.manifest.schema["sequence_length"]),
-        feature_columns=trained.feature_columns,
-        scaler=scaler,
-        observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
+        device=device,
+        k_grid=k_grid,
     )
-    report = benchmark_false_positives(trained, eval_dataset, k_grid=k_grid, device=device)
+    if report is None:
+        raise ValueError("no sequence windows available for the false-positive benchmark")
     return BackboneResult(
         key=backbone.key,
         model_type=backbone.model_type,
@@ -360,7 +367,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "into each manifest.",
     )
     add_common_args(parser)
-    parser.add_argument("--bindings", type=Path, default=DEFAULT_BINDINGS_PATH)
+    add_bindings_arg(parser)
     parser.add_argument(
         "--out",
         type=Path,
@@ -393,11 +400,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Also write the full comparison as JSON to this path.",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 
@@ -424,7 +427,8 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
 def _auto_carve_calibration_sessions(sessions: Sequence[Path]) -> list[Path]:
     """Auto-hold-out calibration sessions from ``sessions`` (Task 3.3).
 
-    Reuses ``retrain.py``'s auto-holdout picker (most-recent *substantial*
+    Reuses retrain's auto-holdout picker
+    (``evaluation.pick_calibration_holdouts``: most-recent *substantial*
     sessions, chosen for operating-mode coverage) rather than inventing a new
     splitting strategy. Returns ``[]`` when the corpus is too small to spare a
     holdout (fewer than 3 sessions) — the caller must treat that as a hard
@@ -432,7 +436,7 @@ def _auto_carve_calibration_sessions(sessions: Sequence[Path]) -> list[Path]:
     """
     if len(sessions) < 3:
         return []
-    return retrain._pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
+    return pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

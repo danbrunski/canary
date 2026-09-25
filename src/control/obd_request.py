@@ -39,9 +39,8 @@ from src.collection.can_obd_client import (
     parse_dtc_payload,
 )
 from src.collection.isotp import nrc_name
-from src.collection.obd_scheduler import load_repo_did_map
 from src.config import CanBusConfig
-from src.decode.dids import apply_scaling, decode_did_raw, did_entries_by_hex
+from src.decode.dids import apply_scaling, decode_did_raw, did_entries_by_hex, load_repo_did_map
 
 log = logging.getLogger(__name__)
 

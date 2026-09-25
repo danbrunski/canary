@@ -570,7 +570,7 @@ before the structural ones.
   `query_mode_01_batch(byte_length_for=)` defaults to the registry width.
   The decoder sets stay separate (July decision).
 
-- [~] **R02.14 Small cleanups (batch them).**
+- [x] **R02.14 Small cleanups (batch them).**
   - Delete dead code: `CanObdClient._handle_single_frame` (no callers) and
     `_extract_service_payload` (test-only).
   - Remove the 66 unused `# noqa: E501` in `obd_registry`
@@ -604,6 +604,11 @@ before the structural ones.
   profile). **Remainder:** `kline_collector._wait` → `wait_for_stop_or_timeout`
   is not done: `src/collection/kline_collector.py` carries a human session's
   uncommitted work.
+  *Remainder done 2026-09-25.* `kline_collector._wait` is deleted; its six
+  waits call `reconnect.wait_for_stop_or_timeout` (same timeout semantics;
+  a non-positive delay now yields once instead of `wait_for(timeout=0)`).
+  `tests/test_kline_collector.py`, `test_kline_exchanges.py`,
+  `test_kline_exchange_report_tool.py` pass.
 
 ## Looked at and fine
 

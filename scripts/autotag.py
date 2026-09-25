@@ -36,12 +36,20 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from _cli import (
-    add_common_args,
-    add_log_level_arg,
-    discover_live_session_dirs,
-    load_config,
-)
+try:
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+        discover_live_session_dirs,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.autotag` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+        discover_live_session_dirs,
+        load_config,
+    )
 
 from src.analysis.autotag import TagEvent, detect_tags
 from src.collection.tags import write_tag

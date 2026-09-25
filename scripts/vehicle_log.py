@@ -20,10 +20,16 @@ from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 
-from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
-    add_common_args,
-    load_config,
-)
+try:
+    from _cli import (
+        add_common_args,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.vehicle_log` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        load_config,
+    )
 
 from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402

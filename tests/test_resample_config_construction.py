@@ -274,11 +274,12 @@ def test_detector_benchmark_uses_the_recipe(
 def test_disposition_report_uses_the_recipe(
     tuned: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import scripts.disposition_report as report
+    from src.preprocessing import feature_pipeline
 
-    seen = _spy_resample_wide(monkeypatch, report, stop=True)
+    # The screen scripts/disposition_report.py runs (R06.4: moved to src).
+    seen = _spy_resample_wide(monkeypatch, feature_pipeline, stop=True)
     with pytest.raises(_StopError):
-        report._scan_sessions(
+        feature_pipeline.disposition_screen_frames(
             [_write_session(tmp_path)], tuned, bindings_path=tmp_path / "absent.yaml"
         )
     assert seen == [resample_config_for(tuned)]

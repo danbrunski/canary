@@ -14,14 +14,15 @@ import pytest
 pytest.importorskip("sklearn")
 
 from scripts.evaluate_detectors import (  # noqa: E402
+    EVALUATION_SESSION_KINDS,
     SessionScore,
     clean_drive_record,
-    discover_session_dirs,
     main,
     render_markdown,
     summarize_recall,
 )
 from src.analysis.labelled_events import LabelledEvent  # noqa: E402
+from src.control.sessions import recorded_sessions  # noqa: E402
 from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
@@ -45,16 +46,26 @@ def _write_session(root: Path, name: str, *, start: float, n: int = 120, seed: i
 def test_discovery_keeps_captures_drops_quarantine_and_orders_by_parsed_time(
     tmp_path: Path,
 ) -> None:
+    """R06.6: the harness asks ``recorded_sessions`` with the tuning kind
+    added, so a legacy ``_tuning-*`` recording still bridges drives as its
+    local copy did. A directory with no telemetry chunk is not a recording."""
     for name in (
         "2026-09-18T120000",
         "_capture-tuning-2026-09-18T110000",
+        "_tuning-2026-09-18T113000",
         "_archive",
         "_replay-2026-09-18T100000",
         "notes",
     ):
         (tmp_path / name).mkdir()
-    found = [p.name for p in discover_session_dirs([tmp_path])]
-    assert found == ["_capture-tuning-2026-09-18T110000", "2026-09-18T120000"]
+        (tmp_path / name / "telemetry-000000.parquet").write_bytes(b"PAR1")
+    (tmp_path / "2026-09-18T130000").mkdir()  # rotated into, nothing flushed
+    found = [p.name for p in recorded_sessions([tmp_path], kinds=EVALUATION_SESSION_KINDS)]
+    assert found == [
+        "_capture-tuning-2026-09-18T110000",
+        "_tuning-2026-09-18T113000",
+        "2026-09-18T120000",
+    ]
 
 
 def test_recall_excludes_withheld_outcomes_from_its_denominator() -> None:

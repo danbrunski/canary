@@ -155,8 +155,11 @@ What exists in `src/` is coupled to the USB cable:
   `TelemetrySource`, `CAPTURED_SOURCES`, H01.1's trainability classification
   (not trainable), `channels.SpecSource`, `spec_producibility`, the live
   router and `tests/test_telemetry.py` — the sweep `f73333f` made for
-  `sensor`. Channels: `kline:DID_<hex>` and `kline:MEM_<NAME>` (matching the
-  catalog names), raw frames as `kline:FRAME` rows with payload bytes so any
+  `sensor`. Channels: `kline:<module>:<hex>` and `kline:<module>:MEM_<NAME>`
+  (e.g. `kline:ECM:1206`, `kline:ECM:MEM_ECM_TARGET_EQUIV_RATIO`; K01.1
+  module-attributed names, `src/collection/kline/names.py` — rows recorded
+  before 2026-09-24 are the legacy `DID_<hex>`/`MEM_<NAME>` and are never
+  rewritten), raw frames as `kline:FRAME` rows with payload bytes so any
   session can be re-decoded later. **Accept:** `grep` for every place
   `TelemetrySource` members are listed shows `kline` or a stated reason.
   **Partial (2026-09-23):** `KLINE_SOURCE` in `src/telemetry.py` (Literal,
@@ -185,8 +188,8 @@ What exists in `src/` is coupled to the USB cable:
   `hardware.kline` (`KlineConfig`: off by default; enabling means the
   hardware may be used, not that it transmits). Idle until the active capture
   profile lists `kline:` channels; then claims the ECM session, wakes the
-  ECM, defines local id `0x81`, polls, and emits `kline:DID_*`/`kline:MEM_*`
-  rows with raw bytes and `acquired_at` at the exchange midpoint; ends with
+  ECM, defines local id `0x81`, polls, and emits `kline:ECM:<hex>` /
+  `kline:ECM:MEM_*` rows (named `kline:DID_*`/`kline:MEM_*` until K01.1) with raw bytes and `acquired_at` at the exchange midpoint; ends with
   StopCommunication and releases when the list empties or the daemon stops.
   7 tests (`tests/test_kline_collector.py`): idle-then-own, retry after a
   failed start with ownership released between, a new session after loss

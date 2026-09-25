@@ -14,9 +14,11 @@ scope, not a restriction on CANary's general diagnostic request path.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 # Pure protocol helpers — stdlib-only, no python-can, so importing them at
@@ -168,6 +170,40 @@ class DidSnapshot:
             batch_nrc=_opt_int("batch_nrc"),
             batched_reads=_opt_int("batched_reads"),
         )
+
+
+#: The JSONL record discriminator every bus-tool log uses (``tools/did_log``
+#: headers included). ``can_memory_log`` wrote ``"type"`` until R06.1;
+#: :func:`record_kind` still reads those files.
+RECORD_KEY = "kind"
+
+
+def record_kind(row: Mapping[str, Any]) -> str | None:
+    """A JSONL record's discriminator; reads pre-R06.1 ``"type"`` logs too."""
+    kind = row.get(RECORD_KEY, row.get("type"))
+    return kind if isinstance(kind, str) else None
+
+
+def load_widths(path: Path) -> dict[int, int]:
+    """Measured payload widths from a :class:`DidSnapshot` file or a did_log JSONL header.
+
+    Only a measurement counts: a catalog ``byte_length`` is the decoded value's
+    width inside the payload, not the payload's own length. Lives beside the
+    snapshot it reads (R06.1); ``tools/_bus_tool`` re-exports it.
+    """
+    text = path.read_text()
+    try:
+        raw: Any = json.loads(text)
+    except json.JSONDecodeError:
+        first = next((line for line in text.splitlines() if line.strip()), "")
+        raw = json.loads(first)
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
+    if record_kind(raw) == "header" and isinstance(raw.get("widths"), dict):
+        return {int(key, 16): int(width) for key, width in raw["widths"].items()}
+    if isinstance(raw.get("values"), dict):
+        return {int(key, 16): len(hexvalue) // 2 for key, hexvalue in raw["values"].items()}
+    raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
 
 
 def sweep_dids(

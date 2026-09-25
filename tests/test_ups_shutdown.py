@@ -7,11 +7,8 @@ lazily imported inside main(), so this module imports cleanly under the venv.
 from __future__ import annotations
 
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import ups_shutdown_watch as ups  # noqa: E402
+import scripts.ups_shutdown_watch as ups
 
 
 def test_no_shutdown_while_power_good() -> None:

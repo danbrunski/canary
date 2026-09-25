@@ -10,8 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.companion.library import CanaryLibrary, LibrarySession
@@ -20,8 +19,6 @@ from src.companion.schemas import (
     JobSubmitRequest,
     ModelUploadRequest,
     PublishModelRequest,
-    SessionMetadataRequest,
-    SessionPinRequest,
     SyncSessionRequest,
     TrainingRunApprovalRequest,
 )
@@ -38,25 +35,17 @@ from src.companion.services import (
     _require_optional_bearer,
     cancel_job_response,
     dataset_health_response,
-    delete_session_response,
-    export_session_checksum_response,
-    export_session_response,
     feedback_list_response,
     get_job_response,
     get_model_manifest_response,
-    get_session_response,
     job_logs_response,
     job_result_response,
     list_jobs_response,
-    pin_session_response,
     run_queued_action,
-    sessions_list_response,
     set_training_run_approval_response,
     submit_feedback_response,
     submit_job_response,
     training_runs_response,
-    unpin_session_response,
-    update_session_metadata_response,
 )
 from src.config import CanaryConfig
 from src.control.jobs import JobController
@@ -67,6 +56,11 @@ from src.dashboard.readers import (
     read_latest_telemetry_rows,
 )
 from src.dashboard.routes.session_reads import build_session_read_router
+from src.dashboard.routes.stored_sessions import (
+    SessionStore,
+    build_stored_session_router,
+    sessions_payload,
+)
 from src.dashboard.schemas import FeedbackRequest
 from src.dashboard.security import AUTH_MARKER
 from src.models.manifest import compatibility_report, manifest_path_for
@@ -202,98 +196,23 @@ def register_companion_routes(
 
     @app.get("/control/sessions")
     def list_local_sessions(_auth: None = Depends(require_local_auth)) -> dict[str, Any]:
-        return sessions_list_response(
-            [_library_session_to_control_dict(s) for s in lib.list_sessions()]
-        )
+        return sessions_payload([_library_session_to_control_dict(s) for s in lib.list_sessions()])
 
-    @app.get("/control/sessions/{session_id}/export")
-    def export_local_session(
-        session_id: str,
-        background_tasks: BackgroundTasks,
-        _auth: None = Depends(require_local_auth),
-    ) -> FileResponse:
-        return export_session_response(
-            session_id,
-            background_tasks,
-            resolve=lambda sid: _library_session_path(lib, sid),
-            tmp_prefix="canary-local-",
-        )
-
-    @app.get("/control/sessions/{session_id}/export/checksum")
-    def export_local_session_checksum(
-        session_id: str,
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        """6.34: the server-computed sha256 companion's own sync checks its
-        download against — registered locally too so this Pi-side endpoint
-        has a parity fixture to test against without a real Pi."""
-        return export_session_checksum_response(
-            session_id, resolve=lambda sid: _library_session_path(lib, sid)
-        )
-
-    @app.get("/control/sessions/{session_id}")
-    def get_local_session(
-        session_id: str,
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        return get_session_response(
-            session_id,
-            resolve_and_serialize=lambda sid: _library_session_to_control_dict(
-                _library_session(lib, sid)
+    # One session's read/metadata/pin/unpin/delete/export: the routes the
+    # daemon serves, over the synced library (R03.7). A write re-indexes the
+    # session into the library; a delete drops it from the index.
+    app.include_router(
+        build_stored_session_router(
+            SessionStore(
+                resolve=lambda sid: _library_session_path(lib, sid),
+                describe=lambda sid: _library_session_to_control_dict(_library_session(lib, sid)),
+                export_prefix="canary-local-",
+                reindex=_refresh_and_serialize,
+                after_delete=lambda sid: lib.remove_session(sid, delete_files=False),
             ),
+            require_local_auth,
         )
-
-    @app.post("/control/sessions/{session_id}/metadata")
-    def update_local_session_metadata(
-        session_id: str,
-        request: SessionMetadataRequest,
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        return update_session_metadata_response(
-            session_id,
-            request.metadata,
-            merge=request.merge,
-            resolve=lambda sid: _library_session_path(lib, sid),
-            finalize=_refresh_and_serialize,
-        )
-
-    @app.post("/control/sessions/{session_id}/pin")
-    def pin_local_session(
-        session_id: str,
-        request: SessionPinRequest,
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        return pin_session_response(
-            session_id,
-            reason=request.reason,
-            extra_metadata=request.metadata,
-            resolve=lambda sid: _library_session_path(lib, sid),
-            serialize=_refresh_and_serialize,
-        )
-
-    @app.post("/control/sessions/{session_id}/unpin")
-    def unpin_local_session(
-        session_id: str,
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        return unpin_session_response(
-            session_id,
-            resolve=lambda sid: _library_session_path(lib, sid),
-            serialize=_refresh_and_serialize,
-        )
-
-    @app.delete("/control/sessions/{session_id}")
-    def delete_local_session(
-        session_id: str,
-        force: bool = Query(default=False),
-        _auth: None = Depends(require_local_auth),
-    ) -> dict[str, Any]:
-        return delete_session_response(
-            session_id,
-            force=force,
-            resolve=lambda sid: _library_session_path(lib, sid),
-            after_delete=lambda sid: lib.remove_session(sid, delete_files=False),
-        )
+    )
 
     # Chart and GPS-track reads: the same routes the daemon serves, rooted at
     # the synced library and guarded by the local optional bearer (R03.7).

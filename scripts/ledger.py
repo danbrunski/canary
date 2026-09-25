@@ -27,7 +27,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-import _cli  # noqa: E402  (also bootstraps repo root onto sys.path)
+try:
+    import _cli  # run as a file: scripts/ is on sys.path; bootstraps the repo root
+except ImportError:  # loaded as `scripts.ledger` — repo root on path, not scripts/
+    import scripts._cli as _cli  # type: ignore[no-redef]
 
 from src.models.manifest import ManifestValidationError  # noqa: E402
 from src.models.promotion_gate import (  # noqa: E402
@@ -146,18 +149,20 @@ def _freeze_golden_baselines(
     when no golden exists at all. Returns the sidecar path on success.
     """
     try:
-        import disposition_report  # local: needs scripts/ on sys.path, see module docstring
         import pandas as pd
 
         from src.analysis.training_disposition import compute_golden_baselines
         from src.models.golden_baselines import golden_baselines_path, write_golden_baselines
-        from src.preprocessing.feature_pipeline import candidate_feature_columns
+        from src.preprocessing.feature_pipeline import (
+            candidate_feature_columns,
+            disposition_screen_frames,
+        )
 
         config = _cli.load_config(args)
         sessions = [Path(s) for s in updated.input_sessions if Path(s).exists()]
         if not sessions:
             return None
-        framed_parts, _reject_counts = disposition_report._scan_sessions(
+        framed_parts, _reject_counts = disposition_screen_frames(
             sessions, config, bindings_path=args.bindings
         )
         if not framed_parts:

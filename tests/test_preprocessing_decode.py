@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.decode.bindings import Bindings, Signal
+from src.decode.bindings import Bindings, Signal, load_bindings
 from src.preprocessing.decode import (
     DECODED_SOURCE,
     decode_can_rows,
@@ -463,6 +463,60 @@ def test_read_session_decoded_subset_reads_every_channel_spelling(
     assert rows["channel"].unique().tolist() == ["COOLANT"]
     assert rows["value_number"].tolist() == [40.0, 41.0, 42.0, 43.0, 44.0]
     assert "can" not in set(decoded["source"])
+
+
+@pytest.mark.parametrize("spelling", ["0x551", "551", "0x0551", "0551"])
+def test_both_bounded_readers_decode_an_old_spelling_session_alike(
+    tmp_path: Path, spelling: str
+) -> None:
+    """R04.14: the plausibility reader and the behavior-validation evaluation
+    frame both read through ``read_session_decoded_subset``, so an era that
+    spelled the id without ``0x`` decodes in both. ``build_evaluation_frame``
+    pushed ``0x{id:X}`` down itself and got no ``decoded:`` values from it."""
+    from src.analysis.behavior_validation import build_evaluation_frame
+    from src.config import CanaryConfig
+    from src.decode.behavior_models import BehaviorModels
+    from src.plausibility.offline import session_long
+
+    bindings_path = tmp_path / "bindings.yaml"
+    bindings_path.write_text(
+        """
+schema_version: 1
+signals:
+  - name: ECM_COOLANT_TEMP
+    module: ECM
+    can_id: 0x551
+    byte_start: 0
+    byte_length: 1
+    confidence: high
+  - name: OTHER
+    module: ECM
+    can_id: 0x6F7
+    byte_start: 0
+    byte_length: 1
+    confidence: high
+"""
+    )
+    session = _spelled_session(tmp_path, spelling)
+    wanted = {"ECM_COOLANT_TEMP"}
+
+    plausibility = session_long(
+        session, bindings=load_bindings(bindings_path), did_map=None, decoded=wanted
+    )
+    decoded = plausibility[plausibility["source"] == "decoded"]
+    assert decoded["channel"].unique().tolist() == ["ECM_COOLANT_TEMP"]
+
+    frame = build_evaluation_frame(
+        [session],
+        CanaryConfig.from_yaml(Path("canary.example.yaml")),
+        BehaviorModels(schema_version=1),
+        bindings_path=bindings_path,
+        dids_path=tmp_path / "absent-dids.yaml",
+    )
+    column = "decoded:ECM_COOLANT_TEMP"
+    assert column in frame.columns
+    assert "decoded:OTHER" not in frame.columns
+    assert frame[column].dropna().tolist() == decoded["value_number"].tolist()
 
 
 def test_read_session_decoded_subset_without_wanted_signals_reads_no_can(tmp_path: Path) -> None:

@@ -9,7 +9,6 @@ training drives" were 2. These tests pin the shared definition
 
 from __future__ import annotations
 
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +16,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
+from scripts.evaluate_detectors import record_seen
 from src.analysis.behavior_validation import group_drives, piece_time_ranges
 from src.analysis.drives import (
     DRIVE_COLUMN,
@@ -33,8 +33,6 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-from evaluate_detectors import record_seen  # noqa: E402
 
 
 def _epoch(stamp: str) -> float:

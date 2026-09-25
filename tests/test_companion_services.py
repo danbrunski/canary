@@ -245,21 +245,6 @@ def test_run_queued_action_marks_failed_and_reraises(tmp_path: Path) -> None:
     assert "network dropped" in action["detail"]
 
 
-def test_export_session_checksum_response_matches_zip_hash(tmp_path: Path) -> None:
-    import hashlib
-
-    session = tmp_path / "2026-05-17T120000"
-    session.mkdir()
-    (session / "manifest.json").write_text(json.dumps({"started_at": "now"}))
-
-    result = services.export_session_checksum_response(session.name, resolve=lambda _sid: session)
-    assert result["session_id"] == session.name
-
-    tmp_zip = tmp_path / "check.zip"
-    services.write_session_zip(session, tmp_zip)
-    assert result["sha256"] == hashlib.sha256(tmp_zip.read_bytes()).hexdigest()
-
-
 def test_get_model_manifest_response_404_when_missing(tmp_path: Path) -> None:
     from fastapi import HTTPException
 
@@ -279,81 +264,6 @@ def test_get_model_manifest_response_reads_json(tmp_path: Path) -> None:
         "isolation_forest", resolve_manifest_path=lambda _mt: manifest_path
     )
     assert result["manifest"]["model_version"] == "if_v1"
-
-
-def test_update_session_metadata_response_finalize_hook_is_optional(tmp_path: Path) -> None:
-    session = tmp_path / "2026-05-17T120000"
-    session.mkdir()
-
-    # Control's shape: no finalize -> no "session" key at all.
-    without_hook = services.update_session_metadata_response(
-        session.name,
-        {"route": "mesa"},
-        merge=True,
-        resolve=lambda _sid: session,
-    )
-    assert "session" not in without_hook
-    assert without_hook["metadata"]["route"] == "mesa"
-
-    # Companion's shape: a finalize hook adds "session" and can carry any
-    # extra work (here, standing in for the library-index reimport).
-    calls: list[Path] = []
-
-    def finalize(path: Path) -> dict[str, Any]:
-        calls.append(path)
-        return {"refreshed": True}
-
-    with_hook = services.update_session_metadata_response(
-        session.name,
-        {"route": "mesa"},
-        merge=True,
-        resolve=lambda _sid: session,
-        finalize=finalize,
-    )
-    assert with_hook["session"] == {"refreshed": True}
-    assert calls == [session]
-
-
-def test_pin_session_response_serialize_hook_carries_the_divergence(tmp_path: Path) -> None:
-    session = tmp_path / "2026-05-17T120000"
-    session.mkdir()
-    refresh_calls: list[Path] = []
-
-    def serialize_with_refresh(path: Path) -> dict[str, Any]:
-        refresh_calls.append(path)
-        return {"session_id": path.name, "reimported": True}
-
-    result = services.pin_session_response(
-        session.name,
-        reason="good drive",
-        extra_metadata={"terrain": "city"},
-        resolve=lambda _sid: session,
-        serialize=serialize_with_refresh,
-    )
-
-    assert refresh_calls == [session]
-    assert result["session"] == {"session_id": session.name, "reimported": True}
-    assert result["metadata"]["terrain"] == "city"
-
-
-def test_delete_session_response_guard_and_after_delete_hooks(tmp_path: Path) -> None:
-    session = tmp_path / "2026-05-17T120000"
-    session.mkdir()
-
-    guard_calls: list[str] = []
-    after_calls: list[str] = []
-    result = services.delete_session_response(
-        session.name,
-        force=False,
-        resolve=lambda _sid: session,
-        guard=guard_calls.append,
-        after_delete=after_calls.append,
-    )
-
-    assert result == {"session_id": session.name, "deleted": True, "force": False}
-    assert guard_calls == [session.name]
-    assert after_calls == [session.name]
-    assert not session.exists()
 
 
 def test_training_runs_response_on_run_hook_is_optional(tmp_path: Path) -> None:

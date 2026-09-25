@@ -6,16 +6,13 @@ from __future__ import annotations
 
 import json
 import re
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import fingerprint as fingerprint_cli  # noqa: E402
-
+import scripts.fingerprint as fingerprint_cli
 from src.analysis.fingerprint import (  # noqa: E402
     FINGERPRINT_FILENAME,
     is_stale,

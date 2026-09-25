@@ -51,7 +51,7 @@ from src.analysis.tuning_frame import ProviderRegistry, build_tuning_frame
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import PARQUET_PATTERN
+from src.preprocessing.loader import session_footer_span
 from src.session import TAGS_FILENAME, load_tags
 
 Regime = Literal["all", "closed_loop", "enrichment", "fuel_cut", "idle"]
@@ -193,51 +193,15 @@ def session_span(session_dir: Path) -> tuple[datetime | None, datetime | None, i
     No data read — row-group statistics and ``num_rows`` — so the capture
     browser can list duration and size without loading a session. ``None``
     means unknown (nothing readable, or chunks written without statistics),
-    never zero.
+    never zero. The footer walk is the loader's
+    (:func:`src.preprocessing.loader.session_footer_span`, R05.14).
     """
-    import pyarrow.parquet as pq
-
-    lo: pd.Timestamp | None = None
-    hi: pd.Timestamp | None = None
-    rows = 0
-    seen = False
-    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
-        try:
-            if chunk.stat().st_size == 0:
-                continue
-            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
-        except Exception:  # noqa: BLE001 - a truncated chunk just doesn't count
-            continue
-        rows += meta.num_rows
-        seen = True
-        try:
-            column = meta.schema.names.index("timestamp")
-        except ValueError:
-            continue
-        for group in range(meta.num_row_groups):
-            stats = meta.row_group(group).column(column).statistics
-            if stats is None or not stats.has_min_max:
-                continue
-            low, high = _utc(stats.min), _utc(stats.max)
-            if low is not None and (lo is None or low < lo):
-                lo = low
-            if high is not None and (hi is None or high > hi):
-                hi = high
+    footer = session_footer_span(session_dir)
     return (
-        None if lo is None else lo.to_pydatetime(),
-        None if hi is None else hi.to_pydatetime(),
-        rows if seen else None,
+        None if footer.first is None else footer.first.to_pydatetime(),
+        None if footer.last is None else footer.last.to_pydatetime(),
+        footer.rows,
     )
-
-
-def _utc(value: Any) -> pd.Timestamp | None:
-    try:
-        stamp = pd.Timestamp(value)
-    except (TypeError, ValueError):
-        return None
-    if pd.isna(stamp):
-        return None
-    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
 
 
 def session_revision(session_dir: Path, registry: TuneRevisionRegistry | None) -> dict[str, Any]:

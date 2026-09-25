@@ -144,7 +144,7 @@ def decode_can_rows(
                         "value_number": values,
                         "value_text": None,
                         "value_bool": None,
-                        "unit": sig.unit,
+                        "unit": sig.display_unit,
                         "payload": None,
                         "metadata_json": meta,
                         "session": sessions,

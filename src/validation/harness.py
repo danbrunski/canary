@@ -65,14 +65,20 @@ from src.control.capture_finalize import StartEpoch, finalize_capture, record_ca
 from src.daemon.components import DaemonComponents, build_components
 from src.daemon.drain import drain_queue_with_broadcast
 from src.daemon.inference import build_live_feature_source, run_live_inference
+from src.daemon.runtime import (
+    can_receive_stats_observer,
+    drain_kwargs,
+    obd_handoff_stats_observer,
+)
 from src.dashboard.broadcast import Broadcaster, Subscription
 from src.decode.bindings import load_bindings
 from src.decode.frame_decoder import FrameDecoder
 from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
 from src.paths import BINDINGS_YAML
+from src.preprocessing.live import LiveFeatureSource
 from src.profiles import resolve_profile_for_tooling, scope_config
-from src.storage.async_writer import ensure_async_writer
+from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 from src.validation.scenarios import (
@@ -632,37 +638,45 @@ def _counters_dict(counters: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def run_scenario(  # noqa: PLR0912, PLR0915
+@dataclass
+class _Pipeline:
+    """The running daemon half of a scenario: sinks, inference and the
+    dashboard/score counters, as :func:`_start_pipeline` wired them."""
+
+    components: DaemonComponents
+    writer: InstrumentedParquetWriter
+    async_writer: AsyncParquetTelemetryWriter
+    live_source: LiveFeatureSource | None
+    queue: asyncio.Queue[TelemetryRecord]
+    drain_stop: asyncio.Event
+    collector_stop: asyncio.Event
+    inference_stop: asyncio.Event
+    aux_stop: asyncio.Event
+    drain_task: asyncio.Task[None]
+    inference_task: asyncio.Task[None] | None
+    aux_tasks: list[asyncio.Task[None]]
+    telemetry_sub: Subscription
+    scores_sub: Subscription
+    heartbeat: BoundedSamples
+    clock_steps: list[dict[str, float]]
+    dashboard_count: list[int] = field(default_factory=lambda: [0])
+    scores: dict[str, int] = field(default_factory=dict)
+
+
+def _start_pipeline(
     spec: ScenarioSpec,
     *,
     label: str,
     sessions_root: Path,
-    scratch: Path,
-    config: CanaryConfig | None = None,
-    enable_inference: bool = True,
-) -> RunArtifacts:
-    """Run ``spec`` end to end and return the raw artifacts (see module doc)."""
-    scratch.mkdir(parents=True, exist_ok=True)
-    config = config if config is not None else harness_config(scratch)
-    default_profile, _ = build_profile(
-        {"name": "default", "mode01": {"AUTO": 1.0}, "mode22": ALL_DIDS, "corpus_eligible": True}
-    )
-    reset_process_state(default_profile)
-    profile, profile_dropped = build_profile(spec.profile)
-
-    components = build_components(config)
-    health = components.health_monitor
-    models = install_models(components, config) if enable_inference else {"status": "not_built"}
-
-    synthetic = spec.kind != "replay"
-    bindings_path = (
-        write_synthetic_bindings(scratch / "synthetic_bindings.yaml")
-        if synthetic
-        else REAL_BINDINGS
-    )
-    decoder = FrameDecoder.from_bindings(
-        load_bindings(bindings_path), confidence_levels=("confirmed",)
-    )
+    components: DaemonComponents,
+    config: CanaryConfig,
+    bindings_path: Path,
+    decoder: FrameDecoder,
+    enable_inference: bool,
+) -> _Pipeline:
+    """Writer, drain fanout, dashboard/score consumers, heartbeat and the
+    inference loop — the daemon's drain wiring composed from
+    :func:`src.daemon.runtime.drain_kwargs` (R04.13), not a copy of it."""
     writer = InstrumentedParquetWriter(
         sessions_root / label / spec.name,
         stall=spec.storage_stall,
@@ -676,99 +690,88 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
         if enable_inference
         else None
     )
-    can_spec: CanObdSpec | None = None
-    spec_dropped: list[str] = []
-    if spec.kind == "canable":
-        can_spec, spec_dropped = build_can_spec(config, spec)
-
-    artifacts = RunArtifacts(
-        scenario=spec,
-        label=label,
-        config=config,
-        session_dirs=[],
-        capture_dir=None,
-        profile=profile,
-        profile_fields_dropped=profile_dropped,
-        spec_fields_dropped=spec_dropped,
-        can_spec=can_spec,
-        bindings_path=bindings_path,
-        decoder_signals=decoder.signal_count,
-        models=models,
-        components_enabled={
-            "collector": spec.kind,
-            "decode_storage": True,
-            "dashboard_broadcast": True,
-            "live_feature_source": live_source is not None,
-            "inference_loop": live_source is not None,
-            "derived_channels": live_source is not None,
-            "dtc_sink": True,
-            "monitor_sink": True,
-            "gps": (
-                f"simulated live receiver at {spec.live_gps_hz:g} Hz on the replay queue"
-                if spec.live_gps_hz > 0
-                else False
-            ),
-            "elm327": "not_exercised: needs the ELM327-emulator serial integration tier",
-            "hardware_adapter": "synthetic",
-            "kernel_counters": "unavailable (no can0 on this host)",
-        },
-    )
-
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=spec.queue_max_size)
     drain_stop = asyncio.Event()
-    collector_stop = asyncio.Event()
     inference_stop = asyncio.Event()
     aux_stop = asyncio.Event()
-
     drain_task = asyncio.create_task(
         drain_queue_with_broadcast(
             queue,
             async_writer,
             drain_stop,
-            telemetry_broadcaster=components.telemetry_broadcaster,
             live_source=live_source,
-            dtc_state=components.dtc_state,
-            dtc_emitter=components.emitter,
-            monitor_state=components.monitor_state,
-            monitor_emitter=components.emitter,
-            vehicle_ledger=components.vehicle_ledger,
-            active_session_path=lambda: writer.paths.root,
             poll_interval=0.1,
-            health_monitor=health,
-            storage_decode=lambda record: (
-                decoder.decode(record) if tuning_profile.broadcast_decode_enabled() else ()
+            # The daemon's wiring; the trip hooks stay unset because a trip
+            # end would schedule a whole-session digest mid-measurement.
+            **drain_kwargs(
+                config,
+                components,
+                active_session_path=lambda: writer.paths.root,
+                storage_decoder=decoder,
             ),
         ),
         name="c10-drain",
     )
-    dashboard_count = [0]
     telemetry_sub = components.telemetry_broadcaster.subscribe()
     scores_sub = components.scores_broadcaster.subscribe()
-    scores: dict[str, int] = {}
+    heartbeat = BoundedSamples()
+    clock_steps: list[dict[str, float]] = []
+    pipeline = _Pipeline(
+        components=components,
+        writer=writer,
+        async_writer=async_writer,
+        live_source=live_source,
+        queue=queue,
+        drain_stop=drain_stop,
+        collector_stop=asyncio.Event(),
+        inference_stop=inference_stop,
+        aux_stop=aux_stop,
+        drain_task=drain_task,
+        inference_task=None,
+        aux_tasks=[],
+        telemetry_sub=telemetry_sub,
+        scores_sub=scores_sub,
+        heartbeat=heartbeat,
+        clock_steps=clock_steps,
+    )
 
     def _count_dashboard(_message: Any) -> None:
-        dashboard_count[0] += 1
+        pipeline.dashboard_count[0] += 1
 
     def _count_score(message: Any) -> None:
         source = str(message.get("source", "?")) if isinstance(message, Mapping) else "?"
-        scores[source] = scores.get(source, 0) + 1
+        pipeline.scores[source] = pipeline.scores.get(source, 0) + 1
 
-    aux_tasks = [
-        asyncio.create_task(_consume(telemetry_sub, aux_stop, _count_dashboard)),
-        asyncio.create_task(_consume(scores_sub, aux_stop, _count_score)),
-    ]
-    heartbeat = BoundedSamples()
-    clock_steps: list[dict[str, float]] = []
-    aux_tasks.append(asyncio.create_task(_heartbeat(aux_stop, heartbeat, clock_steps)))
-    inference_task: asyncio.Task[None] | None = None
+    pipeline.aux_tasks.extend(
+        [
+            asyncio.create_task(_consume(telemetry_sub, aux_stop, _count_dashboard)),
+            asyncio.create_task(_consume(scores_sub, aux_stop, _count_score)),
+            asyncio.create_task(_heartbeat(aux_stop, heartbeat, clock_steps)),
+        ]
+    )
     if live_source is not None:
-        inference_task = asyncio.create_task(
+        pipeline.inference_task = asyncio.create_task(
             run_live_inference(
                 live_source, components, inference_stop, tick_seconds=spec.inference_tick_s
             ),
             name="c10-inference",
         )
+    return pipeline
 
+
+async def _start_collector(
+    spec: ScenarioSpec,
+    *,
+    label: str,
+    config: CanaryConfig,
+    can_spec: CanObdSpec | None,
+    pipeline: _Pipeline,
+    artifacts: RunArtifacts,
+) -> asyncio.Task[Any]:
+    """Start the scenario's collector (Canable, passive or replay) on the
+    pipeline's queue, observed through the daemon's own health observers."""
+    health = pipeline.components.health_monitor
+    queue, collector_stop = pipeline.queue, pipeline.collector_stop
     ledger = BroadcastLedger(origin_monotonic=time.monotonic())
     artifacts.ledger = ledger
     ecu_kwargs = dict(spec.ecu)
@@ -792,22 +795,16 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
         artifacts.scheduler_metrics = metrics.to_dict()
         artifacts.scheduler_snapshots += 1
 
+    observe_handoff = obd_handoff_stats_observer(health)
+
     def on_handoff(stats: CollectorHandoffStats) -> None:
-        health.observe_collector_handoff("obd_collect", **stats.to_dict())  # type: ignore[arg-type]
+        observe_handoff(stats)
         artifacts.handoff = stats.to_dict()
 
+    observe_receive = can_receive_stats_observer(health)
+
     def on_receive(stats: CanReceiveStats) -> None:
-        health.observe_receive_path(
-            "can_receive",
-            received=stats.frames,
-            parse_errors=stats.parse_errors,
-            buffer_dropped=stats.handoff.dropped,
-            buffer_high_water=stats.handoff.high_water,
-            buffer_capacity=stats.handoff.capacity,
-            queue_dropped=stats.queue_dropped,
-            batches=stats.handoff.drains,
-            reconnects=stats.reconnects,
-        )
+        observe_receive(stats)
         artifacts.receive_stats = {
             "frames": stats.frames,
             "parse_errors": stats.parse_errors,
@@ -822,7 +819,7 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
     artifacts.started_wall = time.time()
     if spec.kind == "canable":
         assert can_spec is not None
-        collector_task = asyncio.create_task(
+        return asyncio.create_task(
             collect_can_obd_from_config(
                 can_spec,
                 queue,
@@ -834,8 +831,8 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
             ),
             name="c10-collector",
         )
-    elif spec.kind == "passive":
-        collector_task = asyncio.create_task(
+    if spec.kind == "passive":
+        return asyncio.create_task(
             collect_can_from_config(
                 config.hardware.can,
                 queue,
@@ -847,35 +844,46 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
             ),
             name="c10-passive",
         )
-    else:
-        replay_source = Path(spec.replay_source) if spec.replay_source else DRIVE_SLICE
-        artifacts.replay_source = replay_source
-        artifacts.replay_speed = spec.replay_speed
-        replay_stats = ReplayEmissionStats()
-        artifacts.replay_emission = replay_stats
-        await async_writer.enter_replay_mode(f"validation-{label}-{int(time.time())}")
-        collector_task = asyncio.create_task(
-            replay_session(
-                queue,
-                replay_source,
-                collector_stop,
-                speed=spec.replay_speed,
-                loop=False,
-                stats=replay_stats,
-            ),
-            name="c10-replay",
-        )
-        if spec.live_gps_hz > 0:
-            aux_tasks.append(
-                asyncio.create_task(
-                    _live_gps(queue, collector_stop, spec.live_gps_hz, artifacts),
-                    name="c10-live-gps",
-                )
+    replay_source = Path(spec.replay_source) if spec.replay_source else DRIVE_SLICE
+    artifacts.replay_source = replay_source
+    artifacts.replay_speed = spec.replay_speed
+    replay_stats = ReplayEmissionStats()
+    artifacts.replay_emission = replay_stats
+    await pipeline.async_writer.enter_replay_mode(f"validation-{label}-{int(time.time())}")
+    collector_task = asyncio.create_task(
+        replay_session(
+            queue,
+            replay_source,
+            collector_stop,
+            speed=spec.replay_speed,
+            loop=False,
+            stats=replay_stats,
+        ),
+        name="c10-replay",
+    )
+    if spec.live_gps_hz > 0:
+        pipeline.aux_tasks.append(
+            asyncio.create_task(
+                _live_gps(queue, collector_stop, spec.live_gps_hz, artifacts),
+                name="c10-live-gps",
             )
+        )
+    return collector_task
 
-    await asyncio.sleep(spec.warmup_s)
 
-    # Arm — the capture boundary, exactly as the control route does it.
+async def _arm(
+    spec: ScenarioSpec,
+    *,
+    label: str,
+    config: CanaryConfig,
+    profile: CaptureProfile,
+    pipeline: _Pipeline,
+    artifacts: RunArtifacts,
+) -> asyncio.Task[None]:
+    """The capture boundary, exactly as the control route draws it; returns
+    the scenario timeline's task, started at the arm instant."""
+    health = pipeline.components.health_monitor
+    writer, async_writer = pipeline.writer, pipeline.async_writer
     start_epoch: StartEpoch | None = None
     capture_dir: Path | None = None
     if spec.kind != "replay":
@@ -905,31 +913,45 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
     artifacts.start_epoch = start_epoch
     artifacts.armed_wall = time.time()
     artifacts.armed_monotonic = time.monotonic()
-    rusage_before = _rusage()
     armed_loop = asyncio.get_running_loop().time()
-    timeline_task = asyncio.create_task(_timeline(spec.timeline, armed_loop, artifacts, writer))
+    return asyncio.create_task(_timeline(spec.timeline, armed_loop, artifacts, writer))
 
-    await asyncio.sleep(spec.duration_s)
 
-    # Stop — boundary, drain, flush, judge (C03.8) while the collector runs.
+async def _finish(
+    *,
+    pipeline: _Pipeline,
+    artifacts: RunArtifacts,
+    collector_task: asyncio.Task[Any],
+    timeline_task: asyncio.Task[None],
+    rusage_before: dict[str, float],
+    default_profile: CaptureProfile,
+) -> None:
+    """Stop — boundary, drain, flush, judge (C03.8) while the collector runs —
+    then tear down in dependency order and fill in the artifacts."""
+    components = pipeline.components
+    health = components.health_monitor
+    writer = pipeline.writer
     artifacts.scheduler_metrics_before_stop = artifacts.scheduler_metrics
-    if capture_dir is not None:
+    if artifacts.capture_dir is not None:
         artifacts.finalize = await finalize_capture(
-            capture_dir, health=health, writer=async_writer, start=start_epoch
+            artifacts.capture_dir,
+            health=health,
+            writer=pipeline.async_writer,
+            start=artifacts.start_epoch,
         )
     artifacts.stop_epoch = health.loss_epoch().to_dict()
-    collector_stop.set()
+    pipeline.collector_stop.set()
     await timeline_task
     await collector_task
-    inference_stop.set()
-    if inference_task is not None:
-        await inference_task
-    drain_stop.set()
-    await drain_task
-    aux_stop.set()
-    await asyncio.gather(*aux_tasks)
-    components.telemetry_broadcaster.unsubscribe(telemetry_sub)
-    components.scores_broadcaster.unsubscribe(scores_sub)
+    pipeline.inference_stop.set()
+    if pipeline.inference_task is not None:
+        await pipeline.inference_task
+    pipeline.drain_stop.set()
+    await pipeline.drain_task
+    pipeline.aux_stop.set()
+    await asyncio.gather(*pipeline.aux_tasks)
+    components.telemetry_broadcaster.unsubscribe(pipeline.telemetry_sub)
+    components.scores_broadcaster.unsubscribe(pipeline.scores_sub)
     artifacts.ended_wall = time.time()
     rusage_after = _rusage()
 
@@ -937,24 +959,136 @@ async def run_scenario(  # noqa: PLR0912, PLR0915
     artifacts.rows_written = writer.rows_written
     artifacts.writer_flush = writer.flush_samples.summary_ms()
     artifacts.writer_stalls = writer.stalls
-    artifacts.heartbeat = heartbeat.summary_ms()
+    artifacts.heartbeat = pipeline.heartbeat.summary_ms()
     artifacts.wall_clock_steps = [
         {**step, "at_s_after_arm": round(step["at_monotonic"] - artifacts.armed_monotonic, 3)}
-        for step in clock_steps
+        for step in pipeline.clock_steps
     ]
     artifacts.rusage = _rusage_delta(
         rusage_before, rusage_after, artifacts.ended_wall - artifacts.armed_wall
     )
-    artifacts.dashboard = {"received": dashboard_count[0], "dropped": telemetry_sub.dropped}
-    artifacts.scores = dict(scores)
+    artifacts.dashboard = {
+        "received": pipeline.dashboard_count[0],
+        "dropped": pipeline.telemetry_sub.dropped,
+    }
+    artifacts.scores = dict(pipeline.scores)
     artifacts.health_snapshot = _health_snapshot(health)
-    artifacts.inference = components.inference_timing.snapshot().to_dict() if live_source else None
+    artifacts.inference = (
+        components.inference_timing.snapshot().to_dict() if pipeline.live_source else None
+    )
     artifacts.emitter_counters = _counters_dict(components.emitter.counters)
     stub = components.model_managers.get("isolation_forest")
     if isinstance(stub, StubModelManager):
         artifacts.if_stub_calls = stub.artifact.calls
     reset_process_state(default_profile)
     _unsubscribe_all(components.telemetry_broadcaster)
+
+
+async def run_scenario(
+    spec: ScenarioSpec,
+    *,
+    label: str,
+    sessions_root: Path,
+    scratch: Path,
+    config: CanaryConfig | None = None,
+    enable_inference: bool = True,
+) -> RunArtifacts:
+    """Run ``spec`` end to end and return the raw artifacts (see module doc).
+
+    Start the pipeline, start the collector, warm up, arm, run, finish
+    (R04.13: the four phases were one 324-line function).
+    """
+    scratch.mkdir(parents=True, exist_ok=True)
+    config = config if config is not None else harness_config(scratch)
+    default_profile, _ = build_profile(
+        {"name": "default", "mode01": {"AUTO": 1.0}, "mode22": ALL_DIDS, "corpus_eligible": True}
+    )
+    reset_process_state(default_profile)
+    profile, profile_dropped = build_profile(spec.profile)
+
+    components = build_components(config)
+    models = install_models(components, config) if enable_inference else {"status": "not_built"}
+
+    synthetic = spec.kind != "replay"
+    bindings_path = (
+        write_synthetic_bindings(scratch / "synthetic_bindings.yaml")
+        if synthetic
+        else REAL_BINDINGS
+    )
+    decoder = FrameDecoder.from_bindings(
+        load_bindings(bindings_path), confidence_levels=("confirmed",)
+    )
+    pipeline = _start_pipeline(
+        spec,
+        label=label,
+        sessions_root=sessions_root,
+        components=components,
+        config=config,
+        bindings_path=bindings_path,
+        decoder=decoder,
+        enable_inference=enable_inference,
+    )
+    can_spec: CanObdSpec | None = None
+    spec_dropped: list[str] = []
+    if spec.kind == "canable":
+        can_spec, spec_dropped = build_can_spec(config, spec)
+
+    live = pipeline.live_source is not None
+    artifacts = RunArtifacts(
+        scenario=spec,
+        label=label,
+        config=config,
+        session_dirs=[],
+        capture_dir=None,
+        profile=profile,
+        profile_fields_dropped=profile_dropped,
+        spec_fields_dropped=spec_dropped,
+        can_spec=can_spec,
+        bindings_path=bindings_path,
+        decoder_signals=decoder.signal_count,
+        models=models,
+        components_enabled={
+            "collector": spec.kind,
+            "decode_storage": True,
+            "dashboard_broadcast": True,
+            "live_feature_source": live,
+            "inference_loop": live,
+            "derived_channels": live,
+            "dtc_sink": True,
+            "monitor_sink": True,
+            "gps": (
+                f"simulated live receiver at {spec.live_gps_hz:g} Hz on the replay queue"
+                if spec.live_gps_hz > 0
+                else False
+            ),
+            "elm327": "not_exercised: needs the ELM327-emulator serial integration tier",
+            "hardware_adapter": "synthetic",
+            "kernel_counters": "unavailable (no can0 on this host)",
+        },
+    )
+
+    collector_task = await _start_collector(
+        spec,
+        label=label,
+        config=config,
+        can_spec=can_spec,
+        pipeline=pipeline,
+        artifacts=artifacts,
+    )
+    await asyncio.sleep(spec.warmup_s)
+    timeline_task = await _arm(
+        spec, label=label, config=config, profile=profile, pipeline=pipeline, artifacts=artifacts
+    )
+    rusage_before = _rusage()
+    await asyncio.sleep(spec.duration_s)
+    await _finish(
+        pipeline=pipeline,
+        artifacts=artifacts,
+        collector_task=collector_task,
+        timeline_task=timeline_task,
+        rusage_before=rusage_before,
+        default_profile=default_profile,
+    )
     return artifacts
 
 

@@ -283,7 +283,7 @@ def read_can_coverage(
                     "can_id": signal.can_id,
                     "can_id_hex": f"0x{signal.can_id:X}",
                     "name": signal.name,
-                    "unit": "" if signal.unit == "unknown" else signal.unit,
+                    "unit": signal.display_unit,
                     "source": "decoded",
                     "channel": decoded_channel(signal.name),
                     "scale": signal.scale,

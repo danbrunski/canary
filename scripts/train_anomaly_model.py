@@ -29,11 +29,8 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from collections.abc import Mapping, Sequence
-from dataclasses import replace
-from datetime import UTC, datetime
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
@@ -57,16 +54,13 @@ except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on 
     )
 
 from src.config import CanaryConfig
-from src.decode.behavior_decoder import withheld_learned_feature_columns
-from src.decode.behavior_models import load_behavior_models
 from src.decode.bindings import load_bindings
 from src.log import configure_logging
 from src.models.isolation_forest import (
     MissingModelDependencyError,
     TrainedIsolationForest,
-    default_manifest_path,
-    fit_isolation_forest,
 )
+from src.models.training_entry import train_isolation_forest
 from src.preprocessing import (
     AnomalyInjector,
     decode_can_rows,
@@ -77,14 +71,7 @@ from src.preprocessing import (
 )
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
-    FeaturePolicy,
-    build_feature_frame,
-    build_feature_spec,
     featurize_wide_frame,
-    resolve_feature_policy,
-)
-from src.preprocessing.feature_pipeline import (
-    isolation_forest_feature_columns as _if_feature_columns,
 )
 from src.preprocessing.resampler import is_slow_channel, resample_config_for
 from src.telemetry import DECODED_SOURCE, source_of
@@ -92,133 +79,9 @@ from src.telemetry import DECODED_SOURCE, source_of
 log = logging.getLogger(__name__)
 
 
-def train(
-    session_dirs: Sequence[Path],
-    config: CanaryConfig,
-    out_dir: Path,
-    *,
-    bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    feature_frame: pd.DataFrame | None = None,
-    feature_cache_dir: Path | None = None,
-    rebuild_feature_cache: bool = False,
-    calibration_sessions: Sequence[Path] | None = None,
-    calibration_frame: pd.DataFrame | None = None,
-    feature_policy: FeaturePolicy | None = None,
-    evaluation_sessions: Sequence[Path] | None = None,
-    quarantined_cells: Mapping[str, pd.Index] | None = None,
-    calibration_policy: Mapping[str, Any] | None = None,
-    calibration_override: str | None = None,
-) -> TrainedIsolationForest:
-    """Build features, fit the per-mode IF + scaler, write artifact + manifest.
-
-    ``calibration_frame`` is the already-built feature frame of the held-out
-    sessions (``scripts/retrain.py`` builds it once for every detector); when
-    omitted it is built here from ``calibration_sessions``.
-    ``evaluation_sessions`` (A02.1) are the held-out sessions the retrain gate
-    scores — disjoint from calibration — recorded in the manifest.
-    ``quarantined_cells`` / ``calibration_policy`` / ``calibration_override``
-    pass through to :func:`fit_isolation_forest` (A04.3, A04.4).
-    """
-    policy = (
-        feature_policy
-        if feature_policy is not None
-        else resolve_feature_policy(config, bindings_path=bindings_path)
-    )
-    features = (
-        feature_frame
-        if feature_frame is not None
-        else build_feature_frame(
-            session_dirs,
-            config,
-            bindings_path=bindings_path,
-            cache_dir=feature_cache_dir,
-            force_rebuild=rebuild_feature_cache,
-        )
-    )
-    # IF-specific selection: additionally drops columns too sparse for a
-    # per-row detector to score on (see MIN_ISOLATION_FOREST_COVERAGE). The
-    # sequence trainer deliberately does NOT apply this — GRU-D consumes
-    # missingness as signal.
-    feature_columns = _if_feature_columns(features, policy=policy)
-    # B03.2 — a deviation column whose behavior model withholds
-    # ``learned_feature`` (demoted/quarantined/exploratory in the profile's
-    # behavior_policy.yaml) is not selected for a *new* model. The column is
-    # still produced for existing manifests; the refusal is recorded on the
-    # spec so the artifact answers why it is absent.
-    behavior_models_path = config.daemon.behavior_models
-    behavior_models = (
-        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
-    )
-    withheld = withheld_learned_feature_columns(feature_columns, behavior_models)
-    if withheld:
-        log.info(
-            "behavior deviation columns withheld from IF training",
-            extra={"columns": sorted(withheld)},
-        )
-        feature_columns = [column for column in feature_columns if column not in withheld]
-    if not feature_columns:
-        raise ValueError(
-            "no trainable feature columns — the sessions produced no numeric "
-            "signal columns. Did you convert them to Parquet, and is "
-            "data/bindings.yaml present so CAN payloads get decoded?"
-        )
-
-    trained = fit_isolation_forest(
-        features,
-        config.models.isolation_forest,
-        feature_columns=feature_columns,
-        feature_spec={
-            **build_feature_spec(
-                features,
-                feature_columns,
-                config=config,
-                policy=policy,
-                # B03.4 — pin which behavior artifact produced each consumed
-                # deviation column, so a later refit is caught by the
-                # producibility check instead of fed to this model.
-                behavior_models=behavior_models,
-            ),
-            "behavior_learned_feature_withheld": dict(sorted(withheld.items())),
-        },
-        fitted_at=datetime.now(UTC),
-        calibration_frame=(
-            calibration_frame
-            if calibration_frame is not None or not calibration_sessions
-            else build_feature_frame(
-                calibration_sessions,
-                config,
-                bindings_path=bindings_path,
-                cache_dir=feature_cache_dir,
-                force_rebuild=rebuild_feature_cache,
-            )
-        ),
-        quarantined_cells=quarantined_cells,
-        calibration_policy=calibration_policy,
-        calibration_override=calibration_override,
-    )
-
-    if evaluation_sessions:
-        trained = replace(
-            trained,
-            manifest=replace(
-                trained.manifest,
-                evaluation_sessions=tuple(Path(s).name for s in evaluation_sessions),
-            ),
-        )
-    out_dir.mkdir(parents=True, exist_ok=True)
-    artifact_path = out_dir / "model.joblib"
-    manifest_path = default_manifest_path(artifact_path)
-    trained.save(artifact_path, manifest_path)
-    log.info(
-        "model trained and saved",
-        extra={
-            "artifact": str(artifact_path),
-            "manifest": str(manifest_path),
-            "feature_columns": len(feature_columns),
-            "sessions": [str(s) for s in session_dirs],
-        },
-    )
-    return trained
+#: The IF training entry is ``src.models.training_entry`` (R06.4); this CLI's
+#: historical name for it.
+train = train_isolation_forest
 
 
 def evaluate(

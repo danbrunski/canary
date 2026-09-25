@@ -39,6 +39,7 @@ from pathlib import Path
 from src.analysis.did_scan import (
     CanableMode22Transport,
     DidSnapshot,
+    load_widths,
     sweep_dids,
     sweep_dids_batched,
 )
@@ -47,7 +48,6 @@ from src.config import CanaryConfig
 from tools._bus_tool import (
     PassiveVerdict,
     add_bus_tool_args,
-    load_widths,
     open_client,
     parse_header,
     resolve_session,

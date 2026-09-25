@@ -39,6 +39,7 @@ this module is pure (numpy/pandas) so its rules are unit-testable.
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -64,10 +65,13 @@ from src.control.sessions import session_started_at
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.models.sequence_calibration import block_maxima as max_finite_per_block
+from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 from src.session import SessionKind, session_kind, session_sort_key
+
+log = logging.getLogger(__name__)
 
 #: Longest step between rows that still counts as continuous engine time when
 #: integrating engine-hours (the 1 Hz grid with a few dropped ticks).
@@ -406,6 +410,243 @@ def holdout_by_drive(
     held = {p.resolve() for p in (*held_calibration, *held_evaluation)}
     training = tuple(p for p in pool if Path(p).resolve() not in held)
     return DriveHoldout(training, held_calibration, held_evaluation, split)
+
+
+def nothing_left_to_train(holdout: DriveHoldout) -> str:
+    """Why a holdout left no training session (A03.6), naming both sides.
+
+    Held-out sessions take their whole physical drive with them, so naming one
+    session of a drive can empty an explicit list that looked disjoint. The
+    wording names the sequence CLIs' flags (``train_sequence.py``,
+    ``sequence_bakeoff.py``), its two callers.
+    """
+    calibration = ", ".join(p.name for p in holdout.calibration) or "none"
+    evaluation = ", ".join(p.name for p in holdout.evaluation) or "none"
+    return (
+        "nothing left to train on: every session is held out (with its whole "
+        f"physical drive) by --calibration-sessions [{calibration}] or --evaluate "
+        f"[{evaluation}]. Training on held-out drives would make their numbers "
+        "in-sample; pass more sessions or hold out fewer."
+    )
+
+
+#: Both detectors calibrate on the same pooled holdout set; the floor is the
+#: sequence registry's (one definition: the manifest stamps a shortfall).
+MIN_CALIBRATION_HOLDOUT_SESSIONS = MIN_CALIBRATION_SESSIONS
+
+#: Held-out drives the post-retrain gate scores (A02.1), disjoint from the
+#: calibration drives. Same count as the calibration floor: one drive is one
+#: day's conditions, for grading as much as for calibrating.
+EVALUATION_HOLDOUT_DRIVES = MIN_CALIBRATION_HOLDOUT_SESSIONS
+
+#: Minimum total parquet bytes for a session to be considered "substantial"
+#: enough to anchor an out-of-sample calibration holdout. A single in-progress
+#: capture (1 truncated chunk a few KB on disk) doesn't have the rows to form
+#: useful per-mode bands, so auto-holdout skips it and picks an earlier real
+#: drive instead. ~1 MB is roughly a minute of telemetry at our chunk rate;
+#: way below any actual drive (the 05-18 short idles are still ~1.5 MB).
+MIN_CALIBRATION_HOLDOUT_BYTES = 1_000_000
+
+#: A mode must run at least this long in a session (per the classifier
+#: sidecar) before the session counts as "covering" that mode for holdout
+#: selection: a 5 s highway blip can't calibrate a highway band.
+MIN_HOLDOUT_MODE_SECONDS = 60.0
+
+
+def session_parquet_bytes(session_dir: Path) -> int:
+    """Total bytes of a session's telemetry chunks (0 when unreadable)."""
+    try:
+        return sum(p.stat().st_size for p in session_dir.glob(PARQUET_PATTERN))
+    except OSError:
+        return 0
+
+
+def session_mode_coverage(session: Path) -> set[str] | None:
+    """Modes a session meaningfully covers, from its classifier sidecar.
+
+    ``None`` when the session hasn't been classified (run
+    ``scripts/label_sessions.py``); callers treat that as unknown coverage.
+    """
+    from src.analysis.session_classifier import read_classification
+
+    classification = read_classification(session)
+    if classification is None:
+        return None
+    return {
+        mode
+        for mode, seconds in classification.mode_seconds.items()
+        if seconds >= MIN_HOLDOUT_MODE_SECONDS and mode != "unknown"
+    }
+
+
+def session_holdout_health(session: Path) -> tuple[str, int] | None:
+    """Classifier disposition and observed feature width for holdout screening."""
+    from src.analysis.session_classifier import read_classification
+
+    classification = read_classification(session)
+    if classification is None:
+        return None
+    return (
+        classification.disposition,
+        int(classification.quality.get("feature_columns", 0)),
+    )
+
+
+def _started_at_key(session: Path) -> datetime:
+    """Sort key by *parsed* start time (never by directory name: capture
+    prefixes sort first). Unparseable names keep their given order, oldest:
+    the time half of :func:`src.session.session_sort_key` (R01.1)."""
+    return session_sort_key(session)[0]
+
+
+def pick_calibration_holdouts(
+    sessions: Sequence[Path],
+    *,
+    max_holdouts: int = MIN_CALIBRATION_HOLDOUT_SESSIONS,
+) -> list[Path]:
+    """Healthy substantial sessions: mode coverage first, then spread in time.
+
+    The historical single auto-holdout had a blind spot: if the freshest
+    drive was an idle session, highway/city earned no per-mode band AND the
+    global fallback threshold was calibrated from an idle-dominated error
+    distribution, too tight or too loose for the first real drive.
+
+    Pass 1 walks newest to oldest: the freshest substantial session anchors
+    the holdout (the legacy rule, so unclassified corpora behave exactly as
+    before); further sessions are added when their classifier sidecar covers a
+    mode not yet held out, until every mode seen in the classified corpus is
+    covered or ``max_holdouts`` is reached.
+
+    Pass 2 tops the set up to ``max_holdouts``. Pass 1 alone stops at ONE
+    session whenever the freshest drive happens to touch every mode, and a
+    single drive is a single day's conditions. The extra sessions are the
+    healthy ones *farthest in time* from those already held out, so the
+    calibration set spans the corpus rather than clustering on its last day.
+    ``scripts/retrain.py`` hands the same list to every detector.
+
+    Returns whole drives, in pick order: a picked session's restart/capture
+    siblings are held out with it (callers still split through
+    :func:`holdout_by_drive`).
+    """
+    ordered = sorted(sessions, key=_started_at_key)
+    corpus_modes: set[str] = set()
+    classified_widths = [
+        health[1]
+        for session in ordered
+        if (health := session_holdout_health(session)) is not None
+        and health[0] == "ready"
+        and health[1] > 0
+    ]
+    minimum_compatible_width = 0.9 * max(classified_widths, default=0)
+    for session in ordered:
+        modes = session_mode_coverage(session)
+        if modes:
+            corpus_modes |= modes
+
+    healthy: list[Path] = []
+    for session in reversed(ordered):
+        if session_parquet_bytes(session) < MIN_CALIBRATION_HOLDOUT_BYTES:
+            continue
+        health = session_holdout_health(session)
+        if health is not None and (health[0] != "ready" or health[1] < minimum_compatible_width):
+            log.info(
+                "skipping unhealthy calibration holdout",
+                extra={
+                    "session": session.name,
+                    "disposition": health[0],
+                    "feature_columns": health[1],
+                    "minimum_compatible_feature_columns": minimum_compatible_width,
+                },
+            )
+            continue
+        healthy.append(session)
+
+    # One pick per physical drive (A02.1/A02.2): three sessions of one day's
+    # drive are one drive's conditions, and the sequence trainer refuses a
+    # calibration resting on fewer than MIN_CALIBRATION_SESSIONS drives.
+    drives = drives_of_sessions(ordered)
+    drive_of = {name: drive.drive_id for drive in drives for name in drive.session_names}
+    drive_members = {
+        drive.drive_id: [span.path for span in drive.sessions if span.path is not None]
+        for drive in drives
+    }
+
+    def new_drive(candidate: Path, chosen: Sequence[Path]) -> bool:
+        taken = {drive_of.get(held.name, held.name) for held in chosen}
+        return drive_of.get(candidate.name, candidate.name) not in taken
+
+    selected: list[Path] = []
+    covered: set[str] = set()
+    for session in healthy:
+        if len(selected) >= max_holdouts:
+            break
+        modes = session_mode_coverage(session)
+        if not selected:
+            selected.append(session)
+            covered |= modes or set()
+        elif modes and modes - covered and new_drive(session, selected):
+            selected.append(session)
+            covered |= modes
+        if corpus_modes and covered >= corpus_modes:
+            break
+
+    while selected and len(selected) < max_holdouts:
+        remaining = [
+            session
+            for session in healthy
+            if session not in selected and new_drive(session, selected)
+        ]
+        if not remaining:
+            break
+        selected.append(
+            max(
+                remaining,
+                key=lambda candidate: min(
+                    abs((_started_at_key(candidate) - _started_at_key(held)).total_seconds())
+                    for held in selected
+                ),
+            )
+        )
+    whole: list[Path] = []
+    for session in selected:
+        for member in drive_members.get(drive_of.get(session.name, ""), [session]):
+            if member not in whole:
+                whole.append(member)
+    return whole
+
+
+def pick_evaluation_holdouts(
+    sessions: Sequence[Path],
+    *,
+    max_sessions: int,
+    max_drives: int = EVALUATION_HOLDOUT_DRIVES,
+) -> list[Path]:
+    """The newest healthy, substantial drives, for the regression gate only.
+
+    Drawn from ``sessions`` after calibration has taken its drives, so the gate
+    never scores a session the thresholds were cut from (A02.1). Whole drives
+    or nothing, newest first, within ``max_sessions`` so training keeps its
+    floor.
+    """
+    selected: list[Path] = []
+    drives = 0
+    for drive in reversed(drives_of_sessions(sessions)):
+        if drives >= max_drives:
+            break
+        members = [span.path for span in drive.sessions if span.path is not None]
+        if len(selected) + len(members) > max_sessions:
+            continue
+        healthy = [
+            m
+            for m in members
+            if session_parquet_bytes(m) >= MIN_CALIBRATION_HOLDOUT_BYTES
+            and ((health := session_holdout_health(m)) is None or health[0] == "ready")
+        ]
+        if not healthy:
+            continue
+        selected.extend(members)
+        drives += 1
+    return sorted(selected, key=_started_at_key)
 
 
 @dataclass(frozen=True)
@@ -1297,10 +1538,14 @@ __all__ = [
     "Drive",
     "DriveDetectorResult",
     "DriveHoldout",
+    "EVALUATION_HOLDOUT_DRIVES",
     "Episode",
     "Era",
     "Fold",
     "HoldoutSplit",
+    "MIN_CALIBRATION_HOLDOUT_BYTES",
+    "MIN_CALIBRATION_HOLDOUT_SESSIONS",
+    "MIN_HOLDOUT_MODE_SECONDS",
     "PersistenceSpec",
     "RatioEstimate",
     "ScoreTrace",
@@ -1322,7 +1567,13 @@ __all__ = [
     "group_into_drives",
     "grouped_folds",
     "holdout_by_drive",
+    "nothing_left_to_train",
     "observed_median",
+    "pick_calibration_holdouts",
+    "pick_evaluation_holdouts",
+    "session_holdout_health",
+    "session_mode_coverage",
+    "session_parquet_bytes",
     "session_span",
     "shift_columns",
     "single_quantity_shift",

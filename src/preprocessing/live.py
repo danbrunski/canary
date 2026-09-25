@@ -39,7 +39,6 @@ scaler normalizes anyway and many bindings have no pinned scale yet.
 from __future__ import annotations
 
 import logging
-import math
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -55,10 +54,11 @@ from src.analysis.derived import (
     fuel_properties,
 )
 from src.can_ids import parse_can_channel
+from src.coerce import finite_float
 from src.config import CanaryConfig
 from src.decode.accepted_baselines import AcceptedBaselines
 from src.decode.behavior_models import BehaviorModels
-from src.decode.bindings import Bindings, Signal
+from src.decode.bindings import Bindings
 from src.decode.dids import (
     DID_SOURCE,
     DecodedDid,
@@ -67,13 +67,14 @@ from src.decode.dids import (
     decode_raw_did_reading,
 )
 from src.decode.engineering import physical_value
+from src.decode.frame_decoder import FrameDecoder
 from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import (
+    ResampleConfig,
     arrived_column,
     gap_column,
-    is_slow_channel,
     resample_config_for,
 )
 from src.preprocessing.session_context import (
@@ -194,7 +195,10 @@ class LiveFeatureSource:
     #: on :meth:`reset` like every other observation-derived state.
     _reject_counts: dict[str, int] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
-    _bindings_by_id: dict[int, list[Signal]] = field(init=False)
+    #: R04.4 — the storage sink's decoder over every confidence, so the
+    #: ``decoded:`` record this source publishes (and observes) is the record
+    #: storage writes. ``None`` without bindings.
+    _frame_decoder: FrameDecoder | None = field(init=False, default=None)
     _dbc_message_by_id: dict[int, Any] = field(init=False)
     _did_by_hex: dict[str, DidEntry] = field(init=False)
     _feature_config: FeatureConfig = field(init=False)
@@ -208,6 +212,11 @@ class LiveFeatureSource:
     #: threshold since slow sensors (coolant/IAT/baro) legitimately update
     #: far less often.
     _slow_max_gap_seconds: float = field(init=False)
+    #: R04.7 — the training recipe's :class:`ResampleConfig`; its
+    #: ``max_gap_seconds_for`` is the one fast/slow rule. Memoised per channel
+    #: (``_max_gap_by_channel``) because ``_gap_flags`` runs every tick.
+    _resample_config: ResampleConfig = field(init=False)
+    _max_gap_by_channel: dict[str, float] = field(init=False, default_factory=dict)
     #: Replay/session reset generation. A feature process can finish after a
     #: reset because the loop remains responsive while it works; tagging the
     #: snapshot makes that stale result impossible to apply to the new run.
@@ -287,14 +296,15 @@ class LiveFeatureSource:
         # training time, so a channel reads stale at serve exactly when its
         # ``__gap`` flag would have been set offline.
         resample_config = resample_config_for(self.config)
+        self._resample_config = resample_config
         self._max_gap_seconds = float(resample_config.max_gap.total_seconds())
         self._slow_max_gap_seconds = float(resample_config.slow_channel_max_gap.total_seconds())
-        # Pre-index bindings by CAN ID so decode is O(signals per ID), not
-        # O(all signals) per CAN frame.
-        self._bindings_by_id = {}
-        if self.bindings is not None:
-            for sig in self.bindings.signals:
-                self._bindings_by_id.setdefault(sig.can_id, []).append(sig)
+        # The storage sink's decoder (pre-indexed by CAN ID, so decode is
+        # O(signals per ID)), over every confidence: the dashboard and the
+        # features see every binding, storage persists a filtered subset.
+        self._frame_decoder = (
+            FrameDecoder.from_bindings(self.bindings) if self.bindings is not None else None
+        )
         # Same idea for the DBC database: frame_id → message so a per-frame
         # decode is an O(1) lookup, not a scan of every message.
         self._dbc_message_by_id = {}
@@ -353,7 +363,7 @@ class LiveFeatureSource:
             if self._did_by_hex and record.channel.startswith("DID_"):
                 self._apply_did_decode(record)
                 return
-            value = _to_float(record.value)
+            value = finite_float(record.value)
             if value is not None:
                 self._set_value(channel_key(OBD_SOURCE, record.channel), value, record.timestamp)
             return
@@ -361,7 +371,7 @@ class LiveFeatureSource:
             self._apply_can_decode(record)
             return
         if record.source == "gps":
-            value = _to_float(record.value)
+            value = finite_float(record.value)
             if value is not None:
                 self._set_value(channel_key(GPS_SOURCE, record.channel), value, record.timestamp)
             return
@@ -373,13 +383,13 @@ class LiveFeatureSource:
             # its own arm. Phase 2b's collector is what actually starts
             # emitting these records; ``ImuConfig.source: disabled`` (2a.2)
             # means none arrive today.
-            value = _to_float(record.value)
+            value = finite_float(record.value)
             if value is not None:
                 self._set_value(channel_key(IMU_SOURCE, record.channel), value, record.timestamp)
             return
         # Anything else (e.g. a future source pushed directly) gets stored
         # as-is; the pipeline will surface it as a new column.
-        value = _to_float(record.value)
+        value = finite_float(record.value)
         if value is not None:
             self._set_value(channel_key(record.source, record.channel), value, record.timestamp)
 
@@ -389,41 +399,18 @@ class LiveFeatureSource:
         This is the dashboard-facing counterpart to ``observe``'s CAN decode:
         inference wants the values in ``_current_values``; the UI also needs
         named ``decoded:<SIGNAL>`` rows so it can render gauges instead of raw
-        arbitration IDs.
+        arbitration IDs. The rows are :meth:`FrameDecoder.decode`'s — the same
+        records the storage sink persists (R04.4) — over every binding.
         """
-        if record.source != "can" or record.payload is None:
+        if self._frame_decoder is None:
             return ()
-        can_id = parse_can_channel(record.channel)
-        if can_id is None:
-            return ()
-        signals = self._bindings_by_id.get(can_id)
-        if not signals:
-            return ()
-        payload = bytes(record.payload)
-        decoded: list[TelemetryRecord] = []
-        for sig in signals:
-            raw = _decode_signal_raw(sig, payload)
-            if raw is None:
-                continue
-            decoded.append(
-                TelemetryRecord.decoded(
-                    record.timestamp,
-                    sig.name,
-                    raw,
-                    sig.unit if sig.unit != "unknown" else "",
-                    metadata={
-                        "can_id": can_id,
-                        "confidence": sig.confidence,
-                    },
-                )
-            )
-        return tuple(decoded)
+        return self._frame_decoder.decode(record)
 
     def _apply_can_decode(self, record: TelemetryRecord) -> None:
         for decoded in self.decode_for_telemetry(record):
             # Raw integer matches decode_can_rows' policy — the scaler
             # normalizes downstream and most bindings have no pinned scale.
-            value = _to_float(decoded.value)
+            value = finite_float(decoded.value)
             if value is not None:
                 self._set_value(
                     channel_key(DECODED_SOURCE, decoded.channel), value, record.timestamp
@@ -679,15 +666,13 @@ class LiveFeatureSource:
 
         Mirrors ``resampler._gap_flags`` post-1.2: every channel is stale
         (``True``) when the seconds since its last observation exceed its
-        class's ceiling — fast channels use ``_max_gap_seconds``, slow
-        channels (``is_slow_channel``) their own, more generous
-        ``_slow_max_gap_seconds``.
+        class's ceiling, read from the recipe's
+        ``ResampleConfig.max_gap_seconds_for`` — the resampler's own rule,
+        explicit ``fast_channels`` included (R04.7).
         """
         flags: dict[str, bool] = {}
         for channel in self._current_values:
-            max_gap = (
-                self._slow_max_gap_seconds if is_slow_channel(channel) else self._max_gap_seconds
-            )
+            max_gap = self._max_gap_seconds_for(channel)
             observed_at = self._last_observed_at.get(channel)
             if observed_at is None:
                 flags[gap_column(channel)] = True
@@ -695,6 +680,14 @@ class LiveFeatureSource:
             age = (now - observed_at).total_seconds()
             flags[gap_column(channel)] = age > max_gap
         return flags
+
+    def _max_gap_seconds_for(self, channel: str) -> float:
+        """The recipe's stale ceiling for ``channel``, memoised (pure per channel)."""
+        cached = self._max_gap_by_channel.get(channel)
+        if cached is None:
+            cached = self._resample_config.max_gap_seconds_for(channel)
+            self._max_gap_by_channel[channel] = cached
+        return cached
 
     def _arrival_flags(self, previous_tick: datetime | None) -> dict[str, bool]:
         """Per-channel ``<channel>__arrived`` flags (A03.1).
@@ -839,15 +832,6 @@ class LiveFeatureSource:
 # ---------------------------------------------------------------------------
 
 
-def _to_float(value: Any) -> float | None:
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
 def _first_finite(
     point: dict[str, Any], *keys: str, bindings: Bindings | None = None
 ) -> float | None:
@@ -863,17 +847,10 @@ def _first_finite(
     for key in keys:
         if key not in point:
             continue
-        value = _to_float(point[key])
-        if value is not None and not math.isnan(value):
+        value = finite_float(point[key])
+        if value is not None:
             return physical_value(value, key, bindings)
     return None
-
-
-def _decode_signal_raw(signal: Signal, payload: bytes) -> int | None:
-    end = signal.byte_start + signal.byte_length
-    if len(payload) < end:
-        return None
-    return int.from_bytes(payload[signal.byte_start : end], byteorder=signal.byte_order)
 
 
 __all__ = [

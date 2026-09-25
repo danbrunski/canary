@@ -13,14 +13,16 @@ have grown into library code with a CLI attached.
   in a script moves to `src/`.
 - **A transmitting tool cannot skip the passive check.** The JobController
   runs `did_sweep`, which must keep skipping it deliberately, and says so.
-- **`src/control/jobs.py` pins script paths.** The `train_lstm.py` /
-  `train_tcn.py` shims stay.
+- **Script paths other things call stay.** `src/control/jobs.py` launches
+  `retrain.py`, `refit_behavior_models.py` and `did_sweep.py` by path; the
+  `train_lstm.py` / `train_tcn.py` shims stay as stable command names (no job
+  launches them -- corrected 2026-09-25).
 - **Moves under `src/models`/`src/preprocessing` trigger the `ml_training`
   tier.**
 
 ---
 
-- [~] **R06.1 Give `tools/` a shared bus-tool module.**
+- [x] **R06.1 Give `tools/` a shared bus-tool module.**
   - No shared module exists. `tools/did_log.py` serves as one:
     `can_memory_log`, `batch_probe` and `verify_memory_channels` import its
     private `_passive_problem`, `_resolve_session`, `_resolve_token` and
@@ -86,6 +88,18 @@ have grown into library code with a CLI attached.
   `watch_uprev_logs` still imports `tools.import_uprev_log._FILENAME_TIME`,
   pinned as the one allowed entry in the test. Make it public in
   `import_uprev_log.py` and delete the entry.
+  *Both remainders done 2026-09-25.* (1) `load_widths` lives beside
+  `DidSnapshot` in `src/analysis/did_scan.py`, with the record discriminator it
+  reads (`RECORD_KEY`, `record_kind`); `tools/_bus_tool.py` re-exports all
+  three, and `did_log`/`did_sweep` import `load_widths` from `did_scan`. (2)
+  `import_uprev_log.FILENAME_TIME` is public; `watch_uprev_logs` imports it,
+  and `test_no_tool_imports_another_tools_private_names` now asserts no
+  offender at all (the allowance set is deleted). `test_bus_tool.py`,
+  `test_did_log_tool.py`, `test_did_sweep_tool.py`, `test_did_sweep_job.py`,
+  `test_did_scan.py`, `test_import_uprev_log.py`,
+  `test_analyze_can_memory_log_tool.py`, `test_can_memory_log_tool.py` pass
+  (128 with `test_emit_dbc`/`test_backfill_decoded`);
+  `tools/watch_uprev_logs.py --help` runs.
 
   *Verifier follow-up, 2026-09-25:*
   - **Responder window.** `open_client` pins a physical header's response
@@ -143,7 +157,7 @@ have grown into library code with a CLI attached.
   reason from a non-CLI caller. `retrain._stated_reason` is now unused;
   delete it in R06.3.
 
-- [ ] **R06.3 Break up `scripts/retrain.py` (1,749 lines).** *Deferred until R04 lands.*
+- [x] **R06.3 Break up `scripts/retrain.py` (1,749 lines).**
   - `main` is 527 lines and `parse_args` 288.
   - `main` runs about 10 phases in sequence: sessions, holdout, frames,
     quarantine, feedback, trainers, benchmark gate, alert-budget gate,
@@ -182,7 +196,65 @@ have grown into library code with a CLI attached.
 
   Retrain is the deploy path. Size **L**.
 
-- [ ] *Deferred until R04 lands.* **R06.4 Move trainer and evaluation library code out of `scripts/`,
+  *Done 2026-09-25.*
+  - Holdout pickers: `src.models.evaluation.pick_calibration_holdouts` /
+    `pick_evaluation_holdouts` (+ `session_parquet_bytes`,
+    `session_mode_coverage`, `session_holdout_health`, the
+    `MIN_CALIBRATION_HOLDOUT_*` / `EVALUATION_HOLDOUT_DRIVES` constants and
+    `nothing_left_to_train`). `sequence_bakeoff` uses them from there.
+  - Staging and publish: `src/models/publish.py` (`staging_dir`,
+    `artifact_name`, `write_artifact_verdict`, `publish_staged`,
+    `set_aside_refused`, `ISOLATION_FOREST_SOURCE`/`SEQUENCE_SOURCE`).
+  - `_cli.filter_sessions_by_boundary` + `_cli.apply_since_boundary(args,
+    config, sessions)`; both copies of the `--since-boundary` block are gone.
+    The helper reads the *profile-scoped* vehicle ledger, where the daemon
+    records a calibration change; retrain's copy read the unscoped one (refit's
+    was scoped). `test_retrain_since_boundary_excludes_older_sessions` now
+    records the boundary in the profile ledger (not re-run against HEAD).
+  - `main` is 85 lines over a `RetrainRun` dataclass (`args` is never written:
+    `grep -c "args\.[a-z_]* = " scripts/retrain.py` → 0) and phase functions
+    `_start_run`, `_select_sessions`, `_hold_out`, `_skip_disabled`,
+    `_prepare_inputs` (→ `TrainingInputs`), `_stage_alert_role_outputs`,
+    `_run_trainers`, `_run_benchmark_gate`, `_run_alert_budget_gate`,
+    `_publish_or_refuse`, `_ingest_ledger`, `_print_report`, `_exit_code`.
+    `RetrainRun.train_dir(source)` is the staging dir while the budget gate is
+    pending, `served_dir(source)` the served one. `retrain._stated_reason`
+    deleted. `parse_args` is 276 lines (flag definitions only).
+  - R06.2 snapshot: `retrain.py`'s surface unchanged (the only regenerated
+    entry is `evaluate_detectors --log-level`, R06.6).
+  - Seams retargeted in `test_retrain_script.py`, `test_training_ledger.py`,
+    `test_alert_budget.py`, `test_sequence_bakeoff.py`:
+    `retrain.if_trainer.train` → `training_entry.train_isolation_forest`,
+    `retrain.lstm_trainer.train`/`tcn_trainer.train` →
+    `training_entry.train_sequence_detector` (backend first),
+    `retrain._session_*` / `_pick_*` → `src.models.evaluation`'s public names,
+    `evaluate_detectors.main` → `retrain.run_evaluate_detectors`,
+    `_run_benchmark_gate(config, sessions, args)` → `(…, retrain._start_run(args,
+    config))`. `pytest -n 4 -m "not integration and not slow"` on those four
+    + `test_train_sequence_columns.py`: 91 passed; with `-m ""` 889 passed
+    over 22 touched files (R06.4).
+  - Real laptop retrain, HEAD archive vs HEAD + this diff (the other session's
+    K-line files excluded), 9 sessions from
+    `~/canary-data/sessions/nissan-xterra-2008` (2026-07-26..08-06), smoke
+    config (IF 100 trees, LSTM `max_epochs: 3`, cpu), explicit
+    `--if-out/--sequence-out/--ledger/--analyses-dir` in the scratchpad,
+    `--no-feature-cache --no-feedback-policy --accept-thin-calibration`
+    (this corpus is thin) and `--skip-benchmark`: 8m46s vs 9m44s, rc 0 both.
+    Same holdouts (calibration 2026-08-04T162651, 08-06T032414, 08-06T144349;
+    evaluation 07-26T223147, 07-29T205841, 07-31T145209). Both manifests: 0
+    differences apart from timestamps. IF: modes idle+koeo, all 200 trees'
+    node/value arrays, `offset_`, feature subsets and the scaler identical.
+    LSTM: every `state_dict` tensor identical (best epoch 3, 521 windows).
+    Ledger: 2 rows each, identical apart from timestamps and
+    `artifact_sha256`, which differs only because the binaries embed their
+    manifest's timestamps. Printed report identical. Not in the comparison:
+    the benchmark gate. With the gate on, the HEAD run had not finished the
+    grid after 40+ min, so both runs were stopped and repeated with
+    `--skip-benchmark`. The gate's code path is covered by
+    `test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline`
+    (real grid, real IF), which passes.
+
+- [x] **R06.4 Move trainer and evaluation library code out of `scripts/`,
   and end sibling imports between scripts.**
   - `train_sequence.train` (308 lines) is training-contract logic: it drops
     parked rows, chooses validation drives, fits the scaler, drops unobserved
@@ -219,6 +291,45 @@ have grown into library code with a CLI attached.
   - `ml_paths.txt` covers the new `src` homes.
 
   Size **L**.
+
+  *Done 2026-09-25.*
+  - New homes: `src/models/training_entry.py` (`train_sequence_detector`,
+    `build_sequence_dataset`, `train_isolation_forest`, `benchmark_held_out`,
+    `SEQUENCE_BACKBONES`); `src/preprocessing/feature_pipeline.py`
+    (`load_resampled_session`, and `disposition_screen_frames`, which was
+    `disposition_report._scan_sessions`, imported by `retrain` and `ledger`);
+    `src/models/detector_benchmark.py` (the grid, rollup, diff and
+    `load_trained_sequence` behind retrain's gate). The scripts keep their old
+    names as aliases/re-exports (`train_sequence.train`, `train_anomaly_model.train`,
+    `detector_benchmark.run_grid` …).
+  - No script imports another script except `_cli`:
+    `tests/test_script_imports.py::test_no_script_imports_another_script_except_cli`
+    (51 scripts; the AST scan found 17 sibling imports in 7 scripts at HEAD).
+    Retrain's alert-budget gate runs `evaluate_detectors.py` as a process
+    (`retrain.run_evaluate_detectors`), not an in-process `main()`. The
+    `train_lstm`/`train_tcn` shims stay (stable command names; no job launches them) and execute
+    `train_sequence.py` with `runpy.run_path`, which registers no module, so
+    there is no second identity (a load by path, not an import).
+  - `grep -rn "sys.path" tests`: only `tests/test_script_cli_snapshot.py`
+    (it loads each script as `python scripts/x.py` runs it, via a scoped
+    `monkeypatch.syspath_prepend`, and now drops the bare modules it loaded:
+    `_forget_bare_script_modules`) and `tests/test_script_imports.py` (names
+    the calls it forbids). `test_no_test_edits_sys_path` enforces it. The 22
+    files that had one at HEAD now import `scripts.<name>`. Every script with a
+    bare `from _cli import` now has the `except ImportError: from scripts._cli`
+    fallback (18 converted), enforced by
+    `test_a_bare_cli_import_falls_back_to_the_package`.
+  - `pyproject` `pythonpath = ["."]` unchanged. `ml_paths.txt`: the new
+    homes are under `src/models/` and `src/preprocessing/`, already listed;
+    `scripts/train_lstm.py`/`train_tcn.py` added (their tests are
+    `ml_training`).
+  - Tests retargeted to the public seams: `test_train_sequence_columns.py`
+    patches `training_entry`; `test_train_anomaly_model.py` imports
+    `build_feature_frame` from `feature_pipeline`;
+    `test_resample_config_construction.py` spies `disposition_screen_frames`.
+    `pytest -m "" -n 4` over the 22 touched model/script test files
+    (incl. `test_train_lstm.py`, `test_train_tcn.py`,
+    `test_false_positive_benchmark.py`, `test_sequence_bakeoff.py`): 889 passed.
 
 - [~] **R06.5 Operator decision: one corpus benchmark harness?** *Awaiting the
   operator's answer (2026-09-25); nothing implemented.*
@@ -277,19 +388,26 @@ have grown into library code with a CLI attached.
     - `refit_behavior_models._discover_behavior_capture_sessions` sorted by name; it now uses
       `session_sort_key`.
     - Tests: `tests/test_recorded_sessions.py`, 4 passed.
-  - Remaining:
-    - `evaluate_detectors.discover_session_dirs` should become
-      `recorded_sessions` once R04 releases the file. Note that its local
-      copy includes `_tuning-*` and does not check for data.
-    - `tools/backfill_decoded` has its own `telemetry-[0-9]*` check, which
-      excludes its own backfill chunks on purpose. The file is dirty from
-      another session, and `decode_session_frame` is R04.4.
-    - `fp_benchmark --config` is R04's area.
-    - `--log-level`/`--bindings` in `retrain`, `train_sequence` and
-      `sequence_bakeoff` are blocked on R06.3; edits to those files are
-      limited to the `--accept-*` lines until then.
-    - `--log-level`/`--bindings` in `evaluate_detectors` are blocked on R04,
-      which is editing the file.
+  - Finished 2026-09-25 (with R06.3/R06.4):
+    - `evaluate_detectors.discover_session_dirs` is gone; the harness asks
+      `control.sessions.recorded_sessions(roots, kinds=EVALUATION_SESSION_KINDS)`.
+      `recorded_sessions` gained a `kinds` argument (it refuses
+      `SessionKind.REPLAY`); the harness adds `SessionKind.TUNING`, so a legacy
+      `_tuning-*` recording still bridges its siblings into one drive exactly
+      as the local copy did, and R04.6 still keeps its rows out of scoring.
+      One difference, named: a directory with no non-empty telemetry chunk is
+      no longer listed, so it drops out of the report's "skipped: no telemetry
+      rows" list (it was never part of a drive). Test:
+      `test_discovery_keeps_captures_drops_quarantine_and_orders_by_parsed_time`.
+    - `--log-level`/`--bindings` via `_cli` in `retrain`, `train_sequence`,
+      `sequence_bakeoff` and `evaluate_detectors`. The CLI snapshot moved in
+      one place: `evaluate_detectors --log-level` gained the `LOG_LEVELS`
+      choice set (default still `WARNING`). Retrain's surface is unchanged.
+    - `retrain._stated_reason` deleted.
+    - `fp_benchmark --config` via `_cli.add_common_args` (+ `load_config`).
+  - Still open:
+    - `tools/backfill_decoded` keeps its own `telemetry-[0-9]*` check, which
+      excludes its own backfill chunks on purpose (R04.4's area).
     - `canary_companion` and `stop_recording` do not import `_cli`. They are
       deliberately light, and `_cli` pulls in pandas.
     - `tools/` cannot import `scripts/_cli`.

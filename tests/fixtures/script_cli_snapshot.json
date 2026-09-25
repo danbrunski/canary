@@ -2087,7 +2087,12 @@
       },
       "--log-level": {
         "action": "_StoreAction",
-        "choices": null,
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
         "default": "WARNING",
         "dest": "log_level",
         "nargs": null,

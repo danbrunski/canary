@@ -62,7 +62,7 @@ def _to_signal(b: Binding) -> Signal:
         conversion=BaseConversion.factory(scale=scale, offset=offset, is_float=False),
         minimum=b.plausible_min,
         maximum=b.plausible_max,
-        unit=(b.unit if b.unit and b.unit != "unknown" else None),
+        unit=(b.display_unit or None),
         comment=f"confidence={b.confidence}" + (f"; {b.notes.splitlines()[0]}" if b.notes else ""),
     )
 

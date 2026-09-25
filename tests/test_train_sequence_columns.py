@@ -1,8 +1,10 @@
-"""Which columns a sequence model may train on (no torch training here)."""
+"""Which columns a sequence model may train on (no torch training here).
+
+The training entry is ``src.models.training_entry.train_sequence_detector``
+(R06.4); these tests used to patch ``scripts/train_sequence.py``."""
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -11,13 +13,12 @@ import pytest
 import yaml
 
 from src.config import CanaryConfig
+from src.models import training_entry
 from src.models.sequence_training import ValidationChoice
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
-import train_sequence  # noqa: E402
 
 
 class _StopError(Exception):
@@ -57,7 +58,7 @@ def test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named(
         _session(root, f"s{i}", start=1_778_500_000.0 + 3600 * i, extra=i == 2) for i in range(3)
     ]
     monkeypatch.setattr(
-        train_sequence,
+        training_entry,
         "choose_validation_sessions",
         lambda *_a, **_k: ValidationChoice(sessions=("s2",), record={"sessions": ["s2"]}),
     )
@@ -69,11 +70,11 @@ def test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named(
         seen["scaler"] = kwargs["scaler"]
         raise _StopError
 
-    monkeypatch.setattr(train_sequence, "train_sequence_autoencoder", fake_trainer)
+    monkeypatch.setattr(training_entry, "train_sequence_autoencoder", fake_trainer)
 
     with pytest.raises(_StopError):
-        train_sequence.train(
-            train_sequence.BACKBONES["lstm"],
+        training_entry.train_sequence_detector(
+            training_entry.SEQUENCE_BACKBONES["lstm"],
             sessions,
             config,
             tmp_path / "out",
@@ -124,7 +125,7 @@ def test_parked_rows_neither_train_nor_validate(
         _parked_session(root, f"2026-08-0{i + 1}T120000", start=1_785_600_000.0 + 86_400 * i)
         for i in range(3)
     ]
-    real_choice = train_sequence.choose_validation_sessions
+    real_choice = training_entry.choose_validation_sessions
     seen: dict[str, Any] = {}
 
     def spy_choice(frame: Any, **kwargs: Any) -> Any:
@@ -136,12 +137,12 @@ def test_parked_rows_neither_train_nor_validate(
         seen["spec"] = kwargs["feature_spec"]
         raise _StopError
 
-    monkeypatch.setattr(train_sequence, "choose_validation_sessions", spy_choice)
-    monkeypatch.setattr(train_sequence, "train_sequence_autoencoder", fake_trainer)
+    monkeypatch.setattr(training_entry, "choose_validation_sessions", spy_choice)
+    monkeypatch.setattr(training_entry, "train_sequence_autoencoder", fake_trainer)
 
     with pytest.raises(_StopError):
-        train_sequence.train(
-            train_sequence.BACKBONES["lstm"],
+        training_entry.train_sequence_detector(
+            training_entry.SEQUENCE_BACKBONES["lstm"],
             sessions,
             config,
             tmp_path / "out",
@@ -187,10 +188,10 @@ def test_a_tail_block_validation_never_moves_the_scaler(
         seen.update(split=split, dataset=dataset, **kwargs)
         raise _StopError
 
-    monkeypatch.setattr(train_sequence, "train_sequence_autoencoder", fake_trainer)
+    monkeypatch.setattr(training_entry, "train_sequence_autoencoder", fake_trainer)
     with pytest.raises(_StopError):
-        train_sequence.train(
-            train_sequence.BACKBONES["lstm"],
+        training_entry.train_sequence_detector(
+            training_entry.SEQUENCE_BACKBONES["lstm"],
             [session],
             config,
             tmp_path / "out",

@@ -102,21 +102,23 @@ from src.collection.obd_scheduler.spec import (
     FreezeFrameTrigger,
     SessionControlResult,
     _bus_budget_requests_per_second,
-    _did_ids_by_name,
     _DiscoveryClient,
     _PidDiscoveryClient,
-    did_access,
     did_alias_table,
-    did_response_widths,
     discovery_items,
-    known_did_names,
-    load_repo_did_map,
     log,
-    memory_channels,
     parse_did_token,
     parse_pid_token,
     profile_did_union,
     resolve_did_session_spec,
+)
+from src.decode.dids import (
+    _did_ids_by_name,
+    did_access,
+    did_response_widths,
+    known_did_names,
+    load_repo_did_map,
+    memory_channels,
 )
 
 __all__ = [

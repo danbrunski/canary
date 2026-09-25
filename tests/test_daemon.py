@@ -24,8 +24,8 @@ from src.daemon import (
     run_storage_sink,
     run_telemetry_fanout,
 )
+from src.daemon.health import HealthMonitor
 from src.dashboard.broadcast import Broadcaster
-from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.storage.async_writer import AsyncParquetTelemetryWriter
@@ -1319,7 +1319,7 @@ async def test_score_and_emit_reconciles_missing_live_columns(
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.event_logger import AnomalyEventLogger
     from src.daemon import _score_and_emit
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
@@ -1402,8 +1402,8 @@ async def test_score_and_emit_warns_once_on_mode_blindness_transition(
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.event_logger import AnomalyEventLogger
     from src.daemon import _score_and_emit
-    from src.models.health import _MODE_BLIND_WINDOW as MODE_BLIND_WINDOW
-    from src.models.health import HealthMonitor
+    from src.daemon.health import _MODE_BLIND_WINDOW as MODE_BLIND_WINDOW
+    from src.daemon.health import HealthMonitor
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
@@ -1485,7 +1485,7 @@ async def test_score_and_emit_uncalibrated_mode_never_emits(
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.event_logger import AnomalyEventLogger
     from src.daemon import _score_and_emit
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
@@ -1542,7 +1542,7 @@ async def test_score_and_emit_calibrated_mode_still_emits(
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.event_logger import AnomalyEventLogger
     from src.daemon import _score_and_emit
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
@@ -1595,7 +1595,7 @@ async def test_score_and_emit_attaches_the_scoring_models_occlusion_contributors
     from src.alerts.emitter import AnomalyEventEmitter
     from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
     from src.daemon import _score_and_emit
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
@@ -2522,7 +2522,7 @@ def test_can_receive_stats_reach_health_snapshot_as_named_counter() -> None:
     from src.daemon import runtime as runtime_mod
 
     health = HealthMonitor()
-    runtime_mod._can_receive_stats_observer(health)(
+    runtime_mod.can_receive_stats_observer(health)(
         CanReceiveStats(
             frames=1200,
             parse_errors=3,
@@ -2565,7 +2565,7 @@ def test_obd_collector_handoff_stats_reach_health_as_obd_collect() -> None:
         raw_responses=900,
         reconnects=1,
     )
-    runtime_mod._obd_handoff_stats_observer(health)(stats)
+    runtime_mod.obd_handoff_stats_observer(health)(stats)
     sink = health.snapshot()["telemetry_sinks"]["obd_collect"]
     assert sink["dropped_records"] == 5
     assert sink["buffer_dropped"] == 3 and sink["queue_dropped"] == 2

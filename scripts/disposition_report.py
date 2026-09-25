@@ -29,7 +29,6 @@ import sys
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 try:
     from _cli import (
@@ -55,22 +54,14 @@ from src.analysis.training_disposition import (  # noqa: E402
     DispositionSummary,
     classify_dispositions,
 )
-from src.config import CanaryConfig  # noqa: E402
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
-from src.decode.bindings import load_bindings  # noqa: E402
-from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir  # noqa: E402
-from src.decode.dids import load_did_map  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
-    DEFAULT_DIDS_PATH,
-    _decode_session_to_wide,
     candidate_feature_columns,
-    segment_or_constant,
+    disposition_screen_frames,
 )
-from src.preprocessing.quality_gate import apply_quality_gate  # noqa: E402
-from src.preprocessing.resampler import resample_config_for, resample_wide  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -143,51 +134,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_log_level_arg(parser)
     return parser.parse_args(argv)
-
-
-def _scan_sessions(
-    sessions: list[Path],
-    config: CanaryConfig,
-    *,
-    bindings_path: Path,
-) -> tuple[list[Any], dict[str, int]]:
-    """Decode → quality-gate → resample → regime-gate every session.
-
-    Returns the per-session regime-gated frames (ready for
-    ``classify_dispositions``) and the corpus-wide per-channel reject counts
-    accumulated across every session's quality gate. Reuses
-    ``feature_pipeline._decode_session_to_wide`` — the exact same decode
-    steps the trainers run — so this report screens precisely what training
-    would see, not a parallel reimplementation.
-    """
-    import pandas as pd
-
-    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
-    dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
-    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
-    # The training recipe, gap rules included: this report claims to screen
-    # exactly what training would see (D03.27 — it used to take hz only).
-    resample_config = resample_config_for(config)
-
-    framed_parts: list[pd.DataFrame] = []
-    total_rejects: dict[str, int] = {}
-    for session_dir in sessions:
-        try:
-            wide = _decode_session_to_wide(session_dir, bindings, dbc_database, did_map)
-        except Exception as exc:  # noqa: BLE001 — one bad session must not kill the scan
-            log.warning(
-                "skipping unreadable session",
-                extra={"session": str(session_dir), "error": str(exc)},
-            )
-            continue
-        gated, quality = apply_quality_gate(wide)
-        for channel, count in quality.reject_counts.items():
-            total_rejects[channel] = total_rejects.get(channel, 0) + count
-        resampled = resample_wide(gated, config=resample_config)
-        framed, _fell_back = segment_or_constant(resampled, config)
-        framed_parts.append(framed)
-
-    return framed_parts, total_rejects
 
 
 def build_report_markdown(
@@ -305,7 +251,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if scoped.daemon.accepted_baselines.exists():
         overrides = load_accepted_baselines(scoped.daemon.accepted_baselines)
 
-    framed_parts, reject_counts = _scan_sessions(sessions, scoped, bindings_path=args.bindings)
+    framed_parts, reject_counts = disposition_screen_frames(
+        sessions, scoped, bindings_path=args.bindings
+    )
     if not framed_parts:
         print("error: no session in the selection was readable", file=sys.stderr)
         return 1

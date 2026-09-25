@@ -4,7 +4,6 @@ provenance checks."""
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -14,10 +13,8 @@ import pandas as pd
 import pytest
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import evaluate_behavior_models as eval_cli  # noqa: E402
-import refit_behavior_models as refit_cli  # noqa: E402
-
+import scripts.evaluate_behavior_models as eval_cli
+import scripts.refit_behavior_models as refit_cli
 from src.analysis.behavior_validation import session_content_identity  # noqa: E402
 from src.analysis.refit import Surface2DRecipe, fit_recipe  # noqa: E402
 from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry  # noqa: E402

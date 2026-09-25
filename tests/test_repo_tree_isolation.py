@@ -142,10 +142,7 @@ def test_isolated_config_overrides_apply_after_the_rebase(tmp_path: Path) -> Non
 
 
 def test_retrain_argv_puts_every_output_under_tmp_path(tmp_path: Path) -> None:
-    import sys
-
-    sys.path.insert(0, str(REPO / "scripts"))
-    import retrain
+    from scripts import retrain
 
     args = retrain.parse_args(retrain_argv(tmp_path, "--all"))
     for value in (args.if_out, args.sequence_out, args.ledger, args.analyses_dir):

@@ -19,6 +19,13 @@ batch/training decode-at-read path), not a new convention:
 * metadata carries the same ``{"can_id", "binding_confidence"}`` keys, so
   stored rows are indistinguishable from recomputed ones and
   ``decode_can_rows`` can safely skip channels that were already persisted.
+* the unit is :attr:`~src.decode.bindings.Signal.display_unit` (``""`` for
+  an ``"unknown"`` binding), the same string ``decode_can_rows`` writes.
+
+One decoder for live and storage (R04.4): ``LiveFeatureSource`` holds a
+:class:`FrameDecoder` over *all* confidences and publishes exactly these
+records to the dashboard stream and its own current-value dict, so the
+record a gauge shows is the record the storage sink writes.
 
 Confidence gating: storage is forever, so default to persisting only
 ``confirmed`` bindings (``collection.persist_decoded_confidence`` widens
@@ -112,7 +119,7 @@ class FrameDecoder:
                     record.timestamp,
                     sig.name,
                     float(raw),
-                    sig.unit,
+                    sig.display_unit,
                     metadata={"can_id": can_id, "binding_confidence": sig.confidence},
                 )
             )

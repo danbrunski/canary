@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import vehicle_log as vehicle_log_cli  # noqa: E402
-
+import scripts.vehicle_log as vehicle_log_cli
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

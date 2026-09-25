@@ -19,12 +19,17 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
 import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from src.decode import slices
+from src.decode.slices import ByteSlice, LinearScale, PlausibleRange
+from src.paths import DIDS_YAML
 
 log = logging.getLogger(__name__)
 
@@ -52,48 +57,10 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Evidence(_Strict):
-    """One piece of evidence backing a DID identification.
-
-    Evidence that establishes a *number* must also say when the number holds.
-    A calibration measured at steady state does not apply during a transient,
-    and one measured in closed loop does not apply under enrichment — quoting
-    a constant outside its conditions is the shape of every retracted finding
-    in this project's history (AGENTS.md, "never compare aggregates"). So
-    ``constant`` cannot be recorded without ``conditions``: the validator
-    below makes the unsafe entry unwritable rather than merely discouraged.
-    """
-
-    session: str
-    method: str
-    finding: str
-    #: The quantitative result, when this evidence establishes one.
-    constant: float | None = None
-    #: Units of ``constant``, e.g. ``"counts per gram of fuel"``.
-    constant_unit: str | None = None
-    #: The operating envelope the constant was measured in, and outside which
-    #: it must not be quoted.
-    conditions: str | None = None
-
-    @model_validator(mode="after")
-    def _constant_requires_conditions_and_unit(self) -> Evidence:
-        if self.constant is None:
-            return self
-        missing = [
-            name
-            for name, value in (
-                ("conditions", self.conditions),
-                ("constant_unit", self.constant_unit),
-            )
-            if not value
-        ]
-        if missing:
-            raise ValueError(
-                f"evidence carrying `constant` must also set {' and '.join(missing)} "
-                "— a bare number invites being quoted against data it was never "
-                "measured on"
-            )
-        return self
+#: One evidence record for every catalog (R05.9): the DID catalog's refusal
+#: (a ``constant`` never without its ``conditions`` and unit) now lives in
+#: :class:`src.decode.slices.Evidence`, which bindings share.
+Evidence = slices.Evidence
 
 
 class CalibrationIdAccess(_Strict):
@@ -167,7 +134,7 @@ class DidAccess(_Strict):
         return self
 
 
-class DidEntry(_Strict):
+class DidEntry(ByteSlice, LinearScale, PlausibleRange, _Strict):
     """An identified Mode 22 DID: where its value sits in the response
     payload + how to decode it.
 
@@ -296,7 +263,7 @@ class MemoryKnownAnswer(_Strict):
         return self
 
 
-class MemoryChannel(_Strict):
+class MemoryChannel(ByteSlice, LinearScale, PlausibleRange, _Strict):
     """A recurring ReadMemoryByAddress (service ``0x23``) channel.
 
     A DID is an identifier the ECU defines; a RAM address is a location in
@@ -387,10 +354,7 @@ def decode_memory_raw(channel: MemoryChannel, payload: bytes) -> int | None:
 
     ``None`` when the payload is too short for the declared slice.
     """
-    end = channel.byte_start + channel.byte_length
-    if len(payload) < end:
-        return None
-    return int.from_bytes(payload[channel.byte_start : end], byteorder=channel.byte_order)
+    return channel.raw_from(payload)
 
 
 def apply_memory_scaling(channel: MemoryChannel, raw: int) -> float | None:
@@ -400,12 +364,9 @@ def apply_memory_scaling(channel: MemoryChannel, raw: int) -> float | None:
     ``None`` keeps it out of every mean, comparison and model input rather
     than contributing a zero.
     """
-    if channel.sentinel_raw is not None and raw == channel.sentinel_raw:
+    if is_memory_sentinel(channel, raw):
         return None
-    if channel.scale is None:
-        return None
-    offset = channel.offset if channel.offset is not None else 0.0
-    return raw * channel.scale + offset
+    return channel.scaled(raw)
 
 
 def is_memory_sentinel(channel: MemoryChannel, raw: int) -> bool:
@@ -469,11 +430,9 @@ def plan_memory_reads(channels: Sequence[MemoryChannel]) -> list[MemoryRead]:
 
 def decode_memory_window(channel: MemoryChannel, payload: bytes, offset: int) -> int | None:
     """Raw integer for `channel` from a window reply starting `offset` earlier."""
-    start = offset + channel.byte_start
-    end = start + channel.byte_length
-    if len(payload) < end:
-        return None
-    return int.from_bytes(payload[start:end], byteorder=channel.byte_order)
+    return slices.slice_raw(
+        payload, offset + channel.byte_start, channel.byte_length, channel.byte_order
+    )
 
 
 def check_known_answer(channel: MemoryChannel, word: int, did_raw: int) -> bool:
@@ -574,6 +533,90 @@ def load_did_map(path: Path) -> DidMap:
     return DidMap.model_validate(raw)
 
 
+# The repo catalog accessors (R01.2): the one cached loader of the checked-in
+# data/dids.yaml and the lookups built on it. Repo-rooted (``src.paths``), so
+# the working directory does not matter. ``src.collection.obd_scheduler``
+# re-exports them for its callers.
+
+
+@lru_cache(maxsize=1)
+def load_repo_did_map() -> DidMap | None:
+    """Parsed data/dids.yaml, or ``None`` when absent/unparseable.
+
+    ``None`` keeps the collector running without DID metadata — callers fall
+    back to hex-only token parsing and session-less polling. The one cached
+    loader of the repo DID catalog (``control.obd_request`` kept a documented
+    copy; R01.2 retired it).
+    """
+    if not DIDS_YAML.exists():
+        return None
+    try:
+        return load_did_map(DIDS_YAML)
+    except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
+        return None
+
+
+@lru_cache(maxsize=1)
+def _did_ids_by_name() -> dict[str, int]:
+    """Symbolic DID name → identifier from data/dids.yaml.
+
+    Empty when the file is absent or unparseable — callers then accept only
+    4-char hex, matching the pre-resolution behavior. Mirrors how
+    ``parse_pid_token`` resolves PID names against ``_PID_IDS_BY_NAME``.
+    """
+    did_map = load_repo_did_map()
+    if did_map is None:
+        return {}
+    # Aliases resolve too, so renaming a DID cannot break a saved capture
+    # profile that still references its old name. Current names are inserted
+    # last so they win any collision with a stale alias.
+    resolved: dict[str, int] = {}
+    for entry in did_map.dids:
+        for alias in entry.aliases:
+            resolved[alias] = entry.did
+    for entry in did_map.dids:
+        resolved[entry.name] = entry.did
+    return resolved
+
+
+def known_did_names() -> tuple[str, ...]:
+    """Return the vehicle DID inventory available to capture profiles."""
+    return tuple(_did_ids_by_name())
+
+
+def did_access() -> DidAccess | None:
+    """The access block of data/dids.yaml (gating session, keep-alive)."""
+    did_map = load_repo_did_map()
+    return None if did_map is None else did_map.access
+
+
+def memory_channels() -> tuple[MemoryChannel, ...]:
+    """Every service-0x23 channel in the catalog, unfiltered.
+
+    Selecting the ones a capture profile names is the caller's job.
+    """
+    did_map = load_repo_did_map()
+    return () if did_map is None else tuple(did_map.memory)
+
+
+def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:
+    """Provenance-backed full Mode-22 payload widths, keyed by DID."""
+    did_map = load_repo_did_map()
+    if did_map is None:
+        return {}, {}
+    widths = {
+        entry.did: entry.response_length
+        for entry in did_map.dids
+        if entry.response_length is not None
+    }
+    sources = {
+        entry.did: entry.response_length_source
+        for entry in did_map.dids
+        if entry.response_length_source is not None
+    }
+    return widths, sources
+
+
 def decode_did_raw(entry: DidEntry, payload: bytes) -> int | None:
     """Extract the raw integer for `entry` from a Mode-22 response payload.
 
@@ -581,18 +624,12 @@ def decode_did_raw(entry: DidEntry, payload: bytes) -> int | None:
     `CanObdClient.query_mode_22().payload` yields). Returns `None` when the
     payload is too short for the declared byte range.
     """
-    end = entry.byte_start + entry.byte_length
-    if len(payload) < end:
-        return None
-    return int.from_bytes(payload[entry.byte_start : end], byteorder=entry.byte_order)
+    return entry.raw_from(payload)
 
 
 def apply_scaling(entry: DidEntry, raw: int) -> float | None:
     """Apply `scale`/`offset`; `None` when scaling isn't pinned yet."""
-    if entry.scale is None:
-        return None
-    offset = entry.offset if entry.offset is not None else 0.0
-    return raw * entry.scale + offset
+    return entry.scaled(raw)
 
 
 def is_plausible(entry: DidEntry, decoded: float) -> bool | None:
@@ -602,13 +639,7 @@ def is_plausible(entry: DidEntry, decoded: float) -> bool | None:
     (no check). Mirrors `bindings.is_plausible` so the DID validator can
     flag misapplied scalings the same way the broadcast one does.
     """
-    if entry.plausible_min is None and entry.plausible_max is None:
-        return None
-    if entry.plausible_min is not None and decoded < entry.plausible_min:
-        return False
-    if entry.plausible_max is not None and decoded > entry.plausible_max:
-        return False
-    return True
+    return entry.plausible(decoded)
 
 
 @dataclass(frozen=True)

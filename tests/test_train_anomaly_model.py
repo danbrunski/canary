@@ -11,7 +11,6 @@ import pyarrow.parquet as pq
 import pytest
 
 from scripts.train_anomaly_model import (
-    build_feature_frame,
     main,
     train,
 )
@@ -19,6 +18,7 @@ from src.config import CanaryConfig
 from src.preprocessing import MODE_COLUMN, feature_pipeline
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
+    build_feature_frame,
     build_feature_spec,
     reconcile_feature_frame_to_spec,
 )

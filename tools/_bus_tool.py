@@ -13,7 +13,9 @@ instead and imported each other's private names. This is their one home:
   verdict. A transmitting tool cannot open the bus without one, so it cannot
   skip the passive check by forgetting it (``probe_local_identifier`` and
   ``scan_constant_dids`` used to);
-* :func:`resolve_session`, :func:`load_widths` and the JSONL record shape.
+* :func:`resolve_session` and the JSONL header; :func:`load_widths` and the
+  record discriminator (:data:`RECORD_KEY`, :func:`record_kind`) live beside
+  ``DidSnapshot`` in :mod:`src.analysis.did_scan` and are re-exported here.
 
 The HTTP half (:mod:`src.control.passive_client`) lives in ``src`` so nothing
 here needs the daemon's own code.
@@ -22,13 +24,13 @@ here needs the daemon's own code.
 from __future__ import annotations
 
 import argparse
-import json
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from src.analysis.did_scan import RECORD_KEY, load_widths, record_kind
 from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.collection.isotp import (
@@ -37,7 +39,6 @@ from src.collection.isotp import (
     DEFAULT_RESPONSE_ID_MIN,
     expected_responder,
 )
-from src.collection.obd_scheduler import did_access
 from src.config import CanaryConfig
 from src.control.passive_client import (
     DEFAULT_DAEMON_URL,
@@ -47,6 +48,7 @@ from src.control.passive_client import (
     passive_problem,
     resolve_token,
 )
+from src.decode.dids import did_access
 
 #: Why passive mode is mandatory for a session-holding tool — quoted in every
 #: refusal and stop message.
@@ -57,10 +59,6 @@ PASSIVE_REASON = (
 
 #: Exit status every bus tool returns when it refuses to transmit.
 PASSIVE_REFUSED_EXIT = 2
-
-#: The JSONL record discriminator every bus-tool log uses. ``can_memory_log``
-#: wrote ``"type"`` until R06.1; :func:`record_kind` still reads those files.
-RECORD_KEY = "kind"
 
 VerdictSource = Literal["armed", "no_daemon", "job_controller"]
 
@@ -262,27 +260,6 @@ def responder_for(request_id: int) -> int | None:
     return expected_responder(request_id, response_window(request_id))
 
 
-def load_widths(path: Path) -> dict[int, int]:
-    """Measured payload widths from a did_sweep snapshot or a did_log JSONL header.
-
-    Only a measurement counts: a catalog ``byte_length`` is the decoded value's
-    width inside the payload, not the payload's own length.
-    """
-    text = path.read_text()
-    try:
-        raw: Any = json.loads(text)
-    except json.JSONDecodeError:
-        first = next((line for line in text.splitlines() if line.strip()), "")
-        raw = json.loads(first)
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
-    if record_kind(raw) == "header" and isinstance(raw.get("widths"), dict):
-        return {int(key, 16): int(width) for key, width in raw["widths"].items()}
-    if isinstance(raw.get("values"), dict):
-        return {int(key, 16): len(hexvalue) // 2 for key, hexvalue in raw["values"].items()}
-    raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
-
-
 def header_record(tool: str, *, started_at: float, **fields: Any) -> dict[str, Any]:
     """The first line of every bus-tool JSONL log.
 
@@ -290,12 +267,6 @@ def header_record(tool: str, *, started_at: float, **fields: Any) -> dict[str, A
     ``t_send``/``t_recv`` (and the session parquet), never an ISO string.
     """
     return {RECORD_KEY: "header", "tool": tool, "started_at": float(started_at), **fields}
-
-
-def record_kind(row: Mapping[str, Any]) -> str | None:
-    """A JSONL record's discriminator; reads pre-R06.1 ``"type"`` logs too."""
-    kind = row.get(RECORD_KEY, row.get("type"))
-    return kind if isinstance(kind, str) else None
 
 
 __all__ = [

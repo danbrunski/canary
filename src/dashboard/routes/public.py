@@ -35,9 +35,9 @@ from src.dashboard.status import (
 )
 from src.dashboard.ups import DEFAULT_UPS_STATUS_PATH
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
-from src.models.health import HealthMonitor
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
+    from src.daemon.health import HealthMonitor
     from src.daemon.inference_metrics import InferenceTimingRecorder
     from src.decode.dids import DidMap
 

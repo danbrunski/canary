@@ -31,11 +31,18 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from _cli import (
-    add_bindings_arg,
-    add_log_level_arg,
-    load_config,
-)
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_log_level_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.inventory_behavior_inputs`: repo root on path
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.analysis.behavior_input_inventory import (
     fuel_system_state_agreement,

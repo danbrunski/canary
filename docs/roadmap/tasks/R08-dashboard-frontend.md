@@ -498,7 +498,7 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
   were `role="tab"`, so `AnalysisPage.test.tsx` and `Workbench.test.ts` now
   query them as buttons. `SegmentedControl.test.tsx` (2).
 
-- [~] **R08.12 Low-value mechanical sweeps (batch them, or skip them).**
+- [x] **R08.12 Low-value mechanical sweeps (batch them, or skip them).**
   - Ten files hand-write the `panelClass` + `<header>` + `<h2>` shell instead
     of using `<Panel title count actions className>`: ControlPanel,
     ControlPanelSections, JobsCard, SessionsCard, ReplayCard,
@@ -520,6 +520,16 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
   passes, and so does `SessionsPanel.test.ts`.
   **Remaining:** `ControlPanel`'s Capture section, because the panel has no
   behavioural test yet and needs one before the change.
+  *Remainder done 2026-09-25.* `ControlPanel.test.tsx` (3) was written first
+  and passed against the hand-written shell: the Capture header reads
+  `idle`/`active` (with its colour), Start sends the typed purpose/protocol/
+  vehicle state, Tag trims its label and Stop sends the reason on an open
+  window, and without a token every action is disabled and nothing is
+  fetched. The section is now `<Panel title="Capture" actions={…}>`;
+  `ControlPanel.tsx` no longer imports `panelClass`/`panelHeaderClass`/
+  `panelTitleClass`. Gate: `pnpm typecheck`, `pnpm lint`, `pnpm format:check`
+  clean; `vitest run src/panels/ControlPanel.test.tsx
+  src/panels/panelShells.test.tsx` 11 passed.
 
 - [~] **R08.13 A linter and a formatter for the dashboard.** *Operator,
   2026-09-24: "seems like we should use a linter right".* The dashboard had

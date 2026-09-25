@@ -426,7 +426,7 @@ Three problems carry most of the weight here:
   dashboard app (33 files, fast tier) was run; see the report for the one
   foreign failure.
 
-- [~] **R03.7 Share the session-read routes between the companion and the
+- [x] **R03.7 Share the session-read routes between the companion and the
   dashboard.**
   - Companion `routes.py`'s gpx/kml/chart routes are near-copies of
     `control.py`'s, differing only in root and auth. They post-date the July
@@ -453,6 +453,37 @@ Three problems carry most of the weight here:
   list/get/export/checksum/metadata/pin/unpin/delete) are still called from
   both apps with per-app hooks (`finalize`, `after_delete`, `guard`,
   `serialize`); turning them into shared handlers is not done.
+  *Remainder done 2026-09-25.* The eight hook-parameterized session functions
+  are deleted from `companion/services.py` (`sessions_list_response`,
+  `get_session_response`, `export_session_response`,
+  `export_session_checksum_response`, `update_session_metadata_response`,
+  `pin_session_response`, `unpin_session_response`,
+  `delete_session_response`). New `src/dashboard/routes/stored_sessions.py`:
+  `build_stored_session_router(store, auth)` declares the seven per-session
+  routes once (`GET …/{id}`, `POST …/metadata`, `…/pin`, `…/unpin`,
+  `DELETE …/{id}`, `GET …/export`, `…/export/checksum`) as ordinary
+  handlers over a `SessionStore` naming what really differs: `resolve`,
+  `describe`, `export_prefix`, the companion's `reindex` (its metadata
+  response carries the re-indexed `session`, as before) and `after_delete`
+  (index drop), the daemon's `guard_delete` (active capture / writer session)
+  and `on_write` (audit publish `session.metadata|pin|unpin|delete`), and
+  `catalog_db`. The daemon registers it as `sessions.build_store_router`
+  (`daemon_session_store(ctx)`), the companion over `lib.sessions_dir`'s index
+  with `require_local_auth`. The session *list* stays per app (the daemon's
+  `since/until/limit/captures` filters have no companion counterpart); both
+  return `stored_sessions.sessions_payload`. Route table unchanged for both
+  apps (`test_route_table_snapshot.py`). Tests:
+  `tests/test_stored_sessions_router.py` (9, replacing the four
+  `test_companion_services.py` hook tests: reindex/metadata shape, pin
+  serialization, guard-before/index-drop-after delete, guard refusal leaves the
+  files, every write published, read/export/checksum agree);
+  `test_companion_api.py`, `test_companion_services.py`,
+  `test_companion_library.py`, `test_session_chart_route.py`,
+  `test_control_api.py`, `test_dashboard_api.py`, `test_mcp_tools.py`,
+  `test_mcp_phase2_tools.py` pass (208 with the router tests).
+  What stays hook-parameterized in `services.py` is the job, training-run,
+  feedback, model-manifest and dataset-health handlers: not this item's scope
+  (they are not session reads).
 
 - [x] **R03.8 `drain.py`: one sink-registration helper and one per-record
   loop.**

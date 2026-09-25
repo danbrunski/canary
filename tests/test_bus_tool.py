@@ -158,14 +158,6 @@ def _tool_sources() -> list[Path]:
     return sorted(p for p in TOOLS_DIR.glob("*.py") if p.name != "__init__.py")
 
 
-#: Known remainder, not a pass: ``watch_uprev_logs`` reads the filename pattern
-#: private to ``import_uprev_log``, which the R05 refactor owns. Make it public
-#: there and delete this entry.
-_PRIVATE_IMPORT_REMAINDER = frozenset(
-    {"watch_uprev_logs.py: from tools.import_uprev_log import ['_FILENAME_TIME']"}
-)
-
-
 def test_no_tool_imports_another_tools_private_names() -> None:
     offenders: list[str] = []
     for path in _tool_sources():
@@ -178,7 +170,7 @@ def test_no_tool_imports_another_tools_private_names() -> None:
             private = [alias.name for alias in node.names if alias.name.startswith("_")]
             if private:
                 offenders.append(f"{path.name}: from {node.module} import {private}")
-    assert set(offenders) == _PRIVATE_IMPORT_REMAINDER
+    assert offenders == []
 
 
 #: Tools that build a ``CanObdClient`` of their own. Every one opens it through

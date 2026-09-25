@@ -15,7 +15,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +25,7 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
+import scripts.refit_behavior_models as refit_cli
 from src.analysis.behavior_inventory import build_inventory, compare_deployed
 from src.analysis.refit import default_recipes, refit_all
 from src.config import CanaryConfig
@@ -72,9 +72,6 @@ REPO = Path(__file__).resolve().parents[1]
 PROFILE_DIR = REPO / "data" / "nissan-xterra-2008"
 SHIPPED = PROFILE_DIR / "behavior_models.yaml"
 SHIPPED_POLICY = PROFILE_DIR / BEHAVIOR_POLICY_FILENAME
-
-sys.path.insert(0, str(REPO / "scripts"))
-import refit_behavior_models as refit_cli  # noqa: E402
 
 
 @pytest.fixture

@@ -487,6 +487,7 @@ def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("phi"),
+        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -497,6 +498,7 @@ def test_commanded_afr_uses_the_recorded_convention(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("lambda"),
+        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -527,6 +529,7 @@ def test_a_session_opening_on_fuel_cut_still_converts(tmp_path: Path) -> None:
         session,
         ["obd:COMMANDED_AFR"],
         calibration=_calibration("phi"),
+        afr_stoich=14.7,
         bindings_path=BINDINGS,
         dids_path=DIDS,
     )
@@ -545,6 +548,7 @@ def test_unverified_convention_refuses_rather_than_guessing(tmp_path: Path) -> N
             session,
             ["obd:COMMANDED_AFR"],
             calibration=_calibration("unverified"),
+            afr_stoich=14.7,
             bindings_path=BINDINGS,
             dids_path=DIDS,
         )
@@ -557,6 +561,22 @@ def test_commanded_afr_without_a_calibration_says_so(tmp_path: Path) -> None:
     )
     with pytest.raises(ChannelSpecError, match="calibration"):
         read_channels(session, ["obd:COMMANDED_AFR"], bindings_path=BINDINGS, dids_path=DIDS)
+
+
+def test_commanded_afr_without_a_stoich_says_so(tmp_path: Path) -> None:
+    """R05.1: no gasoline default — a diesel profile must not get 14.7 silently."""
+    session = _session(
+        tmp_path,
+        [TelemetryRecord(timestamp=T0, source="obd", channel="COMMANDED_EQUIV_RATIO", value=1.0)],
+    )
+    with pytest.raises(ChannelSpecError, match="stoichiometric"):
+        read_channels(
+            session,
+            ["obd:COMMANDED_AFR"],
+            calibration=_calibration("phi"),
+            bindings_path=BINDINGS,
+            dids_path=DIDS,
+        )
 
 
 def test_the_xterra_profile_records_phi() -> None:

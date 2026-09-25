@@ -116,7 +116,7 @@ def parse_column(header: str) -> tuple[str, str, bool]:
 #: sanity-check hint against the operator-supplied ``--started-at``, never
 #: used to compute anything (the timezone it's in is unknowable from the
 #: filename alone).
-_FILENAME_TIME = re.compile(
+FILENAME_TIME = re.compile(
     r"UpRev_Log(?P<month>\d{1,2})-(?P<day>\d{1,2})-(?P<year>\d{4})_"
     r"(?P<hour>\d{1,2})-(?P<minute>\d{2})-(?P<second>\d{2})_(?P<meridiem>AM|PM)",
     re.IGNORECASE,
@@ -124,7 +124,7 @@ _FILENAME_TIME = re.compile(
 
 
 def filename_time_hint(name: str) -> str | None:
-    match = _FILENAME_TIME.search(name)
+    match = FILENAME_TIME.search(name)
     if match is None:
         return None
     hour = int(match.group("hour")) % 12

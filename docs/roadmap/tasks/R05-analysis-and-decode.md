@@ -41,7 +41,7 @@ code:
 
 ## Correctness first
 
-- [~] **R05.1 Resolve the vehicle's tuning context once.** *Drift bug,
+- [x] **R05.1 Resolve the vehicle's tuning context once.** *Drift bug,
   partly serve path.*
 
   **The registry.** `control/calibration.append_flash` writes new flashes to
@@ -125,6 +125,13 @@ code:
   **Remaining:** `grep -rn "afr_stoich: float = 14.7" src` still finds
   `src/analysis/channels.py` ×2 (`read_channels`, `read_aligned`) — held by
   the human session; every R05.1 caller now passes `afr_stoich` explicitly.
+  *Remainder done 2026-09-25.* `read_channels`/`read_aligned` take
+  `afr_stoich: float | None = None` and `obd:COMMANDED_AFR` refuses without
+  one (`ChannelSpecError` naming `TuningContext.afr_stoich`), as it already
+  refused without a calibration; specs that do not derive commanded AFR need
+  no stoich. `grep -rn "afr_stoich: float = 14.7" src` → nothing. Test:
+  `test_analysis_channels.py::test_commanded_afr_without_a_stoich_says_so`; the
+  four commanded-AFR tests now pass `afr_stoich=14.7` (27 pass).
 
 - [x] **R05.2 Route every noise-floor significance through one refusing
   function.**
@@ -406,7 +413,7 @@ code:
   `test_evaluate_behavior_models_script.py` (incl. slow): 190 passed,
   1 xfailed. Golden catalog unchanged.
 
-- [~] **R05.9 One byte-slice / scale / plausibility layer in `src/decode/`.**
+- [x] **R05.9 One byte-slice / scale / plausibility layer in `src/decode/`.**
   *Serve path.*
   - Raw extraction has four copies: `bindings.decode_raw`,
     `dids.decode_did_raw`, `dids.decode_memory_raw`, and
@@ -447,6 +454,23 @@ code:
   `dids.Evidence` onto `slices` — `src/decode/dids.py` is held by the human
   session with uncommitted work. (`preprocessing/live._decode_signal_raw` is
   R04.4's.)
+  *Remainder done 2026-09-25.* `DidEntry` and `MemoryChannel` take the
+  `ByteSlice`/`LinearScale`/`PlausibleRange` mixins (fields and their order
+  unchanged); `decode_did_raw`, `decode_memory_raw`, `apply_scaling`,
+  `apply_memory_scaling` (sentinel check, then `scaled`), `is_plausible` and
+  `decode_memory_window` (`slices.slice_raw` at the window offset) are one-line
+  delegations; `dids.Evidence` *is* `slices.Evidence`, so the three catalogs
+  share one evidence record. `live._decode_signal_raw` is gone (R04.4).
+  Bit-identity over a real session: every `DID_` row (23,489) and `mem:` row
+  (6,268) of `sessions-0921c/_capture-tuning-2026-09-21T232153`, decoded with
+  HEAD's and this tree's `src/decode/dids.py` against `data/dids.yaml` —
+  `decode_raw_did_reading`, then each of the 27 DIDs' raw/scaled/plausible
+  over each payload and each of the 11 memory channels'
+  window/raw/scaled/sentinel over each window reply — 726,640 results,
+  identical (`==` on the pickled lists; 563,736 scaled DID values, 40,360
+  scaled memory values, 382 sentinels). `data/dids.yaml` (27 DIDs, 11 memory)
+  and `data/bindings.yaml` load. `test_did_decode.py`, `test_decode_slices.py`,
+  `test_memory_channels.py`, ground-truth `catalog_pins` pass.
 
 - [x] **R05.10 Move surface evaluation into decode; one bin rule.**
   - The serve-path evaluators (`evaluate_1d/2d`,
@@ -589,7 +613,7 @@ code:
   names the dev vehicle's floor (now counted against the profile's); (4) the
   optional facade split of `behavior_validation` was not attempted.
 
-- [~] **R05.14 Small cleanups (batch them).**
+- [x] **R05.14 Small cleanups (batch them).**
   - `workbench.session_span` re-walks parquet footers that
     `loader.count_session_rows` / `session_time_span_seconds` already walk.
   - `_hash_xy`/`_hash_xyz` and `_now_iso` are each defined twice.
@@ -607,6 +631,16 @@ code:
   **Remaining:** `workbench.session_span` still walks Parquet footers itself;
   folding it onto the loader needs a (lo, hi, rows) footer reader in
   `src/preprocessing/loader.py` (R04-held).
+  *Remainder done 2026-09-25.* `loader.session_footer_span(session_dir) ->
+  SessionFooterSpan(first, last, rows)` is the one footer walk (row counts,
+  timestamp min/max normalised to UTC, truncated/0-byte chunks skipped);
+  `count_session_rows` and `session_time_span_seconds` read it, and
+  `workbench.session_span` is a three-line adapter over it (its `_utc` copy is
+  gone). Before/after over every session under `~/canary-data` (268 dirs):
+  `count_session_rows`, `session_time_span_seconds` and `session_span`
+  identical to HEAD's for all 268. `test_workbench_analysis.py`,
+  `test_preprocessing_loader.py`, `test_replay*.py`, `test_trip_end_digest.py`
+  pass.
 
 - [ ] **R05.15 The operational calibration directory is shared by every
   profile.** *Pre-existing; found during R05.1, not fixed.*

@@ -68,7 +68,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, TextIO
 
-from src.analysis.did_scan import BatchRead, CanableMode22Transport, sweep_dids
+from src.analysis.did_scan import BatchRead, CanableMode22Transport, load_widths, sweep_dids
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
 from tools._bus_tool import (
     PASSIVE_REFUSED_EXIT,
@@ -78,7 +78,6 @@ from tools._bus_tool import (
     PassiveVerdict,
     add_bus_tool_args,
     header_record,
-    load_widths,
     open_client,
     parse_header,
     passive_problem,

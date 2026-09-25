@@ -28,11 +28,19 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import uvicorn
-from _cli import (
-    add_common_args,
-    add_log_level_arg,
-    load_config,
-)
+
+try:
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.serve_dashboard` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.dashboard.api import create_app
 from src.log import configure_logging

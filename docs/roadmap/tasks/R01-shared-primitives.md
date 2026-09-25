@@ -186,20 +186,29 @@ named.
   shows two catalogs give two cache entries naming their own `dids` path;
   `test_every_default_home_re_exports_the_same_file` now covers
   `feature_pipeline` (`tests/test_paths.py`: 5 pass).
-  **Remaining:** (1) done, see above. (2) Moving the
-  DID-catalog accessors into `src/decode/dids.py` (held by another session's
-  uncommitted work); they stay in `obd_scheduler` for now. (3)
-  `src/analysis/channels.py` (same session): three dids/bindings defaults.
-  (4) `grep -rn 'Path("data/' src` still lists `config.py`'s runtime-state
+  *Accessors and `channels.py` done 2026-09-25 (remainders pass).*
+  `load_repo_did_map`, `_did_ids_by_name`, `known_did_names`, `did_access`,
+  `memory_channels` and `did_response_widths` live in `src/decode/dids.py`
+  (repo-rooted through `src.paths.DIDS_YAML`, the one `lru_cache`d loader);
+  `src.collection.obd_scheduler` re-exports them (its `spec.py` imports them
+  for the spec builder), and `control/obd_request.py` and `tools/_bus_tool.py`
+  import the new home. `src/analysis/channels.py`'s `read_channels`,
+  `read_aligned` and `rescale_channel_rows` default to
+  `src.paths.BINDINGS_YAML`/`DIDS_YAML` (six `Path("data/…")` defaults, three
+  functions). Tests: `test_hybrid_scheduling.py`, `test_kline_sniff.py`,
+  `test_kline_protocol.py`, `test_d02_accounting.py`, `test_did_sweep_tool.py`,
+  `test_control_obd_request.py`, `test_analysis_channels.py`,
+  `test_paths.py` pass.
+  **Remaining:** (4) `grep -rn 'Path("data/' src` still lists `config.py`'s runtime-state
   defaults (`data/control/*`, `data/anomalies`, …) and the module constants
   that mirror them (`reference_epoch`, `vehicle_ledger`, `alerts/tuning`,
   `alerts/feedback`, `training_ledger`, `llm_assist/store`, `mcp_server/config`,
   `custom_pids`, `accepted_baselines`, `feature_pipeline`'s cache dir):
   `profiles.scope_config` rewrites those relative paths per vehicle and tests
-  pin them (`test_profiles`, `test_config`), so they wait for R05.1's
-  profile-relative helpers. `ml_training` not run here.
+  pin them (`test_profiles`, `test_config`), so they wait for R05.1/R05.15's
+  profile-relative helpers (R05.15 is not started). `ml_training` not run here.
 
-- [~] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
+- [x] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
   "number or `None`" helper has about ten copies with four behaviours:
   - `daemon/inference._finite_or_none` and `_num` (identical bodies, one
     file), `preprocessing/session_context._finite` and
@@ -234,6 +243,20 @@ named.
   `cold_start_inventory._finite` is an array filter, not a scalar coercion
   (deliberate); **`preprocessing/live._to_float` remains**: the file is held
   by another session's uncommitted work.
+  *Remainder done 2026-09-25.* `live._to_float` is gone; every live coercion
+  (`observe` for obd/gps/imu/other, the CAN decode, `_first_finite`) is
+  `coerce.finite_float`. Callers read first: the only behaviour that changes
+  is a NaN or ±inf sample, which no longer stamps its channel fresh. That is
+  the offline rule — the resampler's `_gap_flags` drops NaN before ageing
+  (`observed = original.dropna()`), so at HEAD a NaN sample made serve read the
+  channel fresh-and-NaN where training held the previous value and aged it.
+  No named `float_or_none` was needed. Real-session before/after (R04.4's
+  run, 546,953 records of `sessions-0920/2026-09-20T205117`): 351/351 live
+  feature rows identical to HEAD's. Test (fails on HEAD's `live.py`):
+  `tests/test_preprocessing_live.py::test_a_nan_sample_is_not_an_observation_live_or_offline`.
+  `grep -rn "def _finite\|def _num\b\|def _to_float\|def _as_float\|def
+  _float_or_none\|def _maybe_float" src` → only
+  `cold_start_inventory._finite` (the array filter, deliberate).
 
 - [x] **R01.4 One "numeric column or NaN" helper in
   `src/dataframe_utils.py`.** Six copies:

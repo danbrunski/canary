@@ -10,13 +10,14 @@ not waved through.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
+from scripts import _cli, evaluate_detectors, retrain
+from src.models import training_entry
 from src.models.alert_budget import (
     ALERT_BUDGET_INCIDENT,
     check_alert_budget,
@@ -25,11 +26,6 @@ from src.models.alert_budget import (
 )
 from src.models.retrain_exit_codes import ALERT_BUDGET_REFUSED
 from src.models.role_gate import resolve_role
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import _cli  # noqa: E402
-import evaluate_detectors  # noqa: E402
-import retrain  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -284,8 +280,8 @@ def _setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         (out_dir / "model.manifest.json").write_text("{}")
         trained_into.append(out_dir)
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     return {"root": root, "sessions": sessions, "trained_into": trained_into}
 
 
@@ -331,7 +327,7 @@ def test_retrain_with_evidence_roles_publishes_without_measuring(
 ) -> None:
     setup = _setup(tmp_path, monkeypatch)
     calls: list[list[str]] = []
-    monkeypatch.setattr(evaluate_detectors, "main", _fake_harness({}, calls))
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", _fake_harness({}, calls))
 
     rc = retrain.main(_argv(tmp_path, EXAMPLE_YAML, setup))
 
@@ -355,7 +351,7 @@ def test_retrain_refuses_an_alert_role_artifact_over_the_budget(
     (served / "model.joblib").write_bytes(b"old-if")
     calls: list[list[str]] = []
     flooding = _report([_drive("d4", 1.0, {"isolation_forest": 12})])
-    monkeypatch.setattr(evaluate_detectors, "main", _fake_harness(flooding, calls))
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", _fake_harness(flooding, calls))
 
     rc = retrain.main(_argv(tmp_path, _alert_config(tmp_path), setup))
 
@@ -389,7 +385,7 @@ def test_retrain_publishes_an_alert_role_artifact_within_the_budget(
     quiet = _report(
         [_drive(f"d{i}", 1.0, {"isolation_forest": 0}) for i in range(5)], bootstrap_high=0.0
     )
-    monkeypatch.setattr(evaluate_detectors, "main", _fake_harness(quiet, calls))
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", _fake_harness(quiet, calls))
 
     rc = retrain.main(_argv(tmp_path, _alert_config(tmp_path), setup))
 
@@ -417,7 +413,7 @@ def test_retrain_publishes_over_the_budget_only_with_a_stated_reason(
 
     calls: list[list[str]] = []
     flooding = _report([_drive("d4", 1.0, {"isolation_forest": 12})])
-    monkeypatch.setattr(evaluate_detectors, "main", _fake_harness(flooding, calls))
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", _fake_harness(flooding, calls))
     reason = "fault-injection bench drive, operator 2026-09-23"
 
     rc = retrain.main(_argv(tmp_path, config, setup, "--accept-alert-budget", reason))
@@ -435,9 +431,9 @@ def test_retrain_refuses_an_alert_role_artifact_with_no_evaluation_drive(
 ) -> None:
     setup = _setup(tmp_path, monkeypatch)
     calls: list[list[str]] = []
-    monkeypatch.setattr(evaluate_detectors, "main", _fake_harness({}, calls))
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", _fake_harness({}, calls))
     # Nothing spared for evaluation (the auto-pick would otherwise take one).
-    monkeypatch.setattr(retrain, "_pick_evaluation_holdouts", lambda *a, **k: [])
+    monkeypatch.setattr(retrain, "pick_evaluation_holdouts", lambda *a, **k: [])
     argv = [
         a for a in _argv(tmp_path, _alert_config(tmp_path), setup) if a != "--evaluation-sessions"
     ]

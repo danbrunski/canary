@@ -4,23 +4,21 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+from scripts import _cli, retrain
 from src.alerts.feedback import FeedbackStore
 from src.config import CanaryConfig
+from src.models import evaluation as model_evaluation
+from src.models import training_entry
+from src.preprocessing.feature_pipeline import load_resampled_session
+from tests.builders import write_fixture_session
 from tests.configs import retrain_argv
 from tests.repo_guard import RepoTreeGuard
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import _cli  # noqa: E402
-import retrain  # noqa: E402
-
-from tests.builders import write_fixture_session
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
@@ -48,8 +46,8 @@ def test_retrain_calls_both_trainers(
         assert kwargs["feature_frame"] is feature_frame
         calls.append("lstm")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", _lstm_train)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", _lstm_train)
 
     rc = retrain.main(
         retrain_argv(
@@ -123,8 +121,10 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
         assert isinstance(filtered, pd.DataFrame)
         assert filtered["obd:RPM"].tolist() == [700.0, 710.0]
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(
+        training_entry, "train_sequence_detector", lambda *a, **k: calls.append("lstm")
+    )
 
     rc = retrain.main(
         retrain_argv(
@@ -150,8 +150,12 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: calls.append("if")
+    )
+    monkeypatch.setattr(
+        training_entry, "train_sequence_detector", lambda *a, **k: calls.append("lstm")
+    )
 
     rc = retrain.main(
         retrain_argv(
@@ -178,8 +182,12 @@ def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: calls.append("if")
+    )
+    monkeypatch.setattr(
+        training_entry, "train_sequence_detector", lambda *a, **k: calls.append("lstm")
+    )
 
     rc = retrain.main(
         retrain_argv(
@@ -216,9 +224,14 @@ def test_retrain_sequence_model_tcn(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
 
     calls: list[str] = []
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: calls.append("if"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
-    monkeypatch.setattr(retrain.tcn_trainer, "train", lambda *a, **k: calls.append("tcn"))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: calls.append("if")
+    )
+    monkeypatch.setattr(
+        training_entry,
+        "train_sequence_detector",
+        lambda backend, *a, **k: calls.append(backend.selector),
+    )
 
     rc = retrain.main(
         retrain_argv(
@@ -246,20 +259,32 @@ def test_retrain_since_boundary_excludes_older_sessions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Task 3.5: --since-boundary drops sessions older than the latest
-    corpus_boundary event; without the flag, nothing is filtered."""
+    corpus_boundary event; without the flag, nothing is filtered.
+
+    The event is read from the vehicle profile's ledger, where the daemon
+    records a calibration change (``profiles.record_calibration_change``).
+    Retrain's own copy of this block read the unscoped ledger and missed it;
+    refit's read the scoped one (R06.3: one helper, ``_cli.apply_since_boundary``).
+    """
     import yaml
 
     from src.analysis.vehicle_ledger import VehicleLedgerStore
+    from src.profiles import resolve_profile_for_tooling, scope_config
 
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
-    VehicleLedgerStore(ledger_path).record(
-        occurred_at=date(2026, 6, 1), kind="mod", title="Intake swap", corpus_boundary=True
-    )
-
     data = yaml.safe_load(EXAMPLE_YAML.read_text())
     data["daemon"] = {"vehicle_ledger": str(ledger_path)}
     cfg_path = tmp_path / "canary.yaml"
     cfg_path.write_text(yaml.safe_dump(data))
+    config = CanaryConfig.from_yaml(cfg_path)
+    assert config.profiles.enabled
+    profile_ledger = scope_config(
+        config, resolve_profile_for_tooling(config, None)
+    ).daemon.vehicle_ledger
+    assert profile_ledger != ledger_path
+    VehicleLedgerStore(profile_ledger).record(
+        occurred_at=date(2026, 6, 1), kind="mod", title="Intake swap", corpus_boundary=True
+    )
 
     old_session = tmp_path / "sessions" / "2026-05-01T120000"
     new_session = tmp_path / "sessions" / "2026-06-15T120000"
@@ -272,8 +297,8 @@ def test_retrain_since_boundary_excludes_older_sessions(
     def _if_train(sessions_arg: list[Path], *_a: object, **_kwargs: object) -> None:
         seen["sessions"] = list(sessions_arg)
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -315,15 +340,15 @@ def test_retrain_since_selects_only_sessions_at_or_after_cutoff(
         s.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
 
     seen: dict[str, object] = {}
     monkeypatch.setattr(
-        retrain.if_trainer,
-        "train",
+        training_entry,
+        "train_isolation_forest",
         lambda positional, *_a, **_k: seen.__setitem__("if_sessions", list(positional)),
     )
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -393,8 +418,8 @@ def test_retrain_since_with_no_calibration_holdout_does_not_refuse(
         s.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -465,8 +490,8 @@ def test_retrain_continues_after_first_trainer_fails(
     def _ok_lstm(*_a: object, **_k: object) -> None:
         lstm_called.append(True)
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _broken_if)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", _ok_lstm)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _broken_if)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", _ok_lstm)
 
     rc = retrain.main(
         retrain_argv(
@@ -499,8 +524,8 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
     def _broken(*_a: object, **_k: object) -> None:
         raise RuntimeError("simulated trainer failure")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _broken)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", _broken)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _broken)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", _broken)
 
     rc = retrain.main(
         retrain_argv(
@@ -522,8 +547,8 @@ def test_retrain_skip_benchmark_flag_prevents_gate_call(
     session.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     def _boom(*_a: object, **_k: object) -> tuple[None, None]:
         raise AssertionError("benchmark gate must not run with --skip-benchmark")
@@ -554,8 +579,8 @@ def test_retrain_calls_benchmark_gate_with_calibration_sessions(
     session.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     calls: list[object] = []
 
@@ -591,8 +616,8 @@ def test_retrain_returns_error_when_benchmark_gate_regressed(
     session.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
     monkeypatch.setattr(
@@ -624,8 +649,8 @@ def test_retrain_ok_benchmark_does_not_fail_run(
     session.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
     monkeypatch.setattr(
@@ -674,7 +699,7 @@ def test_run_benchmark_gate_skips_cleanly_with_no_evaluation_sessions(
     )
 
     caplog.set_level(logging.WARNING)
-    result = retrain._run_benchmark_gate(config, [], args)
+    result = retrain._run_benchmark_gate(config, [], retrain._start_run(args, config))
 
     assert result == (None, None)
     assert "no evaluation holdout" in caplog.text
@@ -697,7 +722,7 @@ def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
     )
 
     caplog.set_level(logging.WARNING)
-    result = retrain._run_benchmark_gate(config, [session], args)
+    result = retrain._run_benchmark_gate(config, [session], retrain._start_run(args, config))
 
     assert result == (None, None)
     assert "no isolation forest artifact" in caplog.text
@@ -729,7 +754,7 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     config.models.isolation_forest.min_calibration_drives_per_mode = 1
 
     session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
-    long = retrain.detector_benchmark.load_resampled_session(session, config)
+    long = load_resampled_session(session, config)
     features = featurize_wide_frame(long, config).features
     trained = fit_isolation_forest(
         features,
@@ -759,7 +784,9 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
         ]
     )
 
-    report_path, diff = retrain._run_benchmark_gate(config, [session], args)
+    report_path, diff = retrain._run_benchmark_gate(
+        config, [session], retrain._start_run(args, config)
+    )
 
     assert report_path is not None
     assert report_path.exists()
@@ -780,7 +807,7 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     comparable.write_text(report_path.read_text())
     newer_other = analyses_dir / "benchmark-20990101-000000.json"
     newer_other.write_text(json.dumps({**report, "sessions": ["some-other-drive"], "table": []}))
-    _, diff = retrain._run_benchmark_gate(config, [session], args)
+    _, diff = retrain._run_benchmark_gate(config, [session], retrain._start_run(args, config))
     assert diff is not None and diff["comparable"] is True
     # Newest comparable wins: the first run's own report, not the 2099 one.
     assert diff["baseline"].endswith(report_path.name)
@@ -801,16 +828,18 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     # Stub session sizes so each looks "substantial" without writing parquet —
     # the auto-holdout filter is gated on parquet byte totals.
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
 
     seen: dict[str, object] = {}
 
-    def _seq_train(positional_sessions: list[Path], *_a: object, **kwargs: object) -> None:
+    def _seq_train(
+        _backend: object, positional_sessions: list[Path], *_a: object, **kwargs: object
+    ) -> None:
         seen["sessions"] = list(positional_sessions)
         seen["calibration_sessions"] = kwargs.get("calibration_sessions")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", _seq_train)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", _seq_train)
 
     rc = retrain.main(
         retrain_argv(
@@ -854,14 +883,14 @@ def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
     def _fake_bytes(p: Path) -> int:
         return 22_000 if p == tiny else 5_000_000
 
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", _fake_bytes)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", _fake_bytes)
 
     seen: dict[str, object] = {}
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
     monkeypatch.setattr(
-        retrain.lstm_trainer,
-        "train",
-        lambda positional, *a, **k: seen.update(
+        training_entry,
+        "train_sequence_detector",
+        lambda _backend, positional, *a, **k: seen.update(
             sessions=list(positional), calibration_sessions=k.get("calibration_sessions")
         ),
     )
@@ -897,16 +926,16 @@ def test_calibration_picker_rejects_quarantine_and_narrow_schema(
     narrow = tmp_path / "narrow"
     quarantined = tmp_path / "quarantined"
     sessions = [ready, narrow, quarantined]
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_mode_coverage", lambda _p: {"city"})
     health = {
         ready: ("ready", 100),
         narrow: ("ready", 50),
         quarantined: ("quarantine", 100),
     }
-    monkeypatch.setattr(retrain, "_session_holdout_health", health.__getitem__)
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", health.__getitem__)
 
-    assert retrain._pick_calibration_holdouts(sessions) == [ready]
+    assert model_evaluation.pick_calibration_holdouts(sessions) == [ready]
 
 
 def test_retrain_no_calibration_holdout_keeps_full_training_set(
@@ -922,11 +951,11 @@ def test_retrain_no_calibration_holdout_keeps_full_training_set(
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
 
     seen: dict[str, object] = {}
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
     monkeypatch.setattr(
-        retrain.lstm_trainer,
-        "train",
-        lambda positional, *a, **k: seen.update(
+        training_entry,
+        "train_sequence_detector",
+        lambda _backend, positional, *a, **k: seen.update(
             sessions=list(positional), calibration_sessions=k.get("calibration_sessions")
         ),
     )
@@ -963,7 +992,7 @@ def _healthy_corpus(
     sessions = [tmp_path / "sessions" / name for name in names]
     for session in sessions:
         session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
     return sessions
 
 
@@ -984,10 +1013,12 @@ def test_holdout_picker_tops_up_to_three_even_when_the_newest_covers_every_mode(
             "2026-09-19T120000",
         ],
     )
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city", "highway", "idle"})
-    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+    monkeypatch.setattr(
+        model_evaluation, "session_mode_coverage", lambda _p: {"city", "highway", "idle"}
+    )
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", lambda _p: ("ready", 100))
 
-    picked = retrain._pick_calibration_holdouts(sessions)
+    picked = model_evaluation.pick_calibration_holdouts(sessions)
 
     assert len(picked) == retrain.MIN_CALIBRATION_HOLDOUT_SESSIONS == 3
     assert picked[0].name == "2026-09-19T120000"  # newest still anchors
@@ -1008,10 +1039,10 @@ def test_holdout_picker_orders_by_parsed_time_not_directory_name(
         monkeypatch,
         ["_tuning-2026-09-19T120000", "2026-08-05T120000", "2026-08-06T120000"],
     )
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: None)
-    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: None)
+    monkeypatch.setattr(model_evaluation, "session_mode_coverage", lambda _p: None)
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", lambda _p: None)
 
-    (anchor,) = retrain._pick_calibration_holdouts(sorted(sessions), max_holdouts=1)
+    (anchor,) = model_evaluation.pick_calibration_holdouts(sorted(sessions), max_holdouts=1)
     assert anchor.name == "_tuning-2026-09-19T120000"
 
 
@@ -1023,16 +1054,16 @@ def test_holdout_picker_never_tops_up_with_an_unhealthy_session(
         monkeypatch,
         ["2026-08-05T120000", "2026-08-06T120000", "2026-09-18T120000", "2026-09-19T120000"],
     )
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(model_evaluation, "session_mode_coverage", lambda _p: {"city"})
     health = {
         "2026-08-05T120000": ("quarantine", 100),
         "2026-08-06T120000": ("ready", 100),
         "2026-09-18T120000": ("ready", 40),  # narrow schema
         "2026-09-19T120000": ("ready", 100),
     }
-    monkeypatch.setattr(retrain, "_session_holdout_health", lambda p: health[p.name])
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", lambda p: health[p.name])
 
-    picked = retrain._pick_calibration_holdouts(sessions)
+    picked = model_evaluation.pick_calibration_holdouts(sessions)
     assert [p.name for p in picked] == ["2026-09-19T120000", "2026-08-06T120000"]
 
 
@@ -1045,8 +1076,8 @@ def test_retrain_gives_both_detectors_the_same_pooled_holdout_frame(
     names = [f"2026-09-{day:02d}T120000" for day in range(1, 8)]
     sessions = _healthy_corpus(tmp_path, monkeypatch, names)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
-    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+    monkeypatch.setattr(model_evaluation, "session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", lambda _p: ("ready", 100))
 
     built: list[list[Path]] = []
 
@@ -1057,10 +1088,14 @@ def test_retrain_gives_both_detectors_the_same_pooled_holdout_frame(
     monkeypatch.setattr(retrain, "build_feature_frame", _build)
     seen: dict[str, dict[str, object]] = {}
     monkeypatch.setattr(
-        retrain.if_trainer, "train", lambda *a, **k: seen.__setitem__("if", dict(k, train=a[0]))
+        training_entry,
+        "train_isolation_forest",
+        lambda *a, **k: seen.__setitem__("if", dict(k, train=a[0])),
     )
     monkeypatch.setattr(
-        retrain.lstm_trainer, "train", lambda *a, **k: seen.__setitem__("seq", dict(k, train=a[0]))
+        training_entry,
+        "train_sequence_detector",
+        lambda *a, **k: seen.__setitem__("seq", dict(k, train=a[1])),
     )
 
     rc = retrain.main(
@@ -1130,8 +1165,10 @@ def test_stubbed_trainer_does_not_re_ingest_the_previous_runs_manifest(
     session.mkdir(parents=True)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)  # writes nothing
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: None
+    )  # writes nothing
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     report_path = tmp_path / "analyses" / "benchmark-20260920-000000.json"
     monkeypatch.setattr(
         retrain,
@@ -1171,8 +1208,8 @@ def test_a_manifest_written_by_this_run_is_ingested_with_its_benchmark_path(
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     _write_manifest(tmp_path / "if", "isolation_forest_PREVIOUS")
     monkeypatch.setattr(
-        retrain.if_trainer,
-        "train",
+        training_entry,
+        "train_isolation_forest",
         lambda *a, **k: _write_manifest(tmp_path / "if", "isolation_forest_NEW"),
     )
     report_path = tmp_path / "analyses" / "benchmark-20260920-000000.json"
@@ -1256,8 +1293,8 @@ def test_a_session_in_both_holdouts_is_refused(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     monkeypatch.setattr(
-        retrain.if_trainer,
-        "train",
+        training_entry,
+        "train_isolation_forest",
         lambda *a, **k: pytest.fail("no trainer may run on an overlapping holdout"),
     )
 
@@ -1291,22 +1328,22 @@ def test_gate_scores_evaluation_drives_disjoint_from_calibration(
     sessions = _day_sessions(tmp_path / "sessions", 8)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
     seen: dict[str, object] = {}
 
-    def _seq_train(positional: list[Path], *_a: object, **kwargs: object) -> None:
+    def _seq_train(_backend: object, positional: list[Path], *_a: object, **kwargs: object) -> None:
         seen["training"] = list(positional)
         seen["calibration"] = kwargs.get("calibration_sessions")
         seen["evaluation"] = kwargs.get("evaluation_sessions")
         seen["override"] = kwargs.get("calibration_override")
 
-    def _gate(_config: object, evaluation: list[Path], args: object) -> tuple[None, None]:
+    def _gate(_config: object, evaluation: list[Path], run: object) -> tuple[None, None]:
         seen["gate"] = list(evaluation)
-        seen["split"] = args.holdout_split  # type: ignore[attr-defined]
+        seen["split"] = run.holdout_split  # type: ignore[attr-defined]
         return None, None
 
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", _seq_train)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", _seq_train)
     monkeypatch.setattr(retrain, "_run_benchmark_gate", _gate)
 
     rc = retrain.main(
@@ -1351,7 +1388,7 @@ def test_a_calibration_drive_takes_its_sibling_sessions(tmp_path: Path) -> None:
     for session in (first, restart, other):
         session.mkdir(parents=True)
 
-    held = retrain.holdout_by_drive([first, restart, other], calibration=[first])
+    held = model_evaluation.holdout_by_drive([first, restart, other], calibration=[first])
     assert held.calibration == (first, restart)
     assert held.training == (other,)
 
@@ -1381,13 +1418,13 @@ def test_a_capture_window_keeps_the_sessions_either_side_one_drive(tmp_path: Pat
     _write_span(after, "2026-09-21T20:18:36", 60)
     _write_span(other, "2026-09-22T16:34:15", 30)
 
-    drives = retrain.drives_of_sessions([before, after, other])
+    drives = model_evaluation.drives_of_sessions([before, after, other])
     assert [drive.session_names for drive in drives] == [
         (before.name, after.name),
         (other.name,),
     ]
 
-    held = retrain.holdout_by_drive([before, after, other], evaluation=[before])
+    held = model_evaluation.holdout_by_drive([before, after, other], evaluation=[before])
     assert held.evaluation == (before, after)
     assert held.training == (other,)
     assert capture not in (*held.training, *held.calibration, *held.evaluation)
@@ -1406,9 +1443,9 @@ def test_calibration_picker_takes_one_session_per_physical_drive(
     sessions = [root / name for name in names]
     for session in sessions:
         session.mkdir(parents=True)
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
 
-    picked = retrain._pick_calibration_holdouts(sessions, max_holdouts=3)
+    picked = model_evaluation.pick_calibration_holdouts(sessions, max_holdouts=3)
 
     # Three drives, not three sessions — and whole drives: the restart comes
     # with its drive rather than staying behind to train.
@@ -1428,8 +1465,8 @@ def test_retrain_hands_the_if_trainer_its_calibration_policy_and_override(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     seen: dict[str, object] = {}
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.update(k))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: seen.update(k))
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -1477,8 +1514,12 @@ def test_quarantine_exclusion_applies_whichever_trainers_run(
         lambda f, *_a, **_k: (screened, {"obd:RPM": 1}, {"obd:RPM": pd.Index([0])}),
     )
     seen: dict[str, dict[str, object]] = {}
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.update(if_=k))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.update(seq=k))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: seen.update(if_=k)
+    )
+    monkeypatch.setattr(
+        training_entry, "train_sequence_detector", lambda *a, **k: seen.update(seq=k)
+    )
 
     rc = retrain.main(
         retrain_argv(
@@ -1517,8 +1558,8 @@ def test_feedback_filtered_calibration_frame_goes_to_the_if_only(
     names = [f"2026-09-{day:02d}T120000" for day in range(1, 8)]
     sessions = _healthy_corpus(tmp_path, monkeypatch, names)
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
-    monkeypatch.setattr(retrain, "_session_mode_coverage", lambda _p: {"city"})
-    monkeypatch.setattr(retrain, "_session_holdout_health", lambda _p: ("ready", 100))
+    monkeypatch.setattr(model_evaluation, "session_mode_coverage", lambda _p: {"city"})
+    monkeypatch.setattr(model_evaluation, "session_holdout_health", lambda _p: ("ready", 100))
     built: list[pd.DataFrame] = []
 
     def _build(positional: list[Path], *_a: object, **_k: object) -> pd.DataFrame:
@@ -1549,8 +1590,12 @@ def test_feedback_filtered_calibration_frame_goes_to_the_if_only(
         lambda frame, *_a, **_k: (frame.iloc[1:], report),
     )
     seen: dict[str, dict[str, object]] = {}
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: seen.__setitem__("if", k))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.__setitem__("seq", k))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: seen.__setitem__("if", k)
+    )
+    monkeypatch.setattr(
+        training_entry, "train_sequence_detector", lambda *a, **k: seen.__setitem__("seq", k)
+    )
 
     rc = retrain.main(
         retrain_argv(

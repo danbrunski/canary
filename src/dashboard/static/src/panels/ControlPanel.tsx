@@ -11,6 +11,7 @@ import {
   tagCapture,
 } from "../api/http";
 import { Notice } from "../components/Notice";
+import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
 import { useControlStream } from "../hooks/useControlStream";
@@ -22,14 +23,7 @@ import type {
   SequenceDetectorStatus,
   VersionResponse,
 } from "../types";
-import {
-  buttonClass,
-  cn,
-  inputClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-} from "../styles";
+import { buttonClass, cn, inputClass } from "../styles";
 import { formatTimeOfDay } from "../util/time";
 import { CompanionConfigCard } from "./CompanionConfigCard";
 import { ControlEventsCard, PreflightCard } from "./ControlPanelSections";
@@ -185,13 +179,14 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
       <div className="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-1">
         <PreflightCard hasToken={Boolean(token)} preflight={preflight} />
 
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Capture</h2>
+        <Panel
+          title="Capture"
+          actions={
             <span className={capture ? "text-[0.8rem] text-ok" : "text-fg-dim"}>
               {capture ? "active" : "idle"}
             </span>
-          </header>
+          }
+        >
           <div className="grid grid-cols-4 gap-2 max-[1100px]:grid-cols-1">
             <input
               className={inputClass}
@@ -257,7 +252,7 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
               Stop
             </button>
           </div>
-        </section>
+        </Panel>
 
         <JobsCard token={token} busy={busy} run={run} jobs={jobs} />
         <SequenceDetectorCard

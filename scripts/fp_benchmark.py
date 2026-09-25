@@ -23,16 +23,17 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from scripts.train_lstm import build_dataset
+try:
+    from _cli import add_common_args, load_config
+except ImportError:  # loaded as `scripts.fp_benchmark` — repo root on path, not scripts/
+    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+
 from src.config import CanaryConfig
-from src.models.false_positive_benchmark import (
-    FalsePositiveBenchmarkReport,
-    benchmark_false_positives,
-)
+from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
 from src.models.lstm_training import load_lstm_autoencoder_model
-from src.models.sequence_dataset import observation_mask_from_schema
-from src.preprocessing.normalization import ZScoreScaler
+from src.models.sequence_registry import LSTM_TRAINING_BACKEND
+from src.models.training_entry import benchmark_held_out
 
 
 def run_false_positive_benchmark(
@@ -47,7 +48,7 @@ def run_false_positive_benchmark(
 ) -> FalsePositiveBenchmarkReport:
     """Load a trained LSTM and benchmark its false-positive rate on the sessions.
 
-    Routes through the SAME pipeline the trainer uses (``build_dataset``:
+    Routes through the SAME pipeline the trainer uses (``build_sequence_dataset``:
     bindings/DBC/DID decode → derived signals → deviation columns →
     features) and re-applies the manifest's z-score scaler, so windows are
     scored in the calibrated-threshold domain. The old path here skipped
@@ -58,31 +59,21 @@ def run_false_positive_benchmark(
     if not session_dirs:
         raise ValueError("at least one held-out session directory is required")
     trained = load_lstm_autoencoder_model(model_path, device=device)
-    scaler = (
-        ZScoreScaler.from_dict(dict(trained.manifest.scaler))
-        if trained.manifest.scaler is not None
-        else None
-    )
-    dataset = build_dataset(
+    # R04.1: score the detector the daemon serves -- benchmark_held_out keeps
+    # the configured suppress_channels for this backbone out of the score.
+    report = benchmark_held_out(
+        LSTM_TRAINING_BACKEND,
+        trained,
         [Path(path) for path in session_dirs],
         config,
-        sequence_length=int(trained.manifest.schema["sequence_length"]),
-        feature_columns=trained.feature_columns,
         stride=stride,
-        scaler=scaler,
-        observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
-    )
-    # R04.1: score the detector the daemon serves -- the configured
-    # suppress_channels for this backbone are kept out of the score there.
-    block = getattr(config.models, str(trained.manifest.model_type), None)
-    return benchmark_false_positives(
-        trained,
-        dataset,
-        k_grid=k_grid,
         batch_size=batch_size,
         device=device,
-        suppress_channels=tuple(getattr(block, "suppress_channels", ()) or ()),
+        k_grid=k_grid,
     )
+    if report is None:
+        raise ValueError("no sequence windows available for the false-positive benchmark")
+    return report
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -105,12 +96,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         nargs="+",
         help="One or more held-out clean Parquet session directories.",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="Path to canary.yaml (default: ./canary.yaml).",
-    )
+    add_common_args(parser, help="Path to canary.yaml (default: ./canary.yaml).")
     parser.add_argument(
         "--k",
         type=float,
@@ -147,7 +133,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = CanaryConfig.from_yaml(args.config)
+        config = load_config(args)
         report = run_false_positive_benchmark(
             args.model,
             args.session_dir,

@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import autotag as autotag_cli  # noqa: E402
-
+import scripts.autotag as autotag_cli
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
 

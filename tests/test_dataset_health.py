@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import scripts.dataset_health as cli
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
@@ -17,9 +17,6 @@ from src.preprocessing.loader import discover_sessions
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import write_isolated_config
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import dataset_health as cli  # noqa: E402
 
 
 def _make_session(

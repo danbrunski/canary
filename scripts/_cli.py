@@ -13,8 +13,9 @@ module instead of hand-rolling `sys.path.insert(0, str(Path(__file__)...))`.
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 # Python only auto-adds a standalone script's own directory (`scripts/`) to
@@ -24,12 +25,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.control.sessions import session_started_at  # noqa: E402
 from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
+
+log = logging.getLogger(__name__)
 
 
 def add_common_args(parser: argparse.ArgumentParser, *, help: str = "Path to canary.yaml.") -> None:
@@ -174,6 +178,60 @@ def filter_sessions_since(sessions: list[Path], since: datetime) -> list[Path]:
     return kept
 
 
+def filter_sessions_by_boundary(sessions: list[Path], boundary: date) -> list[Path]:
+    """Keep session dirs whose start is on/after ``boundary`` (Task 3.5).
+
+    Same non-conforming-name-is-kept posture as ``filter_sessions_by_age``
+    (over-include rather than silently drop). The one session-time parser: a
+    capture prefix must not turn a dated session into an "unknown format" that
+    silently survives the boundary.
+    """
+    kept: list[Path] = []
+    for session in sessions:
+        started = session_started_at(session)
+        if started is None:
+            kept.append(session)  # unknown format → keep
+            continue
+        if started.date() >= boundary:
+            kept.append(session)
+    return kept
+
+
+def apply_since_boundary(
+    args: argparse.Namespace, config: CanaryConfig, sessions: list[Path]
+) -> list[Path]:
+    """``--since-boundary`` (Task 3.5): drop sessions older than the latest
+    ``corpus_boundary`` event in the vehicle ledger, e.g. so pre- and post-mod
+    behavior never blend into one corpus. ``sessions`` unchanged without the
+    flag or without a boundary event.
+
+    ``config`` is the *unscoped* config; the ledger is read from the vehicle
+    profile ``args.profile`` resolves to (no VIN probe), the same one the
+    artifacts are written for. ``retrain.py`` and ``refit_behavior_models.py``
+    each carried a copy of this block, and retrain's read the unscoped ledger.
+    """
+    if not getattr(args, "since_boundary", False):
+        return sessions
+    ledger = config.daemon.vehicle_ledger
+    if config.profiles.enabled:
+        profile = resolve_profile_for_tooling(config, getattr(args, "profile", None))
+        ledger = scope_config(config, profile).daemon.vehicle_ledger
+    boundary = VehicleLedgerStore(ledger).latest_boundary()
+    if boundary is None:
+        return sessions
+    kept = filter_sessions_by_boundary(sessions, boundary.occurred_at)
+    log.info(
+        "--since-boundary applied",
+        extra={
+            "boundary_event": boundary.title,
+            "boundary_occurred_at": str(boundary.occurred_at),
+            "sessions_before": len(sessions),
+            "sessions_after": len(kept),
+        },
+    )
+    return kept
+
+
 def discover_live_session_dirs(root: Path) -> list[Path]:
     """Sorted live-session dirs directly under `root` matching the naming convention.
 
@@ -220,11 +278,13 @@ __all__ = [
     "add_log_level_arg",
     "add_override_reason_arg",
     "add_profile_arg",
+    "apply_since_boundary",
     "override_reason",
     "scoped_models_dir",
     "load_config",
     "discover_live_session_dirs",
     "filter_sessions_by_age",
+    "filter_sessions_by_boundary",
     "filter_sessions_since",
     "parse_since_argument",
     "resolve_sessions",

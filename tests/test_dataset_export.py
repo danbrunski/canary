@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -11,6 +10,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+import scripts.export_dataset as cli
 from src.config import CanaryConfig
 from src.datasets.export import (
     DatasetExportSpec,
@@ -22,9 +22,6 @@ from src.datasets.export import (
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import write_isolated_config
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import export_dataset as cli  # noqa: E402
 
 
 def _make_session(

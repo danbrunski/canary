@@ -300,10 +300,7 @@ def test_session_discovery_weighs_duplicate_copies_once_per_directory(
     chunk: the corpus scan read 17 MB and then spun at 100 % CPU for an hour
     (2026-09-22). This pins the cost at one weighing per copy.
     """
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-    import inventory_cold_starts as cli
+    import scripts.inventory_cold_starts as cli
 
     small = tmp_path / "pull-a" / "2026-09-18T134345"
     big = tmp_path / "pull-b" / "2026-09-18T134345"

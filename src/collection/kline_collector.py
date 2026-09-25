@@ -86,7 +86,7 @@ from src.collection.kline.transport import (
     RxChunk,
 )
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy
+from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
 from src.config import KlineConfig
 from src.decode.dids import DidMap, load_did_map
 from src.telemetry import KLINE_SOURCE, TelemetryRecord
@@ -251,7 +251,7 @@ class KlineCollector:
             entries = self._wants_command()
             if entries is None:
                 if not self.config.sniff:
-                    await _wait(stop, IDLE_CHECK_SECONDS)
+                    await wait_for_stop_or_timeout(stop, IDLE_CHECK_SECONDS)
                     continue
                 try:
                     await self._sniff(queue, stop)
@@ -262,7 +262,7 @@ class KlineCollector:
                         delay,
                         extra={"error": str(exc), "retry_seconds": delay},
                     )
-                    await _wait(stop, delay)
+                    await wait_for_stop_or_timeout(stop, delay)
                     delay = self._policy.next_delay(delay)
                 continue
             prepared = self._prepare(entries)
@@ -299,7 +299,7 @@ class KlineCollector:
                     delay,
                     extra={"error": str(exc), "retry_seconds": delay},
                 )
-                await _wait(stop, delay)
+                await wait_for_stop_or_timeout(stop, delay)
                 delay = self._policy.next_delay(delay)
 
     def _prepare(self, entries: tuple[str, ...]) -> tuple[KlineProfile, ModulePlan] | None:
@@ -462,7 +462,7 @@ class KlineCollector:
         keepalive = plan.tester_present_seconds
         while remaining > 0 and self._may_continue(entries, stop):
             step = remaining if keepalive is None else min(remaining, keepalive)
-            await _wait(stop, step)
+            await wait_for_stop_or_timeout(stop, step)
             remaining -= step
             if keepalive is not None and remaining > 0 and self._may_continue(entries, stop):
                 await asyncio.to_thread(transport.tester_present)
@@ -475,7 +475,7 @@ class KlineCollector:
             did_map = load_did_map(self.dids_path)
         except (KlineNotConfiguredError, ValueError) as exc:
             self._say_once("sniff-unconfigured", "K-line sniffing unavailable: %s", exc)
-            await _wait(stop, IDLE_CHECK_SECONDS * 10)
+            await wait_for_stop_or_timeout(stop, IDLE_CHECK_SECONDS * 10)
             return
         ecm_widths = {e.did: e.response_length for e in did_map.dids if e.response_length}
         decoder = FrameDecoder()
@@ -504,7 +504,7 @@ class KlineCollector:
         )
         try:
             while not stop.is_set() and self._wants_command() is None:
-                await _wait(stop, SNIFF_DRAIN_SECONDS)
+                await wait_for_stop_or_timeout(stop, SNIFF_DRAIN_SECONDS)
                 to_epoch = time.time() - time.monotonic()
                 while True:
                     try:
@@ -652,13 +652,6 @@ def sniffed_value_records(
         )
         for name, value, extra in pairs
     ]
-
-
-async def _wait(stop: asyncio.Event, seconds: float) -> None:
-    try:
-        await asyncio.wait_for(stop.wait(), timeout=seconds)
-    except TimeoutError:
-        pass
 
 
 __all__ = [

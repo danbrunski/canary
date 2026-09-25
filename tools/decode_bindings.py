@@ -170,7 +170,7 @@ def report(
             print(f"      {span:<13}  {scaling}")
             print(f"      raw     : {r.raw_min:>6} .. {r.raw_max:<6}   n={r.n_samples}")
             if r.decoded_min is not None and r.decoded_max is not None:
-                unit = f" {sig.unit}" if sig.unit and sig.unit != "unknown" else ""
+                unit = f" {sig.display_unit}" if sig.display_unit else ""
                 # Plausibility status:
                 #   no bounds        → nothing extra
                 #   bounds, all OK   → "✓ plausible"

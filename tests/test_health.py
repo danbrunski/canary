@@ -7,10 +7,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import src.models.health as health_mod
+import src.daemon.health as health_mod
 from src.config import CanaryConfig
-from src.dashboard.api import build_status, create_app
-from src.models.health import (
+from src.daemon.health import (
     HealthMonitor,
     can0_counters,
     feature_drift,
@@ -18,6 +17,7 @@ from src.models.health import (
     reconstruction_error_drift,
     system_metrics,
 )
+from src.dashboard.api import build_status, create_app
 from tests.configs import isolated_config
 
 # ---------------------------------------------------------------------------
@@ -563,7 +563,7 @@ def test_memory_limit_status_reads_the_enforced_ceiling(tmp_path: Path) -> None:
     nothing (`cgroup_disable=memory`, 2026-09-18) and `systemctl show` agreed
     with the unit the whole time. This reads the kernel's own answer.
     """
-    from src.models.health import memory_limit_status
+    from src.daemon.health import memory_limit_status
 
     root, self_cgroup = _cgroup(tmp_path)
     (root / "system.slice/canary.service/memory.max").write_text("6442450944\n")
@@ -577,7 +577,7 @@ def test_memory_limit_status_reports_an_unlimited_ceiling_as_not_enforced(
     tmp_path: Path,
 ) -> None:
     """`max` means the controller is mounted and the ceiling is off — a real False."""
-    from src.models.health import memory_limit_status
+    from src.daemon.health import memory_limit_status
 
     root, self_cgroup = _cgroup(tmp_path)
     (root / "system.slice/canary.service/memory.max").write_text("max\n")
@@ -591,7 +591,7 @@ def test_memory_limit_status_is_unknown_when_the_cgroup_file_is_absent(
     tmp_path: Path,
 ) -> None:
     """No file is *unknown*, never False: a laptop or container has no answer."""
-    from src.models.health import memory_limit_status
+    from src.daemon.health import memory_limit_status
 
     root, self_cgroup = _cgroup(tmp_path)
 
@@ -604,7 +604,7 @@ def test_memory_limit_status_is_unknown_when_the_cgroup_file_is_unreadable(
     tmp_path: Path,
 ) -> None:
     """An unreadable file is unknown too, and must not raise into `/status`."""
-    from src.models.health import memory_limit_status
+    from src.daemon.health import memory_limit_status
 
     root, self_cgroup = _cgroup(tmp_path)
     denied = root / "system.slice/canary.service/memory.max"

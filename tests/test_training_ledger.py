@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
+import scripts.ledger as ledger_cli
+from scripts import _cli, retrain
 from src.alerts.feedback import FeedbackStore
+from src.models import training_entry
 from src.models.manifest import ManifestValidationError
 from src.models.training_ledger import (
     TrainingLedger,
@@ -19,11 +21,6 @@ from src.models.training_ledger import (
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import retrain_argv
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import _cli  # noqa: E402
-import ledger as ledger_cli  # noqa: E402
-import retrain  # noqa: E402
 
 
 def _lstm_manifest(out_dir: Path, version: str = "lstm_autoencoder_2026") -> Path:
@@ -574,9 +571,13 @@ def test_retrain_ingests_ledger_when_manifest_present(
     lstm_out = tmp_path / "lstm"
 
     # Stub trainers: write a manifest as the real trainers would.
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
     monkeypatch.setattr(
-        retrain.lstm_trainer, "train", lambda *a, **k: _lstm_manifest(lstm_out, "lstm_run")
+        training_entry, "train_isolation_forest", lambda *a, **k: _if_manifest(if_out, "if_run")
+    )
+    monkeypatch.setattr(
+        training_entry,
+        "train_sequence_detector",
+        lambda *a, **k: _lstm_manifest(lstm_out, "lstm_run"),
     )
     ledger_path = tmp_path / "runs.jsonl"
     rc = retrain.main(
@@ -619,8 +620,10 @@ def test_retrain_ledger_records_detector_benchmark_report_path(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: _if_manifest(if_out, "if_run")
+    )
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     report_path = tmp_path / "analyses" / "benchmark-20260719-120000.json"
     monkeypatch.setattr(
@@ -681,7 +684,9 @@ def test_retrain_ledger_records_feedback_policy(
         ),
     )
     if_out = tmp_path / "if"
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: _if_manifest(if_out, "if_run")
+    )
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
@@ -728,8 +733,10 @@ def test_retrain_ledger_records_disposition_summary(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: _if_manifest(if_out, "if_run")
+    )
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
@@ -800,8 +807,8 @@ def test_retrain_excludes_quarantine_cells_from_training_matrix(
         captured["feature_frame"] = kwargs["feature_frame"]
         return _if_manifest(tmp_path / "if", "if_run")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
@@ -862,8 +869,8 @@ def test_retrain_skip_quarantine_exclusion_flag_leaves_matrix_untouched(
         captured["feature_frame"] = kwargs["feature_frame"]
         return _if_manifest(tmp_path / "if", "if_run")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -941,8 +948,8 @@ def test_retrain_quarantine_exclusion_is_golden_anchored_when_declared(
         captured["feature_frame"] = kwargs["feature_frame"]
         return _if_manifest(tmp_path / "if", "if_run")
 
-    monkeypatch.setattr(retrain.if_trainer, "train", _if_train)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _if_train)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
 
     rc = retrain.main(
         retrain_argv(
@@ -980,8 +987,10 @@ def test_retrain_skip_disposition_summary_flag_leaves_it_none(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     if_out = tmp_path / "if"
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: _if_manifest(if_out, "if_run"))
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(
+        training_entry, "train_isolation_forest", lambda *a, **k: _if_manifest(if_out, "if_run")
+    )
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
@@ -1014,8 +1023,8 @@ def test_retrain_ledger_hook_is_best_effort(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [session])
     monkeypatch.setattr(retrain, "build_feature_frame", lambda *a, **k: object())
     # Stub trainers that write nothing — ledger ingest must not crash retrain.
-    monkeypatch.setattr(retrain.if_trainer, "train", lambda *a, **k: None)
-    monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", lambda *a, **k: None)
+    monkeypatch.setattr(training_entry, "train_sequence_detector", lambda *a, **k: None)
     ledger_path = tmp_path / "runs.jsonl"
     rc = retrain.main(
         retrain_argv(

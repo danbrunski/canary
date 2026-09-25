@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -11,10 +10,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import scripts.refit_behavior_models as refit_cli
+
 # Importable as a module so we can call main() and patch its dependencies.
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import _cli  # noqa: E402
-import refit_behavior_models as refit_cli  # noqa: E402
+from scripts import _cli
 
 
 def _frame(session_name: str = "2026-05-13T120000", seed: int = 0) -> pd.DataFrame:
@@ -71,7 +70,7 @@ def test_filter_disabled_by_days_zero(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _filter_sessions_by_boundary (Task 3.5)
+# _cli.filter_sessions_by_boundary (Task 3.5; one copy for refit and retrain, R06.3)
 # ---------------------------------------------------------------------------
 
 
@@ -82,7 +81,7 @@ def test_filter_sessions_by_boundary_keeps_on_and_after(tmp_path: Path) -> None:
     odd = tmp_path / "manual-import"  # non-conforming name — kept
     for p in (older, on_boundary, newer, odd):
         p.mkdir()
-    kept = refit_cli._filter_sessions_by_boundary(
+    kept = _cli.filter_sessions_by_boundary(
         [older, on_boundary, newer, odd], boundary=date(2026, 6, 1)
     )
     assert older not in kept

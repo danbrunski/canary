@@ -6,7 +6,7 @@ import json
 import logging
 import shutil
 import zipfile
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -73,7 +73,9 @@ def latest_session(root: Path) -> Path | None:
     return dated[-1] if dated else None
 
 
-def recorded_sessions(roots: Sequence[Path]) -> list[Path]:
+def recorded_sessions(
+    roots: Sequence[Path], *, kinds: Collection[SessionKind] = RECORDED_SESSION_KINDS
+) -> list[Path]:
     """This vehicle's recorded sessions under ``roots``, captures included.
 
     The third session question, distinct from "which may train?"
@@ -87,10 +89,20 @@ def recorded_sessions(roots: Sequence[Path]) -> list[Path]:
     ``_replay-*`` are never sessions. A name seen under two roots counts once
     (the first root wins: the same drive is often pulled twice). Ordered by
     parsed start time, never by name.
+
+    ``kinds`` widens the question for a caller that needs more recordings as
+    *evidence* without scoring them: ``scripts/evaluate_detectors.py`` adds
+    ``SessionKind.TUNING`` because a legacy ``_tuning-*`` recording bridges
+    its siblings into one physical drive, exactly as a capture does (its rows
+    are excluded from scoring by ``default_profile_exclusion``, R04.6).
+    ``_replay-*`` is refused: re-emitted rows are never this vehicle's
+    recording.
     """
+    if SessionKind.REPLAY in kinds:
+        raise ValueError("replay output is not a recorded session (re-emitted rows)")
     found: dict[str, Path] = {}
     for root in roots:
-        for child in iter_sessions(root, kinds=RECORDED_SESSION_KINDS):
+        for child in iter_sessions(root, kinds=frozenset(kinds)):
             if child.name not in found and has_telemetry(child):
                 found[child.name] = child
     return sorted(found.values(), key=session_sort_key)

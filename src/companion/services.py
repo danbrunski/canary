@@ -1,14 +1,14 @@
 """Service helpers for the companion API.
 
 Also home to the backend-agnostic ``/control/*`` handlers shared with
-``src/dashboard/routes/control.py`` (refactoring.md 1.2): each takes the bits
-that differ between the companion (local library-backed) and control
-(live-daemon, filesystem-backed) callers as parameters — a path resolver, a
-session serializer, and a handful of optional hooks for the one caller's
-extra side effect (companion's library-index refresh on write, control's
-audit-event publish, control's active-capture delete guard). Callers keep
-their own request-schema classes and unpack them to primitives before
-calling in, so this module never depends on either schema module.
+``src/dashboard/routes/control/`` (refactoring.md 1.2) for jobs, training
+runs, feedback, model manifests and dataset health: each takes the bits that
+differ between the companion (local library-backed) and control (live-daemon)
+callers as parameters, with an optional hook for the one caller's extra side
+effect (control's audit-event publish). Callers keep their own request-schema
+classes and unpack them to primitives before calling in, so this module never
+depends on either schema module. The per-session routes both apps serve are
+one router instead (:mod:`src.dashboard.routes.stored_sessions`, R03.7).
 """
 
 from __future__ import annotations
@@ -27,20 +27,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
-from fastapi import BackgroundTasks, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import HTTPException
 
 from src.alerts.feedback import FEEDBACK_LABELS, FeedbackStore
 from src.companion.library import CanaryLibrary, LibrarySession
 from src.config import CanaryConfig
 from src.control.jobs import JobController
 from src.control.sessions import (
-    delete_session,
-    pin_session,
     summarize_session,
-    unpin_session,
-    write_session_metadata,
-    write_session_zip,
 )
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.models.artifact_hash import sha256_file
@@ -369,66 +363,12 @@ def _unlink_path(path: Path) -> None:
 # -- shared `/control/*` handlers (refactoring.md 1.2) -----------------------
 #
 # Both the companion app and the dashboard's control API register the same
-# ~15 session/job/training-run/dataset-health routes against different
-# backing stores (companion: `CanaryLibrary`'s sqlite index; control: the
-# live daemon's session directory + `SessionCatalog`). Each handler below
-# takes that difference as a parameter (a path resolver, a session
-# serializer, or a small optional hook) instead of being written twice.
-
-
-def sessions_list_response(sessions: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"sessions": sessions, "count": len(sessions)}
-
-
-def get_session_response(
-    session_id: str, *, resolve_and_serialize: Callable[[str], dict[str, Any]]
-) -> dict[str, Any]:
-    return {"session": resolve_and_serialize(session_id)}
-
-
-def export_session_response(
-    session_id: str,
-    background_tasks: BackgroundTasks,
-    *,
-    resolve: Callable[[str], Path],
-    tmp_prefix: str,
-) -> FileResponse:
-    path = resolve(session_id)
-    tmp = tempfile.NamedTemporaryFile(
-        prefix=f"{tmp_prefix}{session_id}-", suffix=".zip", delete=False
-    )
-    tmp_path = Path(tmp.name)
-    tmp.close()
-    write_session_zip(path, tmp_path)
-    background_tasks.add_task(_unlink_path, tmp_path)
-    return FileResponse(tmp_path, media_type="application/zip", filename=f"{session_id}.zip")
-
-
-def export_session_checksum_response(
-    session_id: str,
-    *,
-    resolve: Callable[[str], Path],
-) -> dict[str, Any]:
-    """Shared body of `GET /control/sessions/{id}/export/checksum` (6.34).
-
-    Companion's checksum-validated sync needs a server-computed sha256 to
-    compare its download against. Zips the session the same way
-    `export_session_response` does (`write_session_zip` is a deterministic
-    function of the session's files) to a throwaway temp file, hashes it,
-    and discards it — so the digest always matches what a same-moment
-    `/export` call would produce, without persisting a second copy anywhere.
-    """
-    path = resolve(session_id)
-    tmp = tempfile.NamedTemporaryFile(prefix="canary-checksum-", suffix=".zip", delete=False)
-    tmp_path = Path(tmp.name)
-    tmp.close()
-    try:
-        write_session_zip(path, tmp_path)
-        digest = sha256_file(tmp_path)
-        size_bytes = tmp_path.stat().st_size
-    finally:
-        _unlink_path(tmp_path)
-    return {"session_id": session_id, "sha256": digest, "size_bytes": size_bytes}
+# job/training-run/feedback/dataset-health routes against different backing
+# stores (companion: `CanaryLibrary`'s sqlite index; control: the live
+# daemon's). Each handler below takes that difference as a parameter instead
+# of being written twice. The per-session routes (read, metadata, pin, unpin,
+# delete, export, checksum) are no longer here: both apps include one router,
+# `src.dashboard.routes.stored_sessions` (R03.7).
 
 
 def get_model_manifest_response(
@@ -453,92 +393,6 @@ def get_model_manifest_response(
     except (OSError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=500, detail=f"unreadable manifest: {exc}") from exc
     return {"model_type": model_type, "manifest": manifest}
-
-
-def update_session_metadata_response(
-    session_id: str,
-    metadata: dict[str, Any],
-    *,
-    merge: bool,
-    resolve: Callable[[str], Path],
-    finalize: Callable[[Path], dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Shared body of the `/control/sessions/{id}/metadata` handlers.
-
-    ``finalize`` is companion's seam for its library-index refresh: passing
-    one makes the response include a freshly-reindexed ``"session"`` key
-    (companion's behavior today); leaving it unset reproduces control's
-    current response, which has no ``"session"`` key at all.
-    """
-    path = resolve(session_id)
-    written = write_session_metadata(path, metadata, merge=merge)
-    payload: dict[str, Any] = {"session_id": session_id, "metadata": written}
-    if finalize is not None:
-        payload["session"] = finalize(path)
-    return payload
-
-
-def pin_session_response(
-    session_id: str,
-    *,
-    reason: str | None,
-    extra_metadata: dict[str, Any],
-    resolve: Callable[[str], Path],
-    serialize: Callable[[Path], dict[str, Any]],
-    catalog_db: Path | None = None,
-) -> dict[str, Any]:
-    """Shared body of the `/control/sessions/{id}/pin` handlers.
-
-    ``serialize`` is companion's seam for its library-index refresh: its
-    caller supplies a serializer that re-imports the session into the
-    library (picking up the just-written pin/metadata state) before
-    converting it, where control's serializer just re-reads the session
-    directory it already resolved.
-    """
-    path = resolve(session_id)
-    metadata = pin_session(path, reason=reason, catalog_db=catalog_db)
-    if extra_metadata:
-        metadata = write_session_metadata(path, extra_metadata)
-    return {"session": serialize(path), "metadata": metadata}
-
-
-def unpin_session_response(
-    session_id: str,
-    *,
-    resolve: Callable[[str], Path],
-    serialize: Callable[[Path], dict[str, Any]],
-    catalog_db: Path | None = None,
-) -> dict[str, Any]:
-    path = resolve(session_id)
-    metadata = unpin_session(path, catalog_db=catalog_db)
-    return {"session": serialize(path), "metadata": metadata}
-
-
-def delete_session_response(
-    session_id: str,
-    *,
-    force: bool,
-    resolve: Callable[[str], Path],
-    guard: Callable[[str], None] | None = None,
-    after_delete: Callable[[str], None] | None = None,
-) -> dict[str, Any]:
-    """Shared body of the `DELETE /control/sessions/{id}` handlers.
-
-    ``guard`` is control's seam for its active-capture conflict check
-    (companion has no capture concept, so it passes none); ``after_delete``
-    is companion's seam for dropping the session from its library index
-    without re-deleting the (already-deleted) files.
-    """
-    path = resolve(session_id)
-    if guard is not None:
-        guard(session_id)
-    try:
-        delete_session(path, force=force)
-    except PermissionError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if after_delete is not None:
-        after_delete(session_id)
-    return {"session_id": session_id, "deleted": True, "force": force}
 
 
 def submit_job_response(
@@ -737,22 +591,14 @@ __all__ = [
     "_unlink_path",
     "cancel_job_response",
     "dataset_health_response",
-    "delete_session_response",
-    "export_session_checksum_response",
-    "export_session_response",
     "feedback_list_response",
     "get_job_response",
     "get_model_manifest_response",
-    "get_session_response",
     "job_logs_response",
     "list_jobs_response",
-    "pin_session_response",
     "run_queued_action",
-    "sessions_list_response",
     "set_training_run_approval_response",
     "submit_feedback_response",
     "submit_job_response",
     "training_runs_response",
-    "unpin_session_response",
-    "update_session_metadata_response",
 ]

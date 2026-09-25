@@ -333,6 +333,143 @@ def test_live_gap_flag_matches_resampler_for_same_observations(config: CanaryCon
     assert live_gap == [False, False, False, True, False, False, False, True]
 
 
+def test_live_gap_flags_follow_a_non_default_fast_channels_like_the_resampler(
+    config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R04.7: live ``__gap`` flags read ``ResampleConfig.max_gap_seconds_for``,
+    so an explicit ``fast_channels`` (coolant fast, RPM therefore slow) flips
+    the same cells stale at serve as the resampler does offline. Before, live
+    re-derived the rule from the default slow-channel hints and disagreed on
+    both channels."""
+    import src.preprocessing.live as live_module
+    from src.preprocessing.resampler import (
+        SESSION_COLUMN,
+        TIMESTAMP_COLUMN,
+        ResampleConfig,
+        gap_column,
+        resample_wide,
+    )
+
+    recipe = ResampleConfig(
+        hz=1.0,
+        max_gap_factor=2.0,
+        fast_channels=frozenset({"obd:COOLANT_TEMP"}),
+        slow_channel_max_gap_seconds=30.0,
+    )
+    monkeypatch.setattr(live_module, "resample_config_for", lambda _config: recipe)
+
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    observed = (0, 5)
+    src = LiveFeatureSource(config=config)
+    live: dict[str, list[bool]] = {"obd:COOLANT_TEMP": [], "obd:RPM": []}
+    for i in range(6):
+        at = (base + timedelta(seconds=i)).timestamp()
+        if i in observed:
+            src.observe(TelemetryRecord.obd(at, "COOLANT_TEMP", 80.0 + i, "C"))
+            src.observe(TelemetryRecord.obd(at, "RPM", 700.0 + i, "rpm"))
+        src.observe(TelemetryRecord.obd(at, "SPEED", 0.0, "km/h"))
+        row = src.tick(base + timedelta(seconds=i))
+        assert row is not None
+        for channel, flags in live.items():
+            flags.append(bool(row[gap_column(channel)].iloc[0]))
+
+    wide = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s"] * len(observed),
+            TIMESTAMP_COLUMN: [base + timedelta(seconds=i) for i in observed],
+            "obd:COOLANT_TEMP": [80.0 + i for i in observed],
+            "obd:RPM": [700.0 + i for i in observed],
+        }
+    )
+    resampled = resample_wide(wide, config=recipe)
+    for channel, flags in live.items():
+        assert flags == resampled[gap_column(channel)].astype(bool).tolist(), channel
+    # The non-default rule is what is being compared, not a coincidence of
+    # the defaults: coolant goes stale past 2 s, RPM (now slow) never does.
+    assert live["obd:COOLANT_TEMP"] == [False, False, False, True, True, False]
+    assert live["obd:RPM"] == [False] * 6
+
+
+def test_a_nan_sample_is_not_an_observation_live_or_offline(config: CanaryConfig) -> None:
+    """R01.3: the live source coerces through ``coerce.finite_float``. A NaN
+    value is not a fresh observation, as offline, where the resampler's
+    ``_gap_flags`` drops NaN before ageing. The old ``_to_float`` let NaN
+    through, so a NaN sample stamped the channel fresh (``__gap`` False) and
+    NaN'd its cell, where training held the previous value."""
+    from src.preprocessing.resampler import (
+        SESSION_COLUMN,
+        TIMESTAMP_COLUMN,
+        gap_column,
+        resample_config_for,
+        resample_wide,
+    )
+
+    base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    values = [700.0, None, None, float("nan")]
+    src = LiveFeatureSource(config=config)
+    live_gap: list[bool] = []
+    live_rpm: list[float] = []
+    for i, value in enumerate(values):
+        at = (base + timedelta(seconds=i)).timestamp()
+        if value is not None:
+            src.observe(TelemetryRecord.obd(at, "RPM", value, "rpm"))
+        src.observe(TelemetryRecord.obd(at, "SPEED", 0.0, "km/h"))
+        row = src.tick(base + timedelta(seconds=i))
+        assert row is not None
+        live_gap.append(bool(row[gap_column("obd:RPM")].iloc[0]))
+        live_rpm.append(float(row["obd:RPM"].iloc[0]))
+
+    wide = pd.DataFrame(
+        {
+            SESSION_COLUMN: ["s", "s"],
+            TIMESTAMP_COLUMN: [base, base + timedelta(seconds=3)],
+            "obd:RPM": [700.0, float("nan")],
+        }
+    )
+    resampled = resample_wide(wide, config=resample_config_for(config))
+    assert live_gap == resampled[gap_column("obd:RPM")].astype(bool).tolist()
+    assert live_gap == [False, False, False, True]
+    # The NaN did not refresh the channel; it aged out and went NaN on schedule.
+    assert live_rpm[:3] == [700.0] * 3 and math.isnan(live_rpm[3])
+
+
+def test_live_and_storage_decode_a_frame_to_the_same_record(config: CanaryConfig) -> None:
+    """R04.4: the live source publishes ``FrameDecoder.decode``'s records — the
+    storage sink's — over every confidence. Before, it re-implemented the
+    decode and drifted: metadata ``confidence`` vs ``binding_confidence``, an
+    int value vs a float, and ``""`` vs ``"unknown"`` for the unit."""
+    from src.decode.frame_decoder import FrameDecoder
+
+    bindings = load_bindings(Path("data/bindings.yaml"))
+    live = LiveFeatureSource(config=config, bindings=bindings)
+    storage = FrameDecoder.from_bindings(
+        bindings, confidence_levels=config.collection.persist_decoded_confidence
+    )
+    everything = FrameDecoder.from_bindings(bindings)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC).timestamp()
+    compared = 0
+    for can_id in sorted({signal.can_id for signal in bindings.signals}):
+        record = TelemetryRecord.can(now, can_id, bytes(range(0x31, 0x39)))
+        live_records = live.decode_for_telemetry(record)
+        assert live_records == everything.decode(record)
+        by_name = {decoded.channel: decoded for decoded in live_records}
+        for stored in storage.decode(record):
+            assert by_name[stored.channel] == stored
+            compared += 1
+    assert compared > 0
+    # A binding whose unit is the placeholder reads as no unit on every path.
+    unknown = next(s for s in bindings.signals if s.unit == "unknown")
+    (first, *_) = [
+        r
+        for r in live.decode_for_telemetry(
+            TelemetryRecord.can(now, unknown.can_id, bytes(range(0x31, 0x39)))
+        )
+        if r.channel == unknown.name
+    ]
+    assert first.unit == "" == unknown.display_unit
+    assert first.metadata == {"can_id": unknown.can_id, "binding_confidence": unknown.confidence}
+
+
 def test_live_channel_age_tracks_seconds_since_observation(config: CanaryConfig) -> None:
     """``channel_age_seconds`` (the GRU-D Δt source) counts seconds since the
     channel's last observation, resetting on every fresh ``observe``."""

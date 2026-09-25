@@ -21,11 +21,18 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
-    add_common_args,
-    add_log_level_arg,
-    load_config,
-)
+try:
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.export_dataset` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.datasets.export import (  # noqa: E402
     DatasetExportSpec,

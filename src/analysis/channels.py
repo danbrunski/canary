@@ -58,6 +58,7 @@ from src.analysis.afr import AfrCalibration
 from src.control.capture_manifest import read_capture_manifest
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import read_session
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 
@@ -571,12 +572,19 @@ _EQUIV_RATIO_CHANNEL = "COMMANDED_EQUIV_RATIO"
 def _commanded_afr_series(
     frame: pd.DataFrame,
     calibration: AfrCalibration | None,
-    afr_stoich: float,
+    afr_stoich: float | None,
 ) -> pd.DataFrame:
     if calibration is None:
         raise ChannelSpecError(
             f"{COMMANDED_AFR_SPEC} needs an AFR calibration; pass calibration= "
             "(the vehicle profile's afr_calibration.yaml)"
+        )
+    if afr_stoich is None:
+        # No gasoline default (R05.1): a literal 14.7 here made the workbench
+        # disagree with the serve path for any non-gasoline profile.
+        raise ChannelSpecError(
+            f"{COMMANDED_AFR_SPEC} needs the vehicle's stoichiometric AFR; pass "
+            "afr_stoich= (TuningContext.afr_stoich, from derived.fuel_properties)"
         )
     rows = frame[(frame["source"] == "obd") & (frame["channel"] == _EQUIV_RATIO_CHANNEL)]
     out = rows.loc[:, ["timestamp"]].copy()
@@ -593,10 +601,10 @@ def read_channels(
     session: Path | pd.DataFrame,
     specs: list[str],
     *,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float | None = None,
     acquired_time: bool = False,
 ) -> pd.DataFrame:
     """Read ``specs`` from one session as a long frame in engineering units.
@@ -664,10 +672,10 @@ def read_aligned(
     cell_agg: Literal["last", "mean"] = "last",
     max_staleness: pd.Timedelta | str | None = None,
     with_age: bool = False,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float | None = None,
 ) -> pd.DataFrame:
     """Put ``specs`` on one clock, refusing stale joins by default.
 
@@ -776,8 +784,8 @@ def align_long(
 def rescale_channel_rows(
     rows: list[dict[str, object]],
     *,
-    bindings_path: Path = Path("data/bindings.yaml"),
-    dids_path: Path = Path("data/dids.yaml"),
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
     key_field: str = "channel_key",
     value_field: str = "value_number",
 ) -> list[dict[str, object]]:

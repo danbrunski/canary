@@ -31,17 +31,29 @@ import logging
 import shutil
 import sys
 from collections.abc import Sequence
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from _cli import (
-    add_bindings_arg,
-    add_common_args,
-    add_log_level_arg,
-    filter_sessions_by_age,
-    load_config,
-    resolve_sessions,
-)
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        apply_since_boundary,
+        filter_sessions_by_age,
+        load_config,
+        resolve_sessions,
+    )
+except ImportError:  # loaded as `scripts.refit_behavior_models` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        apply_since_boundary,
+        filter_sessions_by_age,
+        load_config,
+        resolve_sessions,
+    )
 
 from src.analysis.behavior_validation import (
     BehaviorValidationDocument,
@@ -61,7 +73,6 @@ from src.analysis.tune_revisions import (
     load_tune_revisions,
     resolve_session_revision,
 )
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
 from src.decode.behavior_models import (
@@ -191,26 +202,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_log_level_arg(parser)
     return parser.parse_args(argv)
-
-
-def _filter_sessions_by_boundary(sessions: list[Path], boundary: date) -> list[Path]:
-    """Keep session dirs whose timestamped name is on/after ``boundary`` (Task 3.5).
-
-    Same ``YYYY-MM-DDTHHMMSS`` naming convention as
-    :func:`_filter_sessions_by_age`; non-conforming names are kept for the
-    same reason (over-include rather than silently drop).
-    """
-    kept: list[Path] = []
-    for session in sessions:
-        # The one parser: a capture prefix must not turn a dated session into
-        # an "unknown format" that silently survives the boundary.
-        started = session_started_at(session)
-        if started is None:
-            kept.append(session)  # unknown format → keep
-            continue
-        if started.date() >= boundary:
-            kept.append(session)
-    return kept
 
 
 def _select_recipes(catalog: list[Recipe], names: list[str] | None) -> list[Recipe]:
@@ -427,20 +418,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 capture_sessions, args.days, datetime.now(UTC)
             )
         sessions = sorted({*sessions, *capture_sessions})
-    if args.since_boundary:
-        boundary = VehicleLedgerStore(scoped.daemon.vehicle_ledger).latest_boundary()
-        if boundary is not None:
-            before = len(sessions)
-            sessions = _filter_sessions_by_boundary(sessions, boundary.occurred_at)
-            log.info(
-                "--since-boundary applied",
-                extra={
-                    "boundary_event": boundary.title,
-                    "boundary_occurred_at": str(boundary.occurred_at),
-                    "sessions_before": before,
-                    "sessions_after": len(sessions),
-                },
-            )
+    sessions = apply_since_boundary(args, config, sessions)
     if not sessions:
         print(
             f"error: no sessions found under {sessions_root} within --days {args.days}. "

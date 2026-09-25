@@ -42,16 +42,23 @@ import numpy as np
 import pandas as pd
 
 try:
-    from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
-    from detector_benchmark import load_resampled_session
-except ImportError:  # loaded as `scripts.evaluate_detectors`
-    from scripts._cli import (  # type: ignore[no-redef]
+    from _cli import (
+        add_bindings_arg,
         add_common_args,
+        add_log_level_arg,
         add_profile_arg,
         load_config,
         scoped_models_dir,
     )
-    from scripts.detector_benchmark import load_resampled_session  # type: ignore[no-redef]
+except ImportError:  # loaded as `scripts.evaluate_detectors` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_profile_arg,
+        load_config,
+        scoped_models_dir,
+    )
 
 from src.analysis.drives import parent_session
 from src.analysis.labelled_events import (
@@ -61,7 +68,7 @@ from src.analysis.labelled_events import (
 )
 from src.analysis.tune_revisions import load_tune_revisions
 from src.config import CanaryConfig
-from src.control.sessions import session_started_at
+from src.control.sessions import recorded_sessions, session_started_at
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
 from src.log import configure_logging
@@ -120,14 +127,14 @@ from src.models.synthetic_fault_eval import (
 )
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
-    DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
     featurize_wide_frame,
+    load_resampled_session,
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.profiles import active_registry_path
-from src.session import session_sort_key
+from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 
 log = logging.getLogger(__name__)
 
@@ -147,27 +154,13 @@ DEFAULT_GRACE_SECONDS = 60.0
 # ---------------------------------------------------------------------------
 
 
-def discover_session_dirs(roots: Sequence[Path]) -> list[Path]:
-    """Every recorded session under ``roots``, captures included.
-
-    Captures are kept for *drive grouping* only: a capture bridges its sibling
-    recordings into one physical drive. Whether its rows are scored is
-    :func:`~src.models.evaluation.default_profile_exclusion`'s call (R04.6):
-    tuning captures are not. ``_archive`` (quarantine) and ``_replay-*``
-    (re-emitted copies) are not drives. Ordered by parsed start time, never by
-    name.
-    """
-    found: dict[str, Path] = {}
-    for root in roots:
-        if not root.is_dir():
-            continue
-        for child in root.iterdir():
-            if not child.is_dir() or child.name.startswith(("_archive", "_replay")):
-                continue
-            if session_started_at(child) is None:
-                continue
-            found.setdefault(child.name, child)
-    return sorted(found.values(), key=session_sort_key)
+#: Every recording under ``--sessions-root``, captures and legacy ``_tuning-*``
+#: included: they are kept for *drive grouping* only, a sibling recording
+#: bridging its neighbours into one physical drive. Whether their rows are
+#: scored is :func:`~src.models.evaluation.default_profile_exclusion`'s call
+#: (R04.6): tuning captures are not. ``_archive`` (quarantine) and ``_replay-*``
+#: (re-emitted copies) are not drives.
+EVALUATION_SESSION_KINDS = RECORDED_SESSION_KINDS | {SessionKind.TUNING}
 
 
 def _load_one(args: tuple[Path, Path, str]) -> tuple[str, pd.DataFrame | None, str | None]:
@@ -1223,7 +1216,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--labels", type=Path, default=None)
     parser.add_argument("--tune-revisions", type=Path, default=None)
     parser.add_argument("--fault-roles", type=Path, default=None)
-    parser.add_argument("--bindings", type=Path, default=DEFAULT_BINDINGS_PATH)
+    add_bindings_arg(parser)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -1265,7 +1258,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=900,
         help="Rows per drive the single-quantity shift is scored on (default 900).",
     )
-    parser.add_argument("--log-level", default="WARNING")
+    add_log_level_arg(parser, default="WARNING")
     return parser.parse_args(argv)
 
 
@@ -1328,8 +1321,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         record_seen(seen, label, manifest)
 
     roots = list(args.sessions_root)
-    session_dirs = list(args.sessions) or discover_session_dirs(roots)
-    by_name = {path.name: path for path in discover_session_dirs(roots)}
+    recorded = recorded_sessions(roots, kinds=EVALUATION_SESSION_KINDS)
+    session_dirs = list(args.sessions) or recorded
+    by_name = {path.name: path for path in recorded}
     by_name.update({path.name: path for path in args.sessions})
 
     # R05.1: the profile's active flash registry (operational copy first).

@@ -59,11 +59,19 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import yaml
-from _cli import (
-    add_bindings_arg,
-    add_log_level_arg,
-    load_config,
-)
+
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_log_level_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.evaluate_behavior_models`: repo root on path
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.analysis.behavior_validation import (
     EVALUATOR_VERSION,

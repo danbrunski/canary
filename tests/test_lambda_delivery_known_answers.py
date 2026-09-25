@@ -14,15 +14,12 @@ relations the declaration's convention, sentinel and regime claims rest on,
 
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import lambda_delivery_evidence as evidence  # noqa: E402
-
+import scripts.lambda_delivery_evidence as evidence
 from src.analysis.afr import load_afr_calibration  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
     ELIGIBLE,

@@ -2,11 +2,13 @@
 """Retrain both anomaly detectors from recent sessions (Task 5.17).
 
 Manual trigger in v1; cron later. The companion piece to `refit_behavior_models.py`:
-runs the Isolation Forest trainer (`scripts/train_anomaly_model.train`) and the
-**configured sequence-detector** trainer — the GRU-D LSTM (`scripts/train_lstm`)
-or the TCN (`scripts/train_tcn`), selected by ``models.sequence_detector`` and
-overridable with ``--sequence-model`` — over the same session set, side by side,
-in one process. Only the *selected* sequence backbone is trained, never both.
+runs the Isolation Forest trainer and the **configured sequence-detector**
+trainer — the GRU-D LSTM or the TCN, selected by ``models.sequence_detector``
+and overridable with ``--sequence-model`` — over the same session set, side by
+side, in one process. Only the *selected* sequence backbone is trained, never
+both. Both trainers are ``src.models.training_entry`` (R06.4); the holdout
+pickers are ``src.models.evaluation``, and staging/publishing behind the
+alert-budget gate is ``src.models.publish`` (R06.3).
 
 Each trainer writes its own ``model.joblib`` (or ``model.pt``) +
 ``model.manifest.json`` under a dedicated output directory. The
@@ -23,9 +25,15 @@ Usage:
     .venv/bin/python scripts/retrain.py --sequence-model tcn
 
 Skips on failure: a broken sequence trainer doesn't prevent the IF artifact from
-landing (or vice versa) — partial coverage beats none. Each trainer's
-``train()`` already validates inputs and raises with a useful message; we
-log + continue.
+landing (or vice versa) — partial coverage beats none. Each trainer validates
+inputs and raises with a useful message; we log + continue.
+
+``main`` runs the phases below in order over one :class:`RetrainRun`; ``args``
+is never written to (R06.3):
+
+sessions → holdouts → frames (+ quarantine, feedback, disposition summary) →
+stage → trainers → benchmark gate → alert-budget gate → publish → ledger →
+report → exit code.
 """
 
 from __future__ import annotations
@@ -36,316 +44,189 @@ import gc
 import json
 import logging
 import shutil
+import subprocess
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 
-# Reuse the trainer modules as importable libraries — same pattern
-# refit_behavior_models.py uses.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import detector_benchmark  # noqa: E402
-import disposition_report  # noqa: E402
-import train_anomaly_model as if_trainer  # noqa: E402
-import train_lstm as lstm_trainer  # noqa: E402
-import train_tcn as tcn_trainer  # noqa: E402
-from _cli import (  # noqa: E402
-    add_common_args,
-    add_override_reason_arg,
-    add_profile_arg,
-    load_config,
-    parse_since_argument,
-    resolve_sessions,
-    scoped_models_dir,
-)
-from refit_behavior_models import _filter_sessions_by_boundary  # noqa: E402
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_override_reason_arg,
+        add_profile_arg,
+        apply_since_boundary,
+        load_config,
+        parse_since_argument,
+        resolve_sessions,
+        scoped_models_dir,
+    )
+except ImportError:  # loaded as `scripts.retrain` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_override_reason_arg,
+        add_profile_arg,
+        apply_since_boundary,
+        load_config,
+        parse_since_argument,
+        resolve_sessions,
+        scoped_models_dir,
+    )
 
-from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore  # noqa: E402
-from src.analysis.training_disposition import (  # noqa: E402
+from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore
+from src.analysis.training_disposition import (
     GoldenBaselines,
     classify_dispositions,
     compute_quarantine_mask,
 )
-from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
-from src.config import CanaryConfig  # noqa: E402
-from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
-from src.log import configure_logging  # noqa: E402
-from src.models.alert_budget import (  # noqa: E402
+from src.config import CanaryConfig
+from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines
+from src.log import configure_logging
+from src.models import training_entry
+from src.models.alert_budget import (
     AlertBudgetCheck,
     alert_role_sources,
     check_alert_budget,
     evaluation_drives,
-    file_sha256,
-    verdict_record,
-    write_verdict,
 )
-from src.models.artifact_hash import sha256_file_or_none  # noqa: E402
-from src.models.evaluation import (  # noqa: E402
+from src.models.artifact_hash import sha256_file_or_none
+from src.models.detector_benchmark import (
+    DEFAULT_TOLERANCE,
+    build_report,
+    diff_reports,
+    load_trained_sequence,
+    run_grid,
+)
+from src.models.evaluation import (
+    MIN_CALIBRATION_HOLDOUT_SESSIONS,
     HoldoutSplit,
-    drives_of_sessions,
     holdout_by_drive,
+    pick_calibration_holdouts,
+    pick_evaluation_holdouts,
 )
-from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
-from src.models.isolation_forest import load_isolation_forest_model  # noqa: E402
-from src.models.manifest import ManifestValidationError  # noqa: E402
-from src.models.retrain_exit_codes import (  # noqa: E402
+from src.models.golden_baselines import golden_baselines_path, read_golden_baselines
+from src.models.isolation_forest import load_isolation_forest_model
+from src.models.manifest import ManifestValidationError
+from src.models.publish import (
+    ISOLATION_FOREST_SOURCE,
+    SEQUENCE_SOURCE,
+    artifact_name,
+    publish_staged,
+    sequence_artifact_name,
+    set_aside_refused,
+    staging_dir,
+    write_artifact_verdict,
+)
+from src.models.retrain_exit_codes import (
     ALERT_BUDGET_REFUSED,
     WINDOW_TOO_SMALL_FOR_HOLDOUT,
 )
-from src.models.retraining_policy import (  # noqa: E402
+from src.models.retraining_policy import (
     RetrainingFeedbackReport,
     apply_retraining_feedback_policy,
 )
-from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS  # noqa: E402
-from src.models.sequence_training import (  # noqa: E402
+from src.models.sequence_registry import SequenceTrainingBackend
+from src.models.sequence_training import (
     configure_torch_threads,
     default_training_device,
 )
-from src.models.training_ledger import (  # noqa: E402
+from src.models.training_entry import SEQUENCE_BACKBONES
+from src.models.training_ledger import (
     DEFAULT_TRAINING_LEDGER_PATH,
     TrainingLedger,
     build_run_record_from_manifest,
 )
-from src.paths import BINDINGS_YAML  # noqa: E402
-from src.preprocessing.feature_pipeline import (  # noqa: E402
+from src.preprocessing.feature_pipeline import (
     DEFAULT_FEATURE_CACHE_DIR,
+    FeaturePolicy,
     build_feature_frame,
     candidate_feature_columns,
+    disposition_screen_frames,
+    load_resampled_session,
     resolve_feature_policy,
 )
-from src.preprocessing.quality_gate import apply_quarantine_gate  # noqa: E402
-from src.session import session_sort_key  # noqa: E402
+from src.preprocessing.quality_gate import apply_quarantine_gate
 
 log = logging.getLogger(__name__)
 
-#: Selectable sequence-detector backbones: config selector value → (model_type,
-#: trainer module). Only the configured/selected backbone is trained per run.
-SEQUENCE_TRAINERS: dict[str, tuple[str, object]] = {
-    "lstm": ("lstm_autoencoder", lstm_trainer),
-    "tcn": ("tcn_autoencoder", tcn_trainer),
-}
-
-#: Minimum total parquet bytes for a session to be considered "substantial"
-#: enough to anchor an out-of-sample calibration holdout. A single in-progress
-#: capture (1 truncated chunk a few KB on disk) doesn't have the rows to form
-#: useful per-mode bands — auto-holdout skips it and picks an earlier real
-#: drive instead. ~1 MB is roughly a minute of telemetry at our chunk rate;
-#: way below any actual drive (the 05-18 short idles are still ~1.5 MB).
-_MIN_CALIBRATION_HOLDOUT_BYTES = 1_000_000
+#: A02's harness, run as its own process by the alert-budget gate. Scripts do
+#: not import each other (R06.4); this one is a CLI with a JSON report.
+EVALUATE_DETECTORS_SCRIPT = Path(__file__).resolve().with_name("evaluate_detectors.py")
 
 
-def _session_parquet_bytes(session_dir: Path) -> int:
-    try:
-        return sum(p.stat().st_size for p in session_dir.glob("telemetry-*.parquet"))
-    except OSError:
-        return 0
+@dataclass
+class RetrainRun:
+    """One retrain's resolved state, filled phase by phase.
 
-
-#: A mode must run at least this long in a session (per the classifier
-#: sidecar) before the session counts as "covering" that mode for holdout
-#: selection — a 5 s highway blip can't calibrate a highway band.
-_MIN_HOLDOUT_MODE_SECONDS = 60.0
-
-
-def _session_mode_coverage(session: Path) -> set[str] | None:
-    """Modes a session meaningfully covers, from its classifier sidecar.
-
-    ``None`` when the session hasn't been classified (run
-    ``scripts/label_sessions.py``) — callers treat that as unknown coverage.
+    ``args`` stays exactly as parsed. ``main`` used to carry run state by
+    writing onto it (``if_out``, ``sequence_out``, ``skip_if``,
+    ``skip_sequence``, ``holdout_split``, ``seq_model_type``,
+    ``sequence_model``), so what a flag *said* and what the run *did* were the
+    same attribute, and ``if_out`` meant the staging directory for half the
+    run and the served one for the rest (R06.3).
     """
-    from src.analysis.session_classifier import read_classification
 
-    classification = read_classification(session)
-    if classification is None:
-        return None
-    return {
-        mode
-        for mode, seconds in classification.mode_seconds.items()
-        if seconds >= _MIN_HOLDOUT_MODE_SECONDS and mode != "unknown"
-    }
+    args: argparse.Namespace
+    config: CanaryConfig
+    #: ``lstm`` / ``tcn``: ``--sequence-model``, else ``models.sequence_detector``.
+    sequence_model: str
+    #: The served output directories: what the daemon's ModelManager watches.
+    if_out: Path
+    sequence_out: Path
+    #: The flags, then also a model disabled in config (a no-op intent).
+    skip_if: bool
+    skip_sequence: bool
+    #: Training sessions, after every holdout has taken its drives.
+    sessions: list[Path] = field(default_factory=list)
+    calibration_sessions: list[Path] = field(default_factory=list)
+    evaluation_sessions: list[Path] = field(default_factory=list)
+    holdout_split: HoldoutSplit | None = None
+    #: Trainer name → ``ok`` / ``failed: …`` / ``skipped …`` / ``refused: …``.
+    results: dict[str, str] = field(default_factory=dict)
+    #: Where each alert-role source trains before the budget gate (A06.5). A
+    #: source absent here trains straight into its served directory.
+    staging: dict[str, Path] = field(default_factory=dict)
 
+    @property
+    def sequence_backend(self) -> SequenceTrainingBackend:
+        return SEQUENCE_BACKBONES[self.sequence_model]
 
-def _session_holdout_health(session: Path) -> tuple[str, int] | None:
-    """Classifier disposition and observed feature width for holdout screening."""
-    from src.analysis.session_classifier import read_classification
+    @property
+    def seq_model_type(self) -> str:
+        return self.sequence_backend.model_type
 
-    classification = read_classification(session)
-    if classification is None:
-        return None
-    return (
-        classification.disposition,
-        int(classification.quality.get("feature_columns", 0)),
-    )
+    def served_dir(self, source: str) -> Path:
+        return self.if_out if source == ISOLATION_FOREST_SOURCE else self.sequence_out
 
+    def train_dir(self, source: str) -> Path:
+        """Where ``source``'s trainer writes: its staging directory while the
+        alert-budget gate is pending, else the served one."""
+        return self.staging.get(source, self.served_dir(source))
 
-#: Both detectors calibrate on the same pooled holdout set; the floor is the
-#: sequence registry's (one definition — the manifest stamps a shortfall).
-MIN_CALIBRATION_HOLDOUT_SESSIONS = MIN_CALIBRATION_SESSIONS
-
-
-def _started_at_key(session: Path) -> datetime:
-    """Sort key by *parsed* start time (never by directory name — capture
-    prefixes sort first). Unparseable names keep their given order, oldest:
-    the time half of :func:`src.session.session_sort_key` (R01.1)."""
-    return session_sort_key(session)[0]
-
-
-def _pick_calibration_holdouts(
-    sessions: Sequence[Path],
-    *,
-    max_holdouts: int = MIN_CALIBRATION_HOLDOUT_SESSIONS,
-) -> list[Path]:
-    """Healthy substantial sessions: mode coverage first, then spread in time.
-
-    The historical single auto-holdout had a blind spot: if the freshest
-    drive was an idle session, highway/city earned no per-mode band AND the
-    global fallback threshold was calibrated from an idle-dominated error
-    distribution — too tight or too loose for the first real drive.
-
-    Pass 1 walks newest→oldest: the freshest substantial session anchors the
-    holdout (the legacy rule, so unclassified corpora behave exactly as
-    before); further sessions are added when their classifier sidecar covers a
-    mode not yet held out, until every mode seen in the classified corpus is
-    covered or ``max_holdouts`` is reached.
-
-    Pass 2 tops the set up to ``max_holdouts``. Pass 1 alone stops at ONE
-    session whenever the freshest drive happens to touch every mode, and a
-    single drive is a single day's conditions. The extra sessions are the
-    healthy ones *farthest in time* from those already held out, so the
-    calibration set spans the corpus rather than clustering on its last day.
-    The same list goes to every detector (see ``main``).
-    """
-    ordered = sorted(sessions, key=_started_at_key)
-    corpus_modes: set[str] = set()
-    classified_widths = [
-        health[1]
-        for session in ordered
-        if (health := _session_holdout_health(session)) is not None
-        and health[0] == "ready"
-        and health[1] > 0
-    ]
-    minimum_compatible_width = 0.9 * max(classified_widths, default=0)
-    for session in ordered:
-        modes = _session_mode_coverage(session)
-        if modes:
-            corpus_modes |= modes
-
-    healthy: list[Path] = []
-    for session in reversed(ordered):
-        if _session_parquet_bytes(session) < _MIN_CALIBRATION_HOLDOUT_BYTES:
-            continue
-        health = _session_holdout_health(session)
-        if health is not None and (health[0] != "ready" or health[1] < minimum_compatible_width):
-            log.info(
-                "skipping unhealthy calibration holdout",
-                extra={
-                    "session": session.name,
-                    "disposition": health[0],
-                    "feature_columns": health[1],
-                    "minimum_compatible_feature_columns": minimum_compatible_width,
-                },
-            )
-            continue
-        healthy.append(session)
-
-    # One pick per physical drive (A02.1/A02.2): three sessions of one day's
-    # drive are one drive's conditions, and the sequence trainer refuses a
-    # calibration resting on fewer than MIN_CALIBRATION_SESSIONS drives.
-    drives = drives_of_sessions(ordered)
-    drive_of = {name: drive.drive_id for drive in drives for name in drive.session_names}
-    drive_members = {
-        drive.drive_id: [span.path for span in drive.sessions if span.path is not None]
-        for drive in drives
-    }
-
-    def new_drive(candidate: Path, chosen: Sequence[Path]) -> bool:
-        taken = {drive_of.get(held.name, held.name) for held in chosen}
-        return drive_of.get(candidate.name, candidate.name) not in taken
-
-    selected: list[Path] = []
-    covered: set[str] = set()
-    for session in healthy:
-        if len(selected) >= max_holdouts:
-            break
-        modes = _session_mode_coverage(session)
-        if not selected:
-            selected.append(session)
-            covered |= modes or set()
-        elif modes and modes - covered and new_drive(session, selected):
-            selected.append(session)
-            covered |= modes
-        if corpus_modes and covered >= corpus_modes:
-            break
-
-    while selected and len(selected) < max_holdouts:
-        remaining = [
-            session
-            for session in healthy
-            if session not in selected and new_drive(session, selected)
-        ]
-        if not remaining:
-            break
-        selected.append(
-            max(
-                remaining,
-                key=lambda candidate: min(
-                    abs((_started_at_key(candidate) - _started_at_key(held)).total_seconds())
-                    for held in selected
-                ),
-            )
-        )
-    # Whole drives, in pick order: a picked session's restart/capture siblings
-    # are held out with it, so no caller of the picker can train on half a
-    # calibration drive (callers still split through ``holdout_by_drive``).
-    whole: list[Path] = []
-    for session in selected:
-        for member in drive_members.get(drive_of.get(session.name, ""), [session]):
-            if member not in whole:
-                whole.append(member)
-    return whole
+    def result_name(self, source: str) -> str:
+        return "isolation_forest" if source == ISOLATION_FOREST_SOURCE else self.seq_model_type
 
 
-#: Held-out drives the post-retrain gate scores (A02.1), disjoint from the
-#: calibration drives. Same count as the calibration floor: one drive is one
-#: day's conditions, for grading as much as for calibrating.
-EVALUATION_HOLDOUT_DRIVES = MIN_CALIBRATION_HOLDOUT_SESSIONS
+@dataclass
+class TrainingInputs:
+    """What the trainers are handed, built once for both (the frames phase)."""
 
-
-def _pick_evaluation_holdouts(
-    sessions: Sequence[Path],
-    *,
-    max_sessions: int,
-    max_drives: int = EVALUATION_HOLDOUT_DRIVES,
-) -> list[Path]:
-    """The newest healthy, substantial drives, for the regression gate only.
-
-    Drawn from ``sessions`` after calibration has taken its drives, so the gate
-    never scores a session the thresholds were cut from (A02.1). Whole drives
-    or nothing, newest first, within ``max_sessions`` so training keeps its
-    floor.
-    """
-    selected: list[Path] = []
-    drives = 0
-    for drive in reversed(drives_of_sessions(sessions)):
-        if drives >= max_drives:
-            break
-        members = [span.path for span in drive.sessions if span.path is not None]
-        if len(selected) + len(members) > max_sessions:
-            continue
-        healthy = [
-            m
-            for m in members
-            if _session_parquet_bytes(m) >= _MIN_CALIBRATION_HOLDOUT_BYTES
-            and ((health := _session_holdout_health(m)) is None or health[0] == "ready")
-        ]
-        if not healthy:
-            continue
-        selected.extend(members)
-        drives += 1
-    return sorted(selected, key=_started_at_key)
+    feature_policy: FeaturePolicy
+    feature_kwargs: dict[str, Any]
+    calibration_kwargs: dict[str, Any]
+    if_calibration_kwargs: dict[str, Any]
+    calibration_policy: dict[str, Any]
+    quarantined_cells: dict[str, pd.Index] | None
+    feedback_report: RetrainingFeedbackReport | None
+    disposition_summary: dict[str, Any] | None
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -406,12 +287,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_common_args(parser)
     add_profile_arg(parser)
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=BINDINGS_YAML,
-        help="Path to bindings.yaml for CAN-signal decode.",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--if-out",
         type=Path,
@@ -421,7 +297,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--sequence-model",
-        choices=sorted(SEQUENCE_TRAINERS),
+        choices=sorted(SEQUENCE_BACKBONES),
         default=None,
         help="Sequence-detector backbone to retrain (default: models.sequence_detector).",
     )
@@ -620,31 +496,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--benchmark-tolerance",
         type=float,
-        default=detector_benchmark.DEFAULT_TOLERANCE,
+        default=DEFAULT_TOLERANCE,
         # argparse runs `help % params` for every action (for %(default)s
         # etc.), so a literal "%" here must be doubled or it's parsed as a
         # (broken) format spec.
         help="Relative regression tolerance for the post-retrain benchmark gate "
-        f"(default {detector_benchmark.DEFAULT_TOLERANCE * 100:.0f}%%).",
+        f"(default {DEFAULT_TOLERANCE * 100:.0f}%%).",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
-
-
-def _stated_reason(value: str) -> str:
-    if not value.strip():
-        raise argparse.ArgumentTypeError("an override needs a stated reason")
-    return value.strip()
-
-
-#: A06.5 — the event source each retrained artifact publishes under
-#: (``DetectorRolesConfig.by_source``): both sequence backbones fill the one
-#: ``lstm_autoencoder`` slot.
-SEQUENCE_SOURCE = "lstm_autoencoder"
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -652,40 +512,111 @@ def main(argv: Sequence[str] | None = None) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
     config = load_config(args)
+    run = _start_run(args, config)
 
-    # Resolve the sequence-detector backbone (config default, --sequence-model
-    # override) and stash the resolved model_type + output dir on args so the
-    # report/failure helpers stay backbone-agnostic.
-    sequence_model = args.sequence_model or config.models.sequence_detector
-    seq_model_type, seq_trainer = SEQUENCE_TRAINERS[sequence_model]
-    args.sequence_model = sequence_model
-    models_dir = scoped_models_dir(config, args.profile)
-    args.if_out = args.if_out or models_dir / "isolation_forest"
-    args.sequence_out = args.sequence_out or models_dir / seq_model_type
-    args.seq_model_type = seq_model_type
-
-    if args.skip_if and args.skip_sequence:
+    if run.skip_if and run.skip_sequence:
         print(
             "error: --skip-if and --skip-sequence together leave nothing to do.",
             file=sys.stderr,
         )
         return 1
+    for phase in (_select_sessions, _hold_out):
+        code = phase(run)
+        if code is not None:
+            return code
 
+    log.info(
+        "starting retrain",
+        extra={
+            "sessions": len(run.sessions),
+            "calibration_sessions": [str(s) for s in run.calibration_sessions],
+            "evaluation_sessions": [str(s) for s in run.evaluation_sessions],
+            "skip_if": run.skip_if,
+            "skip_sequence": run.skip_sequence,
+            "sequence_model": run.seq_model_type,
+            "device": args.device,
+        },
+    )
+    _skip_disabled(run)
+
+    inputs = _prepare_inputs(run)
+    if isinstance(inputs, int):
+        return inputs
+
+    # What sat in each served dir BEFORE this run. `_ingest_ledger` refuses a
+    # manifest that is byte-for-byte the one already there: see its docstring.
+    manifests_before = {
+        out_dir: _manifest_fingerprint(out_dir) for out_dir in (run.if_out, run.sequence_out)
+    }
+    budget_gated = _stage_alert_role_outputs(run)
+    # Served dirs of trainers that produced a fresh artifact this run. Ledger
+    # ingestion waits for the benchmark gate so each record can link the report
+    # the gate produced against that artifact.
+    ledger_pending = _run_trainers(run, inputs)
+
+    benchmark_report_path: Path | None = None
+    benchmark_diff: dict[str, Any] | None = None
+    if not args.skip_benchmark:
+        # A02.1: evaluation sessions only — never the ones thresholds were cut from.
+        benchmark_report_path, benchmark_diff = _run_benchmark_gate(
+            config, run.evaluation_sessions, run
+        )
+    published = [
+        source
+        for source in (ISOLATION_FOREST_SOURCE, SEQUENCE_SOURCE)
+        if run.results.get(run.result_name(source)) == "ok"
+    ]
+    budget_check = _run_alert_budget_gate(config, run.evaluation_sessions, run, published)
+    refused_dirs = _publish_or_refuse(run, budget_check, budget_gated, published)
+
+    ledger = None if args.no_ledger else TrainingLedger(args.ledger)
+    for out_dir in ledger_pending:
+        refused_at = refused_dirs.get(out_dir)
+        _ingest_ledger(
+            ledger,
+            refused_at if refused_at is not None else out_dir,
+            "failed" if refused_at is not None else "succeeded",
+            args.job_id,
+            feedback_report=inputs.feedback_report,
+            detector_benchmark_report_path=benchmark_report_path,
+            dispositions=inputs.disposition_summary,
+            compute_target=args.compute_target,
+            manifest_before=manifests_before.get(out_dir),
+        )
+
+    _print_report(
+        run,
+        feedback_report=inputs.feedback_report,
+        benchmark_report_path=benchmark_report_path,
+        benchmark_diff=benchmark_diff,
+        budget_check=budget_check,
+    )
+    return _exit_code(run, budget_check, benchmark_diff, benchmark_report_path)
+
+
+def _start_run(args: argparse.Namespace, config: CanaryConfig) -> RetrainRun:
+    """Resolve the sequence backbone (config default, ``--sequence-model``
+    override) and the served output directories (profile-scoped defaults)."""
+    sequence_model = args.sequence_model or config.models.sequence_detector
+    models_dir = scoped_models_dir(config, args.profile)
+    return RetrainRun(
+        args=args,
+        config=config,
+        sequence_model=sequence_model,
+        if_out=args.if_out or models_dir / "isolation_forest",
+        sequence_out=args.sequence_out
+        or models_dir / SEQUENCE_BACKBONES[sequence_model].model_type,
+        skip_if=args.skip_if,
+        skip_sequence=args.skip_sequence,
+    )
+
+
+def _select_sessions(run: RetrainRun) -> int | None:
+    """Explicit sessions, else ``--days``/``--all``/``--since`` discovery, then
+    ``--since-boundary``. An exit code when nothing is left."""
+    args = run.args
     sessions = resolve_sessions(args, args.sessions_root)
-    if args.since_boundary:
-        boundary = VehicleLedgerStore(config.daemon.vehicle_ledger).latest_boundary()
-        if boundary is not None:
-            before = len(sessions)
-            sessions = _filter_sessions_by_boundary(sessions, boundary.occurred_at)
-            log.info(
-                "--since-boundary applied",
-                extra={
-                    "boundary_event": boundary.title,
-                    "boundary_occurred_at": str(boundary.occurred_at),
-                    "sessions_before": before,
-                    "sessions_after": len(sessions),
-                },
-            )
+    sessions = apply_since_boundary(args, run.config, sessions)
     if not sessions:
         print(
             f"error: no sessions under {args.sessions_root} within --days {args.days}. "
@@ -693,16 +624,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    run.sessions = list(sessions)
+    return None
 
-    # Pick calibration holdouts shared by every enabled detector. Out-of-sample
-    # threshold calibration is the default — in-sample calibration underestimates
-    # cross-session error and floods false positives on unseen drives. Explicit
-    # --calibration-sessions wins; otherwise auto-hold-out the most-recent
-    # *substantial* discovered session — abandoned in-progress captures (single
-    # truncated chunk a few KB on disk) are skipped because they don't have the
-    # rows to make a useful calibration band, and picking them would just push
-    # everything to the global threshold. With fewer than 3 sessions we can't
-    # afford to hold one out, so we log and fall back to in-sample.
+
+def _hold_out(run: RetrainRun) -> int | None:
+    """Calibration and evaluation holdouts, by physical drive (A02.1).
+
+    Out-of-sample threshold calibration is the default: in-sample calibration
+    underestimates cross-session error and floods false positives on unseen
+    drives. Explicit ``--calibration-sessions`` wins; otherwise
+    :func:`~src.models.evaluation.pick_calibration_holdouts` picks healthy,
+    substantial sessions for mode coverage (abandoned in-progress captures
+    don't have the rows to make a useful band). With fewer than 3 sessions we
+    can't afford to hold one out, so we log and fall back to in-sample. The
+    same holdout goes to every enabled detector.
+
+    The regression gate scores sessions disjoint from calibration, grouped by
+    physical drive. ``holdout_by_drive`` expands every named or picked session
+    to its whole drive and refuses a drive on both sides; the evaluation
+    drives come from what calibration left, keeping at least two sessions for
+    training. An exit code on a refusal.
+    """
+    args = run.args
+    sessions = run.sessions
     pool = list(sessions)
     calibration_sessions: list[Path] = []
     evaluation_sessions: list[Path] = []
@@ -722,7 +667,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     elif not args.no_calibration_holdout and len(sessions) >= 3:
         # Hold out up to 3 sessions for mode coverage, but always keep
         # at least 2 for training.
-        holdouts = _pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
+        holdouts = pick_calibration_holdouts(sessions, max_holdouts=min(3, len(sessions) - 2))
         if holdouts:
             calibration_sessions = holdouts
             held = set(holdouts)
@@ -740,11 +685,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             extra={"session_count": len(sessions)},
         )
 
-    # A02.1: the regression gate scores sessions disjoint from calibration,
-    # grouped by physical drive. ``holdout_by_drive`` expands every named or
-    # picked session to its whole drive and refuses a drive on both sides;
-    # the evaluation drives come from what calibration left, keeping at
-    # least two sessions for training.
     try:
         after_calibration = holdout_by_drive(pool, calibration=calibration_sessions)
         if args.evaluation_sessions:
@@ -755,7 +695,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             and not args.no_calibration_holdout
             and len(after_calibration.training) > 2
         ):
-            evaluation_sessions = _pick_evaluation_holdouts(
+            evaluation_sessions = pick_evaluation_holdouts(
                 after_calibration.training,
                 max_sessions=len(after_calibration.training) - 2,
             )
@@ -771,73 +711,70 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     if moved:
         log.info("holdouts take the rest of their drives", extra={"sessions": moved})
-    sessions = list(holdout.training)
-    calibration_sessions = list(holdout.calibration)
-    evaluation_sessions = list(holdout.evaluation)
-    args.holdout_split = holdout.split
+    run.sessions = list(holdout.training)
+    run.calibration_sessions = list(holdout.calibration)
+    run.evaluation_sessions = list(holdout.evaluation)
+    run.holdout_split = holdout.split
 
     # Task 3.1: a --since window is explicitly the scheduled-retrain shape (a
-    # rolling window, not a fixed corpus) — the calibration-holdout fallback
+    # rolling window, not a fixed corpus). The calibration-holdout fallback
     # above (warn + train in-sample) is the right posture for an ad hoc manual
     # --days run with a thin corpus, but a *scheduled* run must never silently
     # degrade to in-sample calibration (that's exactly the FPR≈1.0 flood the
-    # ml-hardening review traced to in-sample calibration). Refuse instead —
-    # a distinct exit code so a caller (the online-training scheduler, 3.2)
-    # can log this as a routine skip rather than a hard failure.
+    # ml-hardening review traced to in-sample calibration). Refuse instead,
+    # with a distinct exit code so a caller (the online-training scheduler,
+    # 3.2) can log this as a routine skip rather than a hard failure.
     if (
         args.since is not None
-        and not args.skip_sequence
+        and not run.skip_sequence
         and not args.no_calibration_holdout
-        and not calibration_sessions
+        and not run.calibration_sessions
     ):
         print(
-            f"error: --since window ({len(sessions)} session(s)) is too small to "
+            f"error: --since window ({len(run.sessions)} session(s)) is too small to "
             "reserve a calibration holdout; a scheduled retrain never calibrates "
             "in-sample. Widen --since, pass explicit --calibration-sessions, or "
             "(manual runs only) --no-calibration-holdout.",
             file=sys.stderr,
         )
         return WINDOW_TOO_SMALL_FOR_HOLDOUT
+    return None
 
-    log.info(
-        "starting retrain",
-        extra={
-            "sessions": len(sessions),
-            "calibration_sessions": [str(s) for s in calibration_sessions],
-            "evaluation_sessions": [str(s) for s in evaluation_sessions],
-            "skip_if": args.skip_if,
-            "skip_sequence": args.skip_sequence,
-            "sequence_model": seq_model_type,
-            "device": args.device,
-        },
-    )
 
-    results: dict[str, str] = {}
-
-    # A model disabled in config is "skipped", not "failed": running its
-    # trainer would raise `_validate_config` ("... config is disabled"), which
-    # is a no-op intent, not an error. Treat it like an implicit --skip-<m> so
-    # a disabled trainer doesn't poison the exit code, the report, or the
-    # all-failed check (and sync-train.sh still runs the behavior refit).
-    if not args.skip_if and not config.models.isolation_forest.enabled:
+def _skip_disabled(run: RetrainRun) -> None:
+    """A model disabled in config is "skipped", not "failed": its trainer
+    would raise ``_validate_config`` ("... config is disabled"), which is a
+    no-op intent, not an error. Treated like an implicit ``--skip-<m>`` so a
+    disabled trainer doesn't poison the exit code, the report, or the
+    all-failed check (and sync-train.sh still runs the behavior refit)."""
+    models = run.config.models
+    if not run.skip_if and not models.isolation_forest.enabled:
         log.info("isolation_forest disabled in config; skipping")
-        results["isolation_forest"] = "skipped (disabled in config)"
-        args.skip_if = True
-    if not args.skip_sequence and not getattr(config.models, seq_model_type).enabled:
-        log.info("%s disabled in config; skipping", seq_model_type)
-        results[seq_model_type] = "skipped (disabled in config)"
-        args.skip_sequence = True
+        run.results["isolation_forest"] = "skipped (disabled in config)"
+        run.skip_if = True
+    if not run.skip_sequence and not getattr(models, run.seq_model_type).enabled:
+        log.info("%s disabled in config; skipping", run.seq_model_type)
+        run.results[run.seq_model_type] = "skipped (disabled in config)"
+        run.skip_sequence = True
 
-    ledger = None if args.no_ledger else TrainingLedger(args.ledger)
+
+def _prepare_inputs(run: RetrainRun) -> TrainingInputs | int:
+    """The shared training and calibration frames, screened once for both
+    trainers: quarantine exclusion, the feedback-label policy, the IF's
+    calibration policy and the disposition summary. An exit code (after
+    printing the report) when a shared step fails."""
+    args, config = run.args, run.config
+    sessions = run.sessions
+    calibration_sessions = run.calibration_sessions
     feedback_labels = {} if args.no_feedback_policy else FeedbackStore(args.feedback).labels()
-    any_trainer_requested = not args.skip_if or not args.skip_sequence
+    any_trainer_requested = not run.skip_if or not run.skip_sequence
     # The shared frame is where the quarantine screen and the feedback policy
     # are applied, so it is built whenever either applies -- not only when both
     # trainers run. An IF-only retrain (--skip-sequence) used to hand the
     # trainer an unscreened frame: the 2026-09-23 A06.3 candidate IF lost 0
     # rows to quarantine where the same corpus, both trainers, lost 369 of 709.
     needs_shared_feature_frame = any_trainer_requested and (
-        (not args.skip_if and not args.skip_sequence)
+        (not run.skip_if and not run.skip_sequence)
         or bool(feedback_labels)
         or not args.skip_quarantine_exclusion
     )
@@ -854,8 +791,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - preprocessing is shared by both trainers
             log.exception("feature frame build failed", extra={"error": str(exc)})
-            _mark_requested_failures(results, args, f"failed: preprocessing: {exc}")
-            _print_report(sessions, results, args)
+            _mark_requested_failures(run, f"failed: preprocessing: {exc}")
+            _print_report(run)
             return 1
 
     # One calibration frame for every detector, built HERE — before either
@@ -877,8 +814,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - shared by both trainers
             log.exception("calibration feature frame build failed", extra={"error": str(exc)})
-            _mark_requested_failures(results, args, f"failed: calibration preprocessing: {exc}")
-            _print_report(sessions, results, args)
+            _mark_requested_failures(run, f"failed: calibration preprocessing: {exc}")
+            _print_report(run)
             return 1
     if calibration_sessions and len(calibration_sessions) < MIN_CALIBRATION_HOLDOUT_SESSIONS:
         log.warning(
@@ -912,14 +849,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - label policy is a retrain gate
             log.exception("feedback label policy failed", extra={"error": str(exc)})
-            _mark_requested_failures(results, args, f"failed: feedback policy: {exc}")
-            _print_report(sessions, results, args, feedback_report=feedback_report)
+            _mark_requested_failures(run, f"failed: feedback policy: {exc}")
+            _print_report(run, feedback_report=feedback_report)
             return 1
         if shared_feature_frame.empty:
             msg = "feedback policy excluded every training row"
             log.error(msg)
-            _mark_requested_failures(results, args, f"failed: {msg}")
-            _print_report(sessions, results, args, feedback_report=feedback_report)
+            _mark_requested_failures(run, f"failed: {msg}")
+            _print_report(run, feedback_report=feedback_report)
             return 1
         log.info(
             "applied feedback retraining policy",
@@ -954,8 +891,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001 - label policy is a retrain gate
             log.exception("calibration feedback label policy failed", extra={"error": str(exc)})
-            _mark_requested_failures(results, args, f"failed: calibration feedback policy: {exc}")
-            _print_report(sessions, results, args, feedback_report=feedback_report)
+            _mark_requested_failures(run, f"failed: calibration feedback policy: {exc}")
+            _print_report(run, feedback_report=feedback_report)
             return 1
         calibration_policy["feedback_labels"] = {
             "applied": True,
@@ -985,149 +922,150 @@ def main(argv: Sequence[str] | None = None) -> int:
         # as its own key rather than folded into `totals`).
         disposition_summary["excluded"] = quarantine_excluded
 
-    # out_dirs of trainers that produced a fresh artifact this run — ledger
-    # ingestion is deferred until after the benchmark gate (below) so each
-    # record can link the report the gate produced against that artifact.
-    ledger_pending: list[Path] = []
-    # What sat in each out_dir BEFORE this run. `_ingest_ledger` refuses a
-    # manifest that is byte-for-byte the one already there: see its docstring.
-    manifests_before = {
-        out_dir: _manifest_fingerprint(out_dir) for out_dir in (args.if_out, args.sequence_out)
-    }
-    # A06.5: an alert-role artifact trains into a staging directory and reaches
-    # the served one only through the alert-budget gate below, so the daemon's
-    # ModelManager can never hot-swap an artifact the gate then refuses.
-    served_out = {"isolation_forest": args.if_out, SEQUENCE_SOURCE: args.sequence_out}
-    budget_gated = set(
+    return TrainingInputs(
+        feature_policy=feature_policy,
+        feature_kwargs=feature_kwargs,
+        calibration_kwargs=calibration_kwargs,
+        if_calibration_kwargs=if_calibration_kwargs,
+        calibration_policy=calibration_policy,
+        quarantined_cells=quarantined_cells,
+        feedback_report=feedback_report,
+        disposition_summary=disposition_summary,
+    )
+
+
+def _stage_alert_role_outputs(run: RetrainRun) -> set[str]:
+    """A06.5: an alert-role artifact trains into a staging directory and
+    reaches the served one only through the alert-budget gate, so the daemon's
+    ModelManager can never hot-swap an artifact the gate then refuses. Returns
+    the gated sources."""
+    gated = set(
         alert_role_sources(
-            config.models.roles.by_source(),
+            run.config.models.roles.by_source(),
             [
                 source
                 for source, skipped in (
-                    ("isolation_forest", args.skip_if),
-                    (SEQUENCE_SOURCE, args.skip_sequence),
+                    (ISOLATION_FOREST_SOURCE, run.skip_if),
+                    (SEQUENCE_SOURCE, run.skip_sequence),
                 )
                 if not skipped
             ],
         )
     )
-    if "isolation_forest" in budget_gated:
-        args.if_out = _staging_dir(args.if_out)
-    if SEQUENCE_SOURCE in budget_gated:
-        args.sequence_out = _staging_dir(args.sequence_out)
+    for source in sorted(gated):
+        run.staging[source] = staging_dir(run.served_dir(source))
+    return gated
 
-    if not args.skip_if:
+
+def _run_trainers(run: RetrainRun, inputs: TrainingInputs) -> list[Path]:
+    """Each requested trainer in turn; one failing does not stop the other.
+    Returns the served directories of trainers that produced an artifact."""
+    args, config = run.args, run.config
+    calibration_sessions = run.calibration_sessions or None
+    evaluation_sessions = run.evaluation_sessions or None
+    produced: list[Path] = []
+    if not run.skip_if:
         try:
-            if_trainer.train(
-                sessions,
+            training_entry.train_isolation_forest(
+                run.sessions,
                 config,
-                args.if_out,
+                run.train_dir(ISOLATION_FOREST_SOURCE),
                 bindings_path=args.bindings,
-                calibration_sessions=calibration_sessions or None,
-                feature_policy=feature_policy,
-                evaluation_sessions=evaluation_sessions or None,
-                quarantined_cells=quarantined_cells,
-                calibration_policy=calibration_policy,
+                calibration_sessions=calibration_sessions,
+                feature_policy=inputs.feature_policy,
+                evaluation_sessions=evaluation_sessions,
+                quarantined_cells=inputs.quarantined_cells,
+                calibration_policy=inputs.calibration_policy,
                 calibration_override=args.accept_thin_calibration,
-                **if_calibration_kwargs,
-                **feature_kwargs,
+                **inputs.if_calibration_kwargs,
+                **inputs.feature_kwargs,
             )
-            results["isolation_forest"] = "ok"
-            ledger_pending.append(served_out["isolation_forest"])
+            run.results["isolation_forest"] = "ok"
+            produced.append(run.if_out)
         except Exception as exc:  # noqa: BLE001 — surface + continue to the next trainer
             log.exception("isolation forest trainer failed", extra={"error": str(exc)})
-            results["isolation_forest"] = f"failed: {exc}"
+            run.results["isolation_forest"] = f"failed: {exc}"
 
         # The sequence trainer needs the shared feature frame, but none of the
         # IF mode matrices. Reclaim cyclic/joblib temporaries before allocating
         # the LSTM dataset's values/mask/delta arrays.
         gc.collect()
 
-    if not args.skip_sequence:
+    if not run.skip_sequence:
         try:
-            seq_trainer.train(  # type: ignore[attr-defined]
-                sessions,
+            training_entry.train_sequence_detector(
+                run.sequence_backend,
+                run.sessions,
                 config,
-                args.sequence_out,
+                run.train_dir(SEQUENCE_SOURCE),
                 bindings_path=args.bindings,
                 device=args.device,
-                calibration_sessions=calibration_sessions or None,
-                feature_policy=feature_policy,
-                evaluation_sessions=evaluation_sessions or None,
+                calibration_sessions=calibration_sessions,
+                feature_policy=inputs.feature_policy,
+                evaluation_sessions=evaluation_sessions,
                 calibration_override=args.accept_thin_calibration,
-                **calibration_kwargs,
-                **feature_kwargs,
+                **inputs.calibration_kwargs,
+                **inputs.feature_kwargs,
             )
-            results[seq_model_type] = "ok"
-            ledger_pending.append(served_out[SEQUENCE_SOURCE])
+            run.results[run.seq_model_type] = "ok"
+            produced.append(run.sequence_out)
         except Exception as exc:  # noqa: BLE001
             log.exception(
-                "sequence trainer failed", extra={"error": str(exc), "model": seq_model_type}
+                "sequence trainer failed", extra={"error": str(exc), "model": run.seq_model_type}
             )
-            results[seq_model_type] = f"failed: {exc}"
+            run.results[run.seq_model_type] = f"failed: {exc}"
+    return produced
 
-    benchmark_report_path: Path | None = None
-    benchmark_diff: dict[str, Any] | None = None
-    if not args.skip_benchmark:
-        # A02.1: evaluation sessions only — never the ones thresholds were cut from.
-        benchmark_report_path, benchmark_diff = _run_benchmark_gate(
-            config, evaluation_sessions, args
-        )
-    published = [
-        source
-        for source, name in (
-            ("isolation_forest", "isolation_forest"),
-            (SEQUENCE_SOURCE, seq_model_type),
-        )
-        if results.get(name) == "ok"
-    ]
-    budget_check = _run_alert_budget_gate(config, evaluation_sessions, args, published)
+
+def _publish_or_refuse(
+    run: RetrainRun,
+    budget_check: AlertBudgetCheck,
+    gated: set[str],
+    published: Sequence[str],
+) -> dict[Path, Path]:
+    """Every staged artifact either reaches its served directory or is set
+    aside beside it. Returns ``{served dir: refused dir}`` for the refused.
+
+    The verdict travels with the binary (operator decision 2026-09-23): models
+    reach the Pi by scp and data/analyses never does, so the daemon serves an
+    `alert` role only beside an accepted verdict that names this artifact's
+    sha256 (src/models/role_gate.py).
+    """
     refused_dirs: dict[Path, Path] = {}
-    for source in sorted(budget_gated):
-        staged = args.if_out if source == "isolation_forest" else args.sequence_out
-        name = "isolation_forest" if source == "isolation_forest" else seq_model_type
+    for source in sorted(gated):
+        staged = run.train_dir(source)
+        served = run.served_dir(source)
         if source not in published:
             # The trainer failed: nothing to publish or keep.
             if staged.exists():
                 shutil.rmtree(staged)
             continue
-        # The verdict travels with the binary (operator decision 2026-09-23):
-        # models reach the Pi by scp and data/analyses never does, so the
-        # daemon serves an `alert` role only beside an accepted verdict that
-        # names this artifact's sha256 (src/models/role_gate.py).
-        _write_artifact_verdict(budget_check, source, staged / _artifact_name(config, source, args))
-        if budget_check.refused:
-            refused_dirs[served_out[source]] = _set_aside_refused(staged, served_out[source])
-            results[name] = "refused: alert budget (see the alert-budget report)"
-        else:
-            _publish_staged(staged, served_out[source])
-    if budget_gated:
-        # Every later step (the report, the ledger) names the served paths.
-        args.if_out = served_out["isolation_forest"]
-        args.sequence_out = served_out[SEQUENCE_SOURCE]
-    for out_dir in ledger_pending:
-        refused_at = refused_dirs.get(out_dir)
-        _ingest_ledger(
-            ledger,
-            refused_at if refused_at is not None else out_dir,
-            "failed" if refused_at is not None else "succeeded",
-            args.job_id,
-            feedback_report=feedback_report,
-            detector_benchmark_report_path=benchmark_report_path,
-            dispositions=disposition_summary,
-            compute_target=args.compute_target,
-            manifest_before=manifests_before.get(out_dir),
+        write_artifact_verdict(
+            budget_check, source, staged / artifact_name(run.config, source, run.seq_model_type)
         )
+        if budget_check.refused:
+            refused_dirs[served] = set_aside_refused(staged, served)
+            run.results[run.result_name(source)] = (
+                "refused: alert budget (see the alert-budget report)"
+            )
+        else:
+            publish_staged(staged, served)
+    # Every later step (the report, the ledger) names the served paths.
+    run.staging.clear()
+    return refused_dirs
 
-    _print_report(
-        sessions,
-        results,
-        args,
-        feedback_report=feedback_report,
-        benchmark_report_path=benchmark_report_path,
-        benchmark_diff=benchmark_diff,
-        budget_check=budget_check,
-    )
+
+def _exit_code(
+    run: RetrainRun,
+    budget_check: AlertBudgetCheck,
+    benchmark_diff: dict[str, Any] | None,
+    benchmark_report_path: Path | None,
+) -> int:
+    """Partial success is the documented contract (a broken LSTM must not
+    block the IF artifact, and vice versa). Non-zero ONLY when every requested
+    trainer failed, the alert budget refused, or the benchmark regressed, so
+    the caller (sync-train.sh) still runs the independent behavior-model refit
+    instead of `set -e` aborting the whole pipeline on a partial run."""
     if budget_check.refused:
         # A06.5: a refusal, not a report. The refused artifact sits in a
         # ``_refused-alert-budget-*`` directory beside the served one.
@@ -1140,11 +1078,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             budget_check.override_reason,
             "; ".join(budget_check.violations),
         )
-    # Partial success is the documented contract (a broken LSTM must not block
-    # the IF artifact, and vice versa — see the module docstring). Exit
-    # non-zero ONLY when every requested trainer failed, so the caller
-    # (sync-train.sh) still runs the independent behavior-model refit instead
-    # of `set -e` aborting the whole pipeline on a partial run.
+    results = run.results
     succeeded = [k for k, v in results.items() if v == "ok"]
     failed = [k for k, v in results.items() if v.startswith("failed")]
     skipped = [k for k, v in results.items() if v.startswith("skipped")]
@@ -1246,10 +1180,10 @@ def _compute_disposition_summary(
     """Best-effort disposition summary for this run's training sessions.
 
     The same regime-gate -> data-quality-gate -> four-tier classify screen
-    `scripts/disposition_report.py` runs standalone (reused via its
-    `_scan_sessions`, not reimplemented), applied here so a real retrain run
-    finally populates `TrainingRunRecord.dispositions` (Task 1.4 added the
-    schema field with the note "populated in Phase 3"; this is that wiring).
+    `scripts/disposition_report.py` runs standalone (reused via
+    `feature_pipeline.disposition_screen_frames`, not reimplemented), applied
+    here so a real retrain run finally populates `TrainingRunRecord.dispositions`
+    (Task 1.4 added the schema field with the note "populated in Phase 3"; this is that wiring).
     Feeds the champion/challenger promotion gate's contamination sanity check
     (Task 3.3).
 
@@ -1263,7 +1197,7 @@ def _compute_disposition_summary(
         overrides = None
         if config.daemon.accepted_baselines.exists():
             overrides = load_accepted_baselines(config.daemon.accepted_baselines)
-        framed_parts, reject_counts = disposition_report._scan_sessions(
+        framed_parts, reject_counts = disposition_screen_frames(
             list(sessions), config, bindings_path=bindings_path
         )
         if not framed_parts:
@@ -1360,7 +1294,7 @@ def _prior_benchmark_reports(analyses_dir: Path) -> list[Path]:
 def _run_benchmark_gate(
     config: CanaryConfig,
     evaluation_sessions: Sequence[Path],
-    args: argparse.Namespace,
+    run: RetrainRun,
 ) -> tuple[Path | None, dict[str, Any] | None]:
     """Post-retrain regression gate (Task 2.6): benchmark the freshly-trained
     artifacts on held-out sessions and diff against the most recent prior
@@ -1376,9 +1310,13 @@ def _run_benchmark_gate(
     skipped — logged, not a failure — rather than silently testing on
     calibration or training data.
 
+    Scores the artifacts where they were trained (the staging directory of an
+    alert-role source, before the budget gate publishes it).
+
     Never raises: like the trainers themselves, an unexpected failure here is
     logged and treated as "gate didn't run", not a retrain-flow crash.
     """
+    args = run.args
     if not evaluation_sessions:
         log.warning(
             "no evaluation holdout for the post-retrain benchmark gate; skipping "
@@ -1386,7 +1324,7 @@ def _run_benchmark_gate(
         )
         return None, None
 
-    if_model_path = args.if_out / "model.joblib"
+    if_model_path = run.train_dir(ISOLATION_FOREST_SOURCE) / "model.joblib"
     try:
         trained_if = load_isolation_forest_model(if_model_path)
     except FileNotFoundError:
@@ -1395,30 +1333,20 @@ def _run_benchmark_gate(
 
     # The benchmark's default artifact path is UNSCOPED
     # (``models_dir/<type>/model.pt``), but retrain writes to the
-    # profile-scoped ``args.sequence_out``. Passing ``None`` here let it look in
+    # profile-scoped sequence output. Passing ``None`` here let it look in
     # the pre-profile-migration location, miss, and silently skip the sequence
     # detector — so the 2026-07-26 retrain produced a benchmark report with no
     # LSTM coverage at all. Pass the path we actually just wrote.
-    sequence_model_type = getattr(args, "seq_model_type", config.models.sequence_detector)
-    sequence_artifact_name = Path(
-        config.daemon.tcn_artifact
-        if sequence_model_type == "tcn_autoencoder"
-        else config.daemon.lstm_artifact
-    ).name
-    sequence_artifact_path = (
-        None if args.sequence_out is None else args.sequence_out / sequence_artifact_name
+    sequence_artifact_path = run.train_dir(SEQUENCE_SOURCE) / sequence_artifact_name(
+        config, run.seq_model_type
     )
     try:
-        trained_sequence = detector_benchmark._load_trained_sequence(
-            config, sequence_artifact_path, skip=False
-        )
+        trained_sequence = load_trained_sequence(config, sequence_artifact_path, skip=False)
 
         sessions_loaded: list[tuple[str, Any]] = []
         for session_dir in evaluation_sessions:
             try:
-                resampled = detector_benchmark.load_resampled_session(
-                    session_dir, config, bindings_path=args.bindings
-                )
+                resampled = load_resampled_session(session_dir, config, bindings_path=args.bindings)
             except FileNotFoundError as exc:
                 log.warning("benchmark gate: skipping unreadable session %s: %s", session_dir, exc)
                 continue
@@ -1427,14 +1355,10 @@ def _run_benchmark_gate(
             log.warning("benchmark gate: no readable held-out sessions; skipping")
             return None, None
 
-        cells = detector_benchmark.run_grid(
-            sessions_loaded, config, trained_if, trained_sequence=trained_sequence
-        )
+        cells = run_grid(sessions_loaded, config, trained_if, trained_sequence=trained_sequence)
         timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        report = detector_benchmark.build_report(
-            cells, seed=42, n_injections=5, generated_at=timestamp
-        )
-        split = getattr(args, "holdout_split", None)
+        report = build_report(cells, seed=42, n_injections=5, generated_at=timestamp)
+        split = run.holdout_split
         report["holdout"] = (
             split.to_dict()
             if split is not None
@@ -1454,9 +1378,7 @@ def _run_benchmark_gate(
             except (OSError, json.JSONDecodeError) as exc:
                 log.warning("benchmark gate: cannot read baseline %s: %s", baseline_path, exc)
                 continue
-            attempt = detector_benchmark.diff_reports(
-                baseline_report, report, tolerance=args.benchmark_tolerance
-            )
+            attempt = diff_reports(baseline_report, report, tolerance=args.benchmark_tolerance)
             if attempt.get("comparable", True):
                 diff = {**attempt, "baseline": str(baseline_path)}
                 break
@@ -1487,77 +1409,29 @@ def _run_benchmark_gate(
         return None, None
 
 
-def _staging_dir(served: Path) -> Path:
-    """Where an alert-role artifact trains before the budget gate (A06.5): a
-    ``_``-prefixed sibling of the served directory, which neither the
-    ModelManager nor training discovery reads. Emptied first, so a stale
-    artifact from an earlier run can never be the one that gets published."""
-    staging = served.parent / f"_staging-{served.name}"
-    if staging.exists():
-        shutil.rmtree(staging)
-    return staging
-
-
-def _artifact_name(config: CanaryConfig, source: str, args: argparse.Namespace) -> str:
-    """The binary a gated source's verdict names (``model.joblib`` / ``model.pt``)."""
-    if source == "isolation_forest":
-        return Path(config.daemon.isolation_forest_artifact).name
-    if getattr(args, "seq_model_type", None) == "tcn_autoencoder":
-        return Path(config.daemon.tcn_artifact).name
-    return Path(config.daemon.lstm_artifact).name
-
-
-def _write_artifact_verdict(check: AlertBudgetCheck, source: str, artifact: Path) -> None:
-    if not artifact.exists():
-        log.warning("no artifact at %s to write an alert-budget verdict beside", artifact)
-        return
-    write_verdict(
-        artifact,
-        verdict_record(check, source=source, artifact_path=artifact, sha256=file_sha256(artifact)),
-    )
-
-
-def _publish_staged(staged: Path, served: Path) -> None:
-    """Move a gated artifact into the served directory: the alert-budget
-    verdict first, then the binaries, the manifest last. A poller then never
-    pairs a new manifest with an old binary, and never sees the new binary
-    without its verdict (which would serve it as evidence until the next
-    poll)."""
-    served.mkdir(parents=True, exist_ok=True)
-
-    def order(path: Path) -> int:
-        if path.name.endswith(".alert-budget.json"):
-            return 0
-        return 2 if path.name.endswith(".manifest.json") else 1
-
-    files = sorted(staged.iterdir(), key=order)
-    for path in files:
-        path.replace(served / path.name)
-    staged.rmdir()
-
-
-def _set_aside_refused(staged: Path, served: Path) -> Path:
-    """Keep a refused artifact for inspection, out of every served path."""
-    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    target = served.parent / f"_refused-alert-budget-{stamp}-{served.name}"
-    staged.replace(target)
-    return target
+def run_evaluate_detectors(argv: Sequence[str]) -> int:
+    """Run A02's harness (``scripts/evaluate_detectors.py``) as its own
+    process; its exit code. Its own process, not an import: scripts never
+    import each other (R06.4), and the harness reconfigures logging for its
+    process, which in-process used to silence this retrain's INFO log for
+    the rest of the run."""
+    return subprocess.run(
+        [sys.executable, str(EVALUATE_DETECTORS_SCRIPT), *argv], check=False
+    ).returncode
 
 
 def _evaluate_on_drives(
-    config: CanaryConfig,
     evaluation_sessions: Sequence[Path],
-    args: argparse.Namespace,
+    run: RetrainRun,
     *,
     if_model: Path,
     sequence_model: Path | None,
     out: Path,
 ) -> dict[str, Any]:
-    """A02's harness (``scripts/evaluate_detectors.py``) on the evaluation
-    drives, clean scoring only: no baselines, injections or shift test, which
-    the budget does not read. Returns its JSON report."""
-    import evaluate_detectors
-
+    """A02's harness on the evaluation drives, clean scoring only: no
+    baselines, injections or shift test, which the budget does not read.
+    Returns its JSON report."""
+    args = run.args
     argv = [
         *(str(path) for path in evaluation_sessions),
         "--config",
@@ -1574,12 +1448,12 @@ def _evaluate_on_drives(
         "--out",
         str(out),
     ]
-    if getattr(args, "profile", None):
+    if args.profile:
         argv += ["--profile", str(args.profile)]
     argv += (
         ["--no-sequence"] if sequence_model is None else ["--sequence-model", str(sequence_model)]
     )
-    code = evaluate_detectors.main(argv)
+    code = run_evaluate_detectors(argv)
     if code != 0:
         raise RuntimeError(f"evaluate_detectors exited {code}")
     report: dict[str, Any] = json.loads(out.read_text())
@@ -1589,7 +1463,7 @@ def _evaluate_on_drives(
 def _run_alert_budget_gate(
     config: CanaryConfig,
     evaluation_sessions: Sequence[Path],
-    args: argparse.Namespace,
+    run: RetrainRun,
     published: Sequence[str],
 ) -> AlertBudgetCheck:
     """A06.5 — at most 1 alert per engine-hour on the evaluation drives, as a
@@ -1601,20 +1475,21 @@ def _run_alert_budget_gate(
     alert-role artifact that could not be measured has not shown the budget,
     and is refused like one that failed it.
     """
+    args = run.args
     roles = config.models.roles.by_source()
-    override = getattr(args, "accept_alert_budget", None)
+    override = args.accept_alert_budget
     if not alert_role_sources(roles, published):
         return check_alert_budget(
             None, roles_by_source=roles, published_sources=published, override_reason=override
         )
+    if_model = run.train_dir(ISOLATION_FOREST_SOURCE) / "model.joblib"
     sequence_model: Path | None = None
     missing: str | None = None
-    sequence_type = getattr(args, "seq_model_type", "lstm_autoencoder")
-    if sequence_type == "lstm_autoencoder":
-        candidate = args.sequence_out / Path(config.daemon.lstm_artifact).name
+    if run.seq_model_type == "lstm_autoencoder":
+        candidate = run.train_dir(SEQUENCE_SOURCE) / Path(config.daemon.lstm_artifact).name
         sequence_model = candidate if candidate.exists() else None
     elif roles.get(SEQUENCE_SOURCE) == "alert" and SEQUENCE_SOURCE in published:
-        missing = f"A02's harness scores LSTM sequence artifacts only, not {sequence_type}"
+        missing = f"A02's harness scores LSTM sequence artifacts only, not {run.seq_model_type}"
     if not evaluation_sessions:
         missing = (
             "no evaluation holdout (a corpus too small to spare one, or --no-calibration-holdout)"
@@ -1626,10 +1501,9 @@ def _run_alert_budget_gate(
         try:
             args.analyses_dir.mkdir(parents=True, exist_ok=True)
             report = _evaluate_on_drives(
-                config,
                 evaluation_sessions,
-                args,
-                if_model=args.if_out / "model.joblib",
+                run,
+                if_model=if_model,
                 sequence_model=sequence_model,
                 out=out,
             )
@@ -1637,8 +1511,8 @@ def _run_alert_budget_gate(
             log.exception("alert-budget evaluation failed", extra={"error": str(exc)})
             missing = f"the evaluation failed: {exc}"
     expected = {
-        "isolation_forest": _file_sha256(args.if_out / "model.joblib")
-        if "isolation_forest" in published
+        "isolation_forest": _file_sha256(if_model)
+        if ISOLATION_FOREST_SOURCE in published
         else None,
         "sequence": _file_sha256(sequence_model)
         if sequence_model is not None and SEQUENCE_SOURCE in published
@@ -1667,31 +1541,26 @@ def _run_alert_budget_gate(
 _file_sha256 = sha256_file_or_none
 
 
-def _mark_requested_failures(
-    results: dict[str, str],
-    args: argparse.Namespace,
-    status: str,
-) -> None:
-    if not args.skip_if:
-        results["isolation_forest"] = status
-    if not args.skip_sequence:
-        results[args.seq_model_type] = status
+def _mark_requested_failures(run: RetrainRun, status: str) -> None:
+    if not run.skip_if:
+        run.results["isolation_forest"] = status
+    if not run.skip_sequence:
+        run.results[run.seq_model_type] = status
 
 
 def _print_report(
-    sessions: list[Path],
-    results: dict[str, str],
-    args: argparse.Namespace,
+    run: RetrainRun,
     *,
     feedback_report: RetrainingFeedbackReport | None = None,
     benchmark_report_path: Path | None = None,
     benchmark_diff: dict[str, Any] | None = None,
     budget_check: AlertBudgetCheck | None = None,
 ) -> None:
+    results = run.results
     print("=" * 72)
-    print(f"RETRAIN  ({len(sessions)} sessions)")
+    print(f"RETRAIN  ({len(run.sessions)} sessions)")
     print("=" * 72)
-    split = getattr(args, "holdout_split", None)
+    split = run.holdout_split
     if split is not None:
         print(f"  calibration holdout  →  {', '.join(split.calibration) or 'none'}")
         print(f"  evaluation holdout   →  {', '.join(split.evaluation) or 'none (gate skipped)'}")
@@ -1703,7 +1572,7 @@ def _print_report(
             f"{feedback_report.excluded_rows} rows removed, "
             f"{feedback_report.enriched_labels} enriched (hypothesis/Q&A)"
         )
-    out_dirs = {"isolation_forest": args.if_out, args.seq_model_type: args.sequence_out}
+    out_dirs = {"isolation_forest": run.if_out, run.seq_model_type: run.sequence_out}
     for name, out_dir in out_dirs.items():
         if name not in results:
             continue

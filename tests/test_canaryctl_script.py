@@ -4,14 +4,12 @@ from __future__ import annotations
 
 import base64
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import canaryctl  # noqa: E402
+from scripts import canaryctl
 
 
 def test_base_url_adds_scheme() -> None:

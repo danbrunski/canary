@@ -559,7 +559,7 @@ def resolve_limits(
         for signal in bindings.signals:
             entry = builder(f"decoded:{signal.name}")
             entry.tier = GROUP_DEFAULT_TIER[GROUP_BROADCAST]
-            entry.unit = signal.unit if signal.unit != "unknown" else ""
+            entry.unit = signal.display_unit
             if signal.scale is not None and signal.scale != 0:
                 entry.engineering = (signal.scale, signal.offset or 0.0)
             else:

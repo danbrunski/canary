@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import trip_report as trip_report_cli  # noqa: E402
-
+import scripts.trip_report as trip_report_cli
 from src.analysis.trip_summary_sidecar import read_trip_summary  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402

@@ -10,7 +10,6 @@ import logging
 import threading
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Protocol
 
@@ -25,13 +24,19 @@ from src.collection.discovery import (
 )
 from src.collection.isotp import PERMANENT_REFUSAL_NRCS
 from src.config import DEFAULT_PRIORITY_CHANNELS, CanBusConfig, CollectionConfig, VehicleConfig
-from src.paths import DIDS_YAML
+from src.decode.dids import (
+    _did_ids_by_name,
+    did_access,
+    did_response_widths,
+    known_did_names,
+    memory_channels,
+)
 
 if TYPE_CHECKING:
     from src.collection.capture_profiles import CaptureProfile
     from src.collection.custom_pids import CustomPid
     from src.collection.discovery import SupportProbe
-    from src.decode.dids import DidAccess, DidMap, MemoryChannel
+    from src.decode.dids import MemoryChannel
 
 
 log = logging.getLogger(__name__)
@@ -187,88 +192,8 @@ class ForcePollTrigger:
 _PID_IDS_BY_NAME: dict[str, int] = {name: pid for pid, (name, _decoder) in PID_DECODERS.items()}
 
 
-# DID name→identifier lives in data/dids.yaml (not a static table like PIDs), so
-# resolve it lazily and cache. Repo-rooted (``src.paths``) so cwd doesn't matter.
-
-
-@lru_cache(maxsize=1)
-def load_repo_did_map() -> DidMap | None:
-    """Parsed data/dids.yaml, or ``None`` when absent/unparseable.
-
-    ``None`` keeps the collector running without DID metadata — callers fall
-    back to hex-only token parsing and session-less polling. The one cached
-    loader of the repo DID catalog (``control.obd_request`` kept a documented
-    copy; R01.2 retired it).
-    """
-    from src.decode.dids import load_did_map
-
-    if not DIDS_YAML.exists():
-        return None
-    try:
-        return load_did_map(DIDS_YAML)
-    except Exception:  # noqa: BLE001 — bad YAML shouldn't crash the collector
-        return None
-
-
-@lru_cache(maxsize=1)
-def _did_ids_by_name() -> dict[str, int]:
-    """Symbolic DID name → identifier from data/dids.yaml.
-
-    Empty when the file is absent or unparseable — callers then accept only
-    4-char hex, matching the pre-resolution behavior. Mirrors how
-    ``parse_pid_token`` resolves PID names against ``_PID_IDS_BY_NAME``.
-    """
-    did_map = load_repo_did_map()
-    if did_map is None:
-        return {}
-    # Aliases resolve too, so renaming a DID cannot break a saved capture
-    # profile that still references its old name. Current names are inserted
-    # last so they win any collision with a stale alias.
-    resolved: dict[str, int] = {}
-    for entry in did_map.dids:
-        for alias in entry.aliases:
-            resolved[alias] = entry.did
-    for entry in did_map.dids:
-        resolved[entry.name] = entry.did
-    return resolved
-
-
-def known_did_names() -> tuple[str, ...]:
-    """Return the vehicle DID inventory available to capture profiles."""
-    return tuple(_did_ids_by_name())
-
-
-def did_access() -> DidAccess | None:
-    """The access block of data/dids.yaml (gating session, keep-alive)."""
-    did_map = load_repo_did_map()
-    return None if did_map is None else did_map.access
-
-
-def memory_channels() -> tuple[MemoryChannel, ...]:
-    """Every service-0x23 channel in the catalog, unfiltered.
-
-    Selecting the ones a capture profile names is the caller's job.
-    """
-    did_map = load_repo_did_map()
-    return () if did_map is None else tuple(did_map.memory)
-
-
-def did_response_widths() -> tuple[dict[int, int], dict[int, str]]:
-    """Provenance-backed full Mode-22 payload widths, keyed by DID."""
-    did_map = load_repo_did_map()
-    if did_map is None:
-        return {}, {}
-    widths = {
-        entry.did: entry.response_length
-        for entry in did_map.dids
-        if entry.response_length is not None
-    }
-    sources = {
-        entry.did: entry.response_length_source
-        for entry in did_map.dids
-        if entry.response_length_source is not None
-    }
-    return widths, sources
+# The DID-catalog accessors live in ``src.decode.dids`` (R01.2); imported here
+# for the spec builder and re-exported from the package for its callers.
 
 
 class _PidDiscoveryClient(Protocol):

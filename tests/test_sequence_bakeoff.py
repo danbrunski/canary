@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import pytest
 import yaml
 
+# Same module object scripts/sequence_bakeoff.py's bare `import retrain` binds —
+# needed to monkeypatch its byte-size gate (matches test_retrain_script.py).
 from scripts.sequence_bakeoff import (
     BackboneResult,
     _auto_carve_calibration_sessions,
@@ -17,12 +18,7 @@ from scripts.sequence_bakeoff import (
     run_bakeoff,
 )
 from src.config import CanaryConfig
-
-# Same module object scripts/sequence_bakeoff.py's bare `import retrain` binds —
-# needed to monkeypatch its byte-size gate (matches test_retrain_script.py).
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import retrain  # noqa: E402
-
+from src.models import evaluation as model_evaluation
 from tests.builders import write_obd_session
 
 # Torch training: not a commit gate (see the pyproject test tiers).
@@ -195,7 +191,7 @@ def test_main_auto_carves_calibration_sessions_when_corpus_is_large_enough(
     _torch()
     # Stub session sizes so each looks "substantial" without writing 1MB+ of
     # parquet — mirrors test_retrain_script.py's auto-holdout tests.
-    monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
+    monkeypatch.setattr(model_evaluation, "session_parquet_bytes", lambda _p: 5_000_000)
     config_path = _write_config(tmp_path)
     sessions = [
         write_obd_session(tmp_path, f"train{i}", rows=40, start_epoch=1_778_500_000.0 + i * 1000)

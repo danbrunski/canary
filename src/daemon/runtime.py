@@ -112,9 +112,13 @@ TRIP_END_SHUTDOWN_SECONDS = 30.0
 __all__ = [
     "DRAIN_SHUTDOWN_SECONDS",
     "TRIP_END_SHUTDOWN_SECONDS",
+    "can_receive_stats_observer",
+    "drain_kwargs",
+    "obd_handoff_stats_observer",
     "run_daemon",
     "run_retention_sweeper",
     "serve_in_background",
+    "storage_decode_for",
 ]
 
 #: Strong references to in-flight trip-end digests. ``create_task`` alone
@@ -230,10 +234,14 @@ async def _settle_trip_end_tasks(timeout: float = TRIP_END_SHUTDOWN_SECONDS) -> 
         await asyncio.gather(*still_running, return_exceptions=True)
 
 
-def _obd_handoff_stats_observer(
+def obd_handoff_stats_observer(
     health: HealthMonitor,
 ) -> Callable[[CollectorHandoffStats], None]:
-    """Adapt the Canable collector's handoff counters (C03.6) into ``/status``."""
+    """Adapt the Canable collector's handoff counters (C03.6) into ``/status``.
+
+    Public so the validation harness wires the daemon's observer rather than a
+    copy of it (R04.13).
+    """
 
     def _observe(stats: CollectorHandoffStats) -> None:
         health.observe_collector_handoff(
@@ -252,8 +260,12 @@ def _obd_handoff_stats_observer(
     return _observe
 
 
-def _can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveStats], None]:
-    """Adapt the passive CAN receive counters (C07.5) into ``/status``."""
+def can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveStats], None]:
+    """Adapt the passive CAN receive counters (C07.5) into ``/status``.
+
+    Public so the validation harness wires the daemon's observer rather than a
+    field-for-field copy of it (R04.13).
+    """
 
     def _observe(stats: CanReceiveStats) -> None:
         health.observe_receive_path(
@@ -269,6 +281,59 @@ def _can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveSt
         )
 
     return _observe
+
+
+def storage_decode_for(
+    decoder: FrameDecoder | None,
+) -> Callable[[TelemetryRecord], Sequence[TelemetryRecord]] | None:
+    """The storage sink's ``decode``: ``decoder`` while the capture profile
+    lets the broadcast bus be decoded (``tuning_profile``), else nothing.
+    ``None`` without a decoder (no persisted ``decoded:`` rows)."""
+    if decoder is None:
+        return None
+
+    def _decode(record: TelemetryRecord) -> Sequence[TelemetryRecord]:
+        return decoder.decode(record) if tuning_profile.broadcast_decode_enabled() else ()
+
+    return _decode
+
+
+def drain_kwargs(
+    config: CanaryConfig,
+    components: DaemonComponents,
+    *,
+    active_session_path: Callable[[], Path],
+    storage_decoder: FrameDecoder | None,
+    on_trip_complete: Callable[[Path, TripEnd], None] | None = None,
+    on_trip_unobservable: Callable[[Path, TripEnd], None] | None = None,
+) -> dict[str, Any]:
+    """The daemon's wiring of :func:`drain_queue_with_broadcast`, as keywords.
+
+    Everything but the queue, writer, stop event and live source: the sinks'
+    targets from ``components``, the storage-warning and queue-warning
+    thresholds from ``config``, and the storage decode. The validation
+    harness composes this rather than hand-copying the call, which is how it
+    came to validate a drain with no GPS sink and no storage warning (R04.13).
+    The trip hooks are the daemon's own business (a trip end schedules a
+    digest), so a caller that must not run one leaves them ``None``.
+    """
+    return {
+        "telemetry_broadcaster": components.telemetry_broadcaster,
+        "gps_tracker": components.gps_tracker,
+        "dtc_state": components.dtc_state,
+        "dtc_emitter": components.emitter,
+        "monitor_state": components.monitor_state,
+        "monitor_emitter": components.emitter,
+        "vehicle_ledger": components.vehicle_ledger,
+        "active_session_path": active_session_path,
+        "on_trip_complete": on_trip_complete,
+        "on_trip_unobservable": on_trip_unobservable,
+        "storage_path": config.collection.storage_path,
+        "storage_warning_mb": config.collection.storage_warning_mb,
+        "queue_warning_fraction": config.collection.queue_warning_fraction,
+        "health_monitor": components.health_monitor,
+        "storage_decode": storage_decode_for(storage_decoder),
+    }
 
 
 async def _build_live_source_off_loop(
@@ -436,8 +501,8 @@ async def run_daemon(
             obd_scheduler_metrics_callback=components.health_monitor.observe_obd_scheduler,
             freeze_frame_trigger=components.freeze_frame_trigger,
             force_poll_trigger=components.force_poll_trigger,
-            can_receive_stats_callback=_can_receive_stats_observer(components.health_monitor),
-            obd_handoff_stats_callback=_obd_handoff_stats_observer(components.health_monitor),
+            can_receive_stats_callback=can_receive_stats_observer(components.health_monitor),
+            obd_handoff_stats_callback=obd_handoff_stats_observer(components.health_monitor),
         )
 
     # Decoded-channel persistence (config-gated): bound CAN signals at the
@@ -483,35 +548,18 @@ async def run_daemon(
             queue,
             storage_writer,
             stop_event,
-            telemetry_broadcaster=components.telemetry_broadcaster,
             live_source_ready=live_source_ready,
-            gps_tracker=components.gps_tracker,
-            dtc_state=components.dtc_state,
-            dtc_emitter=components.emitter,
-            monitor_state=components.monitor_state,
-            monitor_emitter=components.emitter,
-            vehicle_ledger=components.vehicle_ledger,
-            active_session_path=lambda: storage_writer.paths.root,
-            on_trip_complete=lambda session_dir, end: _run_trip_end_hook(
-                session_dir, config, components, end
-            ),
-            on_trip_unobservable=lambda session_dir, end: _run_trip_unobservable_hook(
-                session_dir, end.detail, config
-            ),
-            storage_path=config.collection.storage_path,
-            storage_warning_mb=config.collection.storage_warning_mb,
-            queue_warning_fraction=config.collection.queue_warning_fraction,
-            health_monitor=components.health_monitor,
-            storage_decode=(
-                (
-                    lambda record: (
-                        storage_frame_decoder.decode(record)
-                        if tuning_profile.broadcast_decode_enabled()
-                        else ()
-                    )
-                )
-                if storage_frame_decoder is not None
-                else None
+            **drain_kwargs(
+                config,
+                components,
+                active_session_path=lambda: storage_writer.paths.root,
+                storage_decoder=storage_frame_decoder,
+                on_trip_complete=lambda session_dir, end: _run_trip_end_hook(
+                    session_dir, config, components, end
+                ),
+                on_trip_unobservable=lambda session_dir, end: _run_trip_unobservable_hook(
+                    session_dir, end.detail, config
+                ),
             ),
         )
     )

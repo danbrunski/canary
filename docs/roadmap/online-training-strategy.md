@@ -44,7 +44,7 @@ and is out of scope until the guards below exist.
 | Training run lineage + promotion lifecycle + rollback | `src/models/training_ledger.py` | Done — `unpublished → active`, latest-line-wins per `run_id` |
 | Reactive operator verdicts feeding retrain | `src/alerts/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
 | Observed-vs-FSM-spec range scoring | `src/analysis/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
-| Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `_pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
+| Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `src.models.evaluation.pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
 | Per-vehicle data partitioning | `src/profiles.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
 | Scheduled trigger + training-data validation | — | **Missing. This doc.** |
 

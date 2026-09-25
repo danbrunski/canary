@@ -6,14 +6,11 @@ rides the same post-classify pass.
 from __future__ import annotations
 
 import json
-import sys
 from pathlib import Path
 
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-import label_sessions as label_sessions_cli  # noqa: E402
-
+import scripts.label_sessions as label_sessions_cli
 from src.analysis.fingerprint import FINGERPRINT_FILENAME  # noqa: E402
 from src.analysis.reference_epoch import (  # noqa: E402
     ReferenceEpoch,

@@ -80,6 +80,30 @@ def _script_paths() -> list[Path]:
     return sorted(p for p in SCRIPTS_DIR.glob("*.py") if p.name not in NOT_A_CLI)
 
 
+@pytest.fixture(autouse=True)
+def _forget_bare_script_modules() -> Iterator[None]:
+    """Drop every module this test loaded from ``scripts/`` under a bare name.
+
+    ``_load_script`` runs a script the way ``python scripts/x.py`` does, with
+    ``scripts/`` on ``sys.path`` (the one justified ``sys.path`` change in the
+    suite, R06.4), so its ``from _cli import`` binds a bare ``_cli``. Left in
+    ``sys.modules``, that bare module would answer a later test's ``import
+    scripts.x`` too (the dance tries the bare name first), and a patch of
+    ``scripts._cli`` would miss code bound to it: the dual-identity trap the
+    sys.path hacks were deleted for.
+    """
+    before = set(sys.modules)
+    yield
+    for name in set(sys.modules) - before:
+        module_file = getattr(sys.modules.get(name), "__file__", None)
+        if (
+            not name.startswith(("scripts.", "_cli_snapshot_"))  # the latter: monkeypatch's
+            and module_file
+            and Path(module_file).resolve().parent == SCRIPTS_DIR
+        ):
+            del sys.modules[name]
+
+
 def _load_script(path: Path, monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """Import ``scripts/<name>.py`` the way it runs: its own directory first on
     ``sys.path`` (for ``from _cli import ...``), scoped to this test."""

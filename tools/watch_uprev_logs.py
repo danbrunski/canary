@@ -35,9 +35,9 @@ from pathlib import Path
 from src.config import CanaryConfig
 
 try:
-    from import_uprev_log import _FILENAME_TIME  # type: ignore[import-not-found]
+    from import_uprev_log import FILENAME_TIME  # type: ignore[import-not-found]
 except ImportError:  # invoked as `tools/watch_uprev_logs.py`
-    from tools.import_uprev_log import _FILENAME_TIME
+    from tools.import_uprev_log import FILENAME_TIME
 
 
 def already_imported(uprev_root: Path) -> set[str]:
@@ -58,7 +58,7 @@ def already_imported(uprev_root: Path) -> set[str]:
 
 def filename_started_at(name: str, offset: timedelta) -> datetime | None:
     """Parse the filename's local timestamp and attach ``offset``."""
-    match = _FILENAME_TIME.search(name)
+    match = FILENAME_TIME.search(name)
     if match is None:
         return None
     hour = int(match.group("hour")) % 12

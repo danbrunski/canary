@@ -25,7 +25,7 @@ about: a rule copied four times is a rule that four places can disagree on.
 
 ## Correctness first
 
-- [~] **R04.1 The false-positive benchmark must score the detector that is
+- [x] **R04.1 The false-positive benchmark must score the detector that is
   served.** *Drift bug, offline but published.*
   - `models/false_positive_benchmark._reconstruction_errors` scores with
     `model.reconstruction_error(reduction="sample")`, which averages over
@@ -69,11 +69,14 @@ about: a rule copied four times is a rule that four places can disagree on.
     flags more (the count depends on the suppression).
   - `pytest -m "" tests/test_false_positive_benchmark.py`: 21 passed (the
     stub test now returns the `"none"` cell error).
-  - **Remaining:** `scripts/train_sequence.py --evaluate` and
-    `scripts/sequence_bakeoff.py` still call the benchmark without
-    `suppress_channels` (they now get uncalibrated/context exclusions and the
-    family path, but not the configured suppress list). Both files are held by
-    another session's uncommitted work.
+  - *Remainder done 2026-09-25 (R06.4):* `train_sequence.py --evaluate`,
+    `sequence_bakeoff.py` and `fp_benchmark.py` all benchmark through
+    `src.models.training_entry.benchmark_held_out`, which passes
+    `models.<type>.suppress_channels`.
+    `tests/test_script_imports.py::test_benchmark_held_out_leaves_the_configured_suppress_list_out`
+    pins the pass-through, and
+    `test_scripts_benchmark_only_through_the_served_rule` refuses any script
+    calling `benchmark_false_positives` itself (at HEAD three did).
 
 - [x] **R04.2 One kernel for the served sequence-scoring rule.** *Parity,
   serve path.*
@@ -134,7 +137,7 @@ about: a rule copied four times is a rule that four places can disagree on.
     `pytest -m ""` on `test_lstm_inference.py`, `test_evaluation_detectors.py`,
     `test_sequence_calibration.py` pass (in the 788-pass run below).
 
-- [~] **R04.3 Define the rolling-suffix / base-channel parser once.** *Latent
+- [x] **R04.3 Define the rolling-suffix / base-channel parser once.** *Latent
   parity bug, serve path.*
   - `("__mean", "__std", "__roc")` is re-declared or inlined 9 times, though
     the producer, `preprocessing/features.py`, already exports
@@ -174,8 +177,13 @@ about: a rule copied four times is a rule that four places can disagree on.
   - **Remaining:** `decode/behavior_decoder.deviation_model_name`'s
     `("__mean", "__std", "__roc", "__gap")` — `src/decode/**` is the
     concurrent R05 agent's area.
+  *Remainder done 2026-09-25.* `deviation_model_name` strips `GAP_SUFFIX`
+  or else `features.base_channel` (identical results: a name ends in at most
+  one of the four). `analysis/behavior_input_inventory` uses `ROC_SUFFIX`
+  too. `grep -rn '"__roc"' src` → `src/preprocessing/features.py` only.
+  `test_behavior_decoder.py`, `test_behavior_trim_contracts.py` pass.
 
-- [~] **R04.4 One decode path for CAN records: live, storage, backfill,
+- [x] **R04.4 One decode path for CAN records: live, storage, backfill,
   offline.** *Drift, serve path.*
   - `preprocessing/live._decode_signal_raw` is a line-for-line copy of
     `decode/bindings.decode_raw`.
@@ -222,6 +230,33 @@ about: a rule copied four times is a rule that four places can disagree on.
     test — needs `src/preprocessing/live.py`, held by a human session with
     uncommitted work. (2) `Signal.display_unit` for the five `!= "unknown"`
     copies — `src/decode/**` is the concurrent R05 agent's (R05.9).
+  *Remainder done 2026-09-25.* `LiveFeatureSource` holds
+  `FrameDecoder.from_bindings(bindings)` (every confidence) and
+  `decode_for_telemetry` returns its records, so the dashboard stream and the
+  live features get exactly the record storage writes; `_bindings_by_id` and
+  `_decode_signal_raw` are deleted. `bindings.Signal.display_unit` (`""` for
+  the `"unknown"` placeholder, `UNKNOWN_UNIT`) replaces the five copies
+  (`live`, `plausibility/limits`, `dashboard/readers`, `tools/emit_dbc`,
+  `tools/decode_bindings`). The one record: metadata `binding_confidence`,
+  float value, and `display_unit` — so `FrameDecoder`, `decode_can_rows` and
+  `tools/backfill_decoded` now write `unit=""` where they wrote `"unknown"`
+  (the stream already showed `""`; stored and recomputed rows still match,
+  `test_matches_decode_can_rows_semantics`). Frontend re-checked: no non-test
+  `.ts`/`.tsx` reads `confidence`/`binding_confidence` from a telemetry
+  record. Test (fails on HEAD's `live.py`):
+  `test_preprocessing_live.py::test_live_and_storage_decode_a_frame_to_the_same_record`
+  (every bound CAN id of `data/bindings.yaml`; live == all-confidence decoder,
+  and == the storage decoder for each persisted signal).
+  `test_preprocessing_live.py`, `test_frame_decoder.py`,
+  `test_preprocessing_decode.py`, `test_decoded_mode_signals.py`,
+  `test_backfill_decoded.py`, `test_emit_dbc.py`, `test_plausibility.py` pass.
+  Before/after on a real session (shared with R01.3/R04.7): the first 5.9
+  minutes of chunks 100-180 of `sessions-0920/2026-09-20T205117` (546,953
+  records: CAN frames with payloads, Mode 01, GPS) fed through HEAD's and this
+  tree's `LiveFeatureSource` (repo bindings + DID map) with a tick per second:
+  351 of 351 feature rows identical (`assert_frame_equal(check_exact=True)`,
+  315 columns), and all 863,775 `decode_for_telemetry` records equal once the
+  two named differences are normalised (metadata key, int→float).
 
 - [x] **R04.5 Promotion gate: a withheld detector must fail, not pass.**
   *Drift bug, offline gate.*
@@ -332,7 +367,7 @@ about: a rule copied four times is a rule that four places can disagree on.
     (it caches as it goes) and write
     `data/analyses/<date>-a02-detector-baseline.{json,md}`.
 
-- [~] **R04.7 Write the fast/slow max-gap rule once.**
+- [x] **R04.7 Write the fast/slow max-gap rule once.**
   - The resampler honours `ResampleConfig.fast_channels`/`slow_channels`.
   - `live._gap_flags` (serve) and
     `synthetic_fault_eval._max_gap_seconds_for` re-derive the rule from the
@@ -356,6 +391,16 @@ about: a rule copied four times is a rule that four places can disagree on.
   - **Remaining:** `live._gap_flags` still re-derives from the default hints,
     and the resampler-vs-live acceptance test needs it — both need
     `src/preprocessing/live.py`, held by a human session with uncommitted work.
+  *Remainder done 2026-09-25.* `LiveFeatureSource` keeps the recipe's
+  `ResampleConfig` and `_gap_flags` reads `max_gap_seconds_for(channel)`
+  (memoised per channel; `_max_gap_seconds`/`_slow_max_gap_seconds` stay as
+  the recipe's two ceilings, which `test_resample_config_construction.py`
+  reads); `is_slow_channel` is no longer imported by `live`. Test (fails on
+  HEAD's `live.py`):
+  `test_preprocessing_live.py::test_live_gap_flags_follow_a_non_default_fast_channels_like_the_resampler`
+  (`fast_channels={"obd:COOLANT_TEMP"}`: live and `resample_wide` give coolant
+  `[F,F,F,T,T,F]` and RPM all-fresh). Real-session before/after: see R04.4
+  (351/351 ticks identical under the default recipe).
 
 ## Structure
 
@@ -398,6 +443,17 @@ about: a rule copied four times is a rule that four places can disagree on.
     `tests/{test_health,test_daemon,test_profile_capture}.py` (another
     session's uncommitted work) still import `src.models.health`; move them,
     then delete the shim.
+  *Importers done 2026-09-25.* `dashboard/routes/public.py` imports
+  `HealthMonitor` from `src.daemon.health` under `TYPE_CHECKING` (annotation
+  only, like the other dashboard modules); `tests/test_health.py`
+  (`import src.daemon.health as health_mod`), `test_daemon.py` and
+  `test_profile_capture.py` import `src.daemon.health`. `grep -rn
+  "models.health" src tests --include=*.py` → only the shim itself and
+  `daemon/health.py`'s docstring. `test_health.py`, `test_daemon.py`,
+  `test_profile_capture.py`, `test_route_table_snapshot.py`,
+  `test_cold_start_imports.py`, `test_layering.py` pass (143).
+  - **Remaining:** delete the `src/models/health.py` shim — `src/models/**`
+    is held by the concurrent R06 agent (R06.3/R06.4).
 
 - [x] **R04.9 Break up `fit_isolation_forest` (552 lines).** Its phases:
   1. validate and resolve the spec;
@@ -534,7 +590,7 @@ about: a rule copied four times is a rule that four places can disagree on.
     scores 908 windows identically (R04.2 replay).
     `test_both_backbones_share_one_reconstruction_implementation`.
 
-- [~] **R04.13 Validation harness: reuse the daemon's wiring and break up
+- [x] **R04.13 Validation harness: reuse the daemon's wiring and break up
   `run_scenario`.**
   - `validation/harness.run_scenario` is 324 lines: setup, task start,
     collector callbacks, arm, stop/finalize.
@@ -558,8 +614,27 @@ about: a rule copied four times is a rule that four places can disagree on.
   **Remaining:** all of it, once R07 lands: compose runtime's observer and
   drain-kwargs factories, split `run_scenario` into `_start_pipeline`,
   `_start_collector`, `_arm`, `_finish`.
+  *Done 2026-09-25.* `daemon/runtime` exposes
+  `can_receive_stats_observer(health)`, `obd_handoff_stats_observer(health)`
+  (were private; `test_daemon.py` calls the public names),
+  `storage_decode_for(decoder)` and `drain_kwargs(config, components, *,
+  active_session_path, storage_decoder, on_trip_complete=None,
+  on_trip_unobservable=None)` — the daemon's own drain call is
+  `drain_queue_with_broadcast(queue, writer, stop, live_source_ready=…,
+  **drain_kwargs(…))`. The harness composes the same factory (trip hooks left
+  unset: a trip end would schedule a whole-session digest mid-measurement), so
+  it now wires the GPS tracker, `storage_path`/`storage_warning_mb` and the
+  configured `queue_warning_fraction` it had drifted from; its `on_receive`/
+  `on_handoff` call the daemon's observers (the handoff one replaced a
+  `**stats.to_dict()` spread) and then record the artifacts. `run_scenario`
+  is setup + `_start_pipeline` (writer, drain, dashboard/score consumers,
+  heartbeat, inference; returns a `_Pipeline`) + `_start_collector` +
+  warm-up + `_arm` (returns the timeline task) + run + `_finish`;
+  `rebase_state_paths` was already used. `pytest -m "" -n 4
+  tests/test_sustained_validation.py tests/test_replay_row_accounting.py`:
+  26 passed, 1 xfailed (the xfail is the suite's own marker, unchanged).
 
-- [~] **R04.14 `build_feature_frame`: break it up and make the segmenter
+- [x] **R04.14 `build_feature_frame`: break it up and make the segmenter
   inputs public.**
   - `build_feature_frame` (167 lines) splits into `_load_cached`,
     `_load_decode_inputs` and `_resample_sessions` (pool + `BrokenExecutor`
@@ -602,6 +677,16 @@ about: a rule copied four times is a rule that four places can disagree on.
     `read_session_decoded_subset` / `segmenter_input_columns` is in
     `src/analysis/**`, the concurrent R05 agent's area. The cross-caller test
     lands with that switch.
+  *Remainder done 2026-09-25.* `build_evaluation_frame` reads each session
+  through `read_session_decoded_subset(session, bindings=, decoded=)` (the
+  wanted set is empty for `decode_can="none"`), and
+  `evaluation_decoded_signals` starts from `segmenter_input_columns()` instead
+  of flattening `_SEGMENTER_SIGNAL_COLUMNS` again. Cross-caller test (3 of 4
+  spellings fail on HEAD's `behavior_validation.py`, all pass now):
+  `test_preprocessing_decode.py::test_both_bounded_readers_decode_an_old_spelling_session_alike`
+  (`0x551`, `551`, `0x0551`, `0551`: `plausibility.offline.session_long` and
+  `build_evaluation_frame` decode the same `ECM_COOLANT_TEMP` values, and the
+  unwanted binding stays out). `test_behavior_validation*.py` pass.
 
 - [x] **R04.15 One z-score denominator rule.**
   - The rule `std if std >= std_floor else 1.0` is re-derived in

@@ -77,6 +77,7 @@ _ROUTER_BUILDERS: tuple[Callable[[ControlContext], APIRouter], ...] = (
     captures.build_router,
     replay.build_router,
     sessions.build_router,
+    sessions.build_store_router,
     _session_reads,
     bus.build_router,
     profile_capture.build_router,

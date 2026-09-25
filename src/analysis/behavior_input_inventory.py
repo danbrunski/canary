@@ -42,7 +42,7 @@ from src.decode.behavior_eligibility import (
 )
 from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES, fuel_status_name
 from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.features import compute_rate_of_change
+from src.preprocessing.features import ROC_SUFFIX, compute_rate_of_change
 from src.preprocessing.resampler import gap_column
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import (
@@ -124,11 +124,11 @@ def with_contract_context(frame: pd.DataFrame, recipes: Iterable[Recipe]) -> pd.
     starts: list[StartContextSpec] = []
     for recipe in recipes:
         spec = recipe_serving_spec(recipe)
-        roc_bases.extend(c.channel.removesuffix("__roc") for c in spec.conditions)
+        roc_bases.extend(c.channel.removesuffix(ROC_SUFFIX) for c in spec.conditions)
         cold = spec.eligibility.cold_start if spec.eligibility is not None else None
         if cold is not None and any(col not in out.columns for col in start_context_columns(cold)):
             starts.append(StartContextSpec.from_requirement(cold))
-    wanted = sorted({b for b in roc_bases if f"{b}__roc" not in out.columns})
+    wanted = sorted({b for b in roc_bases if f"{b}{ROC_SUFFIX}" not in out.columns})
     if wanted:
         out = compute_rate_of_change(out, wanted)
     if starts:

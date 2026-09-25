@@ -1361,12 +1361,10 @@ def evaluation_decoded_signals(models: BehaviorModels) -> set[str]:
     segmenter's ``decoded:`` mode candidates plus any ``decoded:`` channel a
     model reads (input, output, gate or required context)."""
     from src.decode.behavior_eligibility import required_channel_groups
-    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.preprocessing.feature_pipeline import segmenter_input_columns
 
     names: set[str] = set()
-    columns: list[str] = []
-    for candidates in _SEGMENTER_SIGNAL_COLUMNS.values():
-        columns.extend([candidates] if isinstance(candidates, str) else list(candidates))
+    columns: list[str] = list(segmenter_input_columns())
     for model in models.models:
         for group in required_channel_groups(model):
             columns.extend(group)
@@ -1392,7 +1390,11 @@ def build_evaluation_frame(
     chain as ``build_feature_frame`` (shared functions, not copies), except raw
     CAN frames are read only for the ids of the bindings in
     :func:`evaluation_decoded_signals` — a whole-bus decode of one 42 MB drive
-    peaked above 6 GB. DBC decoding is not run. Returns the operating frame
+    peaked above 6 GB. The bounded read is
+    :func:`src.preprocessing.decode.read_session_decoded_subset`, the one
+    reader that pushes the ids down under every era's channel spelling
+    (R04.14; this reader used to push ``0x{id:X}`` only and silently decoded
+    nothing from an older session). DBC decoding is not run. Returns the operating frame
     (deviation and prerequisite columns included), one row per resampled
     second, with ``session`` naming the piece.
 
@@ -1403,30 +1405,21 @@ def build_evaluation_frame(
     """
     from src.decode.bindings import load_bindings
     from src.decode.dids import load_did_map
+    from src.preprocessing.decode import read_session_decoded_subset
     from src.preprocessing.feature_pipeline import (
         drop_fully_stale_rows,
         featurize_wide_frame,
         resample_config_for,
         resample_long_session,
     )
-    from src.preprocessing.loader import read_session
 
     bindings = load_bindings(bindings_path) if bindings_path.exists() else None
     did_map = load_did_map(dids_path) if dids_path.exists() else None
-    wanted = evaluation_decoded_signals(models)
-    subset = None
-    can_channels: list[str] = []
-    if bindings is not None and decode_can == "mode-inputs":
-        signals = [signal for signal in bindings.signals if signal.name in wanted]
-        subset = bindings.model_copy(update={"signals": signals})
-        can_channels = sorted({f"0x{signal.can_id:X}" for signal in signals})
-    filters: list[list[tuple[str, str, Any]]] = [[("source", "!=", "can")]]
-    if can_channels:
-        filters.append([("source", "==", "can"), ("channel", "in", can_channels)])
+    wanted = evaluation_decoded_signals(models) if decode_can == "mode-inputs" else set()
     resample_config = resample_config_for(config)
     parts = []
     for session in sessions:
-        long = read_session(Path(session), filters=filters)
+        long, subset = read_session_decoded_subset(Path(session), bindings=bindings, decoded=wanted)
         parts.append(
             resample_long_session(
                 long, subset, None, did_map, resample_config, session_name=Path(session).name

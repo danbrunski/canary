@@ -144,7 +144,7 @@ def decode_session_frame(can_rows: pd.DataFrame, signals: list[Signal]) -> pd.Da
                     "value_number": values,
                     "value_text": None,
                     "value_bool": None,
-                    "unit": sig.unit,
+                    "unit": sig.display_unit,
                     "payload": None,
                     "metadata_json": meta,
                 }

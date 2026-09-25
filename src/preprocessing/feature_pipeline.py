@@ -927,6 +927,84 @@ def drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
     return resampled.loc[~fully_stale].reset_index(drop=True)
 
 
+def load_resampled_session(
+    session_dir: Path,
+    config: CanaryConfig,
+    *,
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
+) -> pd.DataFrame:
+    """Read + decode + wide-pivot + quality-gate + resample one session (no
+    segmentation: ``featurize_wide_frame`` segments internally).
+
+    The same per-session chain the trainers run (:func:`resample_long_session`):
+    bindings, ``.dbc`` files and the DID map all decode, and the reject gate
+    NaNs impossible cells before the resampler sees them. The benchmark copy
+    this replaced decoded bindings only, with no DID decode and no quality
+    gate, so it scored the sequence detector on frames with every ``did:``
+    channel absent: rows the artifact never saw that way in training or
+    serving (A02). A missing bindings file or DID map is skipped, not an
+    error, as in training. Used by ``scripts/detector_benchmark.py``,
+    ``scripts/evaluate_detectors.py`` and retrain's benchmark gate.
+    """
+    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
+    resampled = resample_long_session(
+        read_session(session_dir),
+        bindings,
+        load_dbc_dir(DEFAULT_DBC_DIR),
+        did_map,
+        resample_config_for(config),
+        session_name=session_dir.name,
+    )
+    return drop_fully_stale_rows(resampled)
+
+
+def disposition_screen_frames(
+    sessions: Sequence[Path],
+    config: CanaryConfig,
+    *,
+    bindings_path: Path = DEFAULT_BINDINGS_PATH,
+) -> tuple[list[pd.DataFrame], dict[str, int]]:
+    """Decode, quality-gate, resample and regime-gate every session for the
+    training-disposition screen (Task 1.4).
+
+    Returns the per-session regime-gated frames (ready for
+    ``training_disposition.classify_dispositions``) and the corpus-wide
+    per-channel reject counts accumulated across every session's quality gate.
+    Reuses :func:`_decode_session_to_wide`, the exact decode steps the trainers
+    run, so the screen sees precisely what training would see; the resample
+    uses the training recipe, gap rules included (D03.27). One unreadable
+    session is logged and skipped. Used by ``scripts/disposition_report.py``,
+    ``scripts/ledger.py`` (golden baselines) and ``scripts/retrain.py``'s
+    disposition summary: this was ``disposition_report._scan_sessions``,
+    imported by the other two across scripts (R06.4).
+    """
+    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
+    dbc_database = load_dbc_dir(DEFAULT_DBC_DIR)
+    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
+    resample_config = resample_config_for(config)
+
+    framed_parts: list[pd.DataFrame] = []
+    total_rejects: dict[str, int] = {}
+    for session_dir in sessions:
+        try:
+            wide = _decode_session_to_wide(Path(session_dir), bindings, dbc_database, did_map)
+        except Exception as exc:  # noqa: BLE001 — one bad session must not kill the scan
+            log.warning(
+                "skipping unreadable session",
+                extra={"session": str(session_dir), "error": str(exc)},
+            )
+            continue
+        gated, quality = apply_quality_gate(wide)
+        for channel, count in quality.reject_counts.items():
+            total_rejects[channel] = total_rejects.get(channel, 0) + count
+        resampled = resample_wide(gated, config=resample_config)
+        framed, _fell_back = segment_or_constant(resampled, config)
+        framed_parts.append(framed)
+
+    return framed_parts, total_rejects
+
+
 @dataclass(frozen=True)
 class FeaturizedFrame:
     """Output of :func:`featurize_wide_frame`.

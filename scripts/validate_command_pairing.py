@@ -44,11 +44,17 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from _cli import (  # noqa: F401  (keeps the repo-root bootstrap)
-    add_bindings_arg,
-    add_log_level_arg,
-    load_config,
-)
+
+try:
+    from _cli import (
+        add_bindings_arg,
+        add_log_level_arg,
+    )
+except ImportError:  # loaded as `scripts.validate_command_pairing`: repo root on path
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_log_level_arg,
+    )
 
 from src.analysis.channels import read_channels
 from src.analysis.compare import (

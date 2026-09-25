@@ -7,6 +7,8 @@
 src/models/
 src/preprocessing/
 scripts/train_sequence.py
+scripts/train_lstm.py
+scripts/train_tcn.py
 scripts/train_anomaly_model.py
 scripts/retrain.py
 scripts/sequence_bakeoff.py

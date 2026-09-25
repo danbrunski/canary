@@ -54,9 +54,14 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.decode.surface_eval import evaluate_1d, evaluate_2d
-from src.preprocessing.features import ROC_SUFFIX, FeatureConfig, compute_rate_of_change
+from src.preprocessing.features import (
+    ROC_SUFFIX,
+    FeatureConfig,
+    base_channel,
+    compute_rate_of_change,
+)
 from src.preprocessing.local_range import append_local_ranges, local_range_column
-from src.preprocessing.resampler import gap_column
+from src.preprocessing.resampler import GAP_SUFFIX, gap_column
 from src.preprocessing.session_context import append_start_context, start_context_specs
 
 log = logging.getLogger(__name__)
@@ -566,10 +571,11 @@ def deviation_model_name(column: str) -> str | None:
     if not column.startswith(DEVIATION_COLUMN_PREFIX):
         return None
     name = column.removeprefix(DEVIATION_COLUMN_PREFIX)
-    for suffix in ("__mean", "__std", "__roc", "__gap"):
-        if name.endswith(suffix):
-            return name[: -len(suffix)]
-    return name
+    # The rolling suffixes come from their one declaration (R04.3), so a new
+    # rolling feature on a deviation column cannot misfile its model name.
+    if name.endswith(GAP_SUFFIX):
+        return name.removesuffix(GAP_SUFFIX)
+    return base_channel(name)
 
 
 def withheld_learned_feature_columns(

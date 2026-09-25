@@ -33,6 +33,10 @@ class _Strict(BaseModel):
 QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
 
 
+#: The ``unit`` placeholder of a binding whose engineering unit is not known.
+UNKNOWN_UNIT = "unknown"
+
+
 class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
     """A signal binding: where in a CAN frame the value lives + how to decode it.
 
@@ -54,7 +58,7 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
     byte_order: Literal["big", "little"] = "big"
     scale: float | None = None
     offset: float | None = None
-    unit: str = "unknown"
+    unit: str = UNKNOWN_UNIT
     confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
     #: Persist this signal as a ``decoded:`` row regardless of confidence.
     #:
@@ -129,6 +133,12 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
     quantity: Literal["road_speed"] | None = None
     evidence: list[Evidence] = Field(default_factory=list)
     notes: str | None = None
+
+    @property
+    def display_unit(self) -> str:
+        """``unit`` for a record or a label: ``""`` while it is the ``"unknown"``
+        placeholder (R04.4). Five callers each spelled ``!= "unknown"``."""
+        return "" if self.unit == UNKNOWN_UNIT else self.unit
 
     @model_validator(mode="after")
     def _check_quantity_is_readable(self) -> Signal:

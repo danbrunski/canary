@@ -28,11 +28,18 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from _cli import (
-    add_common_args,
-    add_log_level_arg,
-    load_config,
-)
+try:
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
+except ImportError:  # loaded as `scripts.migrate_to_profiles` — repo root on path, not scripts/
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.config import CanaryConfig
 from src.log import configure_logging

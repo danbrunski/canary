@@ -30,7 +30,7 @@ from src.control.profile_capture import (
     ProfileCaptureSession,
     ProfileCaptureStart,
 )
-from src.models.health import HealthMonitor
+from src.daemon.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 
