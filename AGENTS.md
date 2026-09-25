@@ -144,9 +144,12 @@ to direct HTTP.
   (`scripts/push.sh`, below) runs lint, types and every test except the
   `slow` tier; **GitHub CI runs the whole suite on every push**, slow tier
   included. While iterating, run the test files you are working on. For dashboard
-  changes, `pnpm typecheck` and the vitest files you touched (re-run
-  `TuningFeedback.test.ts` once on flake before treating it as a
-  regression).
+  changes, `pnpm typecheck`, `pnpm format`, `pnpm lint` and the vitest files you
+  touched (re-run `TuningFeedback.test.ts` once on flake before treating it as a
+  regression). ESLint is type-aware, and its pre-existing violations are
+  bulk-suppressed in `eslint-suppressions.json`. A new violation fails, and
+  so does a fixed one until you run `pnpm lint:prune`. Fix a new violation;
+  never re-run `--suppress-all` to hide it.
 - **CI is the same gate, on the same versions.** CI installs
   `constraints-dev.txt`, the exact dev toolchain, and `scripts/check.sh`
   refuses to run on a venv that has drifted from it (`scripts/check_dev_env.py`
@@ -168,8 +171,8 @@ to direct HTTP.
   ~140 tests, 3 % of the suite and most of its time. It adds the `ml_training`
   tier only when the push touches `scripts/ml_paths.txt` (see "Test tiers"):
   CI has no torch, so those pushes take minutes. When the push touches
-  `src/dashboard/static` it runs pnpm typecheck and `vitest related` on the
-  changed files; full vitest and e2e are CI's. A green run stamps that commit, and
+  `src/dashboard/static` it runs pnpm typecheck, ESLint and Prettier on the
+  changed files, and `vitest related`; full lint, vitest and e2e are CI's. A green run stamps that commit, and
   the tracked `pre-push` hook (`git config core.hooksPath scripts/git-hooks`)
   refuses any unstamped, non-documentation push. The gate cannot run inside
   the hook itself: git opens the connection first, and GitHub closed it during

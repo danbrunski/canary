@@ -31,7 +31,7 @@ code.
 | [R05](R05-analysis-and-decode.md) | One tuning context (registry, stoich, noise floor), refusing significance, `compare_channels` for cam tracking, derived-signal table, fingerprint featurization, recipe clones; then `fit_recipe`, decode slices, surface eval | parts | no |
 | [R06](R06-scripts-and-tools.md) | A shared bus-tool module (two tools skip the passive check), a CLI snapshot, `retrain.py` phases, library code out of `scripts/` | no | R06.4 |
 | [R07](R07-test-infrastructure.md) | `src → tests` import, test writes into the repo tree, ScriptedEcu for collector fakes, one global-state reset, shared builders | no | no |
-| [R08](R08-dashboard-frontend.md) | Undefined theme class, raw error text, a localStorage crash, then API layering, formatter sweep, the 840-line `CaptureProfilesPanel`, one palette, one poll loop | UI | no |
+| [R08](R08-dashboard-frontend.md) | Undefined theme class, raw error text, a localStorage crash, then API layering, formatter sweep, the 840-line `CaptureProfilesPanel`, one palette, one poll loop; ESLint + Prettier with a ratcheted baseline (R08.13) | UI | no |
 
 ## Fix first: drift bugs found by the review
 
@@ -136,8 +136,9 @@ Record each answer in the item and never re-open it.
   module?
 - **R06.5:** fold `detector_benchmark` into `evaluate_detectors`?
 - **R08.6:** which DID rate is the "requested" rate in the capture table?
-- **R08 rules:** add a TS formatter or linter? That is a tool install, so it
-  is the operator's call.
+- **R08.13:** add a TS formatter and linter? **Decided 2026-09-24: yes.**
+  ESLint (type-aware) + Prettier, with a bulk-suppressed baseline; see
+  R08.13.
 
 ## Shared acceptance rules
 

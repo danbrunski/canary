@@ -23,8 +23,10 @@
 #   runs here when <base>..<commit> touches scripts/ml_paths.txt, because CI
 #   has no torch (operator, 2026-09-23): those pushes take minutes, not one.
 # - Frontend, only when <base>..<commit> touches src/dashboard/static: pnpm
-#   typecheck and `vitest related` on the changed files. Full vitest and
-#   playwright e2e are CI's (ci.yml `frontend`).
+#   typecheck; ESLint and Prettier on the changed files (the whole dashboard
+#   when its lint/format/TS config or dependencies changed); `vitest related`
+#   on the changed files. Full lint, vitest and playwright e2e are CI's
+#   (ci.yml `frontend`).
 #
 # Why not inside the pre-push hook: git opens the connection to GitHub before
 # the hook runs, and GitHub closed it during the ~7 min gate on 2026-09-23
@@ -100,6 +102,27 @@ start=$(date +%s)
       cd src/dashboard/static || exit 1
       echo "==> pnpm install --frozen-lockfile"; pnpm install --frozen-lockfile --prefer-offline >/dev/null || exit 1
       echo "==> pnpm typecheck"; pnpm typecheck || exit 1
+      # Lint and format only what changed (type-aware ESLint over the whole
+      # dashboard is ~40 s), unless the change can move every file's verdict.
+      mapfile -t changed < <(git -C "$wt" diff --name-only --diff-filter=d "${range%%..*}" "$sha" \
+        2>/dev/null | sed -n 's|^src/dashboard/static/||p')
+      mapfile -t lintable < <(printf '%s\n' "${changed[@]}" | grep -E '\.(ts|tsx|js)$')
+      mapfile -t formattable < <(printf '%s\n' "${changed[@]}" | grep -E '\.(ts|tsx|js|css)$')
+      whole='^(eslint\.config\.js|eslint-suppressions\.json|\.prettierrc\.json|package\.json|pnpm-lock\.yaml|tsconfig.*\.json)$'
+      if [[ "$range" != *..* ]] || printf '%s\n' "${frontend[@]}" | grep -qE "$whole"; then
+        echo "==> eslint + prettier (whole dashboard)"
+        pnpm lint || exit 1
+        pnpm format:check || exit 1
+      else
+        if [[ ${#lintable[@]} -gt 0 ]]; then
+          echo "==> eslint (${#lintable[@]} changed file(s))"
+          pnpm exec eslint --max-warnings 0 "${lintable[@]}" || exit 1
+        fi
+        if [[ ${#formattable[@]} -gt 0 ]]; then
+          echo "==> prettier --check (${#formattable[@]} changed file(s))"
+          pnpm exec prettier --check "${formattable[@]}" || exit 1
+        fi
+      fi
       echo "==> vitest related (${#frontend[@]} changed file(s)); full vitest + e2e run in CI"
       pnpm exec vitest related --run --passWithNoTests "${frontend[@]}" || exit 1
     fi

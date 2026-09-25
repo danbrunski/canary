@@ -1,0 +1,225 @@
+{
+  "src/api/websocket.ts": {
+    "@typescript-eslint/no-unsafe-argument": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    }
+  },
+  "src/components/Curve.tsx": {
+    "@typescript-eslint/no-unused-expressions": {
+      "count": 3
+    }
+  },
+  "src/hooks/useBehaviorLive.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
+  "src/hooks/useBehaviorModels.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
+  "src/hooks/useConnectivityMode.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
+  "src/hooks/useControlResource.ts": {
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unnecessary-type-assertion": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/hooks/useControlStream.ts": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/hooks/useStatus.ts": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    },
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    }
+  },
+  "src/hooks/useTagQueue.ts": {
+    "@typescript-eslint/no-misused-promises": {
+      "count": 1
+    },
+    "react-hooks/refs": {
+      "count": 2
+    }
+  },
+  "src/lib/evidence.ts": {
+    "@typescript-eslint/no-base-to-string": {
+      "count": 1
+    }
+  },
+  "src/lib/trainingQuality.ts": {
+    "@typescript-eslint/no-base-to-string": {
+      "count": 1
+    }
+  },
+  "src/lib/workbenchApi.ts": {
+    "no-useless-assignment": {
+      "count": 1
+    }
+  },
+  "src/panels/AlarmsPanel.tsx": {
+    "react-hooks/purity": {
+      "count": 1
+    }
+  },
+  "src/panels/AnomalyPanel.tsx": {
+    "@typescript-eslint/no-redundant-type-constituents": {
+      "count": 1
+    }
+  },
+  "src/panels/BehaviorModelsPanel.test.ts": {
+    "@typescript-eslint/no-unnecessary-type-assertion": {
+      "count": 1
+    }
+  },
+  "src/panels/CaptureProfilesPanel.tsx": {
+    "react-hooks/preserve-manual-memoization": {
+      "count": 1
+    },
+    "react-hooks/purity": {
+      "count": 1
+    },
+    "react-hooks/refs": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 4
+    }
+  },
+  "src/panels/ControlPanel.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/panels/MonitorsPanel.tsx": {
+    "react-hooks/refs": {
+      "count": 3
+    }
+  },
+  "src/panels/ProfilesPanel.tsx": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 1
+    }
+  },
+  "src/panels/ReplayCard.tsx": {
+    "preserve-caught-error": {
+      "count": 2
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/panels/RescoreControl.tsx": {
+    "react-hooks/refs": {
+      "count": 2
+    }
+  },
+  "src/panels/RomMapsPanel.test.tsx": {
+    "@typescript-eslint/no-unnecessary-type-assertion": {
+      "count": 3
+    }
+  },
+  "src/panels/RomMapsPanel.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 2
+    },
+    "react-hooks/purity": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 3
+    }
+  },
+  "src/panels/SessionsPanel.test.ts": {
+    "@typescript-eslint/no-unnecessary-type-assertion": {
+      "count": 1
+    }
+  },
+  "src/panels/SessionsPanel.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/panels/TelemetryPanel.tsx": {
+    "@typescript-eslint/no-unsafe-assignment": {
+      "count": 1
+    },
+    "@typescript-eslint/no-unused-vars": {
+      "count": 1
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/panels/TestSessionPanel.tsx": {
+    "@typescript-eslint/no-floating-promises": {
+      "count": 2
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 2
+    }
+  },
+  "src/panels/TripPanel.tsx": {
+    "@typescript-eslint/no-base-to-string": {
+      "count": 1
+    },
+    "react-hooks/purity": {
+      "count": 2
+    },
+    "react-hooks/refs": {
+      "count": 1
+    }
+  },
+  "src/panels/TuningPanel.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/panels/tuning/CalibrationPage.tsx": {
+    "react-hooks/set-state-in-effect": {
+      "count": 1
+    }
+  },
+  "src/panels/tuning/LogsPage.tsx": {
+    "react-hooks/exhaustive-deps": {
+      "count": 3
+    },
+    "react-hooks/set-state-in-effect": {
+      "count": 4
+    }
+  },
+  "src/panels/tuning/TuningContextBar.tsx": {
+    "@typescript-eslint/no-base-to-string": {
+      "count": 1
+    }
+  }
+}

@@ -112,6 +112,12 @@ jobs:
       - name: Typecheck (app + e2e)
         run: pnpm typecheck
 
+      - name: ESLint (bulk-suppressed baseline; new or stale violations fail)
+        run: pnpm lint
+
+      - name: Prettier
+        run: pnpm format:check
+
       - name: Vitest
         run: pnpm test
 

@@ -11,6 +11,10 @@
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:prune": "eslint . --prune-suppressions",
+    "format": "prettier --write src e2e \"*.{ts,js}\"",
+    "format:check": "prettier --check src e2e \"*.{ts,js}\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
@@ -22,6 +26,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.0",
     "@testing-library/dom": "^10.4.1",
@@ -31,9 +36,15 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^10.11.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.12.0",
     "jsdom": "^25.0.1",
+    "prettier": "^3.9.9",
     "tailwindcss": "^4.3.0",
     "typescript": "^5.6.3",
+    "typescript-eslint": "^8.70.1",
     "vite": "^5.4.10",
     "vitest": "^2.1.9"
   }

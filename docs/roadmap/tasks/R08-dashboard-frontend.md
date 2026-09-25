@@ -29,10 +29,10 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
   changes one of them adds a test before the change.
 - **The July calls stand.** `RankedBars` and `ChannelBars` stay separate.
   `api/http.ts` stays one function per route (R08.3 extends that rule).
-- **No new tools without asking.** There is no TS formatter or linter config,
-  which would explain the 140+ character lines. Adding prettier or eslint is
-  a tool install, so ask the operator (see the memory note on installing
-  tools).
+- **Lint and format (R08.13, operator 2026-09-24).** `pnpm format` (Prettier)
+  and `pnpm lint` (type-aware ESLint with a bulk-suppressed baseline) are part
+  of the gate. An item that fixes a baselined violation runs
+  `pnpm lint:prune` in the same commit.
 
 ---
 
@@ -302,6 +302,52 @@ characters, `CaptureProfilesPanel` is 43.6k and `LogsPage` 24.0k.
     h)`.
 
   Size **S–M**.
+
+- [~] **R08.13 A linter and a formatter for the dashboard.** *Operator,
+  2026-09-24: "seems like we should use a linter right".* The dashboard had
+  no linter and no formatter: 154 lines ran over 140 characters, and nothing
+  checked promise handling or hook dependencies. The first ESLint run found
+  7 floating promises and 6 async callbacks handed to timers or listeners.
+
+  **Done 2026-09-24:**
+  - Prettier 3.9 (`printWidth: 100`, like ruff; the default double quotes
+    and semicolons match the existing code). One mechanical
+    `prettier --write` commit over 113 files is listed in
+    `.git-blame-ignore-revs`. After it: typecheck clean, vitest 47 files and
+    357 tests pass.
+  - ESLint 10 with typescript-eslint 8.70 `recommendedTypeChecked`,
+    eslint-plugin-react-hooks 7.1 `recommended-latest` (including the React
+    Compiler rules) and eslint-config-prettier.
+    - Every rule is an error: the preset's three hook warnings are raised,
+      because warnings neither fail nor bulk-suppress.
+    - Two scoped relaxations, both reasoned in `eslint.config.js`: async JSX
+      event handlers (48 hits; React ignores the return value), and the
+      `no-unsafe-*`/`require-await`/`unbound-method` rules in vitest files,
+      where mocks are `any` by construction.
+  - The baseline is bulk-suppressed in `eslint-suppressions.json`: 78
+    violations in 32 files. The largest groups:
+    - `react-hooks/set-state-in-effect` 23 (the fetch-in-effect pattern, R08.2)
+    - `refs` 9
+    - `no-floating-promises` 7
+    - `no-misused-promises` 6
+    - `no-unnecessary-type-assertion` 6
+    - `exhaustive-deps` 6
+    - `purity` 5
+  - The ratchet was verified three ways:
+    - a new floating promise fails;
+    - a stale suppression fails, naming `--prune-suppressions`;
+    - linting only the changed files works with the suppressions (3.4 s,
+      against 39 s for the whole dashboard).
+  - Gate: `scripts/ci_gate.sh` lints and format-checks the changed files, or
+    the whole dashboard when its lint/format/TS config or dependencies
+    change. CI (`frontend` job) runs `pnpm lint` and `pnpm format:check` in
+    full. AGENTS.md is updated.
+
+  **Remaining:** burn the baseline down. The hook items (R08.2, R08.8, R08.9)
+  should remove most of `set-state-in-effect`, `refs` and the promise rules.
+  Each prunes the suppressions it clears. This box goes `[x]` when
+  `eslint-suppressions.json` is empty or every entry left is named here as
+  deliberate.
 
 ## Looked at and fine
 
