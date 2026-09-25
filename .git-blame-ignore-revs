@@ -1,0 +1,5 @@
+# Mechanical reformatting commits, skipped by `git blame` (GitHub reads this
+# file; locally: git config blame.ignoreRevsFile .git-blame-ignore-revs).
+
+# style(dashboard): prettier --write (R08.13, 2026-09-24)
+e9934ec47d1fe94d0a22ad0794c4247ec07de4f1
