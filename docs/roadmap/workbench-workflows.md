@@ -179,7 +179,7 @@ the index.
 - [x] **[W1](tasks/archive/W01-navigation-regroup.md) — Regroup the navigation.** Five groups as tabled above; rename
   `models-tuning` → Alert Thresholds; move `live-rom-maps` into Engine Tuning.
   Keep the old route ids resolving (redirect) so bookmarks and docs survive.
-- [~] **[W2](tasks/W02-tuning-context-bar.md) — Context bar.** Running calibration from `0x21 10` beside the
+- [~] **[W2](tasks/archive/W02-tuning-context-bar.md) — Context bar.** Running calibration from `0x21 10` beside the
   registry's newest revision; selected log and loaded ROM held in group state;
   readiness chips (UPS SOC, storage, memory channels, achieved rates).
 - [x] **[W3](tasks/archive/W03-logging-page.md) — Logging page.** Profile picker, start/stop, keepalive, per-channel

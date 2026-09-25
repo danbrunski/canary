@@ -39,7 +39,7 @@ share a subject without sharing a sequence.
   `calibration_matches_registry true`. Recorded as `session: extended` in
   `data/dids.yaml` `access.calibration_id` with the evidence string; pinned by
   `tests/test_ecu_calibration_id.py::test_committed_catalog_records_the_measured_session_requirement`.
-  Evidence: [`2026-09-22-w02-1-koeo-probe.md`](../../../data/analyses/2026-09-22-w02-1-koeo-probe.md).
+  Evidence: [`2026-09-22-w02-1-koeo-probe.md`](../../../../data/analyses/2026-09-22-w02-1-koeo-probe.md).
   *Found on the way:* `/control/obd_request` reported `responded: false` for
   the NRC — the ECM answered and the endpoint called it silence. Fixed in the
   same commit (see the evidence file).

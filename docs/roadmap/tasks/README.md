@@ -1,5 +1,9 @@
 # Implementation task index
 
+**Status 2026-09-24: B02 and W02 archived.** Every box in both is ticked;
+they moved to [`archive/`](archive/), and the links in B00, W00 and
+`../workbench-workflows.md` point there.
+
 **Status 2026-09-24: R01–R08, the second refactor review.**
 [`R00-refactor-README.md`](R00-refactor-README.md) indexes eight checklists
 from a six-area review of the ~125k lines added since the July refactor

@@ -1,7 +1,7 @@
 # B02 — reproducible behavior validation and publication gates
 
 **Depends on:** B01 for final serving parity; evaluator/corpus inventory can
-start immediately. Follow [B00](B00-behavior-models-README.md).
+start immediately. Follow [B00](../B00-behavior-models-README.md).
 
 The existing holdouts reproduced, but some cover only 47–79 rows. A 2D model
 can pass with negative predictive R², and a legacy 1D artifact can pass on
@@ -28,7 +28,7 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   catalog-recipe contract for legacy artifacts, `--decode-can none`) vs
   `--mode corrected` (refused unless the config matches
   `approved_operating_modes`; `suburban` listed as retired into `city`).
-  Evidence: all seven persisted holdouts reproduce exactly, [report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §1.
+  Evidence: all seven persisted holdouts reproduce exactly, [report](../../../../data/analyses/2026-09-21-behavior-validation-report.md) §1.
 - [x] **B02.2 — Pin known answers and counterexamples.** Preserve a suitably
   sized real-data fixture or reproducible evidence manifest for the July
   holdout reproduction and September failures. Verify the ground-truth chain
@@ -66,7 +66,7 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   test drive. Evidence: `tests/test_behavior_validation.py::test_prefix_sorted_chronology_is_refused`,
   `::test_drive_fragments_never_cross_folds`, `::test_fit_recipe_keeps_segments_of_one_drive_in_one_fold`,
   `::test_prior_edges_fitted_on_a_test_drive_are_refused`. It showed the July
-  held-out J26 is a 35 s continuation of training session `223147` ([report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §2).
+  held-out J26 is a 35 s continuation of training session `223147` ([report](../../../../data/analyses/2026-09-21-behavior-validation-report.md) §2).
 - [x] **B02.4 — Enforce provenance and adequate evidence.** Validate tune
   boundaries, source/decoder identity, mode labels and capture recipe grants.
   Unknown revisions and sessions crossing a flash need a named resolution,
@@ -87,10 +87,10 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   by operator decision 2026-09-22 in `behavior_validation.yaml`
   `provenance_resolutions`; event-gated warmup recipes are blocked by **D03.22** (stale
   sidecar events); cat_warmup's May training sessions are absent locally. All
-  eight shipped models stay diagnostic-only ([report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §4).
+  eight shipped models stay diagnostic-only ([report](../../../../data/analyses/2026-09-21-behavior-validation-report.md) §4).
   *Remainder resolved 2026-09-23:* the machinery was applied to the operator's
   current-calibration corpus (ZS44A-20260920, decision 2026-09-23;
-  [manifest](../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml)).
+  [manifest](../../../../data/analyses/2026-09-23-behavior-corpus-manifest.yaml)).
   - Every session resolves to one revision (13 via their capture manifests),
     with no unknown revisions and no flash crossings (checked per row by the
     refit CLI).
@@ -108,7 +108,7 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   never polled), TPS (244 rows), manifold VE (no MAP), LTFT balance (LTFT
   constantly 0.0). All 12 shipped models are diagnostic-only because they
   *failed* or lack evidence, never by default
-  ([refit report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0, §2).
+  ([refit report](../../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §0, §2).
 - [x] **B02.5 — Report denominators and practical accuracy.** Per model,
   drive and relevant regime, emit input-present/fresh/eligible/evaluated counts,
   refusal reasons, coverage, MAE, signed bias, error quantiles, R² where useful,
@@ -123,8 +123,8 @@ training R² with no held-out samples. Quiet alerting is not proof of accuracy.
   envelope coverage, per-drive MAE range, drive-resampled bootstrap from three
   drives) per model, drive and regime, in the evidence and the report. Evidence:
   `test_no_prediction_is_not_a_valid_observation`,
-  `test_row_exceedance_is_not_an_event`; [report](../../../data/analyses/2026-09-21-behavior-validation-report.md) §3.
-  *Re-run 2026-09-22 under `EVALUATOR_VERSION 2`* ([v2 report](../../../data/analyses/2026-09-22-behavior-validation-report-v2.md)):
+  `test_row_exceedance_is_not_an_event`; [report](../../../../data/analyses/2026-09-21-behavior-validation-report.md) §3.
+  *Re-run 2026-09-22 under `EVALUATOR_VERSION 2`* ([v2 report](../../../../data/analyses/2026-09-22-behavior-validation-report-v2.md)):
   v1 read `datetime64[us]` row times 1000x short, so the 09-21 event counts,
   control rates and synthetic windows were wrong; per-row metrics reproduce
   exactly. Event rates are now real, over wall-clock watched time rather

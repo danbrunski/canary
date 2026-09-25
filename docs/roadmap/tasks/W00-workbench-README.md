@@ -11,7 +11,7 @@ commit, screenshot, or measurement), `[~]` for partial with the remainder named.
 | file | covers | roadmap task | needs the truck |
 |---|---|---|---|
 | [W01](archive/W01-navigation-regroup.md) ✅ | five groups, renames, redirects, reserved entries | W1, W10 | no |
-| [W02](W02-tuning-context-bar.md) | shared context bar, calibration id in `/status`, readiness chips | W2 | one KOEO probe |
+| [W02](archive/W02-tuning-context-bar.md) | shared context bar, calibration id in `/status`, readiness chips | W2 | one KOEO probe |
 | [W03](archive/W03-logging-page.md) ✅ | Logging page, ended-capture announcement | W3, W4 | final check only |
 | [W04](archive/W04-logs-and-analysis.md) ✅ | Logs (table / visual) and Analysis pages | W5, W6 | no |
 | [W05](W05-rom-maps-trace-coverage.md) | ECM-coordinate trace, coverage overlay | W7, W8 | final check only |
