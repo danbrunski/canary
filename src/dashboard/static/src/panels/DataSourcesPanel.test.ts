@@ -209,17 +209,19 @@ describe("DataSourcesPanel", () => {
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
       polled: [],
-      dids: [{
-        did: 0x1206,
-        name: "INJECTOR_PULSE",
-        unit: "ms",
-        confidence: "high",
-        scale: 0.01,
-        offset: 0,
-        plausible_min: null,
-        plausible_max: null,
-        notes: null,
-      }],
+      dids: [
+        {
+          did: 0x1206,
+          name: "INJECTOR_PULSE",
+          unit: "ms",
+          confidence: "high",
+          scale: 0.01,
+          offset: 0,
+          plausible_min: null,
+          plausible_max: null,
+          notes: null,
+        },
+      ],
     });
     const status = {
       capture_profile: {
@@ -232,20 +234,24 @@ describe("DataSourcesPanel", () => {
     const channels = new Map([channel("did:INJECTOR_PULSE", 2.5, "ms")]);
     render(createElement(DataSourcesPanel, { channels, status }));
     fireEvent.click(screen.getByRole("button", { name: "Manufacturer DIDs (Mode 22)" }));
-    expect(await screen.findByText("1/1 capture DIDs responding (1 catalogued)")).toBeInTheDocument();
+    expect(
+      await screen.findByText("1/1 capture DIDs responding (1 catalogued)"),
+    ).toBeInTheDocument();
     expect(screen.getByText("2.5 ms")).toBeInTheDocument();
   });
 
   it("lists RAM channels and overlays the current service-0x23 value", async () => {
     mocks.getDids.mockResolvedValue({
       ...EMPTY_DIDS,
-      memory: [{
-        name: "ECM_TARGET_EQUIV_RATIO",
-        address: 0xffff26be,
-        unit: "phi",
-        confidence: "high",
-        window: "fuel_target",
-      }],
+      memory: [
+        {
+          name: "ECM_TARGET_EQUIV_RATIO",
+          address: 0xffff26be,
+          unit: "phi",
+          confidence: "high",
+          window: "fuel_target",
+        },
+      ],
     });
     const status = {
       capture_profile: {

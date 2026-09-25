@@ -72,9 +72,7 @@ describe("TrendsPanel", () => {
     };
     mocks.getTrends.mockResolvedValue(body);
     render(createElement(TrendsPanel, { token: "secret" }));
-    expect(
-      await screen.findByText(/no session has a fingerprint yet/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/no session has a fingerprint yet/)).toBeInTheDocument();
   });
 
   it("renders a stat row with latest value, band, trend verdict, and CUSUM alarm", async () => {

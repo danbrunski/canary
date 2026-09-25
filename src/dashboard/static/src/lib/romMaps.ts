@@ -48,19 +48,26 @@ export const TRACE_MAX_SKEW_MS = 750;
 /** A stored channel spec's row on the live stream. Stream keys are
  *  `<source>:<channel>`, and memory rows are stored as source `obd`, channel
  *  `mem:<NAME>` — so the spec `mem:X` arrives keyed `obd:mem:X`. */
-export function streamRow(channels: Map<string, ChannelSnapshot>, spec: string): TelemetryRow | null {
+export function streamRow(
+  channels: Map<string, ChannelSnapshot>,
+  spec: string,
+): TelemetryRow | null {
   return (channels.get(spec) ?? channels.get(`obd:${spec}`))?.latest ?? null;
 }
 
 export function liveValue(
-  channels: Map<string, ChannelSnapshot>, provider: RomProvider | null,
-  now: number, stoich: number,
+  channels: Map<string, ChannelSnapshot>,
+  provider: RomProvider | null,
+  now: number,
+  stoich: number,
 ): { value: number; timestamp: number } | null {
   if (!provider) return null;
   const row = streamRow(channels, provider.spec);
-  if (!row || typeof row.value !== "number" || !Number.isFinite(row.value) || !row.timestamp) return null;
+  if (!row || typeof row.value !== "number" || !Number.isFinite(row.value) || !row.timestamp)
+    return null;
   const timestamp = Date.parse(row.timestamp);
-  if (!Number.isFinite(timestamp) || now - timestamp > TRACE_MAX_AGE_MS || timestamp - now > 1000) return null;
+  if (!Number.isFinite(timestamp) || now - timestamp > TRACE_MAX_AGE_MS || timestamp - now > 1000)
+    return null;
   let value = row.value;
   if (provider.transform === "scale") {
     if (provider.factor === null || !Number.isFinite(provider.factor)) return null;
@@ -75,7 +82,8 @@ export function liveValue(
 }
 
 export function axisBracket(axis: number[], value: number): number[] | null {
-  if (!axis.length || !Number.isFinite(value) || value < axis[0] || value > axis[axis.length - 1]) return null;
+  if (!axis.length || !Number.isFinite(value) || value < axis[0] || value > axis[axis.length - 1])
+    return null;
   const hi = axis.findIndex((point) => point >= value);
   return axis[hi] === value ? [hi] : [hi - 1, hi];
 }
@@ -86,13 +94,23 @@ export function tracePosition(table: RomTable, rpm: number, bfs: number) {
   const columns = axisBracket(table.x_axis, bfs);
   if (!rows || !columns) return null;
   const nearest = (indices: number[], axis: number[], value: number) =>
-    indices.reduce((a, b) => Math.abs(axis[a] - value) <= Math.abs(axis[b] - value) ? a : b);
-  return { rows, columns, row: nearest(rows, table.y_axis, rpm), column: nearest(columns, table.x_axis, bfs) };
+    indices.reduce((a, b) => (Math.abs(axis[a] - value) <= Math.abs(axis[b] - value) ? a : b));
+  return {
+    rows,
+    columns,
+    row: nearest(rows, table.y_axis, rpm),
+    column: nearest(columns, table.x_axis, bfs),
+  };
 }
 
 /** Numeric scale only: green is low, red is high, not safe/dangerous. */
 export function mapColor(value: number, min: number, max: number): string {
-  const stops = [[80, 190, 110], [245, 210, 65], [248, 155, 55], [230, 80, 65]];
+  const stops = [
+    [80, 190, 110],
+    [245, 210, 65],
+    [248, 155, 55],
+    [230, 80, 65],
+  ];
   const fraction = max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
   const step = fraction * (stops.length - 1);
   const low = Math.min(stops.length - 2, Math.floor(step));

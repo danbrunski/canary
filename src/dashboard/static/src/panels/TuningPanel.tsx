@@ -20,10 +20,7 @@ interface TuningPanelProps {
  *  committing (Risk R11). Apply auto-versions + audits server-side; revert
  *  is itself a new audited version. */
 export function TuningPanel({ token }: TuningPanelProps) {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => getTuning(token, signal),
-    [token],
-  );
+  const fetcher = useCallback((signal: AbortSignal) => getTuning(token, signal), [token]);
   const { data, error, loading, refresh } = useControlResource(fetcher, {
     enabled: Boolean(token),
     intervalMs: 30000,
@@ -149,18 +146,14 @@ export function TuningPanel({ token }: TuningPanelProps) {
                   evaluated {estimate.before.evaluated} · would-suppress{" "}
                   {estimate.before.would_suppress} →{" "}
                   <b className="text-fg">{estimate.after.would_suppress}</b>{" "}
-                  <span
-                    className={
-                      estimate.newly_suppressed > 0 ? "text-warn" : "text-ok"
-                    }
-                  >
+                  <span className={estimate.newly_suppressed > 0 ? "text-warn" : "text-ok"}>
                     ({estimate.newly_suppressed >= 0 ? "+" : ""}
                     {estimate.newly_suppressed} newly muted)
                   </span>
                 </div>
                 <p className="mt-1 text-[0.76rem] text-fg-faint">
-                  Review this before Apply — tuning must not silently blind the
-                  alert detector (Risk R11).
+                  Review this before Apply — tuning must not silently blind the alert detector (Risk
+                  R11).
                 </p>
               </div>
             )}

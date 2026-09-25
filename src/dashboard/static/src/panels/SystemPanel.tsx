@@ -102,9 +102,7 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
   const gpsFixState = gps ? gpsFix(gps) : null;
   const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
   const can0 = status?.health?.can0 ?? null;
-  const can0Growth = can0
-    ? can0.since_start.rx_over_errors + can0.since_start.rx_dropped
-    : 0;
+  const can0Growth = can0 ? can0.since_start.rx_over_errors + can0.since_start.rx_dropped : 0;
 
   return (
     <Panel title="System">
@@ -142,7 +140,9 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>memory</dt>
-            <dd className={cn(definitionValueClass, toneClass(loadTone(system?.mem_used_fraction)))}>
+            <dd
+              className={cn(definitionValueClass, toneClass(loadTone(system?.mem_used_fraction)))}
+            >
               {formatPercent(system?.mem_used_fraction, 0)}
               {system?.mem_total_mb != null && (
                 <span className="text-fg-dim"> of {system.mem_total_mb.toFixed(0)} MB</span>
@@ -151,21 +151,13 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>power</dt>
-            <dd className={cn(definitionValueClass, toneClass(powerNow.tone))}>
-              {powerNow.label}
-            </dd>
+            <dd className={cn(definitionValueClass, toneClass(powerNow.tone))}>{powerNow.label}</dd>
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>power events</dt>
             <dd className={cn(definitionValueClass, powerEvents.length > 0 && "text-warn")}>
-              {power == null
-                ? "—"
-                : powerEvents.length === 0
-                  ? "none"
-                  : powerEvents.join(", ")}
-              {powerEvents.length > 0 && (
-                <span className="text-fg-dim"> (since boot)</span>
-              )}
+              {power == null ? "—" : powerEvents.length === 0 ? "none" : powerEvents.join(", ")}
+              {powerEvents.length > 0 && <span className="text-fg-dim"> (since boot)</span>}
             </dd>
           </div>
           {status.detectors && (
@@ -201,7 +193,9 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
               </div>
               <div className={definitionRowClass}>
                 <dt className={definitionTermClass}>location</dt>
-                <dd className={definitionValueClass}>{formatCoords(gps.latitude, gps.longitude)}</dd>
+                <dd className={definitionValueClass}>
+                  {formatCoords(gps.latitude, gps.longitude)}
+                </dd>
               </div>
               <div className={definitionRowClass}>
                 <dt className={definitionTermClass}>altitude</dt>

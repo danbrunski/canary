@@ -5,13 +5,7 @@
 // down the polled data + the shared `run` action, not two dozen individual
 // fields — see SessionsCard.tsx etc.
 
-import {
-  cn,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-  placeholderClass,
-} from "../styles";
+import { cn, panelClass, panelHeaderClass, panelTitleClass, placeholderClass } from "../styles";
 import type { ConnectionState, ControlEvent, PreflightResponse } from "../types";
 import { formatTimeOfDay } from "../util/time";
 

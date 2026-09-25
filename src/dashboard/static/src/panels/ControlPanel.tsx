@@ -22,7 +22,14 @@ import type {
   SequenceDetectorStatus,
   VersionResponse,
 } from "../types";
-import { buttonClass, cn, inputClass, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
+import {
+  buttonClass,
+  cn,
+  inputClass,
+  panelClass,
+  panelHeaderClass,
+  panelTitleClass,
+} from "../styles";
 import { formatTimeOfDay } from "../util/time";
 import { CompanionConfigCard } from "./CompanionConfigCard";
 import { ControlEventsCard, PreflightCard } from "./ControlPanelSections";
@@ -57,14 +64,13 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
 
   const refreshControl = useCallback(async () => {
     if (!token) return;
-    const [nextPreflight, nextVersion, nextCapture, nextJobs, nextSequence] =
-      await Promise.all([
-        getPreflight(token),
-        getControlVersion(token),
-        getCurrentCapture(token),
-        listJobs(token),
-        getSequenceDetector(token),
-      ]);
+    const [nextPreflight, nextVersion, nextCapture, nextJobs, nextSequence] = await Promise.all([
+      getPreflight(token),
+      getControlVersion(token),
+      getCurrentCapture(token),
+      listJobs(token),
+      getSequenceDetector(token),
+    ]);
     setPreflight(nextPreflight);
     setVersion(nextVersion);
     setCapture(nextCapture.capture);
@@ -136,7 +142,12 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3 rounded-[8px] border border-border bg-elev p-3">
-        <button className={buttonClass} type="button" onClick={() => refreshControl()} disabled={!token || !!busy}>
+        <button
+          className={buttonClass}
+          type="button"
+          onClick={() => refreshControl()}
+          disabled={!token || !!busy}
+        >
           Refresh
         </button>
         {version && (
@@ -155,16 +166,11 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
       <div
         className={cn(
           "flex items-center gap-2 rounded-[8px] border px-3 py-1.5 text-[0.8rem]",
-          token
-            ? "border-ok/45 bg-ok/10 text-ok"
-            : "border-border-soft bg-elev text-fg-dim",
+          token ? "border-ok/45 bg-ok/10 text-ok" : "border-border-soft bg-elev text-fg-dim",
         )}
       >
         <span
-          className={cn(
-            "inline-block h-2 w-2 rounded-full",
-            token ? "bg-ok" : "bg-fg-faint",
-          )}
+          className={cn("inline-block h-2 w-2 rounded-full", token ? "bg-ok" : "bg-fg-faint")}
         />
         {token
           ? "Control unlocked — mutating actions enabled."
@@ -187,10 +193,30 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
             </span>
           </header>
           <div className="grid grid-cols-4 gap-2 max-[1100px]:grid-cols-1">
-            <input className={inputClass} value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="purpose" />
-            <input className={inputClass} value={protocol} onChange={(event) => setProtocol(event.target.value)} placeholder="protocol" />
-            <input className={inputClass} value={vehicleState} onChange={(event) => setVehicleState(event.target.value)} placeholder="vehicle state" />
-            <button className={buttonClass} type="button" onClick={start} disabled={!token || !!capture || !!busy}>
+            <input
+              className={inputClass}
+              value={purpose}
+              onChange={(event) => setPurpose(event.target.value)}
+              placeholder="purpose"
+            />
+            <input
+              className={inputClass}
+              value={protocol}
+              onChange={(event) => setProtocol(event.target.value)}
+              placeholder="protocol"
+            />
+            <input
+              className={inputClass}
+              value={vehicleState}
+              onChange={(event) => setVehicleState(event.target.value)}
+              placeholder="vehicle state"
+            />
+            <button
+              className={buttonClass}
+              type="button"
+              onClick={start}
+              disabled={!token || !!capture || !!busy}
+            >
               Start
             </button>
           </div>
@@ -202,25 +228,47 @@ export function ControlPanel({ token, companion }: ControlPanelProps) {
             </div>
           )}
           <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto] gap-2 max-[1100px]:grid-cols-1">
-            <input className={inputClass} value={tagLabel} onChange={(event) => setTagLabel(event.target.value)} placeholder="tag label" />
-            <button className={buttonClass} type="button" onClick={addTag} disabled={!token || !capture || !tagLabel}>
+            <input
+              className={inputClass}
+              value={tagLabel}
+              onChange={(event) => setTagLabel(event.target.value)}
+              placeholder="tag label"
+            />
+            <button
+              className={buttonClass}
+              type="button"
+              onClick={addTag}
+              disabled={!token || !capture || !tagLabel}
+            >
               Tag
             </button>
-            <input className={inputClass} value={stopReason} onChange={(event) => setStopReason(event.target.value)} placeholder="stop reason" />
-            <button className={buttonClass} type="button" onClick={stop} disabled={!token || !capture || !!busy}>
+            <input
+              className={inputClass}
+              value={stopReason}
+              onChange={(event) => setStopReason(event.target.value)}
+              placeholder="stop reason"
+            />
+            <button
+              className={buttonClass}
+              type="button"
+              onClick={stop}
+              disabled={!token || !capture || !!busy}
+            >
               Stop
             </button>
           </div>
         </section>
 
         <JobsCard token={token} busy={busy} run={run} jobs={jobs} />
-        <SequenceDetectorCard token={token} busy={busy} run={run} sequenceDetector={sequenceDetector} />
+        <SequenceDetectorCard
+          token={token}
+          busy={busy}
+          run={run}
+          sequenceDetector={sequenceDetector}
+        />
         <ModelUploadCard token={token} busy={busy} run={run} />
 
-        <ControlEventsCard
-          connection={controlStream.connection}
-          events={controlStream.events}
-        />
+        <ControlEventsCard connection={controlStream.connection} events={controlStream.events} />
       </div>
     </section>
   );

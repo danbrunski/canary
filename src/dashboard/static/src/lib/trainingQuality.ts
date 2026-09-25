@@ -76,8 +76,7 @@ export function runQuality(run: TrainingRun): RunQuality {
 
   const alertsPerHour = numberOrNull(fp?.alerts_per_hour);
   const fpRate =
-    numberOrNull(fp?.false_positive_rate) ??
-    numberOrNull(overall?.false_positive_rate);
+    numberOrNull(fp?.false_positive_rate) ?? numberOrNull(overall?.false_positive_rate);
   const meetsBudget =
     typeof fp?.meets_v1_budget === "boolean"
       ? fp.meets_v1_budget
@@ -118,9 +117,7 @@ export function runQuality(run: TrainingRun): RunQuality {
 export function buildComparisons(runs: TrainingRun[]): Map<string, RunComparison> {
   const out = new Map<string, RunComparison>();
   const previousByType = new Map<string, TrainingRun>();
-  const ordered = [...runs].sort(
-    (a, b) => Date.parse(a.created_at) - Date.parse(b.created_at),
-  );
+  const ordered = [...runs].sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
   for (const run of ordered) {
     const previous = previousByType.get(run.model_type);
     if (previous) {
@@ -148,9 +145,7 @@ export function comparisonText(comparison: RunComparison | null): string {
   return `vs ${comparison.previousRunId}`;
 }
 
-export function comparisonTone(
-  comparison: RunComparison | null,
-): "ok" | "warn" | undefined {
+export function comparisonTone(comparison: RunComparison | null): "ok" | "warn" | undefined {
   if (!comparison) return undefined;
   const deltaValue = comparison.alertsDelta ?? comparison.fpDelta;
   if (deltaValue === null) return undefined;
@@ -159,9 +154,7 @@ export function comparisonTone(
   return undefined;
 }
 
-export function distributionView(
-  value: Record<string, unknown> | null,
-): DistributionView | null {
+export function distributionView(value: Record<string, unknown> | null): DistributionView | null {
   if (!value) return null;
   const min = numberOrNull(value.min) ?? numberOrNull(value.minimum);
   const max = numberOrNull(value.max) ?? numberOrNull(value.maximum);
@@ -194,9 +187,7 @@ export function kSweepPoints(value: unknown): KSweepPoint[] {
     .sort((a, b) => a.k - b.k);
 }
 
-export function validationSlices(
-  validation: Record<string, unknown> | null,
-): ValidationSlice[] {
+export function validationSlices(validation: Record<string, unknown> | null): ValidationSlice[] {
   if (!validation) return [];
   const raw =
     arrayOrNull(validation.by_fault_type) ??

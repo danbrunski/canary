@@ -182,11 +182,7 @@ export function extractOverlays(
 }
 
 export function extractResiduals(detail: Record<string, unknown>): ResidualEvidence[] {
-  const candidates = [
-    detail.behavior_residuals,
-    detail.physics_residuals,
-    detail.residuals,
-  ];
+  const candidates = [detail.behavior_residuals, detail.physics_residuals, detail.residuals];
   const out: ResidualEvidence[] = [];
   for (const candidate of candidates) {
     if (!Array.isArray(candidate)) continue;

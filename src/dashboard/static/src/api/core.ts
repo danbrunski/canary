@@ -66,10 +66,7 @@ export function apiUrl(path: string, baseUrl?: string): string {
   return `${base}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
-export async function fetchJson<T>(
-  input: RequestInfo,
-  init?: RequestInit,
-): Promise<T> {
+export async function fetchJson<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetchOrNetworkError(input, init);
   const text = await response.text();
   if (!response.ok) {

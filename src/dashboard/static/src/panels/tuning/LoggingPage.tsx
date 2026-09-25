@@ -62,8 +62,8 @@ export function LoggingPage({
       )}
       {status?.storage_warning_mb != null && status.free_mb < status.storage_warning_mb && (
         <p className="text-sm text-warn">
-          Storage is below the {status.storage_warning_mb.toFixed(0)} MB warning floor
-          ({" "}{status.free_mb.toFixed(0)} MB free).
+          Storage is below the {status.storage_warning_mb.toFixed(0)} MB warning floor ({" "}
+          {status.free_mb.toFixed(0)} MB free).
         </p>
       )}
 
@@ -96,8 +96,16 @@ export function LoggingPage({
       <PowerPanel token={token} />
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className={buttonClass} onClick={() => onNavigate("tuning-logs")}>View logs</button>
-        <button type="button" className={buttonClass} onClick={() => onNavigate("system-capture-profiles")}>Edit profiles in System</button>
+        <button type="button" className={buttonClass} onClick={() => onNavigate("tuning-logs")}>
+          View logs
+        </button>
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => onNavigate("system-capture-profiles")}
+        >
+          Edit profiles in System
+        </button>
       </div>
     </div>
   );

@@ -21,17 +21,13 @@ test("boots into the drive screen with the daemon connected", async ({ page }) =
   // The mode subtitle under the brand reads "drive" on first load.
   await expect(page.getByText("drive", { exact: true })).toBeVisible();
   // The mode toggle offers the *other* mode.
-  await expect(
-    page.getByRole("button", { name: "switch to the parked workbench" }),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "switch to the parked workbench" })).toBeVisible();
 });
 
 test("toggles between the drive screen and the parked workbench", async ({ page }) => {
   await page.goto("/");
 
-  await page
-    .getByRole("button", { name: "switch to the parked workbench" })
-    .click();
+  await page.getByRole("button", { name: "switch to the parked workbench" }).click();
 
   // Landing on the workbench: grouped section nav appears and the URL hash
   // reflects the parked context so a kiosk reload returns here.
@@ -42,21 +38,15 @@ test("toggles between the drive screen and the parked workbench", async ({ page 
   await expect(page).toHaveURL(/#wb/);
 
   // And back to driving.
-  await page
-    .getByRole("button", { name: "switch to the driving screen" })
-    .click();
+  await page.getByRole("button", { name: "switch to the driving screen" }).click();
   await expect(page).toHaveURL(/#drive/);
   await expect(nav).toBeHidden();
 });
 
-test("deep-links straight into a workbench section via the URL hash", async ({
-  page,
-}) => {
+test("deep-links straight into a workbench section via the URL hash", async ({ page }) => {
   await page.goto("/#wb/diag-anomalies");
 
-  await expect(
-    page.getByRole("navigation", { name: "Workbench sections" }),
-  ).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Workbench sections" })).toBeVisible();
   // Kiosk reload preserves the deep-linked view rather than snapping to drive.
   await expect(page).toHaveURL(/#wb\/diag-anomalies/);
 });
@@ -80,9 +70,7 @@ test("switches theme from the header toggle", async ({ page }) => {
   }
 });
 
-test("overflowing panel content makes the workbench pane scroll, not clip", async ({
-  page,
-}) => {
+test("overflowing panel content makes the workbench pane scroll, not clip", async ({ page }) => {
   // Regression: the scroll pane must not itself be the panel grid. A grid
   // that is the scroll container has a definite height, which sizes its auto
   // row to the pane rather than to the content; panels are `overflow-hidden`

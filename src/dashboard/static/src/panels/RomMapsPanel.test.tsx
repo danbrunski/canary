@@ -7,7 +7,10 @@ import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { StatusResponse } from "../types";
 import { RomMapsPanel } from "./RomMapsPanel";
 
-vi.mock("../api/core", async (importOriginal) => ({ ...(await importOriginal<typeof import("../api/core")>()), controlJson: vi.fn() }));
+vi.mock("../api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../api/core")>()),
+  controlJson: vi.fn(),
+}));
 const inspect = vi.mocked(controlJson);
 /** Route the mocked control client by path: the panel also reads the capture
  *  profile catalog (W05.4) and cell residency (W05.6). */
@@ -24,27 +27,75 @@ function routeControl(inspection: RomInspection, extra: Record<string, unknown> 
 }
 const now = new Date("2026-09-21T12:00:00Z");
 const result: RomInspection = {
-  source_sha256: "a".repeat(64), revision: "current", recorded_revision: "current", matches_recorded_revision: true,
-  map_slots: [1, 2, 3, 4, 5], afr_stoich: 14.7, warnings: ["Inferred lookup only"],
-  live: { rpm: { spec: "did:RPM", transform: "identity", factor: null }, base_fuel_schedule: { spec: "did:BFS", transform: "scale", factor: 0.00049 }, commanded_afr: null },
-  tables: [1, 2, 3, 4, 5].flatMap((slot) => (["fuel_targets", "fuel_compensation"] as const).map((kind) => ({
-    slot, kind, title: kind === "fuel_targets" ? "Target AFR" : "Fuel Compensation", status: slot === 1 && kind === "fuel_targets" ? "available" as const : "tbd" as const,
-    reason: "TBD — complete table location and axes not verified.", x_label: kind === "fuel_targets" ? "Base Fuel Schedule" : "Volumetric Flow Ratio", x_unit: kind === "fuel_targets" ? "ms" : "%", y_label: "Rotations Per Minute", y_unit: "rpm", unit: kind === "fuel_targets" ? "AFR" : "%",
-    x_axis: [8.76, 11.46], y_axis: [1200, 1600], values: [[14.7, 13], [13, 12]], raw: [[128, 145], [145, 157]],
-  }))),
+  source_sha256: "a".repeat(64),
+  revision: "current",
+  recorded_revision: "current",
+  matches_recorded_revision: true,
+  map_slots: [1, 2, 3, 4, 5],
+  afr_stoich: 14.7,
+  warnings: ["Inferred lookup only"],
+  live: {
+    rpm: { spec: "did:RPM", transform: "identity", factor: null },
+    base_fuel_schedule: { spec: "did:BFS", transform: "scale", factor: 0.00049 },
+    commanded_afr: null,
+  },
+  tables: [1, 2, 3, 4, 5].flatMap((slot) =>
+    (["fuel_targets", "fuel_compensation"] as const).map((kind) => ({
+      slot,
+      kind,
+      title: kind === "fuel_targets" ? "Target AFR" : "Fuel Compensation",
+      status: slot === 1 && kind === "fuel_targets" ? ("available" as const) : ("tbd" as const),
+      reason: "TBD — complete table location and axes not verified.",
+      x_label: kind === "fuel_targets" ? "Base Fuel Schedule" : "Volumetric Flow Ratio",
+      x_unit: kind === "fuel_targets" ? "ms" : "%",
+      y_label: "Rotations Per Minute",
+      y_unit: "rpm",
+      unit: kind === "fuel_targets" ? "AFR" : "%",
+      x_axis: [8.76, 11.46],
+      y_axis: [1200, 1600],
+      values: [
+        [14.7, 13],
+        [13, 12],
+      ],
+      raw: [
+        [128, 145],
+        [145, 157],
+      ],
+    })),
+  ),
 };
 const snapshot = (channel: string, value: number): ChannelSnapshot => ({
-  latest: { timestamp: now.toISOString(), source: "did", channel, value, unit: null }, history: [],
+  latest: { timestamp: now.toISOString(), source: "did", channel, value, unit: null },
+  history: [],
 });
 function props() {
-  return { token: "test", channels: new Map([["did:RPM", snapshot("RPM", 1200)], ["did:BFS", snapshot("BFS", 8.76 / 0.00049)]]),
-    status: { vehicle_state: { state: "engine_running", derived_at: now.toISOString() } } as StatusResponse };
+  return {
+    token: "test",
+    channels: new Map([
+      ["did:RPM", snapshot("RPM", 1200)],
+      ["did:BFS", snapshot("BFS", 8.76 / 0.00049)],
+    ]),
+    status: {
+      vehicle_state: { state: "engine_running", derived_at: now.toISOString() },
+    } as StatusResponse,
+  };
 }
 async function upload(name = "current.OsirisROM") {
-  await act(async () => { fireEvent.change(screen.getByLabelText("ROM file"), { target: { files: [new File(["test"], name)] } }); });
+  await act(async () => {
+    fireEvent.change(screen.getByLabelText("ROM file"), {
+      target: { files: [new File(["test"], name)] },
+    });
+  });
 }
-beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); routeControl(result); });
-afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(now);
+  routeControl(result);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+});
 
 describe("ROM maps panel", () => {
   it("uploads a file, displays two maps, and keeps slots 2–5 explicitly TBD", async () => {
@@ -52,12 +103,20 @@ describe("ROM maps panel", () => {
     expect(screen.getByLabelText("Map slot")).toBeDisabled();
     await upload();
     expect(screen.getAllByRole("option")).toHaveLength(5);
-    expect(inspect).toHaveBeenCalledWith("/control/rom/inspect", "test", expect.objectContaining({ method: "POST", body: expect.any(File) }));
+    expect(inspect).toHaveBeenCalledWith(
+      "/control/rom/inspect",
+      "test",
+      expect.objectContaining({ method: "POST", body: expect.any(File) }),
+    );
     expect(screen.getByRole("table", { name: "Map 1 Target AFR values" })).toBeInTheDocument();
-    expect(screen.getByRole("region", { name: "Map 1 Fuel Compensation" })).toHaveTextContent("TBD");
+    expect(screen.getByRole("region", { name: "Map 1 Fuel Compensation" })).toHaveTextContent(
+      "TBD",
+    );
     fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: "5" } });
     expect(screen.getByRole("region", { name: "Map 5 Target AFR" })).toHaveTextContent("TBD");
-    expect(screen.getByRole("region", { name: "Map 5 Fuel Compensation" })).toHaveTextContent("TBD");
+    expect(screen.getByRole("region", { name: "Map 5 Fuel Compensation" })).toHaveTextContent(
+      "TBD",
+    );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
@@ -67,7 +126,9 @@ describe("ROM maps panel", () => {
     expect(view.container.querySelectorAll("[data-trace]")).toHaveLength(0);
     fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
     expect(view.container.querySelectorAll('[data-trace="nearest"]')).toHaveLength(1);
-    act(() => { vi.advanceTimersByTime(3000); });
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
     expect(view.container.querySelectorAll("[data-trace]")).toHaveLength(0);
     expect(screen.getByText(/Waiting for fresh RPM and BFS/)).toBeInTheDocument();
   });
@@ -83,7 +144,10 @@ describe("ROM maps panel", () => {
   it("clears an old table when a replacement fails, and reports the error", async () => {
     render(<RomMapsPanel {...props()} />);
     await upload();
-    inspect.mockImplementation(async (path: string) => { if (path === "/control/rom/inspect") throw new Error("Unknown source hash"); return { profiles: [] }; });
+    inspect.mockImplementation(async (path: string) => {
+      if (path === "/control/rom/inspect") throw new Error("Unknown source hash");
+      return { profiles: [] };
+    });
     await upload("unknown.OsirisROM");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("Unknown source hash");
@@ -92,7 +156,11 @@ describe("ROM maps panel", () => {
   it("rejects the wrong extension without uploading and needs a token", async () => {
     const view = render(<RomMapsPanel {...props()} />);
     await upload("wrong.txt");
-    expect(inspect).not.toHaveBeenCalledWith("/control/rom/inspect", expect.anything(), expect.anything());
+    expect(inspect).not.toHaveBeenCalledWith(
+      "/control/rom/inspect",
+      expect.anything(),
+      expect.anything(),
+    );
     view.rerender(<RomMapsPanel {...props()} token="" />);
     expect(screen.getByLabelText("ROM file")).toBeDisabled();
   });
@@ -101,7 +169,8 @@ describe("ROM maps panel", () => {
     const p = props();
     p.status.vehicle_state!.state = "replay";
     const view = render(<RomMapsPanel {...p} />);
-    await upload(); fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
+    await upload();
+    fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
     expect(view.container.querySelectorAll("[data-trace]")).toHaveLength(0);
     expect(screen.getByText(/Replay active/)).toBeInTheDocument();
   });
@@ -111,59 +180,132 @@ describe("ROM maps panel", () => {
 
 const X = "mem:ECM_FUEL_TARGET_MAP_X_TRACE";
 const Y = "mem:ECM_ENGINE_SPEED_RAM";
-const NOTE = "No capture profile polls the fuel-target trace channels: the rom-trace profile was retired.";
+const NOTE =
+  "No capture profile polls the fuel-target trace channels: the rom-trace profile was retired.";
 function withTrace(verified: boolean): RomInspection {
   const trace: TableTrace = {
     x: verified
-      ? { channel: X, axis_mapping: "verified", scale: 1, offset: 0, evidence: "synthetic", request_channel: "mem:fuel_axis" }
-      : { channel: X, axis_mapping: "unverified", scale: null, offset: null, evidence: "Not settled: needs a capture beside BFS.", request_channel: "mem:fuel_axis" },
-    y: { channel: Y, axis_mapping: "verified", scale: 1, offset: 0, evidence: "rpm", request_channel: "mem:spark" },
+      ? {
+          channel: X,
+          axis_mapping: "verified",
+          scale: 1,
+          offset: 0,
+          evidence: "synthetic",
+          request_channel: "mem:fuel_axis",
+        }
+      : {
+          channel: X,
+          axis_mapping: "unverified",
+          scale: null,
+          offset: null,
+          evidence: "Not settled: needs a capture beside BFS.",
+          request_channel: "mem:fuel_axis",
+        },
+    y: {
+      channel: Y,
+      axis_mapping: "verified",
+      scale: 1,
+      offset: 0,
+      evidence: "rpm",
+      request_channel: "mem:spark",
+    },
     unavailable_note: NOTE,
   };
-  return { ...result, tables: result.tables.map((t) => (t.status === "available" ? { ...t, trace } : t)) };
+  return {
+    ...result,
+    tables: result.tables.map((t) => (t.status === "available" ? { ...t, trace } : t)),
+  };
 }
 /** Memory rows arrive on the stream keyed `obd:mem:<NAME>`. */
-const memRow = (channel: string, value: number, at = now): [string, ChannelSnapshot] => [`obd:${channel}`, {
-  latest: { timestamp: at.toISOString(), source: "obd", channel, value, unit: null }, history: [],
-}];
+const memRow = (channel: string, value: number, at = now): [string, ChannelSnapshot] => [
+  `obd:${channel}`,
+  {
+    latest: { timestamp: at.toISOString(), source: "obd", channel, value, unit: null },
+    history: [],
+  },
+];
 function traceProps(x: number, y: number, status: Partial<StatusResponse> = {}) {
   const base = props();
   const channels = new Map([...base.channels, memRow(X, x), memRow(Y, y)]);
   return { ...base, channels, status: { ...base.status, ...status } as StatusResponse };
 }
-async function confirm() { fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ })); }
-const polling = (memory: string[], extra: Record<string, unknown> = {}) => ({
-  capture_profile: { active: true, name: "tuning", started_at: now.toISOString(), memory, mode22_enabled: true, ...extra },
-} as unknown as Partial<StatusResponse>);
+async function confirm() {
+  fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
+}
+const polling = (memory: string[], extra: Record<string, unknown> = {}) =>
+  ({
+    capture_profile: {
+      active: true,
+      name: "tuning",
+      started_at: now.toISOString(),
+      memory,
+      mode22_enabled: true,
+      ...extra,
+    },
+  }) as unknown as Partial<StatusResponse>;
 
 describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
   it("refuses the ECM cell while the X-trace mapping is unverified, and says why", async () => {
     routeControl(withTrace(false));
-    const view = render(<RomMapsPanel {...traceProps(11.46, 1200, polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]))} />);
-    await upload(); await confirm();
+    const view = render(
+      <RomMapsPanel
+        {...traceProps(
+          11.46,
+          1200,
+          polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
+        )}
+      />,
+    );
+    await upload();
+    await confirm();
     expect(view.container.querySelectorAll('[data-trace="nearest"]')).toHaveLength(1);
     expect(view.container.querySelectorAll("[data-ecm]")).toHaveLength(0);
-    expect(screen.getByText(/ECM cell not drawn: how the X trace \(mem:ECM_FUEL_TARGET_MAP_X_TRACE\).*not verified/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /ECM cell not drawn: how the X trace \(mem:ECM_FUEL_TARGET_MAP_X_TRACE\).*not verified/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Not settled: needs a capture beside BFS/)).toBeInTheDocument();
   });
 
   it("outlines the ECM cell beside the inferred one and states the disagreement", async () => {
     routeControl(withTrace(true));
-    const view = render(<RomMapsPanel {...traceProps(11.46, 1200, polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]))} />);
-    await upload(); await confirm();
+    const view = render(
+      <RomMapsPanel
+        {...traceProps(
+          11.46,
+          1200,
+          polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
+        )}
+      />,
+    );
+    await upload();
+    await confirm();
     const ecm = view.container.querySelectorAll('[data-ecm="cell"]');
     expect(ecm).toHaveLength(1);
     expect(ecm[0]).toHaveAttribute("aria-label", expect.stringContaining("11.46 ms"));
-    expect(view.container.querySelector('[data-trace="nearest"]')).toHaveAttribute("aria-label", expect.stringContaining("8.76 ms"));
-    expect(screen.getByRole("alert")).toHaveTextContent("ECM cell differs from the inferred cell by +1 column (ECM 11.46 vs inferred 8.76 ms)");
-    act(() => { vi.advanceTimersByTime(300); });
+    expect(view.container.querySelector('[data-trace="nearest"]')).toHaveAttribute(
+      "aria-label",
+      expect.stringContaining("8.76 ms"),
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "ECM cell differs from the inferred cell by +1 column (ECM 11.46 vs inferred 8.76 ms)",
+    );
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
     expect(screen.getByText(/Disagreed on 1 of 1 ECM samples/)).toBeInTheDocument();
   });
 
   it("says the cells agree when they do", async () => {
     routeControl(withTrace(true));
-    render(<RomMapsPanel {...traceProps(8.8, 1210, polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]))} />);
-    await upload(); await confirm();
+    render(
+      <RomMapsPanel
+        {...traceProps(8.8, 1210, polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]))}
+      />,
+    );
+    await upload();
+    await confirm();
     expect(screen.getByText("ECM cell and inferred cell agree.")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
@@ -172,25 +314,54 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
     routeControl(withTrace(true));
     const status = {
       ...polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
-      health: { obd_scheduler: { requests: [
-        { kind: "memory", channel: "mem:fuel_axis", configured_rate_hz: 8, requests_sent: 12, responses: 0, timeouts: 12, negative_responses: 0, backed_off: true, last_response_age_seconds: null },
-      ] } },
+      health: {
+        obd_scheduler: {
+          requests: [
+            {
+              kind: "memory",
+              channel: "mem:fuel_axis",
+              configured_rate_hz: 8,
+              requests_sent: 12,
+              responses: 0,
+              timeouts: 12,
+              negative_responses: 0,
+              backed_off: true,
+              last_response_age_seconds: null,
+            },
+          ],
+        },
+      },
     } as unknown as Partial<StatusResponse>;
     const view = render(<RomMapsPanel {...traceProps(11.46, 1200, status)} />);
-    await upload(); await confirm();
+    await upload();
+    await confirm();
     expect(view.container.querySelectorAll("[data-ecm]")).toHaveLength(1);
-    act(() => { vi.advanceTimersByTime(3300); });
+    act(() => {
+      vi.advanceTimersByTime(3300);
+    });
     expect(view.container.querySelectorAll("[data-ecm]")).toHaveLength(0);
     const line = view.container.querySelector('[data-trace-liveness="not_answering"]');
     expect(line).toHaveTextContent("polled but not answering");
-    expect(line).toHaveTextContent("mem:ECM_FUEL_TARGET_MAP_X_TRACE (mem:fuel_axis): sent 12, responses 0, timeouts 12, NRCs 0");
+    expect(line).toHaveTextContent(
+      "mem:ECM_FUEL_TARGET_MAP_X_TRACE (mem:fuel_axis): sent 12, responses 0, timeouts 12, NRCs 0",
+    );
   });
 
   it("names the active profile when it does not poll the trace, and offers no nonexistent profile", async () => {
-    routeControl(withTrace(true), { profiles: { profiles: [{ name: "tuning", memory: ["ECM_ENGINE_SPEED_RAM"], mode22_enabled: true }] } });
+    routeControl(withTrace(true), {
+      profiles: {
+        profiles: [{ name: "tuning", memory: ["ECM_ENGINE_SPEED_RAM"], mode22_enabled: true }],
+      },
+    });
     const onNavigate = vi.fn();
     const base = props();
-    const view = render(<RomMapsPanel {...base} status={{ ...base.status, ...polling(["ECM_ENGINE_SPEED_RAM"]) } as StatusResponse} onNavigate={onNavigate} />);
+    const view = render(
+      <RomMapsPanel
+        {...base}
+        status={{ ...base.status, ...polling(["ECM_ENGINE_SPEED_RAM"]) } as StatusResponse}
+        onNavigate={onNavigate}
+      />,
+    );
     await upload();
     const line = view.container.querySelector('[data-trace-liveness="not_polled"]');
     expect(line).toHaveTextContent("not polled by the active profile “tuning”");
@@ -200,12 +371,26 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
   });
 
   it("offers a catalog profile that carries the trace channels on Logging", async () => {
-    routeControl(withTrace(true), { profiles: { profiles: [
-      { name: "rom-trace", memory: ["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"], mode22_enabled: true },
-    ] } });
+    routeControl(withTrace(true), {
+      profiles: {
+        profiles: [
+          {
+            name: "rom-trace",
+            memory: ["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"],
+            mode22_enabled: true,
+          },
+        ],
+      },
+    });
     const onNavigate = vi.fn();
     const base = props();
-    render(<RomMapsPanel {...base} status={{ ...base.status, ...polling([]) } as StatusResponse} onNavigate={onNavigate} />);
+    render(
+      <RomMapsPanel
+        {...base}
+        status={{ ...base.status, ...polling([]) } as StatusResponse}
+        onNavigate={onNavigate}
+      />,
+    );
     await upload();
     expect(screen.getByText(/“rom-trace” carries them — start it on Logging/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open Logging" }));
@@ -215,18 +400,38 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
   it("names no-ECM-data when the key is off", async () => {
     routeControl(withTrace(true));
     const base = props();
-    const view = render(<RomMapsPanel {...base} status={{ vehicle_state: { state: "engine_off", derived_at: now.toISOString() } } as StatusResponse} />);
+    const view = render(
+      <RomMapsPanel
+        {...base}
+        status={
+          {
+            vehicle_state: { state: "engine_off", derived_at: now.toISOString() },
+          } as StatusResponse
+        }
+      />,
+    );
     await upload();
-    expect(view.container.querySelector('[data-trace-liveness="no_ecm_data"]')).toHaveTextContent("no ECM data (vehicle state engine_off)");
+    expect(view.container.querySelector('[data-trace-liveness="no_ecm_data"]')).toHaveTextContent(
+      "no ECM data (vehicle state engine_off)",
+    );
   });
 
   it("refuses to call any trace active when the ECU calibration id contradicts the registry", async () => {
     routeControl(withTrace(true));
-    const status = { ...polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]), calibration_matches_registry: false, ecu_calibration_id: "ZS44A-OTHER", registry_revision: "current", registry_calibration_id: "ZS44A" } as Partial<StatusResponse>;
+    const status = {
+      ...polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]),
+      calibration_matches_registry: false,
+      ecu_calibration_id: "ZS44A-OTHER",
+      registry_revision: "current",
+      registry_calibration_id: "ZS44A",
+    } as Partial<StatusResponse>;
     const view = render(<RomMapsPanel {...traceProps(11.46, 1200, status)} />);
-    await upload(); await confirm();
+    await upload();
+    await confirm();
     expect(view.container.querySelectorAll("[data-trace], [data-ecm]")).toHaveLength(0);
-    expect(screen.getAllByText(/ECU reports calibration id ZS44A-OTHER, which does not match/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(/ECU reports calibration id ZS44A-OTHER, which does not match/).length,
+    ).toBeGreaterThan(0);
   });
 });
 
@@ -243,40 +448,96 @@ describe("ROM maps — coverage (W05.7–W05.9)", () => {
   });
 
   it("shades cells by sample count for the selected log, never-visited distinct from thin", async () => {
-    routeControl(withTrace(true), { residency: {
-      available: true, session_id: "_capture-tuning-x", table: "fuel_targets", revision: "current", reason: null,
-      x_axis: [8.76, 11.46], y_axis: [1200, 1600], counts: [[0, 3], [40, 12]], dwell_s: [[0, 0.4], [5, 1.5]], samples: 55, outside_axes: 2,
-    } });
+    routeControl(withTrace(true), {
+      residency: {
+        available: true,
+        session_id: "_capture-tuning-x",
+        table: "fuel_targets",
+        revision: "current",
+        reason: null,
+        x_axis: [8.76, 11.46],
+        y_axis: [1200, 1600],
+        counts: [
+          [0, 3],
+          [40, 12],
+        ],
+        dwell_s: [
+          [0, 0.4],
+          [5, 1.5],
+        ],
+        samples: 55,
+        outside_axes: 2,
+      },
+    });
     const view = render(<RomMapsPanel {...props()} selectedLogId="_capture-tuning-x" />);
     await upload();
-    await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" })); });
-    expect(inspect).toHaveBeenCalledWith("/control/sessions/_capture-tuning-x/cell-residency?table=fuel_targets", "test");
-    const cells = [...view.container.querySelectorAll("td")].map((td) => td.getAttribute("data-coverage"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" }));
+    });
+    expect(inspect).toHaveBeenCalledWith(
+      "/control/sessions/_capture-tuning-x/cell-residency?table=fuel_targets",
+      "test",
+    );
+    const cells = [...view.container.querySelectorAll("td")].map((td) =>
+      td.getAttribute("data-coverage"),
+    );
     expect(cells).toEqual(["unvisited", "thin", "visited", "visited"]);
-    expect(view.container.querySelectorAll("td")[1]).toHaveAttribute("title", expect.stringContaining("3 samples"));
+    expect(view.container.querySelectorAll("td")[1]).toHaveAttribute(
+      "title",
+      expect.stringContaining("3 samples"),
+    );
     expect(screen.getByText(/55 ECM samples, 2 outside the axes/)).toBeInTheDocument();
   });
 
   it("names the reason a log has no coverage instead of drawing an empty grid", async () => {
-    routeControl(withTrace(true), { residency: {
-      available: false, session_id: "old", table: "fuel_targets", reason: "not_captured",
-      message: "This log holds no mem:ECM_FUEL_TARGET_MAP_X_TRACE", missing: [X],
-    } });
+    routeControl(withTrace(true), {
+      residency: {
+        available: false,
+        session_id: "old",
+        table: "fuel_targets",
+        reason: "not_captured",
+        message: "This log holds no mem:ECM_FUEL_TARGET_MAP_X_TRACE",
+        missing: [X],
+      },
+    });
     const view = render(<RomMapsPanel {...props()} selectedLogId="old" />);
     await upload();
-    await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" })); });
-    expect(screen.getByText(/No coverage for old: This log holds no mem:ECM_FUEL_TARGET_MAP_X_TRACE/)).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" }));
+    });
+    expect(
+      screen.getByText(/No coverage for old: This log holds no mem:ECM_FUEL_TARGET_MAP_X_TRACE/),
+    ).toBeInTheDocument();
     expect(view.container.querySelectorAll("[data-coverage]")).toHaveLength(0);
   });
 
   it("refuses to overlay a log binned on another revision's axes", async () => {
-    routeControl(withTrace(true), { residency: {
-      available: true, session_id: "old", table: "fuel_targets", revision: "older", reason: null,
-      x_axis: [8, 12], y_axis: [1200, 1600], counts: [[1, 1], [1, 1]], dwell_s: [[0, 0], [0, 0]], samples: 4, outside_axes: 0,
-    } });
+    routeControl(withTrace(true), {
+      residency: {
+        available: true,
+        session_id: "old",
+        table: "fuel_targets",
+        revision: "older",
+        reason: null,
+        x_axis: [8, 12],
+        y_axis: [1200, 1600],
+        counts: [
+          [1, 1],
+          [1, 1],
+        ],
+        dwell_s: [
+          [0, 0],
+          [0, 0],
+        ],
+        samples: 4,
+        outside_axes: 0,
+      },
+    });
     const view = render(<RomMapsPanel {...props()} selectedLogId="old" />);
     await upload();
-    await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" })); });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" }));
+    });
     expect(screen.getByText(/ran revision older, whose axes differ/)).toBeInTheDocument();
     expect(view.container.querySelectorAll("[data-coverage]")).toHaveLength(0);
   });
@@ -285,11 +546,16 @@ describe("ROM maps — coverage (W05.7–W05.9)", () => {
     routeControl(withTrace(true));
     const status = polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"]);
     const view = render(<RomMapsPanel {...traceProps(11.46, 1200, status)} />);
-    await upload(); await confirm();
-    await act(async () => { fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" })); });
+    await upload();
+    await confirm();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Coverage overlay Map 1 Target AFR" }));
+    });
     for (let i = 1; i <= 5; i += 1) {
       const at = new Date(now.getTime() + i * 125);
-      act(() => { vi.setSystemTime(at); });
+      act(() => {
+        vi.setSystemTime(at);
+      });
       const p = traceProps(11.46, 1200, status);
       p.channels = new Map([...p.channels, memRow(X, 11.46, at), memRow(Y, 1200, at)]);
       view.rerender(<RomMapsPanel {...p} />);
@@ -297,11 +563,25 @@ describe("ROM maps — coverage (W05.7–W05.9)", () => {
     expect(view.container.querySelectorAll("td")[1]).toHaveAttribute("data-coverage", "visited");
     expect(view.container.querySelectorAll("td")[0]).toHaveAttribute("data-coverage", "unvisited");
     expect(screen.getByText(/Live coverage for this capture: 6 ECM samples/)).toBeInTheDocument();
-    const ended = traceProps(11.46, 1200, { capture_profile: { active: false, name: "default", memory: [] } } as unknown as Partial<StatusResponse>);
+    const ended = traceProps(11.46, 1200, {
+      capture_profile: { active: false, name: "default", memory: [] },
+    } as unknown as Partial<StatusResponse>);
     view.rerender(<RomMapsPanel {...ended} />);
     expect(screen.getByText(/No capture is recording/)).toBeInTheDocument();
-    view.rerender(<RomMapsPanel {...traceProps(11.46, 1200, polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"], { started_at: "2026-09-21T13:00:00Z" }))} />);
-    expect(screen.getByText(/Live coverage for this capture: [01] ECM samples/)).toBeInTheDocument();
+    view.rerender(
+      <RomMapsPanel
+        {...traceProps(
+          11.46,
+          1200,
+          polling(["ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_ENGINE_SPEED_RAM"], {
+            started_at: "2026-09-21T13:00:00Z",
+          }),
+        )}
+      />,
+    );
+    expect(
+      screen.getByText(/Live coverage for this capture: [01] ECM samples/),
+    ).toBeInTheDocument();
   });
 
   it("opens and closes a drive presentation of one table", async () => {

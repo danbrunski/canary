@@ -15,10 +15,7 @@ interface DatasetHealthPanelProps {
  *  verdict + reasons, per-session coverage, and channel availability so the
  *  operator knows what to capture next before burning Pi cycles. */
 export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => getDatasetHealth(token, signal),
-    [token],
-  );
+  const fetcher = useCallback((signal: AbortSignal) => getDatasetHealth(token, signal), [token]);
   const { data, error, loading } = useControlResource(fetcher, {
     enabled: Boolean(token),
     intervalMs: 20000,
@@ -39,17 +36,13 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
       >
         {(data) => {
           const ready = data.readiness.ready;
-          const channels = Object.entries(data.channel_availability).sort(
-            (a, b) => b[1] - a[1],
-          );
+          const channels = Object.entries(data.channel_availability).sort((a, b) => b[1] - a[1]);
           return (
             <>
               <div
                 className={cn(
                   "mb-3 rounded-[8px] border px-3 py-2 text-[0.9rem] font-semibold",
-                  ready
-                    ? "border-ok/45 bg-ok/10 text-ok"
-                    : "border-warn/55 bg-warn/10 text-warn",
+                  ready ? "border-ok/45 bg-ok/10 text-ok" : "border-warn/55 bg-warn/10 text-warn",
                 )}
               >
                 {ready ? "✓ Ready to retrain" : "✗ Not ready to retrain"}
@@ -91,9 +84,7 @@ export function DatasetHealthPanel({ token }: DatasetHealthPanelProps) {
                         </span>
                       )}
                     </span>
-                    <span className="font-num tabular-nums text-fg-dim">
-                      {s.row_count} rows
-                    </span>
+                    <span className="font-num tabular-nums text-fg-dim">{s.row_count} rows</span>
                   </div>
                 ))}
               </div>

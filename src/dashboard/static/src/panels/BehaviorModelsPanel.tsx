@@ -3,12 +3,7 @@ import type { ReactNode } from "react";
 import { Curve } from "../components/Curve";
 import { Heatmap } from "../components/Heatmap";
 import { Sparkline } from "../components/Sparkline";
-import {
-  SEVERITY_HEX,
-  SEVERITY_TEXT,
-  binIndex,
-  fmt,
-} from "../lib/behaviorOverlay";
+import { SEVERITY_HEX, SEVERITY_TEXT, binIndex, fmt } from "../lib/behaviorOverlay";
 import {
   cn,
   panelClass,
@@ -45,11 +40,7 @@ interface BehaviorModelsPanelProps {
  *  This turns the dashboard's "what does normal look like?" reference into
  *  "where are we relative to normal, right now?" — the same deviation the
  *  IF/LSTM consume, made glanceable. */
-export function BehaviorModelsPanel({
-  data,
-  error,
-  live,
-}: BehaviorModelsPanelProps) {
+export function BehaviorModelsPanel({ data, error, live }: BehaviorModelsPanelProps) {
   if (error) {
     return (
       <Frame>
@@ -70,9 +61,8 @@ export function BehaviorModelsPanel({
     return (
       <Frame>
         <p className={placeholderClass}>
-          no surfaces fitted yet — run{" "}
-          <code>scripts/refit_behavior_models.py</code> once a session is
-          on disk.
+          no surfaces fitted yet — run <code>scripts/refit_behavior_models.py</code> once a session
+          is on disk.
         </p>
       </Frame>
     );
@@ -120,10 +110,7 @@ function Frame({
             </span>
           )}
           {streaming && (
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-ok"
-              title="live overlay streaming"
-            />
+            <span className="h-1.5 w-1.5 rounded-full bg-ok" title="live overlay streaming" />
           )}
           {count && <span className={panelCountClass}>{count}</span>}
         </div>
@@ -153,10 +140,8 @@ function ModelCard({
   // B01.4: a daemon that names the reason distinguishes off-map from an
   // ineligible tick (unmet serving condition, missing/stale actual).
   const noPrediction = Boolean(active && active.expected === null);
-  const offMap =
-    noPrediction && (active?.reason == null || active.reason === "off_map");
-  const ineligibleReason =
-    noPrediction && !offMap ? (active?.reason ?? null) : null;
+  const offMap = noPrediction && (active?.reason == null || active.reason === "off_map");
+  const ineligibleReason = noPrediction && !offMap ? (active?.reason ?? null) : null;
 
   return (
     <article
@@ -166,12 +151,8 @@ function ModelCard({
       )}
     >
       <header className="mb-1 flex items-baseline justify-between gap-2">
-        <h3 className="m-0 text-[0.92rem] font-semibold tracking-[0.02em] text-fg">
-          {model.name}
-        </h3>
-        <span className="font-num text-[0.7rem] tabular-nums text-fg-dim">
-          v{model.version}
-        </span>
+        <h3 className="m-0 text-[0.92rem] font-semibold tracking-[0.02em] text-fg">{model.name}</h3>
+        <span className="font-num text-[0.7rem] tabular-nums text-fg-dim">v{model.version}</span>
       </header>
       <div className="mb-2 flex flex-wrap gap-x-3.5 gap-y-2 font-num text-[0.75rem] tabular-nums text-fg-dim">
         <span>
@@ -183,16 +164,15 @@ function ModelCard({
         {model.operating_mode && <span>mode {model.operating_mode}</span>}
         {model.fit.tune_revision && <span>tune {model.fit.tune_revision}</span>}
         <span>n = {model.fit.sample_count.toLocaleString()}</span>
-        {model.fit.r_squared !== null && (
-          <span>r² {model.fit.r_squared.toFixed(3)}</span>
-        )}
+        {model.fit.r_squared !== null && <span>r² {model.fit.r_squared.toFixed(3)}</span>}
       </div>
       <ModelStatus model={model} />
       {(model.conditions ?? []).length > 0 && (
         <p className="mb-2 text-[0.72rem] text-fg-dim">
-          Steady-state only: {(model.conditions ?? []).map((condition) => (
-            `${condition.channel} ≤ ±${condition.max_abs_per_second}/s`
-          )).join(", ")}
+          Steady-state only:{" "}
+          {(model.conditions ?? [])
+            .map((condition) => `${condition.channel} ≤ ±${condition.max_abs_per_second}/s`)
+            .join(", ")}
         </p>
       )}
 
@@ -212,11 +192,7 @@ function ModelCard({
         ineligibleReason={ineligibleReason}
       />
 
-      {model.notes && (
-        <p className="mt-2 mb-0 text-[0.75rem] text-fg-dim italic">
-          {model.notes}
-        </p>
-      )}
+      {model.notes && <p className="mt-2 mb-0 text-[0.75rem] text-fg-dim italic">{model.notes}</p>}
     </article>
   );
 }
@@ -296,7 +272,8 @@ function ModelStatus({ model }: { model: BehaviorModel }) {
               {scope.verdict}
             </span>
           )}
-          {scope.test_drives && scope.test_drives.length > 0 &&
+          {scope.test_drives &&
+            scope.test_drives.length > 0 &&
             ` · ${scope.test_drives.length} test drive${scope.test_drives.length === 1 ? "" : "s"}`}
           {scope.verdict !== "none" && scope.tune_revision && ` · on ${scope.tune_revision}`}
           {scope.failures && scope.failures.length > 0 && ` · ${scope.failures[0]}`}
@@ -337,8 +314,8 @@ function LiveReadout({
   if (offMap) {
     return (
       <p className="mt-2 mb-0 text-[0.72rem] text-fg-dim italic">
-        off-map — operating point outside the fitted envelope (deviation
-        unavailable, anomaly scoring blind here)
+        off-map — operating point outside the fitted envelope (deviation unavailable, anomaly
+        scoring blind here)
       </p>
     );
   }
@@ -434,8 +411,7 @@ function Surface1DView({
       <div className="flex gap-3.5 font-num text-[0.7rem] tabular-nums text-fg-dim">
         {model.axis.name}{" "}
         <span className="text-fg-dim">
-          ({model.axis.unit}) [{model.axis.domain[0].toFixed(0)}–
-          {model.axis.domain[1].toFixed(0)}]
+          ({model.axis.unit}) [{model.axis.domain[0].toFixed(0)}–{model.axis.domain[1].toFixed(0)}]
         </span>
       </div>
     </div>
@@ -472,9 +448,7 @@ function Surface2DView({
         cols={cols}
         xEdges={xAxis.bin_edges}
         yEdges={yAxis.bin_edges}
-        live={
-          live ? { x: live.x, y: live.y, severity: live.severity } : null
-        }
+        live={live ? { x: live.x, y: live.y, severity: live.severity } : null}
       />
       <div className="flex justify-between gap-3.5 font-num text-[0.7rem] tabular-nums text-fg-dim">
         <span>

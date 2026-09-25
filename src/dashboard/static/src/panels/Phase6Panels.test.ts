@@ -2,10 +2,7 @@ import { createElement } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import type {
-  DatasetHealthResponse,
-  TrainingRunsResponse,
-} from "../types";
+import type { DatasetHealthResponse, TrainingRunsResponse } from "../types";
 import { mockHttp } from "../test/harness";
 
 const mocks = mockHttp(["getDatasetHealth", "getTrainingRuns", "submitJob"]);
@@ -53,9 +50,7 @@ describe("DatasetHealthPanel", () => {
     mocks.getDatasetHealth.mockResolvedValue(resp);
     render(createElement(DatasetHealthPanel, { token: "secret" }));
     expect(await screen.findByText("✗ Not ready to retrain")).toBeInTheDocument();
-    expect(
-      screen.getByText("only 1 usable sessions (need ≥ 3)"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("only 1 usable sessions (need ≥ 3)")).toBeInTheDocument();
     expect(screen.getByText("obd:RPM")).toBeInTheDocument();
   });
 });

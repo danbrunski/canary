@@ -96,9 +96,7 @@ describe("AnomalyPanel feedback labelling", () => {
 
   it("has no label buttons without a token", () => {
     render(createElement(AnomalyPanel, { events: [EVENT] }));
-    expect(
-      screen.queryByRole("button", { name: "mark false positive" }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "mark false positive" })).not.toBeInTheDocument();
     expect(mocks.getFeedback).not.toHaveBeenCalled();
   });
 
@@ -128,9 +126,7 @@ describe("AnomalyPanel feedback labelling", () => {
     fireEvent.change(await screen.findByLabelText("clarifying question"), {
       target: { value: "dirt road or heavy rain?" },
     });
-    expect(
-      await screen.findByText(/must both be filled/),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/must both be filled/)).toBeInTheDocument();
     const fp = screen.getByRole("button", { name: "mark false positive" });
     expect(fp).toBeDisabled();
     fireEvent.click(fp);

@@ -103,10 +103,7 @@ export function Workbench({ active, onNavigate, data }: WorkbenchProps) {
               <button
                 key={item.id}
                 type="button"
-                className={cn(
-                  navItemClass(active === item.id),
-                  item.planned && "text-fg-faint",
-                )}
+                className={cn(navItemClass(active === item.id), item.planned && "text-fg-faint")}
                 aria-current={active === item.id ? "page" : undefined}
                 onClick={() => onNavigate(item.id)}
               >
@@ -158,9 +155,7 @@ function renderItem(
     case "system-data-sources":
       return <DataSourcesPanel channels={d.channels} status={d.status} />;
     case "diag-anomalies":
-      return (
-        <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />
-      );
+      return <AnomalyPanel events={d.events} token={d.token} liveScores={d.liveScores} />;
     case "system-info":
       return (
         <SystemPanel
@@ -189,7 +184,9 @@ function renderItem(
     case "system-profiles":
       return <ProfilesPanel token={d.token} />;
     case "system-capture-profiles":
-      return <CaptureProfilesPanel token={d.token} status={d.status} authoring showRunner={false} />;
+      return (
+        <CaptureProfilesPanel token={d.token} status={d.status} authoring showRunner={false} />
+      );
     case "system-power":
       return <PowerPanel token={d.token} />;
     case "observe-charts":
@@ -215,9 +212,7 @@ function renderItem(
     case "model-thresholds":
       return <TuningPanel token={d.token} />;
     case "models-health":
-      return (
-        <ModelHealthPanel status={d.status} statusError={d.statusError} />
-      );
+      return <ModelHealthPanel status={d.status} statusError={d.statusError} />;
     case "system-sessions":
       return <SessionsPanel token={d.token} companion={d.companion} />;
     case "model-dataset-health":
@@ -242,9 +237,21 @@ function renderItem(
     case "tuning-calibration":
       return <CalibrationPage token={d.token} status={d.status} />;
     case "tuning-rom-editor":
-      return <PlaceholderPanel title="ROM Editor" task="planned" summary="ROM editing is reserved for a later implementation." />;
+      return (
+        <PlaceholderPanel
+          title="ROM Editor"
+          task="planned"
+          summary="ROM editing is reserved for a later implementation."
+        />
+      );
     case "tuning-flash":
-      return <PlaceholderPanel title="Flash" task="W07" summary="Module programming waits on the server-side flash interlocks." />;
+      return (
+        <PlaceholderPanel
+          title="Flash"
+          task="W07"
+          summary="Module programming waits on the server-side flash interlocks."
+        />
+      );
   }
 }
 

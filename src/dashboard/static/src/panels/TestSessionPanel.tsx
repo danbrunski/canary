@@ -11,7 +11,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { getCurrentCapture, getPreflight, getTestProfiles, startCapture, stopCapture } from "../api/http";
+import {
+  getCurrentCapture,
+  getPreflight,
+  getTestProfiles,
+  startCapture,
+  stopCapture,
+} from "../api/http";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
 import { useTagQueue } from "../hooks/useTagQueue";
@@ -50,8 +56,14 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
   // allows it (loopback, unconfigured) or 401s (token required). Two
   // independent resources (rather than one combined fetch) so a failure on
   // one side doesn't blank out the other's last-known-good value.
-  const captureFetcher = useCallback((signal: AbortSignal) => getCurrentCapture(token, signal), [token]);
-  const preflightFetcher = useCallback((signal: AbortSignal) => getPreflight(token, signal), [token]);
+  const captureFetcher = useCallback(
+    (signal: AbortSignal) => getCurrentCapture(token, signal),
+    [token],
+  );
+  const preflightFetcher = useCallback(
+    (signal: AbortSignal) => getPreflight(token, signal),
+    [token],
+  );
   const captureRes = useControlResource(captureFetcher, { intervalMs: 5000 });
   const preflightRes = useControlResource(preflightFetcher, { intervalMs: 5000 });
   const capture = captureRes.data?.capture ?? null;
@@ -100,9 +112,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
   // Settle the selection once profiles arrive.
   useEffect(() => {
     if (profiles.length === 0) return;
-    setSelectedProfileId((cur) =>
-      profiles.some((p) => p.id === cur) ? cur : profiles[0].id,
-    );
+    setSelectedProfileId((cur) => (profiles.some((p) => p.id === cur) ? cur : profiles[0].id));
   }, [profiles]);
 
   // 1 Hz tick so the elapsed clock stays live.

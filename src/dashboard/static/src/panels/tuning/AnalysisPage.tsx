@@ -94,11 +94,7 @@ function SessionChooser({
   return (
     <Panel
       title="Sessions"
-      count={
-        choice.revision
-          ? `all on ${choice.revision}`
-          : `${choice.sessions.length} chosen`
-      }
+      count={choice.revision ? `all on ${choice.revision}` : `${choice.sessions.length} chosen`}
       actions={
         <label className="flex items-center gap-1.5 text-xs text-fg-dim">
           <input
@@ -175,12 +171,13 @@ function FloorNote({ floor }: { floor: NoiseFloor | null | undefined }) {
   }
   return (
     <p className="m-0 text-xs text-fg-dim">
-      Noise floor (null run): sd {floor.sd?.toFixed(2)} {floor.unit === "percent" ? "%" : floor.unit}
+      Noise floor (null run): sd {floor.sd?.toFixed(2)}{" "}
+      {floor.unit === "percent" ? "%" : floor.unit}
       {floor.min != null && floor.max != null
         ? `, per-cell range ${floor.min.toFixed(2)} … ${floor.max.toFixed(2)}`
         : ", per-cell range not recorded"}
-      {` over ${floor.n_cells} cells. Measured under: ${floor.conditions}.`} A result inside the band
-      is not distinguishable from changing nothing.
+      {` over ${floor.n_cells} cells. Measured under: ${floor.conditions}.`} A result inside the
+      band is not distinguishable from changing nothing.
     </p>
   );
 }
@@ -191,7 +188,8 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
   const rangeLo = floor.available && floor.min != null ? floor.min : -sd;
   const rangeHi = floor.available && floor.max != null ? floor.max : sd;
   const values = result.bands.map((b) => b.error_pct ?? 0);
-  const limit = Math.max(3, ...values.map((v) => Math.abs(v)), Math.abs(rangeLo), Math.abs(rangeHi)) * 1.15;
+  const limit =
+    Math.max(3, ...values.map((v) => Math.abs(v)), Math.abs(rangeLo), Math.abs(rangeHi)) * 1.15;
   const H = 200;
   const W = Math.max(320, result.bands.length * 70);
   const y = (v: number) => H / 2 - (v / limit) * (H / 2 - 12);
@@ -232,7 +230,13 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
               height={Math.abs(y(v) - y(0))}
               fill={inside ? "#94a3ad" : v > 0 ? "#ffb547" : "#4fd6e0"}
             />
-            <text x={i * bw + bw / 2} y={v >= 0 ? top - 3 : top + Math.abs(y(v) - y(0)) + 10} textAnchor="middle" fontSize={10} fill="#e6edf3">
+            <text
+              x={i * bw + bw / 2}
+              y={v >= 0 ? top - 3 : top + Math.abs(y(v) - y(0)) + 10}
+              textAnchor="middle"
+              fontSize={10}
+              fill="#e6edf3"
+            >
               {v.toFixed(2)}% · n {band.n}
             </text>
             <text x={i * bw + bw / 2} y={H + 14} textAnchor="middle" fontSize={9} fill="#94a3ad">
@@ -318,7 +322,11 @@ function DeliveryView({ token, choice }: { token: string; choice: SessionChoice 
               <DeliveryChart result={result} />
             </>
           ) : (
-            <EmptyResult kind={result.unavailable_kind} gates={result.gates} unavailable={result.unavailable} />
+            <EmptyResult
+              kind={result.unavailable_kind}
+              gates={result.gates}
+              unavailable={result.unavailable}
+            />
           )}
           <FloorNote floor={result.noise_floor} />
           <UnavailableList items={result.unavailable} />
@@ -368,7 +376,12 @@ function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
           <>
             <label className="flex flex-col gap-1">
               Bank
-              <select className={selectClass} aria-label="Bank" value={bank} onChange={(e) => setBank(e.target.value)}>
+              <select
+                className={selectClass}
+                aria-label="Bank"
+                value={bank}
+                onChange={(e) => setBank(e.target.value)}
+              >
                 {Object.keys(result.banks).map((b) => (
                   <option key={b} value={b}>
                     {b === "b1" ? "Bank 1" : "Bank 2"}
@@ -378,7 +391,12 @@ function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
             </label>
             <label className="flex flex-col gap-1">
               Split
-              <select className={selectClass} aria-label="Split" value={split} onChange={(e) => setSplit(e.target.value)}>
+              <select
+                className={selectClass}
+                aria-label="Split"
+                value={split}
+                onChange={(e) => setSplit(e.target.value)}
+              >
                 <option value="pooled">Pooled</option>
                 {result.per_session.map((s) => (
                   <option key={s.session_id} value={s.session_id}>
@@ -403,11 +421,15 @@ function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
               label="Trim surface"
             />
           ) : (
-            <EmptyResult kind={result.unavailable_kind} gates={result.gates} unavailable={result.unavailable} />
+            <EmptyResult
+              kind={result.unavailable_kind}
+              gates={result.gates}
+              unavailable={result.unavailable}
+            />
           )}
           <p className="m-0 mt-1 text-xs text-fg-faint">
-            A pooled surface can hide a per-session effect — the −5 % hump of 2026-09-18 existed only on
-            the altitude trip. Use Split to check each session.
+            A pooled surface can hide a per-session effect — the −5 % hump of 2026-09-18 existed
+            only on the altitude trip. Use Split to check each session.
           </p>
           <UnavailableList items={result.unavailable} />
           <ConditionsBlock conditions={result.conditions} />
@@ -490,7 +512,11 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
                 label="Timing cells"
               />
             ) : (
-              <EmptyResult kind={result.unavailable_kind} gates={result.gates} unavailable={result.unavailable} />
+              <EmptyResult
+                kind={result.unavailable_kind}
+                gates={result.gates}
+                unavailable={result.unavailable}
+              />
             ))}
           {result && <UnavailableList items={result.unavailable} />}
           {result && <ConditionsBlock conditions={result.conditions} />}
@@ -507,7 +533,12 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
             ).map(([label, value, set]) => (
               <label key={label} className="flex flex-col gap-1">
                 {label}
-                <select className={selectClass} aria-label={label} value={value} onChange={(e) => set(e.target.value)}>
+                <select
+                  className={selectClass}
+                  aria-label={label}
+                  value={value}
+                  onChange={(e) => set(e.target.value)}
+                >
                   <option value="">choose</option>
                   {revisions.map((r) => (
                     <option key={r}>{r}</option>
@@ -517,7 +548,11 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
             ))}
             <label className="flex flex-col gap-1">
               Noise-floor channel (optional)
-              <input className={inputClass} value={floorChannel} onChange={(e) => setFloorChannel(e.target.value)} />
+              <input
+                className={inputClass}
+                value={floorChannel}
+                onChange={(e) => setFloorChannel(e.target.value)}
+              />
             </label>
             <button
               type="button"
@@ -550,12 +585,16 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
                 />
                 <p className="m-0 mt-1 text-xs text-warn">
                   {compare.cells.filter((c) => c.dropped).length} cell(s) outlined: timing dropped
-                  where {compare.revision_a} had advanced — the ECM's emergency retard, the only knock
-                  proxy this ECM offers.
+                  where {compare.revision_a} had advanced — the ECM's emergency retard, the only
+                  knock proxy this ECM offers.
                 </p>
               </>
             ) : (
-              <EmptyResult kind={compare.unavailable_kind} gates={compare.gates} unavailable={compare.unavailable} />
+              <EmptyResult
+                kind={compare.unavailable_kind}
+                gates={compare.gates}
+                unavailable={compare.unavailable}
+              />
             ))}
           {compare && <FloorNote floor={compare.noise_floor} />}
           {compare && <UnavailableList items={compare.unavailable} />}

@@ -41,7 +41,11 @@ describe("ExplorePanel", () => {
 
     expect(await screen.findByText("n=40")).toBeInTheDocument();
     expect(mocks.getBinnedAnalysis).toHaveBeenCalledWith(
-      expect.objectContaining({ value: "obd:SHORT_FUEL_TRIM_1", x: "obd:RPM", y: "obd:ENGINE_LOAD" }),
+      expect.objectContaining({
+        value: "obd:SHORT_FUEL_TRIM_1",
+        x: "obd:RPM",
+        y: "obd:ENGINE_LOAD",
+      }),
     );
   });
 

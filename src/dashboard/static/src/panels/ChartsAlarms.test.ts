@@ -42,9 +42,7 @@ describe("ChartsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /obd:RPM/ }));
     expect(screen.getByText("1/6 selected")).toBeInTheDocument();
     // Legend shows the selected series with its stats.
-    expect(
-      screen.getByText((t) => t.includes("min") && t.includes("avg")),
-    ).toBeInTheDocument();
+    expect(screen.getByText((t) => t.includes("min") && t.includes("avg"))).toBeInTheDocument();
   });
 
   it("pause toggles its label", () => {
@@ -85,9 +83,7 @@ describe("AlarmsPanel", () => {
 
     expect(screen.getByText("1 rules")).toBeInTheDocument();
     expect(screen.getByText("obd:COOLANT_TEMP")).toBeInTheDocument();
-    const stored = JSON.parse(
-      window.localStorage.getItem("canary.alarms") ?? "[]",
-    );
+    const stored = JSON.parse(window.localStorage.getItem("canary.alarms") ?? "[]");
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ channel: "obd:COOLANT_TEMP", value: 110 });
   });

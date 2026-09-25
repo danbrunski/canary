@@ -14,7 +14,13 @@ function channel(key: string, value: number): [string, ChannelSnapshot] {
   return [
     key,
     {
-      latest: { timestamp: "2026-07-19T12:00:00+00:00", source: "derived", channel: key, value, unit: "" },
+      latest: {
+        timestamp: "2026-07-19T12:00:00+00:00",
+        source: "derived",
+        channel: key,
+        value,
+        unit: "",
+      },
       history: [value],
     },
   ];
@@ -104,10 +110,7 @@ describe("TripPanel", () => {
       }),
     );
     expect(await screen.findByText("2026-07-19T110000")).toBeInTheDocument();
-    expect(mocks.getTripSummary).toHaveBeenCalledWith(
-      "2026-07-19T110000",
-      expect.anything(),
-    );
+    expect(mocks.getTripSummary).toHaveBeenCalledWith("2026-07-19T110000", expect.anything());
     expect(screen.getByText(/12\.3 km/)).toBeInTheDocument();
     expect(screen.getByText(/8\.9 L\/100km/)).toBeInTheDocument();
     expect(screen.getByText(/26\.4 mpg/)).toBeInTheDocument();

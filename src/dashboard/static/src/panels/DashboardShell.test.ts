@@ -45,9 +45,9 @@ describe("DashboardShell", () => {
         onToggleMode,
       }),
     );
-    expect(
-      screen.getByRole("button", { name: "switch to the driving screen" }),
-    ).toHaveTextContent("→ drive");
+    expect(screen.getByRole("button", { name: "switch to the driving screen" })).toHaveTextContent(
+      "→ drive",
+    );
   });
 
   it("always shows the status strip with a nominal anomaly state", () => {

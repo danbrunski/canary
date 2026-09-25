@@ -2,16 +2,10 @@ import { createElement } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type {
-  AcceptedBaselineOverrideSummary,
-  AnomalyEvent,
-  StatusResponse,
-} from "../types";
+import type { AcceptedBaselineOverrideSummary, AnomalyEvent, StatusResponse } from "../types";
 import { StatusStrip } from "./StatusStrip";
 
-function status(
-  overrides: StatusResponse["accepted_baseline_overrides"],
-): StatusResponse {
+function status(overrides: StatusResponse["accepted_baseline_overrides"]): StatusResponse {
   return {
     storage_path: "/tmp/canary",
     free_mb: 2048,

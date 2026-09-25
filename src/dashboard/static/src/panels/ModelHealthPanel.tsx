@@ -90,11 +90,7 @@ function HealthBody({ health }: { health: StatusHealth }) {
                   tone={featureDrift.missingFeatures.length > 0 ? "warn" : "ok"}
                 />
               </dl>
-              <RankedBars
-                values={featureDrift.topFeatures}
-                valueSuffix="sigma"
-                dangerAt={3}
-              />
+              <RankedBars values={featureDrift.topFeatures} valueSuffix="sigma" dangerAt={3} />
               {featureDrift.missingFeatures.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {featureDrift.missingFeatures.slice(0, 8).map((feature) => (
@@ -116,10 +112,7 @@ function HealthBody({ health }: { health: StatusHealth }) {
             <p className={placeholderClass}>no reconstruction drift snapshot.</p>
           ) : (
             <dl className={definitionListClass}>
-              <InfoRow
-                label="live mean"
-                value={formatNumberOrDash(reconDrift.liveMeanError)}
-              />
+              <InfoRow label="live mean" value={formatNumberOrDash(reconDrift.liveMeanError)} />
               <InfoRow
                 label="train ratio"
                 value={reconDrift.ratio === null ? "-" : `${reconDrift.ratio.toFixed(2)}x`}
@@ -220,11 +213,7 @@ function RankedBars({
               value={value}
               max={max}
               colorClass={
-                value >= dangerAt
-                  ? "bg-bad"
-                  : value >= dangerAt * 0.7
-                    ? "bg-warn"
-                    : "bg-accent-2"
+                value >= dangerAt ? "bg-bad" : value >= dangerAt * 0.7 ? "bg-warn" : "bg-accent-2"
               }
             />
           </div>
@@ -286,4 +275,3 @@ function latencyTone(value: number | null): "ok" | "warn" | "bad" {
   if (value > 250) return "warn";
   return "ok";
 }
-

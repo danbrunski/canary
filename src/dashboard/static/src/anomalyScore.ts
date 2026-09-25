@@ -53,11 +53,7 @@ export function windowReference(scores: number[]): number {
  *  threshold (IF) we scale against `windowRef`. Non-finite scores (the
  *  missing-features sentinel) pin to 100.
  */
-export function scoreView(
-  score: number,
-  threshold: number | null,
-  windowRef: number,
-): ScoreView {
+export function scoreView(score: number, threshold: number | null, windowRef: number): ScoreView {
   if (!Number.isFinite(score)) {
     return { raw: score, index: 100, level: "high" };
   }

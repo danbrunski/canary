@@ -8,11 +8,7 @@ import {
   statusStripClass,
   statusValueClass,
 } from "../styles";
-import type {
-  AcceptedBaselineOverrideSummary,
-  AnomalyEvent,
-  StatusResponse,
-} from "../types";
+import type { AcceptedBaselineOverrideSummary, AnomalyEvent, StatusResponse } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
 
@@ -91,12 +87,7 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
         {recent === null ? (
           <span className={cn(statusValueClass, "text-ok")}>nominal</span>
         ) : (
-          <span
-            className={cn(
-              statusValueClass,
-              recent.fresh ? "text-bad" : "text-warn",
-            )}
-          >
+          <span className={cn(statusValueClass, recent.fresh ? "text-bad" : "text-warn")}>
             {recent.fresh ? "● active" : "○ recent"} · {recent.label}
           </span>
         )}
@@ -106,8 +97,7 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
         <StatusItem label="alerts">
           <span className={statusValueClass}>
             {counters.emitted} emitted
-            {counters.suppressed_tuning > 0 &&
-              ` · ${counters.suppressed_tuning} tuned-out`}
+            {counters.suppressed_tuning > 0 && ` · ${counters.suppressed_tuning} tuned-out`}
           </span>
         </StatusItem>
       )}
@@ -136,10 +126,7 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
           {health.system.load_per_cpu != null && (
             <StatusItem label="cpu">
               <span
-                className={cn(
-                  statusValueClass,
-                  health.system.load_per_cpu > 0.85 && "text-warn",
-                )}
+                className={cn(statusValueClass, health.system.load_per_cpu > 0.85 && "text-warn")}
               >
                 {(health.system.load_per_cpu * 100).toFixed(0)}%
               </span>
@@ -149,9 +136,7 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
       )}
 
       <StatusItem label="model">
-        <span className={statusValueClass}>
-          {modelSummary(status)}
-        </span>
+        <span className={statusValueClass}>{modelSummary(status)}</span>
       </StatusItem>
 
       {overrides && (
@@ -167,9 +152,7 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
               <span className="text-warn"> · expired</span>
             )}
           </button>
-          {overridesOpen && (
-            <OverridesDropdown overrides={overrides.overrides} />
-          )}
+          {overridesOpen && <OverridesDropdown overrides={overrides.overrides} />}
         </StatusItem>
       )}
     </div>
@@ -179,16 +162,18 @@ export function StatusStrip({ status, channels, events }: StatusStripProps) {
 function captureEndedMessage(capture: NonNullable<StatusResponse["last_capture"]>): string {
   const started = Date.parse(capture.started_at);
   const ended = capture.ended_at == null ? Number.NaN : Date.parse(capture.ended_at);
-  const minutes = Number.isFinite(started) && Number.isFinite(ended)
-    ? Math.max(0, Math.round((ended - started) / 60000))
-    : null;
-  const reason = capture.end_reason === "daemon_shutdown"
-    ? "daemon stopped"
-    : capture.end_reason === "interrupted"
-      ? "daemon restarted or lost power"
-      : capture.end_reason === "profile_switch"
-        ? "profile switched"
-        : "unknown reason";
+  const minutes =
+    Number.isFinite(started) && Number.isFinite(ended)
+      ? Math.max(0, Math.round((ended - started) / 60000))
+      : null;
+  const reason =
+    capture.end_reason === "daemon_shutdown"
+      ? "daemon stopped"
+      : capture.end_reason === "interrupted"
+        ? "daemon restarted or lost power"
+        : capture.end_reason === "profile_switch"
+          ? "profile switched"
+          : "unknown reason";
   return `${capture.name} ended${minutes == null ? "" : ` after ${minutes} min`}: ${reason}`;
 }
 
@@ -198,11 +183,7 @@ function captureEndedMessage(capture: NonNullable<StatusResponse["last_capture"]
  *  spine layout. Expired overrides are flagged rather than hidden — the
  *  doc is explicit that a lapsed override needs re-confirmation, not
  *  silent continuation. */
-function OverridesDropdown({
-  overrides,
-}: {
-  overrides: AcceptedBaselineOverrideSummary[];
-}) {
+function OverridesDropdown({ overrides }: { overrides: AcceptedBaselineOverrideSummary[] }) {
   if (overrides.length === 0) {
     return (
       <div className={overridesDropdownClass}>
@@ -219,12 +200,8 @@ function OverridesDropdown({
         >
           <div className="flex items-center gap-2">
             <span className="font-num text-fg">{o.target}</span>
-            {o.operating_mode && (
-              <span className="text-fg-faint">({o.operating_mode})</span>
-            )}
-            {o.expired && (
-              <span className="text-warn">needs re-confirmation</span>
-            )}
+            {o.operating_mode && <span className="text-fg-faint">({o.operating_mode})</span>}
+            {o.expired && <span className="text-warn">needs re-confirmation</span>}
           </div>
           <p className="m-0 text-fg-dim">{o.reason}</p>
           <p className="m-0 text-fg-faint">
@@ -254,13 +231,7 @@ const overridesDropdownClass = [
   "shadow-lg",
 ].join(" ");
 
-function StatusItem({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
+function StatusItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <span className={statusItemClass}>
       <span className={statusLabelClass}>{label}</span>
@@ -288,10 +259,7 @@ const ANOMALY_RECENT_MS = 5 * 60_000;
  *  Returns null once the freshest event is older than the recent window, so the
  *  strip clears to "nominal". Event timestamps are ISO-8601; unparseable ones
  *  are skipped rather than treated as "now". */
-function mostRecentEvent(
-  events: AnomalyEvent[],
-  now: number,
-): RecentAnomaly | null {
+function mostRecentEvent(events: AnomalyEvent[], now: number): RecentAnomaly | null {
   for (const e of events) {
     // A06.5: an evidence-role detector's event is stored and listed in the
     // Anomalies panel, but it is not an alert — it never lights this spine.
@@ -316,9 +284,7 @@ function mostRecentEvent(
 
 function modelSummary(status: StatusResponse | null): string {
   if (!status) return "—";
-  const versions = Object.entries(status.model_versions).filter(
-    ([, v]) => v != null,
-  );
+  const versions = Object.entries(status.model_versions).filter(([, v]) => v != null);
   if (versions.length === 0) return "none loaded";
   return versions.map(([k]) => k.replace("_autoencoder", "")).join(" · ");
 }

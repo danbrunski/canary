@@ -12,9 +12,7 @@ describe("Panel primitive", () => {
   });
 
   it("renders a count when no actions are given", () => {
-    render(
-      createElement(Panel, { title: "Anomalies", count: "3 events", children: null }),
-    );
+    render(createElement(Panel, { title: "Anomalies", count: "3 events", children: null }));
     expect(screen.getByText("3 events")).toBeInTheDocument();
   });
 

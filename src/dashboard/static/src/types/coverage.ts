@@ -3,11 +3,7 @@
 // ---------------------------------------------------------------------------
 
 /** `GET /obd/coverage` — mirrors `CoverageReport.to_dict()` (Task 6.3). */
-export type PidCoverageStatus =
-  | "decoded"
-  | "supported_not_decoded"
-  | "unsupported"
-  | "unknown_pid";
+export type PidCoverageStatus = "decoded" | "supported_not_decoded" | "unsupported" | "unknown_pid";
 
 export interface ObdCoverageRow {
   mode: number;

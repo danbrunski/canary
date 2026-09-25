@@ -73,8 +73,7 @@ export const panelHeaderClass = "mb-3 flex items-baseline justify-between gap-4"
 export const panelHeaderCenterClass = "mb-3 flex items-center justify-between gap-4";
 export const panelTitleClass =
   "m-0 text-[0.82rem] font-bold uppercase tracking-[0.14em] text-fg-dim";
-export const panelCountClass =
-  "font-num text-[0.74rem] tracking-[0.03em] text-fg-faint";
+export const panelCountClass = "font-num text-[0.74rem] tracking-[0.03em] text-fg-faint";
 export const placeholderClass = "m-0 text-fg-faint italic";
 export const dimTextClass = "text-fg-dim";
 
@@ -140,10 +139,8 @@ export const badgeClass = [
 ].join(" ");
 
 export const definitionListClass = "m-0 flex flex-col gap-1.5";
-export const definitionRowClass =
-  "flex items-baseline justify-between gap-3 text-[0.88rem]";
-export const definitionTermClass =
-  "text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
+export const definitionRowClass = "flex items-baseline justify-between gap-3 text-[0.88rem]";
+export const definitionTermClass = "text-[0.72rem] uppercase tracking-[0.08em] text-fg-faint";
 export const definitionValueClass = "m-0 font-num tabular-nums";
 
 export type NoticeKind = "ok" | "error" | "busy";
@@ -185,8 +182,7 @@ export const statusStripClass = [
 ].join(" ");
 
 export const statusItemClass = "inline-flex items-center gap-1.5";
-export const statusLabelClass =
-  "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
+export const statusLabelClass = "text-[0.6rem] uppercase tracking-[0.16em] text-fg-faint";
 export const statusValueClass = "font-num tabular-nums text-fg";
 
 /** Workbench: sidebar on wide screens, horizontal scroller on phones.
@@ -207,8 +203,7 @@ export const sidebarClass =
  *  A plain block wrapping the panel grid, for the reason in
  *  `scrollPaneClass` above. */
 export const workbenchContentClass =
-  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] " +
-  "max-[900px]:overflow-y-visible";
+  "min-w-0 overflow-y-auto overscroll-contain p-[1.15rem] " + "max-[900px]:overflow-y-visible";
 
 export const navGroupLabelClass =
   "px-2 text-[0.6rem] font-bold uppercase tracking-[0.16em] text-fg-faint max-[900px]:hidden";

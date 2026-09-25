@@ -42,14 +42,7 @@ interface CurveProps {
  *  — is a handful of cheap canvas paths redrawn on each 2 s live poll. The
  *  y-range is fitted over the curve *and* the band *and* the live values so
  *  an excursion past "normal" is visible rather than clipped off-canvas. */
-export function Curve({
-  fit,
-  domain,
-  deviation,
-  live,
-  width = 240,
-  height = 90,
-}: CurveProps) {
+export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }: CurveProps) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -91,8 +84,7 @@ export function Curve({
       for (const y of ys) yCandidates.push(y + outer, y - outer);
     }
     const trailPts = (live?.trail ?? []).filter(
-      (p): p is { x: number; actual: number } =>
-        p.x !== null && p.actual !== null && inDomain(p.x),
+      (p): p is { x: number; actual: number } => p.x !== null && p.actual !== null && inDomain(p.x),
     );
     for (const p of trailPts) yCandidates.push(p.actual);
     if (live && live.x !== null && live.actual !== null && inDomain(live.x)) {

@@ -76,7 +76,10 @@ export function MonitorsPanel() {
   const maxCount = Math.max(1, ...cylinders.map((c) => c.count));
 
   return (
-    <Panel title="Monitors" count={`${data.results.length} test${data.results.length === 1 ? "" : "s"}`}>
+    <Panel
+      title="Monitors"
+      count={`${data.results.length} test${data.results.length === 1 ? "" : "s"}`}
+    >
       <p className="mb-3 text-[0.78rem] text-fg-dim">
         {data.captured_at ? `captured ${formatTimestamp(data.captured_at)}` : "never polled"}
         {data.stale && (
@@ -104,7 +107,10 @@ export function MonitorsPanel() {
               </div>
               <span className="w-8 shrink-0 text-right font-num text-fg">{count}</span>
               {delta > 0 && (
-                <span className="w-10 shrink-0 text-right font-num text-bad" title="since this page opened">
+                <span
+                  className="w-10 shrink-0 text-right font-num text-bad"
+                  title="since this page opened"
+                >
                   +{delta}
                 </span>
               )}
@@ -121,7 +127,10 @@ export function MonitorsPanel() {
       ) : (
         <div className="flex flex-col gap-1">
           {data.results.map((result, index) => (
-            <MonitorResultRow key={`${result.monitor_id}-${result.test_id}-${index}`} result={result} />
+            <MonitorResultRow
+              key={`${result.monitor_id}-${result.test_id}-${index}`}
+              result={result}
+            />
           ))}
         </div>
       )}

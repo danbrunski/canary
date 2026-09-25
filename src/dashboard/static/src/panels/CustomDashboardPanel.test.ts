@@ -30,9 +30,7 @@ describe("CustomDashboardPanel", () => {
     expect(screen.getByText(/empty dashboard/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /obd:RPM/ }));
     expect(screen.getByText("1 tiles")).toBeInTheDocument();
-    const stored = JSON.parse(
-      window.localStorage.getItem("canary.dashboard") ?? "{}",
-    );
+    const stored = JSON.parse(window.localStorage.getItem("canary.dashboard") ?? "{}");
     expect(stored.tiles).toContain("obd:RPM");
   });
 
@@ -82,9 +80,7 @@ describe("CustomDashboardPanel", () => {
     // Only the two present AFR channels land as tiles, not the whole preset
     // list (e.g. obd:SHORT_FUEL_TRIM_1, never reported here).
     expect(screen.getByText("2 tiles")).toBeInTheDocument();
-    const stored = JSON.parse(
-      window.localStorage.getItem("canary.dashboard") ?? "{}",
-    );
+    const stored = JSON.parse(window.localStorage.getItem("canary.dashboard") ?? "{}");
     expect(stored.tiles).toEqual(
       expect.arrayContaining(["obd:O2_WR_LAMBDA_S1", "derived:FUEL_RATE_LPH"]),
     );

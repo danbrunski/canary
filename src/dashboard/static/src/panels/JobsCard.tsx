@@ -64,12 +64,25 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
         <span className={panelCountClass}>{jobs.length}</span>
       </header>
       <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto] gap-2 max-[1100px]:grid-cols-1">
-        <select className={selectClass} value={jobKind} onChange={(event) => setJobKind(event.target.value)}>
+        <select
+          className={selectClass}
+          value={jobKind}
+          onChange={(event) => setJobKind(event.target.value)}
+        >
           {JOB_KINDS.map((kind) => (
-            <option key={kind} value={kind}>{kind}</option>
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
           ))}
         </select>
-        <input className={inputClass} value={jobDays} onChange={(event) => setJobDays(event.target.value)} disabled={useAllSessions} inputMode="numeric" placeholder="days" />
+        <input
+          className={inputClass}
+          value={jobDays}
+          onChange={(event) => setJobDays(event.target.value)}
+          disabled={useAllSessions}
+          inputMode="numeric"
+          placeholder="days"
+        />
         <label className="flex min-h-9 flex-row items-center justify-center gap-2 text-[0.75rem] text-fg-dim">
           <input
             type="checkbox"
@@ -78,7 +91,12 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
           />
           all
         </label>
-        <button className={buttonClass} type="button" onClick={startJob} disabled={!token || !!busy}>
+        <button
+          className={buttonClass}
+          type="button"
+          onClick={startJob}
+          disabled={!token || !!busy}
+        >
           Start
         </button>
       </div>
@@ -87,10 +105,14 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
           <div key={job.job_id} className={cn(jobRowClass(job.status))}>
             <div className="flex min-w-0 flex-col">
               <b>{job.kind}</b>
-              <small className="text-fg-dim">{job.status} / {job.job_id.slice(0, 8)}</small>
+              <small className="text-fg-dim">
+                {job.status} / {job.job_id.slice(0, 8)}
+              </small>
             </div>
             <div className="flex flex-wrap justify-end gap-1.5">
-              <button className={buttonClass} type="button" onClick={() => showLogs(job.job_id)}>Logs</button>
+              <button className={buttonClass} type="button" onClick={() => showLogs(job.job_id)}>
+                Logs
+              </button>
               <button
                 className={buttonClass}
                 type="button"

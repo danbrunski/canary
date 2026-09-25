@@ -105,9 +105,9 @@ export function PowerPanel({ token }: PowerPanelProps) {
               <Notice notice={notice} className="mb-2" />
               {!power.watchdog_running && (
                 <p className={cn(placeholderClass, "mb-3")}>
-                  The <code>ups-shutdown</code> watchdog isn't running (or hasn't written its
-                  first heartbeat). No auto-shutdown protection is active — this is expected on a
-                  bench Pi without the UPS wired up.
+                  The <code>ups-shutdown</code> watchdog isn't running (or hasn't written its first
+                  heartbeat). No auto-shutdown protection is active — this is expected on a bench Pi
+                  without the UPS wired up.
                 </p>
               )}
               <dl className={definitionListClass}>

@@ -108,8 +108,8 @@ export function TestSessionSetupScreen({
           <p className="m-0 text-fg-faint italic">Loading profiles…</p>
         ) : profiles.length === 0 ? (
           <p className="m-0 text-fg-dim">
-            No profiles found. Add a <code>*.yaml</code> file under{" "}
-            <code>data/test_profiles/</code> (see the README there).
+            No profiles found. Add a <code>*.yaml</code> file under <code>data/test_profiles/</code>{" "}
+            (see the README there).
           </p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5 max-[680px]:grid-cols-1">
@@ -132,9 +132,7 @@ export function TestSessionSetupScreen({
                   </span>
                 </div>
                 {p.description && (
-                  <p className="mt-1 text-[0.82rem] leading-snug text-fg-dim">
-                    {p.description}
-                  </p>
+                  <p className="mt-1 text-[0.82rem] leading-snug text-fg-dim">{p.description}</p>
                 )}
                 <p className="mt-1.5 text-[0.72rem] text-fg-faint">
                   {p.events.length} event buttons
@@ -206,7 +204,11 @@ export function TestSessionSetupScreen({
           >
             {busy ? "Starting…" : `Start session — ${selectedProfile.label}`}
           </button>
-          <button type="button" onClick={onRerunPreflight} className={cn(buttonClass, "mt-2 w-full")}>
+          <button
+            type="button"
+            onClick={onRerunPreflight}
+            className={cn(buttonClass, "mt-2 w-full")}
+          >
             Re-run preflight
           </button>
         </section>
@@ -283,8 +285,8 @@ export function TestSessionRecordingScreen({
 
       {pendingCount > 0 && (
         <div className="rounded-[8px] border border-warn/45 bg-warn/10 px-3 py-2 text-[0.82rem] text-warn">
-          {pendingCount} event{pendingCount > 1 ? "s" : ""} waiting to send — taps are saved
-          locally and retried automatically; they keep their real time even if signal is down.
+          {pendingCount} event{pendingCount > 1 ? "s" : ""} waiting to send — taps are saved locally
+          and retried automatically; they keep their real time even if signal is down.
         </div>
       )}
 

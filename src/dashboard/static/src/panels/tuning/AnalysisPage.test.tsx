@@ -19,7 +19,13 @@ vi.mock("../../api/core", async (importOriginal) => {
 });
 const control = vi.mocked(controlJson);
 
-const LOGS: LogsResponse = { include_sessions: false, total: 0, limit: 100, capped: false, logs: [] };
+const LOGS: LogsResponse = {
+  include_sessions: false,
+  total: 0,
+  limit: 100,
+  capped: false,
+  logs: [],
+};
 
 const CONDITIONS: Conditions = {
   sessions: ["2026-09-18T120000", "2026-09-19T120000"],
@@ -68,7 +74,12 @@ function delivery(overrides: Partial<DeliveryErrorResponse> = {}): DeliveryError
 const RUNNING = { registry_revision: "ZS44A-20260920" } as StatusResponse;
 
 function context(): TuningContext {
-  return { selectedLogId: null, setSelectedLogId: () => {}, loadedRom: null, setLoadedRom: () => {} };
+  return {
+    selectedLogId: null,
+    setSelectedLogId: () => {},
+    loadedRom: null,
+    setLoadedRom: () => {},
+  };
 }
 
 function route(handlers: Record<string, unknown>) {
@@ -126,7 +137,9 @@ describe("AnalysisPage", () => {
     const conditions = screen.getByLabelText("Conditions");
     expect(conditions).toHaveTextContent("2 pooled");
     expect(conditions).toHaveTextContent("63.1–80.4 kPa");
-    expect(conditions).toHaveTextContent("20 of 120 samples passed: closed loop removed 90, fuel cut removed 10");
+    expect(conditions).toHaveTextContent(
+      "20 of 120 samples passed: closed loop removed 90, fuel cut removed 10",
+    );
   });
 
   it("keeps the two kinds of empty distinguishable", async () => {
@@ -207,11 +220,18 @@ describe("AnalysisPage", () => {
       available: true,
       unavailable_kind: null,
       value: "total",
-      axes: { rpm: "obd:RPM", airflow: "obd:MAF", rpm_edges: [500, 1000, 1500, 2000, 2500], airflow_edges: [0, 3, 6, 10, 15, 20] },
+      axes: {
+        rpm: "obd:RPM",
+        airflow: "obd:MAF",
+        rpm_edges: [500, 1000, 1500, 2000, 2500],
+        airflow_edges: [0, 3, 6, 10, 15, 20],
+      },
       min_n: 5,
       n: 40,
       banks: { b1: { n: 40, cells: [cell(-5, false, 40)] } },
-      per_session: [{ session_id: "2026-09-18T120000", revision: "R", cells: { b1: [cell(-5, true, 2)] } }],
+      per_session: [
+        { session_id: "2026-09-18T120000", revision: "R", cells: { b1: [cell(-5, true, 2)] } },
+      ],
       gates: { started: 60, filtered: { not_closed_loop: 20 }, remaining: 40 },
       unavailable: [],
       conditions: CONDITIONS,
@@ -234,16 +254,39 @@ describe("AnalysisPage", () => {
       value: "obd:TIMING_ADVANCE",
       revision_a: "A",
       revision_b: "B",
-      axes: { rpm: "obd:RPM", airflow: "obd:MAF", rpm_edges: [3000, 3500, 4000], airflow_edges: [100, 130, 170] },
+      axes: {
+        rpm: "obd:RPM",
+        airflow: "obd:MAF",
+        rpm_edges: [3000, 3500, 4000],
+        airflow_edges: [100, 130, 170],
+      },
       min_n: 5,
       cells: [
         {
-          rpm_index: 0, airflow_index: 0, rpm_range: [3000, 3500], airflow_range: [100, 130],
-          n_a: 9, n_b: 9, mean_a: 24, mean_b: 20, delta: -4, dropped: true, delta_sigma: null,
+          rpm_index: 0,
+          airflow_index: 0,
+          rpm_range: [3000, 3500],
+          airflow_range: [100, 130],
+          n_a: 9,
+          n_b: 9,
+          mean_a: 24,
+          mean_b: 20,
+          delta: -4,
+          dropped: true,
+          delta_sigma: null,
         },
         {
-          rpm_index: 1, airflow_index: 1, rpm_range: [3500, 4000], airflow_range: [130, 170],
-          n_a: 9, n_b: 9, mean_a: 22, mean_b: 23, delta: 1, dropped: false, delta_sigma: null,
+          rpm_index: 1,
+          airflow_index: 1,
+          rpm_range: [3500, 4000],
+          airflow_range: [130, 170],
+          n_a: 9,
+          n_b: 9,
+          mean_a: 22,
+          mean_b: 23,
+          delta: 1,
+          dropped: false,
+          delta_sigma: null,
         },
       ],
       n_cells: 2,

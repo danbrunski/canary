@@ -3,13 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { HttpError, getReplay, startReplay, stopReplay } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
-import {
-  buttonClass,
-  inputClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-} from "../styles";
+import { buttonClass, inputClass, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
 import type { ReplayStatus, SessionSummary } from "../types";
 import { formatElapsed } from "../util/time";
 
@@ -137,7 +131,12 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
             Stop
           </button>
         ) : (
-          <button className={buttonClass} type="button" onClick={start} disabled={!token || !sessionId}>
+          <button
+            className={buttonClass}
+            type="button"
+            onClick={start}
+            disabled={!token || !sessionId}
+          >
             Start
           </button>
         )}

@@ -56,14 +56,8 @@ export function useHashRoute(): {
     }
   }, [route]);
 
-  const setMode = useCallback(
-    (mode: AppMode) => setRoute((r) => ({ ...r, mode })),
-    [],
-  );
-  const setItem = useCallback(
-    (item: WorkbenchItem) => setRoute((r) => ({ ...r, item })),
-    [],
-  );
+  const setMode = useCallback((mode: AppMode) => setRoute((r) => ({ ...r, mode })), []);
+  const setItem = useCallback((item: WorkbenchItem) => setRoute((r) => ({ ...r, item })), []);
 
   return { mode: route.mode, item: route.item, setMode, setItem };
 }

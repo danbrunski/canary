@@ -72,10 +72,7 @@ export function MultiSeriesChart({
   const ref = useRef<HTMLCanvasElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const sampleCount = useMemo(
-    () => Math.max(0, ...series.map((s) => s.values.length)),
-    [series],
-  );
+  const sampleCount = useMemo(() => Math.max(0, ...series.map((s) => s.values.length)), [series]);
 
   const sharedExtent = useMemo(() => {
     if (yAxisMode !== "shared") return null;
@@ -225,10 +222,18 @@ export function MultiSeriesChart({
       </div>
       {showExport && series.length > 0 && (
         <div className="flex justify-end gap-2">
-          <button type="button" className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")} onClick={exportPng}>
+          <button
+            type="button"
+            className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")}
+            onClick={exportPng}
+          >
             export PNG
           </button>
-          <button type="button" className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")} onClick={exportCsv}>
+          <button
+            type="button"
+            className={cn(buttonClass, "px-2 py-0.5 text-[0.7rem]")}
+            onClick={exportCsv}
+          >
             export CSV
           </button>
         </div>

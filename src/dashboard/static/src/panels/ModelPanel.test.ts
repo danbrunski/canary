@@ -24,7 +24,12 @@ const TCN_ACTIVE: SequenceDetectorStatus = {
   active: "tcn_autoencoder",
   active_version: "tcn_v1",
   available: {
-    lstm_autoencoder: { selector: "lstm", artifact_present: true, version: "lstm_v1", active: false },
+    lstm_autoencoder: {
+      selector: "lstm",
+      artifact_present: true,
+      version: "lstm_v1",
+      active: false,
+    },
     tcn_autoencoder: { selector: "tcn", artifact_present: true, version: "tcn_v1", active: true },
   },
 };

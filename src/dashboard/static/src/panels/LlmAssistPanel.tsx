@@ -38,9 +38,9 @@ export function LlmAssistPanel() {
             <EnabledView cards={data.cards} />
           ) : (
             <p className={placeholderClass}>
-              LLM-assist tier is disabled (the default — no producer is installed).
-              Enable <code>llm_assist.enabled</code> in config once a producer exists to
-              see differential/narrative cards here.
+              LLM-assist tier is disabled (the default — no producer is installed). Enable{" "}
+              <code>llm_assist.enabled</code> in config once a producer exists to see
+              differential/narrative cards here.
             </p>
           )
         }

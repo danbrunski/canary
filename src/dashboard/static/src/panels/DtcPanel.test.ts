@@ -66,9 +66,7 @@ describe("DtcPanel", () => {
 
     expect(await screen.findByText("MIL / CEL ON")).toBeInTheDocument();
     expect(screen.getByText("P0300")).toBeInTheDocument();
-    expect(
-      screen.getByText("Random/Multiple Cylinder Misfire Detected"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Random/Multiple Cylinder Misfire Detected")).toBeInTheDocument();
     expect(screen.getAllByText("powertrain")).toHaveLength(2);
     expect(screen.getByText("P0171")).toBeInTheDocument();
     expect(screen.getByText("2 codes")).toBeInTheDocument();

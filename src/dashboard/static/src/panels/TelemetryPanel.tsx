@@ -116,9 +116,7 @@ export function TelemetryPanel({
 
   const graphSet = useMemo(() => new Set(graphs), [graphs]);
   const toggleGraph = (key: string) =>
-    setGraphs((cur) =>
-      cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
-    );
+    setGraphs((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
 
   const displayChannels = useMemo(() => {
     return [...channels]
@@ -149,7 +147,9 @@ export function TelemetryPanel({
       if (!needle) return true;
       return (
         key.toLowerCase().includes(needle) ||
-        String(snap.latest.value ?? "").toLowerCase().includes(needle) ||
+        String(snap.latest.value ?? "")
+          .toLowerCase()
+          .includes(needle) ||
         (snap.latest.unit ?? "").toLowerCase().includes(needle)
       );
     });
@@ -169,7 +169,9 @@ export function TelemetryPanel({
 
   if (channels.size === 0) {
     return (
-      <section className={cn(panelClass, compact && "col-span-2 row-start-1 max-[900px]:col-span-1")}>
+      <section
+        className={cn(panelClass, compact && "col-span-2 row-start-1 max-[900px]:col-span-1")}
+      >
         <header className={panelHeaderCenterClass}>
           <h2 className={panelTitleClass}>Telemetry</h2>
         </header>
@@ -235,8 +237,8 @@ export function TelemetryPanel({
           )}
           {activePinned.length === 0 && displayChannels.length > 6 && (
             <p className="mt-2 text-[0.74rem] text-fg-faint">
-              Tip: ☆ a channel to pin it to the top — then “pinned only” for a
-              focused drive view. Multi-channel trends live in Live ▸ Charts.
+              Tip: ☆ a channel to pin it to the top — then “pinned only” for a focused drive view.
+              Multi-channel trends live in Live ▸ Charts.
             </p>
           )}
         </>
@@ -316,9 +318,7 @@ function ChannelTableRow({
       >
         {prettyChannel(channelKey)}
       </th>
-      <td className="py-1.5 pr-3 text-[0.72rem] uppercase text-fg-dim">
-        {snapshot.latest.source}
-      </td>
+      <td className="py-1.5 pr-3 text-[0.72rem] uppercase text-fg-dim">{snapshot.latest.source}</td>
       <td
         className={cn(
           "py-1.5 pr-3 text-right font-bold text-fg",
@@ -434,11 +434,7 @@ function ChannelCard({
       </div>
       {/* Slot is always present at a fixed height → constant card size
           whether the graph is on, off, or unavailable. */}
-      <div
-        className="mt-1 flex items-end"
-        style={{ height: GRAPH_SLOT_PX }}
-        aria-hidden={!graphOn}
-      >
+      <div className="mt-1 flex items-end" style={{ height: GRAPH_SLOT_PX }} aria-hidden={!graphOn}>
         {graphOn && canGraph && (
           <Sparkline values={sparkValues} width={150} height={GRAPH_SLOT_PX} />
         )}
@@ -448,7 +444,8 @@ function ChannelCard({
       </div>
       <div className="mt-1 flex items-center justify-between gap-2 text-[0.62rem] uppercase tracking-[0.08em] text-fg-faint">
         <span className={cn(freshness.stale && "font-semibold text-warn")}>
-          age {freshness.ageLabel}{freshness.stale && " stale"}
+          age {freshness.ageLabel}
+          {freshness.stale && " stale"}
         </span>
         {freshness.achievedHz !== null && (
           <span
@@ -478,17 +475,14 @@ function channelFreshness(
   scheduler?: ObdSchedulerStatus,
   now: number = Date.now(),
 ): ChannelFreshness {
-  const timestampMs = snapshot.latest.timestamp == null
-    ? Number.NaN
-    : Date.parse(snapshot.latest.timestamp);
+  const timestampMs =
+    snapshot.latest.timestamp == null ? Number.NaN : Date.parse(snapshot.latest.timestamp);
   const ageMs = Number.isFinite(timestampMs) ? Math.max(0, now - timestampMs) : null;
   const request = matchingRequest(snapshot, scheduler);
   const achievedHz = scheduler?.achieved_hz_60s?.[snapshot.latest.channel] ?? null;
   const targetHz = effectiveTargetHz(request, scheduler);
   const intervalMs = targetHz !== null && targetHz > 0 ? 1_000 / targetHz : null;
-  const staleAfterMs = intervalMs === null
-    ? STALE_THRESHOLD_MS
-    : Math.max(3_000, intervalMs * 3);
+  const staleAfterMs = intervalMs === null ? STALE_THRESHOLD_MS : Math.max(3_000, intervalMs * 3);
   return {
     ageLabel: formatAge(snapshot.latest.timestamp),
     achievedHz,

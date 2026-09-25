@@ -151,7 +151,11 @@ function LogRow({
           </span>
         )}
       </td>
-      <td className={log.quality?.verdict === "pass" ? "text-ok" : log.quality ? "text-warn" : "text-fg-faint"}>
+      <td
+        className={
+          log.quality?.verdict === "pass" ? "text-ok" : log.quality ? "text-warn" : "text-fg-faint"
+        }
+      >
         {log.quality?.verdict ?? "unknown"}
       </td>
       <td>{log.end_reason?.replace(/_/g, " ") ?? (log.is_capture ? "open" : "—")}</td>
@@ -176,7 +180,11 @@ export function LogViewer({ token, sessionId }: { token: string; sessionId: stri
   const [loading, setLoading] = useState(false);
 
   const specs = useMemo(
-    () => specsText.split(",").map((s) => s.trim()).filter(Boolean),
+    () =>
+      specsText
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
     [specsText],
   );
 
@@ -297,7 +305,8 @@ function FrameNotes({ frame, onOffset }: { frame: FrameResponse; onOffset: (n: n
         {frame.freshness.dropped.toLocaleString()} of{" "}
         {frame.freshness.cells_with_any.toLocaleString()} cells dropped by the freshness bound
         (every channel must be sampled in the cell)
-        {report.regime !== "all" && report.available !== false &&
+        {report.regime !== "all" &&
+          report.available !== false &&
           ` · regime ${report.regime.replace(/_/g, " ")} kept ${report.after} of ${report.before}` +
             (report.unknown ? ` (${report.unknown} unclassifiable)` : "")}
       </p>
@@ -356,8 +365,14 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
   const visible = order.slice(first, last);
 
   const exportCsv = useCallback(() => {
-    const header = ["timestamp", ...frame.columns.map((c) => (c.unit ? `${c.spec} (${c.unit})` : c.spec))];
-    const rows = order.map((i) => [frame.timestamps[i], ...specs.map((s) => frame.values[s]?.[i] ?? null)]);
+    const header = [
+      "timestamp",
+      ...frame.columns.map((c) => (c.unit ? `${c.spec} (${c.unit})` : c.spec)),
+    ];
+    const rows = order.map((i) => [
+      frame.timestamps[i],
+      ...specs.map((s) => frame.values[s]?.[i] ?? null),
+    ]);
     downloadText(toCsv(header, rows), `${frame.session_id}-${frame.regime_report.regime}.csv`);
   }, [frame, order, specs]);
 
@@ -407,7 +422,12 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
               </tr>
             )}
             {visible.map((i) => (
-              <tr key={i} data-row style={{ height: ROW_HEIGHT }} className="border-t border-border-soft">
+              <tr
+                key={i}
+                data-row
+                style={{ height: ROW_HEIGHT }}
+                className="border-t border-border-soft"
+              >
                 <td>{new Date(frame.timestamps[i]).toLocaleTimeString()}</td>
                 {specs.map((spec) => (
                   <td key={spec}>{formatValue(frame.values[spec]?.[i])}</td>
@@ -479,8 +499,18 @@ export function FrameVisual({ frame }: { frame: FrameResponse }) {
                 {column.unit ? ` (${column.unit})` : ""}
                 {range && ` · ${formatValue(range[0])}–${formatValue(range[1])}`}
               </figcaption>
-              <svg width="100%" viewBox={`0 0 ${STRIP_W} ${STRIP_H}`} preserveAspectRatio="none" className="h-16 bg-elev-2">
-                <polyline points={points} fill="none" stroke={COLORS[index % COLORS.length]} strokeWidth={1.2} />
+              <svg
+                width="100%"
+                viewBox={`0 0 ${STRIP_W} ${STRIP_H}`}
+                preserveAspectRatio="none"
+                className="h-16 bg-elev-2"
+              >
+                <polyline
+                  points={points}
+                  fill="none"
+                  stroke={COLORS[index % COLORS.length]}
+                  strokeWidth={1.2}
+                />
                 {markers.map((m, i) => (
                   <line
                     key={`${m.kind}-${i}`}
@@ -528,7 +558,9 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
   const px = (v: number) => (xr ? ((v - xr[0]) / (xr[1] - xr[0] || 1)) * (W - 10) + 5 : 0);
   const py = (v: number) => (yr ? H - 5 - ((v - yr[0]) / (yr[1] - yr[0] || 1)) * (H - 10) : 0);
   const color = (v: number | null) =>
-    v === null || !zr ? "#4fd6e0" : `hsl(${240 - ((v - zr[0]) / (zr[1] - zr[0] || 1)) * 240}, 80%, 60%)`;
+    v === null || !zr
+      ? "#4fd6e0"
+      : `hsl(${240 - ((v - zr[0]) / (zr[1] - zr[0] || 1)) * 240}, 80%, 60%)`;
 
   const heat = useMemo(() => {
     if (mode !== "heat" || !xr || !yr) return [];
@@ -564,7 +596,12 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
         ).map(([label, value, set]) => (
           <label key={label} className="flex flex-col gap-1">
             {label}
-            <select className={selectClass} aria-label={`${label} axis`} value={value} onChange={(e) => set(e.target.value)}>
+            <select
+              className={selectClass}
+              aria-label={`${label} axis`}
+              value={value}
+              onChange={(e) => set(e.target.value)}
+            >
               {specs.map((s) => (
                 <option key={s}>{s}</option>
               ))}
@@ -573,31 +610,62 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
         ))}
         <label className="flex flex-col gap-1">
           {mode === "heat" ? "Cell value (mean)" : "Colour"}
-          <select className={selectClass} aria-label="Colour channel" value={z} onChange={(e) => setZ(e.target.value)}>
+          <select
+            className={selectClass}
+            aria-label="Colour channel"
+            value={z}
+            onChange={(e) => setZ(e.target.value)}
+          >
             <option value="">{mode === "heat" ? "sample count" : "none"}</option>
             {specs.map((s) => (
               <option key={s}>{s}</option>
             ))}
           </select>
         </label>
-        <button type="button" className={buttonClass} onClick={() => setMode(mode === "scatter" ? "heat" : "scatter")}>
+        <button
+          type="button"
+          className={buttonClass}
+          onClick={() => setMode(mode === "scatter" ? "heat" : "scatter")}
+        >
           {mode === "scatter" ? "Heat map" : "Scatter"}
         </button>
       </div>
-      <svg aria-label={mode === "scatter" ? "Scatter" : "Heat map"} width={W} height={H} className="bg-elev-2">
+      <svg
+        aria-label={mode === "scatter" ? "Scatter" : "Heat map"}
+        width={W}
+        height={H}
+        className="bg-elev-2"
+      >
         {mode === "scatter" &&
           xs.map((xv, i) => {
             const yv = ys[i];
             if (xv === null || yv === null || yv === undefined) return null;
-            return <circle key={i} cx={px(xv)} cy={py(yv)} r={1.8} fill={color(z ? (zs[i] ?? null) : null)} />;
+            return (
+              <circle
+                key={i}
+                cx={px(xv)}
+                cy={py(yv)}
+                r={1.8}
+                fill={color(z ? (zs[i] ?? null) : null)}
+              />
+            );
           })}
         {mode === "heat" &&
           heat.map((cell) => {
             const w = W / cell.bins;
             const h = H / cell.bins;
-            const t = heatRange ? (cell.value - heatRange[0]) / (heatRange[1] - heatRange[0] || 1) : 0.5;
+            const t = heatRange
+              ? (cell.value - heatRange[0]) / (heatRange[1] - heatRange[0] || 1)
+              : 0.5;
             return (
-              <rect key={`${cell.bx}:${cell.by}`} x={cell.bx * w} y={H - (cell.by + 1) * h} width={w} height={h} fill={`hsl(${240 - t * 240}, 80%, 55%)`}>
+              <rect
+                key={`${cell.bx}:${cell.by}`}
+                x={cell.bx * w}
+                y={H - (cell.by + 1) * h}
+                width={w}
+                height={h}
+                fill={`hsl(${240 - t * 240}, 80%, 55%)`}
+              >
                 <title>{`${formatValue(cell.value)} (n ${cell.n})`}</title>
               </rect>
             );
@@ -605,7 +673,11 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
       </svg>
       <figcaption className="text-[0.65rem] text-fg-faint">
         {y} against {x}
-        {z ? `, ${mode === "heat" ? "cell mean of" : "coloured by"} ${z}` : mode === "heat" ? ", cell sample count" : ""}
+        {z
+          ? `, ${mode === "heat" ? "cell mean of" : "coloured by"} ${z}`
+          : mode === "heat"
+            ? ", cell sample count"
+            : ""}
         {xr && ` · x ${formatValue(xr[0])}–${formatValue(xr[1])}`}
         {yr && ` · y ${formatValue(yr[0])}–${formatValue(yr[1])}`}
       </figcaption>

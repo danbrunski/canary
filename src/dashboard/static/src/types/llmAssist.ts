@@ -49,6 +49,4 @@ export type LlmAssistCard = DifferentialCard | NarrativeCard;
 
 /** `GET /analysis/llm-assist/cards` — `enabled: false` is the explicit,
  *  expected absent state (the tier's default), not an error. */
-export type LlmAssistCardsResponse =
-  | { enabled: false }
-  | { enabled: true; cards: LlmAssistCard[] };
+export type LlmAssistCardsResponse = { enabled: false } | { enabled: true; cards: LlmAssistCard[] };

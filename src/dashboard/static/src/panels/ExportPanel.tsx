@@ -36,9 +36,7 @@ export function ExportPanel({ token }: { token: string }) {
   const { notice, busy, run } = useAsyncAction();
 
   const toggleFormat = (fmt: string) =>
-    setFormats((prev) =>
-      prev.includes(fmt) ? prev.filter((f) => f !== fmt) : [...prev, fmt],
-    );
+    setFormats((prev) => (prev.includes(fmt) ? prev.filter((f) => f !== fmt) : [...prev, fmt]));
 
   const submit = () =>
     run(
@@ -153,11 +151,7 @@ export function ExportPanel({ token }: { token: string }) {
           </label>
         ))}
         <label className="flex items-center gap-1.5">
-          <input
-            type="checkbox"
-            checked={zip}
-            onChange={(e) => setZip(e.target.checked)}
-          />
+          <input type="checkbox" checked={zip} onChange={(e) => setZip(e.target.checked)} />
           zip
         </label>
       </div>
@@ -200,8 +194,8 @@ export function ExportPanel({ token }: { token: string }) {
       )}
       {!job && (
         <p className={cn(placeholderClass, "mt-3")}>
-          pick sessions/channels/formats above and submit — the job's log
-          shows the exported files and any data-quality warnings.
+          pick sessions/channels/formats above and submit — the job's log shows the exported files
+          and any data-quality warnings.
         </p>
       )}
     </Panel>

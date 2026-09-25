@@ -38,13 +38,7 @@ export interface ReconnectingSocket {
 export function openReconnectingSocket<T>(
   options: ReconnectingSocketOptions<T>,
 ): ReconnectingSocket {
-  const {
-    url,
-    onMessage,
-    onState,
-    initialDelayMs = 250,
-    maxDelayMs = 5000,
-  } = options;
+  const { url, onMessage, onState, initialDelayMs = 250, maxDelayMs = 5000 } = options;
   let closed = false;
   let delay = initialDelayMs;
   let socket: WebSocket | null = null;

@@ -3,13 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Panel } from "../components/Panel";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
-import {
-  buttonClass,
-  cn,
-  dangerButtonClass,
-  inputClass,
-  placeholderClass,
-} from "../styles";
+import { buttonClass, cn, dangerButtonClass, inputClass, placeholderClass } from "../styles";
 
 interface AlarmsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -57,9 +51,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
   const [audible, setAudible] = useState(false);
 
   // Per-rule runtime: consecutive breach count + last fire timestamp.
-  const runtime = useRef<Map<string, { streak: number; mutedUntil: number }>>(
-    new Map(),
-  );
+  const runtime = useRef<Map<string, { streak: number; mutedUntil: number }>>(new Map());
 
   const [draft, setDraft] = useState({
     channel: "",
@@ -141,9 +133,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
   };
 
   const toggleRule = (id: string) =>
-    setRules((r) =>
-      r.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)),
-    );
+    setRules((r) => r.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)));
 
   const recent = history.filter((e) => Date.now() - e.at < 60_000);
 
@@ -153,11 +143,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
       count={`${rules.length} rules`}
       actions={
         <label className="flex items-center gap-1.5 text-[0.76rem] text-fg-dim">
-          <input
-            type="checkbox"
-            checked={audible}
-            onChange={(e) => setAudible(e.target.checked)}
-          />
+          <input type="checkbox" checked={audible} onChange={(e) => setAudible(e.target.checked)} />
           audible
         </label>
       }
@@ -212,9 +198,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
           <select
             className={inputClass}
             value={draft.severity}
-            onChange={(e) =>
-              setDraft({ ...draft, severity: e.target.value as Severity })
-            }
+            onChange={(e) => setDraft({ ...draft, severity: e.target.value as Severity })}
           >
             <option value="warn">warn</option>
             <option value="critical">critical</option>
@@ -227,15 +211,14 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
 
       {rules.length === 0 ? (
         <p className={placeholderClass}>
-          no alarms yet — add a threshold above (e.g. obd:COOLANT_TEMP &gt;
-          110). These fire from the live stream, separately from ML anomalies.
+          no alarms yet — add a threshold above (e.g. obd:COOLANT_TEMP &gt; 110). These fire from
+          the live stream, separately from ML anomalies.
         </p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1 p-0">
           {rules.map((rule) => {
             const live = channels.get(rule.channel)?.latest.value;
-            const breaching =
-              typeof live === "number" && COMPARE[rule.op](live, rule.value);
+            const breaching = typeof live === "number" && COMPARE[rule.op](live, rule.value);
             return (
               <li
                 key={rule.id}
@@ -271,9 +254,7 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
                 </span>
                 <span className="ml-auto font-num tabular-nums text-fg-dim">
                   {typeof live === "number" ? live.toFixed(2) : "—"}
-                  {breaching && rule.enabled && (
-                    <span className="ml-1 text-bad">breach</span>
-                  )}
+                  {breaching && rule.enabled && <span className="ml-1 text-bad">breach</span>}
                 </span>
                 <button
                   type="button"
@@ -299,15 +280,11 @@ export function AlarmsPanel({ channels }: AlarmsPanelProps) {
                 key={`${e.ruleId}-${e.at}-${i}`}
                 className="flex gap-2 border-b border-border-soft pb-0.5 last:border-0"
               >
-                <time className="font-num text-fg-dim">
-                  {new Date(e.at).toLocaleTimeString()}
-                </time>
+                <time className="font-num text-fg-dim">{new Date(e.at).toLocaleTimeString()}</time>
                 <span className={e.severity === "critical" ? "text-bad" : "text-warn"}>
                   {e.channel}
                 </span>
-                <span className="font-num tabular-nums text-fg-dim">
-                  = {e.value.toFixed(2)}
-                </span>
+                <span className="font-num tabular-nums text-fg-dim">= {e.value.toFixed(2)}</span>
               </li>
             ))}
           </ol>
@@ -321,8 +298,7 @@ function beep(severity: Severity): void {
   try {
     const Ctx =
       window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: typeof AudioContext })
-        .webkitAudioContext;
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!Ctx) return;
     const ctx = new Ctx();
     const osc = ctx.createOscillator();

@@ -47,10 +47,12 @@ describe("useTelemetryStream", () => {
   it("ingests live messages and accumulates per-channel history", async () => {
     mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (r: TelemetryRow) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
     const { result } = renderHook(() => useTelemetryStream());
     await waitFor(() => expect(onMessage).not.toBeNull());
 
@@ -68,10 +70,12 @@ describe("useTelemetryStream", () => {
   it("caps history at 120 samples (sliding ring buffer)", async () => {
     mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (r: TelemetryRow) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
     const { result } = renderHook(() => useTelemetryStream());
     await waitFor(() => expect(onMessage).not.toBeNull());
 
@@ -88,10 +92,12 @@ describe("useTelemetryStream", () => {
   it("skips non-numeric values from the history but keeps the latest record", async () => {
     mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (r: TelemetryRow) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
     const { result } = renderHook(() => useTelemetryStream());
     await waitFor(() => expect(onMessage).not.toBeNull());
 
@@ -106,10 +112,12 @@ describe("useTelemetryStream", () => {
   it("ignores malformed rows (missing source/channel)", async () => {
     mocks.getLatestPerChannel.mockResolvedValue({ rows: [], count: 0 });
     let onMessage: ((r: TelemetryRow) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (r: TelemetryRow) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (r: TelemetryRow) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
     const { result } = renderHook(() => useTelemetryStream());
     await waitFor(() => expect(onMessage).not.toBeNull());
 

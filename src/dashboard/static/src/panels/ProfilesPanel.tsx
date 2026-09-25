@@ -18,10 +18,7 @@ interface ProfilesPanelProps {
  *  later. The name is cosmetic — the stable `slug` keys the data tree, so a
  *  rename never moves anything. */
 export function ProfilesPanel({ token }: ProfilesPanelProps) {
-  const fetcher = useCallback(
-    (signal: AbortSignal) => getProfiles(token, signal),
-    [token],
-  );
+  const fetcher = useCallback((signal: AbortSignal) => getProfiles(token, signal), [token]);
   const { data, error, loading, refresh } = useControlResource(fetcher, {
     enabled: Boolean(token),
     intervalMs: 30000,
@@ -44,7 +41,10 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
     });
 
   return (
-    <Panel title="Profiles" count={data ? `${data.count} vehicle${data.count === 1 ? "" : "s"}` : undefined}>
+    <Panel
+      title="Profiles"
+      count={data ? `${data.count} vehicle${data.count === 1 ? "" : "s"}` : undefined}
+    >
       <ResourceGate
         enabled={Boolean(token)}
         enabledMessage="Enter the control token (Control panel) to view and name vehicle profiles."
@@ -58,8 +58,8 @@ export function ProfilesPanel({ token }: ProfilesPanelProps) {
             <Notice notice={notice} className="mb-2" />
             {data.profiles.length === 0 ? (
               <p className={placeholderClass}>
-                No vehicles registered yet. Plug the Pi into a vehicle with the engine
-                on; the daemon reads its VIN and registers a profile automatically.
+                No vehicles registered yet. Plug the Pi into a vehicle with the engine on; the
+                daemon reads its VIN and registers a profile automatically.
               </p>
             ) : (
               <ul className="space-y-2">

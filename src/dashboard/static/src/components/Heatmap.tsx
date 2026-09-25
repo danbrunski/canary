@@ -103,13 +103,7 @@ export function Heatmap({
     });
 
     // Live "you are here" cell.
-    if (
-      live &&
-      live.x !== null &&
-      live.y !== null &&
-      xEdges &&
-      yEdges
-    ) {
+    if (live && live.x !== null && live.y !== null && xEdges && yEdges) {
       const ri = binIndex(live.x, xEdges); // row (axes[0])
       const ci = binIndex(live.y, yEdges); // col (axes[1])
       if (ri !== null && ci !== null) {
@@ -131,11 +125,7 @@ export function Heatmap({
 
   return (
     <div className="flex flex-col gap-1">
-      {caption && (
-        <div className="text-[0.7rem] tracking-[0.04em] text-fg-dim">
-          {caption}
-        </div>
-      )}
+      {caption && <div className="text-[0.7rem] tracking-[0.04em] text-fg-dim">{caption}</div>}
       <canvas ref={ref} width={width} height={height} />
     </div>
   );

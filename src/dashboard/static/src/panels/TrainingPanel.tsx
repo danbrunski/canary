@@ -289,16 +289,12 @@ function RunCard({
       </div>
       <div className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[0.76rem] text-fg-dim">
         <span>{run.model_type}</span>
-        <span className={run.status === "failed" ? "text-bad" : "text-ok"}>
-          {run.status}
-        </span>
+        <span className={run.status === "failed" ? "text-bad" : "text-ok"}>{run.status}</span>
         {run.compute_target && <span title="compute target">{run.compute_target}</span>}
         <span>{run.input_sessions.length} sessions</span>
         <span>{run.feature_schema.length} features</span>
         {quality.fpRate !== null && (
-          <span title="held-out false-positive rate">
-            FP {(quality.fpRate * 100).toFixed(1)}%
-          </span>
+          <span title="held-out false-positive rate">FP {(quality.fpRate * 100).toFixed(1)}%</span>
         )}
         {quality.alertsPerHour !== null && (
           <span>{quality.alertsPerHour.toFixed(2)} alerts/hr</span>
@@ -310,9 +306,7 @@ function RunCard({
         )}
         <time className="font-num">{run.created_at.slice(0, 19)}</time>
       </div>
-      {quality.hasQuality && (
-        <RunQualityView quality={quality} comparison={comparison} />
-      )}
+      {quality.hasQuality && <RunQualityView quality={quality} comparison={comparison} />}
       {loss.length > 1 && (
         <div className="mt-2">
           <span className="text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
@@ -323,8 +317,7 @@ function RunCard({
       )}
       {threshold(run) !== null && (
         <div className="mt-1 text-[0.74rem] text-fg-dim">
-          calibrated threshold:{" "}
-          <b className="font-num text-fg">{threshold(run)?.toFixed(4)}</b>
+          calibrated threshold: <b className="font-num text-fg">{threshold(run)?.toFixed(4)}</b>
         </div>
       )}
     </div>
@@ -392,9 +385,7 @@ function ScoreDistributionStrip({
         </span>
       </div>
       <div className="relative h-7 rounded-full bg-elev-3">
-        {median !== null && (
-          <Marker left={median} label="median" className="bg-accent-2" />
-        )}
+        {median !== null && <Marker left={median} label="median" className="bg-accent-2" />}
         {p95 !== null && <Marker left={p95} label="p95" className="bg-warn" />}
         {thresh !== null && <Marker left={thresh} label="threshold" className="bg-bad" />}
       </div>
@@ -402,15 +393,7 @@ function ScoreDistributionStrip({
   );
 }
 
-function Marker({
-  left,
-  label,
-  className,
-}: {
-  left: number;
-  label: string;
-  className: string;
-}) {
+function Marker({ left, label, className }: { left: number; label: string; className: string }) {
   return (
     <span
       className={cn("absolute top-1 h-5 w-1 rounded-full", className)}
@@ -428,9 +411,7 @@ function KSweepStrip({ points }: { points: KSweepPoint[] }) {
           key={point.k}
           className={cn(
             "rounded-full border px-2 py-0.5 font-num text-[0.66rem] tabular-nums",
-            point.meetsBudget
-              ? "border-ok/40 text-ok"
-              : "border-warn/40 text-warn",
+            point.meetsBudget ? "border-ok/40 text-ok" : "border-warn/40 text-warn",
           )}
           title={`${point.alertsPerHour.toFixed(2)} alerts/hr`}
         >
@@ -460,4 +441,3 @@ function ValidationSlices({ rows }: { rows: ValidationSlice[] }) {
     </div>
   );
 }
-

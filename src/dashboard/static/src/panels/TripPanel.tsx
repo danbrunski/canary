@@ -80,9 +80,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
   const openedAtRef = useRef<number>(Date.now());
   const observedSeconds = (Date.now() - openedAtRef.current) / 1000;
   const idleFraction =
-    idleTimeS != null && observedSeconds > 1
-      ? Math.min(idleTimeS / observedSeconds, 1)
-      : null;
+    idleTimeS != null && observedSeconds > 1 ? Math.min(idleTimeS / observedSeconds, 1) : null;
 
   const hasLiveData = distanceKm != null || fuelUsedL != null || idleTimeS != null;
 
@@ -134,9 +132,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>avg economy</dt>
-            <dd className={definitionValueClass}>
-              {formatEconomy(avgEconomyL100, avgEconomyMpg)}
-            </dd>
+            <dd className={definitionValueClass}>{formatEconomy(avgEconomyL100, avgEconomyMpg)}</dd>
           </div>
           <div className={definitionRowClass}>
             <dt className={definitionTermClass}>CO2</dt>
@@ -153,9 +149,7 @@ export function TripPanel({ channels, status, token }: TripPanelProps) {
         </dl>
       )}
 
-      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
-        Last drive
-      </h3>
+      <h3 className="mb-1 text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">Last drive</h3>
       {!sessionId ? (
         <p className={placeholderClass}>no recorded session yet</p>
       ) : loading ? (
@@ -315,4 +309,3 @@ function LastDriveSummary({
     </dl>
   );
 }
-

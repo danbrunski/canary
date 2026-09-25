@@ -2,7 +2,14 @@ import { useState } from "react";
 
 import { uploadModelArtifact } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
-import { buttonClass, inputClass, panelClass, panelHeaderClass, panelTitleClass, selectClass } from "../styles";
+import {
+  buttonClass,
+  inputClass,
+  panelClass,
+  panelHeaderClass,
+  panelTitleClass,
+  selectClass,
+} from "../styles";
 import { fileToBase64 } from "../util/browser";
 import { parseJsonObject } from "../util/json";
 
@@ -35,14 +42,32 @@ export function ModelUploadCard({ token, busy, run }: ModelUploadCardProps) {
         <h2 className={panelTitleClass}>Model Upload</h2>
       </header>
       <div className="grid grid-cols-1 gap-2">
-        <select className={selectClass} value={modelType} onChange={(event) => setModelType(event.target.value)}>
+        <select
+          className={selectClass}
+          value={modelType}
+          onChange={(event) => setModelType(event.target.value)}
+        >
           <option value="isolation_forest">isolation_forest</option>
           <option value="lstm_autoencoder">lstm_autoencoder</option>
           <option value="tcn_autoencoder">tcn_autoencoder</option>
         </select>
-        <input className={inputClass} type="file" onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)} />
-        <input className={inputClass} type="file" accept="application/json,.json" onChange={(event) => setManifestFile(event.target.files?.[0] ?? null)} />
-        <button className={buttonClass} type="button" onClick={uploadModel} disabled={!token || !!busy}>
+        <input
+          className={inputClass}
+          type="file"
+          onChange={(event) => setArtifactFile(event.target.files?.[0] ?? null)}
+        />
+        <input
+          className={inputClass}
+          type="file"
+          accept="application/json,.json"
+          onChange={(event) => setManifestFile(event.target.files?.[0] ?? null)}
+        />
+        <button
+          className={buttonClass}
+          type="button"
+          onClick={uploadModel}
+          disabled={!token || !!busy}
+        >
           Publish
         </button>
       </div>

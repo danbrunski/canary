@@ -2,12 +2,7 @@ import { useEffect, useState } from "react";
 
 import type { TuningContext } from "../../hooks/useTuningContext";
 import { cn } from "../../styles";
-import type {
-  ReadinessEntry,
-  ReadinessKey,
-  StatusResponse,
-  WorkbenchItem,
-} from "../../types";
+import type { ReadinessEntry, ReadinessKey, StatusResponse, WorkbenchItem } from "../../types";
 
 /** Chips in display order. Every key is always rendered: a chip the daemon
  *  did not report is grey "not reported", never absent and never green. */
@@ -155,7 +150,7 @@ export function TuningContextBar({ status, context, onNavigate }: Props) {
                 data-chip={key}
                 data-tone={tone}
                 className={cn("rounded-full border px-2 py-0.5 text-xs", toneClass[tone])}
-                title={showsFix ? entry?.fix ?? undefined : entry?.detail}
+                title={showsFix ? (entry?.fix ?? undefined) : entry?.detail}
                 aria-expanded={showsFix ? openChip === key : undefined}
                 onClick={() => {
                   if (showsFix) setOpenChip(openChip === key ? null : key);
@@ -215,9 +210,7 @@ function RunningCalibration({
   return (
     <span className="inline-flex items-center gap-1.5" title={`ECU reports ${ecuId}`}>
       <span>running {matches === true && revision ? revision : ecuId}</span>
-      {matches === null && (
-        <span className="text-xs text-warn">(flash history records no id)</span>
-      )}
+      {matches === null && <span className="text-xs text-warn">(flash history records no id)</span>}
       {changed && (
         <button
           type="button"

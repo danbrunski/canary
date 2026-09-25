@@ -5,12 +5,7 @@ import type { ConnectivityMode } from "../hooks/useConnectivityMode";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, headerClass, mainClass, shellClass } from "../styles";
 import type { Theme } from "../hooks/useTheme";
-import type {
-  AnomalyEvent,
-  AppMode,
-  ConnectionState,
-  StatusResponse,
-} from "../types";
+import type { AnomalyEvent, AppMode, ConnectionState, StatusResponse } from "../types";
 import { ConnectionIndicator } from "./ConnectionIndicator";
 import { OperatingModeIndicator } from "./OperatingModeIndicator";
 import { ReplayBanner } from "./ReplayBanner";
@@ -117,9 +112,7 @@ export function DashboardShell({
           )}
           onClick={onToggleTheme}
           aria-label={
-            theme === "dark"
-              ? "switch to the night (low-glare) theme"
-              : "switch to the day theme"
+            theme === "dark" ? "switch to the night (low-glare) theme" : "switch to the day theme"
           }
           title="Toggle day / night theme"
         >
@@ -133,11 +126,7 @@ export function DashboardShell({
             !driving && "border-accent bg-accent/15 text-accent",
           )}
           onClick={onToggleMode}
-          aria-label={
-            driving
-              ? "switch to the parked workbench"
-              : "switch to the driving screen"
-          }
+          aria-label={driving ? "switch to the parked workbench" : "switch to the driving screen"}
         >
           {driving ? "→ workbench" : "→ drive"}
         </button>

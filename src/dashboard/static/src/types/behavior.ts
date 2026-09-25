@@ -83,11 +83,7 @@ export interface DeviationConfig {
 
 /** Why a model may or may not alert. Only `validated` alerts. */
 export type BehaviorLifecycle =
-  | "validated"
-  | "unvalidated"
-  | "exploratory"
-  | "demoted"
-  | "quarantined";
+  "validated" | "unvalidated" | "exploratory" | "demoted" | "quarantined";
 
 export type BehaviorPermittedUse = "display" | "learned_feature" | "alert";
 

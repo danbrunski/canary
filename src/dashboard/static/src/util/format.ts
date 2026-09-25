@@ -16,10 +16,7 @@ export function formatNumber(value: number, smallDigits = 2): string {
 
 /** Fraction → percent. `null`/`undefined` → "-". `digits` defaults to 1
  *  (Training); ModelHealth passes 0. */
-export function formatPercent(
-  value: number | null | undefined,
-  digits = 1,
-): string {
+export function formatPercent(value: number | null | undefined, digits = 1): string {
   return value == null ? "-" : `${(value * 100).toFixed(digits)}%`;
 }
 

@@ -32,8 +32,8 @@ export function SequenceDetectorCard({
         <span className="text-[0.8rem] text-fg-dim">{sequenceDetector?.active ?? "—"}</span>
       </header>
       <p className="mb-2 text-[0.75rem] text-fg-dim">
-        Live backbone for the sequence slot. A switch takes effect immediately and is not
-        persisted — set the durable default via <code>models.sequence_detector</code>.
+        Live backbone for the sequence slot. A switch takes effect immediately and is not persisted
+        — set the durable default via <code>models.sequence_detector</code>.
       </p>
       <div className="grid grid-cols-2 gap-2 max-[1100px]:grid-cols-1">
         {(["lstm", "tcn"] as const).map((backbone) => {

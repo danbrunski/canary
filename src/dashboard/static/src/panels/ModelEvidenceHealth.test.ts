@@ -75,7 +75,8 @@ describe("ModelEvidencePanel", () => {
   });
 
   it("titles the ranking with the artifact's own scope when the API gives it", () => {
-    const note = "Engine-response channels ranked ... (driving conditions are context, never ranked)";
+    const note =
+      "Engine-response channels ranked ... (driving conditions are context, never ranked)";
     const event: AnomalyEvent = {
       ...LSTM_EVENT,
       detail: { ...LSTM_EVENT.detail, channel_ranking_note: note },

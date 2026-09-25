@@ -73,7 +73,11 @@ export function SessionsPanel({ token, companion }: SessionsPanelProps) {
       <Notice notice={notice} />
       <Notice notice={busy ? { kind: "busy", text: `Working: ${busy}` } : null} />
       <label className="flex items-center gap-2 text-sm text-fg-dim">
-        <input type="checkbox" checked={showCaptures} onChange={(event) => setShowCaptures(event.target.checked)} />
+        <input
+          type="checkbox"
+          checked={showCaptures}
+          onChange={(event) => setShowCaptures(event.target.checked)}
+        />
         captures ({showCaptures ? "isolated capture sessions" : "drive sessions"})
       </label>
       <div className="grid grid-cols-3 gap-4 max-[1100px]:grid-cols-1">

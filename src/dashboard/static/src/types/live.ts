@@ -161,24 +161,14 @@ export interface ReadinessEntry {
 }
 
 export type ReadinessKey =
-  | "ups_soc"
-  | "storage_free_mb"
-  | "memory_channels"
-  | "calibration"
-  | "vehicle_state";
+  "ups_soc" | "storage_free_mb" | "memory_channels" | "calibration" | "vehicle_state";
 
 export type TuningReadiness = Partial<Record<ReadinessKey, ReadinessEntry>>;
 
 /** `/status.vehicle_state` — mirrors
  *  `src.dashboard.status.VehicleState.to_dict()`. */
 export interface VehicleState {
-  state:
-    | "engine_running"
-    | "ignition_only"
-    | "engine_off"
-    | "no_data"
-    | "replay"
-    | "unknown";
+  state: "engine_running" | "ignition_only" | "engine_off" | "no_data" | "replay" | "unknown";
   rpm: number | null;
   coolant_temp: number | null;
   run_time: number | null;

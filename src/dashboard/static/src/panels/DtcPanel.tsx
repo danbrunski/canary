@@ -40,24 +40,15 @@ export function DtcPanel() {
   const milOn = data.mil_on;
 
   return (
-    <Panel
-      title="Trouble Codes"
-      count={`${data.dtc_count} code${data.dtc_count === 1 ? "" : "s"}`}
-    >
+    <Panel title="Trouble Codes" count={`${data.dtc_count} code${data.dtc_count === 1 ? "" : "s"}`}>
       <div
         title="Malfunction Indicator Lamp — the check-engine light (Mode 01 PID 01, bit 7)"
         className={cn(
           "mb-3 rounded-[8px] border px-3 py-2 text-[0.9rem] font-semibold",
-          milOn
-            ? "border-bad/55 bg-bad/10 text-bad"
-            : "border-ok/45 bg-ok/10 text-ok",
+          milOn ? "border-bad/55 bg-bad/10 text-bad" : "border-ok/45 bg-ok/10 text-ok",
         )}
       >
-        {milOn == null
-          ? "MIL / CEL state unknown"
-          : milOn
-            ? "MIL / CEL ON"
-            : "MIL / CEL off"}
+        {milOn == null ? "MIL / CEL state unknown" : milOn ? "MIL / CEL ON" : "MIL / CEL off"}
       </div>
 
       <p className="mb-3 text-[0.78rem] text-fg-dim">
@@ -80,11 +71,7 @@ export function DtcPanel() {
 /** Task 3.3/3.5 — the Mode 02 snapshot read once when a stored code most
  *  recently first appeared this session, rendered inside the DTC panel
  *  (not a separate panel) since it belongs to the trouble-code report. */
-function FreezeFrame({
-  freezeFrame,
-}: {
-  freezeFrame: Record<string, number | string> | null;
-}) {
+function FreezeFrame({ freezeFrame }: { freezeFrame: Record<string, number | string> | null }) {
   if (!freezeFrame || Object.keys(freezeFrame).length === 0) return null;
   return (
     <div>

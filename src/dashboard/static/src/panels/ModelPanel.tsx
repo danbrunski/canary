@@ -34,9 +34,7 @@ export function ModelPanel({ status, events }: ModelPanelProps) {
   const meanLstmLatency =
     lstmEvents.length === 0
       ? null
-      : lstmEvents
-          .map((e) => e.latency_ms ?? 0)
-          .reduce((a, b) => a + b, 0) / lstmEvents.length;
+      : lstmEvents.map((e) => e.latency_ms ?? 0).reduce((a, b) => a + b, 0) / lstmEvents.length;
 
   return (
     <Panel title="Models">

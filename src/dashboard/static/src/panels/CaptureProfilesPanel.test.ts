@@ -125,9 +125,9 @@ function status(activeName: string | null): StatusResponse {
           did_continuous: false,
           expected_total_demand_hz: null,
           capacity_evidence: "",
-  required_tuple: [],
-  min_achieved_rate_hz: null,
-  requires_tune_revision: false,
+          required_tuple: [],
+          min_achieved_rate_hz: null,
+          requires_tune_revision: false,
           paused: false,
           broadcast_decode: true,
           corpus_eligible: false,
@@ -185,14 +185,8 @@ function renderPanel(activeName: string | null = null, extra: Record<string, unk
     ],
   });
   mocks.getDids.mockResolvedValue({
-    dids: [
-      { name: "ECM_AF_SENSOR_V_B1" },
-      { name: "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" },
-    ],
-    memory: [
-      { name: "ECM_TARGET_EQUIV_RATIO" },
-      { name: "ECM_ENGINE_PERIOD" },
-    ],
+    dids: [{ name: "ECM_AF_SENSOR_V_B1" }, { name: "ECM_BASE_FUEL_SCHEDULE_CANDIDATE" }],
+    memory: [{ name: "ECM_TARGET_EQUIV_RATIO" }, { name: "ECM_ENGINE_PERIOD" }],
   });
   // The daemon returns the new snapshot from every capture mutation and the
   // panel applies it immediately — /status only polls every 5 s, which is what
@@ -251,7 +245,9 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     expect(target).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(mocks.saveCaptureProfile).toHaveBeenCalled());
-    expect(mocks.saveCaptureProfile.mock.calls.at(-1)?.[1].memory).toEqual(["ECM_TARGET_EQUIV_RATIO"]);
+    expect(mocks.saveCaptureProfile.mock.calls.at(-1)?.[1].memory).toEqual([
+      "ECM_TARGET_EQUIV_RATIO",
+    ]);
   });
 
   it("shows resolved batched and fallback demand as distinct units", async () => {
@@ -479,9 +475,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     });
     fireEvent.click(screen.getByLabelText(/per-channel rate weights/));
 
-    const weight = screen.getByLabelText(
-      "ECM_BASE_FUEL_SCHEDULE_CANDIDATE rate weight",
-    );
+    const weight = screen.getByLabelText("ECM_BASE_FUEL_SCHEDULE_CANDIDATE rate weight");
     expect(weight).toHaveValue(0.25);
     fireEvent.change(weight, { target: { value: "0.5" } });
     fireEvent.click(screen.getByRole("button", { name: /^Save$/ }));
@@ -536,18 +530,23 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
       memory: ["ECM_TARGET_EQUIV_RATIO"],
     };
     const channels = new Map([
-      ["did:ECM_AF_SENSOR_V_B1", {
-        latest: { value: 2.5, unit: "V", timestamp: "2026-07-30T10:00:00+00:00" },
-        history: [],
-      }],
+      [
+        "did:ECM_AF_SENSOR_V_B1",
+        {
+          latest: { value: 2.5, unit: "V", timestamp: "2026-07-30T10:00:00+00:00" },
+          history: [],
+        },
+      ],
     ]);
     renderPanel("fuel-map", { status: captureStatus, channels });
     await waitFor(() => expect(mocks.getCaptureProfiles).toHaveBeenCalled());
 
-    expect(screen.getByText("did:ECM_AF_SENSOR_V_B1").closest("tr"))
-      .toHaveTextContent("Waiting for sample");
-    expect(screen.getByText("mem:ECM_TARGET_EQUIV_RATIO").closest("tr"))
-      .toHaveTextContent("Waiting for sample");
+    expect(screen.getByText("did:ECM_AF_SENSOR_V_B1").closest("tr")).toHaveTextContent(
+      "Waiting for sample",
+    );
+    expect(screen.getByText("mem:ECM_TARGET_EQUIV_RATIO").closest("tr")).toHaveTextContent(
+      "Waiting for sample",
+    );
   });
 
   it("shows only channels from enabled polling services", async () => {
@@ -579,9 +578,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
     // The `status` prop is deliberately never updated in this test.
-    await waitFor(() =>
-      expect(screen.getByTestId("capture-phase")).toHaveTextContent("Recording"),
-    );
+    await waitFor(() => expect(screen.getByTestId("capture-phase")).toHaveTextContent("Recording"));
     expect(screen.getByRole("button", { name: /Pause/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
   });
@@ -593,9 +590,7 @@ describe("CaptureProfilesPanel (capture-profiles.md 3.2)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Pause/ }));
 
-    await waitFor(() =>
-      expect(screen.getByTestId("capture-phase")).toHaveTextContent("Paused"),
-    );
+    await waitFor(() => expect(screen.getByTestId("capture-phase")).toHaveTextContent("Paused"));
     expect(screen.getByRole("button", { name: /Resume/ })).toBeInTheDocument();
   });
 

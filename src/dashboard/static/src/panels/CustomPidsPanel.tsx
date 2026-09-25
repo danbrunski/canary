@@ -5,7 +5,14 @@ import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
 import { useControlResource } from "../hooks/useControlResource";
-import { buttonClass, cn, dangerButtonClass, inputClass, placeholderClass, selectClass } from "../styles";
+import {
+  buttonClass,
+  cn,
+  dangerButtonClass,
+  inputClass,
+  placeholderClass,
+  selectClass,
+} from "../styles";
 import type { CustomPid } from "../types";
 
 interface CustomPidsPanelProps {
@@ -249,11 +256,7 @@ export function CustomPidsPanel({ token }: CustomPidsPanelProps) {
         Torque Pro CSV import
       </h3>
       {!importing ? (
-        <button
-          type="button"
-          className={buttonClass}
-          onClick={() => setImporting(true)}
-        >
+        <button type="button" className={buttonClass} onClick={() => setImporting(true)}>
           Import CSV…
         </button>
       ) : (

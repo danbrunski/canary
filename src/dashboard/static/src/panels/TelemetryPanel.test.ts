@@ -44,10 +44,7 @@ describe("renderChannel", () => {
       value: 105, // raw byte
       unit: "",
     });
-    const r = renderChannel(
-      decoded,
-      binding({ scale: 1.0, offset: -40.0, unit: "degC" }),
-    );
+    const r = renderChannel(decoded, binding({ scale: 1.0, offset: -40.0, unit: "degC" }));
     // 105 * 1.0 + (-40) = 65; formatter shows one decimal for 10-100 range
     expect(r.text).toBe("65.0");
     expect(r.unit).toBe("degC");
@@ -148,10 +145,7 @@ describe("TelemetryPanel", () => {
     const channels = new Map<string, ChannelSnapshot>();
     for (let i = 0; i < 28; i += 1) {
       const id = `0x${(0x1f9 + i).toString(16).toUpperCase()}`;
-      channels.set(
-        `can:${id}`,
-        snapshot({ source: "can", channel: id, value: null, unit: "" }),
-      );
+      channels.set(`can:${id}`, snapshot({ source: "can", channel: id, value: null, unit: "" }));
     }
     channels.set(
       "obd:EVAPORATIVE_PURGE",
@@ -177,9 +171,9 @@ describe("TelemetryPanel", () => {
     expect(screen.getByText("2 live values")).toBeInTheDocument();
     expect(screen.queryByText("0x1F9")).not.toBeInTheDocument();
     expect(screen.getByText("2 visible")).toBeInTheDocument();
-    expect(
-      screen.getByRole("table", { name: "Live telemetry values" }),
-    ).toHaveClass("font-console");
+    expect(screen.getByRole("table", { name: "Live telemetry values" })).toHaveClass(
+      "font-console",
+    );
     expect(screen.getByRole("columnheader", { name: "Signal" })).toBeInTheDocument();
     // No combined multi-channel chart — each tile carries its own sparkline.
     expect(screen.queryByText("Live chart")).not.toBeInTheDocument();
@@ -224,18 +218,16 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
   }
 
   it("shows every channel as an equal tile — nothing hidden behind an expander", () => {
-    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    render(
+      createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }),
+    );
     // No "N more channels" expander, no pinned-only toggle until something is pinned.
     expect(screen.queryByText(/more channels/)).not.toBeInTheDocument();
     expect(screen.queryByText(/pinned only/)).not.toBeInTheDocument();
     // Every channel is an equal tile — assert the tile-unique pin control.
     expect(screen.getByRole("button", { name: "pin ECM_RPM" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "pin ECM_COOLANT_TEMP" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "pin STEERING_ANGLE_002" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "pin ECM_COOLANT_TEMP" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "pin STEERING_ANGLE_002" })).toBeInTheDocument();
   });
 
   it("shows per-channel age, achieved rate, and stale/slow state", () => {
@@ -253,45 +245,53 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
       ],
     ]);
 
-    render(createElement(TelemetryPanel, {
-      channels,
-      bindings: {},
-      compact: true,
-      scheduler: {
-        achieved_hz_60s: { THROTTLE_POS: 0.2 },
-        requests: [
-          {
-            kind: "pid",
-            channel: "THROTTLE_POS",
-            configured_rate_hz: 1,
-            backed_off: false,
-            last_response_age_seconds: 6,
-          },
-        ],
-      },
-    }));
+    render(
+      createElement(TelemetryPanel, {
+        channels,
+        bindings: {},
+        compact: true,
+        scheduler: {
+          achieved_hz_60s: { THROTTLE_POS: 0.2 },
+          requests: [
+            {
+              kind: "pid",
+              channel: "THROTTLE_POS",
+              configured_rate_hz: 1,
+              backed_off: false,
+              last_response_age_seconds: 6,
+            },
+          ],
+        },
+      }),
+    );
 
     expect(screen.getByText("age 6s stale")).toBeInTheDocument();
     expect(screen.getByText("0.20/1 Hz slow")).toBeInTheDocument();
   });
 
   it("pins a channel, persists it, and exposes the pinned-only toggle", () => {
-    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    render(
+      createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }),
+    );
     fireEvent.click(screen.getByRole("button", { name: "pin ECM_RPM" }));
     expect(screen.getByText("3 live values · 1 pinned")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /pinned only/ }),
-    ).toBeInTheDocument();
-    expect(
-      JSON.parse(window.localStorage.getItem("canary.drive.pinned") ?? "[]"),
-    ).toEqual(["decoded:ECM_RPM"]);
+    expect(screen.getByRole("button", { name: /pinned only/ })).toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem("canary.drive.pinned") ?? "[]")).toEqual([
+      "decoded:ECM_RPM",
+    ]);
     // Unpin returns to the no-pins state.
     fireEvent.click(screen.getByRole("button", { name: "unpin ECM_RPM" }));
     expect(screen.getByText("3 live values")).toBeInTheDocument();
   });
 
   it("does not re-seed default pins after every default pin is removed", async () => {
-    render(createElement(TelemetryPanel, { channels: defaultDriveChannels(), bindings: {}, compact: true }));
+    render(
+      createElement(TelemetryPanel, {
+        channels: defaultDriveChannels(),
+        bindings: {},
+        compact: true,
+      }),
+    );
 
     expect(await screen.findByText("6 live values · 6 pinned")).toBeInTheDocument();
     for (const key of defaultDriveKeys) {
@@ -311,7 +311,13 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
   it("honors a stored empty pin list", () => {
     window.localStorage.setItem("canary.drive.pinned", "[]");
 
-    render(createElement(TelemetryPanel, { channels: defaultDriveChannels(), bindings: {}, compact: true }));
+    render(
+      createElement(TelemetryPanel, {
+        channels: defaultDriveChannels(),
+        bindings: {},
+        compact: true,
+      }),
+    );
 
     expect(screen.getByText("6 live values")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /pinned only/ })).not.toBeInTheDocument();
@@ -319,25 +325,26 @@ describe("TelemetryPanel — Drive (compact) pinning", () => {
   });
 
   it("sparklines are off by default and the per-card toggle persists", () => {
-    render(createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }));
+    render(
+      createElement(TelemetryPanel, { channels: driveChannels(), bindings: {}, compact: true }),
+    );
     // Default: graph off → "show graph" affordance on every tile, no canvas.
     const showBtn = screen.getByRole("button", { name: "show graph for ECM_RPM" });
     expect(showBtn).toHaveAttribute("aria-pressed", "false");
     expect(document.querySelector("canvas")).toBeNull();
 
     fireEvent.click(showBtn);
-    expect(
-      screen.getByRole("button", { name: "hide graph for ECM_RPM" }),
-    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "hide graph for ECM_RPM" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect(document.querySelector("canvas")).not.toBeNull();
-    expect(
-      JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]"),
-    ).toEqual(["decoded:ECM_RPM"]);
+    expect(JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]")).toEqual([
+      "decoded:ECM_RPM",
+    ]);
 
     // Toggling back removes it again.
     fireEvent.click(screen.getByRole("button", { name: "hide graph for ECM_RPM" }));
-    expect(
-      JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]"),
-    ).toEqual([]);
+    expect(JSON.parse(window.localStorage.getItem("canary.drive.graphs") ?? "[]")).toEqual([]);
   });
 });

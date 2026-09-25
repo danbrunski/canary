@@ -5,13 +5,7 @@ import { Heatmap } from "../components/Heatmap";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
 import { useAsyncAction } from "../hooks/useAsyncAction";
-import {
-  buttonClass,
-  cn,
-  inputClass,
-  placeholderClass,
-  selectClass,
-} from "../styles";
+import { buttonClass, cn, inputClass, placeholderClass, selectClass } from "../styles";
 import type { BinnedAggregation, BinnedAnalysisResponse } from "../types";
 
 const AGGREGATIONS: BinnedAggregation[] = ["mean", "median", "p95", "count"];
@@ -35,23 +29,27 @@ export function ExplorePanel() {
   const { notice, setNotice, busy, run } = useAsyncAction();
 
   const submit = () =>
-    run("explore", async () => {
-      const next = await getBinnedAnalysis({
-        value,
-        x,
-        y: y.trim() ? y.trim() : undefined,
-        xBins: Number(xBins) || undefined,
-        yBins: y.trim() ? Number(yBins) || undefined : undefined,
-        agg,
-        session: session.trim() || undefined,
-        since: since.trim() || undefined,
-        until: until.trim() || undefined,
-      });
-      setResult(next);
-      if (!next.available) {
-        setNotice({ kind: "error", text: next.reason });
-      }
-    }, { okText: null });
+    run(
+      "explore",
+      async () => {
+        const next = await getBinnedAnalysis({
+          value,
+          x,
+          y: y.trim() ? y.trim() : undefined,
+          xBins: Number(xBins) || undefined,
+          yBins: y.trim() ? Number(yBins) || undefined : undefined,
+          agg,
+          session: session.trim() || undefined,
+          since: since.trim() || undefined,
+          until: until.trim() || undefined,
+        });
+        setResult(next);
+        if (!next.available) {
+          setNotice({ kind: "error", text: next.reason });
+        }
+      },
+      { okText: null },
+    );
 
   return (
     <Panel title="Explore" count={result?.available ? `n=${result.sample_count}` : undefined}>
@@ -165,9 +163,7 @@ export function ExplorePanel() {
         {result === null && (
           <p className={placeholderClass}>pick channels and run to see the binned result.</p>
         )}
-        {result && !result.available && (
-          <p className={placeholderClass}>{result.reason}</p>
-        )}
+        {result && !result.available && <p className={placeholderClass}>{result.reason}</p>}
         {result && result.available && result.kind === "2d" && (
           <Heatmap
             cells={result.cells}

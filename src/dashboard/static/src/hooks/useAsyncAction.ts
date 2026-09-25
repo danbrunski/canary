@@ -29,11 +29,7 @@ export function useAsyncAction() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const run = useCallback(
-    async (
-      label: string,
-      action: () => Promise<void>,
-      opts: RunOptions = {},
-    ): Promise<void> => {
+    async (label: string, action: () => Promise<void>, opts: RunOptions = {}): Promise<void> => {
       const gate = opts.precheck?.();
       if (gate) {
         setNotice({ kind: "error", text: gate });

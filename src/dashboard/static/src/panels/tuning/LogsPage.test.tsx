@@ -48,7 +48,9 @@ const LOGS: LogsResponse = {
       duration_source: "parquet_span",
       row_count: 900,
       revision: { revision: "ZS44A-20260727", source: "registry", conflict: false },
-      revision_boundaries: [{ revision: "ZS44A-20260910", flashed_at: "2026-09-10T12:00:30+00:00" }],
+      revision_boundaries: [
+        { revision: "ZS44A-20260910", flashed_at: "2026-09-10T12:00:30+00:00" },
+      ],
       quality: null,
       end_reason: "daemon_shutdown",
       tag_count: 0,
@@ -197,12 +199,19 @@ describe("LogsPage viewer (direct route with a persisted log)", () => {
       frame({
         capped: true,
         rows_total: 50000,
-        missing: [{ spec: "obd:INTAKE_TEMP", reason: "This capture's profile does not poll obd:INTAKE_TEMP" }],
+        missing: [
+          {
+            spec: "obd:INTAKE_TEMP",
+            reason: "This capture's profile does not poll obd:INTAKE_TEMP",
+          },
+        ],
       }),
     );
     render(<LogsPage token="t" context={selected} />);
     expect(await screen.findByText(/Showing rows 1–3 of 50,000/)).toBeInTheDocument();
-    expect(screen.getByText("This capture's profile does not poll obd:INTAKE_TEMP")).toBeInTheDocument();
+    expect(
+      screen.getByText("This capture's profile does not poll obd:INTAKE_TEMP"),
+    ).toBeInTheDocument();
   });
 
   it("defers while a capture records, with the laptop path", async () => {
@@ -220,7 +229,9 @@ describe("LogsPage viewer (direct route with a persisted log)", () => {
       ),
     );
     render(<LogsPage token="t" context={selected} />);
-    expect(await screen.findByText(/is recording/)).toHaveTextContent("Deferred while tuning is recording");
+    expect(await screen.findByText(/is recording/)).toHaveTextContent(
+      "Deferred while tuning is recording",
+    );
     expect(screen.getByText(/tar -cf -/)).toBeInTheDocument();
   });
 
@@ -230,16 +241,24 @@ describe("LogsPage viewer (direct route with a persisted log)", () => {
     await screen.findByRole("table", { name: "Log table" });
     fireEvent.change(screen.getByLabelText("Regime"), { target: { value: "fuel_cut" } });
     await waitFor(() =>
-      expect(
-        control.mock.calls.some(([path]) => String(path).includes("regime=fuel_cut")),
-      ).toBe(true),
+      expect(control.mock.calls.some(([path]) => String(path).includes("regime=fuel_cut"))).toBe(
+        true,
+      ),
     );
   });
 });
 
 describe("workbench helpers", () => {
   it("exports CSV of exactly the given rows", () => {
-    expect(toCsv(["a", "b"], [[1, null], ["x,y", 2]])).toBe('a,b\n1,\n"x,y",2\n');
+    expect(
+      toCsv(
+        ["a", "b"],
+        [
+          [1, null],
+          ["x,y", 2],
+        ],
+      ),
+    ).toBe('a,b\n1,\n"x,y",2\n');
   });
 
   it("formats durations", () => {

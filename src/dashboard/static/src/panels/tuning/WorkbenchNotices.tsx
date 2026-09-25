@@ -18,8 +18,8 @@ export function RefusalNotice({ refusal }: { refusal: Refusal | null }) {
     return (
       <div role="status" className="rounded border border-warn/60 p-3 text-sm text-warn">
         <p className="m-0">
-          Deferred while <code>{refusal.profile ?? "a capture"}</code> is recording — analysis
-          would compete with the collector for memory.
+          Deferred while <code>{refusal.profile ?? "a capture"}</code> is recording — analysis would
+          compete with the collector for memory.
         </p>
         {refusal.laptopPath && (
           <p className="m-0 mt-1 text-xs text-fg-dim">
@@ -130,7 +130,9 @@ export function ConditionsBlock({
           <dt>Flash inside</dt>
           <dd className="m-0 text-warn">
             {boundaries
-              .map(([session, crossed]) => `${session} → ${crossed.map((b) => b.revision).join(", ")}`)
+              .map(
+                ([session, crossed]) => `${session} → ${crossed.map((b) => b.revision).join(", ")}`,
+              )
               .join("; ")}
           </dd>
         </>
@@ -141,7 +143,10 @@ export function ConditionsBlock({
           ? `not captured (${baro.spec})`
           : `${baro.min_kpa.toFixed(1)}–${(baro.max_kpa ?? baro.min_kpa).toFixed(1)} kPa`}
         {baro.sessions_without.length > 0 && baro.min_kpa !== null && (
-          <span className="text-warn"> · {baro.sessions_without.length} session(s) without baro</span>
+          <span className="text-warn">
+            {" "}
+            · {baro.sessions_without.length} session(s) without baro
+          </span>
         )}
       </dd>
       <dt>Gates</dt>

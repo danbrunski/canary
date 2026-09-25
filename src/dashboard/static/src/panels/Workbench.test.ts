@@ -27,9 +27,7 @@ const DATA: DashboardData = {
 };
 
 function renderAt(active: WorkbenchItem) {
-  return render(
-    createElement(Workbench, { active, onNavigate: () => {}, data: DATA }),
-  );
+  return render(createElement(Workbench, { active, onNavigate: () => {}, data: DATA }));
 }
 
 describe("Workbench navigation", () => {
@@ -42,13 +40,16 @@ describe("Workbench navigation", () => {
 
   it("places Capture Profiles under System", () => {
     renderAt("observe-charts");
-    expect(screen.getByRole("button", { name: "Capture Profiles" }).closest("div"))
-      .toHaveTextContent("System");
+    expect(
+      screen.getByRole("button", { name: "Capture Profiles" }).closest("div"),
+    ).toHaveTextContent("System");
   });
 
   it("separates profile editing from the Logging run controls", () => {
     const editor = renderAt("system-capture-profiles");
-    expect(screen.getByText(/Define the default collection and temporary logging schemas/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Define the default collection and temporary logging schemas/),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start" })).not.toBeInTheDocument();
     editor.unmount();
@@ -72,9 +73,7 @@ describe("Workbench navigation", () => {
       }),
     );
     fireEvent.click(screen.getByRole("button", { name: "System Info" }));
-    rerender(
-      createElement(Workbench, { active, onNavigate: () => {}, data: DATA }),
-    );
+    rerender(createElement(Workbench, { active, onNavigate: () => {}, data: DATA }));
     expect(screen.getByRole("heading", { name: "System" })).toBeInTheDocument();
   });
 

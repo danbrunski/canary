@@ -17,12 +17,7 @@ const SOURCE_LABEL: Record<ScoreSource, string> = {
   behavior: "behavior residual",
 };
 
-const SOURCES: ScoreSource[] = [
-  "isolation_forest",
-  "lstm_autoencoder",
-  "fused",
-  "behavior",
-];
+const SOURCES: ScoreSource[] = ["isolation_forest", "lstm_autoencoder", "fused", "behavior"];
 
 /** One model's live readout: current normalized index + level + raw value,
  *  and a fixed-scale (0–100, threshold ref at 50) sparkline of recent ticks.
@@ -62,17 +57,12 @@ function ModelCard({ source, msgs }: { source: ScoreSource; msgs: ScoreMessage[]
       ) : (
         <div className="flex items-baseline gap-2">
           <span
-            className={cn(
-              "font-num text-2xl font-semibold tabular-nums",
-              LEVEL_TONE[view.level],
-            )}
+            className={cn("font-num text-2xl font-semibold tabular-nums", LEVEL_TONE[view.level])}
           >
             {view.index}
             <span className="text-sm text-fg-dim">/100</span>
           </span>
-          <span
-            className={cn("text-[0.7rem] uppercase tracking-[0.06em]", LEVEL_TONE[view.level])}
-          >
+          <span className={cn("text-[0.7rem] uppercase tracking-[0.06em]", LEVEL_TONE[view.level])}>
             {view.level}
           </span>
           <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">

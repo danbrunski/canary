@@ -46,9 +46,7 @@ export interface BinnedAnalysis2D {
 }
 
 export type BinnedAnalysisResponse =
-  | BinnedAnalysis1D
-  | BinnedAnalysis2D
-  | BinnedAnalysisUnavailable;
+  BinnedAnalysis1D | BinnedAnalysis2D | BinnedAnalysisUnavailable;
 
 export interface SessionChartSeries {
   timestamps: string[];

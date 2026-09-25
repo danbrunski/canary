@@ -57,10 +57,7 @@ const PRESET_GROUPS: PresetGroup[] = [
  *  the channel set + responsive grid is the durable core a richer builder
  *  layers onto.) */
 export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
-  const [profile, setProfile] = useLocalStorageJson<Profile>(
-    STORAGE_KEY,
-    DEFAULT_PROFILE,
-  );
+  const [profile, setProfile] = useLocalStorageJson<Profile>(STORAGE_KEY, DEFAULT_PROFILE);
   const [filter, setFilter] = useState("");
   const [importing, setImporting] = useState(false);
   const [importText, setImportText] = useState("");
@@ -76,9 +73,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
   );
 
   const addTile = (key: string) =>
-    setProfile((p) =>
-      p.tiles.includes(key) ? p : { ...p, tiles: [...p.tiles, key] },
-    );
+    setProfile((p) => (p.tiles.includes(key) ? p : { ...p, tiles: [...p.tiles, key] }));
   const removeTile = (key: string) =>
     setProfile((p) => ({ ...p, tiles: p.tiles.filter((k) => k !== key) }));
 
@@ -163,11 +158,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
             onChange={(e) => setImportText(e.target.value)}
           />
           <div className="flex gap-2">
-            <button
-              type="button"
-              className={buttonClass}
-              onClick={() => applyImport(importText)}
-            >
+            <button type="button" className={buttonClass} onClick={() => applyImport(importText)}>
               Apply JSON
             </button>
             <input
@@ -180,11 +171,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
                 if (f) applyImport(await f.text());
               }}
             />
-            <button
-              type="button"
-              className={buttonClass}
-              onClick={() => fileRef.current?.click()}
-            >
+            <button type="button" className={buttonClass} onClick={() => fileRef.current?.click()}>
               From file…
             </button>
           </div>

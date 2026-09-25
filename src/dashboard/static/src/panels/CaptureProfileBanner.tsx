@@ -11,7 +11,8 @@ export function CaptureProfileBanner({ state }: { state?: CaptureProfileState | 
       {state.experimental && " · EXPERIMENTAL"}
       {state.target_rate_hz != null && ` · ${state.target_rate_hz} Hz/channel`}
       {state.did_continuous && " · Mode 22 continuous"}
-      {" · "}{state.session_dir ?? "rotating storage"}
+      {" · "}
+      {state.session_dir ?? "rotating storage"}
     </div>
   );
 }

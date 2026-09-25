@@ -112,24 +112,29 @@ export function SessionsCard({
         <span className={panelCountClass}>{sessions.length}</span>
       </header>
       <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto">
-        {sessions.slice().reverse().map((session) => (
-          <button
-            key={session.session_id}
-            type="button"
-            className={cn(
-              "grid w-full grid-cols-[1fr_auto] gap-2 rounded-[8px] border border-border bg-elev-2 px-2.5 py-2 text-left text-fg transition-colors hover:border-border-soft max-[1100px]:grid-cols-1",
-              session.session_id === selectedSessionId && "border-accent",
-            )}
-            onClick={() => onSelectSessionId(session.session_id)}
-          >
-            <span>{session.session_id}</span>
-            <small className="text-fg-dim">
-              {typeof session.metadata.capture_profile === "string" ? `${session.metadata.capture_profile} / ` : ""}
-              {session.telemetry_chunks} chunks / {session.tag_count} tags
-              {session.pinned ? " / pinned" : ""}
-            </small>
-          </button>
-        ))}
+        {sessions
+          .slice()
+          .reverse()
+          .map((session) => (
+            <button
+              key={session.session_id}
+              type="button"
+              className={cn(
+                "grid w-full grid-cols-[1fr_auto] gap-2 rounded-[8px] border border-border bg-elev-2 px-2.5 py-2 text-left text-fg transition-colors hover:border-border-soft max-[1100px]:grid-cols-1",
+                session.session_id === selectedSessionId && "border-accent",
+              )}
+              onClick={() => onSelectSessionId(session.session_id)}
+            >
+              <span>{session.session_id}</span>
+              <small className="text-fg-dim">
+                {typeof session.metadata.capture_profile === "string"
+                  ? `${session.metadata.capture_profile} / `
+                  : ""}
+                {session.telemetry_chunks} chunks / {session.tag_count} tags
+                {session.pinned ? " / pinned" : ""}
+              </small>
+            </button>
+          ))}
       </div>
       {selectedSession && (
         <div className="mt-3 flex flex-col gap-2">
@@ -141,11 +146,21 @@ export function SessionsCard({
             spellCheck={false}
           />
           <div className="flex flex-wrap gap-1.5">
-            <button className={buttonClass} type="button" onClick={saveMetadata}>Metadata</button>
-            <button className={buttonClass} type="button" onClick={exportSelected}>Export</button>
-            <button className={buttonClass} type="button" onClick={syncSelectedToLaptop}>Sync to laptop</button>
-            <button className={buttonClass} type="button" onClick={pinSelected}>Pin</button>
-            <button className={buttonClass} type="button" onClick={unpinSelected}>Unpin</button>
+            <button className={buttonClass} type="button" onClick={saveMetadata}>
+              Metadata
+            </button>
+            <button className={buttonClass} type="button" onClick={exportSelected}>
+              Export
+            </button>
+            <button className={buttonClass} type="button" onClick={syncSelectedToLaptop}>
+              Sync to laptop
+            </button>
+            <button className={buttonClass} type="button" onClick={pinSelected}>
+              Pin
+            </button>
+            <button className={buttonClass} type="button" onClick={unpinSelected}>
+              Unpin
+            </button>
             <button type="button" className={dangerButtonClass} onClick={deleteSelected}>
               Delete
             </button>
@@ -158,7 +173,12 @@ export function SessionsCard({
             />
             pin on Pi during sync
           </label>
-          <input className={inputClass} value={pinReason} onChange={(event) => setPinReason(event.target.value)} placeholder="pin reason" />
+          <input
+            className={inputClass}
+            value={pinReason}
+            onChange={(event) => setPinReason(event.target.value)}
+            placeholder="pin reason"
+          />
         </div>
       )}
     </section>

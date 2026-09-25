@@ -1,10 +1,6 @@
 import { useMemo, useState } from "react";
 
-import {
-  downloadSessionGpx,
-  downloadSessionKml,
-  getSessionChart,
-} from "../api/http";
+import { downloadSessionGpx, downloadSessionKml, getSessionChart } from "../api/http";
 import { MultiSeriesChart, type ChartSeries } from "../components/MultiSeriesChart";
 import { Notice } from "../components/Notice";
 import { Panel } from "../components/Panel";
@@ -21,14 +17,7 @@ interface ChartsPanelProps {
   token?: string;
 }
 
-const PALETTE = [
-  "#ffb547",
-  "#4fd6e0",
-  "#5fe3b3",
-  "#ff6f6f",
-  "#c08cff",
-  "#8ad15a",
-];
+const PALETTE = ["#ffb547", "#4fd6e0", "#5fe3b3", "#ff6f6f", "#c08cff", "#8ad15a"];
 const MAX_SERIES = 6;
 const WINDOWS = [60, 120, 300] as const;
 
@@ -139,9 +128,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
     });
 
   const liveSeries: ChartSeries[] = selected.map((key, i) => {
-    const all = paused
-      ? (frozen?.get(key) ?? [])
-      : (channels.get(key)?.history ?? []);
+    const all = paused ? (frozen?.get(key) ?? []) : (channels.get(key)?.history ?? []);
     return { key, color: PALETTE[i % PALETTE.length], values: all.slice(-windowN) };
   });
 
@@ -307,9 +294,7 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
               const last = v.at(-1);
               const min = v.length ? Math.min(...v) : null;
               const max = v.length ? Math.max(...v) : null;
-              const avg = v.length
-                ? v.reduce((a, b) => a + b, 0) / v.length
-                : null;
+              const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
               return (
                 <span key={s.key} className="inline-flex items-center gap-1.5">
                   <span

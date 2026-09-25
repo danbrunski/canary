@@ -52,9 +52,8 @@ export function TrendsPanel({ token }: TrendsPanelProps) {
     return (
       <Panel title="Drift Trends">
         <p className={placeholderClass}>
-          No reference epoch frozen yet — run{" "}
-          <code>scripts/fingerprint.py freeze</code> once a healthy baseline
-          of sessions exists.
+          No reference epoch frozen yet — run <code>scripts/fingerprint.py freeze</code> once a
+          healthy baseline of sessions exists.
         </p>
       </Panel>
     );

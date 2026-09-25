@@ -58,14 +58,7 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
-import {
-  apiUrl,
-  controlJson,
-  fetchJson,
-  fetchOrNetworkError,
-  HttpError,
-  jsonBody,
-} from "./core";
+import { apiUrl, controlJson, fetchJson, fetchOrNetworkError, HttpError, jsonBody } from "./core";
 
 export { HttpError, NetworkError } from "./core";
 
@@ -76,9 +69,7 @@ export function getStatus(signal?: AbortSignal): Promise<StatusResponse> {
 /** Task 6.35 — only the companion app answers this (same-origin, no
  *  `baseUrl`/token): its reachability is the "am I running as the local
  *  library, not the live Pi dashboard" signal `useConnectivityMode` reads. */
-export function getCompanionStatus(
-  signal?: AbortSignal,
-): Promise<CompanionStatusResponse> {
+export function getCompanionStatus(signal?: AbortSignal): Promise<CompanionStatusResponse> {
   return fetchJson<CompanionStatusResponse>("/companion/status", { signal });
 }
 
@@ -86,10 +77,7 @@ export function getConfig(signal?: AbortSignal): Promise<Record<string, unknown>
   return fetchJson("/config", { signal });
 }
 
-export function getAnomalies(
-  since?: string,
-  signal?: AbortSignal,
-): Promise<AnomaliesResponse> {
+export function getAnomalies(since?: string, signal?: AbortSignal): Promise<AnomaliesResponse> {
   const params = since ? `?since=${encodeURIComponent(since)}` : "";
   return fetchJson<AnomaliesResponse>(`/anomalies${params}`, { signal });
 }
@@ -104,26 +92,20 @@ export function getLatestTelemetry(
 /** Seed shape for the live panels: the most recent sample for *every*
  *  channel, not the last N rows globally (which the high-rate CAN bus
  *  dominates, starving the ~1 Hz OBD gauges). */
-export function getLatestPerChannel(
-  signal?: AbortSignal,
-): Promise<TelemetryLatestResponse> {
+export function getLatestPerChannel(signal?: AbortSignal): Promise<TelemetryLatestResponse> {
   return fetchJson<TelemetryLatestResponse>(`/telemetry/latest?per_channel=true`, {
     signal,
   });
 }
 
-export function getBehaviorModels(
-  signal?: AbortSignal,
-): Promise<BehaviorModelsResponse> {
+export function getBehaviorModels(signal?: AbortSignal): Promise<BehaviorModelsResponse> {
   return fetchJson<BehaviorModelsResponse>("/models/behavior", { signal });
 }
 
 /** Live "you are here" overlay feed. Polled fast (~2 s) and independently
  *  of the slow static-surface poll — the trail itself lives server-side, so
  *  a slow client poll still returns a smooth history. */
-export function getBehaviorLive(
-  signal?: AbortSignal,
-): Promise<BehaviorLiveResponse> {
+export function getBehaviorLive(signal?: AbortSignal): Promise<BehaviorLiveResponse> {
   return fetchJson<BehaviorLiveResponse>("/models/behavior/live", { signal });
 }
 
@@ -131,17 +113,11 @@ export function getBindings(signal?: AbortSignal): Promise<BindingsByChannel> {
   return fetchJson<BindingsByChannel>("/bindings", { signal });
 }
 
-export function getPreflight(
-  token: string,
-  signal?: AbortSignal,
-): Promise<PreflightResponse> {
+export function getPreflight(token: string, signal?: AbortSignal): Promise<PreflightResponse> {
   return controlJson<PreflightResponse>("/control/preflight", token, { signal });
 }
 
-export function getControlVersion(
-  token: string,
-  signal?: AbortSignal,
-): Promise<VersionResponse> {
+export function getControlVersion(token: string, signal?: AbortSignal): Promise<VersionResponse> {
   return controlJson<VersionResponse>("/control/version", token, { signal });
 }
 
@@ -221,10 +197,7 @@ export function stopCapture(
  *  mirrored at `/status.replay` for the unauthenticated banner (Task 1.2),
  *  but `ReplayCard` uses this authenticated route so its own poll doesn't
  *  depend on the public status payload staying in sync. */
-export function getReplay(
-  token: string,
-  signal?: AbortSignal,
-): Promise<ReplayStatusResponse> {
+export function getReplay(token: string, signal?: AbortSignal): Promise<ReplayStatusResponse> {
   return controlJson<ReplayStatusResponse>("/control/replay", token, { signal });
 }
 
@@ -419,10 +392,15 @@ export function submitJob(
   params: Record<string, unknown>,
   baseUrl?: string,
 ): Promise<JobResponse> {
-  return controlJson<JobResponse>("/control/jobs", token, {
-    method: "POST",
-    body: jsonBody({ kind, params }),
-  }, baseUrl);
+  return controlJson<JobResponse>(
+    "/control/jobs",
+    token,
+    {
+      method: "POST",
+      body: jsonBody({ kind, params }),
+    },
+    baseUrl,
+  );
 }
 
 export function cancelJob(token: string, jobId: string): Promise<JobResponse> {
@@ -486,16 +464,12 @@ export function syncSessionToCompanion(
 // --- Phase-6 panels --------------------------------------------------------
 
 /** `/obd/coverage` is read-only + unauthenticated (Task 6.3). */
-export function getObdCoverage(
-  signal?: AbortSignal,
-): Promise<ObdCoverageResponse> {
+export function getObdCoverage(signal?: AbortSignal): Promise<ObdCoverageResponse> {
   return fetchJson("/obd/coverage", { signal });
 }
 
 /** `/can/coverage` — static catalog of decodable broadcast-CAN signals. */
-export function getCanCoverage(
-  signal?: AbortSignal,
-): Promise<CanCoverageResponse> {
+export function getCanCoverage(signal?: AbortSignal): Promise<CanCoverageResponse> {
   return fetchJson("/can/coverage", { signal });
 }
 
@@ -603,9 +577,7 @@ export function getSessionChart(
 
 /** `/test-profiles` is read-only + unauthenticated (scanned YAML catalog);
  *  the picker must render before the control token is entered. */
-export function getTestProfiles(
-  signal?: AbortSignal,
-): Promise<TestProfilesResponse> {
+export function getTestProfiles(signal?: AbortSignal): Promise<TestProfilesResponse> {
   return fetchJson("/test-profiles", { signal });
 }
 
@@ -640,10 +612,7 @@ export function approveTrainingRun(
   );
 }
 
-export function getTuning(
-  token: string,
-  signal?: AbortSignal,
-): Promise<TuningResponse> {
+export function getTuning(token: string, signal?: AbortSignal): Promise<TuningResponse> {
   return controlJson("/control/tuning", token, { signal });
 }
 
@@ -658,30 +627,21 @@ export function updateTuning(
   });
 }
 
-export function estimateTuning(
-  token: string,
-  config: TuningConfig,
-): Promise<TuningEstimate> {
+export function estimateTuning(token: string, config: TuningConfig): Promise<TuningEstimate> {
   return controlJson("/control/tuning/estimate", token, {
     method: "POST",
     body: jsonBody({ config }),
   });
 }
 
-export function revertTuning(
-  token: string,
-  version: number,
-): Promise<TuningResponse> {
+export function revertTuning(token: string, version: number): Promise<TuningResponse> {
   return controlJson("/control/tuning/revert", token, {
     method: "POST",
     body: jsonBody({ version }),
   });
 }
 
-export function getProfiles(
-  token: string,
-  signal?: AbortSignal,
-): Promise<VehicleProfilesResponse> {
+export function getProfiles(token: string, signal?: AbortSignal): Promise<VehicleProfilesResponse> {
   return controlJson<VehicleProfilesResponse>("/control/profiles", token, { signal });
 }
 
@@ -700,34 +660,22 @@ export function updateProfileName(
 /** `/control/trends` (Task 4.5) — per-stat session-fingerprint drift over
  *  the frozen reference epoch. Auth-gated like the other `/control/*`
  *  read routes. */
-export function getTrends(
-  token: string,
-  signal?: AbortSignal,
-): Promise<TrendsResponse> {
+export function getTrends(token: string, signal?: AbortSignal): Promise<TrendsResponse> {
   return controlJson<TrendsResponse>("/control/trends", token, { signal });
 }
 
-export function getPowerStatus(
-  token: string,
-  signal?: AbortSignal,
-): Promise<PowerStatusResponse> {
+export function getPowerStatus(token: string, signal?: AbortSignal): Promise<PowerStatusResponse> {
   return controlJson<PowerStatusResponse>("/control/power", token, { signal });
 }
 
-export function setKeepAlive(
-  token: string,
-  minutes: number,
-): Promise<PowerKeepaliveResponse> {
+export function setKeepAlive(token: string, minutes: number): Promise<PowerKeepaliveResponse> {
   return controlJson<PowerKeepaliveResponse>("/control/power/keepalive", token, {
     method: "POST",
     body: jsonBody({ minutes }),
   });
 }
 
-export function getFeedback(
-  token: string,
-  signal?: AbortSignal,
-): Promise<FeedbackResponse> {
+export function getFeedback(token: string, signal?: AbortSignal): Promise<FeedbackResponse> {
   return controlJson("/control/feedback", token, { signal });
 }
 
@@ -756,17 +704,11 @@ export function postFeedback(
   });
 }
 
-export function getCustomPids(
-  token: string,
-  signal?: AbortSignal,
-): Promise<CustomPidsResponse> {
+export function getCustomPids(token: string, signal?: AbortSignal): Promise<CustomPidsResponse> {
   return controlJson("/control/custom-pids", token, { signal });
 }
 
-export function addCustomPid(
-  token: string,
-  pid: CustomPid,
-): Promise<{ custom_pid: CustomPid }> {
+export function addCustomPid(token: string, pid: CustomPid): Promise<{ custom_pid: CustomPid }> {
   return controlJson("/control/custom-pids", token, {
     method: "POST",
     body: jsonBody(pid),

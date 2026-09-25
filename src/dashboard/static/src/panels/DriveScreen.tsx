@@ -18,12 +18,7 @@ export function DriveScreen({ channels, bindings, scheduler }: DriveScreenProps)
   return (
     <div className={scrollPaneClass}>
       <div className={cn(responsiveGridClass, "grid-cols-1")}>
-        <TelemetryPanel
-          channels={channels}
-          bindings={bindings}
-          scheduler={scheduler}
-          compact
-        />
+        <TelemetryPanel channels={channels} bindings={bindings} scheduler={scheduler} compact />
       </div>
     </div>
   );

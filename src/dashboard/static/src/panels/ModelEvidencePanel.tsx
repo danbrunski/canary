@@ -35,11 +35,7 @@ interface ModelEvidencePanelProps {
   token?: string;
 }
 
-export function ModelEvidencePanel({
-  event,
-  relatedEvents,
-  token,
-}: ModelEvidencePanelProps) {
+export function ModelEvidencePanel({ event, relatedEvents, token }: ModelEvidencePanelProps) {
   if (!event) return null;
 
   const sourceEvents = new Map<EvidenceSource, AnomalyEvent>();
@@ -79,9 +75,7 @@ export function ModelEvidencePanel({
         <span
           className={cn(
             badgeClass,
-            agreement.length > 1
-              ? "border-ok/60 text-ok"
-              : "border-warn/60 text-warn",
+            agreement.length > 1 ? "border-ok/60 text-ok" : "border-warn/60 text-warn",
           )}
         >
           {agreement.length > 0 ? agreement.join(" + ") : "single source"}
@@ -115,9 +109,7 @@ function SourceEvidenceCard({
   return (
     <div className="min-w-0 rounded-[8px] border border-border-soft bg-elev/70 p-2.5">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">
-          {SOURCE_LABEL[source]}
-        </b>
+        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">{SOURCE_LABEL[source]}</b>
         <span
           className={cn(
             "font-num text-[0.68rem] uppercase tracking-[0.08em]",
@@ -133,9 +125,7 @@ function SourceEvidenceCard({
         <>
           <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-1 text-[0.74rem]">
             <dt className="text-fg-faint">score</dt>
-            <dd className="m-0 text-right font-num tabular-nums">
-              {formatNumber(event.score)}
-            </dd>
+            <dd className="m-0 text-right font-num tabular-nums">{formatNumber(event.score)}</dd>
             <dt className="text-fg-faint">threshold</dt>
             <dd className="m-0 text-right font-num tabular-nums">
               {event.threshold === null ? "-" : formatNumber(event.threshold)}
@@ -192,9 +182,7 @@ function ResidualEvidenceCard({ residuals }: { residuals: ResidualEvidence[] }) 
   return (
     <div className="min-w-0 rounded-[8px] border border-border-soft bg-elev/70 p-2.5">
       <div className="mb-2 flex items-center justify-between gap-2">
-        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">
-          Residuals
-        </b>
+        <b className="text-[0.78rem] uppercase tracking-[0.08em] text-fg">Residuals</b>
         <span
           className={cn(
             "font-num text-[0.68rem] uppercase tracking-[0.08em]",
@@ -242,7 +230,10 @@ function LstmReconstructionView({
 }) {
   const top = channels.slice(0, 8);
   const heatmap = extractHeatmap(detail, top);
-  const overlays = extractOverlays(detail, top.map((c) => c.channel)).slice(0, 3);
+  const overlays = extractOverlays(
+    detail,
+    top.map((c) => c.channel),
+  ).slice(0, 3);
   return (
     <div className="mt-3 flex flex-col gap-2">
       <ChannelBars channels={top} />
@@ -259,10 +250,7 @@ function LstmReconstructionView({
 }
 
 function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
-  const max = Math.max(
-    1,
-    ...channels.map((c) => (c.ratio === null ? c.score : c.ratio)),
-  );
+  const max = Math.max(1, ...channels.map((c) => (c.ratio === null ? c.score : c.ratio)));
   return (
     <div className="flex flex-col gap-1.5">
       {channels.map((c) => {
@@ -276,9 +264,7 @@ function ChannelBars({ channels }: { channels: ChannelEvidence[] }) {
               <MeterBar
                 value={value}
                 max={max}
-                colorClass={
-                  value >= 1 ? "bg-bad" : value >= 0.75 ? "bg-warn" : "bg-accent-2"
-                }
+                colorClass={value >= 1 ? "bg-bad" : value >= 0.75 ? "bg-warn" : "bg-accent-2"}
               />
             </div>
             <div className="self-end text-right font-num text-[0.68rem] tabular-nums text-fg-dim">
@@ -298,7 +284,11 @@ function ChannelHeatmap({ heatmap }: { heatmap: HeatmapData }) {
     <div className="grid grid-cols-[minmax(5rem,1fr)_minmax(7rem,2fr)] gap-2">
       <div className="flex flex-col gap-0.5">
         {heatmap.channels.map((channel) => (
-          <div key={channel} className="truncate text-[0.62rem] leading-4 text-fg-faint" title={channel}>
+          <div
+            key={channel}
+            className="truncate text-[0.62rem] leading-4 text-fg-faint"
+            title={channel}
+          >
             {channel}
           </div>
         ))}

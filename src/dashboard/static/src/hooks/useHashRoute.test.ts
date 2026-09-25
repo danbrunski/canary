@@ -78,9 +78,9 @@ describe("useHashRoute", () => {
   it.each(Object.entries(OLD_ITEM_ROUTES))(
     "keeps the old %s route as an alias",
     (oldItem, expected) => {
-    window.history.replaceState(null, "", `#wb/${oldItem}`);
-    const { result } = renderHook(() => useHashRoute());
-    expect(result.current.mode).toBe("parked");
+      window.history.replaceState(null, "", `#wb/${oldItem}`);
+      const { result } = renderHook(() => useHashRoute());
+      expect(result.current.mode).toBe("parked");
       expect(result.current.item).toBe(expected);
     },
   );

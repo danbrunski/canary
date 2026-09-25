@@ -82,7 +82,9 @@ export function DataSourcesPanel({ channels, status }: DataSourcesPanelProps) {
 
       {tab === "obd" && <ObdTab channels={channels} view={view} />}
       {tab === "did" && <DidTab channels={channels} status={status} view={view} />}
-      {tab === "memory" && <MemoryTab channels={channels} status={status} view={{ ...view, hideUnavailable: false }} />}
+      {tab === "memory" && (
+        <MemoryTab channels={channels} status={status} view={{ ...view, hideUnavailable: false }} />
+      )}
       {tab === "can" && <CanTab channels={channels} view={view} />}
       {tab === "gps" && <GpsTab status={status} />}
     </Panel>
@@ -105,21 +107,9 @@ const TABLE = "w-full border-collapse text-[0.8rem]";
 const ROW = "border-b border-border-soft last:border-0";
 const TD = "py-1 pr-2";
 
-function Toggle({
-  label,
-  on,
-  onClick,
-}: {
-  label: string;
-  on: boolean;
-  onClick: () => void;
-}) {
+function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5"
-    >
+    <button type="button" onClick={onClick} className="inline-flex items-center gap-1.5">
       <span
         className={cn(
           "inline-block h-3 w-3 rounded-sm border",
@@ -173,13 +163,7 @@ function arrange<T>(
 // OBD PIDs
 // ---------------------------------------------------------------------------
 
-function ObdTab({
-  channels,
-  view,
-}: {
-  channels: Map<string, ChannelSnapshot>;
-  view: ViewOpts;
-}) {
+function ObdTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; view: ViewOpts }) {
   const fetcher = useCallback((s: AbortSignal) => getObdCoverage(s), []);
   const { data, error, loading } = useControlResource<ObdCoverageResponse>(fetcher, {
     intervalMs: 15000,
@@ -190,8 +174,7 @@ function ObdTab({
     // Default order: supported first, then by PID — the "29 at the top".
     const base = [...data.rows].sort(
       (a, b) =>
-        Number(b.status !== "unsupported") - Number(a.status !== "unsupported") ||
-        a.pid - b.pid,
+        Number(b.status !== "unsupported") - Number(a.status !== "unsupported") || a.pid - b.pid,
     );
     return arrange(base, view, (r) => {
       const supported = r.status !== "unsupported";
@@ -320,9 +303,7 @@ function DidTab({
   const capture = status?.capture_profile;
   const capturing = Boolean(capture?.active);
   const polled = useMemo(
-    () => new Set(capture
-      ? (capture?.mode22_enabled ? capture.mode22 : [])
-      : (data?.polled ?? [])),
+    () => new Set(capture ? (capture?.mode22_enabled ? capture.mode22 : []) : (data?.polled ?? [])),
     [capture, data],
   );
 
@@ -382,15 +363,17 @@ function DidTab({
                             ) : (
                               <span
                                 className="text-fg-faint italic"
-                                title={capturing ? "not selected by the active capture" : "not selected by default collection"}
+                                title={
+                                  capturing
+                                    ? "not selected by the active capture"
+                                    : "not selected by default collection"
+                                }
                               >
                                 not selected
                               </span>
                             )}
                           </td>
-                          <td className={cn(TD, "text-fg-dim")}>
-                            {unitCell(channels, d)}
-                          </td>
+                          <td className={cn(TD, "text-fg-dim")}>{unitCell(channels, d)}</td>
                           <td className={cn(TD, "text-fg-faint")}>{d.confidence}</td>
                         </tr>
                       );
@@ -425,52 +408,65 @@ function MemoryTab({
     [capture],
   );
   const rows = useMemo(
-    () => arrange(data?.memory ?? [], view, (entry) => ({
-      available: selected.has(entry.name),
-      active: liveValue(channels, `obd:mem:${entry.name}`).active,
-    })),
+    () =>
+      arrange(data?.memory ?? [], view, (entry) => ({
+        available: selected.has(entry.name),
+        active: liveValue(channels, `obd:mem:${entry.name}`).active,
+      })),
     [data, view, selected, channels],
   );
 
   return (
     <ResourceGate loading={loading} loadingMessage="loading RAM catalog…" error={error} data={data}>
-      {(catalog) => <>
-        <Summary text={`${selected.size} selected by current profile (${(catalog.memory ?? []).length} catalogued)`} />
-        {(catalog.memory ?? []).length === 0 ? (
-          <p className={placeholderClass}>No RAM channels catalogued for this vehicle.</p>
-        ) : (
-          <div className={SCROLL}>
-            <table className={TABLE}>
-              <thead className={THEAD}>
-                <tr>
-                  <th className={TD}>Address</th>
-                  <th className={TD}>Name</th>
-                  <th className={TD}>Value</th>
-                  <th className={TD}>Unit</th>
-                  <th className={TD}>Window</th>
-                  <th className={TD}>Conf.</th>
-                </tr>
-              </thead>
-              <tbody className="font-num tabular-nums">
-                {rows.map((entry: MemoryEntry) => {
-                  const live = liveValue(channels, `obd:mem:${entry.name}`);
-                  const isSelected = selected.has(entry.name);
-                  return (
-                    <tr key={entry.name} className={ROW}>
-                      <td className={cn(TD, "text-fg-dim")}>0x{entry.address.toString(16).toUpperCase().padStart(8, "0")}</td>
-                      <td className={cn(TD, !isSelected && "text-fg-dim")}>{entry.name}</td>
-                      <td className={TD}>{isSelected ? valueCell(live.active, live.text) : <span className="text-fg-faint italic">not selected</span>}</td>
-                      <td className={cn(TD, "text-fg-dim")}>{entry.unit || "—"}</td>
-                      <td className={cn(TD, "text-fg-dim")}>{entry.window ?? "—"}</td>
-                      <td className={cn(TD, "text-fg-faint")}>{entry.confidence}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </>}
+      {(catalog) => (
+        <>
+          <Summary
+            text={`${selected.size} selected by current profile (${(catalog.memory ?? []).length} catalogued)`}
+          />
+          {(catalog.memory ?? []).length === 0 ? (
+            <p className={placeholderClass}>No RAM channels catalogued for this vehicle.</p>
+          ) : (
+            <div className={SCROLL}>
+              <table className={TABLE}>
+                <thead className={THEAD}>
+                  <tr>
+                    <th className={TD}>Address</th>
+                    <th className={TD}>Name</th>
+                    <th className={TD}>Value</th>
+                    <th className={TD}>Unit</th>
+                    <th className={TD}>Window</th>
+                    <th className={TD}>Conf.</th>
+                  </tr>
+                </thead>
+                <tbody className="font-num tabular-nums">
+                  {rows.map((entry: MemoryEntry) => {
+                    const live = liveValue(channels, `obd:mem:${entry.name}`);
+                    const isSelected = selected.has(entry.name);
+                    return (
+                      <tr key={entry.name} className={ROW}>
+                        <td className={cn(TD, "text-fg-dim")}>
+                          0x{entry.address.toString(16).toUpperCase().padStart(8, "0")}
+                        </td>
+                        <td className={cn(TD, !isSelected && "text-fg-dim")}>{entry.name}</td>
+                        <td className={TD}>
+                          {isSelected ? (
+                            valueCell(live.active, live.text)
+                          ) : (
+                            <span className="text-fg-faint italic">not selected</span>
+                          )}
+                        </td>
+                        <td className={cn(TD, "text-fg-dim")}>{entry.unit || "—"}</td>
+                        <td className={cn(TD, "text-fg-dim")}>{entry.window ?? "—"}</td>
+                        <td className={cn(TD, "text-fg-faint")}>{entry.confidence}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
     </ResourceGate>
   );
 }
@@ -492,13 +488,7 @@ interface CanRow {
   plausible_max: number | null;
 }
 
-function CanTab({
-  channels,
-  view,
-}: {
-  channels: Map<string, ChannelSnapshot>;
-  view: ViewOpts;
-}) {
+function CanTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; view: ViewOpts }) {
   const fetcher = useCallback((s: AbortSignal) => getCanCoverage(s), []);
   const { data, error, loading } = useControlResource<CanCoverageResponse>(fetcher, {
     intervalMs: 30000,
@@ -578,7 +568,9 @@ function CanTab({
                           plausible_max: r.plausible_max,
                         })
                       : null;
-                  const valueText = scaled ? `${scaled.text}${scaled.unit ? ` ${scaled.unit}` : ""}` : lv.text;
+                  const valueText = scaled
+                    ? `${scaled.text}${scaled.unit ? ` ${scaled.unit}` : ""}`
+                    : lv.text;
                   return (
                     <tr key={`${r.canIdHex}-${r.signal}-${r.source}`} className={ROW}>
                       <td className={cn(TD, "text-fg-dim")}>{r.canIdHex}</td>

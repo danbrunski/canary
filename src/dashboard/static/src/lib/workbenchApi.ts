@@ -90,7 +90,12 @@ export interface Conditions {
   revisions: Record<string, string[]>;
   mixed_revisions: boolean;
   revision_boundaries: Record<string, RevisionBoundary[]>;
-  baro: { spec: string; min_kpa: number | null; max_kpa: number | null; sessions_without: string[] };
+  baro: {
+    spec: string;
+    min_kpa: number | null;
+    max_kpa: number | null;
+    sessions_without: string[];
+  };
   gates: GateReport | null;
   [key: string]: unknown;
 }
@@ -109,12 +114,7 @@ export interface NoiseFloor {
 }
 
 export type UnavailableKind =
-  | "not_captured"
-  | "refused"
-  | "over_budget"
-  | "gates_removed_everything"
-  | "no_sessions"
-  | null;
+  "not_captured" | "refused" | "over_budget" | "gates_removed_everything" | "no_sessions" | null;
 
 export interface Selection {
   sessions: string[];
@@ -173,7 +173,11 @@ export interface TrimSurfaceResponse extends AnalysisBase {
   min_n: number;
   n: number;
   banks: Record<string, { n: number; cells: Cell[] }>;
-  per_session: Array<{ session_id: string; revision: string | null; cells: Record<string, Cell[]> }>;
+  per_session: Array<{
+    session_id: string;
+    revision: string | null;
+    cells: Record<string, Cell[]>;
+  }>;
 }
 
 export interface TimingResponse extends AnalysisBase {

@@ -32,9 +32,9 @@ describe("TokenGate (Task 5.1)", () => {
     mocks.getPreflight.mockRejectedValue(err);
     render(createElement(TokenGate, { token: "stale-token", onTokenChange: vi.fn() }));
     open();
-    expect(
-      await screen.findByRole("button", { name: "control token" }),
-    ).toHaveTextContent("rejected");
+    expect(await screen.findByRole("button", { name: "control token" })).toHaveTextContent(
+      "rejected",
+    );
   });
 
   it("reads 'unlocked' once a token is accepted", async () => {

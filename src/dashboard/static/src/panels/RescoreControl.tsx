@@ -98,7 +98,9 @@ export function RescoreControl({ token, event }: RescoreControlProps) {
           className={buttonClass}
           onClick={() => void rescore()}
           disabled={!event.session || state.status === "submitting" || state.status === "running"}
-          title={event.session ? undefined : "This event has no session recorded — cannot replay it."}
+          title={
+            event.session ? undefined : "This event has no session recorded — cannot replay it."
+          }
         >
           {state.status === "running" || state.status === "submitting"
             ? "re-scoring…"
@@ -108,9 +110,7 @@ export function RescoreControl({ token, event }: RescoreControlProps) {
           <span className="text-[0.78rem] text-bad">{state.error}</span>
         )}
       </div>
-      {state.status === "succeeded" && state.report && (
-        <RescoreReport report={state.report} />
-      )}
+      {state.status === "succeeded" && state.report && <RescoreReport report={state.report} />}
     </div>
   );
 }

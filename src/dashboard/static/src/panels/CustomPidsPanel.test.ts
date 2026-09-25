@@ -64,7 +64,9 @@ describe("CustomPidsPanel", () => {
     mocks.getCustomPids.mockResolvedValue(ONE_PID);
     render(createElement(CustomPidsPanel, { token: "secret" }));
     expect(await screen.findByText("Oil pressure")).toBeInTheDocument();
-    expect(screen.getByText(/OIL_PRESS · mode 0x22 pid 0x1234 · A \* 0.5 \(psi\)/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/OIL_PRESS · mode 0x22 pid 0x1234 · A \* 0.5 \(psi\)/),
+    ).toBeInTheDocument();
   });
 
   it("shows the empty-state placeholder with no custom PIDs", async () => {

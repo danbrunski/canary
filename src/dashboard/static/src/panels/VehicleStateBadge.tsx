@@ -29,9 +29,7 @@ export function VehicleStateBadge({ vehicleState }: VehicleStateBadgeProps) {
       className="inline-flex min-w-[6.5rem] flex-col items-center rounded-full border border-border-soft bg-elev-2 px-4 py-1"
       title={state === null ? "vehicle_state unavailable" : `vehicle_state: ${state}`}
     >
-      <span className="text-[0.56rem] uppercase tracking-[0.18em] text-fg-faint">
-        vehicle
-      </span>
+      <span className="text-[0.56rem] uppercase tracking-[0.18em] text-fg-faint">vehicle</span>
       <span
         className={cn(
           "text-base font-semibold uppercase tracking-[0.06em]",

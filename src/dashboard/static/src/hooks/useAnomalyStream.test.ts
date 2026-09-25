@@ -54,10 +54,12 @@ describe("useAnomalyStream", () => {
 
     // Capture the WS onMessage so the test can pump events into it.
     let onMessage: ((e: AnomalyEvent) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (e: AnomalyEvent) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (e: AnomalyEvent) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
 
     const { result } = renderHook(() => useAnomalyStream());
 
@@ -86,17 +88,21 @@ describe("useAnomalyStream", () => {
   it("dedupe key separates same-timestamp events from different sources", async () => {
     mocks.getAnomalies.mockResolvedValue({ events: [], count: 0 });
     let onMessage: ((e: AnomalyEvent) => void) | null = null;
-    mocks.openReconnectingSocket.mockImplementation((opts: { onMessage: (e: AnomalyEvent) => void }) => {
-      onMessage = opts.onMessage;
-      return { close: vi.fn() };
-    });
+    mocks.openReconnectingSocket.mockImplementation(
+      (opts: { onMessage: (e: AnomalyEvent) => void }) => {
+        onMessage = opts.onMessage;
+        return { close: vi.fn() };
+      },
+    );
 
     const { result } = renderHook(() => useAnomalyStream());
 
     const ts = "2026-05-13T12:00:00+00:00";
     act(() => {
       onMessage!(makeEvent({ timestamp: ts, source: "isolation_forest" }));
-      onMessage!(makeEvent({ timestamp: ts, source: "lstm_autoencoder", model_version: "lstm_v1" }));
+      onMessage!(
+        makeEvent({ timestamp: ts, source: "lstm_autoencoder", model_version: "lstm_v1" }),
+      );
     });
     expect(result.current.events).toHaveLength(2);
   });

@@ -87,10 +87,7 @@ export interface MockDaemonOptions {
  * correct resting state for a browser that reached the daemon but has no live
  * telemetry yet.
  */
-export async function mockDaemon(
-  page: Page,
-  options: MockDaemonOptions = {},
-): Promise<void> {
+export async function mockDaemon(page: Page, options: MockDaemonOptions = {}): Promise<void> {
   const status: StatusResponse = { ...STATUS_FIXTURE, ...options.status };
 
   // Accept the WebSocket handshakes and keep them open, sending nothing.

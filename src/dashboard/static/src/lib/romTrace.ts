@@ -41,19 +41,30 @@ export const ECM_TRACE_MAX_SKEW_MS = 750;
 export const THIN_COVERAGE_SAMPLES = 5;
 
 export function traceSample(
-  channels: Map<string, ChannelSnapshot>, spec: string, now: number,
+  channels: Map<string, ChannelSnapshot>,
+  spec: string,
+  now: number,
 ): { value: number; timestamp: number } | null {
   const row = streamRow(channels, spec);
-  if (!row || typeof row.value !== "number" || !Number.isFinite(row.value) || !row.timestamp) return null;
+  if (!row || typeof row.value !== "number" || !Number.isFinite(row.value) || !row.timestamp)
+    return null;
   const timestamp = Date.parse(row.timestamp);
-  if (!Number.isFinite(timestamp) || now - timestamp > TRACE_CHANNEL_STALE_MS || timestamp - now > 1000) return null;
+  if (
+    !Number.isFinite(timestamp) ||
+    now - timestamp > TRACE_CHANNEL_STALE_MS ||
+    timestamp - now > 1000
+  )
+    return null;
   return { value: row.value, timestamp };
 }
 
 /** Why no ECM cell may be placed on this table, or null when it may. */
 export function mappingRefusal(trace: TableTrace | null | undefined): string | null {
-  if (!trace) return "This vehicle's rom_viewer.yaml maps no trace channels to this table; no ECM cell is drawn.";
-  const unverified = (["x", "y"] as const).filter((axis) => trace[axis].axis_mapping !== "verified");
+  if (!trace)
+    return "This vehicle's rom_viewer.yaml maps no trace channels to this table; no ECM cell is drawn.";
+  const unverified = (["x", "y"] as const).filter(
+    (axis) => trace[axis].axis_mapping !== "verified",
+  );
   if (!unverified.length) return null;
   return `ECM cell not drawn: how the ${unverified.map((axis) => `${axis.toUpperCase()} trace (${trace[axis].channel})`).join(" and ")} lands on this table's breakpoints is not verified. ${unverified.map((axis) => trace[axis].evidence).join(" ")}`;
 }
@@ -64,17 +75,28 @@ function toAxis(axis: AxisTrace, value: number): number | null {
   return Number.isFinite(mapped) ? mapped : null;
 }
 
-export interface EcmPoint { x: number; y: number; xTimestamp: number; yTimestamp: number }
+export interface EcmPoint {
+  x: number;
+  y: number;
+  xTimestamp: number;
+  yTimestamp: number;
+}
 
 /** The ECM's coordinates in axis units, when fresh, paired and verified. */
-export function ecmPoint(trace: TableTrace | null | undefined, channels: Map<string, ChannelSnapshot>, now: number): EcmPoint | null {
+export function ecmPoint(
+  trace: TableTrace | null | undefined,
+  channels: Map<string, ChannelSnapshot>,
+  now: number,
+): EcmPoint | null {
   if (!trace || mappingRefusal(trace)) return null;
   const xs = traceSample(channels, trace.x.channel, now);
   const ys = traceSample(channels, trace.y.channel, now);
   if (!xs || !ys || Math.abs(xs.timestamp - ys.timestamp) > ECM_TRACE_MAX_SKEW_MS) return null;
   const x = toAxis(trace.x, xs.value);
   const y = toAxis(trace.y, ys.value);
-  return x === null || y === null ? null : { x, y, xTimestamp: xs.timestamp, yTimestamp: ys.timestamp };
+  return x === null || y === null
+    ? null
+    : { x, y, xTimestamp: xs.timestamp, yTimestamp: ys.timestamp };
 }
 
 export type CellPosition = NonNullable<ReturnType<typeof tracePosition>>;
@@ -94,22 +116,35 @@ export interface Disagreement {
 
 /** How far the ECM cell is from the inferred one, or null when they agree. */
 export function cellDisagreement(
-  ecm: CellPosition | null, inferred: CellPosition | null,
-  ecmAt: { x: number; y: number }, inferredAt: { x: number; y: number },
+  ecm: CellPosition | null,
+  inferred: CellPosition | null,
+  ecmAt: { x: number; y: number },
+  inferredAt: { x: number; y: number },
 ): Disagreement | null {
   if (!ecm || !inferred) return null;
   const rows = ecm.row - inferred.row;
   const columns = ecm.column - inferred.column;
   if (!rows && !columns) return null;
-  return { rows, columns, x: { ecm: ecmAt.x, inferred: inferredAt.x }, y: { ecm: ecmAt.y, inferred: inferredAt.y } };
+  return {
+    rows,
+    columns,
+    x: { ecm: ecmAt.x, inferred: inferredAt.x },
+    y: { ecm: ecmAt.y, inferred: inferredAt.y },
+  };
 }
 
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`);
 
 export function describeDisagreement(d: Disagreement, table: RomTable): string {
   const parts: string[] = [];
-  if (d.columns) parts.push(`${signed(d.columns)} column${Math.abs(d.columns) === 1 ? "" : "s"} (ECM ${d.x.ecm.toFixed(2)} vs inferred ${d.x.inferred.toFixed(2)} ${table.x_unit})`);
-  if (d.rows) parts.push(`${signed(d.rows)} row${Math.abs(d.rows) === 1 ? "" : "s"} (ECM ${d.y.ecm.toFixed(0)} vs inferred ${d.y.inferred.toFixed(0)} ${table.y_unit})`);
+  if (d.columns)
+    parts.push(
+      `${signed(d.columns)} column${Math.abs(d.columns) === 1 ? "" : "s"} (ECM ${d.x.ecm.toFixed(2)} vs inferred ${d.x.inferred.toFixed(2)} ${table.x_unit})`,
+    );
+  if (d.rows)
+    parts.push(
+      `${signed(d.rows)} row${Math.abs(d.rows) === 1 ? "" : "s"} (ECM ${d.y.ecm.toFixed(0)} vs inferred ${d.y.inferred.toFixed(0)} ${table.y_unit})`,
+    );
   return `ECM cell differs from the inferred cell by ${parts.join(" and ")}.`;
 }
 
@@ -135,8 +170,11 @@ export function profilesCarrying(trace: TableTrace, profiles: CaptureProfile[] |
 
 /** W05.4: is the ECM trace live, and if not, which of the three reasons. */
 export function traceLiveness(
-  trace: TableTrace, channels: Map<string, ChannelSnapshot>, now: number,
-  status: StatusResponse | null, profiles: CaptureProfile[] | null,
+  trace: TableTrace,
+  channels: Map<string, ChannelSnapshot>,
+  now: number,
+  status: StatusResponse | null,
+  profiles: CaptureProfile[] | null,
 ): TraceLiveness {
   const specs = [...new Set([trace.x.channel, trace.y.channel])];
   const stale = specs.filter((spec) => !traceSample(channels, spec, now));
@@ -149,7 +187,11 @@ export function traceLiveness(
     };
   }
   const profile = status.capture_profile ?? null;
-  const selected = new Set(profile && profile.mode22_enabled !== false ? (profile.memory ?? []).map((n) => n.toUpperCase()) : []);
+  const selected = new Set(
+    profile && profile.mode22_enabled !== false
+      ? (profile.memory ?? []).map((n) => n.toUpperCase())
+      : [],
+  );
   const unpolled = stale.filter((spec) => !selected.has(bare(spec)));
   if (unpolled.length) {
     const carrying = profilesCarrying(trace, profiles);
@@ -184,7 +226,9 @@ export function emptyCoverage(table: RomTable): CoverageGrid {
 }
 
 export function addCoverage(grid: CoverageGrid, position: CellPosition): CoverageGrid {
-  return grid.map((row, r) => (r === position.row ? row.map((count, c) => (c === position.column ? count + 1 : count)) : row));
+  return grid.map((row, r) =>
+    r === position.row ? row.map((count, c) => (c === position.column ? count + 1 : count)) : row,
+  );
 }
 
 export type CoverageClass = "unvisited" | "thin" | "visited";
@@ -199,27 +243,44 @@ export function coverageColor(count: number, max: number): string {
   const kind = coverageClass(count);
   if (kind === "unvisited") return "rgb(226, 232, 240)";
   if (kind === "thin") return "rgb(191, 219, 254)";
-  const fraction = max > THIN_COVERAGE_SAMPLES ? Math.min(1, (count - THIN_COVERAGE_SAMPLES) / (max - THIN_COVERAGE_SAMPLES)) : 1;
-  const from = [96, 165, 250], to = [30, 64, 175];
+  const fraction =
+    max > THIN_COVERAGE_SAMPLES
+      ? Math.min(1, (count - THIN_COVERAGE_SAMPLES) / (max - THIN_COVERAGE_SAMPLES))
+      : 1;
+  const from = [96, 165, 250],
+    to = [30, 64, 175];
   return `rgb(${from.map((v, i) => Math.round(v + (to[i] - v) * fraction)).join(", ")})`;
 }
 
 /** `GET /control/sessions/{id}/cell-residency` (W05.6). */
 export type CellResidency =
   | {
-    available: true; session_id: string; table: string; revision: string | null;
-    x_axis: number[]; y_axis: number[]; counts: number[][]; dwell_s: number[][];
-    samples: number; outside_axes: number; reason: null;
-  }
+      available: true;
+      session_id: string;
+      table: string;
+      revision: string | null;
+      x_axis: number[];
+      y_axis: number[];
+      counts: number[][];
+      dwell_s: number[][];
+      samples: number;
+      outside_axes: number;
+      reason: null;
+    }
   | {
-    available: false; session_id: string; table: string; reason: string; message: string;
-    missing?: string[];
-  };
+      available: false;
+      session_id: string;
+      table: string;
+      reason: string;
+      message: string;
+      missing?: string[];
+    };
 
 /** A residency grid can shade a displayed table only if it was binned on the
  *  same breakpoints — a log from another revision may have other axes. */
 export function residencyMatchesTable(residency: CellResidency, table: RomTable): boolean {
   if (!residency.available) return false;
-  const same = (a: number[], b: number[]) => a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
+  const same = (a: number[], b: number[]) =>
+    a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
   return same(residency.x_axis, table.x_axis) && same(residency.y_axis, table.y_axis);
 }

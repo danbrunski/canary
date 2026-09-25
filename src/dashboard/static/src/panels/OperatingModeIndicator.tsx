@@ -13,17 +13,12 @@ interface OperatingModeIndicatorProps {
 /** Current operating mode badge (Task 5.11). Prefers the live behavior-stream
  *  mode; falls back to the most recent anomaly event's `operating_mode` if the
  *  live feed isn't up yet, then "unknown". */
-export function OperatingModeIndicator({
-  events,
-  liveMode,
-}: OperatingModeIndicatorProps) {
+export function OperatingModeIndicator({ events, liveMode }: OperatingModeIndicatorProps) {
   const recent = events.find((e) => e.operating_mode !== null);
   const mode = liveMode ?? recent?.operating_mode ?? "unknown";
   return (
     <div className="inline-flex min-w-[6.5rem] flex-col items-center rounded-full border border-border-soft bg-elev-2 px-4 py-1">
-      <span className="text-[0.56rem] uppercase tracking-[0.18em] text-fg-faint">
-        mode
-      </span>
+      <span className="text-[0.56rem] uppercase tracking-[0.18em] text-fg-faint">mode</span>
       <span
         className={cn(
           "text-base font-semibold uppercase tracking-[0.06em]",

@@ -14,12 +14,7 @@ interface PlaceholderPanelProps {
  *  UI is a later task. The navigation refactor's job is to give every such
  *  panel a stable home now; this is what sits in that home until the real
  *  component lands. */
-export function PlaceholderPanel({
-  title,
-  summary,
-  endpoint,
-  task,
-}: PlaceholderPanelProps) {
+export function PlaceholderPanel({ title, summary, endpoint, task }: PlaceholderPanelProps) {
   return (
     <Panel
       title={title}

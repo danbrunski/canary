@@ -129,10 +129,13 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
     return visible.map((e) => ({ e, view: scoreView(e.score, e.threshold, ref) }));
   }, [visible]);
 
-
   // Chart keeps every point (continuity); the list is what gets de-flooded.
   const indexSeries = useMemo(
-    () => [...scored].reverse().slice(-60).map((s) => s.view.index),
+    () =>
+      [...scored]
+        .reverse()
+        .slice(-60)
+        .map((s) => s.view.index),
     [scored],
   );
 
@@ -207,220 +210,209 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
       <>
         <LiveModelScores scores={liveScores ?? {}} />
         <p className="mb-2 mt-0 text-[0.72rem] text-fg-faint">
-          By default the Isolation Forest and the sequence model (LSTM) are
-          evidence, not alarms: their events are stored and tagged{" "}
-          <span className="uppercase tracking-[0.08em]">evidence</span>, never pushed.
-          A sequence event says whether its window was outside the envelope the
-          model trained on. The primary detector is the behavior models, with
-          the plausibility checks for gross faults (operator decision
-          2026-09-23, models.roles).
+          By default the Isolation Forest and the sequence model (LSTM) are evidence, not alarms:
+          their events are stored and tagged{" "}
+          <span className="uppercase tracking-[0.08em]">evidence</span>, never pushed. A sequence
+          event says whether its window was outside the envelope the model trained on. The primary
+          detector is the behavior models, with the plausibility checks for gross faults (operator
+          decision 2026-09-23, models.roles).
         </p>
         {events.length === 0 ? (
           <p className={placeholderClass}>
-            no anomalies emitted yet — the live scores above show current
-            model state (the list below only logs threshold crossings).
+            no anomalies emitted yet — the live scores above show current model state (the list
+            below only logs threshold crossings).
           </p>
         ) : scored.length === 0 ? (
           <p className={placeholderClass}>no events match the current filters.</p>
         ) : (
           <>
-              <div className="mb-2 flex gap-2">
-                <div className="flex flex-col justify-between py-0.5 text-[0.6rem] tabular-nums text-fg-faint">
-                  <span>100</span>
-                  <span>50</span>
-                  <span>0</span>
-                </div>
-                <div className="flex flex-col gap-0.5">
-                  <Sparkline
-                    values={indexSeries}
-                    width={500}
-                    height={72}
-                    stroke="#FFB84A"
-                    min={0}
-                    max={100}
-                    baseline={50}
-                  />
-                  <div className="flex justify-between text-[0.65rem] text-fg-faint">
-                    <span>← older</span>
-                    <span>50 ≈ model threshold · last {indexSeries.length}</span>
-                    <span>newest →</span>
-                  </div>
+            <div className="mb-2 flex gap-2">
+              <div className="flex flex-col justify-between py-0.5 text-[0.6rem] tabular-nums text-fg-faint">
+                <span>100</span>
+                <span>50</span>
+                <span>0</span>
+              </div>
+              <div className="flex flex-col gap-0.5">
+                <Sparkline
+                  values={indexSeries}
+                  width={500}
+                  height={72}
+                  stroke="#FFB84A"
+                  min={0}
+                  max={100}
+                  baseline={50}
+                />
+                <div className="flex justify-between text-[0.65rem] text-fg-faint">
+                  <span>← older</span>
+                  <span>50 ≈ model threshold · last {indexSeries.length}</span>
+                  <span>newest →</span>
                 </div>
               </div>
-              {hiddenCount > 0 && (
-                <button
-                  type="button"
-                  className="mb-1 text-[0.72rem] text-accent hover:underline"
-                  onClick={() => setShowAll((v) => !v)}
-                >
-                  {showAll
-                    ? "show fewer (hide low-significance)"
-                    : `${hiddenCount} low-significance hidden · show all`}
-                </button>
-              )}
-              <ModelEvidencePanel
-                event={selectedEvent}
-                relatedEvents={relatedEvents}
-                token={token}
-              />
-              {token && (
-                <div className="mb-2 flex flex-wrap items-center gap-1.5">
-                  <input
-                    className={cn(inputClass, "min-h-0 flex-1 basis-40 py-0.5 text-[0.78rem]")}
-                    value={hypothesis}
-                    onChange={(e) => setHypothesis(e.target.value)}
-                    placeholder="hypothesis (optional) — attaches to the next verdict"
-                    aria-label="hypothesis"
-                  />
-                  <input
-                    className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
-                    value={clarifyingQuestion}
-                    onChange={(e) => setClarifyingQuestion(e.target.value)}
-                    placeholder="clarifying question (optional)"
-                    aria-label="clarifying question"
-                  />
-                  <input
-                    className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
-                    value={clarifyingAnswer}
-                    onChange={(e) => setClarifyingAnswer(e.target.value)}
-                    placeholder="clarifying answer (optional)"
-                    aria-label="clarifying answer"
-                  />
-                  {clarifyingPairIncomplete && (
-                    <span className="basis-full text-[0.72rem] text-bad">
-                      clarifying question and answer must both be filled (or both left empty)
-                      before marking a verdict.
-                    </span>
-                  )}
-                </div>
-              )}
-              <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
-                {shown.slice(0, 50).map(({ e, view }) => (
-              <li
-                key={`${e.timestamp}-${e.source}-${e.model_version}`}
-                className={cn(
-                  "flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0",
-                  selectedEvent !== null &&
-                    eventKey(e) === eventKey(selectedEvent) &&
-                    "bg-accent/5",
-                )}
+            </div>
+            {hiddenCount > 0 && (
+              <button
+                type="button"
+                className="mb-1 text-[0.72rem] text-accent hover:underline"
+                onClick={() => setShowAll((v) => !v)}
               >
-                <time className="font-num tabular-nums text-fg-dim">
-                  {formatTimestamp(e.timestamp)}
-                </time>
-                <span
-                  className={cn(
-                    "rounded bg-elev-2 px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em]",
-                    e.source === "isolation_forest" && "text-accent",
-                    e.source === "lstm_autoencoder" && "text-ok",
-                    e.source === "fused" && "text-warn",
-                    e.source === "behavior" && "text-accent",
-                  )}
-                >
-                  {e.source.replace("_", " ")}
-                </span>
-                {e.role === "evidence" && (
-                  <span
-                    className="rounded border border-border px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-fg-dim"
-                    title="From a detector configured as non-alerting (models.roles, A06.5): stored as low-weight evidence, never pushed or shown as an active alert."
-                  >
-                    evidence
+                {showAll
+                  ? "show fewer (hide low-significance)"
+                  : `${hiddenCount} low-significance hidden · show all`}
+              </button>
+            )}
+            <ModelEvidencePanel event={selectedEvent} relatedEvents={relatedEvents} token={token} />
+            {token && (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                <input
+                  className={cn(inputClass, "min-h-0 flex-1 basis-40 py-0.5 text-[0.78rem]")}
+                  value={hypothesis}
+                  onChange={(e) => setHypothesis(e.target.value)}
+                  placeholder="hypothesis (optional) — attaches to the next verdict"
+                  aria-label="hypothesis"
+                />
+                <input
+                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                  value={clarifyingQuestion}
+                  onChange={(e) => setClarifyingQuestion(e.target.value)}
+                  placeholder="clarifying question (optional)"
+                  aria-label="clarifying question"
+                />
+                <input
+                  className={cn(inputClass, "min-h-0 flex-1 basis-32 py-0.5 text-[0.78rem]")}
+                  value={clarifyingAnswer}
+                  onChange={(e) => setClarifyingAnswer(e.target.value)}
+                  placeholder="clarifying answer (optional)"
+                  aria-label="clarifying answer"
+                />
+                {clarifyingPairIncomplete && (
+                  <span className="basis-full text-[0.72rem] text-bad">
+                    clarifying question and answer must both be filled (or both left empty) before
+                    marking a verdict.
                   </span>
                 )}
-                {e.operating_mode && (
-                  <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
-                )}
-                {noveltyScreen(e) && (
+              </div>
+            )}
+            <ol className="m-0 max-h-[22rem] list-none overflow-y-auto p-0">
+              {shown.slice(0, 50).map(({ e, view }) => (
+                <li
+                  key={`${e.timestamp}-${e.source}-${e.model_version}`}
+                  className={cn(
+                    "flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-[0.85rem] last:border-b-0",
+                    selectedEvent !== null &&
+                      eventKey(e) === eventKey(selectedEvent) &&
+                      "bg-accent/5",
+                  )}
+                >
+                  <time className="font-num tabular-nums text-fg-dim">
+                    {formatTimestamp(e.timestamp)}
+                  </time>
                   <span
                     className={cn(
-                      "rounded border border-border px-1.5 py-0.5 text-[0.7rem]",
-                      noveltyScreen(e)?.outside ? "text-warn" : "text-fg-dim",
+                      "rounded bg-elev-2 px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em]",
+                      e.source === "isolation_forest" && "text-accent",
+                      e.source === "lstm_autoencoder" && "text-ok",
+                      e.source === "fused" && "text-warn",
+                      e.source === "behavior" && "text-accent",
                     )}
-                    title={noveltyScreen(e)?.sentence}
                   >
-                    {noveltyScreen(e)?.label}
+                    {e.source.replace("_", " ")}
                   </span>
-                )}
-                <span
-                  className={cn("font-num tabular-nums", LEVEL_TONE[view.level])}
-                  title={`raw score ${e.score.toFixed(3)}${
-                    e.threshold !== null
-                      ? ` / threshold ${e.threshold.toFixed(3)}`
-                      : ""
-                  }`}
-                >
-                  idx {view.index}
-                </span>
-                <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">
-                  raw {e.score.toFixed(3)}
-                  {e.threshold !== null && ` / ${e.threshold.toFixed(3)}`}
-                </span>
-                {e.affected_channels.length > 0 && (
+                  {e.role === "evidence" && (
+                    <span
+                      className="rounded border border-border px-1.5 py-0.5 text-[0.7rem] uppercase tracking-[0.08em] text-fg-dim"
+                      title="From a detector configured as non-alerting (models.roles, A06.5): stored as low-weight evidence, never pushed or shown as an active alert."
+                    >
+                      evidence
+                    </span>
+                  )}
+                  {e.operating_mode && (
+                    <span className="text-[0.75rem] text-fg-dim">{e.operating_mode}</span>
+                  )}
+                  {noveltyScreen(e) && (
+                    <span
+                      className={cn(
+                        "rounded border border-border px-1.5 py-0.5 text-[0.7rem]",
+                        noveltyScreen(e)?.outside ? "text-warn" : "text-fg-dim",
+                      )}
+                      title={noveltyScreen(e)?.sentence}
+                    >
+                      {noveltyScreen(e)?.label}
+                    </span>
+                  )}
                   <span
-                    className="text-[0.78rem] text-fg-dim"
-                    title={
-                      channelRankingCaption(e)?.title ??
-                      `Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`
-                    }
+                    className={cn("font-num tabular-nums", LEVEL_TONE[view.level])}
+                    title={`raw score ${e.score.toFixed(3)}${
+                      e.threshold !== null ? ` / threshold ${e.threshold.toFixed(3)}` : ""
+                    }`}
                   >
-                    {channelRankingCaption(e)?.caption ??
-                      `${e.affected_channels.length} chan over band`}{" "}
-                    ·{" "}
-                    {e.affected_channels.slice(0, 2).join(", ")}
-                    {e.affected_channels.length > 2 &&
-                      ` +${e.affected_channels.length - 2}`}
+                    idx {view.index}
                   </span>
-                )}
-                {e.detail?.missing_features === true && (
-                  <span className={cn(badgeClass, "border-warn bg-warn text-bg")}>
-                    missing features
+                  <span className="font-num text-[0.72rem] tabular-nums text-fg-faint">
+                    raw {e.score.toFixed(3)}
+                    {e.threshold !== null && ` / ${e.threshold.toFixed(3)}`}
                   </span>
-                )}
-                <button
-                  type="button"
-                  className="ml-auto rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] text-accent hover:border-border"
-                  onClick={() => setSelectedKey(eventKey(e))}
-                >
-                  inspect
-                </button>
-                {token &&
-                  (() => {
-                    const current =
-                      localLabels[eventKey(e)] ?? serverLabels[eventKey(e)];
-                    return (
-                      <span className="flex items-center gap-1">
-                        {current ? (
-                          <span className="text-[0.7rem] uppercase tracking-[0.06em] text-accent-2">
-                            {current.replace("_", " ")}
-                          </span>
-                        ) : (
-                          FEEDBACK_LABELS.map((fb) => (
-                            <button
-                              key={fb.id}
-                              type="button"
-                              disabled={clarifyingPairIncomplete}
-                              className={cn(
-                                "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border disabled:cursor-default disabled:opacity-50",
-                                fb.tone,
-                              )}
-                              title={`mark ${fb.id.replace("_", " ")}`}
-                              aria-label={`mark ${fb.id.replace("_", " ")}`}
-                              onClick={() => labelEvent(e, fb.id)}
-                            >
-                              {fb.short}
-                            </button>
-                          ))
-                        )}
-                      </span>
-                    );
-                  })()}
-              </li>
-            ))}
-              </ol>
-            </>
-          )}
-        </>
+                  {e.affected_channels.length > 0 && (
+                    <span
+                      className="text-[0.78rem] text-fg-dim"
+                      title={
+                        channelRankingCaption(e)?.title ??
+                        `Channels whose reconstruction error exceeded its calibrated band (${e.affected_channels.length}). Click the row for the full per-channel breakdown.`
+                      }
+                    >
+                      {channelRankingCaption(e)?.caption ??
+                        `${e.affected_channels.length} chan over band`}{" "}
+                      · {e.affected_channels.slice(0, 2).join(", ")}
+                      {e.affected_channels.length > 2 && ` +${e.affected_channels.length - 2}`}
+                    </span>
+                  )}
+                  {e.detail?.missing_features === true && (
+                    <span className={cn(badgeClass, "border-warn bg-warn text-bg")}>
+                      missing features
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="ml-auto rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] text-accent hover:border-border"
+                    onClick={() => setSelectedKey(eventKey(e))}
+                  >
+                    inspect
+                  </button>
+                  {token &&
+                    (() => {
+                      const current = localLabels[eventKey(e)] ?? serverLabels[eventKey(e)];
+                      return (
+                        <span className="flex items-center gap-1">
+                          {current ? (
+                            <span className="text-[0.7rem] uppercase tracking-[0.06em] text-accent-2">
+                              {current.replace("_", " ")}
+                            </span>
+                          ) : (
+                            FEEDBACK_LABELS.map((fb) => (
+                              <button
+                                key={fb.id}
+                                type="button"
+                                disabled={clarifyingPairIncomplete}
+                                className={cn(
+                                  "rounded border border-border-soft px-1.5 py-0.5 text-[0.66rem] uppercase tracking-[0.04em] hover:border-border disabled:cursor-default disabled:opacity-50",
+                                  fb.tone,
+                                )}
+                                title={`mark ${fb.id.replace("_", " ")}`}
+                                aria-label={`mark ${fb.id.replace("_", " ")}`}
+                                onClick={() => labelEvent(e, fb.id)}
+                              >
+                                {fb.short}
+                              </button>
+                            ))
+                          )}
+                        </span>
+                      );
+                    })()}
+                </li>
+              ))}
+            </ol>
+          </>
+        )}
+      </>
     </Panel>
   );
 }
-

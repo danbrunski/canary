@@ -14,9 +14,7 @@ export interface CompanionSettings {
 }
 
 export function useCompanionSettings(): CompanionSettings {
-  const [baseUrl, setBaseUrlState] = useState(() =>
-    readString(BASE_KEY, DEFAULT_BASE),
-  );
+  const [baseUrl, setBaseUrlState] = useState(() => readString(BASE_KEY, DEFAULT_BASE));
   const [token, setTokenState] = useState(() => readString(TOKEN_KEY));
 
   const setBaseUrl = (next: string) => {

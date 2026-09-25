@@ -23,8 +23,10 @@ const HELP: Record<TokenGateState, string> = {
   "not needed":
     "This server allows control from loopback (dev/sim) — no token needed here. You'd only paste one pointed at the Pi.",
   required: "Paste the control token this server was started with (Pi: /etc/canary/control.token).",
-  rejected: "The server rejected this token (401/403) — wrong or stale value. Re-enter it or Clear and try again.",
-  unlocked: "Stored on this device; unlocks every gated panel (Sessions, Control Plane, Training, ...).",
+  rejected:
+    "The server rejected this token (401/403) — wrong or stale value. Re-enter it or Clear and try again.",
+  unlocked:
+    "Stored on this device; unlocks every gated panel (Sessions, Control Plane, Training, ...).",
 };
 
 /** Single shell-level control-token entry (Task 5.1): lock icon → popover
@@ -61,7 +63,12 @@ export function TokenGate({ token, onTokenChange }: TokenGateProps) {
         aria-expanded={open}
         aria-label="control token"
       >
-        <span className={cn("h-2 w-2 rounded-full transition-[background,box-shadow]", DOT_CLASS[state])} />
+        <span
+          className={cn(
+            "h-2 w-2 rounded-full transition-[background,box-shadow]",
+            DOT_CLASS[state],
+          )}
+        />
         {state}
       </button>
       {open && (

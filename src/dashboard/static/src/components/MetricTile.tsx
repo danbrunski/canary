@@ -28,12 +28,8 @@ export function MetricTile({
   const s = TILE_SIZE[size];
   return (
     <div className={cn("rounded-[8px] border border-border-soft", s.box)}>
-      <div className={cn("uppercase tracking-[0.12em] text-fg-faint", s.label)}>
-        {label}
-      </div>
-      <div className={cn("mt-1 font-num tabular-nums", s.value, toneClass(tone))}>
-        {value}
-      </div>
+      <div className={cn("uppercase tracking-[0.12em] text-fg-faint", s.label)}>{label}</div>
+      <div className={cn("mt-1 font-num tabular-nums", s.value, toneClass(tone))}>{value}</div>
     </div>
   );
 }

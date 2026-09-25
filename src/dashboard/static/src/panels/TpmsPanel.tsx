@@ -28,9 +28,9 @@ export function TpmsPanel({ channels }: TpmsPanelProps) {
     <Panel title="TPMS">
       {found.length === 0 ? (
         <p className={placeholderClass}>
-          TPMS bindings hypothesized from CAN ID 0x385 but not yet validated —
-          see <code>data/bindings.yaml</code>. Once the four per-tire pressure
-          signals reach confidence ≥ medium, they'll appear here automatically.
+          TPMS bindings hypothesized from CAN ID 0x385 but not yet validated — see{" "}
+          <code>data/bindings.yaml</code>. Once the four per-tire pressure signals reach confidence
+          ≥ medium, they'll appear here automatically.
         </p>
       ) : (
         <div className="grid grid-cols-2 gap-2">{/* future: per-corner cards */}</div>

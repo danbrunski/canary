@@ -104,8 +104,7 @@ export function describeError(err: unknown): string {
   if (err instanceof HttpError) {
     if (err.status === 401 || err.status === 403)
       return "Not authorized — enter or check the control token.";
-    if (err.status === 503)
-      return "This API isn't available on the daemon (feature not wired).";
+    if (err.status === 503) return "This API isn't available on the daemon (feature not wired).";
     if (err.status === 400 || err.status === 422)
       return `Rejected by the server: ${serverDetail(err.body)}`;
     // 404/409 carry the daemon's own reason ("no capture is active", "a

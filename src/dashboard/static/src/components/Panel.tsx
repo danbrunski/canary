@@ -46,9 +46,7 @@ export function Panel({
             either may be omitted. */}
         {(count != null || actions) && (
           <span className="flex items-center gap-3">
-            {count != null && (
-              <span className={panelCountClass}>{count}</span>
-            )}
+            {count != null && <span className={panelCountClass}>{count}</span>}
             {actions}
           </span>
         )}
@@ -69,16 +67,8 @@ const COLS: Record<GridCols, string> = {
 /** Responsive panel grid. A thin, named wrapper over the shared grid class
  *  so layouts declare intent (`cols={2}`) instead of repeating utility
  *  strings — the seam the 6.9 custom-dashboard builder will configure. */
-export function PanelGrid({
-  cols = 1,
-  children,
-}: {
-  cols?: GridCols;
-  children: ReactNode;
-}) {
+export function PanelGrid({ cols = 1, children }: { cols?: GridCols; children: ReactNode }) {
   return (
-    <div className={cn("grid gap-[1.15rem] max-[900px]:grid-cols-1", COLS[cols])}>
-      {children}
-    </div>
+    <div className={cn("grid gap-[1.15rem] max-[900px]:grid-cols-1", COLS[cols])}>{children}</div>
   );
 }
