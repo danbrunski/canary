@@ -127,3 +127,49 @@ def no_trip_end_digest_child(monkeypatch: pytest.MonkeyPatch) -> list[Path]:
 
     monkeypatch.setattr(runtime, "handle_trip_end_off_loop", _record)
     return calls
+
+
+@pytest.fixture
+def step_free_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make ``time.time()`` a wall clock that cannot step, for this test only.
+
+    This WSL2 host steps ``CLOCK_REALTIME``. On 2026-09-24, beside one busy
+    loop per core, it stepped forward +2.93 s every 32.25 s, five times in
+    150 s, and every process on the host saw each step at the same monotonic
+    instant. The ``time.time()`` read sat between two ``time.monotonic()`` reads
+    less than 0.3 ms apart, so a lost GIL or a descheduled thread does not
+    explain the steps. ``src.validation.harness.run_scenario_clean`` rightly
+    marks any run with a step invalid and reruns it, three attempts at most.
+    A 17-30 s run beside a 32 s step period can lose all three, and
+    ``test_fuel_map_persists_tuples_and_known_answers_hold`` then failed
+    ``evidence["valid"]`` (T01.9). Its claims are about the writer, the pairing
+    and the accounting, not the host clock.
+
+    The replacement is the real wall time at fixture setup, advanced by
+    ``time.monotonic()``: one clock for every ``time.time()`` read in the
+    process, collector thread included. Records are stamped from
+    ``time.time()``; live inference judges their freshness against its own
+    ``datetime.now()`` (``src.daemon.inference._utc_now``), so that reads the
+    same clock, or a host step would age every channel by 2.93 s. Other
+    ``datetime.now()`` reads (session names, metadata stamps, the writer's
+    flush timer) still see the host clock; none of them is paired with a row.
+    What the harness does with a real step is tested by injecting one
+    (``tests/test_sustained_validation.py``).
+    """
+    import time
+    from datetime import UTC, datetime
+
+    from src.daemon import inference
+
+    anchor_wall = time.time()
+    anchor_monotonic = time.monotonic()
+    monotonic = time.monotonic
+
+    def _step_free_time() -> float:
+        return anchor_wall + (monotonic() - anchor_monotonic)
+
+    def _step_free_utc_now() -> datetime:
+        return datetime.fromtimestamp(_step_free_time(), UTC)
+
+    monkeypatch.setattr(time, "time", _step_free_time)
+    monkeypatch.setattr(inference, "_utc_now", _step_free_utc_now)

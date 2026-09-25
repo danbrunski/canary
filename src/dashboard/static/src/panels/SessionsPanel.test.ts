@@ -1,6 +1,6 @@
 import { createElement } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 
 import { HttpErrorStub, mockHttp } from "../test/harness";
 import type { SessionSummary } from "../types";
@@ -15,6 +15,18 @@ const COMPANION = {
   setBaseUrl: () => {},
   setToken: () => {},
 };
+
+/** Wait until ReplayCard's picker holds `sessionId`. The session list lands
+ *  in one commit, but the picker's value arrives two effect passes later
+ *  (SessionsPanel's selection effect, then ReplayCard's follow effect). A
+ *  test that waits for the list text and then reads the picker, or clicks
+ *  Start, raced those passes and lost under load (T01.10): Start with an
+ *  empty picker throws "Select a session first." and never calls
+ *  startReplay. Wait for the state the next step depends on. */
+async function pickerHolds(sessionId: string): Promise<void> {
+  const picker = screen.getByRole("combobox") as HTMLSelectElement;
+  await waitFor(() => expect(picker.value).toBe(sessionId));
+}
 
 function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
   return {
@@ -32,6 +44,24 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
 }
 
 describe("SessionsPanel (Task 3.1 — promotes the extracted SessionsCard)", () => {
+  // Load, reproduced on purpose (T01.10). React's scheduler runs queued work
+  // (renders, passive effects) in 5 ms slices measured by performance.now(),
+  // and yields to the event loop when a slice is spent. On a busy host a
+  // slice runs out between the commit that renders the session list and the
+  // effects that set the picker, so testing-library sees the text and returns
+  // before the picker is set. Advancing the clock 10 ms per read makes every
+  // slice run out, so the race loses on every run instead of only on a busy
+  // host. Before the waits below, all three session tests failed this way.
+  let schedulerClock: MockInstance | undefined;
+  beforeEach(() => {
+    const realNow = performance.now.bind(performance);
+    let skew = 0;
+    schedulerClock = vi
+      .spyOn(performance, "now")
+      .mockImplementation(() => realNow() + (skew += 10));
+  });
+  afterEach(() => schedulerClock?.mockRestore());
+
   it("prompts for a token before fetching anything", () => {
     render(createElement(SessionsPanel, { token: "", companion: COMPANION }));
     expect(mocks.listSessions).not.toHaveBeenCalled();
@@ -62,8 +92,7 @@ describe("SessionsPanel (Task 3.1 — promotes the extracted SessionsCard)", () 
     expect(screen.getByRole("heading", { name: "Sessions" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Replay" })).toBeInTheDocument();
     // ReplayCard's picker defaults to the most-recently-selected session.
-    const picker = screen.getByRole("combobox") as HTMLSelectElement;
-    expect(picker.value).toBe("2026-05-18T090000");
+    await pickerHolds("2026-05-18T090000");
   });
 
   it("starts a replay for the selected session", async () => {
@@ -94,7 +123,7 @@ describe("SessionsPanel (Task 3.1 — promotes the extracted SessionsCard)", () 
     });
     render(createElement(SessionsPanel, { token: "secret", companion: COMPANION }));
 
-    await screen.findAllByText("2026-05-17T120000");
+    await pickerHolds("2026-05-17T120000");
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
     expect(await screen.findByText(/_replay-2026-07-19T100000/)).toBeInTheDocument();
@@ -128,7 +157,7 @@ describe("SessionsPanel (Task 3.1 — promotes the extracted SessionsCard)", () 
     mocks.startReplay.mockRejectedValue(err);
     render(createElement(SessionsPanel, { token: "secret", companion: COMPANION }));
 
-    await screen.findAllByText("2026-05-17T120000");
+    await pickerHolds("2026-05-17T120000");
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
     expect(

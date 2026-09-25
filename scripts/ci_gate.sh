@@ -25,7 +25,8 @@
 # - Frontend, only when <base>..<commit> touches src/dashboard/static: pnpm
 #   typecheck; ESLint and Prettier on the changed files (the whole dashboard
 #   when its lint/format/TS config or dependencies changed); `vitest related`
-#   on the changed files. Full lint, vitest and playwright e2e are CI's
+#   on the changed files, whose failing files are re-run serially once, as
+#   pytest's are (T01.10). Full lint, vitest and playwright e2e are CI's
 #   (ci.yml `frontend`).
 #
 # Why not inside the pre-push hook: git opens the connection to GitHub before
@@ -124,7 +125,29 @@ start=$(date +%s)
         fi
       fi
       echo "==> vitest related (${#frontend[@]} changed file(s)); full vitest + e2e run in CI"
-      pnpm exec vitest related --run --passWithNoTests "${frontend[@]}" || exit 1
+      vlog="$wt/.prepush-vitest.log"
+      NO_COLOR=1 pnpm exec vitest related --run --passWithNoTests "${frontend[@]}" >"$vlog" 2>&1
+      vrc=$?
+      tail -6 "$vlog"
+      if [[ $vrc -ne 0 ]]; then
+        # Same rule as the pytest step (T01.10): a vitest file that failed
+        # beside every other jsdom worker is re-run alone, files one at a time,
+        # once. Failing again blocks the push; passing is named as flaky.
+        mapfile -t vfailed < <(sed -E 's/\x1b\[[0-9;]*m//g' "$vlog" \
+          | sed -nE 's/^ *FAIL +([^ ]+\.(test|spec)\.[jt]sx?).*/\1/p' | sort -u)
+        if [[ ${#vfailed[@]} -eq 0 ]]; then
+          tail -40 "$vlog"; exit 1       # no failing file named: no re-run
+        fi
+        echo "==> re-running ${#vfailed[@]} failed vitest file(s) serially (load average: $(cut -d' ' -f1-3 /proc/loadavg))"
+        if NO_COLOR=1 pnpm exec vitest run --no-file-parallelism "${vfailed[@]}" 2>&1 | tail -15; [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+          echo "✗ vitest failed again serially: a real failure, not load" >&2
+          exit 1
+        fi
+        echo "⚠ FLAKY UNDER LOAD -- failed in the parallel vitest run, passed serially:" >&2
+        printf '    src/dashboard/static/%s\n' "${vfailed[@]}" >&2
+        echo "  Stamping green anyway. Record them in docs/roadmap/tasks/T01-test-suite-reliability.md." >&2
+        printf 'src/dashboard/static/%s\n' "${vfailed[@]}" >>"$wt/.flaky"
+      fi
     fi
   )
 rc=$?

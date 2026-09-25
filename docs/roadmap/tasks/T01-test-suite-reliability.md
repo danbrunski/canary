@@ -290,7 +290,7 @@ measurement in hand.
     run of the six files (1-min load 8.6–20.3 at end of run), and 195 passed
     each run with `tests/test_replay_isolation.py` added (15.3–22.3).
 
-- [ ] **T01.9 `test_fuel_map_persists_tuples_and_known_answers_hold` fails under
+- [x] **T01.9 `test_fuel_map_persists_tuples_and_known_answers_hold` fails under
   load and passes alone.** Named "flaky under load" by the `3f2845d` gate
   (2026-09-23; the commit touched no daemon, collector or sustained-validation
   code): failed in the 8.5-minute parallel run, passed serially in 39 s with the
@@ -300,8 +300,38 @@ measurement in hand.
   inside. The failing traceback was not kept (the gate prints only the summary
   line). Reproduce beside the per-core burners, record which wait expires, and
   replace it with a condition, as T01.1–T01.6 did.
+  **No wait expired. The host clock stepped.** Beside 12 burners the test
+  passed alone (2 of 2, 25 s each), and so did four concurrent copies (8 of 8).
+  An instrumented `_heartbeat` found the cause. Each `time.time()` read sat
+  between two `time.monotonic()` reads under 0.3 ms apart, and still this WSL2
+  host stepped `CLOCK_REALTIME` forward +2.93 s every 32.25 s under load
+  (`steps.py`, 150 s: five steps). Every process saw each step at the same
+  monotonic instant, so neither the GIL nor a descheduled thread explains it.
+  `run_scenario_clean` marks a stepped run invalid and reruns it, three
+  attempts at most. A 17–35 s attempt beside a 32 s period can lose all three.
+  One loaded run did exactly that: 118 s, 3 attempts, a +2.93 s step in the
+  last, `invalid_reasons: ["host_wall_clock_step"]`. That is the test's first
+  assertion, `evidence["valid"] is True`. Its other margins held under load:
+  known-answer bias 0.03–0.42 rpm against a 15 rpm tolerance, slope within
+  0.0007 of 1, 40–105 complete tuples against >10, and every scheduled tick
+  completed.
+  Fix: new `tests/conftest.py::step_free_wall_clock`. `time.time()` becomes
+  the setup-time wall clock advanced by `time.monotonic()`, and so does live
+  inference's `src.daemon.inference._utc_now`, which judges record freshness.
+  It applies to all of `tests/test_sustained_validation.py` via `pytestmark`.
+  The T01.9 test now also asserts `attempts_used == 1`. The step path, no
+  longer reachable from those runs, is tested by injection:
+  `test_heartbeat_records_an_injected_wall_clock_step` (+0.5 s recorded once)
+  and `test_a_run_that_saw_a_wall_clock_step_is_rerun_then_reported`. Two
+  mutations were run. A 1.0 s step threshold fails the first ("hung: the
+  heartbeat seeing the step"), and `attempts=1` fails the second
+  (`assert 1 == 2`). Acceptance: 12 of 12 passed with `attempts_used == 1`,
+  as three rounds of four concurrent `pytest -n0` copies beside 12 burners
+  (load 16.2–17.9, 26–35 s each). A logger in the same rounds recorded 3, 2
+  and 3 host steps, so every copy ran across at least one step. The whole
+  module passed, 21 of 21 (`-n 4 -m ""`, 51 s). No production code changed.
 
-- [ ] **T01.10 `SessionsPanel.test.ts` fails in the full vitest run and passes
+- [x] **T01.10 `SessionsPanel.test.ts` fails in the full vitest run and passes
   alone — and the gate has no retry for vitest.** Blocked the `92b5374` push
   (2026-09-23), a commit whose only dashboard change was two tag labels in
   `LoggingPage.tsx`; failed again in a full local run (1 of 357), passed 3 of 3
@@ -310,3 +340,32 @@ measurement in hand.
   dashboard flake blocks a push outright. Two fixes: find what the test waits
   on by wall clock under load (the T01.1 approach), and give the gate the same
   serial re-run for vitest.
+  **What it waited on: the text, when the next step needs the picker value.**
+  The session list reaches the DOM in one commit. ReplayCard's picker gets its
+  value two passive-effect passes later: SessionsPanel's selection effect,
+  then ReplayCard's follow effect. A probe `MutationObserver` saw the three
+  `<option>`s with `value=""` first. React's scheduler works in 5 ms slices
+  timed by `performance.now()`. When a busy host uses up a slice between
+  those passes, `findAllByText` resolves first: testing-library's post-wait
+  drain is a single `setTimeout(0)`. The test then read `picker.value` (the
+  failing test), or clicked Start (the other two), where an empty picker
+  throws "Select a session first." Three full `pnpm vitest run`s beside 12
+  burners did not hit it by chance, and neither did 300 render loops. A
+  `performance.now()` that advances 10 ms per read, so every slice is spent,
+  hit it every time: `value=""` in 50 of 50 renders, and 3 of the file's 4
+  tests failed. Fix, test only (`SessionsPanel.tsx` unchanged): the file now
+  keeps that clock skew in `beforeEach` as a standing load reproduction.
+  `pickerHolds(id)` waits for the picker value before reading it or clicking
+  Start. 4 of 4 pass under the skew. The full suite passed beside 12
+  burners: 428 of 428, load 19.3.
+  **Gate:** `scripts/ci_gate.sh` now re-runs the files that fail in
+  `vitest related` once, with `--no-file-parallelism`. Failing again blocks the
+  push. Passing prints "FLAKY UNDER LOAD" and adds them to the stamp's
+  `flaky-under-load` list. Tested by extracting the block with a scratch test
+  file: fails-once-then-passes gave FLAKY UNDER LOAD, exit 0 and the path in
+  `.flaky`; always-fails gave "failed again serially" and exit 1. The file
+  parser was checked on the ANSI-coloured and collection-error `FAIL` forms.
+  Two other files failed in the loaded full-suite runs before this fix, in R08's
+  area and not investigated here: `useControlResource.test.ts` (3 tests, 1 run;
+  the file was being edited at the time) and `TuningContextBar.test.tsx`
+  (1 test, 2 of 3 runs).

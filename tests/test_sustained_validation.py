@@ -17,19 +17,31 @@ cadence contract (C10.16) and the drive-slice replay (C10.9).
 Every run here goes through ``run_scenario_clean``: the WSL2 workstation's
 wall clock steps by ~0.9 s every couple of minutes (measured while writing
 this), and a step inside a run re-orders every wall-stamped row across it.
+Under load it steps far more often (+2.93 s every 32.25 s beside one busy
+loop per core, 2026-09-24), often enough for all three attempts to see one,
+so every test here runs on ``step_free_wall_clock`` (T01.9) and the step
+handling itself is tested by injecting a step.
 """
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import pytest
 
+from src.validation import harness
 from src.validation.evidence import limiting_stage, sequence_reconciliation
-from src.validation.harness import RunArtifacts, harness_config, run_scenario_clean
+from src.validation.harness import (
+    BoundedSamples,
+    RunArtifacts,
+    harness_config,
+    run_scenario_clean,
+)
 from src.validation.report import build_report
 from src.validation.scenarios import (
     SCENARIOS,
@@ -45,8 +57,12 @@ from src.validation.synthetic_bus import (
     RealClock,
     SyntheticEcu,
 )
+from tests.waits import settle, wait_until
 
-pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
+pytestmark = [
+    pytest.mark.filterwarnings("ignore::DeprecationWarning"),
+    pytest.mark.usefixtures("step_free_wall_clock"),
+]
 
 
 def _mini(spec: ScenarioSpec, **overrides: Any) -> ScenarioSpec:
@@ -127,6 +143,64 @@ async def test_report_carries_versioned_provenance(tmp_path: Path) -> None:
     assert quality["stop_sidecar"]["scope"] == "stop"
     assert quality["stop_sidecar"]["persistence"]["flushed"] is True
     assert (artifacts.capture_dir / "capture_quality.json").exists()  # type: ignore[operator]
+
+
+async def test_heartbeat_records_an_injected_wall_clock_step(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """T01.9 — the step detector the harness reruns on, fed a step on purpose.
+
+    ``step_free_wall_clock`` keeps the host's steps out of every run in this
+    module, so this is where a step still has to be seen: +0.5 s on the wall
+    clock and nothing on the monotonic one is recorded once, with its size.
+    """
+    step_free = time.time
+    jump = [0.0]
+    monkeypatch.setattr(time, "time", lambda: step_free() + jump[0])
+    stop = asyncio.Event()
+    steps: list[dict[str, float]] = []
+    samples = BoundedSamples()
+    task = asyncio.create_task(harness._heartbeat(stop, samples, steps))
+    await wait_until(lambda: samples.count >= 3, what="three heartbeats before the step")
+    assert steps == []
+    jump[0] = 0.5
+    await wait_until(lambda: bool(steps), what="the heartbeat seeing the step")
+    stop.set()
+    await settle(task)
+    assert len(steps) == 1 and abs(steps[0]["step_s"] - 0.5) < 0.01, steps
+
+
+async def test_a_run_that_saw_a_wall_clock_step_is_rerun_then_reported(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """T01.9 — ``run_scenario_clean`` reruns a stepped run, stops at the first
+    clean one, and after ``attempts`` stepped runs returns the last one, which
+    still says it stepped (``build_report`` then marks it invalid)."""
+    plan: list[list[dict[str, float]]] = [[{"step_s": 2.93}], [], [{"step_s": 2.93}]]
+    calls: list[int] = []
+
+    class _Run:
+        def __init__(self, steps: list[dict[str, float]]) -> None:
+            self.wall_clock_steps = steps
+            self.attempts_used = 0
+
+        @property
+        def clock_stepped(self) -> bool:
+            return bool(self.wall_clock_steps)
+
+    async def _fake_run(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(1)
+        return _Run(plan[len(calls) - 1])
+
+    monkeypatch.setattr(harness, "run_scenario", _fake_run)
+    kwargs: dict[str, Any] = {"label": "t", "sessions_root": tmp_path, "scratch": tmp_path}
+    clean = await run_scenario_clean(scenario("fuel-map"), **kwargs)
+    assert len(calls) == 2 and clean.attempts_used == 2 and not clean.clock_stepped
+
+    calls.clear()
+    plan[:] = [[{"step_s": 2.93}]] * 3
+    stepped = await run_scenario_clean(scenario("fuel-map"), **kwargs)
+    assert len(calls) == 3 and stepped.attempts_used == 3 and stepped.clock_stepped
 
 
 def _frame_with_sequences(seqs: list[int]) -> pd.DataFrame:
@@ -285,6 +359,9 @@ async def test_fuel_map_persists_tuples_and_known_answers_hold(tmp_path: Path) -
     recovers slope ~1 with a tight 1:1 residual, and a deliberately wrong
     scale is *not* tautologically accepted."""
     artifacts = await _run(scenario("fuel-map"), tmp_path, inference=True)
+    # The host clock stepped under load often enough to spoil all three
+    # attempts (T01.9); on ``step_free_wall_clock`` the first one is clean.
+    assert artifacts.attempts_used == 1, artifacts.wall_clock_steps
     report = build_report(artifacts)
     evidence = report["evidence"]
     assert evidence["valid"] is True
