@@ -98,6 +98,7 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.log import configure_logging
+from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.preprocessing.features import ROC_SUFFIX
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -171,7 +172,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="tune_revisions.yaml for the calibration stratum (default: next to the artifact).",
     )
-    parser.add_argument("--bindings", type=Path, default=Path("data/bindings.yaml"))
+    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
     parser.add_argument("--dids", type=Path, default=DEFAULT_DIDS_PATH)
     parser.add_argument("--mode", choices=["historical", "corrected"], required=True)
     parser.add_argument(

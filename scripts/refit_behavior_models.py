@@ -68,8 +68,10 @@ from src.decode.behavior_models import (
 )
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.log import configure_logging
+from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
 from src.profiles import resolve_profile_for_tooling, scope_config
+from src.session import format_session_timestamp
 
 log = logging.getLogger(__name__)
 
@@ -135,7 +137,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--bindings",
         type=Path,
-        default=Path("data/bindings.yaml"),
+        default=BINDINGS_YAML,
         help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml).",
     )
     parser.add_argument(
@@ -620,7 +622,7 @@ def preserve_prior_artifact(
     """
     if not out.exists():
         return None
-    stamp = (now or datetime.now(UTC)).strftime("%Y-%m-%dT%H%M%S")
+    stamp = format_session_timestamp(now or datetime.now(UTC))
     target = out.parent / PRIOR_DIRNAME / stamp
     target.mkdir(parents=True, exist_ok=True)
     shutil.copy2(out, target / out.name)
