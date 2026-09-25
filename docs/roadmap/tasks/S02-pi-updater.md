@@ -257,7 +257,7 @@ What 2026-09-22 showed is still rough:
   D03.21), so every drive's health line shows it and a Pi never updated
   through this script is covered too.
   **Done (2026-09-22, drive session):** `memory_limit_status()` in
-  `src/models/health.py` reads the daemon's own cgroup (via `/proc/self/cgroup`,
+  `src/daemon/health.py` (then `src/models/health.py`) reads the daemon's own cgroup (via `/proc/self/cgroup`,
   so it follows the unit wherever it runs) and `/status` `health.system` carries
   `memory_limits_enforced` (`true` / `false` for an explicit `max` / `null` for
   unknown) with `memory_max_bytes` and the path it read. Four tests cover

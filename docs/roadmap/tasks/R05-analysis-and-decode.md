@@ -176,7 +176,7 @@ code:
   the refusal. The shipped Xterra digest still quotes its floor (real capture
   `_capture-tuning-2026-09-23T164007`: `delta_sigma 1.84`).
 
-- [~] **R05.3 Replace the hand-rolled two-signal comparisons.**
+- [x] **R05.3 Replace the hand-rolled two-signal comparisons.**
   - `tuning_digest._cam_tracking` computes `np.corrcoef(commanded, measured)`
     on `read_aligned(grid="1s")` cells. `read_aligned`'s own docstring says
     its output "is not pairing evidence". The only refusal is `len < 3` /
@@ -220,10 +220,12 @@ code:
   (`pairing.InputNotCapturedError`, raised by `compare._refuse_if_absent`),
   not from its message text. Tests:
   `tests/test_tuning_digest_cam.py`; `tests/test_analysis_ground_truth.py`
-  green. **Remaining:** the delivery-error convergence question above is the
-  operator's; not decided here.
+  green.
+  **Operator decision 2026-09-25 (R00, delegated):** yes, converge delivery
+  error onto the acquisition-paired `match_ordered` engine; the numbers will
+  shift. That is the separate **L** item **R05.16**; R05.3's own scope is done.
 
-- [~] **R05.4 Declare the anomaly signals as data.**
+- [x] **R05.4 Declare the anomaly signals as data.**
   - `derived.compute_anomaly_signals` is 243 lines, ~105 of them docstring.
     The body repeats one block eight times:
     `a = _series(X); b = _series(Y); if both: out[n] = f(a, b);
@@ -272,8 +274,39 @@ code:
   profile field threaded through `compute_anomaly_signals`' callers in
   `src/preprocessing/**` (R04-held), `capture_profiles._channel_satisfied`
   (R02-held) and `src/config.py` (R07-held).
+  *Remainder done 2026-09-25.* `derived.py` and `afr.py` name no `did:`
+  identifier (`inspect.getsource` check in the test below). Shared formulas
+  over vehicle-specific inputs are `derived.VEHICLE_INPUT_SIGNALS`
+  (`AFR_BANK_BALANCE`, `TPS_VOLTAGE_PER_PCT`); the vehicle names its channels
+  in `src/analysis/vehicle_signals/<profile module>.py` (`SIGNAL_INPUTS`, and
+  `AF_SENSOR_VOLTAGE` per bank for `afr.append_afr_channels`' voltage
+  fallback and the `derived:AFR_*` registry entries); the Xterra's is
+  `vehicle_signals/nissan_xterra_2008.py`, module name from the same
+  `profiles.profile_module_stem(slug)` rule as R05.7's recipes.
+  `ANOMALY_SIGNALS = SHARED_ANOMALY_SIGNALS + vehicle-input signals`.
+  **Design choice:** `DERIVED_CHANNEL_INPUTS` is module-level and read without
+  a config (trainability, capture-profile warnings, the evaluator), so the
+  vehicle modules are merged, not selected: each input group is the union of
+  the vehicles' alternatives (module-name order), a vehicle may not invent an
+  output or change a formula's arity (refused at import), and a signal is
+  computed only where its inputs exist, so a vehicle's frames resolve to its
+  own identifiers. Selecting by active profile instead would thread a profile
+  through those three consumers and the serve-path featurizer. Bit-identical:
+  `ANOMALY_SIGNALS` (name, input groups) and all 38 `DERIVED_CHANNEL_INPUTS`
+  entries, order included, JSON-identical before vs after;
+  `compute_anomaly_signals` on the all-input frame with and without `vehicle`,
+  and `append_afr_channels` through the voltage fallback with the Xterra's
+  `afr_calibration.yaml`, `assert_frame_equal(check_exact=True)` and identical
+  column order. Tests (`tests/test_anomaly_signals_table.py`, 8 pass):
+  `test_shared_derived_code_names_no_manufacturer_did`,
+  `test_the_xterra_supplies_its_did_inputs_from_its_vehicle_module`,
+  `test_a_second_vehicle_adds_alternatives_not_replacements`,
+  `test_a_vehicle_cannot_invent_a_signal_or_change_its_arity`; `test_derived`,
+  `test_features_batched_parity`, `test_reconcile_feature_frame_parity`,
+  `test_trainability`, `test_capture_profiles`, `test_afr*`,
+  `test_analysis_ground_truth` pass (190 passed).
 
-- [~] **R05.5 Fingerprints must use the real featurization.**
+- [x] **R05.5 Fingerprints must use the real featurization.**
   - `fingerprint.compute_fingerprint` hand-chains `resample_and_segment →
     compute_anomaly_signals → append_committee_residuals →
     _append_behavior_deviations`.
@@ -303,8 +336,9 @@ code:
   2026-07-20) is not silently invalidated and no trend alert fires from the
   bump; it only makes 0.1.0 sidecars stale for recompute. Tests
   `tests/test_fingerprint_featurization.py`, `test_fingerprint*.py`,
-  `test_digest.py`, `test_control_trends.py`. **Remaining:** record when to
-  re-freeze (measurement says it is not forced by this change).
+  `test_digest.py`, `test_control_trends.py`.
+  **Operator decision 2026-09-25 (R00, delegated):** no forced re-freeze;
+  re-freeze the trend reference at the next deliberate corpus boundary.
 
 - [x] **R05.6 `session_deviations.compare_sessions` compares aggregates.**
   - `_compare_surface` reports `mean_actual_delta` / `mean_expected_delta`
@@ -335,7 +369,7 @@ code:
   (tests/test_session_deviations.py, 13 passed). `docs/mcp-server.md`
   updated.
 
-- [~] **R05.7 Collapse the recipe-catalog clones (`refit.default_recipes`,
+- [x] **R05.7 Collapse the recipe-catalog clones (`refit.default_recipes`,
   574 lines).**
   - The per-recipe minimums can't be set. The trailing loop runs
     `replace(recipe, min_sessions=3, min_cell_sessions=2,
@@ -376,8 +410,32 @@ code:
   recipe's own fields — the trailing `replace` loop is gone.
   Golden test unchanged after the refactor (no `contract_changed:recipe`
   reaches the Pi); `test_a_minimum_a_recipe_declares_wins_over_the_family_default`
-  proves per-recipe minimums now stick. **Remaining:** whether DID-named
-  recipes move to a per-profile Python module is the operator's decision.
+  proves per-recipe minimums now stick.
+  **Operator decision 2026-09-25 (R00, delegated):** move the DID-named recipes
+  into a per-profile Python module. *Done 2026-09-25.*
+  `refit.shared_recipes()` is the vehicle-neutral catalog (18 recipes; no
+  `did:` in any output, axis or rate-of-change key); the Xterra's six
+  (`air_charge_vs_rpm_throttle_did`, `cam_primary/secondary_vs_command_rpm_did`
+  with `_cam_tracking_2d`, `afr_bank_balance_robust` — its input is the
+  AF-voltage DID pair — `afr_voltage_vs_rpm_throttle_did`,
+  `tps_sensor_1_vs_sensor_2_did`) moved verbatim to
+  `src/analysis/recipes/nissan_xterra_2008.py::recipes()`.
+  `refit.default_recipes(profile)` takes the slug (**required**, so no caller
+  silently fits another vehicle's surfaces, or none; `None` = shared only) and
+  appends `recipes.profile_recipes(slug)`, found by
+  `profiles.profile_module_stem(slug)`; a profile with no module fits the
+  shared catalog, and a profile recipe shadowing a shared name is refused.
+  Callers pass the resolved profile's slug: `scripts/refit_behavior_models.py`,
+  `scripts/inventory_behavior_inputs.py`, `scripts/evaluate_behavior_models.py`
+  (`evaluate`/`export_columns`/`export_rows` take `profile`). The golden test
+  `tests/test_recipe_catalog_golden.py` is **unchanged** for
+  `default_recipes("nissan-xterra-2008")` (same 24 fingerprints, `asdict`
+  reprs and order). `tests/test_profile_recipes.py` (5 pass): shared catalog
+  names no DID; the Xterra's six come from its module; a second profile's
+  module is used and never gets the Xterra's; a slug with no module (a VIN
+  slug) gets the shared catalog; shadowing refused. `test_refit`,
+  `test_behavior_*`, `test_refit_behavior_models_script`,
+  `test_evaluate_behavior_models_script` pass.
 
 ## Structure
 
@@ -568,7 +626,7 @@ code:
   `_capture-tuning-2026-09-21T232153` + `_capture-tuning-2026-09-23T164007`;
   `compute_tuning_digest(...).to_dict()` JSON byte-identical (before the split vs after R05.12+R05.13) on `_capture-tuning-2026-09-23T164007` (with a previous-capture delta and sigma), `_capture-tuning-2026-09-22T170459`, `_capture-tuning-hybrid-research-2026-09-17T184821` (cam) and `_capture-tuning-hybrid-research-2026-08-07T170918`.
 
-- [~] **R05.13 `behavior_validation.py` (1,811 lines): move the splits
+- [x] **R05.13 `behavior_validation.py` (1,811 lines): move the splits
   beside `drives`, and move vehicle facts out of code.**
   - ~300 lines of drive grouping and splits keep their own `Drive` beside
     `drives.PhysicalDrive`, and re-export `parent_session`/`SEGMENT_MARKER`.
@@ -612,6 +670,29 @@ code:
   MCP tool contract; (3) the digest payload key `rpm_over_2500_seconds` still
   names the dev vehicle's floor (now counted against the profile's); (4) the
   optional facade split of `behavior_validation` was not attempted.
+  *Remainders 2026-09-25.* (1) Kept `splits.Drive`, reason now in its
+  docstring: a split's unit is the frame *piece* (`<session>#<segment>`),
+  which `PhysicalDrive` (recordings + activity spans) has no field for, and
+  every fold and `DriveRecord` names pieces; which pieces share a drive is
+  still `drives`' decision (`row_drive_labels` / `join_spans`), so it is one
+  drive definition with two views. (2) **Operator decision 2026-09-25 (R00,
+  delegated):** MCP `get_delivery_error(min_load=None)` and
+  `tuning_report.py delivery-error --min-load` (default `None`) resolve to the
+  profile's `mode01_wot.load_floor_pct` through
+  `TuningContext.resolve_min_load` (refuses when the profile has no
+  `mode01_wot`); the MCP payload echoes `min_load` + `min_load_source`
+  (`profile`/`caller`). `docs/mcp-server.md` and the tool docstring say so;
+  `tests/fixtures/mcp_tool_snapshot.json`'s `get_delivery_error` entry
+  regenerated (description + `min_load` default `null`, that entry only).
+  Tests: `test_wot_profile_facts.py::test_min_load_defaults_to_the_profiles_wot_floor`,
+  `test_tuning_context.py::test_a_dashboard_flash_resolves_in_the_mcp_tuning_tools`
+  (`(85.0, "profile")`), `test_mcp_tool_snapshot.py`. (3) The digest's
+  `pull_inventory.rpm_over_2500_seconds` is now `rpm_over_floor_seconds` with
+  the `rpm_floor` it counted against beside it. No alias: nothing reads the
+  tuning section of a stored digest back (grep of `src/`, `scripts/`,
+  `tools/`, the dashboard TS and MCP found only the writer and
+  `tests/test_tuning_digest.py`), and old `digest.json` sidecars keep the old
+  key as written. (4) The optional facade split is still not attempted.
 
 - [x] **R05.14 Small cleanups (batch them).**
   - `workbench.session_span` re-walks parquet footers that
@@ -642,7 +723,7 @@ code:
   `test_preprocessing_loader.py`, `test_replay*.py`, `test_trip_end_digest.py`
   pass.
 
-- [ ] **R05.15 The operational calibration directory is shared by every
+- [x] **R05.15 The operational calibration directory is shared by every
   profile.** *Pre-existing; found during R05.1, not fixed.*
   - `profiles.operational_dir(config)` is `config.daemon.jobs_dir.parent /
     "calibration"`.
@@ -659,6 +740,96 @@ code:
     tooling that forgets to scope reads a different file again.
   - Fix direction (undecided): a per-profile directory, e.g. scoped like the
     other `daemon.*` paths. It needs a migration for the existing Pi file.
+
+  *Done 2026-09-25.* New `DaemonConfig.calibration_dir` (default
+  `CONTROL_DIR / "calibration"`); `operational_dir(config)` reads it when set
+  (YAML or `scope_config`) and otherwise stays beside `jobs_dir`, resolved at
+  call time so a `model_copy` of `jobs_dir` moves it too. `scope_config` sets
+  it to `<that>/<slug>`: on the Pi (`jobs_dir: /data/canary/control/jobs`)
+  the Xterra's is `/data/canary/control/calibration/nissan-xterra-2008`, still
+  under the data root. **Migration** (reworked after verification: the
+  first version adopted by registry prefix only and could orphan the
+  Xterra's files silently). `profiles.legacy_adoption(config)` decides
+  whether a profile owns the old shared `<jobs>/calibration`, first match
+  wins: (1) its own `operational_dir` holds a `migrated_from.json` marker
+  naming that directory; (2) the legacy `tune_revisions.yaml` starts with the
+  same revision (name + calibration id) as the profile's tracked registry,
+  so a flash later hand-added to the tracked file does not break the match;
+  (3) the legacy dir has no registry (a dashboard memory *verify* writes only
+  `dids.yaml` + `memory_verify.json`) and the profile is the only one in
+  `profiles.yaml`. `resolve_active_profile` (the daemon's startup path) now
+  calls `migrate_legacy_calibration` on the scoped config: adopted files are
+  copied once into the per-vehicle dir (own files win, legacy left intact)
+  and the marker is written, so later tracked-registry edits or a second
+  registered vehicle cannot orphan them. A failure there is logged, not
+  fatal. Offline tools (`resolve_profile_for_tooling`) never migrate. They
+  read an adopted legacy file through `profiles.operational_file` (own copy,
+  else the adopted legacy copy), which `active_registry_path`,
+  `active_memory_path` and the verify record use; the first write through
+  `src.control.calibration` also seeds from it. **Never silent:** when
+  `<jobs>/calibration` exists and no profile has adopted it (no sibling
+  marker names it), the migration logs a WARNING (once per reason) and
+  `calibration_status` (flattened into `/status`) carries
+  `legacy_calibration_unadopted` with the path and the reason; otherwise
+  `None`. Tests (`tests/test_operational_calibration_scope.py`, 11 pass):
+  per-profile dirs; Pi paths under `/data/canary`; a second profile's flash
+  does not land in the Xterra's registry; the Xterra's shared-location
+  registry is still read (and not by another profile); the first flash
+  migrates it and leaves the legacy file byte-identical; a legacy registry
+  whose history is not the profile's is not adopted; legacy
+  `dids.yaml`/`memory_verify.json` read and migrated;
+  `test_a_verify_only_legacy_dir_is_migrated_for_the_only_registered_profile`
+  (rule 3 at `resolve_active_profile`, marker written, verify outcomes
+  survive, and a second vehicle registering afterwards does not un-adopt
+  it); `test_an_unowned_legacy_dir_warns_and_is_surfaced` (two registered
+  profiles: WARNING logged, `legacy_calibration_unadopted` names the dir);
+  `test_a_hand_added_tracked_flash_does_not_orphan_dashboard_flashes`
+  (case (b), plus a later unrelated tracked rewrite);
+  `test_offline_tools_read_the_legacy_dir_without_migrating`.
+  `test_profiles.py`'s every-daemon-path test now covers `Path | None`
+  fields. **Not verified:** what the Pi's `/data/canary/control/jobs/calibration/`
+  holds, and how many profiles its `profiles.yaml` registers (offline only).
+  A registry-less legacy dir on a Pi with more than one registered profile is
+  reported, not adopted.
+
+- [ ] **R05.16 One delivery-error engine: the acquisition-paired
+  `match_ordered`.** *Operator decision 2026-09-25 (R05.3): converge; numbers
+  will shift.*
+  - Two engines answer "how far is measured AFR from commanded":
+    `tuning.delivery_error` / `gate_delivery_samples` pair on 1 s last-value
+    cells (`read_aligned`, which says it is not pairing evidence), and
+    `lambda_delivery.delivery_samples` pairs by acquisition order
+    (`pairing.match_ordered`), used only by
+    `scripts/lambda_delivery_evidence.py`.
+  - Consumers of the 1 s engine: the trip-end / tuning digest
+    (`tuning_digest`), the MCP `get_delivery_error` and
+    `compare_tuning_sessions` tools (`src/mcp_server/tools/tuning_analysis.py`),
+    `scripts/tuning_report.py`, and the workbench delivery frame
+    (`workbench._session_delivery_frame`, dashboard Analysis page).
+
+  **Do:** make `delivery_error` (and the semantic-frame / gated variants)
+  build its samples from `lambda_delivery`'s acquisition-paired sides and
+  steady-target mask, keep the WOT gates (`mode01_wot` profile facts), and
+  delete the 1 s last-cell path. Bump whatever version the digest sidecar
+  and the MCP payload carry so stored digests recompute.
+
+  **Accept:** the ground-truth suite passes; before/after delivery error
+  recorded on `_capture-tuning-2026-09-21T232153`,
+  `_capture-tuning-2026-09-23T164007` and one hybrid-research capture (n,
+  mean, p95 per band), with the shift explained; digest, MCP and workbench
+  tests updated to the new numbers deliberately, not re-pinned blind.
+  Size **L**.
+
+- [ ] **R05.17 A flash hand-added to the tracked registry after migration is
+  never seen.** *Found by R05.15's rework, 2026-09-25; pre-existing.* Once the
+  per-vehicle operational registry exists it wins over the tracked
+  `data/<profile>/tune_revisions.yaml`, so a revision committed to the tracked
+  file afterwards (the established hand-edit workflow) is invisible to
+  `active_registry_path` readers until someone copies it over. **Do:** merge the
+  two on read (tracked revisions not in the operational copy are appended,
+  ordered by `flashed_at`; a conflicting revision with the same name refuses and
+  names both), or make the tracked file the single source and have
+  `append_flash` write there. Pick one; test both directions. Size **S-M**.
 
 ## Looked at and fine
 

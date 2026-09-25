@@ -38,6 +38,7 @@ import pandas as pd
 
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, decode_raw, load_bindings
+from src.decode.slices import sentinel_channel
 from src.paths import BINDINGS_YAML
 from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
 from src.telemetry import channel_key
@@ -50,15 +51,7 @@ def decoded_channel(signal_name: str) -> str:
     return channel_key(DECODED_SOURCE, signal_name)
 
 
-def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
-    """Raw integer value of ``signal`` in each payload, as float64 (R04.4).
-
-    NaN where a payload is not bytes or is too short for the binding's byte
-    range. Built on :func:`src.decode.bindings.decode_raw`, the one byte-slice
-    rule, so this batch path, the storage-side ``FrameDecoder`` and
-    ``tools/backfill_decoded.py`` cannot extract a signal differently.
-    """
-
+def _raw_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
     def extract(payload: object) -> float:
         if not isinstance(payload, (bytes, bytearray)):
             return float("nan")
@@ -66,6 +59,63 @@ def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any,
         return float("nan") if raw is None else float(raw)
 
     return np.asarray(payloads.map(extract).to_numpy(), dtype=np.float64)
+
+
+def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
+    """Raw integer value of ``signal`` in each payload, as float64 (R04.4).
+
+    NaN where a payload is not bytes or is too short for the binding's byte
+    range, and where it holds the binding's declared sentinel word (A04.6: a
+    state, not a number — :func:`decode_sentinel_mask` finds those). Built on
+    :func:`src.decode.bindings.decode_raw`, the one byte-slice rule, so this
+    batch path, the storage-side ``FrameDecoder`` and
+    ``tools/backfill_decoded.py`` cannot extract a signal differently.
+    """
+    values = _raw_column(payloads, signal)
+    if signal.sentinel_raw is None:
+        return values
+    return np.where(values == signal.sentinel_raw, np.nan, values)
+
+
+def decode_sentinel_mask(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
+    """``True`` where a payload holds ``signal``'s declared sentinel word.
+
+    All ``False`` for a binding without one. The rows it marks are the
+    ``decoded:<NAME>_SENTINEL`` state rows (``sentinel_frame``), exactly where
+    :func:`decode_signal_column` returns NaN for the sentinel.
+    """
+    if signal.sentinel_raw is None:
+        return np.zeros(len(payloads), dtype=bool)
+    return np.asarray(_raw_column(payloads, signal) == signal.sentinel_raw, dtype=bool)
+
+
+def sentinel_frame(
+    timestamps: Any, signal: Signal, metadata_json: str, **columns: Any
+) -> pd.DataFrame:
+    """Long-format ``decoded:<NAME>_SENTINEL`` rows (value = the stated meaning).
+
+    The batch twin of :func:`src.decode.frame_decoder.sentinel_record`, so a
+    re-decoded session and a stored one carry the same state rows.
+    ``columns`` adds session columns (``session``, ``session_path``, ...).
+    """
+    meaning = signal.sentinel_meaning or "sentinel"
+    channel = sentinel_channel(signal.name)
+    frame = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "source": DECODED_SOURCE,
+            "channel": channel,
+            "value_number": None,
+            "value_text": meaning,
+            "value_bool": None,
+            "unit": "",
+            "payload": None,
+            "metadata_json": metadata_json,
+            **columns,
+        }
+    )
+    frame["value_number"] = frame["value_number"].astype("float64")
+    return frame
 
 
 def decode_can_rows(
@@ -106,9 +156,15 @@ def decode_can_rows(
     # would double every row and feed duplicate observations to `to_wide`.
     # Stored rows win; re-run the backfill tool to refresh them after a
     # binding definition changes.
+    # A signal whose sentinel state rows alone were stored (a session the
+    # sensor never woke in) counts as stored too.
     already_stored = set(long_frame.loc[long_frame["source"] == DECODED_SOURCE, "channel"].unique())
     if already_stored:
-        signals = [s for s in signals if s.name not in already_stored]
+        signals = [
+            s
+            for s in signals
+            if s.name not in already_stored and sentinel_channel(s.name) not in already_stored
+        ]
     if not signals:
         return long_frame
 
@@ -135,25 +191,39 @@ def decode_can_rows(
                 sort_keys=True,
             )
             values = decode_signal_column(payloads, sig)
-            decoded_frames.append(
-                pd.DataFrame(
-                    {
-                        "timestamp": timestamps,
-                        "source": DECODED_SOURCE,
-                        "channel": sig.name,
-                        "value_number": values,
-                        "value_text": None,
-                        "value_bool": None,
-                        "unit": sig.display_unit,
-                        "payload": None,
-                        "metadata_json": meta,
-                        "session": sessions,
-                        "session_path": session_paths,
-                        "source_channel": decoded_channel(sig.name),
-                        "value": values,
-                    }
-                )
+            numeric = pd.DataFrame(
+                {
+                    "timestamp": timestamps,
+                    "source": DECODED_SOURCE,
+                    "channel": sig.name,
+                    "value_number": values,
+                    "value_text": None,
+                    "value_bool": None,
+                    "unit": sig.display_unit,
+                    "payload": None,
+                    "metadata_json": meta,
+                    "session": sessions,
+                    "session_path": session_paths,
+                    "source_channel": decoded_channel(sig.name),
+                    "value": values,
+                }
             )
+            sentinel = decode_sentinel_mask(payloads, sig)
+            if sentinel.any():
+                # A04.6: the sentinel word is a state row, not a NaN number
+                # row, the same split FrameDecoder makes on the live path.
+                numeric = numeric[~sentinel]
+                state = sentinel_frame(
+                    timestamps[sentinel],
+                    sig,
+                    meta,
+                    session=np.asarray(sessions)[sentinel],
+                    session_path=np.asarray(session_paths, dtype=object)[sentinel],
+                    source_channel=decoded_channel(sentinel_channel(sig.name)),
+                )
+                state["value"] = state["value_text"]
+                decoded_frames.append(state)
+            decoded_frames.append(numeric)
 
     if not decoded_frames:
         return long_frame

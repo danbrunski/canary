@@ -107,6 +107,8 @@ def test_a_dashboard_flash_resolves_in_the_mcp_tuning_tools(tmp_path: Path) -> N
     delivery = tuning_analysis.get_delivery_error(config_path, session=a.name, min_load=None)
     assert delivery["ok"], delivery
     assert delivery["tune_revision"] == FLASH.revision
+    # R05.13: no min_load means the profile's WOT floor, echoed with its source.
+    assert (delivery["min_load"], delivery["min_load_source"]) == (85.0, "profile")
 
     compared = tuning_analysis.compare_tuning_sessions(
         config_path, session=a.name, against=b.name, value="obd:MAF", axes=("obd:RPM",)

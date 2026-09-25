@@ -702,6 +702,15 @@ class LiveInferencePipeline:
 
         scoring_allowed = True
         vehicle_state: VehicleState | None = None
+        # R03.12 — asked every tick: the behavior detector obeys it even on a
+        # tick with no feature row (R03.12b).
+        profile_gate = capture_profile_gate(components)
+        components.health_monitor.observe_capture_profile_gate(
+            {
+                **profile_gate.to_dict(),
+                "behavior_residuals_withheld": self._behavior.withheld_by_capture_profile,
+            }
+        )
         if row is not None:
             vehicle_state = _live_vehicle_state(source, components, now)
             scoring_allowed = vehicle_state.state in _SCORABLE_VEHICLE_STATES
@@ -709,8 +718,6 @@ class LiveInferencePipeline:
             # which kind of empty it is. Vehicle state is asked first: a
             # profile refusal therefore means "the engine was running, and
             # the capture profile is why nothing scored".
-            profile_gate = capture_profile_gate(components)
-            components.health_monitor.observe_capture_profile_gate(profile_gate.to_dict())
             if not scoring_allowed:
                 components.emitter.counters.skipped_vehicle_state += 1
             elif not profile_gate.scoring_allowed:
@@ -733,6 +740,7 @@ class LiveInferencePipeline:
             operating_mode=operating_mode,
             timestamp_str=timestamp_str,
             scoring_allowed=scoring_allowed,
+            capture_profile_allows=profile_gate.scoring_allowed,
         )
         token = _current_generation(components)
         if_job = self._if.prepare(row, ctx)
@@ -1023,8 +1031,12 @@ async def run_live_inference(
     still withheld from IF and the sequence detector while the active profile
     is not corpus-eligible (:func:`capture_profile_gate`; during a replay, the
     replayed session's manifest). Counted in
-    ``emitter.counters.skipped_capture_profile``. Behavior models and the
-    plausibility checks are not gated by it.
+    ``emitter.counters.skipped_capture_profile``. Behavior-model deviations
+    stop under the same gate (R03.12b, operator decision 2026-09-25): no
+    event, fusion vote or score publish, counted as
+    ``capture_profile_gate.behavior_residuals_withheld`` in ``/status``; the
+    live overlay still shows expected/actual. Plausibility checks keep running
+    (R03.12c).
 
     Best-effort: every error inside the loop is caught + logged.
     """

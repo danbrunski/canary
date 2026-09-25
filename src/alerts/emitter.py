@@ -42,6 +42,7 @@ if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.notifier import Notifier
     from src.config import DetectorRole
     from src.models.inference import SequenceInferenceResult
+    from src.plausibility.evaluator import EvidenceRecord
 
 log = logging.getLogger(__name__)
 
@@ -435,6 +436,22 @@ class AnomalyEventEmitter:
             mann_kendall_p_value=mann_kendall_p_value,
         )
         return self._emit(event)
+
+    def emit_plausibility(self, record: EvidenceRecord) -> AnomalyEvent | None:
+        """Emit a confirmed plausibility failure (A05.9).
+
+        The live evaluator's ``alert_sink``. A pending record is counted as
+        ``suppressed_not_anomaly`` and never logged: only a confirmed
+        episode alerts (A05.6), and the evidence file already holds the
+        pending ones. No persistence gate — confirmation *is* the
+        debounce (``repeats`` detections ``min_separation_seconds`` apart),
+        the same reasoning as ``emit_dtc``. Tuning, dedupe (per channel and
+        check), role and the notification push apply as for every source.
+        """
+        if not record.alerts:
+            self.counters.suppressed_not_anomaly += 1
+            return None
+        return self._emit(AnomalyEvent.from_plausibility(record))
 
     def _emit(self, event: AnomalyEvent) -> AnomalyEvent | None:
         # Operator tuning gate (6.25) runs before dedupe: a tuned-out event

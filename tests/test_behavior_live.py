@@ -7,6 +7,7 @@ deviation/severity/mode-gating math, and ``GET /models/behavior/live``.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -206,6 +207,69 @@ def test_observe_behavior_mode_gated_does_not_speak() -> None:
     assert m["expected"] is None
     assert m["deviation"] is None
     assert m["mode_match"] is False
+    # B03.9 — an unscored row never reads as healthy.
+    assert m["severity"] is None
+    assert m["not_scored"] == "operating_mode_mismatch"
+    assert m["series"][-1]["severity"] is None
+
+
+def _unscored(point_overrides: dict[str, object]) -> dict[str, object]:
+    state = BehaviorLiveState()
+    point: dict[str, object] = {
+        "timestamp": pd.Timestamp("2026-05-17T00:00:00Z"),
+        "operating_mode": "idle",
+        "obd:RUN_TIME": 100.0,
+        "obd:COOLANT_TEMP": 50.0,
+    }
+    point.update(point_overrides)
+    _observe_behavior(_source(_poly_model(), point), state)
+    entry: dict[str, object] = state.snapshot()["models"]["coolant_warmup"]
+    return entry
+
+
+@pytest.mark.parametrize(
+    ("overrides", "kind"),
+    [
+        ({"obd:RUN_TIME": 9000.0}, "off_map"),  # outside the fitted domain
+        ({"obd:COOLANT_TEMP": float("nan"), "obd:COOLANT_TEMP__gap": True}, "actual_stale"),
+        ({"obd:COOLANT_TEMP": None}, "actual_missing"),
+    ],
+)
+def test_an_unscored_row_has_null_severity_and_says_which_kind(
+    overrides: dict[str, object], kind: str
+) -> None:
+    """B03.9: the grader returns ``severity="ok"`` beside ``deviation=None``;
+    the live payload (and so the MCP tool) must not."""
+    m = _unscored(overrides)
+    assert m["deviation"] is None
+    assert m["severity"] is None
+    assert m["not_scored"] == kind
+    series = m["series"]
+    assert isinstance(series, list)
+    assert series[-1]["severity"] is None and series[-1]["not_scored"] == kind
+
+
+def test_a_scored_row_keeps_its_severity_and_no_not_scored() -> None:
+    m = _unscored({})
+    assert m["severity"] == "warning" and m["not_scored"] is None
+
+
+def test_observation_normalises_severity_at_construction() -> None:
+    """Every kind of not-scored, including an excluded mode and a row with no
+    named reason, nulls the severity on the object itself, so no serialiser
+    can emit the grader's placeholder ``ok``."""
+    base = _obs("m", 1.0, "ok")
+    cases = {
+        "operating_mode_excluded": {"reason": "operating_mode_excluded:warmup", "deviation": None},
+        "off_map": {"reason": "off_map", "deviation": None, "expected": None},
+        "operating_mode_mismatch": {"mode_match": False, "deviation": None},
+        "no_deviation": {"deviation": None},
+    }
+    for kind, changes in cases.items():
+        obs = replace(base, **changes)  # type: ignore[arg-type]
+        assert obs.severity is None, kind
+        assert obs.not_scored == kind
+    assert base.severity == "ok" and base.not_scored is None
 
 
 def test_observe_behavior_noop_without_models_or_point() -> None:

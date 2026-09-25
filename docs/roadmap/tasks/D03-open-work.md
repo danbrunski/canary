@@ -140,10 +140,31 @@ estimated signal; they cannot establish how UpRev calculates its display.
   (`tests/test_replay.py::test_a_clamped_gap_is_reported_as_effective_speed_not_hidden_behind_speed`,
   `::test_pass_reconciliation_counts_rows_not_wall_time`,
   `tests/test_replay_control.py::test_status_reports_effective_speed_and_source_time_progress`).
-  **Still owed:** live-producer isolation at replay boundaries (the collectors
-  and their queue wiring live under `src/daemon/*`, held by another session
-  today), and the Pi comparison over both a payload-bearing and a legacy
-  baseline session, recording the selected policy with each result.
+  ~~**Still owed:** live-producer isolation at replay boundaries~~ **Done
+  2026-09-25 (desk).** `run_daemon` hands every live collector a
+  `src.daemon.ingress.LiveIngress` (a write-only door onto the queue) instead
+  of the queue, and a `drain.PipelineBarrier` joins the ingest queue and every
+  sink queue. `ReplayController.start` closes the ingress *first*, settles the
+  pipeline so live records already queued land in the live session, then
+  redirects the writer; on stop it settles the replay's own tail into
+  `_replay-*`, switches back, then reopens the ingress (a failed switch
+  reopens it too). Withheld live rows are counted per source:
+  `ReplayStatus.live_rows_withheld` (live while running, baked into the idle
+  status and the "replay finished" log), plus `entry_settled`/`exit_settled`
+  (a 5 s bound; `False` says a boundary was cut). Tests:
+  `tests/test_replay_live_isolation.py::test_live_gps_is_withheld_from_a_replay_and_restored_after`
+  (real `run_daemon`, a 100 Hz live GPS collector through a replay of a
+  40-row source: `_replay-*` holds exactly `{RPM: 40, SPEED: 40}`, withheld
+  `gps > 0`, live GPS back in the live session after stop; shown failing with
+  collectors on the bare queue: `{'LIVE_RECEIVER_LAT': 66, 'RPM': 40, 'SPEED':
+  40}`), `tests/test_replay_control.py` boundary-order, failed-switch and
+  write-only tests, and the strict-xfail
+  `tests/test_replay_row_accounting.py::test_live_gps_does_not_contaminate_replay_output`
+  now passes (the validation harness routes its simulated receiver through a
+  closed `LiveIngress`; xfail removed). The replay's OBD *polling* is not
+  stopped — only its rows are withheld. **Still owed:** the Pi comparison over
+  both a payload-bearing and a legacy baseline session, recording the selected
+  policy with each result.
 
   Evidence preserved before the 7-day replay sweep: source `2026-09-10T142711`
   **pinned** on the Pi, and both directories copied to
@@ -533,8 +554,8 @@ estimated signal; they cannot establish how UpRev calculates its display.
   D03.18's, tracked there.
 
 - [~] **D03.6 Trip-end digest isolation and memory-order fix landed; measured at
-  scale and budget revised 2026-09-22; the `runtime.py` fallback deadline and the
-  Pi stop/restart check remain.** The original synchronous digest, not the replay, took the daemon
+  scale and budget revised 2026-09-22; the shutdown deadline landed 2026-09-25;
+  the Pi stop/restart check remains.** The original synchronous digest, not the replay, took the daemon
   to 7.7 GB and got it OOM-killed on 2026-09-11
   ([evidence](../../../data/analyses/2026-09-17-d029-replay-amplification.md)).
   The old trip-end hook ran `get_or_compute_digest` **synchronously on the
@@ -632,10 +653,24 @@ estimated signal; they cannot establish how UpRev calculates its display.
     compute it. `tests/test_trip_end_digest.py::test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted`
     (hanging executor, cancel, one submission total, sidecar reason, then a
     fresh process computes normally).
-  - **Still owed:** `run_daemon`'s fallback in `src/daemon/runtime.py` still
+  - ~~**Still owed:** `run_daemon`'s fallback in `src/daemon/runtime.py` still
     passes the 900 s digest timeout for a *different* session than the one
-    cancelled (one shutdown deadline needs threading there; that file is held
-    by another session today), and the Pi stop/restart check. `[~]` for those.
+    cancelled~~ **Done 2026-09-25 (desk).** One shutdown deadline, taken when
+    `run_daemon`'s teardown begins: `TRIP_END_SHUTDOWN_SECONDS` =
+    `UNIT_STOP_TIMEOUT_SECONDS` (30, pinned to `systemd/canary.service`'s
+    `TimeoutStopSec` by a test that reads the unit) − 10 s reserved for the
+    inference join and the dashboard's forced exit. The drain, capture stop,
+    `_settle_trip_end_tasks` and the fallback all spend it
+    (`runtime.shutdown_trip_end(…, deadline=)`): the fallback's child gets only
+    the remainder as its timeout (a cut is recorded as `child_timed_out`), is
+    not started with < 1 s left (logged), and is bounded outside too (a cancel
+    takes the `interrupted_at_shutdown` path). Tests
+    (`tests/test_daemon_shutdown_deadline.py`, hanging spawn pool): a hung edge
+    digest spends a 1 s deadline, shutdown returns < 2.5 s, one child total,
+    the edge session carries `interrupted_at_shutdown`; a fallback alone with
+    1.5 s left writes `child_timed_out` < 3 s; `run_daemon` hands the fallback
+    `0 < timeout ≤ 20`; unit/constant parity. **Still owed:** the Pi
+    stop/restart check. `[~]` for that.
 
 - [x] **D03.5 The Pi cannot pull from GitHub.** `git pull` on the Pi fails with
   "Please make sure you have the correct access rights" — no deploy key for
@@ -1599,26 +1634,84 @@ live here now, so the documents could be archived
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
 
-- [ ] **D03.30 Passive mode does not survive a daemon restart.** On 2026-09-24
+- [~] **D03.30 Passive mode does not survive a daemon restart.** On 2026-09-24
   the operator had a scan tool connected with CANary passive (armed through
   `/control/passive`, TTL 1800 s). A deploy restart at 16:53:24Z came up with
   passive off, and CANary sent Mode 01 for ~13 s (0x7E8 answers
   16:53:34–37Z) before it was re-armed by hand. It did not collide: the tool
   was on the BCM at 0x745. It could have, on 0x7E0.
   ([scan-tool session note](../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)).
-  - [ ] A passive arm with TTL remaining survives a restart: persist it (armed
+  - [x] A passive arm with TTL remaining survives a restart: persist it (armed
     at, TTL, source) and restore it before any collector transmits. Expired
     at boot means off, and the log says which.
-  - [ ] `scripts/restart_canary.sh` names an armed passive mode in its output,
+    *Done 2026-09-25 (desk).* `tx_gate.restore_persisted(path)` adopts a state
+    file (`passive_state.json`, `tx_gate.passive_state_path(config)` = the
+    control-state directory beside `trip_state`); from then every arm writes
+    `{version, armed_at (wall clock), ttl_seconds, source}` atomically and every
+    disarm or TTL expiry removes it. `src.main` restores on the *unscoped*
+    config **before the VIN probe** (which transmits Mode 09) and hands the path
+    to `run_daemon`, which restores before any collector exists (a no-op when
+    `main` already did; any other caller derives the path from its config).
+    Restored arms read `source: restored:<original>` with the TTL that was left
+    (clamped to the original TTL, so a clock that stepped back cannot lengthen
+    it); expired-at-boot (a readable file saying so: dropped, logged) and
+    env-armed cases each log which. **Fails safe (verifier fix 2026-09-25):** a
+    state file that exists but cannot be trusted — unreadable (OSError), not
+    JSON, unknown version, missing/malformed `armed_at` — arms passive with no
+    TTL (`source: restored:untrusted-state`), keeps the file, and logs an ERROR
+    naming the cause; the operator's disarm through `/control/passive` removes
+    it. `/status.passive.survives_restart` is set only by a successful write
+    (or a restore from a file still on disk) and cleared by a removal or a
+    failed write, so a swallowed OSError no longer lets the restart script
+    promise a restore.
+    Tests: `tests/test_tx_gate.py` (written/removed, memory-only without a
+    file, TTL remainder, expired-at-boot logged, clock-back clamp, no-TTL arm,
+    TTL expiry removes the file,
+    `test_an_untrusted_state_file_fails_safe[bad-json|unknown-version|missing-armed-at]`,
+    `test_a_state_file_that_cannot_be_read_fails_safe`,
+    `test_a_failed_write_does_not_claim_the_arm_survives`),
+    `tests/test_main.py::test_main_restores_passive_before_the_vin_probe`.
+    **Pi owed:** one real `restart_canary.sh` with passive armed, confirming no
+    0x7DF/0x7E0 frame between unit start and the first `/status`.
+  - [x] `scripts/restart_canary.sh` names an armed passive mode in its output,
     the way it names an active capture.
-  - [ ] Test: arm with a TTL, restart the daemon in the test harness, and no
+    *Done 2026-09-25.* Named, never refused: a persisted arm prints `note:
+    passive mode is armed (source …, N s of TTL left); … restores it before
+    transmitting`; a daemon that does not persist it (anything before this
+    change, i.e. the deploy that installs it) gets a stderr WARNING that the
+    restarted daemon comes up TRANSMITTING. The capture refusal is unchanged.
+    `tests/test_restart_canary_script.py` (5 tests, shimmed curl/sudo/systemctl;
+    `test_a_failed_persist_is_a_warning_not_a_promise` feeds the gate's own
+    snapshot after a failed write and gets the WARNING).
+  - [x] Test: arm with a TTL, restart the daemon in the test harness, and no
     frame is transmitted before the first status read shows passive on.
-  - `vehicle_state` under passive reads `engine_off` even at KOEO or with the
+    `tests/test_passive_restart.py::test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first`
+    (two `run_daemon`s in one process, the gate's memory wiped between them as a
+    new process would have it; the second daemon's first collector send is
+    suppressed, the recording bus sees 0 frames, `/status.passive` reads
+    enabled/`restored:control`/`survives_restart`, TTL 1700–1800 s). Shown
+    failing with the restore removed (`first_send["sent"] is True`).
+    `::test_a_disarm_before_the_restart_is_not_resurrected`.
+  - [x] `vehicle_state` under passive reads `engine_off` even at KOEO or with the
     engine running, because CANary's own OBD polling is what tells those
     apart. Report a passive-specific state, for example `passive` with the CAN
     freshness, rather than a confident `engine_off`. An empty result says
     which kind of empty.
-  - [ ] Test: while passive, `vehicle_state` names passive.
+    *Done 2026-09-25.* New `VehicleStateName` `passive`: while
+    `tx_gate.is_passive()` (operator switch or an ECM-session claim) the
+    verdicts OBD staleness would have decided (`engine_off`, `unknown`) become
+    `passive`; evidence-backed verdicts stand (fresh broadcast rpm →
+    `engine_running`, silence on both buses → `no_data`), and `passive: true`
+    rides on every verdict. The derivations read the gate themselves
+    (`derive_from_inputs`, `derive_from_latest_rows`), so no caller passes it.
+    Consumers checked: inference gate (not scorable, as `engine_off` was not),
+    non-volatile-write gate (refuses; `test_nonvolatile_write.py` state table
+    extended), replay guard (allows, as before), idle shutdown (already
+    inhibited under passive), dashboard badge/type, AGENTS.md, mcp-server.md.
+  - [x] Test: while passive, `vehicle_state` names passive.
+    `tests/test_vehicle_state.py::test_passive_turns_a_confident_engine_off_into_passive`,
+    `::test_passive_keeps_verdicts_that_rest_on_evidence`,
+    `::test_the_derivations_read_passive_from_the_gate`.
 
 ## Deferred by decision, not blocked
 

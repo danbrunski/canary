@@ -258,14 +258,16 @@ class ParquetTelemetryWriter:
         tune_revision: str | None = None,
         resolved_polling_plan: dict[str, Any] | None = None,
     ) -> Path | None:
-        """Rotate atomically into a profile-owned capture session."""
+        """Rotate atomically into a profile-owned capture session.
+
+        Always an isolated ``_capture-*`` directory: a non-default profile may
+        not be corpus-eligible (``CaptureProfile`` refuses it, R03.12), so no
+        capture rotates into a plain, trainable session.
+        """
         if profile.name == "default":
             raise ValueError("default is normal collection, not a bounded capture")
-        if profile.corpus_eligible:
-            flushed = self.rotate_session()
-        else:
-            prefix = profile.storage_prefix or f"_capture-{profile.name}"
-            flushed = self._enter_isolated_dir(f"{prefix}-{capture_id}")
+        prefix = profile.storage_prefix or f"_capture-{profile.name}"
+        flushed = self._enter_isolated_dir(f"{prefix}-{capture_id}")
         sidecar = {
             "schema_version": 2,
             "profile": profile.name,

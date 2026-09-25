@@ -19,7 +19,10 @@ async def get_behavior_live(
     """Live ``you-are-here`` overlay for the behavior surfaces.
 
     Returns per-model ``expected`` / ``actual`` / ``deviation`` / ``severity``
-    for the most recent tick. ``include_series=True`` also returns each
+    for the most recent tick. ``severity`` is ``null`` on a row that was not
+    scored, and ``not_scored`` names which kind (``off_map``,
+    ``actual_stale``, ``operating_mode_excluded``, ``operating_mode_mismatch``,
+    ...); never read a ``null`` severity as healthy. ``include_series=True`` also returns each
     model's rolling trail (~4 min at 1 Hz) — the default is ``False`` because
     with enough registered surfaces the full trail can exceed the MCP
     tool-result size cap; pass ``True`` only when you actually need the

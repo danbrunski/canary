@@ -22,10 +22,13 @@ from src.config import CanaryConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
 from src.profiles import (
     active_registry_path,
+    legacy_operational_dir,
     operational_dir,
+    operational_file,
     operational_registry_path,
     profile_dir,
     source_registry_path,
+    unadopted_legacy_calibration,
 )
 
 
@@ -41,8 +44,8 @@ def _seed(source: Path, destination: Path) -> Path:
 
 
 def active_memory_path(config: CanaryConfig, source: Path) -> Path:
-    override = operational_memory_path(config)
-    return override if override.exists() else source
+    override = operational_file(config, "dids.yaml")
+    return override if override is not None else source
 
 
 def calibration_status(config: CanaryConfig) -> dict[str, Any]:
@@ -78,6 +81,9 @@ def calibration_status(config: CanaryConfig) -> dict[str, Any]:
         # happen underneath the running daemon. Loud by design.
         "calibration_alert": reason is not None,
         "calibration_alert_reason": reason,
+        # R05.15: the pre-R05.15 shared calibration directory exists but no
+        # profile owns it, so its flashes / verified RAM catalog are not read.
+        "legacy_calibration_unadopted": unadopted_legacy_calibration(config),
     }
 
 
@@ -128,9 +134,11 @@ def memory_channels_payload(config: CanaryConfig, source: Path) -> dict[str, Any
 
 
 def append_flash(config: CanaryConfig, revision: TuneRevision) -> TuneRevisionRegistry:
-    source = source_registry_path(config)
+    # Seed from what readers see now: the legacy shared copy this vehicle owns
+    # (R05.15 migration) or the tracked registry.
+    source = active_registry_path(config)
     destination = operational_registry_path(config)
-    if source.exists():
+    if source.exists() and source != destination:
         _seed(source, destination)
     registry = load_tune_revisions(destination) or TuneRevisionRegistry()
     if any(item.revision == revision.revision for item in registry.revisions):
@@ -157,14 +165,16 @@ def record_verify_results(config: CanaryConfig, verdicts: dict[str, str]) -> Non
     Merged over the previous record, so verifying one window does not turn
     every other channel back into "never ran".
     """
-    previous = _read_verify_results(config)
+    previous = _read_verify_results(config)  # includes an adopted legacy record
     stamp = datetime.now(UTC).isoformat()
     merged = {**previous, **{name: {"outcome": out, "at": stamp} for name, out in verdicts.items()}}
     atomic_write_text(last_verify_path(config), json.dumps(merged, indent=2), mkdir=True)
 
 
 def _read_verify_results(config: CanaryConfig) -> dict[str, dict[str, str]]:
-    path = last_verify_path(config)
+    path = operational_file(config, "memory_verify.json")
+    if path is None:
+        return {}
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
@@ -204,7 +214,7 @@ def memory_verify_summary(config: CanaryConfig, source: Path) -> dict[str, int]:
 
 def seed_operational_memory(config: CanaryConfig, source: Path) -> Path:
     destination = operational_memory_path(config)
-    _seed(source, destination)
+    _seed(active_memory_path(config, source), destination)
     # Validate the copy before callers are allowed to edit it.
     DidMap.model_validate(yaml.safe_load(destination.read_text()))
     return destination
@@ -217,14 +227,17 @@ __all__ = [
     "calibration_payload",
     "calibration_status",
     "last_verify_path",
+    "legacy_operational_dir",
     "memory_verify_summary",
     "record_verify_results",
     "memory_channel_state",
     "memory_channels_payload",
     "operational_dir",
+    "operational_file",
     "operational_memory_path",
     "operational_registry_path",
     "profile_dir",
     "seed_operational_memory",
     "source_registry_path",
+    "unadopted_legacy_calibration",
 ]

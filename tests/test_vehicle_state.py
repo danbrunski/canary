@@ -553,3 +553,57 @@ def test_the_three_derivations_agree_on_an_all_did_capture(tmp_path: Path) -> No
     )
     assert parquet.state == live.state == "engine_running"
     assert parquet.rpm == live.rpm == 2500.0
+
+
+# --- D03.30: while passive, vehicle_state names passive ----------------------
+
+
+def test_passive_turns_a_confident_engine_off_into_passive() -> None:
+    """CAN fresh, OBD stale because CANary is not asking: KOEO or running,
+    this used to read ``engine_off``."""
+    state = classify_vehicle_state(
+        **_common_telemetry(obd_freshness_seconds=120.0, can_freshness_seconds=0.2),
+        passive=True,
+    )
+    assert state.state == "passive"
+    assert state.passive is True
+    assert state.to_dict()["passive"] is True
+    assert state.to_dict()["can_freshness_seconds"] == 0.2
+
+
+def test_passive_keeps_verdicts_that_rest_on_evidence() -> None:
+    running = classify_vehicle_state(
+        **_common_telemetry(
+            broadcast_rpm=780.0, obd_freshness_seconds=120.0, can_freshness_seconds=0.2
+        ),
+        passive=True,
+    )
+    assert running.state == "engine_running"
+    assert running.passive is True
+    silent = classify_vehicle_state(**_common_telemetry(), passive=True)
+    assert silent.state == "no_data"
+
+
+def test_the_derivations_read_passive_from_the_gate() -> None:
+    """No caller passes ``passive``: the in-memory and Parquet derivations
+    read :mod:`src.collection.tx_gate` themselves."""
+    from datetime import UTC, datetime, timedelta
+
+    from src.collection import tx_gate
+    from src.vehicle_state import derive_from_inputs, derive_from_latest_rows
+
+    now = datetime(2026, 9, 24, 16, 53, 40, tzinfo=UTC)
+    inputs = {"obd_freshness_seconds": 60.0, "can_freshness_seconds": 0.1}
+    rows = [
+        {
+            "source": "can",
+            "channel": "0x180",
+            "value": None,
+            "timestamp": (now - timedelta(seconds=0.1)).isoformat(),
+        }
+    ]
+    assert derive_from_inputs(inputs, None, now).state == "engine_off"
+    assert derive_from_latest_rows(rows, replay_id=None, now=now).state == "engine_off"
+    tx_gate.set_passive(True, source="control")
+    assert derive_from_inputs(inputs, None, now).state == "passive"
+    assert derive_from_latest_rows(rows, replay_id=None, now=now).state == "passive"

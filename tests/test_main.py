@@ -1,14 +1,13 @@
 """Tests for the daemon entry point."""
 
 import asyncio
-from datetime import UTC, datetime
 from pathlib import Path
 
-import pyarrow.parquet as pq
 import pytest
 
+from src.collection.collectors import default_collectors as _default_collectors
 from src.config import CanaryConfig
-from src.main import _default_collectors, parse_args, run, run_collection
+from src.main import parse_args, run
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,69 +41,61 @@ async def test_run_exits_on_stop_event():
     )
 
 
-@pytest.mark.asyncio
-async def test_run_collection_writes_collector_records(tmp_path: Path):
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    config = config.model_copy(
-        update={
-            "collection": config.collection.model_copy(
-                update={
-                    "storage_path": tmp_path,
-                    "session_retention_days": 30,
-                }
-            )
-        }
-    )
-    stop = asyncio.Event()
+def test_collection_only_is_retired() -> None:
+    """R03.11, operator decision 2026-09-25: the ``--collection-only`` drain
+    (no decode, no arming, no GPS sink) is gone; the flag is refused rather
+    than silently ignored."""
+    with pytest.raises(SystemExit):
+        parse_args(["--collection-only"])
+    import src.main as main_mod
 
-    async def collector(queue: asyncio.Queue[TelemetryRecord], stop_event: asyncio.Event) -> None:
-        await queue.put(
-            TelemetryRecord(
-                timestamp=datetime(2026, 5, 11, tzinfo=UTC),
-                source="obd",
-                channel="RPM",
-                value=700.0,
-                unit="rpm",
-            )
+    assert not hasattr(main_mod, "run_collection")
+    assert not hasattr(main_mod, "_drain_queue")
+
+
+def test_main_restores_passive_before_the_vin_probe(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D03.30: the startup VIN probe transmits Mode 09, so a passive arm the
+    previous process persisted must already hold when it runs — and ``run``
+    gets the same file to keep writing."""
+    import json
+    import time
+
+    import src.main as main_mod
+    from src.collection import tx_gate
+    from tests.configs import isolated_config
+
+    config = isolated_config(tmp_path, profiles={"enabled": True})
+    state = tx_gate.passive_state_path(config)
+    state.parent.mkdir(parents=True, exist_ok=True)
+    state.write_text(
+        json.dumps(
+            {
+                "version": tx_gate.PASSIVE_STATE_VERSION,
+                "enabled": True,
+                "armed_at": time.time() - 60,
+                "ttl_seconds": 1800,
+                "source": "control",
+            }
         )
-        stop_event.set()
-
-    await run_collection(config, stop, collectors=[collector])
-
-    files = sorted(tmp_path.glob("*/telemetry-*.parquet"))
-    assert len(files) == 1
-    rows = pq.read_table(files[0]).to_pylist()
-    assert rows[0]["channel"] == "RPM"
-    assert rows[0]["value_number"] == 700.0
-
-
-@pytest.mark.asyncio
-async def test_run_collection_smoke_writes_obd_and_can_records(tmp_path: Path):
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    config = config.model_copy(
-        update={
-            "collection": config.collection.model_copy(
-                update={
-                    "storage_path": tmp_path,
-                    "session_retention_days": 30,
-                }
-            )
-        }
     )
-    stop = asyncio.Event()
+    seen: dict[str, object] = {}
 
-    async def collector(queue: asyncio.Queue[TelemetryRecord], stop_event: asyncio.Event) -> None:
-        await queue.put(TelemetryRecord.obd(1_778_000_000.0, "RPM", 700.0, "rpm"))
-        await queue.put(TelemetryRecord.can(1_778_000_000.1, 0x123, b"\x01\x02"))
-        stop_event.set()
+    def _probe(_config: CanaryConfig, override_slug: str | None = None) -> object:
+        seen["passive_at_probe"] = tx_gate.is_passive()
+        raise SystemExit(0)  # stop before scope_config/run; the probe is the point
 
-    await run_collection(config, stop, collectors=[collector])
+    monkeypatch.setattr(main_mod, "configure_logging", lambda _level: None)
+    monkeypatch.setattr(main_mod.CanaryConfig, "from_yaml", classmethod(lambda cls, _p: config))
+    monkeypatch.setattr(main_mod, "resolve_active_profile", _probe)
 
-    files = sorted(tmp_path.glob("*/telemetry-*.parquet"))
-    assert len(files) == 1
-    rows = pq.read_table(files[0]).to_pylist()
-    assert {row["source"] for row in rows} == {"obd", "can"}
-    assert {row["channel"] for row in rows} == {"RPM", "0x123"}
+    with pytest.raises(SystemExit):
+        main_mod.main(["--config", str(tmp_path / "canary.yaml")])
+
+    assert seen["passive_at_probe"] is True
+    assert tx_gate.snapshot()["source"] == "restored:control"
+    assert tx_gate.state_path() == state
 
 
 @pytest.mark.asyncio

@@ -168,13 +168,24 @@ export type TuningReadiness = Partial<Record<ReadinessKey, ReadinessEntry>>;
 /** `/status.vehicle_state` — mirrors
  *  `src.dashboard.status.VehicleState.to_dict()`. */
 export interface VehicleState {
-  state: "engine_running" | "ignition_only" | "engine_off" | "no_data" | "replay" | "unknown";
+  state:
+    | "engine_running"
+    | "ignition_only"
+    | "engine_off"
+    | "no_data"
+    | "replay"
+    | "passive"
+    | "unknown";
   rpm: number | null;
   coolant_temp: number | null;
   run_time: number | null;
   obd_freshness_seconds: number | null;
   can_freshness_seconds: number | null;
   replay_id: string | null;
+  /** CANary is not transmitting (passive armed or another tester holds the
+   *  ECM), so a stale OBD means "not asking" (D03.30). Absent from daemons
+   *  older than that change. */
+  passive?: boolean;
   /** Wall clock the freshness numbers were measured against. The derivation
    *  reads Parquet, so the daemon shares one reading across `/status` views
    *  for a couple of seconds — the stamp travels with the state so a reused

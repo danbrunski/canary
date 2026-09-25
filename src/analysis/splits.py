@@ -47,7 +47,20 @@ def parent_session(piece: str) -> str:
 
 @dataclass(frozen=True)
 class Drive:
-    """One independent physical drive: every piece recorded during it."""
+    """One independent physical drive: every piece recorded during it.
+
+    Deliberately not :class:`src.analysis.drives.PhysicalDrive` (R05.13
+    looked, and kept both). The two answer different questions about the same
+    drive. ``PhysicalDrive`` is built from recordings on disk: activity
+    ``SessionSpan`` records and the recording names asked about. A split is built
+    from an in-memory frame: its unit is the *piece* (``<session>#<segment>``
+    rows, which ``PhysicalDrive`` has no field for), and every fold and
+    evidence record (:class:`~src.decode.behavior_models.DriveRecord`) names
+    pieces. Which pieces share a drive is still decided by ``drives``: the
+    ``drive_rows`` labels :func:`group_drives` groups on come from its
+    ``row_drive_labels`` and the range fallback joins with its ``join_spans``,
+    so there is one drive *definition* and two views of it.
+    """
 
     drive_id: str
     pieces: tuple[str, ...]

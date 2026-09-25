@@ -546,3 +546,130 @@ def test_delete_expired_replays_respects_protect(tmp_path: Path) -> None:
 def test_delete_expired_replays_rejects_negative_days(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         delete_expired_replays(tmp_path, replay_retention_days=-1)
+
+
+# --------------------------------------------------------------------------- #
+# D02.9 — live producers are withheld at replay boundaries
+# --------------------------------------------------------------------------- #
+
+
+class _Journal:
+    """Records the order of boundary steps across the ingress, the pipeline
+    barrier and the writer."""
+
+    def __init__(self) -> None:
+        self.steps: list[str] = []
+
+
+def _journalled_controller(
+    tmp_path: Path, journal: _Journal
+) -> tuple[ReplayController, Path, object]:
+    from src.daemon.ingress import LiveIngress
+
+    storage_root = tmp_path / "sessions"
+    storage_root.mkdir()
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+    ingress = LiveIngress(queue)
+    writer = ParquetTelemetryWriter(storage_root)
+    original_close, original_open = ingress.close, ingress.open
+
+    def _close(reason: str) -> None:
+        journal.steps.append("ingress.close")
+        original_close(reason)
+
+    def _open() -> dict[str, int]:
+        journal.steps.append("ingress.open")
+        return original_open()
+
+    ingress.close = _close  # type: ignore[method-assign]
+    ingress.open = _open  # type: ignore[method-assign]
+    enter, exit_ = writer.enter_replay_mode, writer.exit_replay_mode
+
+    def _enter(replay_id: str) -> Path | None:
+        journal.steps.append("writer.enter_replay_mode")
+        return enter(replay_id)
+
+    def _exit(**kwargs: object) -> Path | None:
+        journal.steps.append("writer.exit_replay_mode")
+        return exit_(**kwargs)  # type: ignore[arg-type]
+
+    writer.enter_replay_mode = _enter  # type: ignore[method-assign]
+    writer.exit_replay_mode = _exit  # type: ignore[method-assign]
+
+    async def _settle(timeout: float) -> bool:
+        journal.steps.append("settle")
+        return True
+
+    controller = ReplayController(
+        queue=queue,
+        writer=writer,
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+        live_ingress=ingress,
+        settle_pipeline=_settle,
+    )
+    return controller, storage_root, ingress
+
+
+async def test_live_input_is_withheld_before_the_writer_switches_and_restored_after(
+    tmp_path: Path,
+) -> None:
+    """Entry: close the ingress, let queued live rows land, then switch.
+    Exit: let the replay's tail land, switch back, then reopen."""
+    journal = _Journal()
+    controller, storage_root, ingress = _journalled_controller(tmp_path, journal)
+    (storage_root / "2026-05-18T120000").mkdir()
+
+    status = await controller.start("2026-05-18T120000", loop=False)
+    assert journal.steps == ["ingress.close", "settle", "writer.enter_replay_mode"]
+    assert status.entry_settled is True
+    assert status.live_rows_withheld == {}
+
+    # A live GPS row during the replay is withheld and counted, not queued.
+    ingress.put_nowait(  # type: ignore[attr-defined]
+        TelemetryRecord.from_epoch(
+            datetime.now(UTC).timestamp(), source="gps", channel="LAT", value=1.0
+        )
+    )
+    assert controller._queue.qsize() == 0
+    assert controller.status().live_rows_withheld == {"gps": 1}
+
+    journal.steps.clear()
+    stopped = await controller.stop()
+    assert journal.steps == ["settle", "writer.exit_replay_mode", "ingress.open"]
+    assert stopped.running is False
+    assert stopped.live_rows_withheld == {"gps": 1}
+    assert stopped.exit_settled is True
+    assert stopped.to_dict()["live_rows_withheld"] == {"gps": 1}
+
+    # Restored: live rows reach the queue again.
+    ingress.put_nowait(_record())  # type: ignore[attr-defined]
+    assert controller._queue.qsize() == 1
+
+
+async def test_a_failed_switch_reopens_live_input(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    journal = _Journal()
+    controller, storage_root, ingress = _journalled_controller(tmp_path, journal)
+    (storage_root / "2026-05-18T120000").mkdir()
+
+    def _boom(_replay_id: str) -> Path | None:
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(controller._writer._writer, "enter_replay_mode", _boom)
+    with pytest.raises(OSError, match="disk gone"):
+        await controller.start("2026-05-18T120000")
+    assert ingress.closed_reason is None  # type: ignore[attr-defined]
+
+
+def test_the_ingress_is_write_only(tmp_path: Path) -> None:
+    from src.daemon.ingress import LiveIngress
+
+    queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=7)
+    ingress = LiveIngress(queue)
+    assert ingress.maxsize == 7
+    ingress.put_nowait(_record())
+    assert ingress.qsize() == queue.qsize() == 1
+    with pytest.raises(TypeError, match="write-only"):
+        ingress.get_nowait()

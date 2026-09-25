@@ -248,6 +248,7 @@ def test_iter_sessions_orders_by_time_and_filters_kinds(tmp_path: Path) -> None:
         "_replay-2026-09-02T100000",
     ]
     assert [p.name for p in iter_sessions(tmp_path, kinds=RECORDED_SESSION_KINDS)] == [
+        "_tuning-2026-08-01T100000",
         "2026-08-15T100000",
         "_capture-fuel-map-2026-09-01T100000",
     ]
@@ -274,16 +275,43 @@ def test_list_sessions_with_captures_and_limit_returns_newest_by_time(tmp_path: 
     ]
 
 
-def test_tuning_sessions_are_not_http_resolvable_pending_the_operator_decision() -> None:
-    """R01.1 leaves today's behaviour: ``_tuning-*`` is not in
-    ``RECORDED_SESSION_KINDS``, so ``resolve_session`` refuses it. When the
-    operator decides, this test and that one constant change together."""
-    from src.control.sessions import is_session_dir_name
+def test_tuning_sessions_are_http_resolvable(tmp_path: Path) -> None:
+    """R01.1, operator decision 2026-09-25: ``_tuning-*`` is this vehicle's
+    own recording, so HTTP reads resolve it and sidecars may be computed over
+    it. Training still skips it (the ``_`` prefix); replay output is still
+    not a session."""
+    from src.control.sessions import (
+        is_session_dir_name,
+        latest_session,
+        list_sessions,
+        recorded_sessions,
+        resolve_session,
+    )
+    from src.preprocessing.loader import discover_sessions
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
 
-    assert SessionKind.TUNING not in RECORDED_SESSION_KINDS
-    assert not is_session_dir_name("_tuning-2026-08-05T142720")
+    assert SessionKind.TUNING in RECORDED_SESSION_KINDS
+    assert is_session_dir_name("_tuning-2026-08-05T142720")
     assert is_session_dir_name("_capture-fuel-map-2026-08-05T142720")
     assert not is_session_dir_name("_replay-2026-08-05T142720")
+
+    names = ("2026-08-05T100000", "_tuning-2026-08-05T142720", "_replay-2026-08-06T100000")
+    for name in names:
+        write_records_to_parquet(
+            [TelemetryRecord.obd(1_778_000_000.0, "RPM", 800.0, "rpm")], tmp_path / name
+        )
+    tuning = tmp_path / "_tuning-2026-08-05T142720"
+    assert resolve_session(tmp_path, tuning.name) == tuning
+    assert [p.name for p in recorded_sessions([tmp_path])] == [
+        "2026-08-05T100000",
+        "_tuning-2026-08-05T142720",
+    ]
+    assert [s.session_id for s in list_sessions(tmp_path, captures=True)] == [tuning.name]
+    # "Which is live?" already answered over every kind; the newest is replay.
+    assert latest_session(tmp_path) == tmp_path / "_replay-2026-08-06T100000"
+    # "Which may train?" still excludes it.
+    assert [p.name for p in discover_sessions(tmp_path)] == ["2026-08-05T100000"]
 
 
 def test_dir_size_counts_nested_files(tmp_path: Path) -> None:

@@ -1,5 +1,5 @@
 """Daemon and inference health monitoring (Task 6.27; moved from
-``src.models.health`` by R04.8).
+``src.models.health`` by R04.8; the old path no longer imports).
 
 A detector that's silently degrading (feature distribution drifted off the
 training set, reconstruction error creeping up, the Pi pegged, the schema

@@ -29,8 +29,25 @@ DBC_DIR = DATA_DIR / "dbc"
 #: Scanned directory of YAML test-session profiles for the Test panel.
 TEST_PROFILES_DIR = DATA_DIR / "test_profiles"
 
+# Runtime state (gitignored, written by the daemon and tools). Anchored to the
+# checkout for the same reason as the catalogs: a tool started from another
+# directory must read and write the daemon's files, not a stray ``data/`` of
+# its own. The systemd units ``cd`` to the clone, so on the Pi these are the
+# paths the old working-directory-relative defaults already resolved to; a
+# ``canary.yaml`` value (``/data/canary/...``) still wins.
+
+#: Control-plane state: jobs, ledgers, audit logs, trip odometer, catalog.
+CONTROL_DIR = DATA_DIR / "control"
+#: The anomaly event log directory.
+ANOMALIES_DIR = DATA_DIR / "anomalies"
+#: Analysis outputs (reports, LLM-assist cards).
+ANALYSES_DIR = DATA_DIR / "analyses"
+
 __all__ = [
+    "ANALYSES_DIR",
+    "ANOMALIES_DIR",
     "BINDINGS_YAML",
+    "CONTROL_DIR",
     "DATA_DIR",
     "DBC_DIR",
     "DIDS_YAML",

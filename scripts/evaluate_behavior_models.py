@@ -506,9 +506,10 @@ def evaluate(
     document: BehaviorValidationDocument | None,
     policy: EventPolicy,
     taxonomy_problems: list[str],
+    profile: str | None,
     revisions: TuneRevisionRegistry | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    catalog = {recipe.name: recipe for recipe in default_recipes()}
+    catalog = {recipe.name: recipe for recipe in default_recipes(profile)}
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
     drives = group_drives(piece_time_ranges(frame), join_gap_seconds=join_gap)
     drive_of_piece = {piece: d.drive_id for d in drives for piece in d.pieces}
@@ -562,9 +563,11 @@ def evaluate(
 # ---------------------------------------------------------------------------
 
 
-def export_columns(models: BehaviorModels, frame: pd.DataFrame) -> list[str]:
+def export_columns(
+    models: BehaviorModels, frame: pd.DataFrame, *, profile: str | None
+) -> list[str]:
     """Every column the evaluator reads for these models (+ catalog contracts)."""
-    catalog = {recipe.name: recipe for recipe in default_recipes()}
+    catalog = {recipe.name: recipe for recipe in default_recipes(profile)}
     bases: set[str] = set()
     specs: list[Any] = []
     for model in models.models:
@@ -588,9 +591,10 @@ def export_rows(
     frame: pd.DataFrame,
     *,
     inputs: dict[str, Any],
+    profile: str | None,
 ) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
-    columns = export_columns(models, frame)
+    columns = export_columns(models, frame, profile=profile)
     entries = []
     for parent in sorted({parent_session(p) for p in frame[SESSION_COLUMN].astype(str)}):
         rows = frame[_pieces_of(frame, {parent})][columns]
@@ -684,6 +688,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         document=document,
         policy=policy,
         taxonomy_problems=taxonomy_problems,
+        profile=args.profile,
         revisions=revisions,
     )
     report = {
@@ -705,7 +710,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, indent=2, sort_keys=False, default=str) + "\n")
     if args.export_rows is not None:
-        export_rows(args.export_rows, models, frame, inputs=inputs)
+        export_rows(args.export_rows, models, frame, inputs=inputs, profile=args.profile)
     _print_summary(report)
     return 0
 

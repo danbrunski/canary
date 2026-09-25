@@ -37,7 +37,7 @@ from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 
-CATALOG = {recipe.name: recipe for recipe in default_recipes()}
+CATALOG = {recipe.name: recipe for recipe in default_recipes("nissan-xterra-2008")}
 TOTAL_TRIM = ("total_trim_vs_rpm_load_b1", "total_trim_vs_rpm_load_b2")
 
 

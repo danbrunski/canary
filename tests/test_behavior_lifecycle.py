@@ -210,7 +210,9 @@ def test_demotion_survives_a_refit_that_passes_validation(tmp_path: Path) -> Non
 def test_quarantine_follows_the_artifact_through_carry_over(tmp_path: Path) -> None:
     shipped = load_behavior_models(SHIPPED)
     # A partial refit that refits nothing carries every prior over.
-    carried, _ = refit_all([], pd.DataFrame(), existing=shipped, catalog=default_recipes())
+    carried, _ = refit_all(
+        [], pd.DataFrame(), existing=shipped, catalog=default_recipes("nissan-xterra-2008")
+    )
     assert "cat_warmup" in {model.name for model in carried.models}
     path = _write_profile(tmp_path, carried, SHIPPED_POLICY.read_text())
     reloaded = load_behavior_models(path)
@@ -271,7 +273,9 @@ def test_demoted_model_contributes_no_fusion_vote(
             )
         )
         detector = BehaviorDetector(components, fusion, source)  # type: ignore[arg-type]
-        ctx = SimpleNamespace(now=datetime(2026, 9, 21, tzinfo=UTC), timestamp_str="t")
+        ctx = SimpleNamespace(
+            now=datetime(2026, 9, 21, tzinfo=UTC), timestamp_str="t", capture_profile_allows=True
+        )
         fused = detector.apply(residuals, ctx)  # type: ignore[arg-type]
         return emitted, fused, state.snapshot(include_series=False)["models"]["steady_timing"]
 

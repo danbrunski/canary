@@ -194,7 +194,8 @@ export interface BehaviorModelsResponse {
 export type BehaviorSeverity = "ok" | "warning" | "critical";
 
 /** One rolling-trail point. Any field is null when the model didn't speak
- *  for the operating point (outside domain, empty cell, mode mismatch). */
+ *  for the operating point (outside domain, empty cell, mode mismatch).
+ *  B03.9: `severity` is null on an unscored point — never read it as ok. */
 export interface BehaviorLivePoint {
   t: string | null;
   x: number | null;
@@ -202,7 +203,9 @@ export interface BehaviorLivePoint {
   actual: number | null;
   expected: number | null;
   deviation: number | null;
-  severity: BehaviorSeverity;
+  severity: BehaviorSeverity | null;
+  /** B03.9 — which kind of not-scored this point is (null when scored). */
+  not_scored?: string | null;
 }
 
 export interface BehaviorLiveModel {
@@ -212,7 +215,12 @@ export interface BehaviorLiveModel {
   actual: number | null;
   expected: number | null;
   deviation: number | null;
-  severity: BehaviorSeverity;
+  /** B03.9 — null whenever the tick was not scored; `not_scored` says why. */
+  severity: BehaviorSeverity | null;
+  /** B03.9 — the kind of not-scored (`off_map`, `actual_stale`,
+   *  `operating_mode_excluded`, `operating_mode_mismatch`, ...), null when
+   *  scored. Older daemons omit it. */
+  not_scored?: string | null;
   /** model.operating_mode is unset OR equals the current operating mode. */
   mode_match: boolean;
   series: BehaviorLivePoint[];

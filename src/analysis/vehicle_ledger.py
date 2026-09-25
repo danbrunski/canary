@@ -30,6 +30,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.jsonl_store import JsonlStore, latest_by_key
+from src.paths import CONTROL_DIR
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ __all__ = [
     "VehicleLedgerStore",
 ]
 
-DEFAULT_VEHICLE_LEDGER_PATH = Path("data/control/vehicle_ledger.jsonl")
+DEFAULT_VEHICLE_LEDGER_PATH = CONTROL_DIR / "vehicle_ledger.jsonl"
 
 VehicleEventKind = Literal["maintenance", "mod", "repair", "observation", "dtc"]
 #: The valid kinds, as a set, for request validation at the API edge.

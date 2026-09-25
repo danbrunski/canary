@@ -4,7 +4,7 @@ import { Panel } from "../components/Panel";
 import { Curve } from "../components/Curve";
 import { Heatmap } from "../components/Heatmap";
 import { Sparkline } from "../components/Sparkline";
-import { SEVERITY_TEXT, SEVERITY_TOKEN, binIndex, fmt } from "../lib/behaviorOverlay";
+import { binIndex, fmt, severityText, severityToken } from "../lib/behaviorOverlay";
 import { cn, placeholderClass, panelCountClass } from "../styles";
 import type {
   BehaviorLifecycle,
@@ -135,9 +135,16 @@ function ModelCard({
   // here, which is exactly why anomalies get noisy at the envelope edge.
   // B01.4: a daemon that names the reason distinguishes off-map from an
   // ineligible tick (unmet serving condition, missing/stale actual).
-  const noPrediction = Boolean(active && active.expected === null);
-  const offMap = noPrediction && (active?.reason == null || active.reason === "off_map");
-  const ineligibleReason = noPrediction && !offMap ? (active?.reason ?? null) : null;
+  // B03.9: a null severity is a tick that was not scored (a stale or missing
+  // actual has an expected but no deviation) — never an ok chip.
+  const noPrediction = Boolean(active && (active.expected === null || active.severity == null));
+  const offMap =
+    noPrediction &&
+    (active?.reason === "off_map" ||
+      active?.not_scored === "off_map" ||
+      (active?.reason == null && active?.not_scored == null && active?.expected === null));
+  const ineligibleReason =
+    noPrediction && !offMap ? (active?.reason ?? active?.not_scored ?? "not scored") : null;
 
   return (
     <article
@@ -339,7 +346,7 @@ function LiveReadout({
         </span>
         <span className="text-fg-dim">
           Δ{" "}
-          <span className={SEVERITY_TEXT[live.severity]}>
+          <span className={severityText(live.severity)}>
             {live.deviation !== null && live.deviation > 0 ? "+" : ""}
             {fmt(live.deviation)}
             {u}
@@ -368,7 +375,7 @@ function LiveReadout({
             values={devSeries}
             width={150}
             height={22}
-            stroke={SEVERITY_TOKEN[live.severity]}
+            stroke={severityToken(live.severity)}
           />
         </div>
       )}

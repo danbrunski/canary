@@ -17,7 +17,11 @@ This module is the arithmetic, once:
   method-only mixins over the conventional field names, so a model gains the
   behaviour without the mixin reordering or re-declaring its fields;
 - :class:`Evidence` is the one evidence record, with the refusal that a
-  ``constant`` never travels without its ``conditions`` and unit.
+  ``constant`` never travels without its ``conditions`` and unit;
+- :class:`SentinelState` and :func:`check_sentinel` are the "a sentinel is a
+  state, not a number" rule (AGENTS.md): a declared raw word that means *no
+  measurement* decodes to a ``<NAME>_SENTINEL`` state channel carrying its
+  stated meaning, never to a value.
 """
 
 from __future__ import annotations
@@ -83,6 +87,47 @@ def in_range(value: float, lower: float | None, upper: float | None) -> bool | N
     return True
 
 
+#: Suffix of the state channel a sentinel decodes to (``mem:<NAME>_SENTINEL``,
+#: ``decoded:<NAME>_SENTINEL``).
+SENTINEL_SUFFIX = "_SENTINEL"
+
+
+def sentinel_channel(name: str) -> str:
+    """The state channel ``name``'s sentinel decodes to."""
+    return f"{name}{SENTINEL_SUFFIX}"
+
+
+def check_sentinel(
+    name: str,
+    sentinel_raw: int | None,
+    sentinel_meaning: str | None,
+    *,
+    byte_length: int,
+    signed: bool = False,
+) -> None:
+    """Refuse a half-declared or unrepresentable sentinel.
+
+    Raw and meaning travel together: a sentinel without a stated meaning
+    decodes as a measurement, and a meaning without a raw word matches
+    nothing. The raw word must fit the slice, or it can never match and the
+    declaration is silently dead.
+    """
+    if (sentinel_raw is None) != (sentinel_meaning is None or not sentinel_meaning.strip()):
+        raise ValueError(
+            f"{name}: sentinel_raw and sentinel_meaning must be set together "
+            "-- a sentinel without a stated meaning decodes as a measurement"
+        )
+    if sentinel_raw is None:
+        return
+    bits = 8 * byte_length
+    low, high = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed else (0, (1 << bits) - 1)
+    if not low <= sentinel_raw <= high:
+        raise ValueError(
+            f"{name}: sentinel_raw {sentinel_raw} cannot occur in a {byte_length}-byte "
+            f"{'signed' if signed else 'unsigned'} slice ({low}..{high})"
+        )
+
+
 class ByteSlice:
     """Mixin: decode the raw integer from ``byte_start``/``byte_length``/``byte_order``."""
 
@@ -109,6 +154,18 @@ class LinearScale:
 
     def scaled(self, raw: float) -> float | None:
         return linear_value(raw, self.scale, self.offset)
+
+
+class SentinelState:
+    """Mixin: the ``sentinel_raw``/``sentinel_meaning`` no-measurement state."""
+
+    if TYPE_CHECKING:
+        sentinel_raw: int | None
+        sentinel_meaning: str | None
+
+    def is_sentinel(self, raw: float) -> bool:
+        """Whether ``raw`` is the declared no-measurement word."""
+        return self.sentinel_raw is not None and raw == self.sentinel_raw
 
 
 class PlausibleRange:
@@ -174,8 +231,12 @@ __all__ = [
     "Evidence",
     "LinearScale",
     "PlausibleRange",
+    "SENTINEL_SUFFIX",
+    "SentinelState",
+    "check_sentinel",
     "in_range",
     "linear_factors",
     "linear_value",
+    "sentinel_channel",
     "slice_raw",
 ]

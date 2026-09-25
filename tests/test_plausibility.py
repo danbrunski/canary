@@ -800,3 +800,101 @@ def test_offline_mode_labels_read_exactly_the_live_segmenter_columns() -> None:
     assert {f"decoded:{name}" for name in segmenter_decoded()} == {
         c for c in expected if c.startswith("decoded:")
     }
+
+
+# ---------------------------------------------------------------------------
+# A05.9 — confirmed detections enter the anomaly event stream and the push
+# ---------------------------------------------------------------------------
+
+
+class _RecordingNotifier:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def notify(self, title: str, message: str, *, priority: str = "default") -> None:
+        self.calls.append((title, message))
+
+
+def test_a_confirmed_detection_is_an_anomaly_event_and_a_push(tmp_path: Path) -> None:
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
+
+    notifier = _RecordingNotifier()
+    emitter = AnomalyEventEmitter(
+        AnomalyEventLogger(tmp_path), min_seconds_between_events=0, notifier=notifier
+    )
+    written: list[EvidenceRecord] = []
+    evaluator = _evaluator(_profile(), sink=written.append, alert_sink=emitter.emit_plausibility)
+    evaluator.observe("obd:SPEED", 300.0, 100.0, "city")  # pending: evidence only
+    assert read_events_dir(tmp_path) == [] and notifier.calls == []
+    evaluator.observe("obd:SPEED", 300.0, 102.0, "city")  # confirmed
+    assert [r.state for r in written] == ["pending", "confirmed"]
+
+    events = read_events_dir(tmp_path)
+    assert len(events) == 1
+    event = events[0]
+    assert event.source == "plausibility"
+    assert event.model_version == "plausibility/range"
+    assert event.affected_channels == ("obd:SPEED",)
+    assert event.operating_mode == "city" and event.session == "s1"
+    assert event.timestamp == written[1].detected_at
+    assert event.detail["cause"] == written[1].text
+    assert EvidenceRecord.from_dict(event.detail["plausibility"]) == written[1]
+    assert emitter.counters.emitted == 1
+    assert notifier.calls == [("CANary: plausibility anomaly", f"{written[1].text} [session s1]")]
+
+
+def test_a_pending_record_can_never_become_an_event(tmp_path: Path) -> None:
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
+    from src.alerts.events import AnomalyEvent
+
+    written: list[EvidenceRecord] = []
+    _evaluator(_profile(), sink=written.append).observe("obd:SPEED", 300.0, 100.0, "city")
+    pending = written[0]
+    assert pending.state == "pending"
+    with pytest.raises(ValueError, match="only a confirmed detection"):
+        AnomalyEvent.from_plausibility(pending)
+    emitter = AnomalyEventEmitter(AnomalyEventLogger(tmp_path), min_seconds_between_events=0)
+    assert emitter.emit_plausibility(pending) is None
+    assert emitter.counters.suppressed_not_anomaly == 1 and read_events_dir(tmp_path) == []
+
+
+def test_plausibility_events_dedupe_per_channel_and_check_and_never_push_in_replay(
+    tmp_path: Path,
+) -> None:
+    from src.alerts.emitter import AnomalyEventEmitter
+    from src.alerts.event_logger import AnomalyEventLogger
+
+    notifier = _RecordingNotifier()
+    emitter = AnomalyEventEmitter(
+        AnomalyEventLogger(tmp_path), min_seconds_between_events=60.0, notifier=notifier
+    )
+    confirmed: list[EvidenceRecord] = []
+    evaluator = _evaluator(_profile(), alert_sink=confirmed.append)
+    for channel in ("obd:SPEED", "obd:RPM"):
+        evaluator.observe(channel, 1e6, 100.0, "city")
+        evaluator.observe(channel, 1e6, 102.0, "city")
+    assert [r.channel for r in confirmed] == ["obd:SPEED", "obd:RPM"]
+    # Two channels confirming at the same instant are two events, not one.
+    assert all(emitter.emit_plausibility(r) is not None for r in confirmed)
+    assert emitter.counters.emitted == 2 and len(notifier.calls) == 2
+    # The same (channel, check) inside the refractory window is deduped.
+    assert emitter.emit_plausibility(confirmed[0]) is None
+    assert emitter.counters.suppressed_dedupe == 1
+
+    emitter.enter_replay_mode()
+    assert emitter.emit_plausibility(confirmed[0]) is not None  # fresh replay dedupe
+    assert len(notifier.calls) == 2  # a replayed detection never pushes
+
+
+def test_an_alert_sink_failure_never_costs_the_evidence() -> None:
+    def broken(record: EvidenceRecord) -> None:
+        raise RuntimeError("emitter down")
+
+    written: list[EvidenceRecord] = []
+    evaluator = _evaluator(_profile(), sink=written.append, alert_sink=broken)
+    evaluator.observe("obd:SPEED", 300.0, 100.0, "city")
+    evaluator.observe("obd:SPEED", 300.0, 102.0, "city")
+    assert [r.state for r in written] == ["pending", "confirmed"]
+    assert evaluator.counters.confirmed == 1

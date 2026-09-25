@@ -142,24 +142,33 @@ def physical_series(values: pd.Series, column: str, bindings: Bindings | None = 
     """``values`` (column ``column``) as a float series in engineering units.
 
     Pass-through (numeric-coerced) for any non-``decoded:`` column; scaled for
-    ``decoded:``. Never mutates ``values``.
+    ``decoded:``. A binding's declared sentinel word reads as NaN, never as a
+    value (the decoders already keep it out of ``decoded:`` columns; this
+    covers counts from anywhere else). Never mutates ``values``.
     """
     numeric = pd.to_numeric(values, errors="coerce").astype(float)
     if not is_decoded_column(column):
         return numeric
     scale, offset = decoded_factors(column, bindings)
+    sentinel = _signal(column, bindings).sentinel_raw
+    if sentinel is not None:
+        numeric = numeric.mask(numeric == sentinel)
     return numeric * scale + offset
 
 
 def physical_value(
     value: float | None, column: str, bindings: Bindings | None = None
 ) -> float | None:
-    """Scalar counterpart of :func:`physical_series` (``None`` passes through)."""
+    """Scalar counterpart of :func:`physical_series` (``None`` passes through;
+    a declared sentinel word reads as ``None``)."""
     if value is None:
         return None
     if not is_decoded_column(column):
         return float(value)
-    scaled = apply_scaling(_signal(column, bindings), float(value))
+    signal = _signal(column, bindings)
+    if signal.is_sentinel(float(value)):
+        return None  # a declared no-measurement word, not a reading
+    scaled = apply_scaling(signal, float(value))
     if scaled is None:
         raise UnscaledDecodedChannelError(
             f"{column} has no pinned scale in the bindings catalog, so its raw "

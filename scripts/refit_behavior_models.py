@@ -389,11 +389,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Scope sessions/output to a vehicle profile so a refit reads and writes the
     # right vehicle's tree. Offline tool: no VIN probe — --profile or default.
-    scoped = (
-        scope_config(config, resolve_profile_for_tooling(config, args.profile))
-        if config.profiles.enabled
-        else config
-    )
+    profile = resolve_profile_for_tooling(config, args.profile)
+    scoped = scope_config(config, profile) if config.profiles.enabled else config
     sessions_root = args.sessions_root or scoped.collection.storage_path
     out: Path = args.out or scoped.daemon.behavior_models
 
@@ -405,7 +402,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: invalid {validation_path}: {exc}", file=sys.stderr)
         return 2
-    catalog = attach_criteria(default_recipes(), validation_document)
+    catalog = attach_criteria(default_recipes(profile.slug), validation_document)
     recipes = _select_recipes(catalog, args.recipe)
     explicit_sessions = bool(args.sessions)
     sessions = resolve_sessions(args, sessions_root)

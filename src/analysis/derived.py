@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from src.analysis import vehicle_signals
 from src.analysis.committees import COMMITTEES
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
@@ -848,13 +849,9 @@ def _voltage_per_pct(_frame: pd.DataFrame, volts: pd.Series, pct: pd.Series) -> 
     return volts / pct.where(pct > 1.0)
 
 
-#: Every physical-residual signal :func:`compute_anomaly_signals` appends, in
-#: output order (IF/LSTM manifests consume these names and their ``__gap``
-#: columns, so order and formulae are pinned bit-identical — R05.4).
-#:
-#: The ``did:ECM_*`` inputs are Nissan DID names in shared code; moving them
-#: to the vehicle profile is the open part of R05.4 (see the roadmap item).
-ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
+#: The physical-residual signals whose inputs every vehicle names the same way
+#: (standard Mode 01 PIDs, decoded broadcast channels, other derived channels).
+SHARED_ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
     DerivedSignal(
         "derived:AIR_MASS_PER_CYCLE",
         (("obd:MAF",), ("obd:RPM", "decoded:ECM_RPM")),
@@ -923,19 +920,33 @@ ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
         (("obd:O2_B2S1",), ("obd:O2_B2S2",)),
         _both(_cat_efficiency),
     ),
-    DerivedSignal(
-        "derived:AFR_BANK_BALANCE",
-        (("did:ECM_AF_SENSOR_V_B1",), ("did:ECM_AF_SENSOR_V_B2",)),
-        _both(_difference),
-    ),
+)
+
+#: Shared formulas over vehicle-specific inputs (R05.4): each vehicle names
+#: its channels in :mod:`src.analysis.vehicle_signals`, so no manufacturer
+#: identifier sits in this module. A signal no vehicle declares is absent.
+VEHICLE_INPUT_SIGNALS: tuple[tuple[str, Callable[[SignalInputs], pd.Series | None]], ...] = (
+    ("derived:AFR_BANK_BALANCE", _both(_difference)),
     # Inputs span different units (V vs %) so the ratio is the useful
     # invariant — a TPS that's drifted to a different voltage range produces
     # a different ratio.
-    DerivedSignal(
-        "derived:TPS_VOLTAGE_PER_PCT",
-        (("did:ECM_THROTTLE_POS_SENSOR_1",), ("obd:THROTTLE_POS",)),
-        _both(_voltage_per_pct),
-    ),
+    ("derived:TPS_VOLTAGE_PER_PCT", _both(_voltage_per_pct)),
+)
+
+
+def _vehicle_input_signals() -> tuple[DerivedSignal, ...]:
+    formulas = dict(VEHICLE_INPUT_SIGNALS)
+    declared = vehicle_signals.signal_inputs(tuple(formulas))
+    return tuple(DerivedSignal(name, groups, formulas[name]) for name, groups in declared.items())
+
+
+#: Every physical-residual signal :func:`compute_anomaly_signals` appends, in
+#: output order (IF/LSTM manifests consume these names and their ``__gap``
+#: columns, so order and formulae are pinned bit-identical — R05.4): the
+#: shared signals, then the vehicle-input ones.
+ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
+    *SHARED_ANOMALY_SIGNALS,
+    *_vehicle_input_signals(),
 )
 
 
@@ -962,7 +973,7 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # through the profile's transfer (only when a calibration is loaded).
     **{
         f"derived:AFR_{kind}B{bank}": (
-            (f"obd:O2_WR_LAMBDA_S{bank}", f"did:ECM_AF_SENSOR_V_B{bank}"),
+            (f"obd:O2_WR_LAMBDA_S{bank}", *vehicle_signals.af_sensor_voltage_columns(bank)),
         )
         for bank in (1, 2)
         for kind in ("", "CENSORED_")
@@ -1069,8 +1080,8 @@ def compute_anomaly_signals(
       A restriction changes both measured flow and manifold pressure, so this
       ratio alone does not identify it. Inputs: ``obd:MAF``, ``obd:RPM``, MAP-or-baro,
       ``vehicle.displacement_l``. There is no DID pressure cross-check:
-      this engine has no MAP sensor, and 0x1206/0x1207 (once catalogued as
-      intake pressure) are the injected pulse, ``did:ECM_INJECTOR_PULSE_1/2``.
+      the dev vehicle's engine has no MAP sensor, and its DIDs 0x1206/0x1207
+      (once catalogued as intake pressure) are the injected pulse.
       **Legacy** (B04.5): its reference is MAP-or-baro depending on what the
       session polled, so it names two quantities; it is kept unchanged for
       the detectors that consume it and no behavior recipe targets it.
@@ -1102,8 +1113,8 @@ def compute_anomaly_signals(
     * ``derived:AFR_BANK_BALANCE`` — wideband AFR sensor voltage
       difference between banks. Once the AF-sensor DIDs are polling
       (see ``obd_dids`` in ``canary.example.yaml``), this becomes the
-      sharpest bank-asymmetry detector available. Inputs:
-      ``did:ECM_AF_SENSOR_V_B1``, ``did:ECM_AF_SENSOR_V_B2``.
+      sharpest bank-asymmetry detector available. Inputs: the vehicle's
+      per-bank A/F sensor voltage channels (:mod:`src.analysis.vehicle_signals`).
 
     * ``derived:CAT_EFFICIENCY_B1`` / ``derived:CAT_EFFICIENCY_B2``
       (Task 4.4) — a bounded **0-1 heuristic index**, explicitly NOT a
@@ -1126,8 +1137,8 @@ def compute_anomaly_signals(
     * ``derived:TPS_VOLTAGE_PER_PCT`` — raw TPS voltage divided by the
       ECM-calculated throttle percent. Expected to be linear (constant
       ratio) within the operating range. Drift means the calibration
-      curve is shifting before any DTC. Inputs:
-      ``did:ECM_THROTTLE_POS_SENSOR_1``, ``obd:THROTTLE_POS``.
+      curve is shifting before any DTC. Inputs: the vehicle's raw TPS
+      voltage channel (:mod:`src.analysis.vehicle_signals`), ``obd:THROTTLE_POS``.
 
     The function is pure; caller is responsible for ordering it
     correctly in the feature pipeline (it expects mode segmentation

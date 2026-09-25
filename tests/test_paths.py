@@ -117,3 +117,27 @@ def test_build_feature_frame_cache_key_hashes_the_dids_file_it_loads(tmp_path: P
     assert sorted(entry["dids"]["path"] for entry in sidecars) == sorted(
         [str(paths.DIDS_YAML), str(other.resolve())]
     )
+
+
+def test_runtime_state_defaults_do_not_depend_on_the_working_directory() -> None:
+    """R01.2 remainder: the daemon's runtime-state defaults are repo-rooted, and
+    the module constants that mirror them are the same paths, not copies that
+    only agree when the process starts at the repo root."""
+    from src.analysis.llm_assist.store import DEFAULT_LLM_ASSIST_CARDS_PATH
+    from src.analysis.reference_epoch import DEFAULT_REFERENCE_EPOCH_PATH
+    from src.analysis.vehicle_ledger import DEFAULT_VEHICLE_LEDGER_PATH
+    from src.config import DaemonConfig, LLMAssistConfig
+
+    daemon = DaemonConfig()
+    runtime_state = {
+        name: getattr(daemon, name)
+        for name, field in DaemonConfig.model_fields.items()
+        if isinstance(field.default, Path) and field.default.is_relative_to(paths.DATA_DIR)
+    }
+    assert {"jobs_dir", "anomalies_dir", "trip_state", "calibration_dir"} <= set(runtime_state)
+    for name, value in runtime_state.items():
+        assert value.is_absolute(), name
+    assert daemon.anomalies_dir == paths.ANOMALIES_DIR
+    assert DEFAULT_REFERENCE_EPOCH_PATH == daemon.reference_epoch
+    assert DEFAULT_VEHICLE_LEDGER_PATH == daemon.vehicle_ledger
+    assert DEFAULT_LLM_ASSIST_CARDS_PATH == LLMAssistConfig().cards_path

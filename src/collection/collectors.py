@@ -9,8 +9,8 @@ coroutines for CAN/OBD/GPS) used to live in ``src/main.py``, with
 _default_collectors`` — a daemon → main import inversion (``main.py`` is the
 CLI entry point; it should depend on the daemon package, not the other way
 around). This module is their new home, alongside the collector
-constructors they call; ``main.py`` re-exports ``_default_collectors`` for
-its own ``run_collection`` and existing callers.
+constructors they call. (``main.run_collection``, the ``--collection-only``
+path that also used them, was retired 2026-09-25, R03.11.)
 """
 
 from __future__ import annotations

@@ -11,6 +11,7 @@ import src.profiles as profiles_mod
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig, DaemonConfig
 from src.dashboard.api import create_app
+from src.paths import CONTROL_DIR
 from src.profiles import (
     VehicleInfoProbe,
     VehicleProfile,
@@ -448,13 +449,15 @@ def test_scope_config_nests_every_vehicle_path(tmp_path: Path):
     assert scoped.daemon.training_ledger == Path("data/control/xterra/training_runs.jsonl")
     assert scoped.daemon.behavior_models == Path("data/xterra/behavior_models.yaml")
     # Vehicle ledger (Task 3.2) scopes the same way as feedback_log.
-    assert scoped.daemon.vehicle_ledger == Path("data/control/xterra/vehicle_ledger.jsonl")
+    assert scoped.daemon.vehicle_ledger == CONTROL_DIR / "xterra" / "vehicle_ledger.jsonl"
     # Reference epoch (Task 4.3) scopes the same way.
-    assert scoped.daemon.reference_epoch == Path("data/control/xterra/reference_epoch.json")
+    assert scoped.daemon.reference_epoch == CONTROL_DIR / "xterra" / "reference_epoch.json"
     # Trend-alert idempotency marker (Task 4.6) scopes the same way — a stat
     # name is generic (e.g. "idle_rpm_mean"), so without scoping a session id
     # recorded for one vehicle could suppress a legitimate alert for another.
-    assert scoped.daemon.trend_alert_state == Path("data/control/xterra/trend_alert_state.json")
+    assert scoped.daemon.trend_alert_state == CONTROL_DIR / "xterra" / "trend_alert_state.json"
+    # R05.15: calibration state is per vehicle, not one directory in jobs/.
+    assert scoped.daemon.calibration_dir == CONTROL_DIR / "calibration" / "xterra"
     # Slug is recoverable as the storage path's final component.
     assert scoped.collection.storage_path.name == "xterra"
     # The vehicle block reflects the profile (VIN for reproducible manifests).
@@ -475,11 +478,16 @@ def test_scope_config_covers_every_daemon_path_field(tmp_path: Path):
     profile = VehicleProfile(slug="xterra", vin="VIN42", name="X")
     scoped = scope_config(config, profile)
 
-    path_fields = [name for name, f in DaemonConfig.model_fields.items() if f.annotation is Path]
+    path_fields = [
+        name
+        for name, f in DaemonConfig.model_fields.items()
+        if f.annotation is Path or f.annotation == Path | None
+    ]
     assert path_fields  # sanity: DaemonConfig still has Path fields to check
     for name in path_fields:
         original = getattr(config.daemon, name)
         result = getattr(scoped.daemon, name)
+        assert result is not None, f"DaemonConfig.{name} left unresolved by scope_config"
         assert "xterra" in result.parts, (
             f"DaemonConfig.{name} was not profile-scoped by scope_config "
             f"(original={original!r}, scoped={result!r})"

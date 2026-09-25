@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.config import CanaryConfig
+from src.paths import CONTROL_DIR
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -28,7 +29,8 @@ def test_example_yaml_loads():
     assert config.models.isolation_forest.random_state == 42
     assert config.models.isolation_forest.per_mode_contamination == {}
     assert config.dashboard.port == 8000
-    assert config.daemon.jobs_dir == Path("data/control/jobs")
+    # R01.2: repo-rooted, not working-directory-relative.
+    assert config.daemon.jobs_dir == CONTROL_DIR / "jobs"
     assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"
     # 9.1 (operator-approved decision): GRU-D LSTM is the shipped default.
     assert config.models.sequence_detector == "lstm"

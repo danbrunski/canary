@@ -75,6 +75,7 @@ from src.decode.behavior_models import (
     fingerprint,
     refuse_non_trainable_sources,
 )
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.features import roc_column
 from src.preprocessing.local_range import append_local_ranges, local_range_column
 from src.preprocessing.resampler import SESSION_COLUMN
@@ -90,13 +91,12 @@ log = logging.getLogger(__name__)
 #: RPM column used by the engine-running gate.
 RPM_COLUMN = "obd:RPM"
 
-#: Matches the vehicle_state classifier's engine_running threshold. KOEO rows
-#: read RPM == 0 with wildly off-map outputs (TIMING_ADVANCE ≈ 63° vs ~17° at
-#: idle), and an unfiltered KOEO-heavy corpus poisons both the fitted cells
-#: and the auto-edge quantiles — the May 2026 IAT surface shipped a
-#: 62.9° ± 5.0 "expectation" in its idle cell that would fire critical on
-#: every heat-soaked summer idle.
-ENGINE_RUNNING_MIN_RPM = 400.0
+# ``ENGINE_RUNNING_MIN_RPM`` (imported from ``src.operating``, R01.7) is the
+# vehicle_state classifier's engine_running threshold. KOEO rows read RPM == 0
+# with wildly off-map outputs (TIMING_ADVANCE ≈ 63° vs ~17° at idle), and an
+# unfiltered KOEO-heavy corpus poisons both the fitted cells and the auto-edge
+# quantiles — the May 2026 IAT surface shipped a 62.9° ± 5.0 "expectation" in
+# its idle cell that would fire critical on every heat-soaked summer idle.
 
 # ---------------------------------------------------------------------------
 # 4.6 — warmup-surface confounding
@@ -501,45 +501,14 @@ def _bank_balance(kind: Literal["stft", "ltft"], mode: str) -> Surface1DRecipe:
     )
 
 
-def _cam_tracking_2d(role: Literal["primary", "secondary"], *, output: str) -> Surface2DRecipe:
-    """Measured cam angle against its command and DID rpm, steady state only."""
-    return _surface_2d(
-        name=f"cam_{role}_vs_command_rpm_did",
-        output=output,
-        output_unit="deg",
-        x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
-        y_column="did:ECM_RPM",
-        x_axis_name="commanded_cam",
-        y_axis_name="rpm",
-        x_axis_unit="deg",
-        y_axis_unit="rpm",
-        min_samples=500,
-        max_validation_warning_rate=0.03,
-        max_abs_rate_of_change={
-            "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
-            "did:ECM_RPM": 75.0,
-        },
-        deviation=_sigma(0.5),
-        notes=(
-            f"Neutral {role} measured-cam tracking surface; physical bank "
-            "assignment remains intentionally unspecified. Evaluates only "
-            "while commanded angle and RPM satisfy the persisted steady-state gates."
-        ),
-        diagnostic_capabilities=("cam command/position relationship drift",),
-        diagnostic_limitations=(
-            "does not identify the physical bank and does not evaluate command transitions",
-        ),
-    )
-
-
-def default_recipes() -> list[Recipe]:
-    """The catalog the daemon refits by default.
+def shared_recipes() -> list[Recipe]:
+    """The vehicle-neutral catalog: standard Mode 01 PIDs and derived channels.
 
     Surfaces that only need standard Mode 01 PIDs (Coolant, RPM, MAF,
-    TIMING_ADVANCE, STFT, ENGINE_LOAD) — i.e. fittable today, no Mode 22
-    DIDs required. The fuel / AFR / VE / ignition surfaces from
-    ``docs/behavior-model-inference.md`` require the injector-PW DID
-    (4.E.4) before they're worth adding here.
+    TIMING_ADVANCE, STFT, ENGINE_LOAD) and the derived channels built from
+    them. Nothing here names a manufacturer DID: surfaces over a vehicle's own
+    Mode 22 identifiers live in that profile's module under
+    :mod:`src.analysis.recipes` (R05.7, operator decision 2026-09-25).
 
     Naming convention: ``<output>_vs_<axes>``. The dashboard's performance
     panel (5.12) will key off these names — keep them stable.
@@ -813,100 +782,26 @@ def default_recipes() -> list[Recipe]:
                 "secondary air failure. Sister surface to coolant_warmup."
             ),
         ),
-        # ----- Phase 2: DID-dependent surfaces (skip until DIDs are polled) --
-        _surface_2d(
-            name="air_charge_vs_rpm_throttle_did",
-            output="did:ECM_AIR_CHARGE",
-            output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
-            x_column="did:ECM_RPM",
-            y_column="did:ECM_THROTTLE_POS_SENSOR_1",
-            x_axis_name="rpm",
-            y_axis_name="throttle_sensor_voltage",
-            x_axis_unit="rpm",
-            y_axis_unit="V",
-            min_samples=500,
-            # sigma_floor = 1 raw count (scale constant not yet pinned).
-            deviation=_sigma(1.0),
-            notes=(
-                "Mode-22-synchronous air-charge surface. Detects a change in the "
-                "ECM's air charge per intake event at the same DID RPM and throttle "
-                "position. It says nothing about injected fuel (0x1208 ignores "
-                "enrichment and does not drop in fuel cut)."
-            ),
-            diagnostic_capabilities=("air-charge map drift",),
-            diagnostic_limitations=(
-                "cannot uniquely identify intake restriction, MAF bias, "
-                "or cam-phasing change; not a fuelling surface",
-            ),
-        ),
-        _cam_tracking_2d("primary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED"),
-        _cam_tracking_2d("secondary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B"),
-        _surface_1d(
-            name="afr_bank_balance_robust",
-            output="derived:AFR_BANK_BALANCE",
-            output_unit="V",
-            x_column="derived:AFR_BANK_BALANCE",
-            fit_method="robust_baseline",
-            min_r_squared=None,
-            min_samples=300,
-            deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
-            notes=(
-                "Wideband AFR sensor voltage delta between banks. Expected "
-                "~0V; non-zero indicates bank-specific vacuum leak, "
-                "single-injector wear, exhaust leak ahead of one sensor, "
-                "single coil pack misfire. Sharpest bank-asymmetry detector "
-                "available once AF sensor DIDs are polling."
-            ),
-        ),
-        _surface_2d(
-            name="afr_voltage_vs_rpm_throttle_did",
-            output="did:ECM_AF_SENSOR_V_B1",
-            output_unit="V",
-            x_column="did:ECM_RPM",
-            y_column="did:ECM_THROTTLE_POS_SENSOR_1",
-            x_axis_name="rpm",
-            y_axis_name="throttle_sensor_voltage",
-            x_axis_unit="rpm",
-            y_axis_unit="V",
-            min_samples=500,
-            deviation=DeviationConfig(kind="absolute", warning_band=0.10, critical_band=0.25),
-            notes=(
-                "Wideband AFR sensor voltage map. ~2.15V at stoich (closed "
-                "loop), richer (lower V) at WOT, leaner (higher V) under "
-                "decel-fuel-cut. Detects O2 sensor aging (whole-surface "
-                "drift), systemic rich/lean (offset), closed-loop "
-                "oscillation amplitude drift."
-            ),
-        ),
-        _surface_1d(
-            name="tps_sensor_1_vs_sensor_2_did",
-            output="did:ECM_THROTTLE_POS_SENSOR_1",
-            output_unit="V",
-            x_column="did:ECM_THROTTLE_POS_SENSOR_2",
-            x_axis_name="throttle_sensor_2_voltage",
-            x_axis_unit="V",
-            fit_method="poly",
-            degree=1,
-            min_samples=300,
-            # min_rpm deliberately unset: the V-per-%% relationship is
-            # engine-state-independent, and parked KOEO throttle sweeps are
-            # the best full-range coverage this surface ever sees.
-            # reference_std auto-fills from the fit residuals; sigma_floor
-            # (4.2) = one LSB of the underlying ECM_THROTTLE_POS_SENSOR_1
-            # voltage sensor (0.005 V, dids.yaml) — the pct denominator's
-            # own quantization is secondary once pct > 1 (the div-by-zero
-            # guard below), so the voltage LSB dominates the achievable
-            # resolution of this ratio.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=5.0, critical_band=12.0, sigma_floor=0.005
-            ),
-            notes=(
-                "Synchronous redundant TPS-voltage relationship. Drift between "
-                "the two independent tracks can reveal calibration or sensor wear."
-            ),
-        ),
     ]
     return recipes
+
+
+def default_recipes(profile: str | None) -> list[Recipe]:
+    """The catalog the daemon refits for ``profile``: shared, then the vehicle's own.
+
+    ``profile`` is the vehicle profile slug (required, so no caller can forget
+    it and silently fit another vehicle's DID surfaces, or none); ``None``
+    asks for the shared catalog only. The profile's recipes come from
+    :func:`src.analysis.recipes.profile_recipes` and follow the shared ones.
+    """
+    from src.analysis.recipes import profile_recipes
+
+    recipes = shared_recipes()
+    own = profile_recipes(profile)
+    clash = {recipe.name for recipe in recipes} & {recipe.name for recipe in own}
+    if clash:
+        raise ValueError(f"profile {profile!r} recipes shadow shared ones: {sorted(clash)}")
+    return [*recipes, *own]
 
 
 # ---------------------------------------------------------------------------
@@ -2050,6 +1945,7 @@ __all__ = [
     "choose_warmup_confounding_strategy",
     "count_usable_cold_start_sessions",
     "default_recipes",
+    "shared_recipes",
     "fit_recipe",
     "refit_all",
 ]

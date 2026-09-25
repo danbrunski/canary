@@ -103,8 +103,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     config = load_config(args)
-    scoped = scope_config(config, resolve_profile_for_tooling(config, args.profile))
-    recipes = default_recipes()
+    profile = resolve_profile_for_tooling(config, args.profile)
+    scoped = scope_config(config, profile)
+    recipes = default_recipes(profile.slug)
     if args.recipe:
         unknown = sorted(set(args.recipe) - {r.name for r in recipes})
         if unknown:

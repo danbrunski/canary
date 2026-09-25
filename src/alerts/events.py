@@ -21,6 +21,7 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 
     from src.alerts.fusion import FusedResult
     from src.models.inference import SequenceInferenceResult
+    from src.plausibility.evaluator import EvidenceRecord
 
 #: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
 #: per-tick IF + LSTM + behavior-residual sources. ``behavior`` (Phase 7.4)
@@ -30,10 +31,19 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: Mode 03/07/0A poll. ``trend`` (Task 4.6) is a session-fingerprint stat in
 #: sustained CUSUM alarm against the frozen reference epoch — a low-frequency,
 #: per-session event, not a per-tick one. ``misfire`` (Task 3.1) is a
-#: per-cylinder misfire count *increase* from the periodic Mode 06 poll. All
-#: are emitted alongside the per-detector events, not instead of them.
+#: per-cylinder misfire count *increase* from the periodic Mode 06 poll.
+#: ``plausibility`` (A05.9) is a *confirmed* per-channel plausibility failure
+#: (range/slew/stuck/freshness) from ``src.plausibility`` — never a pending
+#: one. All are emitted alongside the per-detector events, not instead of them.
 AnomalySource = Literal[
-    "isolation_forest", "lstm_autoencoder", "fused", "behavior", "dtc", "trend", "misfire"
+    "isolation_forest",
+    "lstm_autoencoder",
+    "fused",
+    "behavior",
+    "dtc",
+    "trend",
+    "misfire",
+    "plausibility",
 ]
 
 
@@ -486,6 +496,41 @@ class AnomalyEvent(BaseModel):
                 "previous_count": previous_count,
             },
             dedupe_key=f"misfire:{cylinder}:{count}",
+        )
+
+    @classmethod
+    def from_plausibility(cls, record: EvidenceRecord) -> AnomalyEvent:
+        """Build a confirmed plausibility-failure event (A05.9).
+
+        Refuses a pending record: only a confirmed episode alerts (A05.6),
+        and the pending ones already live in the evidence file. The event
+        carries the whole evidence record in ``detail.plausibility`` and its
+        rendered sentence as ``detail.cause`` (what the push and the
+        dashboard show). A failed check either confirmed or it did not, so,
+        like ``from_dtc``, ``score`` is a constant ``1.0`` with no
+        threshold. ``dedupe_key`` is per (channel, check), so one channel's
+        stuck episode never suppresses another channel's range failure.
+        """
+        if not record.alerts:
+            raise ValueError(
+                f"plausibility {record.check} on {record.channel} is {record.state}; "
+                "only a confirmed detection is an anomaly event (A05.6)"
+            )
+        return cls(
+            timestamp=record.detected_at,
+            source="plausibility",
+            model_version=f"plausibility/{record.check}",
+            score=1.0,
+            threshold=None,
+            affected_channels=(record.channel,),
+            operating_mode=record.operating_mode,
+            session=record.session,
+            detail={
+                "cause": record.text,
+                "check": record.check,
+                "plausibility": record.to_dict(),
+            },
+            dedupe_key=f"plausibility:{record.channel}:{record.check}",
         )
 
     @classmethod

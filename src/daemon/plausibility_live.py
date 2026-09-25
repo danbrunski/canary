@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -41,6 +42,7 @@ from src.plausibility.evaluator import (
 if TYPE_CHECKING:
     from src.daemon.components import DaemonComponents
     from src.daemon.inference_metrics import InferenceTimingRecorder
+    from src.plausibility.evaluator import EvidenceRecord
     from src.plausibility.limits import LimitsCatalog
     from src.preprocessing.live import LiveFeatureSource
 
@@ -74,6 +76,14 @@ def live_session_key(components: DaemonComponents) -> tuple[str, str | None]:
     return "live", None
 
 
+def _alert_sink(components: DaemonComponents) -> Callable[[EvidenceRecord], object] | None:
+    """The emitter's ``emit_plausibility`` (A05.9). ``DaemonComponents``
+    always carries an emitter; a stand-in without one (a unit test's
+    namespace) records evidence without alerting."""
+    emitter = getattr(components, "emitter", None)
+    return None if emitter is None else emitter.emit_plausibility
+
+
 class LivePlausibility:
     """Evaluator + evidence store + cost accounting for the live tick."""
 
@@ -85,6 +95,7 @@ class LivePlausibility:
         recorder: InferenceTimingRecorder | None,
         session: str = "live",
         replay_id: str | None = None,
+        alert_sink: Callable[[EvidenceRecord], object] | None = None,
     ) -> None:
         self._anomalies_dir = anomalies_dir
         self._recorder = recorder
@@ -95,6 +106,10 @@ class LivePlausibility:
             catalog,
             session=session,
             sink=self._store.append,
+            # A05.9: confirmed detections only (the evaluator decides) become
+            # anomaly events through the emitter — tuning, dedupe, the log,
+            # the broadcast and the push, never a push during replay.
+            alert_sink=alert_sink,
             carried=self._carried(session),
         )
         self._last_tick_seconds = 0.0
@@ -133,6 +148,7 @@ class LivePlausibility:
             recorder=recorder,
             session=session,
             replay_id=replay_id,
+            alert_sink=_alert_sink(components),
         )
         live.attach(source)
         return live

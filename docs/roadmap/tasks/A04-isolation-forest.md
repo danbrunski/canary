@@ -276,6 +276,46 @@ confirms which artifact the Pi runs.
     the concurrent A03 area. TPMS is `model_feature: false` and
     `hypothesized`, so the policy above already keeps it out of the next
     retrain.
+
+  *Sentinel mechanism done 2026-09-25 (desk).* `src/decode/slices.py` holds the
+  rule once: `SentinelState` (`is_sentinel`), `check_sentinel` (raw and meaning
+  set together, meaning non-blank, the word representable in the slice) and
+  `sentinel_channel` (`<NAME>_SENTINEL`). `bindings.Signal` gains
+  `sentinel_raw`/`sentinel_meaning` (same pair as a `dids.yaml` memory
+  channel). A sentinel word decodes to a `decoded:<NAME>_SENTINEL` row carrying
+  the meaning, and to no `decoded:<NAME>` number, on every decode path:
+  `FrameDecoder` (live source, dashboard stream and storage),
+  `preprocessing.decode.decode_can_rows` (batch/training; a signal whose only
+  stored rows are `_SENTINEL` counts as stored), `decode_signal_column` (NaN),
+  and `tools/backfill_decoded.py`. `apply_scaling`, `engineering.physical_value`
+  and `physical_series` read it as None/NaN. Non-sentinel values decode exactly
+  as before; the wide `_SENTINEL` column is text, so the feature builder skips it.
+  - Tests: `tests/test_preprocessing_decode.py::test_a_sentinel_decodes_to_the_same_state_rows_on_the_live_and_batch_paths`
+    (parity), `::test_non_sentinel_values_decode_exactly_as_without_the_declaration`,
+    `::test_a_sentinel_column_is_a_text_state_and_the_number_column_skips_it`,
+    `::test_stored_sentinel_rows_count_as_stored`,
+    `::test_decode_signal_column_masks_the_sentinel_and_the_mask_finds_it`;
+    `tests/test_frame_decoder.py::test_a_sentinel_word_decodes_to_a_state_row_not_a_number`;
+    `tests/test_preprocessing_live.py::test_a_sentinel_word_never_becomes_a_live_feature_value`;
+    `tests/test_backfill_decoded.py::test_backfill_stores_a_sentinel_as_the_live_decoders_state_row`;
+    `tests/test_bindings_decoder.py::test_a_half_declared_or_impossible_sentinel_is_refused`,
+    `::test_a_sentinel_scales_to_nothing_everywhere`.
+    `tests/test_analysis_ground_truth.py` still passes.
+  - **Remaining: declaring the TPMS sentinel in `data/bindings.yaml` (operator
+    decision).** The evidence is in the repo: `data/analyses/2026-05-11T211240.md`
+    ("uniformly 0 across all stationary/reverse windows, then all climb together
+    during forward driving", bytes 2-5 of 0x385) and the 35 % of `134345` above.
+    It is not declared yet because the served IF (manifest created
+    2026-09-20) was trained on TPMS zeros: 16 of its features are TPMS (warmup
+    16/217 = 7.4 %, idle 16/180 = 8.9 %, idle_transient 13/173, city 15/255,
+    highway 16/249), all above `MAX_MISSING_FEATURE_FRACTION` = 5 %. A sentinel
+    decode leaves those features missing while the sensors sleep, so the served
+    model would withhold every such row and report it as a missing-features
+    anomaly until the retrain drops TPMS (operator-deferred 2026-09-22).
+    That consequence is worked out from the code and the manifest, not measured
+    by replay. The YAML to add to each `TPMS_*_PRESSURE` entry is
+    `sentinel_raw: 0` and `sentinel_meaning: wheel sensor not transmitting (0
+    before forward driving; 2026-05-11T211240, A04.6 134345)`.
 - [~] **A04.7 — Impute per mode, or not at all.** One scaler is fit over all
   modes, so `fillna(0)` imputes the *pooled* mean. Against each mode's own
   spread, that mean sits a median 9.4 standard deviations away for idle

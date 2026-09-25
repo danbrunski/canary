@@ -95,10 +95,13 @@ _KIND_PATTERNS: tuple[tuple[SessionKind, re.Pattern[str]], ...] = (
 #: all of them (:func:`src.control.sessions.latest_session`).
 ALL_SESSION_KINDS: frozenset[SessionKind] = frozenset(SessionKind)
 #: This vehicle's own recordings that HTTP reads resolve and post-hoc sidecars
-#: are computed over (``is_session_dir_name``). ``_tuning-*`` is left out
-#: pending the operator decision recorded in R01.1; adding
-#: ``SessionKind.TUNING`` here is the whole change either way.
-RECORDED_SESSION_KINDS: frozenset[SessionKind] = frozenset({SessionKind.LIVE, SessionKind.CAPTURE})
+#: are computed over (``is_session_dir_name``). ``_tuning-*`` counts (operator
+#: decision 2026-09-25, R01.1): it is this vehicle's own recording. It stays
+#: out of training through the ``_`` prefix (``discover_sessions``) and out of
+#: detection through R03.12's profile gate — not through this set.
+RECORDED_SESSION_KINDS: frozenset[SessionKind] = frozenset(
+    {SessionKind.LIVE, SessionKind.CAPTURE, SessionKind.TUNING}
+)
 #: Plain live sessions only: the corpus-shaped directories the classifier,
 #: trends and retention walk.
 LIVE_SESSION_KINDS: frozenset[SessionKind] = frozenset({SessionKind.LIVE})

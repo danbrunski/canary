@@ -15,10 +15,11 @@ from pathlib import Path
 
 from src.analysis.llm_assist.cards import LlmAssistCard, card_from_dict, card_to_dict
 from src.jsonl_store import JsonlStore
+from src.paths import ANALYSES_DIR
 
 __all__ = ["DEFAULT_LLM_ASSIST_CARDS_PATH", "LlmAssistCardStore"]
 
-DEFAULT_LLM_ASSIST_CARDS_PATH = Path("data/analyses/llm_assist_cards.jsonl")
+DEFAULT_LLM_ASSIST_CARDS_PATH = ANALYSES_DIR / "llm_assist_cards.jsonl"
 
 
 class LlmAssistCardStore(JsonlStore[LlmAssistCard]):

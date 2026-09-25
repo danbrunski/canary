@@ -6713,7 +6713,7 @@
           "--min-load": {
             "action": "_StoreAction",
             "choices": null,
-            "default": 85.0,
+            "default": null,
             "dest": "min_load",
             "nargs": null,
             "option_strings": [

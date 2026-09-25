@@ -45,7 +45,7 @@ def get_delivery_error(
     *,
     session: str,
     measured_spec: str = "obd:O2_WR_LAMBDA_S1",
-    min_load: float | None = 85.0,
+    min_load: float | None = None,
     cell_agg: str = "last",
     profile: str | None = None,
 ) -> dict[str, Any]:
@@ -54,8 +54,8 @@ def get_delivery_error(
     Gates, each reported in the response's ``gates`` block so a diluted result
     is visible rather than silent: same-instant pairing (no stale joins), open
     loop **and** a commanded mixture richer than stoich (so decel fuel cut is
-    excluded by construction, not by a guessed threshold), an optional load
-    floor, and band-averaging over rpm so band composition cannot masquerade
+    excluded by construction, not by a guessed threshold), a load floor, and
+    band-averaging over rpm so band composition cannot masquerade
     as an effect.
 
     ``measured_spec`` is explicit on purpose: the ECM's own λ (PID 0x24) and
@@ -67,6 +67,11 @@ def get_delivery_error(
     disagree, rpm coverage is uneven and the band-averaged figure is the one
     to trust — pooling across unequal coverage is what manufactured a
     retracted "K responds 1:1" result.
+
+    ``min_load`` ``None`` (the default) is the vehicle profile's WOT floor,
+    ``mode01_wot.load_floor_pct`` in its ``tuning_providers.yaml``; the value
+    used is echoed as ``min_load`` with ``min_load_source`` ``profile`` or
+    ``caller``.
     """
     scoped = _scoped(config_path, profile)
     try:
@@ -86,12 +91,14 @@ def get_delivery_error(
             "error": "no mode01_wot.rpm_bands in this vehicle's tuning_providers.yaml",
         }
 
+    min_load_source = "caller" if min_load is not None else "profile"
     try:
+        floor = context.resolve_min_load(min_load)
         result = delivery_error(
             session_dir,
             calibration=context.calibration,
             measured_spec=measured_spec,
-            min_load=min_load,
+            min_load=floor,
             cell_agg=cell_agg,
             revisions=context.registry,
             afr_stoich=context.afr_stoich,
@@ -103,6 +110,8 @@ def get_delivery_error(
     return {
         "ok": True,
         "capabilities": _capability_payload(session_dir, context),
+        "min_load": floor,
+        "min_load_source": min_load_source,
         **result.as_dict(),
     }
 

@@ -24,7 +24,7 @@ GOLDEN = Path(__file__).parent / "fixtures" / "recipe_catalog_golden.json"
 
 
 def _catalog() -> dict[str, object]:
-    recipes = default_recipes()
+    recipes = default_recipes("nissan-xterra-2008")
     catalog: dict[str, object] = {
         recipe.name: {
             "type": type(recipe).__name__,

@@ -751,7 +751,7 @@ def test_diagnostic_only_model_is_shown_but_never_alerts(
     )
     refused = _BehaviorResidual(**{**active.__dict__, "name": "refused", "reason": "off_map"})
     diagnostic = _BehaviorResidual(**{**residuals[0].__dict__})
-    ctx = SimpleNamespace(now=T0, timestamp_str="2026-09-21T12:00:00Z")
+    ctx = SimpleNamespace(now=T0, timestamp_str="2026-09-21T12:00:00Z", capture_profile_allows=True)
     fused = detector.apply([active, refused, diagnostic], ctx)  # type: ignore[arg-type]
     assert emitted == ["active"]
     assert len(fused) == 1

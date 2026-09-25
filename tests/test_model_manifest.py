@@ -131,7 +131,9 @@ def test_known_model_types_match_anomaly_sources() -> None:
     ``trend`` source is the same shape again — a CUSUM/Mann-Kendall drift
     verdict over the fingerprint series isn't a trained model either. Task
     3.1's ``misfire`` source is the same shape once more — a Mode 06
-    misfire-count increase isn't a trained model either.
+    misfire-count increase isn't a trained model either. A05.9's
+    ``plausibility`` source is a confirmed per-channel limit check, not a
+    trained model.
 
     The sequence-detector slot is backbone-interchangeable
     (``lstm_autoencoder`` / ``tcn_autoencoder``, only one active at a time) but
@@ -150,6 +152,7 @@ def test_known_model_types_match_anomaly_sources() -> None:
         "dtc",
         "trend",
         "misfire",
+        "plausibility",
     }
     sequence_backbones = {"lstm_autoencoder", "tcn_autoencoder"}
 

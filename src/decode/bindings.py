@@ -7,6 +7,12 @@ functions the daemon (and analyzers) need to actually use them at runtime:
   * `decode_raw(signal, data)` — pull the raw integer out of a frame
   * `apply_scaling(signal, raw)` — turn it into an engineering value
 
+A binding may declare a `sentinel_raw` word (with its `sentinel_meaning`):
+a raw value that is a *state*, not a measurement. The decoders
+(`src.decode.frame_decoder`, `src.preprocessing.decode`) turn it into a
+`decoded:<NAME>_SENTINEL` state row instead of a `decoded:<NAME>` number, and
+`apply_scaling` returns None for it.
+
 The two are separate because some signals (motion candidates, hypothesized
 entries) have no scaling yet; the raw extraction still works, the scaling
 returns None until we pin scale/offset against ground truth.
@@ -22,7 +28,14 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.decode.slices import ByteSlice, Evidence, LinearScale, PlausibleRange
+from src.decode.slices import (
+    ByteSlice,
+    Evidence,
+    LinearScale,
+    PlausibleRange,
+    SentinelState,
+    check_sentinel,
+)
 
 
 class _Strict(BaseModel):
@@ -37,7 +50,7 @@ QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
 UNKNOWN_UNIT = "unknown"
 
 
-class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
+class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
     """A signal binding: where in a CAN frame the value lives + how to decode it.
 
     `byte_order` is "big" for MSB-first (the OBD-II/UDS convention used across
@@ -98,6 +111,17 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
     # without scaling or signals whose plausible range isn't yet known.
     plausible_min: float | None = None
     plausible_max: float | None = None
+    #: A raw word that means *no measurement*, with what it means (A04.6).
+    #:
+    #: A sentinel is a state, not a number (AGENTS.md). TPMS pressure bytes
+    #: read 0 while the wheel sensors are asleep — 35 % of one warmup session,
+    #: every warmup row included — and a pooled scaler treated that zero as a
+    #: pressure. A declared sentinel decodes to ``decoded:<NAME>_SENTINEL``
+    #: carrying ``sentinel_meaning``, never to a ``decoded:<NAME>`` value, so it
+    #: enters no mean, scaler or model input. Same field pair as a ``dids.yaml``
+    #: memory channel; both must be set, and the word must fit the slice.
+    sentinel_raw: int | None = None
+    sentinel_meaning: str | None = None
     #: The binding that replaced this one, named explicitly.
     #:
     #: A superseded binding stays here because stored telemetry and older
@@ -139,6 +163,13 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
         """``unit`` for a record or a label: ``""`` while it is the ``"unknown"``
         placeholder (R04.4). Five callers each spelled ``!= "unknown"``."""
         return "" if self.unit == UNKNOWN_UNIT else self.unit
+
+    @model_validator(mode="after")
+    def _check_sentinel(self) -> Signal:
+        check_sentinel(
+            self.name, self.sentinel_raw, self.sentinel_meaning, byte_length=self.byte_length
+        )
+        return self
 
     @model_validator(mode="after")
     def _check_quantity_is_readable(self) -> Signal:
@@ -273,7 +304,13 @@ def apply_scaling(signal: Signal, raw: float) -> float | None:
     pinned to ground truth yet, so we can't emit an engineering value. The
     raw extraction is still useful for variability tracking, just not for
     "this signal reads 23.5 °C".
+
+    Also `None` for the binding's declared sentinel word: it is the absence
+    of a measurement, not a small one (the same contract as
+    :func:`src.decode.dids.apply_memory_scaling`).
     """
+    if signal.is_sentinel(raw):
+        return None
     return signal.scaled(raw)
 
 

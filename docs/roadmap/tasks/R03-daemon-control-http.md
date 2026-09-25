@@ -109,6 +109,26 @@ Three problems carry most of the weight here:
   a default-profile session lacks, so a default-profile replay is unchanged
   by construction; `test_daemon.py` replay-scoring tests pass unchanged.
   Operator questions above stay open (listed to the operator 2026-09-25).
+  **Operator answers 2026-09-25 (R00), implemented the same day:**
+  (a) *No.* `CaptureProfile._storage_policy` refuses `corpus_eligible: true`
+  on any non-default profile, naming the decision; every committed catalogue
+  (`data/**/capture_profiles*.yaml`, archive included) still loads
+  (`test_capture_profiles.py::test_every_shipped_capture_catalogue_still_loads`,
+  and the refusal case with and without a prefix). `ParquetTelemetryWriter.
+  enter_capture_mode`'s corpus-eligible `rotate_session` branch was unreachable
+  and is gone: every capture enters its isolated `_capture-*` directory.
+  (b) *Yes.* Behavior-model deviations stop under the same gate
+  (`TickContext.capture_profile_allows`, from `capture_profile_gate`, so a
+  replay of a non-eligible source is judged by its manifest likewise):
+  `BehaviorDetector.apply` casts no fusion vote, feeds no persistence, publishes
+  no score and emits no event; alerting residuals withheld are counted in
+  `/status detectors.capture_profile_gate.behavior_residuals_withheld`. The
+  live overlay (`prepare` → `behavior_live`) still shows expected/actual.
+  `tests/test_inference_profile_gate.py::test_behavior_deviations_stop_under_a_non_default_profile`
+  (withheld + counted, diagnostic-only residuals not counted, positive control
+  votes under default). (c) *Keep running* — no change; plausibility is not
+  gated (`tests/test_plausibility_live_alerts.py` confirms and alerts under an
+  active `tuning` profile).
 
 - [x] **R03.1 One vehicle-state module. The inference copy has lost the
   broadcast-RPM fallback.** *Drift bug, serve path. Land R03.12 first:
@@ -176,10 +196,12 @@ Three problems carry most of the weight here:
   allowances are gone from `tests/test_layering.py`. `routes/control.py` now
   imports public names (`active_session_dir`,
   `derive_vehicle_state_from_storage`, `control.sessions.latest_session`).
-  **Freshness rule (provisional — the operator question stays open):** the
+  **Freshness rule (confirmed by the operator 2026-09-25):** the
   broadcast fallback needs CAN freshness (the live copy's rule); the Parquet
   copy used to take a stale decoded rpm whenever the OBD rpm was unusable.
-  Conservative: never claims `engine_running` on stale evidence. Tests:
+  Conservative: never claims `engine_running` on stale evidence. **Operator
+  confirmed 2026-09-25 (R00): the broadcast-RPM fallback requires fresh CAN,
+  as implemented.** Tests:
   `test_inference_gate_reads_engine_running_from_the_broadcast` (failed
   before: gate said `engine_off`, status said `engine_running`),
   `test_all_did_capture_is_withheld_by_the_profile_not_the_state`
@@ -515,7 +537,7 @@ Three problems carry most of the weight here:
   fanout) pass — 157 passed, 1 xfailed. Replay not run separately; the
   harness drives the same sinks end to end.
 
-- [~] **R03.9 Split `daemon/inference.py` by detector.**
+- [x] **R03.9 Split `daemon/inference.py` by detector.**
   - The file is 2,214 lines, laid out as: gating/generation;
     `Detector` protocol + the IF, Sequence and Behavior classes (their two
     `tick` methods are AST-identical); the pipeline; executors; sequence
@@ -558,6 +580,43 @@ Three problems carry most of the weight here:
   by timing alone; a meaningful diff needs the operator's replay protocol
   (`start_replay` on a quiet daemon) or a deterministic tick driver.
 
+  *Replay diff done 2026-09-25 (implementer).* `tools/replay_event_diff.py`
+  is the deterministic tick driver: rows from `replay_session`'s own
+  `_iter_rows`/`probe_rederivability`, stamped with their recorded time and
+  observed up to each tick; `LiveInferencePipeline.run_tick` on a
+  `1/resample_hz` grid in session time (`wall_clock` injected, each compute
+  awaited before the next tick); `time.monotonic` in `src.*` (persistence
+  gate, vehicle-state cache) read from the same clock and restored after.
+  It records the emitter's JSONL and every `/ws/scores` message; `diff` pairs
+  records by `(timestamp, source)`, categorical fields exact, numbers to
+  `rel_tol` 1e-9. `run` uses only pre-R03 APIs, so it drives a `git archive`
+  of any tree (`ab --before-tree`). Tests: `tests/test_replay_event_diff.py`
+  (a stub IF that fires on RPM: the same 30 s of the ground-truth drive slice
+  replays twice with zero differences at zero tolerance, and the clock patch
+  is undone; the diff's float/categorical/extra-record handling).
+  Run: session `2026-09-18T213818` (held-out calibration session of the
+  deployed IF), deployed `models/nissan-xterra-2008` IF
+  `2026-09-20T054703` + LSTM `2026-09-20T064628`, example config, in-process
+  scoring:
+  - Determinism: HEAD vs HEAD, 300 s: events, 845 scores, counters
+    identical, max |delta| 0.
+  - `3f73755` (pre-R03) vs `93bf6ef` (R03), 300 s: all 7 events equal in
+    every categorical field (time, source, role, mode, version, channels);
+    IF 300/300 and fused 271/271 paired scores bit-identical. R03 adds 3
+    score records (IF at 21:38:19, LSTM + fused at 21:38:48) and
+    `skipped_vehicle_state` 1 → 0: the first tick (21:38:19.000) precedes the
+    first Mode 01 RPM (21:38:19.024), so pre-R03's OBD-only classifier
+    skipped it and R03.1's broadcast-RPM fallback scores it. That extra row
+    in the LSTM window moves 240/271 LSTM scores by ≤ 8.9e-5 (event
+    `channel_scores` ≤ 3.5e-4) until 21:42:56, then identical. R03.1's
+    intended change, not the split.
+  - `93bf6ef` vs HEAD (R04–K01), 300 s: categorical identical, counters
+    identical, LSTM scores ≤ 1.3e-7 apart (R04.2's numpy float64 scoring rule
+    against the old float32 torch reduction).
+  - `3f73755` vs HEAD, 900 s: 18 events on both sides (15 highway, 3 city,
+    all LSTM evidence), categorical identical; IF 900/900 and fused 871/871
+    bit-identical; the same 3 extra records and LSTM float drift as above.
+
 - [x] **R03.10 One base for the LSTM/TCN config models.**
   `config.LSTMAutoencoderConfig` and `TCNAutoencoderConfig` share 17
   identical training fields and validators, so a new training knob can reach
@@ -582,7 +641,7 @@ Three problems carry most of the weight here:
   written under `data/control`, pre-existing) and one failure in the
   R07-dirty `test_retrain_script.py`.
 
-- [~] **R03.11 Small cleanups (batch them).**
+- [x] **R03.11 Small cleanups (batch them).**
   - `run_daemon` teardown repeats the cancel/await/suppress block 7 times.
     Add `_cancel_all(tasks)`.
   - `--collection-only` keeps a second, synchronous drain
@@ -603,6 +662,14 @@ Three problems carry most of the weight here:
   `--collection-only` drain is untouched pending the operator decision
   (keep through `drain.run_storage_sink`, or retire); the conservative
   option — no change — is what ships until then.
+  **Retired 2026-09-25 (operator decision, R00).** `main._drain_queue`,
+  `main.run_collection`, the `--collection-only` flag and `run(full_daemon=)`
+  are gone; `src.main` always runs the full daemon. `tests/test_main.py`'s two
+  `run_collection` tests became `test_collection_only_is_retired` (the flag is
+  refused by argparse; neither function exists). Grep of `src scripts systemd
+  tools docs` for the flag: `docs/daemon-architecture.md` updated; only the
+  historical `docs/implementation-tasks.md` (another session's uncommitted
+  file) and this roadmap still mention it. No script or unit passed it.
 
 ## Looked at and fine
 

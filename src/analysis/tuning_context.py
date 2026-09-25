@@ -73,6 +73,24 @@ class TuningContext:
         wot = self.mode01_wot
         return None if wot is None else wot.rpm_bands
 
+    def resolve_min_load(self, min_load: float | None) -> float:
+        """The load floor for a delivery-error call: the caller's, else the profile's.
+
+        ``None`` means "this vehicle's WOT floor" (``mode01_wot.load_floor_pct``,
+        operator decision 2026-09-25 for the MCP tool and the CLI), so no
+        caller restates the dev vehicle's 85 %. Refuses when the profile
+        declares no ``mode01_wot`` rather than guessing a number.
+        """
+        if min_load is not None:
+            return min_load
+        wot = self.mode01_wot
+        if wot is None:
+            raise ValueError(
+                "no min_load given and no mode01_wot.load_floor_pct in this vehicle's "
+                "tuning_providers.yaml"
+            )
+        return wot.load_floor_pct
+
     @property
     def mode01_exclusion_note(self) -> str | None:
         """Why this vehicle's all-DID captures lack Mode 01 (profile data)."""

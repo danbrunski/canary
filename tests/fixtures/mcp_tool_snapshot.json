@@ -389,7 +389,7 @@
     }
   },
   "get_behavior_live": {
-    "description": "Live ``you-are-here`` overlay for the behavior surfaces.\n\n    Returns per-model ``expected`` / ``actual`` / ``deviation`` / ``severity``\n    for the most recent tick. ``include_series=True`` also returns each\n    model's rolling trail (~4 min at 1 Hz) \u2014 the default is ``False`` because\n    with enough registered surfaces the full trail can exceed the MCP\n    tool-result size cap; pass ``True`` only when you actually need the\n    trajectory (e.g. plotting a \u0394 sparkline), not for a one-shot status check.\n    Equivalent to ``GET /models/behavior/live?series=...`` \u2014 see\n    :mod:`src.dashboard.behavior_live` for the schema.\n    ",
+    "description": "Live ``you-are-here`` overlay for the behavior surfaces.\n\n    Returns per-model ``expected`` / ``actual`` / ``deviation`` / ``severity``\n    for the most recent tick. ``severity`` is ``null`` on a row that was not\n    scored, and ``not_scored`` names which kind (``off_map``,\n    ``actual_stale``, ``operating_mode_excluded``, ``operating_mode_mismatch``,\n    ...); never read a ``null`` severity as healthy. ``include_series=True`` also returns each\n    model's rolling trail (~4 min at 1 Hz) \u2014 the default is ``False`` because\n    with enough registered surfaces the full trail can exceed the MCP\n    tool-result size cap; pass ``True`` only when you actually need the\n    trajectory (e.g. plotting a \u0394 sparkline), not for a one-shot status check.\n    Equivalent to ``GET /models/behavior/live?series=...`` \u2014 see\n    :mod:`src.dashboard.behavior_live` for the schema.\n    ",
     "inputSchema": {
       "properties": {
         "include_series": {
@@ -617,7 +617,7 @@
     }
   },
   "get_delivery_error": {
-    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Closed-loop samples and decel fuel cut are excluded by\n            construction, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` is\n            explicit because the ECM lambda and A/F-voltage paths disagree by\n            ~3.8% at WOT and neither is established as truth.",
+    "description": "Measured-vs-commanded AFR at enrichment for one stored session,\n            with the methodology gates applied and reported (local, no daemon\n            call). Closed-loop samples and decel fuel cut are excluded by\n            construction, and results are band-averaged over rpm so uneven\n            coverage cannot masquerade as an effect. ``measured_spec`` is\n            explicit because the ECM lambda and A/F-voltage paths disagree by\n            ~3.8% at WOT and neither is established as truth. ``min_load``\n            defaults to the vehicle profile's WOT load floor.",
     "inputSchema": {
       "properties": {
         "cell_agg": {
@@ -639,7 +639,7 @@
               "type": "null"
             }
           ],
-          "default": 85.0,
+          "default": null,
           "title": "Min Load"
         },
         "session": {

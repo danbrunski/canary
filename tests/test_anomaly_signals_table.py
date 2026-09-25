@@ -100,3 +100,121 @@ def test_a_profile_missing_the_stft_inputs_warns_for_the_bank_balance_models() -
     # LTFT is polled, so its balance models are not starved by it.
     for name, missing in warnings.items():
         assert "derived:LTFT_BANK_BALANCE" not in missing, name
+
+
+# ---------------------------------------------------------------------------
+# R05.4 remainder: vehicle-specific inputs come from the vehicle, not shared code
+# ---------------------------------------------------------------------------
+
+
+def test_shared_derived_code_names_no_manufacturer_did() -> None:
+    import inspect
+
+    from src.analysis import afr, derived
+
+    for module in (derived, afr):
+        assert "did:" not in inspect.getsource(module), module.__name__
+    for signal in derived.SHARED_ANOMALY_SIGNALS:
+        assert not any(c.startswith("did:") for group in signal.input_groups for c in group)
+
+
+def test_the_xterra_supplies_its_did_inputs_from_its_vehicle_module() -> None:
+    from src.analysis.vehicle_signals import af_sensor_voltage_columns, nissan_xterra_2008
+    from src.profiles import profile_module_stem
+
+    assert nissan_xterra_2008.__name__.rsplit(".", 1)[1] == profile_module_stem(
+        "nissan-xterra-2008"
+    )
+    by_name = {signal.name: signal.input_groups for signal in ANOMALY_SIGNALS}
+    assert by_name["derived:AFR_BANK_BALANCE"] == (
+        ("did:ECM_AF_SENSOR_V_B1",),
+        ("did:ECM_AF_SENSOR_V_B2",),
+    )
+    assert by_name["derived:TPS_VOLTAGE_PER_PCT"] == (
+        ("did:ECM_THROTTLE_POS_SENSOR_1",),
+        ("obd:THROTTLE_POS",),
+    )
+    assert af_sensor_voltage_columns(1) == ("did:ECM_AF_SENSOR_V_B1",)
+    # The vehicle-input signals follow the shared ones (pinned output order).
+    assert [s.name for s in ANOMALY_SIGNALS][-2:] == [
+        "derived:AFR_BANK_BALANCE",
+        "derived:TPS_VOLTAGE_PER_PCT",
+    ]
+
+
+def _vehicle(name: str, **attrs: object) -> object:
+    import types
+
+    module = types.ModuleType(f"src.analysis.vehicle_signals.{name}")
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def test_a_second_vehicle_adds_alternatives_not_replacements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.analysis import vehicle_signals
+
+    xterra = vehicle_signals.vehicle_modules()[0]
+    other = _vehicle(
+        "work_truck",
+        SIGNAL_INPUTS={"derived:AFR_BANK_BALANCE": (("did:WT_AF_V_1",), ("did:WT_AF_V_2",))},
+        AF_SENSOR_VOLTAGE={1: "did:WT_AF_V_1"},
+    )
+    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (xterra, other))
+    known = ("derived:AFR_BANK_BALANCE", "derived:TPS_VOLTAGE_PER_PCT")
+    merged = vehicle_signals.signal_inputs(known)
+    assert merged["derived:TPS_VOLTAGE_PER_PCT"] == (
+        ("did:ECM_THROTTLE_POS_SENSOR_1",),
+        ("obd:THROTTLE_POS",),
+    )
+    assert merged["derived:AFR_BANK_BALANCE"] == (
+        ("did:ECM_AF_SENSOR_V_B1", "did:WT_AF_V_1"),
+        ("did:ECM_AF_SENSOR_V_B2", "did:WT_AF_V_2"),
+    )
+    assert vehicle_signals.af_sensor_voltage_columns(1) == (
+        "did:ECM_AF_SENSOR_V_B1",
+        "did:WT_AF_V_1",
+    )
+
+    # Its frames resolve to its own channels through the shared formula.
+    from src.analysis.derived import (
+        VEHICLE_INPUT_SIGNALS,
+        DerivedSignal,
+        SignalInputs,
+        _series,
+    )
+
+    formulas = dict(VEHICLE_INPUT_SIGNALS)
+    signal = DerivedSignal(
+        "derived:AFR_BANK_BALANCE",
+        merged["derived:AFR_BANK_BALANCE"],
+        formulas["derived:AFR_BANK_BALANCE"],
+    )
+    frame = pd.DataFrame({"did:WT_AF_V_1": [2.0, 2.5], "did:WT_AF_V_2": [1.5, 2.0]})
+    inputs = SignalInputs(
+        frame=frame,
+        vehicle=None,
+        series=tuple(_series(frame, *group) for group in signal.input_groups),
+        computed={},
+    )
+    values = signal.compute(inputs)
+    assert values is not None and list(values) == [0.5, 0.5]
+
+
+def test_a_vehicle_cannot_invent_a_signal_or_change_its_arity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from src.analysis import vehicle_signals
+
+    invented = _vehicle("a", SIGNAL_INPUTS={"derived:NEW_THING": (("did:X",),)})
+    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (invented,))
+    with pytest.raises(ValueError, match="no shared formula"):
+        vehicle_signals.signal_inputs(("derived:AFR_BANK_BALANCE",))
+
+    one = _vehicle("b", SIGNAL_INPUTS={"derived:AFR_BANK_BALANCE": (("did:A",), ("did:B",))})
+    three = _vehicle("c", SIGNAL_INPUTS={"derived:AFR_BANK_BALANCE": (("x",), ("y",), ("z",))})
+    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (one, three))
+    with pytest.raises(ValueError, match="arity"):
+        vehicle_signals.signal_inputs(("derived:AFR_BANK_BALANCE",))

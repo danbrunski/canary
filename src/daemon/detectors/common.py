@@ -105,6 +105,11 @@ class TickContext:
     #: trained on a non-running regime or a non-default profile); the
     #: behavior overlay ignores this and keeps its own per-model gating.
     scoring_allowed: bool
+    #: The R03.12 capture-profile gate alone. Behavior models are not
+    #: vehicle-state gated, but their deviations stop under a non-default
+    #: profile too (operator decision 2026-09-25, R03.12b: tuning drives
+    #: atypically on purpose, WOT pulls).
+    capture_profile_allows: bool = True
 
 
 class _PreparedDetector(Generic[_Job, _Computed]):

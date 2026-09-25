@@ -49,7 +49,7 @@ The suite has 351 files. Two problems outrank the rest:
   `src.validation.harness`); 5/5 pass. `tests/test_sustained_validation.py` +
   `test_replay_row_accounting.py` `-m ""`: 26 passed, 1 xfailed.
 
-- [~] **R07.2 Make test writes into the repo tree impossible.**
+- [x] **R07.2 Make test writes into the repo tree impossible.**
   - `DaemonConfig` has 19 repo-relative writable defaults:
     `data/control/{audit,jobs,trip_odometer,catalog.db,…}`, `models` and
     `data/capture_profiles.yaml`. The only guard,
@@ -188,9 +188,17 @@ The suite has 351 files. Two problems outrank the rest:
     `pytest -n 6 -m "not integration and not slow"`: 5123 passed, 7 skipped,
     6 errors, all `test_manifest_producibility.py` (needs a git checkout;
     errors at HEAD too).
-  **Remainder:** the `slow`, `integration` and `ml_training` tiers have not
-  had a full run under the guard (the orchestrator's full gate runs the first
-  two; the guard fails any test in them that writes).
+  ~~**Remainder:** the `slow`, `integration` and `ml_training` tiers have not
+  had a full run under the guard.~~ Done 2026-09-25, each tier whole and
+  separately, working tree at `b7905fa` plus concurrent agents' uncommitted
+  edits, guard armed (autouse fixture + end-of-run diff):
+  - `pytest -n 4 -m slow`: 259 passed, 2 xfailed (574 s).
+  - `pytest -n 4 -m integration`: 9 passed (69 s).
+  - `pytest -n 4 -m ml_training`: 122 passed (231 s).
+  - No guard refusal and no end-of-run diff in any of the three, so no test
+    needed fixing; `find data/control models -printf '%T@ %s %p'` (61 entries)
+    byte-identical before the first run and after the last, `git status --
+    data models` empty throughout.
 
 - [x] **R07.3 Build the collector tests' fake buses on `ScriptedEcu`.**
   - `test_can_obd_collector.py` defines 16 hand-rolled bus classes. Seven

@@ -73,6 +73,9 @@ def reset_process_state_for_tests() -> None:
     Order matters: disarming the gate bumps the capture generation and marks
     the capture ledger, so those two are reset last.
     """
+    # Persistence off first, so the disarm below does not delete a state
+    # file another test (or the daemon it started) wrote (D03.30).
+    tx_gate.configure_persistence(None)
     tx_gate.set_passive(False, source="default")
     tx_gate.reset_ecm_session_claims()
     tx_gate.reset_suppressed()

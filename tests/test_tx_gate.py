@@ -9,6 +9,7 @@ the DTC/DID requests that don't come from the ordinary PID poll path.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Iterator
@@ -97,6 +98,7 @@ def test_snapshot_reports_state_source_and_count() -> None:
         "ecm_session_owner": "can_diagnostics",
         "ecm_session_claims": {},
         "tx_suppressed": True,
+        "survives_restart": False,
     }
 
 
@@ -397,3 +399,181 @@ def test_passive_armed_is_the_operators_switch_not_a_session_claim() -> None:
     assert tx_gate.passive_armed()
     tx_gate.set_passive(False, source="test")
     assert not tx_gate.passive_armed()
+
+
+# --- D03.30: an armed passive survives a daemon restart ----------------------
+
+
+def _forget_process_memory() -> None:
+    """What a new process starts with: passive off, no state file named.
+
+    ``persist=False`` so the file the previous "process" wrote stays on disk,
+    exactly as a restart leaves it.
+    """
+    tx_gate.configure_persistence(None)
+    tx_gate.set_passive(False, source="default", persist=False)
+
+
+def test_an_arm_is_written_and_a_disarm_removes_it(tmp_path: Any) -> None:
+    state = tmp_path / "control" / tx_gate.PASSIVE_STATE_FILENAME
+    assert tx_gate.restore_persisted(state) == "absent"
+    tx_gate.set_passive(True, source="control", ttl_seconds=1800)
+    written = json.loads(state.read_text())
+    assert written["source"] == "control"
+    assert written["ttl_seconds"] == 1800
+    assert written["version"] == tx_gate.PASSIVE_STATE_VERSION
+    assert abs(written["armed_at"] - time.time()) < 60
+    assert tx_gate.snapshot()["survives_restart"] is True
+
+    tx_gate.set_passive(False, source="control")
+    assert not state.exists()
+    assert tx_gate.snapshot()["survives_restart"] is False
+
+
+def test_without_a_state_file_an_arm_is_process_memory_only(tmp_path: Any) -> None:
+    """Nothing named a file (a CLI tool, a bare import): nothing is written,
+    and the status payload says the arm would not survive."""
+    tx_gate.configure_persistence(None)
+    tx_gate.set_passive(True, source="control", ttl_seconds=60)
+    assert tx_gate.snapshot()["survives_restart"] is False
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_ttl_arm_is_restored_with_the_ttl_that_was_left(tmp_path: Any) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+    tx_gate.set_passive(True, source="control", ttl_seconds=1800)
+    armed_at = json.loads(state.read_text())["armed_at"]
+
+    _forget_process_memory()
+    assert not tx_gate.is_passive()
+    now = time.monotonic()
+    assert tx_gate.restore_persisted(state, now_wall=armed_at + 600) == "restored"
+    assert tx_gate.is_passive()
+    snap = tx_gate.snapshot(now=now)
+    assert snap["source"] == "restored:control"
+    assert snap["ttl_remaining_seconds"] == pytest.approx(1200, abs=5)
+    # The file keeps the original arm: a second restart restores the same
+    # deadline, not a fresh 1800 s.
+    assert json.loads(state.read_text())["armed_at"] == armed_at
+    assert json.loads(state.read_text())["source"] == "control"
+
+
+def test_an_arm_that_expired_while_down_is_dropped_and_logged(
+    tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+    tx_gate.set_passive(True, source="mcp", ttl_seconds=60)
+    armed_at = json.loads(state.read_text())["armed_at"]
+
+    _forget_process_memory()
+    with caplog.at_level("WARNING", logger="src.collection.tx_gate"):
+        assert tx_gate.restore_persisted(state, now_wall=armed_at + 90) == "expired"
+    assert not tx_gate.is_passive()
+    assert not state.exists()
+    assert any("expired 30 s before this start" in r.getMessage() for r in caplog.records)
+
+
+def test_a_clock_that_stepped_back_cannot_lengthen_the_arm(tmp_path: Any) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+    tx_gate.set_passive(True, source="control", ttl_seconds=300)
+    armed_at = json.loads(state.read_text())["armed_at"]
+
+    _forget_process_memory()
+    now = time.monotonic()
+    assert tx_gate.restore_persisted(state, now_wall=armed_at - 3600) == "restored"
+    assert tx_gate.snapshot(now=now)["ttl_remaining_seconds"] <= 300
+
+
+def test_an_arm_without_a_ttl_stays_armed_across_a_restart(tmp_path: Any) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+    tx_gate.set_passive(True, source="control")
+
+    _forget_process_memory()
+    assert tx_gate.restore_persisted(state) == "restored"
+    assert tx_gate.is_passive()
+    assert tx_gate.snapshot()["ttl_remaining_seconds"] is None
+
+
+def test_ttl_expiry_removes_the_state_file(tmp_path: Any) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+    tx_gate.set_passive(True, source="control", ttl_seconds=10, now=100.0)
+    assert state.exists()
+    assert tx_gate.check_expiry(now=111.0)
+    assert not state.exists()
+
+
+@pytest.mark.parametrize(
+    ("content", "cause"),
+    [
+        ("{not json", "not JSON"),
+        (
+            json.dumps({"version": 99, "armed_at": 1.0, "ttl_seconds": 60, "source": "control"}),
+            "unknown state version 99",
+        ),
+        (
+            json.dumps({"version": tx_gate.PASSIVE_STATE_VERSION, "ttl_seconds": 60}),
+            "missing or malformed armed_at",
+        ),
+    ],
+    ids=["bad-json", "unknown-version", "missing-armed-at"],
+)
+def test_an_untrusted_state_file_fails_safe(
+    tmp_path: Any, caplog: pytest.LogCaptureFixture, content: str, cause: str
+) -> None:
+    """A state file that exists but cannot be trusted arms passive with no
+    TTL and keeps the file: failing open is the 2026-09-24 incident."""
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    state.write_text(content)
+    with caplog.at_level("ERROR", logger="src.collection.tx_gate"):
+        assert tx_gate.restore_persisted(state) == "untrusted"
+    assert tx_gate.is_passive()
+    snap = tx_gate.snapshot()
+    assert snap["source"] == tx_gate.UNTRUSTED_STATE_SOURCE
+    assert snap["ttl_remaining_seconds"] is None
+    assert snap["survives_restart"] is True
+    assert state.read_text() == content, "the evidence is kept, never silently deleted"
+    assert any(cause in r.getMessage() and r.levelname == "ERROR" for r in caplog.records)
+
+    # The operator's disarm is what clears it, file included.
+    tx_gate.set_passive(False, source="control")
+    assert not state.exists()
+
+
+def test_a_state_file_that_cannot_be_read_fails_safe(
+    tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    state.mkdir()  # read_text raises IsADirectoryError, an OSError
+    with caplog.at_level("ERROR", logger="src.collection.tx_gate"):
+        assert tx_gate.restore_persisted(state) == "untrusted"
+    assert tx_gate.is_passive()
+    assert tx_gate.snapshot()["source"] == tx_gate.UNTRUSTED_STATE_SOURCE
+    assert state.exists()
+    assert any("unreadable: IsADirectoryError" in r.getMessage() for r in caplog.records)
+
+
+def test_a_failed_write_does_not_claim_the_arm_survives(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``survives_restart`` is set by a successful write only: a swallowed
+    OSError must not let ``restart_canary.sh`` promise a restore."""
+    state = tmp_path / tx_gate.PASSIVE_STATE_FILENAME
+    tx_gate.restore_persisted(state)
+
+    def _disk_full(*_a: Any, **_k: Any) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(tx_gate, "atomic_write_text", _disk_full)
+    tx_gate.set_passive(True, source="control", ttl_seconds=600)
+    assert tx_gate.is_passive()
+    assert tx_gate.snapshot()["survives_restart"] is False
+    assert not state.exists()
+
+    monkeypatch.undo()
+    tx_gate.set_passive(True, source="control", ttl_seconds=600)
+    assert tx_gate.snapshot()["survives_restart"] is True

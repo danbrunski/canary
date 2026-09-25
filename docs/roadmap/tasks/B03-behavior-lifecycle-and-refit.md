@@ -262,12 +262,33 @@ Follow [B00](B00-behavior-models-README.md).
     idle):* `/models/behavior` shows all 12 models `diagnostic_only`, each with
     its named reason. The dashboard renders off-map and ineligible rows as
     "off-map — … deviation unavailable" or with the reason, not the `ok` chip.
-    **Remaining (desk):** the raw `/models/behavior/live` and MCP payload still
-    report `severity: "ok"` beside `deviation: null` on off-map, stale,
-    mode-excluded and mode-mismatch rows, so an API consumer can read them as
-    healthy. Make the severity `null` or `unavailable` whenever there is no
-    deviation, and follow it through the dashboard's `BehaviorLiveModel` type. The pre-refresh set is recoverable from git
-    (`2971d79^`) and the laptop's `_prior/2026-09-24T024700`.
+    The pre-refresh set is recoverable from git (`2971d79^`) and the laptop's
+    `_prior/2026-09-24T024700`.
+  - *Desk remainder done 2026-09-25:* `/models/behavior/live` and the MCP
+    `get_behavior_live` payload reported `severity: "ok"` beside
+    `deviation: null` on off-map, stale, mode-excluded and mode-mismatch rows.
+    `BehaviorObservation` now nulls `severity` at construction whenever the
+    tick was not scored (no deviation, or out of mode), and a new `not_scored`
+    field names which kind (`off_map`, `actual_stale`, `actual_missing`,
+    `operating_mode_excluded`, `operating_mode_mismatch`, the eligibility
+    reason's category, or `no_deviation`); the trail points carry both. The
+    dashboard's `BehaviorLiveModel`/`BehaviorLivePoint` types take
+    `severity: BehaviorSeverity | null` and `not_scored`; the card treats a
+    null severity as "no prediction — <reason>" (a stale actual used to show the
+    ok chip, because it has an expected), and canvas marks draw unscored in
+    `fg-faint` (`severityToken`/`severityText`). The MCP tool description and
+    `docs/mcp-server.md` say a null severity is not healthy; the tool snapshot
+    was regenerated.
+    Tests: `tests/test_behavior_live.py::test_an_unscored_row_has_null_severity_and_says_which_kind`
+    (off-map, stale, missing through `_observe_behavior`),
+    `::test_observation_normalises_severity_at_construction`,
+    `::test_a_scored_row_keeps_its_severity_and_no_not_scored`,
+    `::test_observe_behavior_mode_gated_does_not_speak`;
+    `BehaviorModelsPanel.test.ts` "never shows an ok chip for an unscored tick
+    that still has an expected (B03.9)"; `pnpm typecheck`, `pnpm lint`,
+    `pnpm format:check` green.
+  - **Remaining:** pull the build on the Pi and confirm a live off-map row reads
+    `severity: null` with its `not_scored` kind.
 - [~] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
   the previous compatible artifact set and its evidence; exercise existing
   rollback/loading behavior locally. Update D03 only for overlapping work

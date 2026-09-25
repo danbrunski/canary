@@ -59,7 +59,7 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
         _session_dir(config, args.session),
         calibration=context.calibration,
         measured_spec=args.measured,
-        min_load=args.min_load,
+        min_load=context.resolve_min_load(args.min_load),
         cell_agg=args.cell_agg,
         revisions=context.registry,
         afr_stoich=context.afr_stoich,
@@ -184,7 +184,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Measured-AFR source. The ECM lambda and the A/F voltage paths disagree "
         "by ~3.8%% at WOT, so this is explicit rather than defaulted silently.",
     )
-    de.add_argument("--min-load", type=float, default=85.0)
+    de.add_argument(
+        "--min-load",
+        type=float,
+        default=None,
+        help="Engine-load floor, %%. Default: the profile's mode01_wot.load_floor_pct.",
+    )
     de.add_argument("--cell-agg", choices=("last", "mean"), default="last")
     de.set_defaults(func=_run_delivery_error)
 

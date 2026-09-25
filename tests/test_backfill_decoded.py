@@ -7,7 +7,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.decode.bindings import Signal
+from src.decode.bindings import Bindings, Signal
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 from tools import backfill_decoded as tool
@@ -94,3 +94,44 @@ def test_loader_sees_backfilled_rows_without_double_decode(tmp_path: Path) -> No
     out = decode_can_rows(frame, Bindings(schema_version=1, signals=[_RPM_SIGNAL]))
     rpm_rows = out[(out["source"] == "decoded") & (out["channel"] == "ECM_RPM")]
     assert len(rpm_rows) == 10  # stored rows only — nothing recomputed on top
+
+
+def test_backfill_stores_a_sentinel_as_the_live_decoders_state_row() -> None:
+    """A04.6: the backfilled rows are the ones FrameDecoder writes at ingest —
+    the sentinel word a ``_SENTINEL`` state row, never a number."""
+    from src.decode.frame_decoder import FrameDecoder
+
+    tyre = Signal(
+        name="TYRE_A",
+        module="BCM",
+        can_id=0x385,
+        byte_start=2,
+        byte_length=1,
+        scale=0.25,
+        unit="psi",
+        confidence="hypothesized",
+        sentinel_raw=0,
+        sentinel_meaning="wheel sensor not transmitting",
+    )
+    records = [
+        TelemetryRecord.can(1000.0, 0x385, bytes(8)),
+        TelemetryRecord.can(1000.1, 0x385, bytes([0, 0, 148, 0, 0, 0, 0, 0])),
+    ]
+    can_rows = pd.DataFrame(
+        {
+            "timestamp": [r.timestamp for r in records],
+            "source": "can",
+            "channel": [r.channel for r in records],
+            "payload": [r.payload for r in records],
+        }
+    )
+    out = tool.decode_session_frame(can_rows, [tyre])
+    stored = {
+        (row.channel, row.value_text if isinstance(row.value_text, str) else row.value_number)
+        for row in out.itertuples()
+    }
+    decoder = FrameDecoder.from_bindings(Bindings(schema_version=1, signals=[tyre]))
+    live = {(d.channel, d.value) for r in records for d in decoder.decode(r)}
+    assert (
+        stored == live == {("TYRE_A_SENTINEL", "wheel sensor not transmitting"), ("TYRE_A", 148.0)}
+    )

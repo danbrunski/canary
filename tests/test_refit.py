@@ -56,7 +56,7 @@ def _warmup_frame(n: int = 400, seed: int = 0) -> pd.DataFrame:
 
 
 def test_default_recipes_have_unique_names() -> None:
-    names = [r.name for r in default_recipes()]
+    names = [r.name for r in default_recipes("nissan-xterra-2008")]
     assert len(names) == len(set(names)), f"duplicate recipe names: {names}"
 
 
@@ -71,7 +71,7 @@ def test_default_recipe_axes_use_one_synchronous_service() -> None:
     2026-05) are in the catalog.
     """
     allowed_output_prefixes = ("obd:", "derived:", "did:")
-    for recipe in default_recipes():
+    for recipe in default_recipes("nissan-xterra-2008"):
         axes = (
             [recipe.x_column]
             if isinstance(recipe, Surface1DRecipe)

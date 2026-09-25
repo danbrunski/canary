@@ -54,19 +54,38 @@ shutdown all treat it as "OBD is stale by design"), so they need no change.
 A foreign claim outranks our own; claims may carry a TTL, and
 :func:`check_expiry` releases one whose TTL has passed. Broadcast CAN capture
 is listen-only and never affected.
+
+**An armed passive survives a daemon restart (D03.30).** On 2026-09-24 the
+operator had a scan tool connected with passive armed (TTL 1800 s); a deploy
+restart came up with passive off and CANary sent Mode 01 for ~13 s before it
+was re-armed by hand. The switch was process memory only. Now, once
+:func:`restore_persisted` has named a state file (``src.main`` does it before
+the startup VIN probe transmits; ``run_daemon`` does it before any collector
+starts), every arm is written there — wall-clock ``armed_at``, ``ttl_seconds``
+and ``source`` — and every disarm or TTL expiry removes it. The next process
+restores an arm with TTL remaining before it transmits anything; one that
+expired while the daemon was down is dropped, and the log says which. ECM
+session *claims* are not persisted: they describe a live K-line exchange that
+the next process re-detects.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
 import time
-from typing import Any, Literal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
 
 import can
 
+from src.atomic_write import atomic_write_text
 from src.collection import capture_generation, capture_lifetime
+
+if TYPE_CHECKING:
+    from src.config import CanaryConfig
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +107,36 @@ _source: str = "env" if _passive else "default"
 #: rather than wall-clock so a system clock step (NTP sync, manual set)
 #: can't extend or shorten an already-armed window.
 _expires_at: float | None = None
+
+#: Where an armed passive is persisted so it survives a restart (D03.30), or
+#: ``None`` before :func:`restore_persisted` names one (a bare import, a CLI
+#: tool, a unit test): then arming stays process memory only, as it always was.
+_state_path: Path | None = None
+#: Whether the state file on disk describes the current arm — set only by a
+#: successful write (or a restore from a file that is still there), cleared
+#: by a removal or a failed write. ``survives_restart`` reads this, never
+#: merely "a path is configured": a swallowed write error must not let
+#: ``restart_canary.sh`` promise the arm will be restored.
+_persisted: bool = False
+#: Schema version of the persisted state file.
+PASSIVE_STATE_VERSION = 1
+#: File name of the persisted state, beside the daemon's other control state.
+PASSIVE_STATE_FILENAME = "passive_state.json"
+
+
+def passive_state_path(config: CanaryConfig) -> Path:
+    """Where the daemon persists an armed passive: the control-state
+    directory (``trip_state``'s), beside the trip odometer.
+
+    ``src.main`` asks with the *unscoped* config, before the VIN probe has
+    picked a profile, because the probe itself transmits; so on a real start
+    the file is not per-vehicle, which is right — passive describes the bus
+    and whatever else is plugged into it, not the vehicle. It passes that
+    path to ``run_daemon``; a caller that does not (tests, the validation
+    harness) gets this function over its own config.
+    """
+    return config.daemon.trip_state.parent / PASSIVE_STATE_FILENAME
+
 
 EcmSessionHolder = Literal["kline", "foreign"]
 EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign"]
@@ -173,12 +222,44 @@ def reset_ecm_session_claims(*, now: float | None = None) -> None:
         release_ecm_session(holder, now=now)
 
 
+def _persist_locked(enabled: bool, source: str, ttl_seconds: float | None) -> None:
+    """Write (armed) or remove (disarmed) the state file. Caller holds ``_lock``.
+
+    Never raises: a state file that cannot be written must not stop the
+    operator arming passive — the arm itself holds in memory, and the error
+    is logged so a restart that loses it is explained.
+    """
+    global _persisted
+    path = _state_path
+    if path is None:
+        _persisted = False
+        return
+    try:
+        if enabled:
+            payload = {
+                "version": PASSIVE_STATE_VERSION,
+                "enabled": True,
+                "armed_at": time.time(),
+                "ttl_seconds": ttl_seconds,
+                "source": source,
+            }
+            atomic_write_text(path, json.dumps(payload, sort_keys=True) + "\n", mkdir=True)
+            _persisted = True
+        else:
+            _persisted = False
+            path.unlink(missing_ok=True)
+    except OSError:
+        _persisted = False
+        log.exception("could not persist passive state to %s; it will not survive a restart", path)
+
+
 def set_passive(
     enabled: bool,
     *,
     source: str = "control",
     ttl_seconds: float | None = None,
     now: float | None = None,
+    persist: bool = True,
 ) -> bool:
     """Enable/disable passive mode. Returns the *previous* state.
 
@@ -190,6 +271,11 @@ def set_passive(
     off; omit for the old "stays armed until manually disarmed" behavior.
     Disarming (``enabled=False``) always clears any pending TTL. ``now``
     overrides ``time.monotonic()`` (tests).
+
+    Once a state file is configured (:func:`restore_persisted`), an arm is
+    written to it and a disarm removes it, so the switch survives a daemon
+    restart (D03.30). ``persist=False`` is for the restore itself, which must
+    keep the original ``armed_at``/``source`` rather than restamp them.
     """
     global _passive, _source, _expires_at
     effective_now = time.monotonic() if now is None else now
@@ -198,6 +284,8 @@ def set_passive(
         _passive = bool(enabled)
         _source = source
         _expires_at = effective_now + ttl_seconds if enabled and ttl_seconds is not None else None
+        if persist:
+            _persist_locked(bool(enabled), source, ttl_seconds)
     if previous != bool(enabled):
         # Polling stops or resumes: a new capture generation (C02.8), and a
         # pause window in the capture-lifetime ledger (C03.4).
@@ -235,8 +323,142 @@ def check_expiry(*, now: float | None = None) -> bool:
             return bool(expired_claims)
         _passive = False
         _expires_at = None
+        _persist_locked(False, "ttl-expired", None)
     log.warning("passive mode TTL expired; auto-disarmed", extra={"passive": False})
     return True
+
+
+def state_path() -> Path | None:
+    """The configured persistence file, or ``None`` (process memory only)."""
+    with _lock:
+        return _state_path
+
+
+def configure_persistence(path: Path | None) -> None:
+    """Name the state file without restoring from it (``None`` switches
+    persistence off — test reset). :func:`restore_persisted` is what the
+    daemon calls; this exists for the reset and for tests."""
+    global _state_path, _persisted
+    with _lock:
+        _state_path = None if path is None else Path(path)
+        _persisted = False
+
+
+#: Source recorded when a state file exists but cannot be trusted (D03.30).
+UNTRUSTED_STATE_SOURCE = "restored:untrusted-state"
+
+
+def _arm_fail_safe(path: Path, cause: str) -> str:
+    """A state file exists but cannot be trusted: arm passive with no TTL.
+
+    Failing open here is the 2026-09-24 incident again — the daemon comes up
+    transmitting beside a tool the operator armed passive for. The file is
+    kept (a disarm through ``/control/passive`` removes it), so every restart
+    until then fails safe the same way, and the log names the cause.
+    """
+    global _persisted
+    set_passive(True, source=UNTRUSTED_STATE_SOURCE, persist=False)
+    with _lock:
+        # The file stays, and the next process arms from it again.
+        _persisted = True
+    log.error(
+        "persisted passive state %s cannot be trusted (%s); passive ARMED with no TTL "
+        "until disarmed through /control/passive",
+        path,
+        cause,
+        extra={"passive": True, "source": UNTRUSTED_STATE_SOURCE, "cause": cause},
+    )
+    return "untrusted"
+
+
+def restore_persisted(path: Path, *, now_wall: float | None = None) -> str:
+    """Adopt ``path`` as the state file and restore an arm persisted there.
+
+    Must run before anything transmits: ``src.main`` calls it before the
+    startup VIN probe, ``run_daemon`` before any collector starts. Returns
+    what happened, for the caller's log and the tests:
+
+    * ``"absent"`` — no persisted arm; passive is whatever it already was;
+    * ``"restored"`` — armed again with the TTL that was left (none if the
+      arm had none), source ``restored:<original source>``;
+    * ``"expired"`` — a readable file says the TTL ran out while the daemon
+      was down; the file is removed and passive stays off;
+    * ``"untrusted"`` — a file exists but cannot be read, is not JSON, has an
+      unknown version or lacks ``armed_at``: **fails safe**, armed with no
+      TTL (:data:`UNTRUSTED_STATE_SOURCE`), the file kept, an ERROR logged.
+      Nothing says the other tool has left the bus.
+
+    Wall clock, because monotonic time does not survive a process. A clock
+    that stepped *backwards* across the restart cannot lengthen the arm past
+    its original TTL (the remainder is clamped to it); one that stepped
+    forwards shortens it, which is the one direction this cannot detect.
+    Idempotent: ``src.main`` and ``run_daemon`` both call it with the same
+    path in production, and the second call re-arms to the same deadline.
+    """
+    global _persisted
+    configure_persistence(path)
+    wall = time.time() if now_wall is None else now_wall
+    try:
+        text = Path(path).read_text()
+    except FileNotFoundError:
+        return "absent"
+    except OSError as exc:
+        return _arm_fail_safe(path, f"unreadable: {type(exc).__name__}: {exc}")
+    try:
+        payload = json.loads(text)
+    except ValueError as exc:
+        return _arm_fail_safe(path, f"not JSON: {exc}")
+    if not isinstance(payload, dict) or payload.get("version") != PASSIVE_STATE_VERSION:
+        version = payload.get("version") if isinstance(payload, dict) else None
+        return _arm_fail_safe(path, f"unknown state version {version!r}")
+    try:
+        armed_at = float(payload["armed_at"])
+        raw_ttl = payload.get("ttl_seconds")
+        ttl = None if raw_ttl is None else float(raw_ttl)
+    except (ValueError, KeyError, TypeError) as exc:
+        return _arm_fail_safe(path, f"missing or malformed armed_at/ttl_seconds: {exc!r}")
+    source = str(payload.get("source") or "unknown")
+    restored_source = source if source.startswith("restored:") else f"restored:{source}"
+    with _lock:
+        armed_by_env = _passive and _source == "env"
+    if armed_by_env:
+        # ``CANARY_PASSIVE=1`` armed this process with no TTL; a persisted
+        # TTL must not shorten that. The file stays for the next start.
+        log.info("passive already armed by %s; persisted arm by %s not applied", "env", source)
+        return "restored"
+    if ttl is None:
+        set_passive(True, source=restored_source, persist=False)
+        with _lock:
+            _persisted = True
+        log.warning(
+            "passive mode RESTORED after restart (armed by %s with no TTL; stays armed until "
+            "disarmed)",
+            source,
+            extra={"passive": True, "source": restored_source, "ttl_seconds": None},
+        )
+        return "restored"
+    remaining = min(ttl, armed_at + ttl - wall)
+    if remaining <= 0:
+        with _lock:
+            _persist_locked(False, "expired-at-boot", None)
+        log.warning(
+            "persisted passive arm by %s expired %.0f s before this start; passive stays off",
+            source,
+            -remaining,
+            extra={"passive": False, "source": source, "expired_seconds_ago": round(-remaining, 1)},
+        )
+        return "expired"
+    set_passive(True, source=restored_source, ttl_seconds=remaining, persist=False)
+    with _lock:
+        _persisted = True
+    log.warning(
+        "passive mode RESTORED after restart (armed by %s, %.0f s of its %.0f s TTL left)",
+        source,
+        remaining,
+        ttl,
+        extra={"passive": True, "source": restored_source, "ttl_seconds": round(remaining, 1)},
+    )
+    return "restored"
 
 
 def suppressed_count() -> int:
@@ -274,6 +496,9 @@ def snapshot(*, now: float | None = None) -> dict[str, Any]:
                 for holder, deadline in sorted(_claims.items())
             },
             "tx_suppressed": _passive or bool(_claims),
+            # D03.30: whether an arm is written where the next process will
+            # restore it. False while armed means a restart drops it.
+            "survives_restart": _passive and _persisted,
         }
 
 
@@ -308,16 +533,23 @@ __all__ = [
     "PASSIVE_ENV_VAR",
     "EcmSessionHolder",
     "EcmSessionOwner",
+    "PASSIVE_STATE_FILENAME",
+    "PASSIVE_STATE_VERSION",
+    "UNTRUSTED_STATE_SOURCE",
     "check_expiry",
     "claim_ecm_session",
+    "configure_persistence",
+    "passive_state_path",
     "ecm_session_owner",
     "is_passive",
     "passive_armed",
     "release_ecm_session",
     "reset_ecm_session_claims",
     "reset_suppressed",
+    "restore_persisted",
     "send",
     "set_passive",
     "snapshot",
+    "state_path",
     "suppressed_count",
 ]

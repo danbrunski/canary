@@ -59,3 +59,26 @@ def test_a_vehicle_without_mode01_wot_says_so(tmp_path: Path) -> None:
 def test_rpm_bands_must_ascend() -> None:
     with pytest.raises(ValidationError, match="ascending"):
         LoadWotCriterion(load_floor_pct=85.0, rpm_floor=2500.0, rpm_bands=(3000.0, 2500.0))
+
+
+def test_min_load_defaults_to_the_profiles_wot_floor() -> None:
+    """Operator decision 2026-09-25: the MCP/CLI ``min_load`` default is the
+    profile's ``mode01_wot.load_floor_pct``, not a restated 85."""
+    import inspect
+
+    from scripts import tuning_report
+    from src.analysis.tuning_context import TuningContext
+    from src.mcp_server.tools import tuning_analysis
+
+    xterra = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
+    context = TuningContext(afr_stoich=14.7, providers=xterra)
+    assert xterra.mode01_wot is not None
+    assert context.resolve_min_load(None) == xterra.mode01_wot.load_floor_pct == 85.0
+    assert context.resolve_min_load(70.0) == 70.0
+    with pytest.raises(ValueError, match="mode01_wot"):
+        TuningContext(afr_stoich=14.7).resolve_min_load(None)
+
+    signature = inspect.signature(tuning_analysis.get_delivery_error)
+    assert signature.parameters["min_load"].default is None
+    args = tuning_report.build_parser().parse_args(["delivery-error", "--session", "x"])
+    assert args.min_load is None

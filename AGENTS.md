@@ -97,6 +97,9 @@ derived classification of what the daemon is actually seeing right now:
 - `no_data` — neither bus fresh. Pi probably disconnected.
 - `replay` — runtime replay is active; the "OBD"/"CAN" you see is
   re-emitted from a stored session.
+- `passive` — CANary is not transmitting (passive armed, or another tester
+  holds the ECM session), so stale OBD means "not asking", not "engine off";
+  read `can_freshness_seconds`. `passive: true` rides on every verdict.
 - `unknown` — the rule table didn't classify it cleanly; trust the raw
   fields.
 

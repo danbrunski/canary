@@ -512,3 +512,57 @@ def test_collect_stats_implausible_skipped_when_no_scaling(tmp_path: Path):
     s = stats["UNSCALED"]
     assert s.n_samples == 1
     assert s.implausible_samples == 0  # can't check without decoded value
+
+
+# ---------------------------------------------------------------------------
+# A04.6 — sentinels on broadcast bindings
+# ---------------------------------------------------------------------------
+
+
+def _tyre(**extra: object) -> dict[str, object]:
+    return {
+        "name": "TYRE_A",
+        "module": "BCM",
+        "can_id": 0x385,
+        "byte_start": 2,
+        "byte_length": 1,
+        "scale": 0.25,
+        "unit": "psi",
+        "confidence": "hypothesized",
+        **extra,
+    }
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"sentinel_raw": 0},
+        {"sentinel_meaning": "asleep"},
+        {"sentinel_raw": 0, "sentinel_meaning": "  "},
+        {"sentinel_raw": 256, "sentinel_meaning": "cannot occur in one byte"},
+        {"sentinel_raw": -1, "sentinel_meaning": "cannot occur unsigned"},
+    ],
+)
+def test_a_half_declared_or_impossible_sentinel_is_refused(extra: dict[str, object]) -> None:
+    from pydantic import ValidationError
+
+    from src.decode.bindings import Signal
+
+    with pytest.raises(ValidationError, match="sentinel"):
+        Signal.model_validate(_tyre(**extra))
+
+
+def test_a_sentinel_scales_to_nothing_everywhere() -> None:
+    import pandas as pd
+
+    from src.decode.bindings import Bindings, Signal, apply_scaling
+    from src.decode.engineering import physical_series, physical_value
+
+    signal = Signal.model_validate(_tyre(sentinel_raw=0, sentinel_meaning="asleep"))
+    catalog = Bindings(schema_version=1, signals=[signal])
+    assert apply_scaling(signal, 0) is None
+    assert apply_scaling(signal, 148) == 37.0
+    assert physical_value(0.0, "decoded:TYRE_A", catalog) is None
+    assert physical_value(148.0, "decoded:TYRE_A", catalog) == 37.0
+    series = physical_series(pd.Series([0.0, 148.0]), "decoded:TYRE_A", catalog)
+    assert series.isna().tolist() == [True, False] and series.iloc[1] == 37.0

@@ -25,11 +25,17 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
+from src.decode.behavior_eligibility import OPERATING_MODE_MISMATCH
+
 #: Rolling trail length. ~4 min at 1 Hz live-inference cadence (the default
 #: ``1 / preprocessing.resample_hz``); higher resample rates shorten the
 #: wall-clock window but keep the payload bounded. Plenty for the Curve
 #: trail + the per-card Δ sparkline without bloating the 2 s poll.
 TRAIL_MAXLEN = 240
+
+#: ``not_scored`` for a row that has no deviation and no named reason — an
+#: older grader, or a model with nothing to say. Never reported as ``ok``.
+NO_DEVIATION = "no_deviation"
 
 
 @dataclass(frozen=True)
@@ -50,7 +56,14 @@ class BehaviorObservation:
     actual: float | None
     expected: float | None
     deviation: float | None
-    severity: str  # "ok" | "warning" | "critical"
+    #: ``"ok"`` | ``"warning"`` | ``"critical"`` for a scored tick, and
+    #: ``None`` whenever the tick was not scored (B03.9): no deviation, or the
+    #: model's operating mode is not the current one. The grader returns
+    #: ``"ok"`` beside a missing deviation for API compatibility; that is
+    #: normalised away here, at construction, so no serialiser can report an
+    #: unscored row as healthy. :attr:`not_scored` says which kind of
+    #: unscored it is.
+    severity: str | None
     mode_match: bool  # model.operating_mode is None OR == current mode
     #: B01.4 — why the model produced no deviation this tick (``None`` when
     #: it did): an unmet eligibility condition, ``off_map``, or a
@@ -67,6 +80,29 @@ class BehaviorObservation:
     permitted_uses: tuple[str, ...] = ("alert", "display", "learned_feature")
     artifact_version: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.not_scored is not None:
+            object.__setattr__(self, "severity", None)
+
+    @property
+    def not_scored(self) -> str | None:
+        """Which kind of not-scored this tick is, or ``None`` when it was scored.
+
+        The category of the tick's own reason with its detail stripped
+        (``off_map``, ``actual_stale``, ``actual_missing``,
+        ``operating_mode_excluded``, ``operating_mode_mismatch``,
+        ``rate_exceeded``, ...); ``reason`` keeps the detail. A row without a
+        deviation and without a named reason is ``no_deviation`` rather than
+        a silent healthy one.
+        """
+        if not self.mode_match:
+            return OPERATING_MODE_MISMATCH
+        if self.reason is not None:
+            return self.reason.split(":", 1)[0]
+        if self.deviation is None:
+            return NO_DEVIATION
+        return None
+
     @property
     def abstain_reason(self) -> str | None:
         """Why this tick raised no trusted verdict, or ``None`` if it could have.
@@ -76,7 +112,7 @@ class BehaviorObservation:
         alert abstains because of its lifecycle.
         """
         if not self.mode_match:
-            return "operating_mode_mismatch"
+            return OPERATING_MODE_MISMATCH
         if self.reason is not None:
             return self.reason
         if "alert" not in self.permitted_uses:
@@ -125,6 +161,7 @@ class BehaviorLiveState:
                     "expected": obs.expected,
                     "deviation": obs.deviation,
                     "severity": obs.severity,
+                    "not_scored": obs.not_scored,
                     "reason": obs.reason,
                 }
             )
@@ -151,6 +188,7 @@ class BehaviorLiveState:
                 "expected": obs.expected,
                 "deviation": obs.deviation,
                 "severity": obs.severity,
+                "not_scored": obs.not_scored,
                 "mode_match": obs.mode_match,
                 "reason": obs.reason,
                 "status": obs.status,

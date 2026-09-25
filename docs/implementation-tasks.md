@@ -1175,7 +1175,7 @@ benchtop**. Hardware runway comes from a Geekworm X1202 UPS HAT (4×18650);
 the *when-to-shut-down* decision is derived entirely from the CAN/OBD bus
 via the existing `vehicle_state` classifier. Motivated by the 2026-05-24
 under-voltage incident (see `power_status()` / `vcgencmd get_throttled` in
-`src/models/health.py`); this is the software realisation of the
+`src/daemon/health.py`, then `src/models/health.py`); this is the software realisation of the
 graceful-shutdown half of 5.21 and supersedes that task's
 buck-converter-from-ACC approach.
 

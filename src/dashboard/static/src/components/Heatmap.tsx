@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { SEVERITY_TOKEN, binIndex } from "../lib/behaviorOverlay";
+import { binIndex, severityToken } from "../lib/behaviorOverlay";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion } from "../lib/chartTheme";
 import { sequential } from "../lib/colorScale";
@@ -12,7 +12,7 @@ import type { BehaviorSeverity, GridCell } from "../types";
 export interface HeatmapLive {
   x: number | null;
   y: number | null;
-  severity: BehaviorSeverity;
+  severity: BehaviorSeverity | null;
 }
 
 interface HeatmapProps {
@@ -106,10 +106,10 @@ export function Heatmap({
       if (ri !== null && ci !== null) {
         const x = ci * cellW;
         const y = (rows - 1 - ri) * cellH;
-        ctx.strokeStyle = cssColor(SEVERITY_TOKEN[live.severity]);
+        ctx.strokeStyle = cssColor(severityToken(live.severity));
         ctx.lineWidth = 2;
         ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
-        ctx.fillStyle = cssColor(SEVERITY_TOKEN[live.severity]);
+        ctx.fillStyle = cssColor(severityToken(live.severity));
         ctx.beginPath();
         ctx.arc(x + cellW / 2, y + cellH / 2, 3, 0, Math.PI * 2);
         ctx.fill();

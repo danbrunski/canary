@@ -42,7 +42,7 @@ from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import Signal, load_bindings
-from src.preprocessing.decode import decode_signal_column
+from src.preprocessing.decode import decode_sentinel_mask, decode_signal_column, sentinel_frame
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # Same Any-alias pattern as src/storage/parquet_writer.py — pyarrow ships
@@ -150,6 +150,13 @@ def decode_session_frame(can_rows: pd.DataFrame, signals: list[Signal]) -> pd.Da
                 }
             )
             out_frames.append(frame[frame["value_number"].notna()])
+            sentinel = decode_sentinel_mask(payloads, sig)
+            if sentinel.any():
+                # A04.6: the declared sentinel word is stored as the
+                # decoded:<NAME>_SENTINEL state row the live FrameDecoder writes.
+                out_frames.append(
+                    sentinel_frame(group["timestamp"].to_numpy()[sentinel], sig, meta)
+                )
 
     if not out_frames:
         return pd.DataFrame()

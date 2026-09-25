@@ -45,6 +45,7 @@ from pydantic import (
     model_validator,
 )
 
+from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
 
@@ -451,7 +452,7 @@ class EngineStateRequirement(_Strict):
 
     state: Literal["engine_running", "any"]
     rpm_channel: str = "obd:RPM"
-    min_running_rpm: float = Field(default=400.0, gt=0)
+    min_running_rpm: float = Field(default=ENGINE_RUNNING_MIN_RPM, gt=0)
 
 
 class FuelControlRequirement(_Strict):
@@ -487,7 +488,7 @@ class ColdStartRequirement(_Strict):
     rpm_channel: str = "obd:RPM"
     runtime_channel: str = "obd:RUN_TIME"
     coolant_channel: str = "obd:COOLANT_TEMP"
-    min_running_rpm: float = Field(default=400.0, gt=0)
+    min_running_rpm: float = Field(default=ENGINE_RUNNING_MIN_RPM, gt=0)
     max_start_runtime_s: float = Field(default=60.0, gt=0)
     max_initial_coolant_c: float
 

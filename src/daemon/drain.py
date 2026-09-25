@@ -98,6 +98,45 @@ def _resolved_live_source(
     return ready.result()
 
 
+class PipelineBarrier:
+    """Wait until every record already in the pipeline has been handled (D02.9).
+
+    A replay boundary switches the writer's output directory and resets the
+    live in-memory state. Records still queued at that instant belong to the
+    side they were produced on: live records queued before a replay starts go
+    to the live session, the replay's own tail goes to ``_replay-*`` before the
+    writer switches back. ``settle`` joins the ingest queue and then every
+    sink queue (the fanout and every sink call ``task_done`` per record, and
+    the storage sink only after the writer accepted the batch).
+
+    ``run_daemon`` constructs it over the ingest queue and hands it to
+    :func:`drain_queue_with_broadcast`, which attaches its live sink list (a
+    reference, so a sink added later is joined too).
+    """
+
+    def __init__(self, ingest_queue: asyncio.Queue[TelemetryRecord]) -> None:
+        self._ingest = ingest_queue
+        self._sinks: Sequence[TelemetrySink] = ()
+
+    def attach(self, sinks: Sequence[TelemetrySink]) -> None:
+        self._sinks = sinks
+
+    async def _join_all(self) -> None:
+        await self._ingest.join()
+        for sink in list(self._sinks):
+            await sink.queue.join()
+
+    async def settle(self, timeout: float) -> bool:
+        """Join the pipeline, bounded. ``False`` (and a warning) on timeout —
+        a wedged sink must not hold a replay boundary open forever."""
+        try:
+            await asyncio.wait_for(self._join_all(), timeout=timeout)
+        except TimeoutError:
+            log.warning("telemetry pipeline did not settle within %.1f s", timeout)
+            return False
+        return True
+
+
 async def run_telemetry_fanout(
     ingest_queue: asyncio.Queue[TelemetryRecord],
     sinks: Sequence[TelemetrySink],
@@ -648,6 +687,7 @@ async def drain_queue_with_broadcast(
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
     storage_decode: Callable[[TelemetryRecord], Sequence[TelemetryRecord]] | None = None,
+    barrier: PipelineBarrier | None = None,
 ) -> None:
     """Run collector fanout plus independent storage/live/dashboard sinks.
 
@@ -680,6 +720,8 @@ async def drain_queue_with_broadcast(
     sink_queue_size = _sink_queue_size(queue)
     sinks: list[TelemetrySink] = []
     sink_tasks: list[asyncio.Task[None]] = []
+    if barrier is not None:
+        barrier.attach(sinks)
     #: What every sink loop takes besides its queue, target and stop event.
     common: dict[str, Any] = {
         "poll_interval": poll_interval,
@@ -992,6 +1034,7 @@ def _note_error(health_monitor: HealthMonitor | None, name: str, exc: BaseExcept
 
 
 __all__ = [
+    "PipelineBarrier",
     "TelemetrySink",
     "accepts_source",
     "drain_queue_with_broadcast",

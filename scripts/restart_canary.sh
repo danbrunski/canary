@@ -11,6 +11,9 @@ set -euo pipefail
 # day. Every agent restarting the daemon goes through here so that cannot
 # happen by accident.
 #
+# An armed passive mode is named in the output (it survives the restart on a
+# daemon that persists it, D03.30), never refused.
+#
 #   scripts/restart_canary.sh            refuse if a capture is active
 #   scripts/restart_canary.sh --check    check whether a restart is safe
 #   scripts/restart_canary.sh --force    restart anyway (says what it killed)
@@ -29,15 +32,53 @@ for arg in "$@"; do
   esac
 done
 
-active="$(curl -fsS --max-time 5 "${STATUS_URL}" 2>/dev/null | python3 -c '
+status_json="$(curl -fsS --max-time 5 "${STATUS_URL}" 2>/dev/null || true)"
+
+# One line per fact: `capture<TAB>name<TAB>session_dir` for an active capture,
+# `passive<TAB>source<TAB>ttl_left<TAB>survives_restart` for an armed passive.
+facts="$(printf '%s' "${status_json}" | python3 -c '
 import json, sys
 try:
-    profile = (json.load(sys.stdin).get("capture_profile") or {})
+    status = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
+profile = status.get("capture_profile") or {}
 if profile.get("active"):
-    print(profile.get("name") or "unknown", profile.get("session_dir") or "", sep="\t")
+    print("capture", profile.get("name") or "unknown", profile.get("session_dir") or "", sep="\t")
+passive = status.get("passive") or {}
+if passive.get("enabled"):
+    ttl = passive.get("ttl_remaining_seconds")
+    print(
+        "passive",
+        passive.get("source") or "unknown",
+        "none" if ttl is None else f"{float(ttl):.0f}",
+        "yes" if passive.get("survives_restart") else "no",
+        sep="\t",
+    )
 ' || true)"
+
+active="$(printf '%s\n' "${facts}" | sed -n 's/^capture\t//p')"
+passive="$(printf '%s\n' "${facts}" | sed -n 's/^passive\t//p')"
+
+# Passive mode (D03.30) is named, never refused: an armed passive is the
+# operator's scan tool or reflash tool on the bus, and a restart that brings
+# CANary back transmitting can collide with it. A daemon that persists the arm
+# restores it before its first frame; an older one does not.
+if [[ -n "${passive}" ]]; then
+  IFS=$'\t' read -r p_source p_ttl p_persisted <<<"${passive}"
+  if [[ "${p_ttl}" == "none" ]]; then
+    p_left="no TTL"
+  else
+    p_left="${p_ttl} s of TTL left"
+  fi
+  if [[ "${p_persisted}" == "yes" ]]; then
+    echo "note: passive mode is armed (source ${p_source}, ${p_left}); it is persisted and the restarted daemon restores it before transmitting."
+  else
+    echo "WARNING: passive mode is armed (source ${p_source}, ${p_left}) but this daemon does not persist it:" >&2
+    echo "the restarted daemon comes up TRANSMITTING. Re-arm it immediately (POST /control/passive)" >&2
+    echo "or wait until the other tool is off the bus." >&2
+  fi
+fi
 
 if [[ -n "${active}" ]]; then
   name="${active%%$'\t'*}"

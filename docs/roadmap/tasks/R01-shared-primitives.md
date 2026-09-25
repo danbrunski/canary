@@ -20,7 +20,7 @@ named.
 
 ---
 
-- [~] **R01.1 One session-name module: kind, start time, ordering.**
+- [x] **R01.1 One session-name module: kind, start time, ordering.**
   *Drift bug.* Three things answer "what is this directory?", and they
   disagree:
   - The regex `^\d{4}-\d{2}-\d{2}T\d{6}$` is copied in `control/sessions.py`,
@@ -123,6 +123,27 @@ named.
   and sidecars still refuse it; either answer is adding or not adding
   `SessionKind.TUNING` to that one constant (pinned by
   `test_session.py::test_tuning_sessions_are_not_http_resolvable_pending_the_operator_decision`).
+  **Decided and done 2026-09-25** (operator decision, R00: `_tuning-*` counts
+  as a session for HTTP reads and sidecars). `SessionKind.TUNING` joined
+  `RECORDED_SESSION_KINDS`, and `list_sessions(captures=True)` lists
+  `_tuning-*` beside `_capture-*` (a readable session should be listable).
+  Effects checked: `resolve_session`/`is_session_dir_name` accept it, so HTTP
+  reads, digest/trip-end preflight, `logs`, `workbench_jobs` and
+  `analysis/drives` listings include it; `recorded_sessions` includes it by
+  default (`evaluate_detectors`' explicit `| {TUNING}` is now redundant, left
+  as is); `latest_session` already answered over every kind; the catalog
+  already parsed `_tuning-` start times; classification still refuses
+  non-live names (`routes/control/classification.py`, corpus labelling);
+  training discovery still excludes it by the `_` prefix. The pending test
+  became `test_session.py::test_tuning_sessions_are_http_resolvable`
+  (resolve, `recorded_sessions`, `list_sessions(captures=True)`,
+  `latest_session`, and `discover_sessions` still excluding it);
+  `test_iter_sessions_*` updated. Suites green: `test_session`,
+  `test_storage_catalog`, `test_tags`, `test_trip_end_digest`,
+  `test_tuning_digest`, `test_parquet_writer`, `test_mcp_parquet_query`,
+  `test_evaluate_detectors_script`, `test_evaluate_detectors_default_profile`,
+  `test_physical_drives`, `test_mcp_logs`, `test_recorded_sessions`,
+  `test_stored_sessions_router`.
 
 - [~] **R01.2 One repo-rooted home for default data paths.**
   *Drift bug.* The same data files have several default paths, some rooted at
@@ -207,6 +228,39 @@ named.
   `profiles.scope_config` rewrites those relative paths per vehicle and tests
   pin them (`test_profiles`, `test_config`), so they wait for R05.1/R05.15's
   profile-relative helpers (R05.15 is not started). `ml_training` not run here.
+  *Runtime-state defaults done 2026-09-25 (with R05.15).* `src/paths.py` adds
+  `CONTROL_DIR`, `ANOMALIES_DIR`, `ANALYSES_DIR` (repo-rooted, like the
+  catalogs); `DaemonConfig`'s `anomalies_dir`, `jobs_dir`, `audit_log`,
+  `feedback_log`, `vehicle_ledger`, `reference_epoch`, `training_ledger`,
+  `tuning_config`, `tuning_audit`, `trip_state`, `trend_alert_state`,
+  `catalog_db`, the new `calibration_dir`, and `LLMAssistConfig.cards_path`
+  default through them; the mirrors in `analysis/reference_epoch`,
+  `analysis/vehicle_ledger` and `analysis/llm_assist/store` import them. YAML
+  values are untouched (a relative `canary.yaml` value still resolves against
+  the working directory; `canary.pi.example.yaml`'s `/data/canary/...` pins
+  win), and both systemd units `cd "$CANARY_HOME"` (the clone) first, so on the
+  Pi the new defaults are the paths the old ones already resolved to.
+  `scope_config` scopes absolute defaults the same way.
+  `tests/test_paths.py::test_runtime_state_defaults_do_not_depend_on_the_working_directory`
+  (every `DaemonConfig` default under `DATA_DIR` is absolute; the three
+  analysis mirrors equal their config field), `test_config.py`,
+  `test_profiles.py`, `test_repo_tree_isolation.py`,
+  `test_daemon.py::test_daemon_config_defaults_are_sane` updated and pass.
+  **Remaining:** `grep -rn 'Path("data/' src` still lists (a) the tracked
+  per-vehicle catalog defaults in `config.py` (`behavior_models`,
+  `accepted_baselines`, `custom_pids`, `capture_profiles`, `afr_calibration`,
+  `kline_profile`, `sensor_can.signals`): `tests/test_mcp_behavior_deviations.py`
+  `chdir`s into `tmp_path` to redirect the cwd-relative `behavior_models`
+  default at a fixture, so repo-rooting these needs that test changed to set
+  `daemon.behavior_models` in its YAML (held by the concurrent
+  alerts/behavior agent this run); (b) runtime-state mirrors outside this
+  dispatch's files, still cwd-relative while their config field is now
+  repo-rooted (same file whenever the process starts at the repo root, as the
+  units do): `alerts/feedback`, `alerts/tuning` (x2), `models/training_ledger`
+  (held by concurrent agents this run), `mcp_server/config` (x2, anomalies and
+  catalog fallbacks) and `preprocessing/feature_pipeline`'s cache dir. Each is
+  `from src.paths import CONTROL_DIR` (etc.) and one line. The catalog mirrors
+  `decode/accepted_baselines` and `collection/custom_pids` move with (a).
 
 - [x] **R01.3 One finite-float coercion, in `src/coerce.py`.** The
   "number or `None`" helper has about ten copies with four behaviours:
@@ -366,7 +420,7 @@ named.
   digests (`behavior_validation` dbc dir and session chunks, surface/IF/sequence
   training hashes). Tests: `tests/test_artifact_hash.py` (3).
 
-- [~] **R01.7 One home for operating constants.** Same-meaning constants in
+- [x] **R01.7 One home for operating constants.** Same-meaning constants in
   several places:
   - Engine-running 400 rpm is defined four times: `refit.ENGINE_RUNNING_MIN_RPM`,
     `fingerprint._RUNNING_RPM`, `cold_start_inventory.DEFAULT_MIN_RUNNING_RPM`
@@ -393,12 +447,20 @@ named.
   and the existing highway test now labels its rows `highway`.
   `CLASSIFIER_VERSION` 0.3.0 → 0.3.1 so stale classification sidecars
   recompute with the new regime.
-  **Remaining:** `refit.ENGINE_RUNNING_MIN_RPM = 400.0` is still its own
-  definition: `src/analysis/refit.py` is held by the concurrent H01 agent. The
-  fix is `from src.operating import ENGINE_RUNNING_MIN_RPM` there (it stays in
-  `refit.__all__`).
+  *Remainder done 2026-09-25.* `src/analysis/refit.py` now does `from
+  src.operating import ENGINE_RUNNING_MIN_RPM` (still in `refit.__all__`; its
+  KOEO rationale comment kept beside the import). The verifier found two
+  more literal copies by value, not name: `decode/behavior_models`
+  `EngineStateRequirement.min_running_rpm` and
+  `ColdStartRequirement.min_running_rpm` defaulted to `400.0`; both now
+  default to `ENGINE_RUNNING_MIN_RPM` (same float, so the recipe golden
+  fingerprints are unchanged). Acceptance grep widened to numeric literals:
+  `grep -rnE "\b400(\.0)?\b" src --include=*.py` minus HTTP status codes
+  and prose leaves one rpm hit, `src/operating.py:19`; the name grep finds
+  only aliases of it. `test_refit.py`,
+  `test_recipe_catalog_golden.py`, `test_layering.py` pass.
 
-- [~] **R01.8 Fix the layering inversions.** Imports run both ways between
+- [x] **R01.8 Fix the layering inversions.** Imports run both ways between
   analysis and everything else:
   - `decode` imports `analysis`: `behavior_decoder` imports
     `surface_1d.evaluate_1d` / `surface_2d.evaluate_2d` (moved by R05.10).
@@ -444,3 +506,11 @@ named.
   drain,inference} → dashboard.broadcast`, `daemon/{components,inference} →
   dashboard.behavior_live`, `daemon/idle_shutdown → dashboard.ups`.
   **Remaining:** the `OWED` edges, closed by R03.1 and R05.10.
+  *Closed 2026-09-25.* R03.1 and R05.10 landed: `tests/test_layering.py`'s
+  `OWED` is `{}` (the stale-allowance check forced the entries out), and
+  `grep` finds no `decode→analysis.surface_*`, no
+  `{daemon,control,models}→dashboard.status`, no `control→mcp_server`, no
+  `models→analysis.refit` import in `src/` (the only `dashboard.status` hit
+  is prose in `daemon/inference_metrics.py`'s docstring). The remaining
+  daemon→dashboard edges are the recorded `STANDING` ones. All five
+  `test_layering.py` tests pass (with this dispatch's `refit` import change).

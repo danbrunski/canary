@@ -176,6 +176,37 @@ Record each answer in the item and never re-open it.
 - **H01 (source policy):** unaffected. R01.8's layering test must not forbid
   the imports H01 relies on.
 
+## Operator decisions, 2026-09-25 (do not re-open)
+
+- **R01.1:** `_tuning-*` directories count as sessions for HTTP reads and
+  sidecars (they are this vehicle's own recordings). They stay out of
+  training and detection through the `_` prefix and R03.12.
+- **R03.12:** (a) a non-default profile may **not** be corpus-eligible (schema
+  refusal); (b) behavior-model deviations **stop** during tuning captures too
+  -- tuning deliberately drives atypically (WOT pulls); (c) plausibility checks
+  keep running.
+- **R03.1:** the broadcast-RPM fallback requires fresh CAN (as implemented).
+- **R03.11:** retire `--collection-only` (operator delegated; recommendation taken).
+- **R05.3:** converge delivery error onto the acquisition-paired
+  `match_ordered` engine; numbers will shift (delegated; recommendation taken).
+- **R05.5:** no forced re-freeze; re-freeze the trend reference at the next
+  deliberate corpus boundary (delegated).
+- **R05.7:** move the DID-named recipes into a per-profile Python module (delegated).
+- **R05.13:** MCP/CLI `min_load` defaults come from the profile's
+  `mode01_wot.load_floor_pct` (delegated).
+- **R06.5:** fold `detector_benchmark`'s baseline diff into `evaluate_detectors`
+  and retire the older grid (delegated).
+- **R08.6:** the capture table's "requested" rate for a windowed DID is the
+  window cadence it is actually polled at (`effectiveTargetHz`) (delegated).
+- **A02.11 (R04.6):** regenerate the baseline on the laptop when nothing else
+  runs (delegated).
+- **D03.30:** a passive arm with no TTL persists across restarts until an
+  operator disarms it; an untrusted state file fails safe (stays passive)
+  (delegated).
+- **A04.6:** declare the TPMS sentinels in `bindings.yaml` together with the
+  deferred IF retrain, not before (delegated; declaring them now would flood IF
+  events from the start of every drive).
+
 ## Decisions carried forward (don't re-open)
 
 - **Tuning logs are not in the anomaly detectors** (operator, 2026-09-24).

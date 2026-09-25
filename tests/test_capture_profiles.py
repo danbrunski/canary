@@ -738,15 +738,33 @@ def test_storage_prefix_must_stay_resolvable_as_a_session(tmp_path: Path) -> Non
     listed = list_sessions(storage_root, captures=True)
     assert session_dir in {item.session_id for item in listed}
 
-    # Corpus-eligible captures rotate into a normal timestamped session, so a
-    # prefix there would describe a directory that never gets created.
-    with pytest.raises(ValidationError, match="normal timestamped sessions"):
-        CaptureProfile(
-            name="corpus-capture",
-            mode01={"RPM": 1.0},
-            corpus_eligible=True,
-            storage_prefix="_capture-corpus-capture",
-        )
+    # R03.12(a), operator decision 2026-09-25: no capture joins the corpus,
+    # with or without a prefix.
+    for prefix in ("_capture-corpus-capture", ""):
+        with pytest.raises(ValidationError, match="may not be corpus_eligible.*R03.12"):
+            CaptureProfile(
+                name="corpus-capture",
+                mode01={"RPM": 1.0},
+                corpus_eligible=True,
+                storage_prefix=prefix,
+            )
+
+
+def test_every_shipped_capture_catalogue_still_loads() -> None:
+    """R03.12(a) made corpus-eligible captures a schema error; the committed
+    catalogues (seed and per-vehicle, archive included) must not carry one."""
+
+    catalogues = sorted(REPO_ROOT.glob("data/**/capture_profiles*.yaml"))
+    assert catalogues, "no committed capture catalogues found"
+    for path in catalogues:
+        raw = yaml.safe_load(path.read_text()) or {}
+        entries = raw.get("profiles", raw) if isinstance(raw, dict) else raw
+        items = entries.values() if isinstance(entries, dict) else entries
+        for entry in items:
+            if not isinstance(entry, dict) or "name" not in entry:
+                continue
+            profile = CaptureProfile.model_validate(entry)
+            assert profile.name == "default" or not profile.corpus_eligible, path
 
 
 def test_seeded_fuel_map_budget_stays_under_the_storage_safe_line(tmp_path: Path) -> None:

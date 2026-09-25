@@ -1,0 +1,143 @@
+"""D03.30: an armed passive survives a daemon restart.
+
+On 2026-09-24 the operator had a scan tool on the bus with CANary passive
+(armed through ``/control/passive``, TTL 1800 s). A deploy restart came up
+with passive off and CANary sent Mode 01 for ~13 s before it was re-armed by
+hand. These tests run the daemon twice in one process, forgetting the gate's
+in-memory state in between exactly as a new process would, and assert that
+the second daemon sends nothing before its first status read shows passive.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+
+import can
+import pytest
+
+from src.collection import tx_gate
+from src.config import CanaryConfig
+from src.daemon import build_components, run_daemon
+from src.dashboard.status import build_status, gather_status_sources
+from src.telemetry import TelemetryRecord
+from tests.waits import settle, wait_until
+
+#: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
+pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
+
+
+class _RecordingBus:
+    def __init__(self) -> None:
+        self.sent: list[can.Message] = []
+
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
+        self.sent.append(msg)
+
+
+def _forget_process_memory() -> None:
+    """A new process: passive off, no state file named, the file untouched."""
+    tx_gate.configure_persistence(None)
+    tx_gate.set_passive(False, source="default", persist=False)
+
+
+async def _run_once(
+    config: CanaryConfig,
+    *,
+    collectors: list[Any],
+    while_running: Any,
+) -> Any:
+    components = build_components(config)
+    stop = asyncio.Event()
+    task = asyncio.create_task(
+        run_daemon(
+            config,
+            stop,
+            collectors=collectors,
+            components=components,
+            enable_live_inference=False,
+        )
+    )
+    try:
+        return await while_running(components)
+    finally:
+        stop.set()
+        await settle(task)
+
+
+def _status(config: CanaryConfig, components: Any) -> dict[str, Any]:
+    sources = gather_status_sources(config, health_monitor=components.health_monitor)
+    return build_status(config, health_monitor=components.health_monitor, sources=sources).to_dict()
+
+
+async def test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first(
+    daemon_config: CanaryConfig,
+) -> None:
+    config = daemon_config
+
+    async def _arm(components: Any) -> None:
+        await wait_until(lambda: tx_gate.state_path() is not None, what="passive state restored")
+        # What POST /control/passive does.
+        tx_gate.set_passive(True, source="control", ttl_seconds=1800)
+
+    await _run_once(config, collectors=[], while_running=_arm)
+    assert tx_gate.passive_state_path(config).exists()
+
+    _forget_process_memory()
+    assert not tx_gate.is_passive()
+
+    bus = _RecordingBus()
+    first_send: dict[str, bool] = {}
+
+    async def _transmitter(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
+        # A collector's very first act: a Mode 01 request.
+        sent = tx_gate.send(
+            bus,  # type: ignore[arg-type]
+            can.Message(arbitration_id=0x7DF, data=b"\x02\x01\x0c", is_extended_id=False),
+            what="first poll",
+        )
+        first_send["sent"] = sent
+        await stop.wait()
+
+    async def _first_status_read(components: Any) -> dict[str, Any]:
+        await wait_until(lambda: "sent" in first_send, what="first collector send")
+        return _status(config, components)
+
+    status = await _run_once(config, collectors=[_transmitter], while_running=_first_status_read)
+
+    assert first_send["sent"] is False
+    assert bus.sent == [], "a frame went out before passive was restored"
+    assert status["passive"]["enabled"] is True
+    assert status["passive"]["source"] == "restored:control"
+    assert status["passive"]["survives_restart"] is True
+    assert 1700 < status["passive"]["ttl_remaining_seconds"] <= 1800
+
+
+async def test_a_disarm_before_the_restart_is_not_resurrected(
+    daemon_config: CanaryConfig,
+) -> None:
+    config = daemon_config
+
+    async def _arm_then_disarm(components: Any) -> None:
+        await wait_until(lambda: tx_gate.state_path() is not None, what="passive state restored")
+        tx_gate.set_passive(True, source="control", ttl_seconds=1800)
+        tx_gate.set_passive(False, source="control")
+
+    await _run_once(config, collectors=[], while_running=_arm_then_disarm)
+    _forget_process_memory()
+
+    async def _read(components: Any) -> dict[str, Any]:
+        await wait_until(lambda: tx_gate.state_path() is not None, what="passive state restored")
+        return _status(config, components)
+
+    status = await _run_once(config, collectors=[], while_running=_read)
+    assert status["passive"]["enabled"] is False
+
+
+def test_the_state_file_lives_in_the_control_state_directory(
+    daemon_config: CanaryConfig, tmp_path: Path
+) -> None:
+    path = tx_gate.passive_state_path(daemon_config)
+    assert path.parent == daemon_config.daemon.trip_state.parent
+    assert path.is_relative_to(tmp_path)

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { SEVERITY_TOKEN } from "../lib/behaviorOverlay";
+import { severityToken } from "../lib/behaviorOverlay";
 import { prepareCanvas } from "../lib/canvas";
 import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
 import type {
@@ -21,7 +21,7 @@ export interface CurveLive {
   x: number | null;
   actual: number | null;
   expected: number | null;
-  severity: BehaviorSeverity;
+  severity: BehaviorSeverity | null;
   trail: { x: number | null; actual: number | null }[];
 }
 
@@ -152,14 +152,14 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
       const py = yToPy(live.actual);
       // Deviation tick: marker → expected.
       if (live.expected !== null && live.expected !== undefined) {
-        ctx.strokeStyle = cssColor(SEVERITY_TOKEN[live.severity]);
+        ctx.strokeStyle = cssColor(severityToken(live.severity));
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(px, py);
         ctx.lineTo(px, yToPy(live.expected));
         ctx.stroke();
       }
-      ctx.fillStyle = cssColor(SEVERITY_TOKEN[live.severity]);
+      ctx.fillStyle = cssColor(severityToken(live.severity));
       ctx.beginPath();
       ctx.arc(px, py, 3.5, 0, Math.PI * 2);
       ctx.fill();

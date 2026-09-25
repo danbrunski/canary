@@ -350,6 +350,10 @@ class PlausibilityEvaluator:
     """Per-channel checks over arrived samples; see the module docstring.
 
     ``sink`` receives every record written (pending and confirmed).
+    ``alert_sink`` receives confirmed records only — the alert path (the
+    daemon hands it ``AnomalyEventEmitter.emit_plausibility``). The
+    pending/confirmed split is decided here, so a caller cannot route a
+    pending detection into the anomaly stream by forgetting to filter.
     ``carried`` is the previous drive's still-pending records; only those of
     ``across_drives`` checks are honoured.
     """
@@ -360,6 +364,7 @@ class PlausibilityEvaluator:
         *,
         session: str,
         sink: Callable[[EvidenceRecord], object] | None = None,
+        alert_sink: Callable[[EvidenceRecord], object] | None = None,
         carried: Iterable[EvidenceRecord] = (),
     ) -> None:
         if catalog.profile is None:
@@ -369,6 +374,7 @@ class PlausibilityEvaluator:
             )
         self._catalog = catalog
         self.sink = sink
+        self.alert_sink = alert_sink
         self.mode: str | None = None
         self.counters = EvaluatorCounters()
         self._recent: deque[EvidenceRecord] = deque(maxlen=RECENT_RECORDS)
@@ -747,6 +753,11 @@ class PlausibilityEvaluator:
                 self.sink(record)
             except Exception:  # noqa: BLE001 — evidence persistence is best-effort
                 log.exception("plausibility evidence sink failed")
+        if record.alerts and self.alert_sink is not None:
+            try:
+                self.alert_sink(record)
+            except Exception:  # noqa: BLE001 — an alert failure must never cost a sample
+                log.exception("plausibility alert sink failed")
 
     # ------------------------------------------------------------------
     # reporting

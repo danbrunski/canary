@@ -65,6 +65,7 @@ from src.control.capture_finalize import StartEpoch, finalize_capture, record_ca
 from src.daemon.components import DaemonComponents, build_components
 from src.daemon.drain import drain_queue_with_broadcast
 from src.daemon.inference import build_live_feature_source, run_live_inference
+from src.daemon.ingress import LiveIngress
 from src.daemon.runtime import (
     can_receive_stats_observer,
     drain_kwargs,
@@ -548,13 +549,16 @@ async def _live_gps(
     hz: float,
     artifacts: RunArtifacts,
 ) -> None:
-    """A live GPS receiver sharing the replay's queue (D02.9 item 3).
+    """A live GPS receiver running beside the replay (D02.9 item 3).
 
-    On the Pi nothing stops the receiver when a replay starts, so its rows
-    land in whatever session the writer currently points at — the
-    ``_replay-*`` directory. This pushes the same ``reading_to_records`` rows
-    the real collector does, onto the same queue, for as long as the replay
-    runs; the count lands in ``artifacts.live_gps_rows_pushed``.
+    On the Pi the receiver keeps producing when a replay starts; before
+    D02.9 its rows landed in whatever session the writer pointed at — the
+    ``_replay-*`` directory. The daemon now hands every live collector a
+    :class:`~src.daemon.ingress.LiveIngress` that ``ReplayController`` closes
+    for the replay, and the caller passes the same closed ingress here. This
+    pushes the same ``reading_to_records`` rows the real collector does for as
+    long as the replay runs; the count lands in
+    ``artifacts.live_gps_rows_pushed``.
     """
     period = 1.0 / hz
     while not stop.is_set():
@@ -862,9 +866,13 @@ async def _start_collector(
         name="c10-replay",
     )
     if spec.live_gps_hz > 0:
+        # The daemon's door for live collectors, closed for the replay exactly
+        # as ``ReplayController.start`` closes it (D02.9).
+        live_ingress = LiveIngress(queue)
+        live_ingress.close("validation-replay")
         pipeline.aux_tasks.append(
             asyncio.create_task(
-                _live_gps(queue, collector_stop, spec.live_gps_hz, artifacts),
+                _live_gps(live_ingress, collector_stop, spec.live_gps_hz, artifacts),
                 name="c10-live-gps",
             )
         )

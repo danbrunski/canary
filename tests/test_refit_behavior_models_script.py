@@ -96,18 +96,18 @@ def test_filter_sessions_by_boundary_keeps_on_and_after(tmp_path: Path) -> None:
 
 
 def test_select_recipes_default_returns_full_catalog() -> None:
-    catalog = refit_cli.default_recipes()
+    catalog = refit_cli.default_recipes("nissan-xterra-2008")
     assert refit_cli._select_recipes(catalog, None) == catalog
 
 
 def test_select_recipes_filters_by_name() -> None:
-    catalog = refit_cli.default_recipes()
+    catalog = refit_cli.default_recipes("nissan-xterra-2008")
     selected = refit_cli._select_recipes(catalog, ["coolant_warmup", "warm_idle_rpm_baseline"])
     assert [r.name for r in selected] == ["coolant_warmup", "warm_idle_rpm_baseline"]
 
 
 def test_select_recipes_rejects_unknown_name() -> None:
-    catalog = refit_cli.default_recipes()
+    catalog = refit_cli.default_recipes("nissan-xterra-2008")
     with pytest.raises(SystemExit, match="unknown recipe"):
         refit_cli._select_recipes(catalog, ["nope"])
 

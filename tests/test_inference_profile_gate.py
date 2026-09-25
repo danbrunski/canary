@@ -161,6 +161,7 @@ async def test_non_eligible_profile_withholds_if_while_engine_running(
         "scoring_allowed": False,
         "profile": "tuning",
         "source": "live_profile",
+        "behavior_residuals_withheld": 0,
     }
     assert status.emitter_counters is not None
     assert status.emitter_counters["skipped_capture_profile"] >= 3
@@ -227,6 +228,7 @@ async def test_replay_of_a_non_eligible_capture_scores_nothing(config: CanaryCon
         "scoring_allowed": False,
         "profile": "tuning",
         "source": "replay_manifest",
+        "behavior_residuals_withheld": 0,
     }
 
 
@@ -401,3 +403,62 @@ async def test_all_did_capture_is_withheld_by_the_profile_not_the_state(
     # Before R03.1 these ticks were withheld as `engine_off`: right outcome,
     # wrong reason. Now the state is right and the profile withholds them.
     assert components.emitter.counters.skipped_vehicle_state == 0
+
+
+def _residual(name: str = "maf_vs_rpm", *, alerting: bool = True) -> Any:
+    from src.daemon.detectors.behavior import _BehaviorResidual
+
+    return _BehaviorResidual(
+        name=name,
+        kind="surface_2d",
+        channel="obd:MAF",
+        actual=80.0,
+        expected=40.0,
+        deviation=40.0,
+        severity="critical",
+        mode_match=True,
+        operating_mode="idle",
+        timestamp=datetime.now(UTC).isoformat(),
+        alerting=alerting,
+    )
+
+
+def test_behavior_deviations_stop_under_a_non_default_profile(config: CanaryConfig) -> None:
+    """R03.12(b), operator decision 2026-09-25: a tuning capture drives
+    atypically on purpose, so behavior-model deviations raise no event, cast
+    no fusion vote and publish no score while it runs — and are counted."""
+    from src.alerts.fusion import FusionScorer
+    from src.daemon.detectors.behavior import BehaviorDetector
+
+    components = build_components(config)
+    source = build_live_feature_source(components)
+    fusion = FusionScorer(config.models.fusion, roles=config.models.roles.by_source())
+    detector = BehaviorDetector(components, fusion, source)
+    emitted_before = components.emitter.counters.emitted
+    sub = components.scores_broadcaster.subscribe()
+
+    withheld = TickContext(
+        now=datetime.now(UTC),
+        operating_mode="idle",
+        timestamp_str=None,
+        scoring_allowed=False,
+        capture_profile_allows=False,
+    )
+    residuals = [_residual(), _residual("diag", alerting=False)]
+    assert detector.apply(residuals, withheld) == []
+    assert detector.withheld_by_capture_profile == 1, "only the alerting residual counts"
+    assert components.emitter.counters.emitted == emitted_before
+    assert sub.queue.empty()
+
+    allowed = TickContext(
+        now=datetime.now(UTC),
+        operating_mode="idle",
+        timestamp_str=None,
+        scoring_allowed=True,
+        capture_profile_allows=True,
+    )
+    # Positive control: the same residual, repeated past the M-of-N
+    # persistence gate, votes under the default profile.
+    votes = [detector.apply([_residual()], allowed) for _ in range(5)]
+    assert any(votes), "the default profile still votes"
+    assert detector.withheld_by_capture_profile == 1

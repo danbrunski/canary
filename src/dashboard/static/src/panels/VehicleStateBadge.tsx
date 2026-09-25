@@ -13,6 +13,7 @@ const LABEL: Record<VehicleState["state"], string> = {
   engine_off: "engine off",
   no_data: "no data",
   replay: "replay",
+  passive: "passive",
   unknown: "unknown",
 };
 
@@ -36,7 +37,7 @@ export function VehicleStateBadge({ vehicleState }: VehicleStateBadgeProps) {
           state === "engine_running" && "text-ok",
           state === "ignition_only" && "text-accent",
           state === "engine_off" && "text-fg-dim",
-          state === "replay" && "text-accent-2",
+          (state === "replay" || state === "passive") && "text-accent-2",
           (state === "no_data" || state === "unknown" || state === null) && "text-bad",
         )}
       >

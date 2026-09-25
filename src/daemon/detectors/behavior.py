@@ -49,6 +49,9 @@ class BehaviorDetector:
         self._components = components
         self._fusion = fusion
         self._source = source
+        #: Alerting residuals withheld by the capture-profile gate (R03.12b),
+        #: cumulative; surfaced in ``/status`` beside the gate's verdict.
+        self.withheld_by_capture_profile = 0
 
     def prepare(self, row: Any, ctx: TickContext) -> list[_BehaviorResidual]:
         """Loop side (C08.4): grade every behavior model off the source's
@@ -62,7 +65,17 @@ class BehaviorDetector:
 
     def apply(self, residuals: list[_BehaviorResidual], ctx: TickContext) -> list[FusionSource]:
         """Loop side: persistence, ``/ws/scores``, per-model emit, fusion
-        sources — one per fired model."""
+        sources — one per fired model.
+
+        Nothing of it under a non-default capture profile (R03.12b, operator
+        decision 2026-09-25): the deviations would measure the deliberately
+        atypical driving, not the engine. The residuals that would have
+        counted are tallied in :attr:`withheld_by_capture_profile`; the live
+        overlay (``prepare``) still shows expected/actual.
+        """
+        if not ctx.capture_profile_allows:
+            self.withheld_by_capture_profile += sum(1 for r in residuals if r.alerting)
+            return []
         sources: list[FusionSource] = []
         warn_severity = self._components.config.models.fusion.behavior_warning_severity
         persistence = self._components.persistence_gate

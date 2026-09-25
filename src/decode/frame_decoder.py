@@ -27,6 +27,13 @@ One decoder for live and storage (R04.4): ``LiveFeatureSource`` holds a
 records to the dashboard stream and its own current-value dict, so the
 record a gauge shows is the record the storage sink writes.
 
+Sentinels (A04.6): a binding's declared ``sentinel_raw`` word is a state, not
+a number. It decodes to a ``decoded:<NAME>_SENTINEL`` row whose value is the
+binding's ``sentinel_meaning`` text, and to *no* ``decoded:<NAME>`` row, so
+the word never reaches a scaler, a mean or a model input. "Decoded, and the
+sensor said it has nothing" stays distinguishable from "not decoded". Every
+other raw value decodes exactly as before.
+
 Confidence gating: storage is forever, so default to persisting only
 ``confirmed`` bindings (``collection.persist_decoded_confidence`` widens
 this). The live/dashboard path keeps decoding every binding regardless —
@@ -40,6 +47,7 @@ from pathlib import Path
 
 from src.can_ids import parse_can_channel
 from src.decode.bindings import Bindings, Signal, decode_raw, load_bindings
+from src.decode.slices import sentinel_channel
 from src.telemetry import TelemetryRecord
 
 
@@ -114,6 +122,9 @@ class FrameDecoder:
             raw = decode_raw(sig, payload)
             if raw is None:
                 continue
+            if sig.is_sentinel(raw):
+                out.append(sentinel_record(record, sig, can_id))
+                continue
             out.append(
                 TelemetryRecord.decoded(
                     record.timestamp,
@@ -126,4 +137,15 @@ class FrameDecoder:
         return tuple(out)
 
 
-__all__ = ["FrameDecoder"]
+def sentinel_record(record: TelemetryRecord, signal: Signal, can_id: int) -> TelemetryRecord:
+    """The ``decoded:<NAME>_SENTINEL`` state row for ``signal``'s sentinel word."""
+    return TelemetryRecord.decoded(
+        record.timestamp,
+        sentinel_channel(signal.name),
+        signal.sentinel_meaning or "sentinel",
+        "",
+        metadata={"can_id": can_id, "binding_confidence": signal.confidence},
+    )
+
+
+__all__ = ["FrameDecoder", "sentinel_record"]

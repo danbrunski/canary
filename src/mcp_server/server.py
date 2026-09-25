@@ -574,7 +574,7 @@ def _register_read_tools(
         def get_delivery_error(
             session: str,
             measured_spec: str = "obd:O2_WR_LAMBDA_S1",
-            min_load: float | None = 85.0,
+            min_load: float | None = None,
             cell_agg: str = "last",
         ) -> dict[str, Any]:
             """Measured-vs-commanded AFR at enrichment for one stored session,
@@ -583,7 +583,8 @@ def _register_read_tools(
             construction, and results are band-averaged over rpm so uneven
             coverage cannot masquerade as an effect. ``measured_spec`` is
             explicit because the ECM lambda and A/F-voltage paths disagree by
-            ~3.8% at WOT and neither is established as truth."""
+            ~3.8% at WOT and neither is established as truth. ``min_load``
+            defaults to the vehicle profile's WOT load floor."""
             return tuning_analysis_tool.get_delivery_error(
                 config_path,
                 session=session,

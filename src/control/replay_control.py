@@ -29,16 +29,25 @@ Isolation contract:
   three on both replay boundaries (entering AND exiting) so a live drive's
   state can't leak into a replay run's results, and a replay's tail state
   can't leak back into live once it stops.
+* **Live producers are withheld for the whole replay (D02.9).** Collectors
+  feed the queue through a closable ingress (``src.daemon.ingress``). ``start``
+  closes it *before* anything switches, lets the pipeline settle so live
+  records already queued land in the live session, and only then redirects
+  the writer; ``stop`` lets the replay's own tail settle into ``_replay-*``
+  before switching back, then reopens the ingress. Withheld live rows are
+  counted per source in ``live_rows_withheld``. On 2026-09-11 the Pi's own GPS
+  put ~22,800 rows into a replay's output because nothing did this.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
@@ -57,6 +66,26 @@ if TYPE_CHECKING:
     from src.preprocessing.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
+
+
+#: How long a replay boundary waits for already-queued records to be written
+#: before it switches directories anyway (and says so in the status).
+BOUNDARY_SETTLE_SECONDS = 5.0
+
+
+class LiveInputGate(Protocol):
+    """What the controller needs of the live collectors' ingress
+    (``src.daemon.ingress.LiveIngress``)."""
+
+    def close(self, reason: str) -> None: ...
+
+    def open(self) -> dict[str, int]: ...
+
+    def withheld(self) -> dict[str, int]: ...
+
+
+#: ``PipelineBarrier.settle``: join every queue in the pipeline, bounded.
+PipelineSettle = Callable[[float], Awaitable[bool]]
 
 
 class ReplayError(RuntimeError):
@@ -125,6 +154,15 @@ class ReplayStatus:
     #: capture stays unscored however the daemon is configured.
     source_capture_profile: str | None = None
     source_corpus_eligible: bool = True
+    #: D02.9 — live collector rows kept out of the pipeline while this replay
+    #: ran, per source (``None``: no ingress wired, so live input was *not*
+    #: isolated and the output may contain live rows).
+    live_rows_withheld: dict[str, int] | None = None
+    #: Whether the pipeline drained before the writer switched to the replay
+    #: directory (entry) and back (exit). ``False`` means a boundary timed out
+    #: and a few records may sit on the wrong side of it.
+    entry_settled: bool | None = None
+    exit_settled: bool | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -152,6 +190,11 @@ class ReplayStatus:
             "skipped_sources": (
                 None if self.skipped_sources is None else list(self.skipped_sources)
             ),
+            "live_rows_withheld": (
+                None if self.live_rows_withheld is None else dict(self.live_rows_withheld)
+            ),
+            "entry_settled": self.entry_settled,
+            "exit_settled": self.exit_settled,
         }
 
 
@@ -181,8 +224,15 @@ class ReplayController:
         live_source: LiveFeatureSource | None = None,
         persistence_gate: PersistenceGate | None = None,
         emitter: AnomalyEventEmitter | None = None,
+        live_ingress: LiveInputGate | None = None,
+        settle_pipeline: PipelineSettle | None = None,
     ) -> None:
         self._queue = queue
+        # D02.9: the live collectors' door, and the pipeline barrier used at
+        # both boundaries. Optional for callers without collectors (tests,
+        # storage-only checks); ``run_daemon`` always wires both.
+        self._live_ingress = live_ingress
+        self._settle_pipeline = settle_pipeline
         self._writer = ensure_async_writer(writer)
         self._anomaly_logger = anomaly_logger
         self._storage_root = Path(storage_root)
@@ -226,8 +276,23 @@ class ReplayController:
         """
         return self._with_stats(self._status)
 
+    async def _settle(self, boundary: str) -> bool | None:
+        """Let already-queued records reach their sinks before a switch."""
+        if self._settle_pipeline is None:
+            return None
+        settled = await self._settle_pipeline(BOUNDARY_SETTLE_SECONDS)
+        if not settled:
+            log.warning(
+                "replay %s boundary: pipeline did not settle in %.0f s; switching anyway",
+                boundary,
+                BOUNDARY_SETTLE_SECONDS,
+            )
+        return settled
+
     def _with_stats(self, status: ReplayStatus) -> ReplayStatus:
         """Overlay the live emission counters onto a status snapshot."""
+        if status.running and self._live_ingress is not None:
+            status = replace(status, live_rows_withheld=self._live_ingress.withheld())
         stats = self._stats
         if stats is None:
             return status
@@ -276,11 +341,23 @@ class ReplayController:
 
         manifest = read_capture_manifest(source_dir)
         replay_id = format_session_timestamp(_utc_now())
-        await self._writer.enter_replay_mode(replay_id)
+        # D02.9: stop live input first, then let what is already queued land
+        # in the live session, and only then redirect the writer.
+        if self._live_ingress is not None:
+            self._live_ingress.close(f"replay-{replay_id}")
+        try:
+            entry_settled = await self._settle("entry")
+            await self._writer.enter_replay_mode(replay_id)
+        except BaseException:
+            if self._live_ingress is not None:
+                self._live_ingress.open()
+            raise
         try:
             anomalies_path = self._anomaly_logger.enter_replay_mode(replay_id)
         except Exception:
             await self._writer.exit_replay_mode()
+            if self._live_ingress is not None:
+                self._live_ingress.open()
             raise
 
         # 7.1 — reset in-memory state now that storage/JSONL are isolated,
@@ -325,6 +402,8 @@ class ReplayController:
             output_anomalies_path=str(anomalies_path),
             source_capture_profile=None if manifest is None else manifest.profile,
             source_corpus_eligible=True if manifest is None else manifest.corpus_eligible,
+            live_rows_withheld=None if self._live_ingress is None else {},
+            entry_settled=entry_settled,
         )
         log.info(
             "replay started",
@@ -388,6 +467,13 @@ class ReplayController:
                 exc_info=(type(exc), exc, exc.__traceback__),
                 extra={"replay_id": self._status.replay_id},
             )
+        # D02.9: the replay's own tail belongs in its directory — settle
+        # before switching back. Live input stays withheld until after.
+        try:
+            exit_settled = await self._settle("exit")
+        except Exception:
+            log.exception("replay exit settle failed")
+            exit_settled = False
         try:
             await self._writer.exit_replay_mode()
         except Exception:
@@ -405,6 +491,7 @@ class ReplayController:
                 self._emitter.exit_replay_mode()
             except Exception:
                 log.exception("emitter.exit_replay_mode failed")
+        withheld = None if self._live_ingress is None else self._live_ingress.open()
         # Bake the final counters into the idle status (and the log) instead of
         # dropping them: "how many rows did that replay actually emit" is the
         # question D02.9 had to reconstruct from chunk counts.
@@ -424,13 +511,26 @@ class ReplayController:
                     "source_time_s": round(stats.source_time_emitted_s, 3),
                     "effective_speed": stats.effective_speed(),
                     "requested_speed": self._status.speed,
+                    "live_rows_withheld": withheld,
+                    "entry_settled": self._status.entry_settled,
+                    "exit_settled": exit_settled,
                 },
             )
-        self._status = self._with_stats(ReplayStatus(running=False))
+        self._status = self._with_stats(
+            ReplayStatus(
+                running=False,
+                live_rows_withheld=withheld,
+                entry_settled=self._status.entry_settled,
+                exit_settled=exit_settled,
+            )
+        )
         self._stats = None
 
 
 __all__ = [
+    "BOUNDARY_SETTLE_SECONDS",
+    "LiveInputGate",
+    "PipelineSettle",
     "ReplayController",
     "ReplayStatus",
     "ReplayError",

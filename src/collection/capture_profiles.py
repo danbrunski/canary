@@ -522,8 +522,14 @@ class CaptureProfile(_Strict):
             if not self.corpus_eligible:
                 raise ValueError("the default profile must remain corpus eligible")
         elif self.corpus_eligible:
-            if self.storage_prefix:
-                raise ValueError("corpus-eligible captures use normal timestamped sessions")
+            # Operator decision 2026-09-25 (R03.12a): a capture polls another
+            # channel set at other rates, so it never represents the default
+            # profile the detectors learned; it may not join the corpus.
+            raise ValueError(
+                f"capture profile {self.name!r} may not be corpus_eligible: only the "
+                "default profile trains and scores the detectors (operator decision "
+                "2026-09-25, R03.12)"
+            )
         elif not self.storage_prefix:
             raise ValueError("non-corpus profiles require a '_capture-<slug>' storage_prefix")
         return self

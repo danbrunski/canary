@@ -14,7 +14,8 @@ Covered: a payload-bearing source (stored ``decoded``/``derived`` skipped,
 re-derived once), the same source with its payloads stripped (a pre-2026-07-29
 recording: stored rows are the only copy and must be kept), a negative control
 proving the identity fails when the emit filter regresses, and live-GPS
-contamination (xfail: live-producer isolation is still owed under D02.9).
+contamination (live producers go through the daemon's ``LiveIngress``, closed
+for the replay, since D02.9's isolation landed).
 """
 
 from __future__ import annotations
@@ -128,15 +129,6 @@ async def test_legacy_payloadless_replay_keeps_stored_decoded(tmp_path: Path) ->
     assert acct["captured"]["identity_holds"] is True, acct
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason=(
-        "D02.9 item 3 still owed: live producers (the Pi's GPS receiver) share the "
-        "replay's queue and nothing at the queue/writer boundary tells a live row "
-        "from a replayed one, so they persist into _replay-*"
-    ),
-)
 async def test_live_gps_does_not_contaminate_replay_output(tmp_path: Path) -> None:
     """D02.9 item 3 — a live receiver running during the replay must not add
     rows the recording never contained."""

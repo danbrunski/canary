@@ -13,6 +13,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.derived import fuel_properties
+from src.analysis.vehicle_signals import af_sensor_voltage_columns
 from src.config import VehicleParameters
 
 
@@ -247,7 +248,6 @@ def append_afr_channels(
     for bank in (1, 2):
         measured: pd.Series | None = None
         lambda_column = f"obd:O2_WR_LAMBDA_S{bank}"
-        voltage_column = f"did:ECM_AF_SENSOR_V_B{bank}"
         if lambda_column in out:
             candidate = pd.to_numeric(out[lambda_column], errors="coerce") * stoich
             # Presence is not the same as data. Bank-2 lambda is unsupported on
@@ -255,7 +255,11 @@ def append_afr_channels(
             # vehicle), leaving an all-NaN column that must not shadow a
             # working voltage DID.
             measured = candidate if candidate.notna().any() else None
-        if measured is None and transfer and voltage_column in out:
+        # The vehicle's A/F sensor voltage channel (R05.4: named by the
+        # vehicle in src.analysis.vehicle_signals, never here).
+        for voltage_column in af_sensor_voltage_columns(bank):
+            if measured is not None or not transfer or voltage_column not in out:
+                continue
             candidate = voltage_to_afr(out[voltage_column], transfer)
             measured = candidate if candidate.notna().any() else None
         if measured is not None:

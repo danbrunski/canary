@@ -29,6 +29,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, Literal, Protocol
 
+from src.collection import tx_gate
 from src.decode.engineering import physical_value
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.timefmt import parse_iso_utc
@@ -39,6 +40,7 @@ VehicleStateName = Literal[
     "engine_off",
     "no_data",
     "replay",
+    "passive",
     "unknown",
 ]
 
@@ -74,6 +76,10 @@ class VehicleState:
     obd_freshness_seconds: float | None = None
     can_freshness_seconds: float | None = None
     replay_id: str | None = None
+    #: CANary's own diagnostic transmission is suppressed (the operator's
+    #: passive switch, or another tester holds the ECM session). OBD
+    #: staleness then means "not asking", not "not answering" (D03.30).
+    passive: bool = False
     #: Wall clock the freshness numbers above were measured against, stamped
     #: by the ``derive_*`` functions. Deriving from Parquet is the one part of
     #: ``/status`` that gets reused across requests (:class:`VehicleStateCache`)
@@ -95,6 +101,7 @@ class VehicleState:
             "obd_freshness_seconds": _round(self.obd_freshness_seconds),
             "can_freshness_seconds": _round(self.can_freshness_seconds),
             "replay_id": self.replay_id,
+            "passive": self.passive,
             "derived_at": self.derived_at,
         }
 
@@ -112,6 +119,7 @@ def classify_vehicle_state(
     obd_freshness_seconds: float | None,
     can_freshness_seconds: float | None,
     replay_id: str | None = None,
+    passive: bool = False,
     freshness_threshold_seconds: float = FRESHNESS_THRESHOLD_SECONDS,
     rpm_running_threshold: float = RPM_RUNNING_THRESHOLD,
 ) -> VehicleState:
@@ -150,6 +158,17 @@ def classify_vehicle_state(
        but the ECM isn't responding to OBD, typical of full power-down).
     6. Anything else → ``unknown`` (caller should still trust the raw
        fields).
+
+    **Passive (D03.30).** While ``passive`` (CANary is not transmitting), a
+    stale OBD is CANary not *asking*, so rules 5 and 6 would be a confident
+    ``engine_off`` at KOEO or with the engine running. Those two verdicts
+    become ``passive`` instead — read ``can_freshness_seconds`` for whether
+    the bus is alive. Verdicts that rest on evidence still stand: a fresh
+    broadcast rpm is still ``engine_running``, an OBD answer from before the
+    arm is still fresh for its window, and silence on both buses is still
+    ``no_data``. ``passive`` rides on every verdict so an ``engine_running``
+    under passive says so too. The derivations below read it from
+    :mod:`src.collection.tx_gate`, so no caller can forget it.
     """
     obd_fresh = _fresh(obd_freshness_seconds, freshness_threshold_seconds)
     can_fresh = _fresh(can_freshness_seconds, freshness_threshold_seconds)
@@ -169,6 +188,7 @@ def classify_vehicle_state(
             obd_freshness_seconds=obd_freshness_seconds,
             can_freshness_seconds=can_freshness_seconds,
             replay_id=replay_id,
+            passive=passive,
         )
 
     engine_evidence_fresh = obd_fresh or rpm_from_broadcast
@@ -183,6 +203,8 @@ def classify_vehicle_state(
         state = "engine_off"
     else:
         state = "unknown"
+    if passive and state in ("engine_off", "unknown"):
+        state = "passive"
 
     return VehicleState(
         state=state,
@@ -191,6 +213,7 @@ def classify_vehicle_state(
         run_time=run_time,
         obd_freshness_seconds=obd_freshness_seconds,
         can_freshness_seconds=can_freshness_seconds,
+        passive=passive,
     )
 
 
@@ -217,13 +240,18 @@ def running_replay_id(replay_controller: ReplayStatusSource | None) -> str | Non
 
 
 def derive_from_inputs(
-    inputs: Mapping[str, float | None], replay_id: str | None, now: datetime
+    inputs: Mapping[str, float | None],
+    replay_id: str | None,
+    now: datetime,
+    *,
+    passive: bool | None = None,
 ) -> VehicleState:
     """Classify from ``LiveFeatureSource.vehicle_state_inputs`` (no I/O).
 
     The one in-memory derivation, used by both ``/status`` (when a live
     source is wired) and the inference gate. ``broadcast_rpm`` is already in
-    rpm there — ``vehicle_state_inputs`` scales the raw counts.
+    rpm there — ``vehicle_state_inputs`` scales the raw counts. ``passive``
+    defaults to :func:`src.collection.tx_gate.is_passive` (tests override).
     """
     return replace(
         classify_vehicle_state(
@@ -234,6 +262,7 @@ def derive_from_inputs(
             obd_freshness_seconds=inputs.get("obd_freshness_seconds"),
             can_freshness_seconds=inputs.get("can_freshness_seconds"),
             replay_id=replay_id,
+            passive=tx_gate.is_passive() if passive is None else passive,
         ),
         derived_at=now.isoformat(),
     )
@@ -269,7 +298,11 @@ def _row_timestamp(raw: object) -> datetime | None:
 
 
 def derive_from_latest_rows(
-    rows: Iterable[Mapping[str, Any]], *, replay_id: str | None, now: datetime
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    replay_id: str | None,
+    now: datetime,
+    passive: bool | None = None,
 ) -> VehicleState:
     """Classify from a session's latest-per-channel rows (the Parquet variant).
 
@@ -330,6 +363,7 @@ def derive_from_latest_rows(
             obd_freshness_seconds=obd_freshness,
             can_freshness_seconds=can_freshness,
             replay_id=replay_id,
+            passive=tx_gate.is_passive() if passive is None else passive,
         ),
         derived_at=now.isoformat(),
     )

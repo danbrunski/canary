@@ -331,4 +331,29 @@ describe("BehaviorModelsPanel status (B03.8)", () => {
     render(createElement(BehaviorModelsPanel, { data: STATUS_MODELS, error: null, live }));
     expect(screen.getByText(/no prediction — rate_exceeded:obd:RPM/)).toBeInTheDocument();
   });
+
+  it("never shows an ok chip for an unscored tick that still has an expected (B03.9)", () => {
+    // A stale actual: the surface spoke (expected set) but nothing was scored.
+    const live = {
+      observed: 1,
+      timestamp: null,
+      operating_mode: "city",
+      models: {
+        eligible_model: liveTick({
+          expected: 10,
+          actual: null,
+          deviation: null,
+          severity: null,
+          not_scored: "actual_stale",
+          reason: "actual_stale:obd:TIMING_ADVANCE",
+          abstain_reason: "actual_stale:obd:TIMING_ADVANCE",
+        }),
+      },
+    } as unknown as BehaviorLiveResponse;
+    render(createElement(BehaviorModelsPanel, { data: STATUS_MODELS, error: null, live }));
+    expect(screen.getByText(/no prediction — actual_stale:obd:TIMING_ADVANCE/)).toBeInTheDocument();
+    const card = screen.getByTestId("behavior-status-eligible_model").closest("article");
+    expect(card).not.toBeNull();
+    expect(card).not.toHaveTextContent(/\bok\b/);
+  });
 });

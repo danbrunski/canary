@@ -178,6 +178,43 @@ def test_can_record_with_short_payload_is_silently_skipped(config: CanaryConfig)
     assert src.tick(datetime(2026, 5, 13, 12, 0, tzinfo=UTC)) is None
 
 
+def test_a_sentinel_word_never_becomes_a_live_feature_value(config: CanaryConfig) -> None:
+    """A04.6: the live source consumes FrameDecoder's rows, so a declared
+    sentinel reaches the dashboard stream as a ``_SENTINEL`` state and never
+    sets the ``decoded:`` number the models read."""
+    bindings = Bindings.model_validate(
+        {
+            "schema_version": 1,
+            "signals": [
+                {
+                    "name": "TYRE_A",
+                    "module": "TEST",
+                    "can_id": 0x385,
+                    "byte_start": 2,
+                    "byte_length": 1,
+                    "confidence": "hypothesized",
+                    "sentinel_raw": 0,
+                    "sentinel_meaning": "wheel sensor not transmitting",
+                }
+            ],
+        }
+    )
+    src = LiveFeatureSource(config=config, bindings=bindings)
+    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
+    asleep = TelemetryRecord.can(now.timestamp(), 0x385, bytes(8))
+    assert [(r.channel, r.value) for r in src.decode_for_telemetry(asleep)] == [
+        ("TYRE_A_SENTINEL", "wheel sensor not transmitting")
+    ]
+    src.observe(asleep)
+    assert src.tick(now) is None  # nothing numeric arrived
+    later = now + timedelta(seconds=1)
+    src.observe(TelemetryRecord.can(later.timestamp(), 0x385, bytes([0, 0, 148, 0, 0, 0, 0, 0])))
+    row = src.tick(later)
+    assert row is not None
+    assert row["decoded:TYRE_A"].iloc[0] == 148.0
+    assert "decoded:TYRE_A_SENTINEL" not in row.columns
+
+
 # ---------------------------------------------------------------------------
 # Rolling features actually compute
 # ---------------------------------------------------------------------------

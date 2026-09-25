@@ -795,10 +795,14 @@ def _did_pull_inventory(
         "pulls": len(intervals),
         "rpm_samples": int(len(tagged_rpm)),
         "rpm_seconds": int(len(per_second)),
-        # The key predates R05.13 and names the dev vehicle's floor; the count
-        # is against *this* vehicle's ``mode01_wot.rpm_floor`` (None without
-        # one). Renaming it is a payload change for every digest reader.
-        "rpm_over_2500_seconds": None if rpm_floor is None else int((per_second > rpm_floor).sum()),
+        # Seconds above *this* vehicle's ``mode01_wot.rpm_floor`` (None
+        # without one), with the floor beside it. Was ``rpm_over_2500_seconds``
+        # (the dev vehicle's floor in a key name) until R05.13; no reader parses
+        # the tuning section of a stored digest, so there is no alias.
+        "rpm_floor": rpm_floor,
+        "rpm_over_floor_seconds": (
+            None if rpm_floor is None else int((per_second > rpm_floor).sum())
+        ),
         "target_bearing_samples": 0 if target_lookup_ready else None,
         "target_lookup_ready": target_lookup_ready,
         **evidence,

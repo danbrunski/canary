@@ -404,7 +404,7 @@ about: a rule copied four times is a rule that four places can disagree on.
 
 ## Structure
 
-- [~] **R04.8 Move `HealthMonitor` and the system probes out of
+- [x] **R04.8 Move `HealthMonitor` and the system probes out of
   `src/models/`.**
   - `models/health.py` (930 lines) is daemon/system health: cgroup memory,
     CPU temperature, power, can0 counters, throttling, telemetry queues,
@@ -452,8 +452,20 @@ about: a rule copied four times is a rule that four places can disagree on.
   `daemon/health.py`'s docstring. `test_health.py`, `test_daemon.py`,
   `test_profile_capture.py`, `test_route_table_snapshot.py`,
   `test_cold_start_imports.py`, `test_layering.py` pass (143).
-  - **Remaining:** delete the `src/models/health.py` shim — `src/models/**`
-    is held by the concurrent R06 agent (R06.3/R06.4).
+  - ~~**Remaining:** delete the `src/models/health.py` shim~~ — done below.
+
+  *Shim deleted 2026-09-25.* `src/models/health.py` is gone; `grep -rn
+  "models.health\|models import health" src scripts tools tests
+  --include=*.py` → only `daemon/health.py`'s docstring, which now says the
+  old path no longer imports. Doc references moved to `src/daemon/health.py`
+  (`docs/implementation-tasks.md` §5.21 note, `S02-pi-updater.md` S02.cgroup
+  note; archived task docs left as history). `test_health.py`,
+  `test_cold_start_imports.py`, `test_layering.py`, `test_profile_capture.py`,
+  `test_route_table_snapshot.py`, `test_role_gate.py`,
+  `test_scoring_continuity.py`, `test_capture_profiles.py` (152 passed, `-m
+  ""`) and `test_daemon.py` (69 passed) pass; `mypy src` clean. The deletion
+  touches `src/models/`, so the push that carries it pays the `ml_training`
+  tier once (122 passed on 2026-09-25, below R07.2).
 
 - [x] **R04.9 Break up `fit_isolation_forest` (552 lines).** Its phases:
   1. validate and resolve the spec;

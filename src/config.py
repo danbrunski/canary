@@ -13,6 +13,8 @@ from typing import Any, Literal, Self, get_args
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -905,28 +907,28 @@ class DaemonConfig(_Strict):
     unit will pin absolute paths under ``/var/lib/canary``).
     """
 
-    anomalies_dir: Path = Path("data/anomalies")
+    anomalies_dir: Path = ANOMALIES_DIR
     models_dir: Path = Path("models")
-    jobs_dir: Path = Path("data/control/jobs")
-    audit_log: Path = Path("data/control/audit.jsonl")
-    feedback_log: Path = Path("data/control/anomaly_feedback.jsonl")
+    jobs_dir: Path = CONTROL_DIR / "jobs"
+    audit_log: Path = CONTROL_DIR / "audit.jsonl"
+    feedback_log: Path = CONTROL_DIR / "anomaly_feedback.jsonl"
     #: Vehicle maintenance / intervention ledger (Task 3.1,
     #: eval-longitudinal-and-dtc.md) — what physically happened to the
     #: truck, append-only, profile-scoped like the sibling paths below.
-    vehicle_ledger: Path = Path("data/control/vehicle_ledger.jsonl")
+    vehicle_ledger: Path = CONTROL_DIR / "vehicle_ledger.jsonl"
     #: Frozen reference epoch for fingerprint drift trending (Task 4.3,
     #: eval-longitudinal-and-dtc.md) — per-stat mean/std/quantiles over a
     #: hand-picked set of healthy sessions. Written only by
     #: ``scripts/fingerprint.py freeze``; never auto-updated. Profile-scoped
     #: like the sibling ledger paths.
-    reference_epoch: Path = Path("data/control/reference_epoch.json")
-    training_ledger: Path = Path("data/control/training_runs.jsonl")
-    tuning_config: Path = Path("data/control/tuning.yaml")
-    tuning_audit: Path = Path("data/control/tuning_audit.jsonl")
+    reference_epoch: Path = CONTROL_DIR / "reference_epoch.json"
+    training_ledger: Path = CONTROL_DIR / "training_runs.jsonl"
+    tuning_config: Path = CONTROL_DIR / "tuning.yaml"
+    tuning_audit: Path = CONTROL_DIR / "tuning_audit.jsonl"
     #: Persisted GPS trip odometer (cumulative distance + moving time). Survives
     #: daemon restarts so the System page shows lifetime "miles / time driven
     #: with the unit plugged in" rather than per-process totals.
-    trip_state: Path = Path("data/control/trip_odometer.json")
+    trip_state: Path = CONTROL_DIR / "trip_odometer.json"
     #: Task 4.6 idempotency marker — ``{stat: last_alerted_session_id}``. CUSUM
     #: state itself is recomputed fresh from the full fingerprint history on
     #: every evaluation (Task 4.4's design note: cheap at per-session
@@ -934,7 +936,7 @@ class DaemonConfig(_Strict):
     #: file is the ONLY thing persisted, purely so a re-evaluation of the same
     #: already-alerted session never double-emits. Profile-scoped like the
     #: sibling ledger paths.
-    trend_alert_state: Path = Path("data/control/trend_alert_state.json")
+    trend_alert_state: Path = CONTROL_DIR / "trend_alert_state.json"
     #: Behavior-model surfaces (hand-edited / refit-written). A config field
     #: rather than a hardcoded path so it can be scoped per vehicle profile
     #: (see ``src/profiles.py``). Cwd-relative like the sibling paths; the
@@ -962,7 +964,16 @@ class DaemonConfig(_Strict):
     #: over session sidecars. Rebuildable from disk at any time
     #: (``scripts/catalog.py rebuild``); never a second source of truth.
     #: Profile-scoped like the sibling ledger paths.
-    catalog_db: Path = Path("data/control/catalog.db")
+    catalog_db: Path = CONTROL_DIR / "catalog.db"
+    #: Operational calibration state written from the dashboard: the flash
+    #: registry ``append_flash`` extends, the verified RAM catalog and the last
+    #: memory-verify outcomes. Left unset in YAML it resolves beside
+    #: ``jobs_dir`` (``src.profiles.operational_dir``), so a deployment that
+    #: pins ``jobs_dir`` under ``/data/canary`` keeps this there too; the
+    #: default below is where that lands for the default ``jobs_dir``.
+    #: ``scope_config`` always sets it, per vehicle (R05.15: it used to be one
+    #: directory inside ``jobs/`` shared by every profile).
+    calibration_dir: Path = CONTROL_DIR / "calibration"
     #: Ceiling on the row count a trip-end digest will load (D03.6). Peak
     #: memory for a digest is O(rows x channels) because the wide pivot runs
     #: at raw timestamp resolution *before* the 1 Hz resample: 5,483 MB
@@ -1175,7 +1186,7 @@ class LLMAssistConfig(_Strict):
     enabled: bool = False
     #: Where a future producer appends cards and the dashboard endpoint
     #: reads them from (``src.analysis.llm_assist.store.LlmAssistCardStore``).
-    cards_path: Path = Path("data/analyses/llm_assist_cards.jsonl")
+    cards_path: Path = ANALYSES_DIR / "llm_assist_cards.jsonl"
 
 
 class PlausibilityConfig(_Strict):

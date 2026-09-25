@@ -236,10 +236,35 @@ code.
     `test_an_enabled_evaluator_with_a_broken_file_is_withheld_not_off`,
     `test_an_unexpected_start_failure_is_withheld_not_off`,
     `test_live_plausibility_records_cost_and_evidence_per_tick`.
-  - Remainder: the Pi measurement against the missed-tick budget before enabling it
-    on a drive; confirmed detections alert via the log and `/status` only — routing
-    them into the anomaly event stream/ntfy needs `src/alerts/emitter.py` (another
-    session's uncommitted work).
+  - *Alert routing done 2026-09-25 (desk).* `PlausibilityEvaluator(alert_sink=)`
+    receives confirmed records only — the pending/confirmed split is decided in
+    the evaluator, so no caller can route a pending detection by forgetting to
+    filter. `AnomalyEventEmitter.emit_plausibility` turns one into an
+    `AnomalyEvent(source="plausibility")` (new `AnomalySource`; `detail.cause` is
+    the evidence sentence, `detail.plausibility` the whole record, `score` 1.0 with
+    no threshold like `dtc`, dedupe per `plausibility:<channel>:<check>`) through
+    `_emit`, so tuning, dedupe, role, the anomaly log/broadcast and the ntfy push
+    (never during replay, per-session cap) apply as for every source. A pending
+    record is refused twice: `AnomalyEvent.from_plausibility` raises and
+    `emit_plausibility` counts it `suppressed_not_anomaly`. An alert-sink failure
+    never costs the evidence record. Tests (`tests/test_plausibility.py`):
+    `test_a_confirmed_detection_is_an_anomaly_event_and_a_push`,
+    `test_a_pending_record_can_never_become_an_event`,
+    `test_plausibility_events_dedupe_per_channel_and_check_and_never_push_in_replay`,
+    `test_an_alert_sink_failure_never_costs_the_evidence`.
+  - *Daemon wiring done 2026-09-25 (desk).* `LivePlausibility.__init__` passes
+    `alert_sink=` to `PlausibilityEvaluator`; `LivePlausibility.build` feeds it
+    `components.emitter.emit_plausibility`. No `DetectorRolesConfig` key is
+    needed: roles default to `alert` for any source not in `by_source()`, which
+    is right for the deterministic layer. Plausibility is not capture-profile
+    gated (R03.12c). Test (real `build_components`, the Xterra
+    `plausibility.yaml`):
+    `tests/test_plausibility_live_alerts.py::test_a_confirmed_detection_reaches_the_emitter_and_replay_never_pushes`
+    — two out-of-range SPEED samples under an active `tuning` profile give one
+    `source: plausibility` event in the anomaly log and one push; in replay mode
+    the event is emitted and nothing is pushed.
+  - Remainder: the Pi measurement against the missed-tick budget before
+    enabling it on a drive.
 
 ## Acceptance
 

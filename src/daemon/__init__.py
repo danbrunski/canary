@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.config import CanaryConfig
@@ -105,6 +106,7 @@ async def run_daemon(
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
     startup: StartupTimeline | None = None,
+    passive_state: Path | None = None,
 ) -> DaemonComponents:
     """Run the full daemon while preserving the historic ``src.daemon`` facade."""
     _runtime.run_retention_sweeper = run_retention_sweeper
@@ -118,6 +120,7 @@ async def run_daemon(
         components=components,
         enable_live_inference=enable_live_inference,
         startup=startup,
+        passive_state=passive_state,
     )
 
 

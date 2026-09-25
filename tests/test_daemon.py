@@ -28,6 +28,7 @@ from src.daemon.health import HealthMonitor
 from src.dashboard.broadcast import Broadcaster
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
+from src.paths import ANOMALIES_DIR
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -738,7 +739,7 @@ async def test_retention_sweeper_emergency_evicts_below_warning(tmp_path: Path) 
 def test_daemon_config_defaults_are_sane() -> None:
     """Existing canary.yaml files without a `daemon:` block must keep loading."""
     cfg = DaemonConfig()
-    assert cfg.anomalies_dir == Path("data/anomalies")
+    assert cfg.anomalies_dir == ANOMALIES_DIR  # R01.2: repo-rooted
     assert cfg.models_dir == Path("models")
     assert cfg.model_poll_seconds == 30.0
     assert cfg.retention_sweep_seconds == 3600.0

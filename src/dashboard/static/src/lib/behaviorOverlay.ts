@@ -23,6 +23,17 @@ export const SEVERITY_TEXT: Record<BehaviorSeverity, string> = {
   critical: "text-bad",
 };
 
+/** Theme token for a severity that may be absent (B03.9: an unscored tick
+ *  carries `null`); unscored draws in the faint neutral, never the ok green. */
+export function severityToken(severity: BehaviorSeverity | null): ColorToken {
+  return severity === null ? "fg-faint" : SEVERITY_TOKEN[severity];
+}
+
+/** Tailwind text class for a severity that may be absent (see `severityToken`). */
+export function severityText(severity: BehaviorSeverity | null): string {
+  return severity === null ? "text-fg-dim" : SEVERITY_TEXT[severity];
+}
+
 /** Index of the bin ``value`` falls into for a strictly-increasing
  *  ``edges`` array, or ``null`` when out of the grid extent. Inclusive on
  *  both ends, matching ``src/analysis/surface_2d._bin_index`` so the UI

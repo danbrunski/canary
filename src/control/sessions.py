@@ -84,19 +84,18 @@ def recorded_sessions(
     This is "every recording on disk that holds data", for evaluation and
     reporting across one or more roots (e.g. a laptop mirror plus a pull).
 
-    Kinds are :data:`~src.session.RECORDED_SESSION_KINDS` (live + capture;
-    ``_tuning-*`` stays out pending the R01.1 decision). ``_archive`` and
+    Kinds are :data:`~src.session.RECORDED_SESSION_KINDS` (live, capture and
+    legacy ``_tuning-*``, operator decision 2026-09-25). ``_archive`` and
     ``_replay-*`` are never sessions. A name seen under two roots counts once
     (the first root wins: the same drive is often pulled twice). Ordered by
     parsed start time, never by name.
 
-    ``kinds`` widens the question for a caller that needs more recordings as
-    *evidence* without scoring them: ``scripts/evaluate_detectors.py`` adds
-    ``SessionKind.TUNING`` because a legacy ``_tuning-*`` recording bridges
-    its siblings into one physical drive, exactly as a capture does (its rows
-    are excluded from scoring by ``default_profile_exclusion``, R04.6).
-    ``_replay-*`` is refused: re-emitted rows are never this vehicle's
-    recording.
+    ``kinds`` narrows or widens the question. ``scripts/evaluate_detectors.py``
+    keeps legacy ``_tuning-*`` recordings as *evidence* without scoring them:
+    one bridges its siblings into one physical drive, exactly as a capture
+    does (its rows are excluded from scoring by ``default_profile_exclusion``,
+    R04.6). ``_replay-*`` is refused: re-emitted rows are never this
+    vehicle's recording.
     """
     if SessionKind.REPLAY in kinds:
         raise ValueError("replay output is not a recorded session (re-emitted rows)")
@@ -148,7 +147,9 @@ def list_sessions(root: Path, *, captures: bool = False) -> list[SessionSummary]
     being left on the table today. Revisit if this listing's cost becomes a
     measured problem, not preemptively.
     """
-    kinds = {SessionKind.CAPTURE} if captures else LIVE_SESSION_KINDS
+    # ``captures`` lists the profile-owned recordings: bounded captures and
+    # legacy ``_tuning-*`` (a recorded session since R01.1's decision).
+    kinds = {SessionKind.CAPTURE, SessionKind.TUNING} if captures else LIVE_SESSION_KINDS
     # Ordered by parsed start time (R01.1): with captures, name order sorted
     # by profile slug first, so ``filter_sessions(limit=N)`` kept the
     # lexically-last profiles rather than the newest captures.

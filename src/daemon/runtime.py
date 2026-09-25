@@ -9,7 +9,7 @@ from contextlib import AsyncExitStack, suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.collection import tuning_profile
+from src.collection import tuning_profile, tx_gate
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
@@ -33,7 +33,8 @@ from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
 from .components import DaemonComponents, build_components
-from .drain import drain_queue_with_broadcast
+from .drain import PipelineBarrier, drain_queue_with_broadcast
+from .ingress import LiveIngress
 from .online_training import run_online_training_scheduler
 from .polling import (
     poll_behavior_models,
@@ -103,23 +104,30 @@ async def handle_trip_end_off_loop(
     return result
 
 
-#: How long shutdown waits for a trip-end digest started at the GPS edge to
-#: finish before cancelling it (which terminates its child). Bounded so a
-#: multi-gigabyte session cannot hold the unit in `deactivating` — the digest
-#: is on-demand anyway, so a cancelled one is recomputed by the next read.
-TRIP_END_SHUTDOWN_SECONDS = 30.0
+#: ``TimeoutStopSec`` in ``systemd/canary.service``: after this, systemd
+#: SIGKILLs the daemon mid-teardown. ``tests/test_daemon_shutdown_deadline.py``
+#: reads the unit file, so the two cannot drift apart.
+UNIT_STOP_TIMEOUT_SECONDS = 30.0
 
-__all__ = [
-    "DRAIN_SHUTDOWN_SECONDS",
-    "TRIP_END_SHUTDOWN_SECONDS",
-    "can_receive_stats_observer",
-    "drain_kwargs",
-    "obd_handoff_stats_observer",
-    "run_daemon",
-    "run_retention_sweeper",
-    "serve_in_background",
-    "storage_decode_for",
-]
+#: What the teardown after the trip-end step needs, kept out of the trip-end
+#: budget: the inference join (2 s per task), the dashboard's forced exit
+#: (``server.DASHBOARD_SHUTDOWN_SECONDS``, 5 s) and margin.
+SHUTDOWN_TEARDOWN_RESERVE_SECONDS = 10.0
+
+#: One shutdown deadline for the trip-end work, measured from the moment
+#: shutdown begins (D03.6): the drain, the capture stop, settling the GPS-edge
+#: digests and the fallback digest all spend it, in that order. Before, the
+#: settle waited up to 30 s on its own and the fallback then started a child
+#: with the normal 900 s digest timeout for a *different* session — both
+#: inside a 30 s ``TimeoutStopSec``. The digest is on-demand, so a session
+#: whose digest this deadline cuts short is computed by the next read, and the
+#: cut is recorded in its ``digest_skipped.json`` (``interrupted_at_shutdown``
+#: or ``child_timed_out``).
+TRIP_END_SHUTDOWN_SECONDS = UNIT_STOP_TIMEOUT_SECONDS - SHUTDOWN_TEARDOWN_RESERVE_SECONDS
+
+#: Below this much of the deadline left, the fallback digest is not started
+#: at all: a spawned child needs longer than that just to import pandas.
+MIN_FALLBACK_DIGEST_SECONDS = 1.0
 
 #: Strong references to in-flight trip-end digests. ``create_task`` alone
 #: only weakly references its task, so without this the GC may collect a
@@ -232,6 +240,71 @@ async def _settle_trip_end_tasks(timeout: float = TRIP_END_SHUTDOWN_SECONDS) -> 
     if still_running:
         log.warning("cancelled %d in-flight trip-end digest(s) at shutdown", len(still_running))
         await asyncio.gather(*still_running, return_exceptions=True)
+
+
+async def shutdown_trip_end(
+    config: CanaryConfig,
+    components: DaemonComponents,
+    active_session: Path,
+    *,
+    deadline: float,
+) -> None:
+    """Task 5.4's fallback trip-end trigger, inside one shutdown deadline (D03.6).
+
+    ``deadline`` is a ``loop.time()`` instant. Whatever the GPS edge already
+    started is settled first, bounded by what is left of it; the fallback
+    digest then gets only the remainder as its child timeout — never the
+    normal :data:`~src.control.trip_end.DIGEST_TIMEOUT_SECONDS` — and is not
+    started at all with less than :data:`MIN_FALLBACK_DIGEST_SECONDS` left.
+    The fallback is idempotent against a written ``digest.json``,
+    ``_IN_FLIGHT`` and ``_INTERRUPTED``, so it is a no-op when the edge
+    already handled (or was cancelled on) the same session. Off-loop like the
+    edge path: a capped child, never a multi-gigabyte load in this sequence.
+    Never raises.
+    """
+    loop = asyncio.get_running_loop()
+
+    def remaining() -> float:
+        return max(0.0, deadline - loop.time())
+
+    try:
+        await _settle_trip_end_tasks(timeout=remaining())
+        target, open_trip = shutdown_trip_target(components, active_session)
+        if target is not None:
+            budget = remaining()
+            if budget < MIN_FALLBACK_DIGEST_SECONDS:
+                log.warning(
+                    "shutdown deadline spent (%.1f s left); no fallback digest for %s — "
+                    "the next digest read computes it",
+                    budget,
+                    target.name,
+                )
+                return
+            # The child timeout bounds the computation; the outer bound covers
+            # the preflight's footer reads too. Cancelling there takes the
+            # ``interrupted_at_shutdown`` path, so either way it is recorded.
+            await asyncio.wait_for(
+                handle_trip_end_off_loop(
+                    target,
+                    config,
+                    trip=open_trip,
+                    emitter=components.emitter,
+                    notifier=components.notifier,
+                    timeout=budget,
+                ),
+                timeout=budget + MIN_FALLBACK_DIGEST_SECONDS,
+            )
+        elif components.gps_tracker is not None:
+            # No digest: say so if the session was blind long enough that a
+            # drive could have gone unseen, exactly as a rotation would have
+            # (D03.29).
+            closed = components.gps_tracker.close_session()
+            if closed is not None and not closed.observed:
+                await record_trip_end_unobservable(active_session, config, closed.detail)
+    except TimeoutError:
+        log.warning("trip-end fallback (shutdown) cut off at the shutdown deadline")
+    except Exception:  # noqa: BLE001 — shutdown must never fail on this
+        log.exception("trip-end fallback (shutdown) failed")
 
 
 def obd_handoff_stats_observer(
@@ -357,6 +430,19 @@ async def _build_live_source_off_loop(
         return None
 
 
+def restore_passive_state(path: Path) -> str:
+    """Restore a persisted passive arm from ``path`` before anything transmits.
+
+    A no-op when this process already restored from the same file
+    (``src.main`` does, before its VIN probe), so the arm is not re-logged or
+    re-dated. Returns :func:`src.collection.tx_gate.restore_persisted`'s
+    outcome, or ``"already_restored"``.
+    """
+    if tx_gate.state_path() == path:
+        return "already_restored"
+    return tx_gate.restore_persisted(path)
+
+
 async def _cancel_all(tasks: Sequence[asyncio.Task[Any] | None]) -> None:
     """Cancel and await each task in order, ignoring ``None`` (not started)
     and the task's own ``CancelledError``; any other exception propagates.
@@ -378,6 +464,7 @@ async def run_daemon(
     components: DaemonComponents | None = None,
     enable_live_inference: bool = True,
     startup: StartupTimeline | None = None,
+    passive_state: Path | None = None,
 ) -> DaemonComponents:
     """Run the full daemon until ``stop_event`` fires.
 
@@ -414,9 +501,19 @@ async def run_daemon(
     ``/status``'s ``startup`` block and logs one summary line once every
     stage this start will reach has been reached.
 
+    **Passive survives a restart (D03.30).** Before any collector exists, an
+    armed passive persisted by the previous process is restored from
+    ``passive_state`` (``src.main`` passes the path it already restored from
+    before its VIN probe; any other caller gets
+    :func:`src.collection.tx_gate.passive_state_path` over ``config``), and
+    every later arm is written there.
+
     Returns the components so a caller can inspect counters / model
     versions for diagnostics or tests.
     """
+    restore_passive_state(
+        tx_gate.passive_state_path(config) if passive_state is None else passive_state
+    )
     components = components or build_components(config, load_models=False)
     if startup is not None:
         components.health_monitor.startup = startup
@@ -428,6 +525,11 @@ async def run_daemon(
     if enable_live_inference:
         timeline.expect("live_source_ready")
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue(maxsize=config.collection.queue_max_size)
+    # D02.9: collectors put through a closable door, so a runtime replay can
+    # withhold live input for its duration; the barrier lets a replay boundary
+    # wait for already-queued records to reach their sinks.
+    live_ingress = LiveIngress(queue)
+    pipeline_barrier = PipelineBarrier(queue)
     arming_config = config.collection.record_arming
     # Task 8.6: config-gated, defaults off (RecordArmingConfig.enabled=False)
     # — an unconfigured/disabled daemon opens its writer exactly as before,
@@ -549,6 +651,7 @@ async def run_daemon(
             storage_writer,
             stop_event,
             live_source_ready=live_source_ready,
+            barrier=pipeline_barrier,
             **drain_kwargs(
                 config,
                 components,
@@ -605,7 +708,7 @@ async def run_daemon(
     # Recording starts here. Everything below it is slow on a cold boot and
     # none of it is needed to record.
     collector_tasks = [
-        asyncio.create_task(starter(queue, stop_event)) for starter in active_collectors
+        asyncio.create_task(starter(live_ingress, stop_event)) for starter in active_collectors
     ]
     stop_task = asyncio.create_task(stop_event.wait())
     timeline.mark("collector_tasks_created")
@@ -646,6 +749,8 @@ async def run_daemon(
                 live_source=live_source,
                 persistence_gate=components.persistence_gate,
                 emitter=components.emitter,
+                live_ingress=live_ingress,
+                settle_pipeline=pipeline_barrier.settle,
             )
             if live_source is not None:
                 # Hot-reload the behavior-models YAML so refit deployments don't
@@ -687,6 +792,7 @@ async def run_daemon(
                 if task is not stop_task:
                     task.result()
         finally:
+            shutdown_started = asyncio.get_running_loop().time()
             if live_source_ready is not None and not live_source_ready.done():
                 live_source_ready.set_result(None)
             stop_event.set()
@@ -711,34 +817,14 @@ async def run_daemon(
                 await components.profile_capture.stop("daemon_shutdown")
             # Task 5.4 fallback trip-end trigger: the drive can end because
             # the daemon stopped (Pi shutdown) rather than a clean
-            # GPS-detected stop. Settle whatever the GPS edge already
-            # started first — the fallback is idempotent against a *written*
-            # digest.json, and `_IN_FLIGHT` against one still computing, so
-            # this is a no-op when the edge already fired for the active
-            # session. Off-loop like the edge path: a capped child, never a
-            # multi-gigabyte load inside the shutdown sequence itself.
-            try:
-                await _settle_trip_end_tasks()
-                target, open_trip = shutdown_trip_target(components, storage_writer.paths.root)
-                if target is not None:
-                    await handle_trip_end_off_loop(
-                        target,
-                        config,
-                        trip=open_trip,
-                        emitter=components.emitter,
-                        notifier=components.notifier,
-                    )
-                elif components.gps_tracker is not None:
-                    # No digest: say so if the session was blind long enough
-                    # that a drive could have gone unseen, exactly as a
-                    # rotation would have (D03.29).
-                    closed = components.gps_tracker.close_session()
-                    if closed is not None and not closed.observed:
-                        await record_trip_end_unobservable(
-                            storage_writer.paths.root, config, closed.detail
-                        )
-            except Exception:  # noqa: BLE001 — shutdown must never fail on this
-                log.exception("trip-end fallback (shutdown) failed")
+            # GPS-detected stop. One deadline, from the start of shutdown
+            # (D03.6), so the whole stop fits TimeoutStopSec.
+            await shutdown_trip_end(
+                config,
+                components,
+                storage_writer.paths.root,
+                deadline=shutdown_started + TRIP_END_SHUTDOWN_SECONDS,
+            )
             await _cancel_all(
                 (
                     poll_task,
@@ -765,5 +851,17 @@ async def run_daemon(
 
 __all__ = [
     "DRAIN_SHUTDOWN_SECONDS",
+    "MIN_FALLBACK_DIGEST_SECONDS",
+    "SHUTDOWN_TEARDOWN_RESERVE_SECONDS",
+    "TRIP_END_SHUTDOWN_SECONDS",
+    "UNIT_STOP_TIMEOUT_SECONDS",
+    "can_receive_stats_observer",
+    "drain_kwargs",
+    "obd_handoff_stats_observer",
+    "restore_passive_state",
     "run_daemon",
+    "run_retention_sweeper",
+    "serve_in_background",
+    "shutdown_trip_end",
+    "storage_decode_for",
 ]

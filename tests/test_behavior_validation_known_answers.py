@@ -43,7 +43,7 @@ ARTIFACT = load_behavior_models(
     Path(__file__).parent / "fixtures/behavior_validation/behavior_models_2026-09-22.yaml"
 )
 CRITERIA = load_validation_document(Path("data/nissan-xterra-2008/behavior_validation.yaml"))
-CATALOG = {recipe.name: recipe for recipe in default_recipes()}
+CATALOG = {recipe.name: recipe for recipe in default_recipes("nissan-xterra-2008")}
 
 J26 = "2026-07-26T225058"
 S17 = "_capture-tuning-hybrid-research-2026-09-17T184821"

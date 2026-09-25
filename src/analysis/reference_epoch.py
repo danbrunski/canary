@@ -26,10 +26,11 @@ from typing import Any
 
 import numpy as np
 
+from src.paths import CONTROL_DIR
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 
-DEFAULT_REFERENCE_EPOCH_PATH = Path("data/control/reference_epoch.json")
+DEFAULT_REFERENCE_EPOCH_PATH = CONTROL_DIR / "reference_epoch.json"
 
 SCHEMA_VERSION = 1
 

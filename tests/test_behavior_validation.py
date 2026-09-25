@@ -424,7 +424,7 @@ def test_legacy_artifact_is_reproduced_with_its_own_gates_not_a_later_recipe_gat
     re-applying the new gate refused every committed held-out row."""
     from src.analysis.refit import legacy_reproduction_spec
 
-    recipe = {r.name: r for r in default_recipes()}["warm_idle_rpm_baseline"]
+    recipe = {r.name: r for r in default_recipes("nissan-xterra-2008")}["warm_idle_rpm_baseline"]
     assert [c.channel for c in recipe.rate_conditions()] == ["obd:RPM__roc"]
     legacy = load_behavior_models(
         Path(__file__).parent / "fixtures/behavior_validation/behavior_models_2026-09-22.yaml"
@@ -551,7 +551,7 @@ def test_shipped_profile_criteria_load_and_cover_the_shipped_models() -> None:
     assert doc is not None
     shipped = load_behavior_models(Path("data/nissan-xterra-2008/behavior_models.yaml"))
     assert {m.name for m in shipped.models} <= set(doc.recipes)
-    assert set(doc.recipes) <= {r.name for r in default_recipes()}
+    assert set(doc.recipes) <= {r.name for r in default_recipes("nissan-xterra-2008")}
     assert "suburban" in doc.retired_operating_modes
 
 
@@ -600,7 +600,7 @@ def _legacy_catalyst() -> BehaviorModel1D:
 
 def test_missing_holdout_never_falls_back_to_training_r_squared() -> None:
     legacy = _legacy_catalyst()
-    recipe = next(r for r in default_recipes() if r.name == "cat_warmup")
+    recipe = next(r for r in default_recipes("nissan-xterra-2008") if r.name == "cat_warmup")
     # Publication sanity may read training R² ...
     assert _check_publish_gate(recipe, legacy) is None
     # ... but alerting never does.

@@ -193,7 +193,7 @@ def test_profile_timing_resolution_is_declared_and_disclaims_knock() -> None:
 
 
 def test_timing_recipes_do_not_claim_knock_identification() -> None:
-    for recipe in default_recipes():
+    for recipe in default_recipes("nissan-xterra-2008"):
         if recipe.output != "obd:TIMING_ADVANCE":
             continue
         claims = " ".join([*recipe.diagnostic_capabilities, recipe.notes or ""]).lower()
