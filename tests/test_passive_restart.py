@@ -6,11 +6,19 @@ with passive off and CANary sent Mode 01 for ~13 s before it was re-armed by
 hand. These tests run the daemon twice in one process, forgetting the gate's
 in-memory state in between exactly as a new process would, and assert that
 the second daemon sends nothing before its first status read shows passive.
+
+Each run records into its own storage root (:func:`_restarted`). Both used to
+share one, and the session directory is named to the second with
+``exist_ok=False`` (collisions are loud on purpose), so a restart inside the
+same wall-clock second died in ``make_session_dir`` before any collector ran
+and the test hung 30 s on "first collector send" (T01.11). The passive state
+file lives in the control-state directory, which the two runs still share.
 """
 
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +50,15 @@ def _forget_process_memory() -> None:
     tx_gate.set_passive(False, source="default", persist=False)
 
 
+def _restarted(config: CanaryConfig, run: int) -> CanaryConfig:
+    """``config`` for daemon run ``run``: the same control state (where the
+    passive file lives), a storage root of its own (T01.11)."""
+    storage = config.collection.storage_path.with_name(f"storage-run{run}")
+    return config.model_copy(
+        update={"collection": config.collection.model_copy(update={"storage_path": storage})}
+    )
+
+
 async def _run_once(
     config: CanaryConfig,
     *,
@@ -59,8 +76,18 @@ async def _run_once(
             enable_live_inference=False,
         )
     )
+    probe = asyncio.create_task(while_running(components))
     try:
-        return await while_running(components)
+        # A daemon that dies first fails the test with its own error, rather
+        # than leaving ``while_running`` to wait out the hang guard (T01.11).
+        await settle(asyncio.wait({task, probe}, return_when=asyncio.FIRST_COMPLETED))
+        if not probe.done():
+            probe.cancel()
+            with suppress(asyncio.CancelledError):
+                await probe
+            task.result()
+            raise AssertionError("run_daemon returned before the test's probe finished")
+        return probe.result()
     finally:
         stop.set()
         await settle(task)
@@ -81,7 +108,7 @@ async def test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first(
         # What POST /control/passive does.
         tx_gate.set_passive(True, source="control", ttl_seconds=1800)
 
-    await _run_once(config, collectors=[], while_running=_arm)
+    await _run_once(_restarted(config, 1), collectors=[], while_running=_arm)
     assert tx_gate.passive_state_path(config).exists()
 
     _forget_process_memory()
@@ -104,7 +131,9 @@ async def test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first(
         await wait_until(lambda: "sent" in first_send, what="first collector send")
         return _status(config, components)
 
-    status = await _run_once(config, collectors=[_transmitter], while_running=_first_status_read)
+    status = await _run_once(
+        _restarted(config, 2), collectors=[_transmitter], while_running=_first_status_read
+    )
 
     assert first_send["sent"] is False
     assert bus.sent == [], "a frame went out before passive was restored"
@@ -124,14 +153,14 @@ async def test_a_disarm_before_the_restart_is_not_resurrected(
         tx_gate.set_passive(True, source="control", ttl_seconds=1800)
         tx_gate.set_passive(False, source="control")
 
-    await _run_once(config, collectors=[], while_running=_arm_then_disarm)
+    await _run_once(_restarted(config, 1), collectors=[], while_running=_arm_then_disarm)
     _forget_process_memory()
 
     async def _read(components: Any) -> dict[str, Any]:
         await wait_until(lambda: tx_gate.state_path() is not None, what="passive state restored")
         return _status(config, components)
 
-    status = await _run_once(config, collectors=[], while_running=_read)
+    status = await _run_once(_restarted(config, 2), collectors=[], while_running=_read)
     assert status["passive"]["enabled"] is False
 
 

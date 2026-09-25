@@ -370,7 +370,7 @@ measurement in hand.
   the file was being edited at the time) and `TuningContextBar.test.tsx`
   (1 test, 2 of 3 runs).
 
-- [ ] **T01.11 `tests/test_passive_restart.py::test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first`
+- [x] **T01.11 `tests/test_passive_restart.py::test_a_passive_arm_survives_a_restart_and_nothing_is_sent_first`
   fails under full-suite load and passes alone.** Seen 2026-09-25 in the
   isolated fast-tier run of the R05.16 commit (`-n 6`, 5875 other tests
   passing); passed 3 of 3 alone (`-n0`) and beside `test_daemon.py` +
@@ -378,3 +378,34 @@ measurement in hand.
   drives a real restart. Reproduce beside the per-core burners (T01.1's
   method), record which wait expires, and replace it with a condition the test
   controls.
+  **The wait that expired was "first collector send" (the 30 s hang guard),
+  and the daemon was already dead: the two runs shared one storage root.**
+  Caught on a quiet host, no burners, `-n0`, on the 3rd of a loop of runs
+  (an earlier 30.9 s failure, traceback not kept, had the same duration): the second `run_daemon` raised
+  `FileExistsError` in `make_session_dir` for `storage/2026-09-25T233019`,
+  the first run's session directory. Session directories are named to the
+  second and created `exist_ok=False` (collisions loud on purpose,
+  `test_make_session_dir_refuses_collision`), so whenever the restart fell in
+  the same wall-clock second as the first start, the second daemon died
+  before any collector existed and `_first_status_read` waited out the guard.
+  Load is incidental: it only moves where the second boundary falls. Not
+  D03.30's restore ordering: `restore_passive_state` still runs synchronously
+  as `run_daemon`'s first statement, before the writer and every collector,
+  and the captured log shows `passive mode RESTORED ... 1799 s of its 1800 s
+  TTL left` before the crash. No production code changed. The sibling
+  `test_a_disarm_before_the_restart_is_not_resurrected` had the same race and
+  had not been seen yet. Deterministic reproduction: a scratch pytest plugin
+  pinning `src.storage.parquet_writer.datetime.now` to one instant. At `HEAD`
+  both restart tests fail (the survive test after 31.2 s on "hung: first
+  collector send", the disarm test on `FileExistsError`). Fix, test only:
+  `_restarted(config, run)` gives each run its own storage root and keeps the
+  shared control-state directory, where the passive file lives. So the test
+  now also pins that restore does not depend on the session directory.
+  `_run_once` now races the probe against the daemon task, so a daemon that
+  dies first fails the test at once with its own traceback, not after 30 s.
+  Mutation (`_restarted` returning `config` unchanged, clock pinned): both
+  fail on `FileExistsError` in 3.9 s total. Fixed, clock pinned: 3 of 3 pass.
+  Acceptance: the file passed 10 of 10 copies beside 12 burners (two rounds
+  of five concurrent `pytest -n0` copies, 11–13 s each, 1-min load 4.8 and
+  8.4 at the end of the short runs), and 15 of 15 sequential quiet runs,
+  where the collision had hit 1 in 3 before.
