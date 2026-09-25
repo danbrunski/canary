@@ -673,3 +673,47 @@ def test_the_ingress_is_write_only(tmp_path: Path) -> None:
     assert ingress.qsize() == queue.qsize() == 1
     with pytest.raises(TypeError, match="write-only"):
         ingress.get_nowait()
+
+
+async def test_status_reports_the_directory_the_writer_opened(tmp_path: Path) -> None:
+    """D03.32: ``output_session_dir`` is read back from the writer, not rebuilt
+    as ``storage_root / f"_replay-{id}"``. Here the two roots differ, so a
+    rebuilt path would name a directory that does not exist."""
+    storage_root = tmp_path / "sessions"
+    (storage_root / "2026-05-18T120000").mkdir(parents=True)
+    writer = ParquetTelemetryWriter(tmp_path / "writer-root")
+    controller = ReplayController(
+        queue=asyncio.Queue(),
+        writer=writer,
+        anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
+        storage_root=storage_root,
+    )
+    status = await controller.start("2026-05-18T120000", loop=False)
+    assert status.output_session_dir == str(writer.paths.root)
+    assert Path(status.output_session_dir).parent == tmp_path / "writer-root"
+    assert Path(status.output_session_dir).is_dir()
+    await controller.stop()
+
+
+async def test_two_replays_started_in_one_second_get_two_ids(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D03.32: the replay id was ``now`` to the second, so a stop and restart
+    in one second reused ``_replay-<id>`` and its anomaly file."""
+    from src import session as session_mod
+    from src.control import replay_control
+
+    monkeypatch.setattr(session_mod, "_last_isolated_id", None)
+    frozen = datetime(2026, 9, 25, 23, 30, 19, tzinfo=UTC)
+    monkeypatch.setattr(replay_control, "_utc_now", lambda: frozen)
+    controller, storage_root = _make_controller(tmp_path)
+    (storage_root / "2026-05-18T120000").mkdir()
+
+    first = await controller.start("2026-05-18T120000", loop=False)
+    await controller.stop()
+    second = await controller.start("2026-05-18T120000", loop=False)
+    await controller.stop()
+
+    assert (first.replay_id, second.replay_id) == ("2026-09-25T233019", "2026-09-25T233020")
+    assert first.output_session_dir != second.output_session_dir
+    assert first.output_anomalies_path != second.output_anomalies_path

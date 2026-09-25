@@ -8,7 +8,6 @@ Part of ``/control/*``; every route here requires the control token
 from __future__ import annotations
 
 import time
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -26,7 +25,7 @@ from src.dashboard.schemas import (
     TriggerPollRequest,
     TuningModeRequest,
 )
-from src.session import format_session_timestamp
+from src.session import issue_isolated_id
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -166,7 +165,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         if storage_writer is not None and previous != request.enabled:
             try:
                 if request.enabled:
-                    tuning_id = format_session_timestamp(datetime.now(UTC))
+                    tuning_id = issue_isolated_id()
                     await storage_writer.enter_tuning_mode(tuning_id)
                     payload["output_session_dir"] = str(storage_writer.paths.root)
                 else:

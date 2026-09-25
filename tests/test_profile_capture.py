@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pyarrow.parquet as pq
 import pytest
 
 from src.collection import bus_budget, tuning_profile
@@ -289,3 +290,41 @@ async def test_an_http_started_capture_ended_by_daemon_shutdown_reports_its_epoc
     assert _persistence(stored)["loss_epoch_start"] is not None
     manifest = read_capture_manifest(capture_dir)
     assert manifest is not None and manifest.end_reason == "daemon_shutdown"
+
+
+async def test_two_captures_started_in_one_second_keep_both_recordings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D03.32: the capture id was ``now`` to the second, so start, stop and
+    start again inside one second re-entered the first capture's directory,
+    and the second capture overwrote its ``telemetry-00000.parquet``."""
+    from src import session as session_mod
+    from src.control import profile_capture
+    from src.telemetry import TelemetryRecord
+
+    monkeypatch.setattr(session_mod, "_last_isolated_id", None)
+    frozen = datetime(2026, 9, 25, 23, 30, 19, tzinfo=UTC)
+    monkeypatch.setattr(
+        profile_capture, "issue_isolated_id", lambda: session_mod.issue_isolated_id(frozen)
+    )
+    session, writer = _session(tmp_path)
+
+    captured: list[Path] = []
+    for value in (1.0, 2.0):
+        await session.start(ProfileCaptureStart(profile="fuel-map"))
+        captured.append(writer.paths.root)
+        await writer.write(TelemetryRecord.obd(1_790_000_000.0 + value, "RPM", value, "rpm"))
+        await session.stop("operator_stop")
+
+    assert [path.name for path in captured] == [
+        "_capture-fuel-map-2026-09-25T233019",
+        "_capture-fuel-map-2026-09-25T233020",
+    ]
+    for path, value in zip(captured, (1.0, 2.0), strict=True):
+        chunks = sorted(path.glob("telemetry-*.parquet"))
+        values = [
+            v for chunk in chunks for v in pq.read_table(chunk).column("value_number").to_pylist()
+        ]
+        assert values == [value], path.name
+        manifest = read_capture_manifest(path)
+        assert manifest is not None and manifest.end_reason == "operator_stop"

@@ -17,6 +17,7 @@ from src.session import (
     classify_session_name,
     dir_size,
     format_session_timestamp,
+    issue_isolated_id,
     iter_sessions,
     load_tags,
     make_session_dir,
@@ -349,3 +350,17 @@ def test_make_unique_session_dir_gives_up_naming_the_window(
     make_unique_session_dir(tmp_path, started)
     with pytest.raises(FileExistsError, match="within 2 s of 2026-09-25T233019"):
         make_unique_session_dir(tmp_path, started)
+
+
+def test_issue_isolated_id_never_repeats_in_one_second(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D03.32: two captures started in one second got one directory."""
+    monkeypatch.setattr(session_mod, "_last_isolated_id", None)
+    now = datetime(2026, 9, 25, 23, 30, 19, 250_000, tzinfo=UTC)
+    ids = [issue_isolated_id(now) for _ in range(3)]
+    assert ids == ["2026-09-25T233019", "2026-09-25T233020", "2026-09-25T233021"]
+    # A later clock reading is used as it is, not queued behind the bumps.
+    assert issue_isolated_id(datetime(2026, 9, 25, 23, 31, tzinfo=UTC)) == "2026-09-25T233100"
+    # Still parseable stamps, in issue order under the one sort key.
+    names = [f"_capture-fuel-map-{stamp}" for stamp in ids]
+    assert all(classify_session_name(name) is not None for name in names)
+    assert sorted(names, key=session_sort_key) == names

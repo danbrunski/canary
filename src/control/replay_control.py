@@ -55,7 +55,7 @@ from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
 from src.control.capture_manifest import read_capture_manifest
-from src.session import SessionKind, format_session_timestamp, session_kind
+from src.session import SessionKind, issue_isolated_id, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -340,7 +340,7 @@ class ReplayController:
             raise ReplayNotFoundError(f"session {source_session_id!r} not found")
 
         manifest = read_capture_manifest(source_dir)
-        replay_id = format_session_timestamp(_utc_now())
+        replay_id = issue_isolated_id(_utc_now())
         # D02.9: stop live input first, then let what is already queued land
         # in the live session, and only then redirect the writer.
         if self._live_ingress is not None:
@@ -348,6 +348,9 @@ class ReplayController:
         try:
             entry_settled = await self._settle("entry")
             await self._writer.enter_replay_mode(replay_id)
+            # The directory the writer actually opened, never one rebuilt
+            # from the id (D03.32).
+            output_session_dir = self._writer.paths.root
         except BaseException:
             if self._live_ingress is not None:
                 self._live_ingress.open()
@@ -398,7 +401,7 @@ class ReplayController:
             started_at=_utc_now().isoformat(),
             speed=speed,
             loop=loop,
-            output_session_dir=str(self._storage_root / f"_replay-{replay_id}"),
+            output_session_dir=str(output_session_dir),
             output_anomalies_path=str(anomalies_path),
             source_capture_profile=None if manifest is None else manifest.profile,
             source_corpus_eligible=True if manifest is None else manifest.corpus_eligible,

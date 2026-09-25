@@ -1738,15 +1738,58 @@ live here now, so the documents could be archived
   own rows); `tests/test_session.py::test_make_unique_session_dir_bumps_past_taken_seconds_in_order`,
   `::test_make_unique_session_dir_gives_up_naming_the_window`. Mutation: with
   init and `rotate_session` back on `make_session_dir`, the three writer
-  collision tests fail. **Not covered:** re-entering an isolated
-  directory (`_capture-<profile>-<id>`, `_tuning-<id>`, `_replay-<id>`) with
-  the same id. `_enter_isolated_dir` uses `exist_ok=True` and restarts the
-  chunk index at 0, so a second capture started in the same second as the
-  first overwrites the first's `telemetry-00000.parquet` and its
-  `capture_profile.json`. Reproduced in a scratch run. The caller picks the id
-  (`profile_capture`, `bus.py`, `replay_control`, and `replay_control` rebuilds
-  the output path from the id), so this is a control-layer contract change and
-  was left open.
+  collision tests fail. Re-entering an isolated directory with the same id
+  (the same shape, on the capture/tuning/replay side) is D03.32.
+
+- [x] **D03.32 A second capture started in the same second overwrote the
+  first.** Found while closing D03.31: capture, tuning and replay ids were
+  `format_session_timestamp(now)`, and `_enter_isolated_dir` entered an existing
+  directory (`exist_ok=True`) with the chunk index back at 0. So start, stop
+  and start again inside one second re-entered `_capture-<profile>-<id>` and
+  replaced the first capture's `telemetry-00000.parquet` and
+  `capture_profile.json`. Reproduced in a scratch run: one chunk left, holding
+  only the second capture's row. Orchestrator decision 2026-09-25: both fixes.
+  *Done 2026-09-25 (desk).*
+  - Callers never reuse an id. `src.session.issue_isolated_id(now)` returns
+    `now` to the second, or the second after the last id this process issued
+    when that is taken. It keeps a plain stamp in start order under
+    `session_sort_key`. `ProfileCaptureSession.start`
+    (`src/control/profile_capture.py`), the tuning-mode route
+    (`src/dashboard/routes/control/bus.py`) and `ReplayController.start` take
+    their ids from it. So the replay's anomaly file `_replay/<id>.jsonl` is
+    also no longer shared.
+  - `ReplayController` reports `output_session_dir` as the writer's
+    `paths.root` after entry, not `storage_root / f"_replay-{id}"`.
+  - Backstop: `ParquetTelemetryWriter._enter_isolated_dir` raises
+    `IsolatedSessionExistsError` (a `FileExistsError`, message names D03.32)
+    for a directory that already holds anything. It refuses before flushing
+    or moving, so the writer stays where it was. An existing empty directory
+    is still entered. This covers a directory left by an earlier process in
+    the same second, which the in-process id counter cannot see.
+  - Tests: `tests/test_profile_capture.py::test_two_captures_started_in_one_second_keep_both_recordings`
+    (through `ProfileCaptureSession` on one frozen second: `…T233019` and
+    `…T233020`, each keeps its own row and its `operator_stop` manifest);
+    `tests/test_replay_control.py::test_two_replays_started_in_one_second_get_two_ids`
+    (distinct ids, directories and anomaly files) and
+    `::test_status_reports_the_directory_the_writer_opened` (writer root ≠
+    `storage_root`, so a rebuilt path would name a missing directory);
+    `tests/test_parquet_writer.py::test_entering_an_isolated_dir_that_holds_a_recording_refuses`
+    (refuses; writer root, the earlier capture and the live buffer untouched;
+    an empty directory still entered);
+    `tests/test_session.py::test_issue_isolated_id_never_repeats_in_one_second`.
+  - Mutations: with the id bump removed, the session, capture and replay tests
+    fail. The capture test fails on the backstop's
+    `ProfileCaptureError(failed_step="storage_rotation", IsolatedSessionExistsError …)`,
+    and the rollback put the writer back on a live session. With the backstop
+    also removed, the capture test fails on the overwrite itself (one
+    directory, not two). With only the backstop removed, the writer refusal
+    test fails.
+  - `tests/test_route_table_snapshot.py` and `tests/test_mcp_tool_snapshot.py`
+    pass unchanged.
+  - **Left as is:** `src/daemon/plausibility_live.py::live_session_key` still
+    derives `f"_replay-{replay_id}"` from the replay id, outside this change's
+    files. It stays correct, because the writer refuses a taken name rather
+    than renaming it, so the directory is always `_replay-<id>`.
 
 ## Deferred by decision, not blocked
 

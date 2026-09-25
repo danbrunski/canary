@@ -25,7 +25,6 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -40,7 +39,7 @@ from src.control.capture_finalize import (
     record_capture_start,
 )
 from src.control.capture_manifest import read_capture_manifest, stamp_capture_end
-from src.session import format_session_timestamp
+from src.session import issue_isolated_id
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle_state import ReplayStatusSource, derive_from_live_source
 
@@ -193,7 +192,7 @@ class ProfileCaptureSession:
                         "idempotent": True,
                     }
                 raise ProfileCaptureError(409, "a different capture profile is already active")
-            capture_id = format_session_timestamp(datetime.now(UTC))
+            capture_id = issue_isolated_id()
             requested_budget = request.bus_budget_requests_per_second
             if requested_budget is None:
                 requested_budget = profile.bus_budget_override

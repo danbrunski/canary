@@ -748,3 +748,30 @@ def test_capture_enter_exit_and_rotate_within_one_second(tmp_path: Path) -> None
         "2026-09-25T233020": [720.0],
         "2026-09-25T233021": [730.0],
     }
+
+
+def test_entering_an_isolated_dir_that_holds_a_recording_refuses(tmp_path: Path) -> None:
+    """D03.32 backstop: the chunk index restarts at 0 on entry, so entering a
+    non-empty isolated directory again overwrote the earlier recording."""
+    writer = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock, max_rows=1)
+    writer.enter_capture_mode(_capture_profile(), "2026-09-25T233019")
+    first_capture = writer.paths.root
+    writer.write(TelemetryRecord.obd(1_790_000_000.0, "RPM", 1.0, "rpm"))
+    writer.exit_capture_mode()
+    live = writer.paths.root
+    writer.write(TelemetryRecord.obd(1_790_000_000.1, "RPM", 5.0, "rpm"))  # flushed (max_rows=1)
+    writer.max_rows = 10
+    writer.write(TelemetryRecord.obd(1_790_000_000.2, "RPM", 6.0, "rpm"))  # still buffered
+
+    with pytest.raises(parquet_writer.IsolatedSessionExistsError, match="D03.32"):
+        writer.enter_capture_mode(_capture_profile(), "2026-09-25T233019")
+    # Nothing moved, nothing was flushed early, nothing was overwritten.
+    assert writer.paths.root == live
+    assert _values(first_capture) == [1.0]
+    writer.flush()
+    assert _values(live) == [5.0, 6.0]
+
+    # An existing but empty directory holds nothing to lose: entered.
+    (tmp_path / "_replay-empty").mkdir()
+    writer.enter_replay_mode("empty")
+    assert writer.paths.root == tmp_path / "_replay-empty"

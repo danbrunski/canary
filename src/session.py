@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -239,6 +240,32 @@ def make_unique_session_dir(out_root: Path, started_at: datetime) -> SessionPath
         f"no free session directory under {out_root} within {UNIQUE_SESSION_DIR_ATTEMPTS} s "
         f"of {format_session_timestamp(started_at)}"
     )
+
+
+_isolated_id_lock = threading.Lock()
+_last_isolated_id: datetime | None = None
+
+
+def issue_isolated_id(now: datetime | None = None) -> str:
+    """A stamp for an isolated directory (``_capture-<profile>-<id>``,
+    ``_tuning-<id>``, ``_replay-<id>``) that this process has never issued.
+
+    The ids were ``format_session_timestamp(now)``, so two captures started in
+    one wall-clock second named the same directory, and the second silently
+    overwrote the first's ``telemetry-00000.parquet`` and sidecar (D03.32).
+    Each call now returns ``now`` or, when that second is already issued, the
+    second after the last one issued: still a plain, parseable stamp, still in
+    start order under :func:`session_sort_key`. A directory left by an earlier
+    process in the same second is the writer's to refuse
+    (``ParquetTelemetryWriter`` will not enter a non-empty isolated directory).
+    """
+    global _last_isolated_id
+    wanted = (datetime.now(UTC) if now is None else now).astimezone(UTC).replace(microsecond=0)
+    with _isolated_id_lock:
+        if _last_isolated_id is not None and wanted <= _last_isolated_id:
+            wanted = _last_isolated_id + timedelta(seconds=1)
+        _last_isolated_id = wanted
+    return format_session_timestamp(wanted)
 
 
 def load_tags(path: Path) -> list[dict[str, Any]]:

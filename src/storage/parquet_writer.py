@@ -68,6 +68,10 @@ TELEMETRY_SCHEMA: Any = _PA.schema(
 ENGINE_RUN_TIME_CHANNELS = frozenset({"RUN_TIME", "run_time", "runtime", "engine_run_time"})
 
 
+class IsolatedSessionExistsError(FileExistsError):
+    """An isolated directory (capture, tuning, replay) already holds a recording."""
+
+
 class ParquetTelemetryWriter:
     """Buffer telemetry records and flush them into per-session Parquet chunks."""
 
@@ -201,9 +205,21 @@ class ParquetTelemetryWriter:
         ``GET /control/sessions`` listing (timestamp-only regex), and from the
         byte-bounded retention sweep (timestamp parse fails) — see the
         ``_replay-*`` / ``_tuning-*`` isolation note in ``docs/mcp-server.md``.
+
+        Refuses (:class:`IsolatedSessionExistsError`, nothing flushed, nothing
+        moved) when ``dir_name`` already holds anything: the chunk index
+        restarts at 0, so entering it again overwrote the earlier window's
+        ``telemetry-00000.parquet`` and sidecar (D03.32). Callers take their
+        ids from :func:`src.session.issue_isolated_id`, which never repeats
+        one; this is the backstop for a directory an earlier process left.
         """
-        flushed = self.flush()
         isolated_root = self._out_root / dir_name
+        if isolated_root.is_dir() and any(isolated_root.iterdir()):
+            raise IsolatedSessionExistsError(
+                f"refusing to enter {isolated_root}: it already holds a recording, and "
+                "entering it again would overwrite that recording's chunks (D03.32)"
+            )
+        flushed = self.flush()
         isolated_root.mkdir(parents=True, exist_ok=True)
         self.paths = session_paths(isolated_root)
         self.session_paths.append(self.paths)
