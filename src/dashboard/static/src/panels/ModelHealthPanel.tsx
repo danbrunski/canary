@@ -1,5 +1,6 @@
 import { MeterBar, MetricTile } from "../components/MetricTile";
 import { Panel } from "../components/Panel";
+import { describeError } from "../hooks/useControlResource";
 import {
   cn,
   definitionListClass,
@@ -24,7 +25,7 @@ export function ModelHealthPanel({ status, statusError }: ModelHealthPanelProps)
     <Panel title="Drift & Inference Health">
       {statusError && (
         <div className="mb-2 rounded-[8px] border border-bad/40 bg-bad/10 px-2.5 py-1.5 text-[0.82rem] text-bad">
-          /status unreachable: {statusError.message}
+          /status unreachable: {describeError(statusError)}
         </div>
       )}
       {!status ? (

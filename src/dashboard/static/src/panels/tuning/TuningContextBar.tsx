@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { TuningContext } from "../../hooks/useTuningContext";
 import { cn } from "../../styles";
 import type { ReadinessEntry, ReadinessKey, StatusResponse, WorkbenchItem } from "../../types";
+import { formatClockDuration } from "../../util/time";
 
 /** Chips in display order. Every key is always rendered: a chip the daemon
  *  did not report is grey "not reported", never absent and never green. */
@@ -43,7 +44,9 @@ function chipValue(key: ReadinessKey, value: unknown): string {
     return `${counts.passed ?? 0}/${counts.total ?? 0} verified${failed}`;
   }
   if (key === "vehicle_state" && typeof value === "string") return value.replace(/_/g, " ");
-  return String(value);
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value) ?? "not reported";
 }
 
 /** `HH:MM:SS` since `startedAt`, or null when it cannot be parsed. */
@@ -51,9 +54,7 @@ export function elapsedLabel(startedAt: string | null | undefined, now: number):
   if (!startedAt) return null;
   const start = Date.parse(startedAt);
   if (!Number.isFinite(start)) return null;
-  const total = Math.max(0, Math.floor((now - start) / 1000));
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(Math.floor(total / 3600))}:${pad(Math.floor((total % 3600) / 60))}:${pad(total % 60)}`;
+  return formatClockDuration((now - start) / 1000, { hours: "always" });
 }
 
 interface Props {

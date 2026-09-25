@@ -7,8 +7,9 @@ import type {
   Refusal,
   UnavailableKind,
   UnavailableSession,
-} from "../../lib/workbenchApi";
+} from "../../types/workbench";
 import { gateSentence } from "../../lib/workbenchApi";
+import { divergingAround0, sequentialIn } from "../../lib/colorScale";
 import { cn } from "../../styles";
 
 /** A refused request, in the words its kind demands. */
@@ -156,15 +157,6 @@ export function ConditionsBlock({
   );
 }
 
-/** Colour ramp for a cell value against the grid's own extent. */
-function ramp(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  const r = Math.round(40 + 215 * clamped);
-  const g = Math.round(90 + 90 * (1 - Math.abs(clamped - 0.5) * 2));
-  const b = Math.round(200 - 170 * clamped);
-  return `rgb(${r}, ${g}, ${b})`;
-}
-
 /** An rpm x airflow grid as DOM cells (readable and testable without a
  *  canvas). Sparse cells are grey with their n, never coloured. */
 export function CellGrid({
@@ -175,6 +167,7 @@ export function CellGrid({
   unit,
   highlight,
   label,
+  scale = "sequential",
 }: {
   cells: Cell[];
   rpmEdges: number[];
@@ -183,6 +176,10 @@ export function CellGrid({
   unit: string;
   highlight?: (cell: Cell) => boolean;
   label: string;
+  /** `sequential` for a magnitude (timing), shaded over the grid's extent;
+   *  `diverging` for a signed correction or delta, centred on zero so "no
+   *  change" is always the same neutral (R08.7). */
+  scale?: "sequential" | "diverging";
 }) {
   const byKey = new Map(cells.map((cell) => [`${cell.rpm_index}:${cell.airflow_index}`, cell]));
   const usedRpm = [...new Set(cells.map((c) => c.rpm_index))].sort((a, b) => b - a);
@@ -192,7 +189,9 @@ export function CellGrid({
     .map((c) => c[valueKey] as number);
   const lo = values.length ? Math.min(...values) : 0;
   const hi = values.length ? Math.max(...values) : 1;
-  const span = hi - lo || 1;
+  const maxAbs = Math.max(Math.abs(lo), Math.abs(hi));
+  const shade = (value: number) =>
+    scale === "diverging" ? divergingAround0(value, maxAbs) : sequentialIn(value, lo, hi);
   if (!cells.length) return <p className="m-0 text-sm text-fg-dim">No cells.</p>;
   return (
     <div className="overflow-x-auto">
@@ -229,11 +228,10 @@ export function CellGrid({
                       "min-w-12 border px-1 text-center font-num",
                       flagged ? "border-bad border-2" : "border-border-soft",
                       cell.sparse && "bg-elev-2 text-fg-faint",
+                      !cell.sparse && numeric !== null && "text-bg",
                     )}
                     style={
-                      cell.sparse || numeric === null
-                        ? undefined
-                        : { background: ramp((numeric - lo) / span), color: "#0b0f14" }
+                      cell.sparse || numeric === null ? undefined : { background: shade(numeric) }
                     }
                   >
                     {numeric === null ? "—" : numeric.toFixed(1)}

@@ -5,6 +5,7 @@ import { Sparkline } from "../components/Sparkline";
 import { useLocalStorageJson } from "../hooks/useLocalStorage";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
+import { downloadText } from "../util/browser";
 
 interface CustomDashboardPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -88,15 +89,7 @@ export function CustomDashboardPanel({ channels }: CustomDashboardPanelProps) {
   };
 
   const exportProfile = () => {
-    const blob = new Blob([JSON.stringify(profile, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "canary-dashboard.json";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText(JSON.stringify(profile, null, 2), "canary-dashboard.json", "application/json");
   };
 
   const applyImport = (text: string) => {

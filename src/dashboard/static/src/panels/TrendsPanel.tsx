@@ -111,7 +111,7 @@ function StatRow({ trend }: { trend: StatTrend }) {
         min={sparkMin}
         max={sparkMax}
         baseline={trend.reference_mean}
-        stroke={alarm ? "#ef4444" : "#ffb547"}
+        stroke={alarm ? "bad" : "accent"}
       />
       <div className="col-span-2 flex items-center gap-3 text-[0.72rem]">
         <span className={mkTrend === "no trend" ? "text-fg-faint" : "text-fg-dim"}>

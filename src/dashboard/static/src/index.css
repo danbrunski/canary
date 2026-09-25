@@ -15,6 +15,10 @@
   --color-bad: #ff6f6f;
   --color-border: #29333d;
   --color-border-soft: #20272f;
+  /* The fifth and sixth chart series (lib/chartTheme SERIES_TOKENS); the
+   * first four are accent, accent-2, ok and bad. */
+  --color-series-5: #b18cff;
+  --color-series-6: #9be15d;
 
   --radius-card: 14px;
   --radius-tile: 9px;
@@ -51,4 +55,6 @@
   --color-bad: #d95b5b;
   --color-border: #1d262e;
   --color-border-soft: #161c22;
+  --color-series-5: #8f72cc;
+  --color-series-6: #7cb44a;
 }

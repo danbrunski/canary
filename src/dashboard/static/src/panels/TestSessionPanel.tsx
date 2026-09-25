@@ -24,6 +24,7 @@ import { useTagQueue } from "../hooks/useTagQueue";
 import type { TestEvent, TestProfile, TestProfileError } from "../types";
 import { Notice } from "../components/Notice";
 import { noticeClass } from "../styles";
+import { readString, writeString } from "../util/storage";
 import { TestSessionRecordingScreen, TestSessionSetupScreen } from "./TestSessionScreens";
 
 interface TestSessionPanelProps {
@@ -36,9 +37,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
   const [profiles, setProfiles] = useState<TestProfile[]>([]);
   const [profileLoadErrors, setProfileLoadErrors] = useState<TestProfileError[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
-  const [selectedProfileId, setSelectedProfileId] = useState<string>(
-    () => window.localStorage.getItem(PROFILE_KEY) ?? "",
-  );
+  const [selectedProfileId, setSelectedProfileId] = useState<string>(() => readString(PROFILE_KEY));
   const [purpose, setPurpose] = useState("");
   const { notice, setNotice, busy, run } = useAsyncAction();
   const [endArmed, setEndArmed] = useState(false);
@@ -122,7 +121,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
   }, []);
 
   useEffect(() => {
-    if (selectedProfileId) window.localStorage.setItem(PROFILE_KEY, selectedProfileId);
+    if (selectedProfileId) writeString(PROFILE_KEY, selectedProfileId);
   }, [selectedProfileId]);
 
   useEffect(() => {
@@ -157,7 +156,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
       )
         return;
     }
-    run(
+    void run(
       "test session start",
       async () => {
         await startCapture(token, {
@@ -196,7 +195,7 @@ export function TestSessionPanel({ token }: TestSessionPanelProps) {
         return;
       }
     }
-    run(
+    void run(
       "test session end",
       async () => {
         await stopCapture(token, {

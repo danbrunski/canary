@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { axisBracket, liveValue, mapColor, tracePosition } from "./romMaps";
+import { axisBracket, liveValue, mapColor, streamKey, tracePosition } from "./romMaps";
 import type { RomTable } from "./romMaps";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 
@@ -110,5 +110,13 @@ describe("ROM map trace", () => {
     expect(mapColor(2, 0, 3)).toBe("rgb(248, 155, 55)");
     expect(mapColor(3, 0, 3)).toBe("rgb(230, 80, 65)");
     expect(mapColor(1, 1, 1)).not.toContain("NaN");
+  });
+});
+
+describe("streamKey (R08.5)", () => {
+  it("streams a memory spec under source obd and leaves others alone", () => {
+    expect(streamKey("mem:ECM_PHI")).toBe("obd:mem:ECM_PHI");
+    expect(streamKey("did:ECM_AIR_CHARGE")).toBe("did:ECM_AIR_CHARGE");
+    expect(streamKey("obd:RPM")).toBe("obd:RPM");
   });
 });

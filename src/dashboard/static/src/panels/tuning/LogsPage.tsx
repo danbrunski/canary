@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
+import { getFrame } from "../../api/workbench";
 import { Panel } from "../../components/Panel";
+import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
+import { useControlResource } from "../../hooks/useControlResource";
 import { useLocalStorageJson } from "../../hooks/useLocalStorage";
 import type { TuningContext } from "../../hooks/useTuningContext";
-import {
-  REGIMES,
-  describeRefusal,
-  formatDuration,
-  getFrame,
-  getLogs,
-  toCsv,
-  type FrameResponse,
-  type LogSummary,
-  type LogsResponse,
-  type Refusal,
-  type Regime,
-} from "../../lib/workbenchApi";
+import { useLogs } from "../../hooks/useWorkbench";
+import { REGIMES, describeRefusal } from "../../lib/workbenchApi";
 import { buttonClass, cn, inputClass, selectClass } from "../../styles";
+import type { FrameResponse, LogSummary, Regime } from "../../types/workbench";
+import { downloadText } from "../../util/browser";
+import { toCsv } from "../../util/csv";
+import { formatReading } from "../../util/format";
+import { cssVar, seriesVar } from "../../lib/chartTheme";
+import { sequential, sequentialIn } from "../../lib/colorScale";
+import { formatClockDuration } from "../../util/time";
 import { RefusalNotice } from "./WorkbenchNotices";
 
 /** J1979 names every OBD-II vehicle answers — a starting set, not a vehicle
@@ -26,16 +25,6 @@ const SPECS_KEY = "canary.tuning.logSpecs.v1";
 const ROW_HEIGHT = 24;
 const VIEWPORT_ROWS = 18;
 const OVERSCAN = 20;
-
-function downloadText(content: string, filename: string) {
-  const blob = new Blob([content], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
 
 // ---------------------------------------------------------------- browser
 
@@ -49,20 +38,7 @@ export function LogBrowser({
   onSelect: (id: string) => void;
 }) {
   const [includeSessions, setIncludeSessions] = useState(false);
-  const [data, setData] = useState<LogsResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-
-  useEffect(() => {
-    if (!token) return;
-    const controller = new AbortController();
-    setRefusal(null);
-    getLogs(token, includeSessions, controller.signal)
-      .then(setData)
-      .catch((error: unknown) => {
-        if ((error as { name?: string }).name !== "AbortError") setRefusal(describeRefusal(error));
-      });
-    return () => controller.abort();
-  }, [token, includeSessions]);
+  const { data, error: refusal } = useLogs(token, includeSessions);
 
   return (
     <Panel
@@ -141,7 +117,13 @@ function LogRow({
       <td title={log.session_id}>
         {log.started_at ? new Date(log.started_at).toLocaleString() : log.session_id}
       </td>
-      <td title={log.duration_source ?? "unknown"}>{formatDuration(log.duration_s)}</td>
+      <td title={log.duration_source ?? "unknown"}>
+        {formatClockDuration(log.duration_s, {
+          rounding: "round",
+          padMinutes: false,
+          missing: "unknown",
+        })}
+      </td>
       <td>
         {log.revision.revision ?? "unknown"}
         <span className="text-fg-faint"> · {log.revision.source.replace(/_/g, " ")}</span>
@@ -167,17 +149,17 @@ function LogRow({
 // ---------------------------------------------------------------- viewer
 
 type Presentation = "table" | "visual";
+const PRESENTATIONS: ReadonlyArray<SegmentOption<Presentation>> = [
+  { id: "table", label: "Table" },
+  { id: "visual", label: "Visual" },
+];
 
 export function LogViewer({ token, sessionId }: { token: string; sessionId: string }) {
   const [specsText, setSpecsText] = useLocalStorageJson(SPECS_KEY, DEFAULT_SPECS);
   const [draft, setDraft] = useState(specsText);
   const [grid, setGrid] = useState("1s");
   const [regime, setRegime] = useState<Regime>("all");
-  const [offset, setOffset] = useState(0);
   const [presentation, setPresentation] = useState<Presentation>("table");
-  const [frame, setFrame] = useState<FrameResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const specs = useMemo(
     () =>
@@ -188,43 +170,42 @@ export function LogViewer({ token, sessionId }: { token: string; sessionId: stri
     [specsText],
   );
 
-  useEffect(() => {
-    setOffset(0);
-  }, [sessionId, specsText, grid, regime]);
+  // The page offset belongs to one view: a new log, channel set, grid or
+  // regime starts again at row 0 (derived, not reset in an effect, so the
+  // stale offset is never requested).
+  const viewKey = `${sessionId}|${specsText}|${grid}|${regime}`;
+  const [page, setPage] = useState({ key: viewKey, offset: 0 });
+  const offset = page.key === viewKey ? page.offset : 0;
+  const setOffset = (next: number) => setPage({ key: viewKey, offset: next });
 
-  useEffect(() => {
-    if (!token || specs.length === 0) return;
-    const controller = new AbortController();
-    setLoading(true);
-    setRefusal(null);
-    getFrame(token, sessionId, { specs, grid, regime, offset }, controller.signal)
-      .then((next) => setFrame(next))
-      .catch((error: unknown) => {
-        if ((error as { name?: string }).name === "AbortError") return;
-        setFrame(null);
-        setRefusal(describeRefusal(error));
-      })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
-  }, [token, sessionId, specs, grid, regime, offset]);
+  const fetchFrame = useCallback(
+    (signal: AbortSignal) => getFrame(token, sessionId, { specs, grid, regime, offset }, signal),
+    [token, sessionId, specs, grid, regime, offset],
+  );
+  const {
+    data,
+    error: refusal,
+    loading: first,
+    stale,
+  } = useControlResource(fetchFrame, {
+    enabled: Boolean(token) && specs.length > 0,
+    intervalMs: null,
+    describe: describeRefusal,
+  });
+  const loading = first || stale;
+  // A refusal replaces the view; the previous frame is not shown under it.
+  const frame = refusal ? null : data;
 
   return (
     <Panel
       title={sessionId}
       actions={
-        <div role="group" aria-label="Presentation" className="flex gap-1">
-          {(["table", "visual"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={cn(buttonClass, presentation === mode && "border-accent text-accent")}
-              aria-pressed={presentation === mode}
-              onClick={() => setPresentation(mode)}
-            >
-              {mode === "table" ? "Table" : "Visual"}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          label="Presentation"
+          options={PRESENTATIONS}
+          value={presentation}
+          onChange={setPresentation}
+        />
       }
     >
       <form
@@ -337,8 +318,7 @@ function FrameNotes({ frame, onOffset }: { frame: FrameResponse; onOffset: (n: n
 // ---------------------------------------------------------------- table
 
 function formatValue(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  return Math.abs(value) >= 1000 ? value.toFixed(0) : value.toFixed(3).replace(/\.?0+$/, "");
+  return formatReading(value, { digits: 3, trimZeros: true, bigAt: 1000, missing: "" });
 }
 
 export function FrameTable({ frame }: { frame: FrameResponse }) {
@@ -373,7 +353,11 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
       frame.timestamps[i],
       ...specs.map((s) => frame.values[s]?.[i] ?? null),
     ]);
-    downloadText(toCsv(header, rows), `${frame.session_id}-${frame.regime_report.regime}.csv`);
+    downloadText(
+      toCsv(header, rows),
+      `${frame.session_id}-${frame.regime_report.regime}.csv`,
+      "text/csv",
+    );
   }, [frame, order, specs]);
 
   const toggle = (key: string) =>
@@ -450,7 +434,8 @@ export function FrameTable({ frame }: { frame: FrameResponse }) {
 
 const STRIP_W = 720;
 const STRIP_H = 70;
-const COLORS = ["#4fd6e0", "#ffb547", "#9be15d", "#ff6b8b", "#b18cff", "#f2f2f2"];
+
+const NO_VALUES: Array<number | null> = [];
 
 function extent(values: Array<number | null>): [number, number] | null {
   let lo = Infinity;
@@ -508,7 +493,7 @@ export function FrameVisual({ frame }: { frame: FrameResponse }) {
                 <polyline
                   points={points}
                   fill="none"
-                  stroke={COLORS[index % COLORS.length]}
+                  style={{ stroke: seriesVar(index) }}
                   strokeWidth={1.2}
                 />
                 {markers.map((m, i) => (
@@ -519,7 +504,7 @@ export function FrameVisual({ frame }: { frame: FrameResponse }) {
                     x2={tx(m.t)}
                     y1={0}
                     y2={STRIP_H}
-                    stroke={m.kind === "flash" ? "#ff6b8b" : "#94a3ad"}
+                    className={m.kind === "flash" ? "stroke-bad" : "stroke-fg-dim"}
                     strokeDasharray={m.kind === "flash" ? undefined : "3 3"}
                   >
                     <title>{m.label}</title>
@@ -537,19 +522,19 @@ export function FrameVisual({ frame }: { frame: FrameResponse }) {
 
 function ScatterView({ frame }: { frame: FrameResponse }) {
   const specs = frame.columns.map((c) => c.spec);
-  const [x, setX] = useState(specs[0] ?? "");
-  const [y, setY] = useState(specs[1] ?? specs[0] ?? "");
-  const [z, setZ] = useState(specs[2] ?? "");
+  const [xChoice, setX] = useState(specs[0] ?? "");
+  const [yChoice, setY] = useState(specs[1] ?? specs[0] ?? "");
+  const [zChoice, setZ] = useState(specs[2] ?? "");
   const [mode, setMode] = useState<"scatter" | "heat">("scatter");
-  useEffect(() => {
-    if (!specs.includes(x)) setX(specs[0] ?? "");
-    if (!specs.includes(y)) setY(specs[1] ?? specs[0] ?? "");
-    if (z && !specs.includes(z)) setZ("");
-  }, [specs, x, y, z]);
+  // A choice the frame no longer carries falls back to the default axis.
+  const x = specs.includes(xChoice) ? xChoice : (specs[0] ?? "");
+  const y = specs.includes(yChoice) ? yChoice : (specs[1] ?? specs[0] ?? "");
+  const z = zChoice && specs.includes(zChoice) ? zChoice : "";
 
-  const xs = frame.values[x] ?? [];
-  const ys = frame.values[y] ?? [];
-  const zs = z ? (frame.values[z] ?? []) : [];
+  // One shared empty column, so a missing channel keeps the heat memo stable.
+  const xs = frame.values[x] ?? NO_VALUES;
+  const ys = frame.values[y] ?? NO_VALUES;
+  const zs = z ? (frame.values[z] ?? NO_VALUES) : NO_VALUES;
   const xr = extent(xs);
   const yr = extent(ys);
   const zr = extent(zs);
@@ -558,9 +543,7 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
   const px = (v: number) => (xr ? ((v - xr[0]) / (xr[1] - xr[0] || 1)) * (W - 10) + 5 : 0);
   const py = (v: number) => (yr ? H - 5 - ((v - yr[0]) / (yr[1] - yr[0] || 1)) * (H - 10) : 0);
   const color = (v: number | null) =>
-    v === null || !zr
-      ? "#4fd6e0"
-      : `hsl(${240 - ((v - zr[0]) / (zr[1] - zr[0] || 1)) * 240}, 80%, 60%)`;
+    v === null || !zr ? cssVar("accent-2") : sequentialIn(v, zr[0], zr[1]);
 
   const heat = useMemo(() => {
     if (mode !== "heat" || !xr || !yr) return [];
@@ -646,7 +629,7 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
                 cx={px(xv)}
                 cy={py(yv)}
                 r={1.8}
-                fill={color(z ? (zs[i] ?? null) : null)}
+                style={{ fill: color(z ? (zs[i] ?? null) : null) }}
               />
             );
           })}
@@ -664,7 +647,7 @@ function ScatterView({ frame }: { frame: FrameResponse }) {
                 y={H - (cell.by + 1) * h}
                 width={w}
                 height={h}
-                fill={`hsl(${240 - t * 240}, 80%, 55%)`}
+                fill={sequential(t)}
               >
                 <title>{`${formatValue(cell.value)} (n ${cell.n})`}</title>
               </rect>

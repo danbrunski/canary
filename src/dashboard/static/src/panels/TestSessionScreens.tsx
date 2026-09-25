@@ -1,14 +1,7 @@
 import type { QueuedTag } from "../hooks/useTagQueue";
+import { Panel } from "../components/Panel";
 import type { CaptureState, PreflightResponse, TestEvent, TestProfile } from "../types";
-import {
-  buttonClass,
-  cn,
-  dangerButtonClass,
-  inputClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-} from "../styles";
+import { buttonClass, cn, dangerButtonClass, inputClass } from "../styles";
 import { formatClockTime, formatElapsed } from "../util/time";
 
 interface RecentLogProps {
@@ -19,10 +12,10 @@ interface RecentLogProps {
 
 function RecentLog({ recent, orphans, onClearOrphans }: RecentLogProps) {
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Recent events</h2>
-        {orphans > 0 && (
+    <Panel
+      title="Recent events"
+      actions={
+        orphans > 0 && (
           <button
             type="button"
             onClick={onClearOrphans}
@@ -30,8 +23,9 @@ function RecentLog({ recent, orphans, onClearOrphans }: RecentLogProps) {
           >
             clear {orphans} orphaned
           </button>
-        )}
-      </header>
+        )
+      }
+    >
       {recent.length === 0 ? (
         <p className="m-0 text-fg-faint italic">No events tapped yet.</p>
       ) : (
@@ -57,7 +51,7 @@ function RecentLog({ recent, orphans, onClearOrphans }: RecentLogProps) {
           ))}
         </ol>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -100,10 +94,7 @@ export function TestSessionSetupScreen({
 }: TestSessionSetupScreenProps) {
   return (
     <>
-      <section className={panelClass}>
-        <header className={panelHeaderClass}>
-          <h2 className={panelTitleClass}>Test profile</h2>
-        </header>
+      <Panel title="Test profile">
         {!profilesLoaded ? (
           <p className="m-0 text-fg-faint italic">Loading profiles…</p>
         ) : profiles.length === 0 ? (
@@ -141,12 +132,12 @@ export function TestSessionSetupScreen({
             ))}
           </div>
         )}
-      </section>
+      </Panel>
 
       {selectedProfile && (
-        <section className={panelClass}>
-          <header className={panelHeaderClass}>
-            <h2 className={panelTitleClass}>Preflight</h2>
+        <Panel
+          title="Preflight"
+          actions={
             <span
               className={cn(
                 "text-[0.8rem] font-bold",
@@ -167,7 +158,8 @@ export function TestSessionSetupScreen({
                     : "NO-GO"
                   : "checking…"}
             </span>
-          </header>
+          }
+        >
           {preflight && !preflight.ok && (
             <ul className="m-0 mb-3 flex list-none flex-col gap-1 p-0">
               {preflight.checks
@@ -211,7 +203,7 @@ export function TestSessionSetupScreen({
           >
             Re-run preflight
           </button>
-        </section>
+        </Panel>
       )}
 
       {(recent.length > 0 || orphans > 0) && (

@@ -80,7 +80,7 @@ function ModelCard({ source, msgs }: { source: ScoreSource; msgs: ScoreMessage[]
           values={series}
           width={240}
           height={44}
-          stroke="#FFB84A"
+          stroke="accent"
           min={0}
           max={100}
           baseline={50}

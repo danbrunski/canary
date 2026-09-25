@@ -227,7 +227,7 @@ const memRow = (channel: string, value: number, at = now): [string, ChannelSnaps
 function traceProps(x: number, y: number, status: Partial<StatusResponse> = {}) {
   const base = props();
   const channels = new Map([...base.channels, memRow(X, x), memRow(Y, y)]);
-  return { ...base, channels, status: { ...base.status, ...status } as StatusResponse };
+  return { ...base, channels, status: { ...base.status, ...status } };
 }
 async function confirm() {
   fireEvent.click(screen.getByRole("checkbox", { name: /I confirm/ }));
@@ -358,7 +358,7 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
     const view = render(
       <RomMapsPanel
         {...base}
-        status={{ ...base.status, ...polling(["ECM_ENGINE_SPEED_RAM"]) } as StatusResponse}
+        status={{ ...base.status, ...polling(["ECM_ENGINE_SPEED_RAM"]) }}
         onNavigate={onNavigate}
       />,
     );
@@ -387,7 +387,7 @@ describe("ROM maps — ECM trace (W05.1–W05.5)", () => {
     render(
       <RomMapsPanel
         {...base}
-        status={{ ...base.status, ...polling([]) } as StatusResponse}
+        status={{ ...base.status, ...polling([]) }}
         onNavigate={onNavigate}
       />,
     );
@@ -477,6 +477,7 @@ describe("ROM maps — coverage (W05.7–W05.9)", () => {
     expect(inspect).toHaveBeenCalledWith(
       "/control/sessions/_capture-tuning-x/cell-residency?table=fuel_targets",
       "test",
+      expect.anything(),
     );
     const cells = [...view.container.querySelectorAll("td")].map((td) =>
       td.getAttribute("data-coverage"),

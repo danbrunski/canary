@@ -1,6 +1,9 @@
 import { useEffect, useRef } from "react";
 
-import { SEVERITY_HEX, binIndex } from "../lib/behaviorOverlay";
+import { SEVERITY_TOKEN, binIndex } from "../lib/behaviorOverlay";
+import { prepareCanvas } from "../lib/canvas";
+import { cssColor, useThemeVersion } from "../lib/chartTheme";
+import { sequential } from "../lib/colorScale";
 import type { BehaviorSeverity, GridCell } from "../types";
 
 /** Live operating point for a 2D surface. ``x`` is the axes[0] (row /
@@ -53,25 +56,19 @@ export function Heatmap({
   live,
 }: HeatmapProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeVersion = useThemeVersion();
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
 
     if (cells.length === 0 || rows === 0 || cols === 0) return;
 
     const populated = cells.filter((c) => c.count > 0);
     if (populated.length === 0) {
-      ctx.fillStyle = "#94a3ad";
+      ctx.fillStyle = cssColor("fg-dim");
       ctx.font = "12px system-ui, sans-serif";
       ctx.fillText("no cells populated yet", 8, height / 2);
       return;
@@ -93,11 +90,11 @@ export function Heatmap({
       // matching reader intuition for RPM × LOAD-style maps.
       const y = (rows - 1 - row) * cellH;
       if (cell.count === 0) {
-        ctx.fillStyle = "#1f262d"; // bg-elev-2 — visible-but-empty
+        ctx.fillStyle = cssColor("elev-2"); // visible-but-empty
       } else {
         const v = value === "count" ? cell.count : cell.mean;
         const t = (v - lo) / span;
-        ctx.fillStyle = ramp(t);
+        ctx.fillStyle = sequential(t);
       }
       ctx.fillRect(x, y, cellW + 0.5, cellH + 0.5);
     });
@@ -109,19 +106,19 @@ export function Heatmap({
       if (ri !== null && ci !== null) {
         const x = ci * cellW;
         const y = (rows - 1 - ri) * cellH;
-        ctx.strokeStyle = SEVERITY_HEX[live.severity];
+        ctx.strokeStyle = cssColor(SEVERITY_TOKEN[live.severity]);
         ctx.lineWidth = 2;
         ctx.strokeRect(x + 1, y + 1, cellW - 2, cellH - 2);
-        ctx.fillStyle = SEVERITY_HEX[live.severity];
+        ctx.fillStyle = cssColor(SEVERITY_TOKEN[live.severity]);
         ctx.beginPath();
         ctx.arc(x + cellW / 2, y + cellH / 2, 3, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#0b0f14";
+        ctx.strokeStyle = cssColor("bg");
         ctx.lineWidth = 1;
         ctx.stroke();
       }
     }
-  }, [cells, rows, cols, width, height, value, xEdges, yEdges, live]);
+  }, [cells, rows, cols, width, height, value, xEdges, yEdges, live, themeVersion]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -129,24 +126,4 @@ export function Heatmap({
       <canvas ref={ref} width={width} height={height} />
     </div>
   );
-}
-
-/** Hot-cold ramp: dark blue (cold/low) → amber (mid) → bright white (hot/high).
- *  Picked to be readable on the dark dashboard theme; ``t`` is in [0, 1]. */
-function ramp(t: number): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  if (clamped < 0.5) {
-    // dark teal → amber
-    const k = clamped * 2;
-    const r = Math.round(28 + (255 - 28) * k);
-    const g = Math.round(80 + (184 - 80) * k);
-    const b = Math.round(120 + (74 - 120) * k);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-  // amber → near-white
-  const k = (clamped - 0.5) * 2;
-  const r = Math.round(255);
-  const g = Math.round(184 + (240 - 184) * k);
-  const b = Math.round(74 + (220 - 74) * k);
-  return `rgb(${r}, ${g}, ${b})`;
 }

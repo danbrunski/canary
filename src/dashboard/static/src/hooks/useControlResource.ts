@@ -1,77 +1,52 @@
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 
 import { HttpError, NetworkError } from "../api/http";
+import { usePolling } from "./usePolling";
 
-export interface ResourceState<T> {
+export interface ResourceState<T, E = string> {
   data: T | null;
-  error: string | null;
+  error: E | null;
   /** True until the first fetch settles (false when disabled). */
   loading: boolean;
   /** HTTP status of the last failure, for auth-aware messaging. */
   status: number | null;
+  /** The fetcher changed and its first fetch has not settled; `data` and
+   *  `error` are the previous parameters'. See `usePolling`. */
+  stale: boolean;
   refresh: () => void;
 }
 
-interface Options {
+interface Options<E> {
   /** Poll/fetch only when true (e.g. a control token is present). When
    *  false the panel shows its own "enter token" affordance instead of an
    *  error. */
   enabled?: boolean;
-  intervalMs?: number;
+  /** Delay after one fetch settles before the next; `null` fetches once
+   *  (and again on `refresh`). Default 8 s. */
+  intervalMs?: number | null;
+  /** Turn a failure into the error the caller shows. Defaults to
+   *  `describeError`; the workbench passes its structured `Refusal`
+   *  mapper. Need not be stable: it runs at render, not in the loop. */
+  describe?: (err: unknown) => E;
 }
 
-/** Poll a fetcher on an interval with graceful, status-aware error
- *  handling (Task 6.14: 401/403/503 must read clearly, not as a generic
- *  crash). `fetcher` should be stable (wrap in `useCallback`); gate with
+/** Poll a fetcher with graceful, status-aware error handling (Task 6.14:
+ *  401/403/503 must read clearly, not as a generic crash). Built on
+ *  `usePolling`, so a slow daemon never has two requests from one panel in
+ *  flight. `fetcher` should be stable (wrap in `useCallback`); gate with
  *  `enabled` rather than passing a sometimes-null fetcher so generic
  *  inference stays clean. */
-export function useControlResource<T>(
+export function useControlResource<T, E = string>(
   fetcher: (signal: AbortSignal) => Promise<T>,
-  { enabled = true, intervalMs = 8000 }: Options = {},
-): ResourceState<T> {
-  const [data, setData] = useState<T | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<number | null>(null);
-  const [loading, setLoading] = useState<boolean>(enabled);
-  const [tick, setTick] = useState(0);
-
-  const refresh = () => setTick((t) => t + 1);
-
-  useEffect(() => {
-    if (!enabled) {
-      setData(null);
-      setError(null);
-      setStatus(null);
-      setLoading(false);
-      return;
-    }
-    const controller = new AbortController();
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const next = await fetcher(controller.signal);
-        if (cancelled) return;
-        setData(next);
-        setError(null);
-        setStatus(null);
-      } catch (err) {
-        if (cancelled || controller.signal.aborted) return;
-        setStatus(err instanceof HttpError ? err.status : null);
-        setError(describeError(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void load();
-    const timer = window.setInterval(load, intervalMs);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearInterval(timer);
-    };
-  }, [fetcher, enabled, intervalMs, tick]);
-
-  return { data, error, loading, status, refresh };
+  { enabled = true, intervalMs = 8000, describe }: Options<E> = {},
+): ResourceState<T, E> {
+  const { data, error, loading, stale, refresh } = usePolling(fetcher, { enabled, intervalMs });
+  const described = useMemo<E | null>(() => {
+    if (error === null) return null;
+    return describe ? describe(error) : (describeError(error) as E);
+  }, [error, describe]);
+  const status = error !== null && error instanceof HttpError ? error.status : null;
+  return { data, error: described, loading, stale, status, refresh };
 }
 
 /** FastAPI errors are `{"detail": "..."}`; show the sentence, not the JSON
@@ -81,7 +56,7 @@ function serverDetail(body: string): string {
   try {
     const parsed: unknown = JSON.parse(body);
     if (parsed && typeof parsed === "object" && "detail" in parsed) {
-      const detail = (parsed as { detail: unknown }).detail;
+      const detail = parsed.detail;
       if (typeof detail === "string") return detail.slice(0, 160);
     }
   } catch {

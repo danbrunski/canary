@@ -14,7 +14,10 @@ import type { StatusResponse, WorkbenchItem } from "../../types";
 import { Workbench, type DashboardData } from "../Workbench";
 import { READINESS_CHIPS, TuningContextBar, chipTone, elapsedLabel } from "./TuningContextBar";
 
-vi.mock("../../api/core", () => ({ controlJson: vi.fn() }));
+vi.mock("../../api/core", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/core")>()),
+  controlJson: vi.fn(),
+}));
 const control = vi.mocked(controlJson);
 
 const NOW = new Date("2026-09-21T12:00:00Z");

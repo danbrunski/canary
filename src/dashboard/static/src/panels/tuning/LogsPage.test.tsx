@@ -3,14 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HttpError, controlJson } from "../../api/core";
 import type { TuningContext } from "../../hooks/useTuningContext";
-import {
-  describeRefusal,
-  formatDuration,
-  gateSentence,
-  toCsv,
-  type FrameResponse,
-  type LogsResponse,
-} from "../../lib/workbenchApi";
+import { describeRefusal, gateSentence } from "../../lib/workbenchApi";
+import type { FrameResponse, LogsResponse } from "../../types/workbench";
+import { toCsv } from "../../util/csv";
+import { formatClockDuration } from "../../util/time";
 import { LogsPage } from "./LogsPage";
 
 vi.mock("../../api/core", async (importOriginal) => {
@@ -262,9 +258,12 @@ describe("workbench helpers", () => {
   });
 
   it("formats durations", () => {
-    expect(formatDuration(754)).toBe("12:34");
-    expect(formatDuration(3725)).toBe("1:02:05");
-    expect(formatDuration(null)).toBe("unknown");
+    // The log browser's options: rounded, unpadded minutes, "unknown".
+    const log = { rounding: "round", padMinutes: false, missing: "unknown" } as const;
+    expect(formatClockDuration(754, log)).toBe("12:34");
+    expect(formatClockDuration(3725, log)).toBe("1:02:05");
+    expect(formatClockDuration(65.6, log)).toBe("1:06");
+    expect(formatClockDuration(null, log)).toBe("unknown");
   });
 
   it("phrases the gates-removed-everything sentence", () => {

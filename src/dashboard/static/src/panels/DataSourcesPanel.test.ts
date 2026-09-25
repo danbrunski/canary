@@ -287,5 +287,9 @@ describe("DataSourcesPanel", () => {
     render(createElement(DataSourcesPanel, { channels: new Map(), status }));
     fireEvent.click(screen.getByRole("button", { name: "GPS" }));
     expect(screen.getByText("fix · 7 sats")).toBeInTheDocument();
+    // R08.5: the shared GPS formatters, heading now with its cardinal.
+    expect(screen.getByText("90° E")).toBeInTheDocument();
+    expect(screen.getByText("6234 ft")).toBeInTheDocument();
+    expect(screen.getByText("0 mph")).toBeInTheDocument();
   });
 });

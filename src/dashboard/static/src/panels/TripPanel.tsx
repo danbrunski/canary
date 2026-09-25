@@ -13,7 +13,8 @@ import {
   placeholderClass,
 } from "../styles";
 import type { SessionDigestResponse, StatusResponse, TripSummaryFields } from "../types";
-import { formatPercent } from "../util/format";
+import { formatPercent, KM_PER_MILE } from "../util/format";
+import { numberOrNull } from "../util/json";
 import { formatDuration } from "../util/time";
 
 interface TripPanelProps {
@@ -25,13 +26,11 @@ interface TripPanelProps {
 // Mirrors src/analysis/derived.py's own unit constants exactly, so a
 // display-only km->mi / L->gal / L-per-100km->mpg conversion here can never
 // drift from what the backend prints in the last-drive summary.
-const KM_PER_MILE = 1.609344;
 const MI_PER_KM = 0.62137119;
 const GAL_PER_L = 0.26417205;
 
 function channelValue(channels: Map<string, ChannelSnapshot>, key: string): number | null {
-  const value = channels.get(key)?.latest.value;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return numberOrNull(channels.get(key)?.latest.value);
 }
 
 function formatDistance(km: number | null): string {

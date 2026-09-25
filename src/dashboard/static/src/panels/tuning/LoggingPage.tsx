@@ -6,7 +6,7 @@ import { useTagQueue } from "../../hooks/useTagQueue";
 import { buttonClass, panelClass } from "../../styles";
 import type { ChannelSnapshot } from "../../hooks/useTelemetryStream";
 import type { StatusResponse, WorkbenchItem } from "../../types";
-import { CaptureProfilesPanel } from "../CaptureProfilesPanel";
+import { CaptureRunner } from "../CaptureRunner";
 import { PowerPanel } from "../PowerPanel";
 
 // Pull labels are the backend's canonical ones (src/analysis/pull_tags.py);
@@ -48,13 +48,7 @@ export function LoggingPage({
         CANary records default telemetry continuously. Starting a log switches to the selected
         profile and opens a separate capture. Stop closes that log and restores default collection.
       </p>
-      <CaptureProfilesPanel
-        token={token}
-        status={status}
-        channels={channels}
-        authoring={false}
-        showRunner
-      />
+      <CaptureRunner token={token} status={status} channels={channels} />
       {status?.vehicle_state?.state === "ignition_only" && (
         <p className="text-sm text-fg-dim">
           Key on, engine off: diagnostic channels can answer, but engine values will not move.

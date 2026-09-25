@@ -96,6 +96,40 @@ export async function controlJson<T>(
   return fetchJson<T>(apiUrl(path, baseUrl), { ...init, headers });
 }
 
+/** An authorized request whose response body is a file (a zip, a GPX track),
+ *  not JSON. Same auth header and error shape as `controlJson` (R08.10). */
+export async function controlBlob(
+  path: string,
+  token: string,
+  init: RequestInit = {},
+  baseUrl?: string,
+): Promise<Blob> {
+  const headers = new Headers(init.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+  const response = await fetchOrNetworkError(apiUrl(path, baseUrl), { ...init, headers });
+  if (!response.ok) {
+    throw new HttpError(response.status, await response.text());
+  }
+  return response.blob();
+}
+
 export function jsonBody(value: unknown): string {
   return JSON.stringify(value);
+}
+
+export type QueryValue = string | number | boolean | null | undefined;
+
+/** `?a=1&b=x` from a params object, skipping null, undefined and "" — so an
+ *  unset optional never reaches the server as `key=` or `key=null`. Returns
+ *  "" when nothing is set. Key order is the object's. */
+export function queryString(params: Record<string, QueryValue>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value === null || value === undefined || value === "") continue;
+    search.set(key, String(value));
+  }
+  const text = search.toString();
+  return text ? `?${text}` : "";
 }

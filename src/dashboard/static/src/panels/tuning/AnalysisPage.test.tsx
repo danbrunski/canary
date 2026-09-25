@@ -9,7 +9,7 @@ import type {
   LogsResponse,
   PullComparisonResponse,
   TrimSurfaceResponse,
-} from "../../lib/workbenchApi";
+} from "../../types/workbench";
 import type { StatusResponse } from "../../types";
 import { AnalysisPage } from "./AnalysisPage";
 
@@ -128,6 +128,7 @@ describe("AnalysisPage", () => {
     expect(control).toHaveBeenCalledWith(
       "/analysis/delivery-error?revision=ZS44A-20260920&measured=obd%3AO2_WR_LAMBDA_S1",
       "t",
+      expect.anything(),
     );
     expect(screen.getByText("2.00% · n 12")).toBeInTheDocument();
     expect(screen.getByText("1.80% · n 8")).toBeInTheDocument();
@@ -239,7 +240,7 @@ describe("AnalysisPage", () => {
     route({ "/analysis/trim-surface": trim });
     const { container } = render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
     fireEvent.click(screen.getByRole("button", { name: /All on the running calibration/ }));
-    fireEvent.click(screen.getByRole("tab", { name: "Trim surface" }));
+    fireEvent.click(screen.getByRole("button", { name: "Trim surface" }));
     fireEvent.click(screen.getByRole("button", { name: "Run" }));
     expect(await screen.findByRole("table", { name: "Trim surface" })).toBeInTheDocument();
     expect(container.querySelector('[data-sparse="true"]')).toBeNull();
@@ -300,7 +301,7 @@ describe("AnalysisPage", () => {
       "/analysis/pull-comparison": compare,
     });
     const { container } = render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Timing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Timing" }));
     fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
     await screen.findAllByRole("option", { name: "B" });
     fireEvent.change(screen.getByLabelText("Revision A"), { target: { value: "A" } });
@@ -309,5 +310,102 @@ describe("AnalysisPage", () => {
     expect(await screen.findByRole("table", { name: "Timing comparison" })).toBeInTheDocument();
     expect(container.querySelectorAll('[data-flagged="true"]').length).toBe(1);
     expect(screen.getByText(/1 cell\(s\) outlined/)).toBeInTheDocument();
+  });
+});
+
+describe("AnalysisPage request state (R08.2)", () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (err: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const WITH_SESSION: LogsResponse = {
+    ...LOGS,
+    include_sessions: true,
+    total: 1,
+    logs: [
+      {
+        session_id: "2026-09-19T120000",
+        is_capture: false,
+        profile: null,
+        started_at: null,
+        duration_s: null,
+        duration_source: null,
+        row_count: null,
+        revision: { revision: "R", source: "registry", conflict: false },
+        revision_boundaries: [],
+        quality: null,
+        end_reason: null,
+        tag_count: 0,
+      },
+    ],
+  };
+
+  it("drops a stale logs reply that lands after the toggle", async () => {
+    const first = deferred<LogsResponse>();
+    control.mockImplementation((path: string) => {
+      if (path === "/control/logs?include_sessions=false") return first.promise;
+      if (path === "/control/logs?include_sessions=true") return Promise.resolve(WITH_SESSION);
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    fireEvent.click(screen.getByLabelText("Include ordinary sessions"));
+    expect(await screen.findByText("2026-09-19T120000")).toBeInTheDocument();
+    first.reject(new HttpError(500, "boom"));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByText(/Server error|HTTP 500/)).not.toBeInTheDocument();
+    expect(screen.getByText("2026-09-19T120000")).toBeInTheDocument();
+  });
+
+  it("clears a logs refusal once the next listing succeeds", async () => {
+    control.mockImplementation((path: string) => {
+      if (path === "/control/logs?include_sessions=false")
+        return Promise.reject(new HttpError(500, "boom"));
+      if (path === "/control/logs?include_sessions=true") return Promise.resolve(WITH_SESSION);
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    expect(await screen.findByText("Server error 500.")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Include ordinary sessions"));
+    expect(await screen.findByText("2026-09-19T120000")).toBeInTheDocument();
+    expect(screen.queryByText("Server error 500.")).not.toBeInTheDocument();
+  });
+
+  it("keeps a Compare refusal out of the Cells view", async () => {
+    route({
+      "/control/calibration": { history: [{ revision: "A" }, { revision: "B" }] },
+      "/analysis/pull-comparison": new HttpError(
+        409,
+        JSON.stringify({ detail: { error: "analysis_busy", message: "comparison busy" } }),
+      ),
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Timing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
+    await screen.findAllByRole("option", { name: "B" });
+    fireEvent.change(screen.getByLabelText("Revision A"), { target: { value: "A" } });
+    fireEvent.change(screen.getByLabelText("Revision B"), { target: { value: "B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(await screen.findByText("comparison busy")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cells" }));
+    expect(screen.queryByText("comparison busy")).not.toBeInTheDocument();
+    // And back: the refusal belongs to Compare and is still there.
+    fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
+    expect(screen.getByText("comparison busy")).toBeInTheDocument();
+  });
+
+  it("says the daemon is unreachable in the page's shared words", async () => {
+    const { NetworkError } = await import("../../api/core");
+    route({
+      "/analysis/delivery-error": new NetworkError("/analysis/delivery-error", new TypeError("x")),
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    await chooseRunningAndSource();
+    expect(await screen.findByText(/Can't reach the daemon/)).toBeInTheDocument();
   });
 });

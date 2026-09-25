@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import { Panel } from "../components/Panel";
 import {
   deleteSession,
   downloadSession,
@@ -10,18 +11,9 @@ import {
 } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
-import {
-  buttonClass,
-  cn,
-  dangerButtonClass,
-  inputClass,
-  panelClass,
-  panelCountClass,
-  panelHeaderClass,
-  panelTitleClass,
-} from "../styles";
+import { buttonClass, cn, dangerButtonClass, inputClass } from "../styles";
 import type { SessionSummary } from "../types";
-import { currentPiHost } from "../util/browser";
+import { currentPiHost, downloadBlob } from "../util/browser";
 import { parseJsonObject } from "../util/json";
 
 interface SessionsCardProps {
@@ -84,13 +76,7 @@ export function SessionsCard({
   const exportSelected = () =>
     run("session export", async () => {
       if (!selectedSessionId) throw new Error("Select a session first.");
-      const blob = await downloadSession(token, selectedSessionId);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `${selectedSessionId}.zip`;
-      anchor.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(await downloadSession(token, selectedSessionId), `${selectedSessionId}.zip`);
     });
 
   const syncSelectedToLaptop = () =>
@@ -106,11 +92,7 @@ export function SessionsCard({
     });
 
   return (
-    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Sessions</h2>
-        <span className={panelCountClass}>{sessions.length}</span>
-      </header>
+    <Panel title="Sessions" className="col-span-2 max-[1100px]:col-span-1" count={sessions.length}>
       <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto">
         {sessions
           .slice()
@@ -181,6 +163,6 @@ export function SessionsCard({
           />
         </div>
       )}
-    </section>
+    </Panel>
   );
 }

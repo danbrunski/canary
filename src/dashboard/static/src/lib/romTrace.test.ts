@@ -14,6 +14,7 @@ import {
   profilesCarrying,
   residencyMatchesTable,
   traceLiveness,
+  traceGate,
   traceSample,
 } from "./romTrace";
 import type { CellResidency, TableTrace } from "./romTrace";
@@ -246,5 +247,78 @@ describe("coverage (W05.7/W05.8)", () => {
         table,
       ),
     ).toBe(false);
+  });
+});
+
+describe("traceGate (R08.8)", () => {
+  const rom = { matches_recorded_revision: true, recorded_revision: "R1" };
+  const running = {
+    registry_revision: "R1",
+    calibration_matches_registry: true,
+    vehicle_state: { state: "engine_running", derived_at: new Date(now).toISOString() },
+  } as unknown as StatusResponse;
+  const fresh = { timestamp: now };
+  const base = {
+    confirmed: true,
+    rom,
+    status: running,
+    now,
+    fuelCut: false,
+    rpm: fresh,
+    bfs: fresh,
+  };
+
+  it("passes when every gate holds", () => {
+    expect(traceGate(base)).toEqual({ gate: "", trace: "" });
+  });
+
+  it("names the first failing gate, in order", () => {
+    expect(traceGate({ ...base, confirmed: false }).gate).toMatch(/^Confirm the selected ROM/);
+    expect(traceGate({ ...base, rom: { ...rom, matches_recorded_revision: false } }).gate).toMatch(
+      /differs from the recorded active revision/,
+    );
+    expect(
+      traceGate({
+        ...base,
+        status: { ...running, calibration_matches_registry: false, ecu_calibration_id: "X" },
+      }).gate,
+    ).toMatch(/^ECU reports calibration id X/);
+    expect(traceGate({ ...base, status: { ...running, registry_revision: "R2" } }).gate).toMatch(
+      /running revision is now R2, not this ROM's R1/,
+    );
+    const replay = {
+      ...running,
+      vehicle_state: { ...running.vehicle_state!, state: "replay" },
+    } as StatusResponse;
+    expect(traceGate({ ...base, status: replay }).gate).toBe(
+      "Replay active — live-map tracing is disabled.",
+    );
+  });
+
+  it("waits for a fresh engine-running status", () => {
+    const old = {
+      ...running,
+      vehicle_state: { ...running.vehicle_state!, derived_at: new Date(now - 16000).toISOString() },
+    } as StatusResponse;
+    expect(traceGate({ ...base, status: old }).gate).toBe(
+      "Waiting for fresh engine-running status.",
+    );
+    expect(traceGate({ ...base, status: null }).gate).toBe(
+      "Waiting for fresh engine-running status.",
+    );
+  });
+
+  it("keeps live-input reasons out of the shared gate", () => {
+    const cut = traceGate({ ...base, fuelCut: true });
+    expect(cut.gate).toBe("");
+    expect(cut.trace).toMatch(/^Fuel-cut sentinel/);
+    expect(traceGate({ ...base, bfs: null }).trace).toMatch(/^Waiting for fresh RPM and BFS/);
+    expect(traceGate({ ...base, bfs: { timestamp: now - 751 } }).trace).toMatch(/skew exceeds/);
+    expect(traceGate({ ...base, bfs: { timestamp: now - 750 } }).trace).toBe("");
+  });
+
+  it("a gate failure is also the trace reason", () => {
+    const g = traceGate({ ...base, confirmed: false, fuelCut: true });
+    expect(g.trace).toBe(g.gate);
   });
 });

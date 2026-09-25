@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 
+import { Panel } from "../components/Panel";
 import { HttpError, getReplay, startReplay, stopReplay } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
 import { describeError, useControlResource } from "../hooks/useControlResource";
-import { buttonClass, inputClass, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
+import { buttonClass, inputClass } from "../styles";
 import type { ReplayStatus, SessionSummary } from "../types";
 import { formatElapsed } from "../util/time";
 
@@ -94,13 +95,14 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
     });
 
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Replay</h2>
+    <Panel
+      title="Replay"
+      actions={
         <span className={replay?.running ? "text-[0.8rem] text-warn" : "text-fg-dim"}>
           {replay?.running ? "running" : "idle"}
         </span>
-      </header>
+      }
+    >
       <div className="grid grid-cols-[1fr_5rem_auto] gap-2 max-[1100px]:grid-cols-1">
         <select
           className={inputClass}
@@ -168,7 +170,7 @@ export function ReplayCard({ token, run, sessions, selectedSessionId }: ReplayCa
           </span>
         </div>
       )}
-    </section>
+    </Panel>
   );
 }
 

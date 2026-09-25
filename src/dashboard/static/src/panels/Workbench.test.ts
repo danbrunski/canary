@@ -110,7 +110,7 @@ describe("Workbench navigation", () => {
   it("tuning-analysis loads directly and asks for sessions (W04)", () => {
     renderAt("tuning-analysis");
     expect(screen.getByText(/Choose sessions or a revision/)).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Delivery error" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delivery error" })).toBeInTheDocument();
   });
 
   it("renders the detector page as Alert Thresholds, not Tuning", () => {

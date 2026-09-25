@@ -14,6 +14,30 @@ export function formatNumber(value: number, smallDigits = 2): string {
   return value.toFixed(smallDigits);
 }
 
+export interface ReadingOptions {
+  /** Decimal places. Default 2. */
+  digits?: number;
+  /** Strip trailing zeros (and a bare point): "12.50" → "12.5", "3.00" → "3". */
+  trimZeros?: boolean;
+  /** At or above this magnitude, show whole numbers. Default: never. */
+  bigAt?: number | null;
+  /** Text for null, undefined or non-finite. Default "—". */
+  missing?: string;
+}
+
+/** A live channel value (R08.5). Five pages each had their own formatter and
+ *  1234.5 rendered as "1235", "1234.5" or "1234.50"; they are now this one
+ *  function, each keeping its output through options. */
+export function formatReading(
+  value: number | null | undefined,
+  { digits = 2, trimZeros = false, bigAt = null, missing = "—" }: ReadingOptions = {},
+): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return missing;
+  if (bigAt !== null && Math.abs(value) >= bigAt) return value.toFixed(0);
+  const text = value.toFixed(digits);
+  return trimZeros && text.includes(".") ? text.replace(/\.?0+$/, "") : text;
+}
+
 /** Fraction → percent. `null`/`undefined` → "-". `digits` defaults to 1
  *  (Training); ModelHealth passes 0. */
 export function formatPercent(value: number | null | undefined, digits = 1): string {
@@ -38,8 +62,9 @@ export function toneClass(tone: Tone | undefined): string {
   return "";
 }
 
-const KM_PER_MILE = 1.609344;
-const M_PER_FT = 0.3048;
+/** Unit constants, defined once (R08.5). Mirror src/analysis/derived.py. */
+export const KM_PER_MILE = 1.609344;
+export const M_PER_FT = 0.3048;
 const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 
 /** Celsius, one decimal (host/CPU temps). */

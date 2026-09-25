@@ -1,6 +1,7 @@
 import { switchSequenceDetector } from "../api/http";
+import { Panel } from "../components/Panel";
 import type { RunAction } from "../hooks/useAsyncAction";
-import { buttonClass, cn, panelClass, panelHeaderClass, panelTitleClass } from "../styles";
+import { buttonClass, cn } from "../styles";
 import type { SequenceDetectorStatus } from "../types";
 
 interface SequenceDetectorCardProps {
@@ -26,11 +27,10 @@ export function SequenceDetectorCard({
     });
 
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Sequence Detector</h2>
-        <span className="text-[0.8rem] text-fg-dim">{sequenceDetector?.active ?? "—"}</span>
-      </header>
+    <Panel
+      title="Sequence Detector"
+      actions={<span className="text-[0.8rem] text-fg-dim">{sequenceDetector?.active ?? "—"}</span>}
+    >
       <p className="mb-2 text-[0.75rem] text-fg-dim">
         Live backbone for the sequence slot. A switch takes effect immediately and is not persisted
         — set the durable default via <code>models.sequence_detector</code>.
@@ -59,6 +59,6 @@ export function SequenceDetectorCard({
           );
         })}
       </div>
-    </section>
+    </Panel>
   );
 }

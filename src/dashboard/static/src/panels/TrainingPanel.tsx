@@ -8,7 +8,7 @@ import { ResourceGate } from "../components/ResourceGate";
 import { TRAINING_JOB_KINDS } from "../lib/jobKinds";
 import { Sparkline } from "../components/Sparkline";
 import type { CompanionSettings } from "../hooks/useCompanionSettings";
-import { useControlResource } from "../hooks/useControlResource";
+import { describeError, useControlResource } from "../hooks/useControlResource";
 import {
   type DistributionView,
   type KSweepPoint,
@@ -100,7 +100,7 @@ export function TrainingPanel({ token, companion }: TrainingPanelProps) {
       });
       refresh();
     } catch (err) {
-      setNotice({ kind: "error", text: err instanceof Error ? err.message : String(err) });
+      setNotice({ kind: "error", text: describeError(err) });
     } finally {
       setBusy(false);
     }
@@ -312,7 +312,7 @@ function RunCard({
           <span className="text-[0.66rem] uppercase tracking-[0.12em] text-fg-faint">
             loss curve ({loss.length} epochs)
           </span>
-          <Sparkline values={loss} width={420} height={56} stroke="#4FD6E0" />
+          <Sparkline values={loss} width={420} height={56} stroke="accent-2" />
         </div>
       )}
       {threshold(run) !== null && (

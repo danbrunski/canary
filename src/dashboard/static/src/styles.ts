@@ -75,7 +75,6 @@ export const panelTitleClass =
   "m-0 text-[0.82rem] font-bold uppercase tracking-[0.14em] text-fg-dim";
 export const panelCountClass = "font-num text-[0.74rem] tracking-[0.03em] text-fg-faint";
 export const placeholderClass = "m-0 text-fg-faint italic";
-export const dimTextClass = "text-fg-dim";
 
 export const inputClass = [
   "min-h-9",
@@ -217,16 +216,3 @@ export function navItemClass(active: boolean): string {
       "border-border-soft bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg",
   );
 }
-
-export function groupTabClass(active: boolean): string {
-  return cn(
-    "min-h-8 rounded-full border-0 bg-transparent px-3.5 py-1.5 text-[0.82rem]",
-    "font-semibold tracking-[0.02em] text-fg-dim transition-colors hover:text-fg",
-    "max-[900px]:flex-[1_0_auto]",
-    active &&
-      "bg-[linear-gradient(180deg,var(--color-elev-3),var(--color-elev-2))] text-fg shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_2px_8px_-4px_rgba(0,0,0,0.7)]",
-  );
-}
-
-export const groupTabsClass =
-  "flex items-center gap-1 rounded-full border border-border-soft bg-black/30 p-1 max-[900px]:w-full max-[900px]:overflow-x-auto";

@@ -1,18 +1,10 @@
 import { useState } from "react";
 
+import { Panel } from "../components/Panel";
 import { cancelJob, getJobLogs, submitJob } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
 import { JOB_KINDS } from "../lib/jobKinds";
-import {
-  buttonClass,
-  cn,
-  inputClass,
-  panelClass,
-  panelCountClass,
-  panelHeaderClass,
-  panelTitleClass,
-  selectClass,
-} from "../styles";
+import { buttonClass, cn, inputClass, selectClass } from "../styles";
 import type { JobRecord } from "../types";
 
 interface JobsCardProps {
@@ -58,11 +50,7 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
     });
 
   return (
-    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Jobs</h2>
-        <span className={panelCountClass}>{jobs.length}</span>
-      </header>
+    <Panel title="Jobs" className="col-span-2 max-[1100px]:col-span-1" count={jobs.length}>
       <div className="mt-3 grid grid-cols-[1fr_auto_1fr_auto] gap-2 max-[1100px]:grid-cols-1">
         <select
           className={selectClass}
@@ -130,6 +118,6 @@ export function JobsCard({ token, busy, run, jobs }: JobsCardProps) {
           {jobLog}
         </pre>
       )}
-    </section>
+    </Panel>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 
-import { SEVERITY_HEX } from "../lib/behaviorOverlay";
+import { SEVERITY_TOKEN } from "../lib/behaviorOverlay";
+import { prepareCanvas } from "../lib/canvas";
+import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
 import type {
   BehaviorSeverity,
   DeviationConfig,
@@ -44,19 +46,13 @@ interface CurveProps {
  *  an excursion past "normal" is visible rather than clipped off-canvas. */
 export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }: CurveProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeVersion = useThemeVersion();
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, width, height);
 
     const [xLo, xHi] = domain;
     const xSpan = xHi - xLo || 1;
@@ -111,7 +107,8 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
       xs.forEach((x, i) => {
         const px = xToPx(x);
         const py = yToPy(ys[i] + delta);
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       });
       for (let i = xs.length - 1; i >= 0; i--) {
         ctx.lineTo(xToPx(xs[i]), yToPy(ys[i] - delta));
@@ -120,29 +117,31 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
       ctx.fill();
     };
     // Critical first (wider), warning on top — nested envelopes.
-    if (critBand !== null) band(critBand, "rgba(255, 111, 111, 0.10)");
-    if (warnBand !== null) band(warnBand, "rgba(255, 209, 102, 0.12)");
+    if (critBand !== null) band(critBand, withAlpha(cssColor("bad"), 0.1));
+    if (warnBand !== null) band(warnBand, withAlpha(cssColor("warn"), 0.12));
 
     // Fitted curve.
-    ctx.strokeStyle = "#ffb547";
+    ctx.strokeStyle = cssColor("accent");
     ctx.lineWidth = 1.75;
     ctx.beginPath();
     xs.forEach((x, i) => {
       const px = xToPx(x);
       const py = yToPy(ys[i]);
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     });
     ctx.stroke();
 
     // Recent trajectory — faint polyline through the trail.
     if (trailPts.length >= 2) {
-      ctx.strokeStyle = "rgba(238, 243, 248, 0.28)";
+      ctx.strokeStyle = withAlpha(cssColor("fg"), 0.28);
       ctx.lineWidth = 1;
       ctx.beginPath();
       trailPts.forEach((p, i) => {
         const px = xToPx(p.x);
         const py = yToPy(p.actual);
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       });
       ctx.stroke();
     }
@@ -153,18 +152,18 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
       const py = yToPy(live.actual);
       // Deviation tick: marker → expected.
       if (live.expected !== null && live.expected !== undefined) {
-        ctx.strokeStyle = SEVERITY_HEX[live.severity];
+        ctx.strokeStyle = cssColor(SEVERITY_TOKEN[live.severity]);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(px, py);
         ctx.lineTo(px, yToPy(live.expected));
         ctx.stroke();
       }
-      ctx.fillStyle = SEVERITY_HEX[live.severity];
+      ctx.fillStyle = cssColor(SEVERITY_TOKEN[live.severity]);
       ctx.beginPath();
       ctx.arc(px, py, 3.5, 0, Math.PI * 2);
       ctx.fill();
-      ctx.strokeStyle = "#0b0f14";
+      ctx.strokeStyle = cssColor("bg");
       ctx.lineWidth = 1;
       ctx.stroke();
     } else if (live && live.x !== null) {
@@ -172,7 +171,7 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
       // sees "we're driving past the fitted envelope," not a blank chart.
       const atHi = live.x > xHi;
       const px = atHi ? width - 5 : 5;
-      ctx.strokeStyle = "#8a98a5";
+      ctx.strokeStyle = cssColor("fg-dim");
       ctx.lineWidth = 1.25;
       ctx.beginPath();
       ctx.moveTo(atHi ? px - 5 : px + 5, height / 2 - 5);
@@ -182,11 +181,11 @@ export function Curve({ fit, domain, deviation, live, width = 240, height = 90 }
     }
 
     // Axis labels (min/max y only — no clutter).
-    ctx.fillStyle = "#94a3ad";
+    ctx.fillStyle = cssColor("fg-dim");
     ctx.font = "10px ui-monospace, monospace";
     ctx.fillText(yHi.toFixed(1), 2, 10);
     ctx.fillText(yLo.toFixed(1), 2, height - 2);
-  }, [fit, domain, deviation, live, width, height]);
+  }, [fit, domain, deviation, live, width, height, themeVersion]);
 
   return <canvas ref={ref} width={width} height={height} />;
 }

@@ -19,14 +19,10 @@ import {
   panelTitleClass,
   placeholderClass,
 } from "../styles";
-import type {
-  BindingDisplay,
-  BindingsByChannel,
-  ObdSchedulerRequestStatus,
-  ObdSchedulerStatus,
-} from "../types";
+import type { BindingDisplay, BindingsByChannel, ObdSchedulerStatus } from "../types";
+import { effectiveTargetHz, matchingRequest } from "../lib/scheduler";
 import { STALE_THRESHOLD_MS } from "../util/freshness";
-import { writeJson } from "../util/storage";
+import { readJson, writeJson } from "../util/storage";
 import { formatAge } from "../util/time";
 
 export { renderChannel } from "../lib/telemetryDisplay";
@@ -65,16 +61,11 @@ const PIN_STORAGE_KEY = "canary.drive.pinned";
 const GRAPH_STORAGE_KEY = "canary.drive.graphs";
 
 function loadStoredKeys(storageKey: string): string[] | null {
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (raw === null) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((key): key is string => typeof key === "string")
-      : [];
-  } catch {
-    return null;
-  }
+  const parsed = readJson<unknown>(storageKey, null);
+  if (parsed === null) return null;
+  return Array.isArray(parsed)
+    ? parsed.filter((key): key is string => typeof key === "string")
+    : [];
 }
 
 function loadKeys(storageKey: string): string[] {
@@ -120,7 +111,7 @@ export function TelemetryPanel({
 
   const displayChannels = useMemo(() => {
     return [...channels]
-      .filter(([_key, snap]) => !isEmptyRawCan(snap))
+      .filter(([, snap]) => !isEmptyRawCan(snap))
       .sort(([a], [b]) => a.localeCompare(b));
   }, [channels]);
 
@@ -478,7 +469,7 @@ function channelFreshness(
   const timestampMs =
     snapshot.latest.timestamp == null ? Number.NaN : Date.parse(snapshot.latest.timestamp);
   const ageMs = Number.isFinite(timestampMs) ? Math.max(0, now - timestampMs) : null;
-  const request = matchingRequest(snapshot, scheduler);
+  const request = matchingRequest(snapshot.latest.channel, scheduler);
   const achievedHz = scheduler?.achieved_hz_60s?.[snapshot.latest.channel] ?? null;
   const targetHz = effectiveTargetHz(request, scheduler);
   const intervalMs = targetHz !== null && targetHz > 0 ? 1_000 / targetHz : null;
@@ -490,26 +481,6 @@ function channelFreshness(
     slow: achievedHz !== null && targetHz !== null && achievedHz < targetHz * 0.8,
     stale: ageMs === null || ageMs > staleAfterMs,
   };
-}
-
-function matchingRequest(
-  snapshot: ChannelSnapshot,
-  scheduler?: ObdSchedulerStatus,
-): ObdSchedulerRequestStatus | undefined {
-  const channel = snapshot.latest.channel.toUpperCase();
-  return scheduler?.requests?.find((request) => request.channel.toUpperCase() === channel);
-}
-
-function effectiveTargetHz(
-  request: ObdSchedulerRequestStatus | undefined,
-  scheduler?: ObdSchedulerStatus,
-): number | null {
-  if (!request || request.configured_rate_hz <= 0) return null;
-  if (request.kind === "did") {
-    const interval = scheduler?.did_profile?.window_interval_seconds;
-    if (interval != null && interval > 0) return 1 / interval;
-  }
-  return request.configured_rate_hz;
 }
 
 function formatRate(rate: number): string {

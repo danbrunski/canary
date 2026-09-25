@@ -5,6 +5,7 @@ import { Panel } from "../components/Panel";
 import { ResourceGate } from "../components/ResourceGate";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { useControlResource } from "../hooks/useControlResource";
+import { streamKey } from "../lib/romMaps";
 import { renderChannel } from "../lib/telemetryDisplay";
 import { cn, placeholderClass } from "../styles";
 import type {
@@ -16,6 +17,7 @@ import type {
   ObdCoverageRow,
   StatusResponse,
 } from "../types";
+import { formatAltitude, formatGpsSpeed, formatHeading, formatReading } from "../util/format";
 
 type TabId = "obd" | "did" | "memory" | "can" | "gps";
 
@@ -130,15 +132,10 @@ function liveValue(
   const snap = channels.get(key);
   const value = snap?.latest.value;
   if (value == null || value === "") return { text: "—", active: false };
-  const shown = typeof value === "number" ? trimNum(value) : String(value);
+  const shown =
+    typeof value === "number" ? formatReading(value, { trimZeros: true }) : String(value);
   const unit = snap?.latest.unit ? ` ${snap.latest.unit}` : "";
   return { text: `${shown}${unit}`, active: true };
-}
-
-function trimNum(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  if (Number.isInteger(n)) return String(n);
-  return n.toFixed(2).replace(/\.?0+$/, "");
 }
 
 function valueCell(active: boolean, text: string) {
@@ -411,7 +408,7 @@ function MemoryTab({
     () =>
       arrange(data?.memory ?? [], view, (entry) => ({
         available: selected.has(entry.name),
-        active: liveValue(channels, `obd:mem:${entry.name}`).active,
+        active: liveValue(channels, streamKey(`mem:${entry.name}`)).active,
       })),
     [data, view, selected, channels],
   );
@@ -440,7 +437,7 @@ function MemoryTab({
                 </thead>
                 <tbody className="font-num tabular-nums">
                   {rows.map((entry: MemoryEntry) => {
-                    const live = liveValue(channels, `obd:mem:${entry.name}`);
+                    const live = liveValue(channels, streamKey(`mem:${entry.name}`));
                     const isSelected = selected.has(entry.name);
                     return (
                       <tr key={entry.name} className={ROW}>
@@ -599,9 +596,6 @@ function CanTab({ channels, view }: { channels: Map<string, ChannelSnapshot>; vi
 // GPS
 // ---------------------------------------------------------------------------
 
-const KM_PER_MILE = 1.609344;
-const M_PER_FT = 0.3048;
-
 function GpsTab({ status }: { status: StatusResponse | null }) {
   const gps = status?.gps ?? null;
   if (!gps) {
@@ -617,9 +611,10 @@ function GpsTab({ status }: { status: StatusResponse | null }) {
     ["HDOP", gps.hdop != null ? gps.hdop.toFixed(1) : "—"],
     ["latitude", gps.latitude != null ? `${gps.latitude.toFixed(5)}°` : "—"],
     ["longitude", gps.longitude != null ? `${gps.longitude.toFixed(5)}°` : "—"],
-    ["altitude", gps.altitude != null ? `${(gps.altitude / M_PER_FT).toFixed(0)} ft` : "—"],
-    ["speed", gps.speed != null ? `${(gps.speed / KM_PER_MILE).toFixed(0)} mph` : "—"],
-    ["heading", gps.heading != null ? `${gps.heading.toFixed(0)}°` : "—"],
+    ["altitude", formatAltitude(gps.altitude)],
+    ["speed", formatGpsSpeed(gps.speed)],
+    // R08.5: now with the cardinal ("184° S"), like every other heading.
+    ["heading", formatHeading(gps.heading)],
     ["fix age", `${gps.age_seconds.toFixed(1)}s`],
   ];
   return (

@@ -334,11 +334,11 @@ function OverlayChart({ overlay }: { overlay: OverlaySeries }) {
         {overlay.channel}
       </div>
       <svg viewBox={`0 0 ${width} ${height}`} className="h-11 w-full" role="img">
-        <path d={path(overlay.actual)} fill="none" stroke="#eef3f8" strokeWidth="1.4" />
+        <path d={path(overlay.actual)} fill="none" className="stroke-fg" strokeWidth="1.4" />
         <path
           d={path(overlay.reconstructed)}
           fill="none"
-          stroke="#4fd6e0"
+          className="stroke-accent-2"
           strokeDasharray="4 3"
           strokeWidth="1.4"
         />

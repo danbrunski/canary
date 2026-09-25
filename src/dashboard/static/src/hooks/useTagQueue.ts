@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { tagCapture } from "../api/http";
 import type { CaptureState } from "../types";
+import { readJson, writeJson } from "../util/storage";
 import { describeError } from "./useControlResource";
 
 type TagStatus = "pending" | "sent" | "failed";
@@ -32,29 +33,31 @@ interface PersistedQueue {
   recent: QueuedTag[];
 }
 
+function isQueuedTag(value: unknown): value is QueuedTag {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.id === "string" &&
+    typeof row.captureId === "string" &&
+    typeof row.label === "string" &&
+    typeof row.t === "number"
+  );
+}
+
+function tagList(value: unknown): QueuedTag[] {
+  return Array.isArray(value) ? value.filter(isQueuedTag) : [];
+}
+
 function loadQueue(): PersistedQueue {
-  try {
-    const raw = window.localStorage.getItem(QUEUE_KEY);
-    if (!raw) return { queue: [], recent: [] };
-    const parsed = JSON.parse(raw) as Partial<PersistedQueue>;
-    return {
-      queue: Array.isArray(parsed.queue) ? parsed.queue : [],
-      recent: Array.isArray(parsed.recent) ? parsed.recent : [],
-    };
-  } catch {
-    return { queue: [], recent: [] };
-  }
+  const parsed = readJson<unknown>(QUEUE_KEY, null);
+  if (typeof parsed !== "object" || parsed === null) return { queue: [], recent: [] };
+  const stored = parsed as Record<string, unknown>;
+  return { queue: tagList(stored.queue), recent: tagList(stored.recent) };
 }
 
 function saveQueue(state: PersistedQueue): void {
-  try {
-    window.localStorage.setItem(
-      QUEUE_KEY,
-      JSON.stringify({ queue: state.queue, recent: state.recent.slice(0, MAX_RECENT) }),
-    );
-  } catch {
-    /* localStorage full / unavailable — in-memory still works for this run */
-  }
+  // A failed write keeps the in-memory queue for this run.
+  writeJson(QUEUE_KEY, { queue: state.queue, recent: state.recent.slice(0, MAX_RECENT) });
 }
 
 function newId(): string {
@@ -65,9 +68,10 @@ function newId(): string {
  *  sends the oldest unsent tag for the current capture; the queue auto-
  *  flushes every 2.5 s while anything is pending. */
 export function useTagQueue(token: string, capture: CaptureState | null) {
-  const persisted = useRef<PersistedQueue>(loadQueue());
-  const [queue, setQueue] = useState<QueuedTag[]>(persisted.current.queue);
-  const [recent, setRecent] = useState<QueuedTag[]>(persisted.current.recent);
+  const [initial] = useState(loadQueue);
+  const persisted = useRef<PersistedQueue>(initial);
+  const [queue, setQueue] = useState<QueuedTag[]>(initial.queue);
+  const [recent, setRecent] = useState<QueuedTag[]>(initial.recent);
   const flushing = useRef(false);
 
   const pendingCount = queue.filter((q) => q.status !== "sent").length;
@@ -124,7 +128,7 @@ export function useTagQueue(token: string, capture: CaptureState | null) {
   useEffect(() => {
     if (pendingCount === 0 || !capture) return;
     flushOnce().catch(() => undefined);
-    const timer = window.setInterval(() => flushOnce().catch(() => undefined), 2500);
+    const timer = window.setInterval(() => void flushOnce().catch(() => undefined), 2500);
     return () => window.clearInterval(timer);
   }, [pendingCount, capture, flushOnce]);
 

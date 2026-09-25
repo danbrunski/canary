@@ -1,49 +1,22 @@
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { TelemetryRow } from "../types";
-import type { TableTrace } from "./romTrace";
+import type { RomProvider, RomTable } from "../types/workbench";
+import { sequentialIn } from "./colorScale";
 
-export interface RomProvider {
-  spec: string;
-  transform: "identity" | "scale" | "equiv_ratio_afr";
-  factor: number | null;
-}
-
-export interface RomTable {
-  slot: number;
-  kind: "fuel_targets" | "fuel_compensation";
-  title: string;
-  x_label: string;
-  x_unit: string;
-  y_label: string;
-  y_unit: string;
-  unit: string;
-  status: "available" | "tbd";
-  reason: string | null;
-  x_axis: number[];
-  y_axis: number[];
-  values: number[][];
-  raw: number[][];
-  /** W05.1: the ECM's trace channels for this table and whether their
-   *  mapping onto its axes is verified. Null on TBD tables. */
-  trace?: TableTrace | null;
-}
-
-export interface RomInspection {
-  source_sha256: string;
-  revision: string;
-  recorded_revision: string | null;
-  matches_recorded_revision: boolean;
-  map_slots: number[];
-  tables: RomTable[];
-  live: Record<"rpm" | "base_fuel_schedule" | "commanded_afr", RomProvider | null>;
-  warnings: string[];
-  afr_stoich: number;
-}
+export type { RomInspection, RomProvider, RomTable } from "../types/workbench";
 
 // Display freshness, not a collector or diagnostic threshold. Never leave a
 // highlighted cell frozen on the last sample when the stream disconnects.
 export const TRACE_MAX_AGE_MS = 2500;
 export const TRACE_MAX_SKEW_MS = 750;
+
+/** The live-stream key for a stored memory-channel spec (R08.5): memory rows
+ *  are stored as source `obd`, channel `mem:<NAME>`, so `mem:X` streams as
+ *  `obd:mem:X`. Any other spec already names its stream. The only place that
+ *  rule is written; never hand-build `obd:mem:` keys. */
+export function streamKey(spec: string): string {
+  return spec.startsWith("mem:") ? `obd:${spec}` : spec;
+}
 
 /** A stored channel spec's row on the live stream. Stream keys are
  *  `<source>:<channel>`, and memory rows are stored as source `obd`, channel
@@ -103,17 +76,8 @@ export function tracePosition(table: RomTable, rpm: number, bfs: number) {
   };
 }
 
-/** Numeric scale only: green is low, red is high, not safe/dangerous. */
+/** Numeric scale only: green is low, red is high, not safe/dangerous. The
+ *  shared sequential ramp (R08.7). */
 export function mapColor(value: number, min: number, max: number): string {
-  const stops = [
-    [80, 190, 110],
-    [245, 210, 65],
-    [248, 155, 55],
-    [230, 80, 65],
-  ];
-  const fraction = max > min ? Math.min(1, Math.max(0, (value - min) / (max - min))) : 0;
-  const step = fraction * (stops.length - 1);
-  const low = Math.min(stops.length - 2, Math.floor(step));
-  const blend = step - low;
-  return `rgb(${stops[low].map((v, i) => Math.round(v + (stops[low + 1][i] - v) * blend)).join(", ")})`;
+  return sequentialIn(value, min, max);
 }

@@ -58,7 +58,7 @@ import type {
   VehicleProfilesResponse,
   VersionResponse,
 } from "../types";
-import { apiUrl, controlJson, fetchJson, fetchOrNetworkError, HttpError, jsonBody } from "./core";
+import { controlBlob, controlJson, fetchJson, jsonBody, queryString } from "./core";
 
 export { HttpError, NetworkError } from "./core";
 
@@ -73,20 +73,9 @@ export function getCompanionStatus(signal?: AbortSignal): Promise<CompanionStatu
   return fetchJson<CompanionStatusResponse>("/companion/status", { signal });
 }
 
-export function getConfig(signal?: AbortSignal): Promise<Record<string, unknown>> {
-  return fetchJson("/config", { signal });
-}
-
 export function getAnomalies(since?: string, signal?: AbortSignal): Promise<AnomaliesResponse> {
   const params = since ? `?since=${encodeURIComponent(since)}` : "";
   return fetchJson<AnomaliesResponse>(`/anomalies${params}`, { signal });
-}
-
-export function getLatestTelemetry(
-  n = 100,
-  signal?: AbortSignal,
-): Promise<TelemetryLatestResponse> {
-  return fetchJson<TelemetryLatestResponse>(`/telemetry/latest?n=${n}`, { signal });
 }
 
 /** Seed shape for the live panels: the most recent sample for *every*
@@ -332,34 +321,29 @@ export function deleteSession(
   });
 }
 
-export async function downloadSession(token: string, sessionId: string): Promise<Blob> {
-  const response = await fetchOrNetworkError(
+export function downloadSession(token: string, sessionId: string, baseUrl?: string): Promise<Blob> {
+  return controlBlob(
     `/control/sessions/${encodeURIComponent(sessionId)}/export`,
-    { headers: { Authorization: `Bearer ${token}`, Accept: "application/zip" } },
+    token,
+    { headers: { Accept: "application/zip" } },
+    baseUrl,
   );
-  if (!response.ok) {
-    throw new HttpError(response.status, await response.text());
-  }
-  return response.blob();
 }
 
-/** Task 5.6a: GPX/KML export of a session's captured GPS track. Uses a raw
- *  `fetch` (not `controlJson`) like `downloadSession` above, since the
- *  response body is the file itself, not JSON. */
-async function downloadSessionTrack(
+/** Task 5.6a: GPX/KML export of a session's captured GPS track. The body is
+ *  the file itself, so `controlBlob`, not `controlJson`. */
+function downloadSessionTrack(
   token: string,
   sessionId: string,
   format: "gpx" | "kml",
   baseUrl?: string,
 ): Promise<Blob> {
-  const response = await fetchOrNetworkError(
-    apiUrl(`/control/sessions/${encodeURIComponent(sessionId)}/gps.${format}`, baseUrl),
-    { headers: { Authorization: `Bearer ${token}` } },
+  return controlBlob(
+    `/control/sessions/${encodeURIComponent(sessionId)}/gps.${format}`,
+    token,
+    {},
+    baseUrl,
   );
-  if (!response.ok) {
-    throw new HttpError(response.status, await response.text());
-  }
-  return response.blob();
 }
 
 export function downloadSessionGpx(
@@ -541,15 +525,22 @@ export function getBinnedAnalysis(
   },
   signal?: AbortSignal,
 ): Promise<BinnedAnalysisResponse> {
-  const query = new URLSearchParams({ value: params.value, x: params.x });
-  if (params.y) query.set("y", params.y);
-  if (params.xBins != null) query.set("x_bins", String(params.xBins));
-  if (params.yBins != null) query.set("y_bins", String(params.yBins));
-  if (params.agg) query.set("agg", params.agg);
-  if (params.session) query.set("session", params.session);
-  if (params.since) query.set("since", params.since);
-  if (params.until) query.set("until", params.until);
-  return fetchJson<BinnedAnalysisResponse>(`/analysis/binned?${query.toString()}`, { signal });
+  // `value` and `x` are required by the route (FastAPI `Query(...)`): always
+  // send them, even empty, so a cleared field reads as the route's own
+  // refusal rather than a missing parameter. Only the optional ones go
+  // through queryString, which drops blanks.
+  const required = new URLSearchParams({ value: params.value, x: params.x }).toString();
+  const optional = queryString({
+    y: params.y,
+    x_bins: params.xBins,
+    y_bins: params.yBins,
+    agg: params.agg,
+    session: params.session,
+    since: params.since,
+    until: params.until,
+  });
+  const rest = optional ? `&${optional.slice(1)}` : "";
+  return fetchJson<BinnedAnalysisResponse>(`/analysis/binned?${required}${rest}`, { signal });
 }
 
 /** `/control/sessions/{id}/chart` (Task 5.3) — per-channel time-series
@@ -565,10 +556,9 @@ export function getSessionChart(
   baseUrl?: string,
   signal?: AbortSignal,
 ): Promise<SessionChartResponse> {
-  const query = new URLSearchParams({ channels: channels.join(",") });
-  if (resampleHz != null) query.set("resample_hz", String(resampleHz));
+  const query = queryString({ channels: channels.join(","), resample_hz: resampleHz });
   return controlJson<SessionChartResponse>(
-    `/control/sessions/${encodeURIComponent(sessionId)}/chart?${query.toString()}`,
+    `/control/sessions/${encodeURIComponent(sessionId)}/chart${query}`,
     token,
     { signal },
     baseUrl,

@@ -1,15 +1,9 @@
 import { useState } from "react";
 
+import { Panel } from "../components/Panel";
 import { uploadModelArtifact } from "../api/http";
 import type { RunAction } from "../hooks/useAsyncAction";
-import {
-  buttonClass,
-  inputClass,
-  panelClass,
-  panelHeaderClass,
-  panelTitleClass,
-  selectClass,
-} from "../styles";
+import { buttonClass, inputClass, selectClass } from "../styles";
 import { fileToBase64 } from "../util/browser";
 import { parseJsonObject } from "../util/json";
 
@@ -37,10 +31,7 @@ export function ModelUploadCard({ token, busy, run }: ModelUploadCardProps) {
     });
 
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Model Upload</h2>
-      </header>
+    <Panel title="Model Upload">
       <div className="grid grid-cols-1 gap-2">
         <select
           className={selectClass}
@@ -71,6 +62,6 @@ export function ModelUploadCard({ token, busy, run }: ModelUploadCardProps) {
           Publish
         </button>
       </div>
-    </section>
+    </Panel>
   );
 }

@@ -5,7 +5,8 @@
 // down the polled data + the shared `run` action, not two dozen individual
 // fields — see SessionsCard.tsx etc.
 
-import { cn, panelClass, panelHeaderClass, panelTitleClass, placeholderClass } from "../styles";
+import { Panel } from "../components/Panel";
+import { cn, placeholderClass } from "../styles";
 import type { ConnectionState, ControlEvent, PreflightResponse } from "../types";
 import { formatTimeOfDay } from "../util/time";
 
@@ -23,13 +24,14 @@ export function PreflightCard({
   preflight: PreflightResponse | null;
 }) {
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Preflight</h2>
+    <Panel
+      title="Preflight"
+      actions={
         <span className={preflight?.ok ? "text-[0.8rem] text-ok" : "text-[0.8rem] text-bad"}>
           {preflight ? (preflight.ok ? "ready" : "attention") : "locked"}
         </span>
-      </header>
+      }
+    >
       {!hasToken ? (
         <p className={placeholderClass}>Enter the token to unlock controls.</p>
       ) : (
@@ -45,7 +47,7 @@ export function PreflightCard({
           ))}
         </ul>
       )}
-    </section>
+    </Panel>
   );
 }
 
@@ -65,11 +67,10 @@ export function ControlEventsCard({
   events: ControlEvent[];
 }) {
   return (
-    <section className={panelClass}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Control Events</h2>
-        <span className={connectionTextClass(connection)}>{connection}</span>
-      </header>
+    <Panel
+      title="Control Events"
+      actions={<span className={connectionTextClass(connection)}>{connection}</span>}
+    >
       <ol className="m-0 flex max-h-[22rem] list-none flex-col gap-1.5 overflow-y-auto p-0">
         {events.slice(0, 12).map((event, index) => (
           <li
@@ -84,6 +85,6 @@ export function ControlEventsCard({
           </li>
         ))}
       </ol>
-    </section>
+    </Panel>
   );
 }

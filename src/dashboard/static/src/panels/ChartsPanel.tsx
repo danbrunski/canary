@@ -8,6 +8,9 @@ import { useAsyncAction } from "../hooks/useAsyncAction";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import { buttonClass, cn, inputClass, placeholderClass } from "../styles";
 import type { SessionChartResponse } from "../types";
+import { seriesColor, useThemeVersion } from "../lib/chartTheme";
+import { downloadBlob } from "../util/browser";
+import { formatReading } from "../util/format";
 
 interface ChartsPanelProps {
   channels: Map<string, ChannelSnapshot>;
@@ -17,18 +20,8 @@ interface ChartsPanelProps {
   token?: string;
 }
 
-const PALETTE = ["#ffb547", "#4fd6e0", "#5fe3b3", "#ff6f6f", "#c08cff", "#8ad15a"];
 const MAX_SERIES = 6;
 const WINDOWS = [60, 120, 300] as const;
-
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
-}
 
 /** Advanced charting (Task 6.10, session mode Task 5.3): pick up to six
  *  numeric channels and trend them together. "Live" mode charts the current
@@ -127,15 +120,18 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
       downloadBlob(blob, `${sessionId.trim()}.${format}`);
     });
 
+  // Series colours are resolved from the theme each render; re-render when
+  // it flips so a paused or session chart repaints too.
+  useThemeVersion();
   const liveSeries: ChartSeries[] = selected.map((key, i) => {
     const all = paused ? (frozen?.get(key) ?? []) : (channels.get(key)?.history ?? []);
-    return { key, color: PALETTE[i % PALETTE.length], values: all.slice(-windowN) };
+    return { key, color: seriesColor(i), values: all.slice(-windowN) };
   });
 
   const sessionKeys = sessionData ? Object.keys(sessionData.channels) : [];
   const sessionSeries: ChartSeries[] = sessionKeys.map((key, i) => ({
     key,
-    color: PALETTE[i % PALETTE.length],
+    color: seriesColor(i),
     values: (sessionData?.channels[key].values ?? []).map((v) => (v == null ? NaN : v)),
   }));
   const sessionTimestamps = sessionKeys.length
@@ -350,6 +346,5 @@ export function ChartsPanel({ channels, token = "" }: ChartsPanelProps) {
 }
 
 function fmt(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return "—";
-  return Math.abs(v) >= 1000 ? v.toFixed(0) : v.toFixed(2);
+  return formatReading(v, { digits: 2, bigAt: 1000 });
 }

@@ -34,17 +34,49 @@ export function formatTimestamp(ts: string): string {
   }
 }
 
+export interface ClockDurationOptions {
+  /** How fractional seconds collapse. Default "floor" (a running clock never
+   *  shows a second that has not passed). */
+  rounding?: "floor" | "round";
+  /** "auto" shows hours only when nonzero; "always" pads them to two digits
+   *  (`00:01:00`). Default "auto". */
+  hours?: "auto" | "always";
+  /** Pad the minutes when there is no hours field (`01:05` vs `1:05`).
+   *  Default true. */
+  padMinutes?: boolean;
+  /** Text for a null or non-finite duration. Default "—". */
+  missing?: string;
+}
+
+/** A duration in seconds as a clock: `h:mm:ss`, `mm:ss` or `m:ss`, clamped at
+ *  zero (R08.5). The one clock-style formatter: the workbench's log durations,
+ *  the tuning bar's capture clock and `formatElapsed` are its options. Not
+ *  `formatDuration`, which reads "Ym Zs". */
+export function formatClockDuration(
+  seconds: number | null | undefined,
+  {
+    rounding = "floor",
+    hours = "auto",
+    padMinutes = true,
+    missing = "—",
+  }: ClockDurationOptions = {},
+): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return missing;
+  const total = Math.max(0, rounding === "round" ? Math.round(seconds) : Math.floor(seconds));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (hours === "always") return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${padMinutes ? pad(m) : m}:${pad(s)}`;
+}
+
 /** h:mm:ss / mm:ss elapsed since an ISO start, clamped at zero. */
 export function formatElapsed(startedAt: string, now: number): string {
   const start = new Date(startedAt).getTime();
   if (Number.isNaN(start)) return "—";
-  const secs = Math.max(0, Math.floor((now - start) / 1000));
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  const mm = String(m).padStart(2, "0");
-  const ss = String(s).padStart(2, "0");
-  return h > 0 ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+  return formatClockDuration((now - start) / 1000);
 }
 
 /** Relative age of a timestamp: "now" / "Ns" / "-" for missing/unparseable. */

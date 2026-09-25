@@ -27,7 +27,7 @@ import { AlarmsPanel } from "./AlarmsPanel";
 import { AnomalyPanel } from "./AnomalyPanel";
 import { BehaviorModelsPanel } from "./BehaviorModelsPanel";
 import { ChartsPanel } from "./ChartsPanel";
-import { CaptureProfilesPanel } from "./CaptureProfilesPanel";
+import { CaptureProfileEditor } from "./CaptureProfileEditor";
 import { ControlPanel } from "./ControlPanel";
 import { CustomDashboardPanel } from "./CustomDashboardPanel";
 import { CustomPidsPanel } from "./CustomPidsPanel";
@@ -184,9 +184,7 @@ function renderItem(
     case "system-profiles":
       return <ProfilesPanel token={d.token} />;
     case "system-capture-profiles":
-      return (
-        <CaptureProfilesPanel token={d.token} status={d.status} authoring showRunner={false} />
-      );
+      return <CaptureProfileEditor token={d.token} status={d.status} />;
     case "system-power":
       return <PowerPanel token={d.token} />;
     case "observe-charts":

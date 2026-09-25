@@ -1,17 +1,11 @@
 import type { ReactNode } from "react";
 
+import { Panel } from "../components/Panel";
 import { Curve } from "../components/Curve";
 import { Heatmap } from "../components/Heatmap";
 import { Sparkline } from "../components/Sparkline";
-import { SEVERITY_HEX, SEVERITY_TEXT, binIndex, fmt } from "../lib/behaviorOverlay";
-import {
-  cn,
-  panelClass,
-  panelCountClass,
-  panelHeaderClass,
-  panelTitleClass,
-  placeholderClass,
-} from "../styles";
+import { SEVERITY_TEXT, SEVERITY_TOKEN, binIndex, fmt } from "../lib/behaviorOverlay";
+import { cn, placeholderClass, panelCountClass } from "../styles";
 import type {
   BehaviorLifecycle,
   BehaviorLiveModel,
@@ -100,9 +94,10 @@ function Frame({
   streaming?: boolean;
 }) {
   return (
-    <section className={cn(panelClass, "col-span-2 max-[1100px]:col-span-1")}>
-      <header className={panelHeaderClass}>
-        <h2 className={panelTitleClass}>Behavior Models</h2>
+    <Panel
+      title="Behavior Models"
+      className="col-span-2 max-[1100px]:col-span-1"
+      actions={
         <div className="flex items-center gap-2">
           {mode && (
             <span className="font-num text-[0.7rem] tabular-nums text-fg-dim">
@@ -114,9 +109,10 @@ function Frame({
           )}
           {count && <span className={panelCountClass}>{count}</span>}
         </div>
-      </header>
+      }
+    >
       {children}
-    </section>
+    </Panel>
   );
 }
 
@@ -372,7 +368,7 @@ function LiveReadout({
             values={devSeries}
             width={150}
             height={22}
-            stroke={SEVERITY_HEX[live.severity]}
+            stroke={SEVERITY_TOKEN[live.severity]}
           />
         </div>
       )}

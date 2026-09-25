@@ -4,14 +4,16 @@
 // the chip, or between the heatmap outline and the "n=" caption).
 
 import type { BehaviorSeverity } from "../types";
+import { formatReading } from "../util/format";
+import type { ColorToken } from "./chartTheme";
 
-/** Canvas hex per severity — mirrors the `--color-ok/warn/bad` theme tokens
- *  (index.css). Canvas can't read CSS custom properties cheaply, so the
- *  values are duplicated here with that file named as the source of truth. */
-export const SEVERITY_HEX: Record<BehaviorSeverity, string> = {
-  ok: "#5fe3b3",
-  warning: "#ffd166",
-  critical: "#ff6f6f",
+/** Theme token per severity, for canvas marks (`cssColor(token)`) and SVG
+ *  (`cssVar(token)`). Was `SEVERITY_HEX`, a copy of the day palette that
+ *  ignored the night theme (R08.7). */
+export const SEVERITY_TOKEN: Record<BehaviorSeverity, ColorToken> = {
+  ok: "ok",
+  warning: "warn",
+  critical: "bad",
 };
 
 /** Tailwind text class per severity for the chip / readout. */
@@ -37,8 +39,5 @@ export function binIndex(value: number, edges: number[]): number | null {
 
 /** Compact numeric formatter for the readout row; ``"—"`` for null/NaN. */
 export function fmt(value: number | null | undefined, digits = 1): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) {
-    return "—";
-  }
-  return value.toFixed(digits);
+  return formatReading(value, { digits });
 }

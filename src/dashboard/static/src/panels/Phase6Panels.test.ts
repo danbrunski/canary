@@ -138,4 +138,17 @@ describe("TrainingPanel", () => {
     );
     expect(await screen.findByText(/queued on laptop/)).toBeInTheDocument();
   });
+
+  it("describes a refused job in the shared words (R08.2)", async () => {
+    const { HttpErrorStub } = await import("../test/harness");
+    mocks.getTrainingRuns.mockResolvedValue({ count: 0, runs: [] });
+    mocks.submitJob.mockRejectedValue(
+      Object.assign(new HttpErrorStub("HTTP 401: {}"), { status: 401, body: "{}" }),
+    );
+    render(createElement(TrainingPanel, { token: "secret", companion: COMPANION }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    expect(
+      await screen.findByText("Not authorized — enter or check the control token."),
+    ).toBeInTheDocument();
+  });
 });

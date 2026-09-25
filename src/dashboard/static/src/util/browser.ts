@@ -20,3 +20,19 @@ export function currentPiHost(): string | null {
   }
   return window.location.origin;
 }
+
+/** Save `blob` as `filename` through a temporary object URL (R08.10). The
+ *  one copy of the Blob → URL → anchor click → revoke sequence. */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/** Save text as a file of the given MIME type. */
+export function downloadText(content: string, filename: string, mime: string): void {
+  downloadBlob(new Blob([content], { type: mime }), filename);
+}

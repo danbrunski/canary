@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
+import { NetworkError } from "../api/core";
 import { noveltyScreen } from "../lib/evidence";
 import type { AnomalyEvent, StatusResponse } from "../types";
 import { ModelEvidencePanel } from "./ModelEvidencePanel";
@@ -142,5 +143,16 @@ describe("ModelHealthPanel", () => {
     expect(screen.getByText("18.0 ms")).toBeInTheDocument();
     expect(screen.getByText("obd:RPM")).toBeInTheDocument();
     expect(screen.getByText("1.20x")).toBeInTheDocument();
+  });
+
+  it("describes an unreachable daemon instead of the raw transport error (R08.9)", () => {
+    render(
+      createElement(ModelHealthPanel, {
+        status: null,
+        statusError: new NetworkError("/status", new TypeError("Failed to fetch")),
+      }),
+    );
+    expect(screen.getByText(/Can't reach the daemon/)).toBeInTheDocument();
+    expect(screen.queryByText(/Network request to/)).not.toBeInTheDocument();
   });
 });

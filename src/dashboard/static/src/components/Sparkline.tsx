@@ -1,10 +1,14 @@
 import { useEffect, useRef } from "react";
 
+import { prepareCanvas } from "../lib/canvas";
+import { cssColor, useThemeVersion, withAlpha, type ColorToken } from "../lib/chartTheme";
+
 interface SparklineProps {
   values: number[];
   width?: number;
   height?: number;
-  stroke?: string;
+  /** Line colour, as a theme token so it follows the night theme. */
+  stroke?: ColorToken;
   /** When set, the y-axis is fixed to [min, max] instead of auto-scaled. */
   min?: number;
   max?: number;
@@ -20,26 +24,19 @@ export function Sparkline({
   values,
   width = 120,
   height = 28,
-  stroke = "#ffb547",
+  stroke = "accent",
   min,
   max,
   baseline,
 }: SparklineProps) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const themeVersion = useThemeVersion();
 
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.scale(dpr, dpr);
-
-    ctx.clearRect(0, 0, width, height);
     if (values.length < 2) return;
 
     const lo = min ?? Math.min(...values);
@@ -53,7 +50,7 @@ export function Sparkline({
       const by = pad + (1 - (baseline - lo) / span) * usableH;
       ctx.save();
       ctx.lineWidth = 1;
-      ctx.strokeStyle = "rgba(148,163,184,0.45)";
+      ctx.strokeStyle = withAlpha(cssColor("fg-dim"), 0.45);
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.moveTo(0, by);
@@ -63,7 +60,7 @@ export function Sparkline({
     }
 
     ctx.lineWidth = 1.5;
-    ctx.strokeStyle = stroke;
+    ctx.strokeStyle = cssColor(stroke);
     ctx.beginPath();
     values.forEach((v, i) => {
       const x = i * stepX;
@@ -72,7 +69,7 @@ export function Sparkline({
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
-  }, [values, width, height, stroke, min, max, baseline]);
+  }, [values, width, height, stroke, min, max, baseline, themeVersion]);
 
   return <canvas ref={ref} width={width} height={height} />;
 }

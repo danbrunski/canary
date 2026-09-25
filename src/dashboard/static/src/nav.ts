@@ -111,10 +111,6 @@ export function findItem(id: WorkbenchItem): NavItemDef {
   return item ?? ITEMS[0];
 }
 
-export function groupOf(id: WorkbenchItem): NavGroupId {
-  return findItem(id).group;
-}
-
 /** Runtime guard for an untrusted id (e.g. parsed from the URL hash). */
 export function isWorkbenchItem(value: string): value is WorkbenchItem {
   return ITEMS.some((i) => i.id === value);

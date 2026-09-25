@@ -9,3 +9,4 @@ export * from "./types/tripSummary";
 export * from "./types/digest";
 export * from "./types/analysis";
 export * from "./types/llmAssist";
+export * from "./types/workbench";

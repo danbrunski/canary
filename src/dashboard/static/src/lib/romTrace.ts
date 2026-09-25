@@ -13,32 +13,23 @@
  */
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { CaptureProfile, StatusResponse } from "../types";
-import { streamRow, tracePosition } from "./romMaps";
-import type { RomTable } from "./romMaps";
+import type {
+  AxisTrace,
+  CellResidency,
+  RomInspection,
+  RomTable,
+  TableTrace,
+} from "../types/workbench";
+import { coverage } from "./colorScale";
+import { streamRow, TRACE_MAX_SKEW_MS, tracePosition } from "./romMaps";
 
-export interface AxisTrace {
-  channel: string;
-  axis_mapping: "verified" | "unverified";
-  scale: number | null;
-  offset: number | null;
-  evidence: string;
-  /** Scheduler request carrying the channel (`mem:<window>`), or null. */
-  request_channel: string | null;
-}
-
-export interface TableTrace {
-  x: AxisTrace;
-  y: AxisTrace;
-  unavailable_note: string | null;
-}
+export type { AxisTrace, CellResidency, TableTrace } from "../types/workbench";
 
 /** W05.4: a trace channel older than this greys the ECM trace out. */
 export const TRACE_CHANNEL_STALE_MS = 3000;
 /** The two traces of one table are separate memory reads; beyond this apart
  *  they are not one operating point. */
 export const ECM_TRACE_MAX_SKEW_MS = 750;
-/** Coverage cells under this many samples are "thin", distinct from none. */
-export const THIN_COVERAGE_SAMPLES = 5;
 
 export function traceSample(
   channels: Map<string, ChannelSnapshot>,
@@ -231,50 +222,12 @@ export function addCoverage(grid: CoverageGrid, position: CellPosition): Coverag
   );
 }
 
-export type CoverageClass = "unvisited" | "thin" | "visited";
+export { coverageClass, THIN_COVERAGE_SAMPLES, type CoverageClass } from "./colorScale";
 
-export function coverageClass(count: number): CoverageClass {
-  return count <= 0 ? "unvisited" : count < THIN_COVERAGE_SAMPLES ? "thin" : "visited";
-}
-
-/** Sample-count shading: never-visited is a flat neutral, thin is pale, and
- *  visited cells deepen with count. Not a value scale and not a safety scale. */
+/** Sample-count shading (moved to `colorScale.coverage`, R08.7). */
 export function coverageColor(count: number, max: number): string {
-  const kind = coverageClass(count);
-  if (kind === "unvisited") return "rgb(226, 232, 240)";
-  if (kind === "thin") return "rgb(191, 219, 254)";
-  const fraction =
-    max > THIN_COVERAGE_SAMPLES
-      ? Math.min(1, (count - THIN_COVERAGE_SAMPLES) / (max - THIN_COVERAGE_SAMPLES))
-      : 1;
-  const from = [96, 165, 250],
-    to = [30, 64, 175];
-  return `rgb(${from.map((v, i) => Math.round(v + (to[i] - v) * fraction)).join(", ")})`;
+  return coverage(count, max);
 }
-
-/** `GET /control/sessions/{id}/cell-residency` (W05.6). */
-export type CellResidency =
-  | {
-      available: true;
-      session_id: string;
-      table: string;
-      revision: string | null;
-      x_axis: number[];
-      y_axis: number[];
-      counts: number[][];
-      dwell_s: number[][];
-      samples: number;
-      outside_axes: number;
-      reason: null;
-    }
-  | {
-      available: false;
-      session_id: string;
-      table: string;
-      reason: string;
-      message: string;
-      missing?: string[];
-    };
 
 /** A residency grid can shade a displayed table only if it was binned on the
  *  same breakpoints — a log from another revision may have other axes. */
@@ -283,4 +236,75 @@ export function residencyMatchesTable(residency: CellResidency, table: RomTable)
   const same = (a: number[], b: number[]) =>
     a.length === b.length && a.every((v, i) => Math.abs(v - b[i]) < 1e-6);
   return same(residency.x_axis, table.x_axis) && same(residency.y_axis, table.y_axis);
+}
+
+/** How old `/status.vehicle_state` may be before the trace stops trusting
+ *  it, and how far in the future (clock skew) it may claim to be. */
+const VEHICLE_STATE_MAX_AGE_MS = 15000;
+const VEHICLE_STATE_MAX_LEAD_MS = 1000;
+
+export interface TraceGateInput {
+  /** The operator asserted this ROM and slot are running. */
+  confirmed: boolean;
+  rom: Pick<RomInspection, "matches_recorded_revision" | "recorded_revision"> | null;
+  status: StatusResponse | null;
+  now: number;
+  /** The commanded-AFR fuel-cut sentinel is fresh. */
+  fuelCut: boolean;
+  rpm: { timestamp: number } | null;
+  bfs: { timestamp: number } | null;
+}
+
+export interface TraceGate {
+  /** Why no trace (inferred or ECM) is called active; "" when none. */
+  gate: string;
+  /** Why the inferred lookup is not drawn: the gate, or a live-input
+   *  reason (fuel cut, missing or skewed RPM/BFS); "" when it is. */
+  trace: string;
+}
+
+/** The ROM-maps trace gates (W05.5, R08.8), first failing reason wins.
+ *  Nothing is called an active cell unless the operator asserts this ROM and
+ *  slot are running and nothing the daemon knows contradicts it. */
+export function traceGate({
+  confirmed,
+  rom,
+  status,
+  now,
+  fuelCut,
+  rpm,
+  bfs,
+}: TraceGateInput): TraceGate {
+  const vehicle = status?.vehicle_state;
+  const stateAge = vehicle?.derived_at ? now - Date.parse(vehicle.derived_at) : NaN;
+  const stateFresh =
+    Number.isFinite(stateAge) &&
+    stateAge >= -VEHICLE_STATE_MAX_LEAD_MS &&
+    stateAge <= VEHICLE_STATE_MAX_AGE_MS;
+  let gate = "";
+  if (!confirmed) gate = "Confirm the selected ROM and map slot before tracing.";
+  else if (!rom?.matches_recorded_revision)
+    gate = "Selected ROM differs from the recorded active revision; viewing only.";
+  else if (status?.calibration_matches_registry === false)
+    gate = `ECU reports calibration id ${status.ecu_calibration_id ?? "unknown"}, which does not match the flash history's ${status.registry_revision ?? "running revision"} (${status.registry_calibration_id ?? "no recorded id"}). The ECU is not running the recorded ROM, so no trace is called active.`;
+  else if (
+    status?.registry_revision &&
+    rom.recorded_revision &&
+    status.registry_revision !== rom.recorded_revision
+  )
+    gate = `The flash history's running revision is now ${status.registry_revision}, not this ROM's ${rom.recorded_revision}; no trace is called active.`;
+  else if (vehicle?.state === "replay") gate = "Replay active — live-map tracing is disabled.";
+  else if (!stateFresh || vehicle?.state !== "engine_running")
+    gate = "Waiting for fresh engine-running status.";
+  if (gate) return { gate, trace: gate };
+  if (fuelCut) return { gate, trace: "Fuel-cut sentinel — no active fueling cell inferred." };
+  if (!rpm || !bfs)
+    return {
+      gate,
+      trace:
+        "Waiting for fresh RPM and BFS. Missing/stale channels are not substituted with load or throttle.",
+    };
+  if (Math.abs(rpm.timestamp - bfs.timestamp) > TRACE_MAX_SKEW_MS)
+    return { gate, trace: "RPM/BFS sample skew exceeds 750 ms; trace paused." };
+  return { gate, trace: "" };
 }

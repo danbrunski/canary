@@ -1,25 +1,26 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { controlJson } from "../../api/core";
 import { Panel } from "../../components/Panel";
+import { SegmentedControl, type SegmentOption } from "../../components/SegmentedControl";
 import type { TuningContext } from "../../hooks/useTuningContext";
 import {
-  describeRefusal,
+  getCalibration,
   getDeliveryError,
-  getLogs,
   getPullComparison,
   getTiming,
   getTrimSurface,
-  type Cell,
-  type DeliveryErrorResponse,
-  type LogsResponse,
-  type NoiseFloor,
-  type PullComparisonResponse,
-  type Refusal,
-  type SessionChoice,
-  type TimingResponse,
-  type TrimSurfaceResponse,
-} from "../../lib/workbenchApi";
+} from "../../api/workbench";
+import { useControlResource } from "../../hooks/useControlResource";
+import { useAnalysisRun, useLogs } from "../../hooks/useWorkbench";
+import type {
+  Cell,
+  DeliveryErrorResponse,
+  NoiseFloor,
+  PullComparisonResponse,
+  SessionChoice,
+  TimingResponse,
+  TrimSurfaceResponse,
+} from "../../types/workbench";
 import { buttonClass, cn, inputClass, selectClass } from "../../styles";
 import type { StatusResponse } from "../../types";
 import {
@@ -40,24 +41,17 @@ export const MEASURED_SOURCES: ReadonlyArray<{ id: string; label: string }> = [
 ];
 
 type View = "delivery" | "trim" | "timing";
+const VIEWS: ReadonlyArray<SegmentOption<View>> = [
+  { id: "delivery", label: "Delivery error" },
+  { id: "trim", label: "Trim surface" },
+  { id: "timing", label: "Timing" },
+];
 
-async function run<T>(
-  load: () => Promise<T>,
-  setResult: (value: T | null) => void,
-  setRefusal: (value: Refusal | null) => void,
-  setBusy: (value: boolean) => void,
-) {
-  setBusy(true);
-  setRefusal(null);
-  try {
-    setResult(await load());
-  } catch (error) {
-    setResult(null);
-    setRefusal(describeRefusal(error));
-  } finally {
-    setBusy(false);
-  }
-}
+type TimingMode = "cells" | "compare";
+const TIMING_MODES: ReadonlyArray<SegmentOption<TimingMode>> = [
+  { id: "cells", label: "Cells" },
+  { id: "compare", label: "Compare revisions" },
+];
 
 // ---------------------------------------------------------------- chooser
 
@@ -75,14 +69,7 @@ function SessionChooser({
   selectedLogId: string | null;
 }) {
   const [includeSessions, setIncludeSessions] = useState(false);
-  const [logs, setLogs] = useState<LogsResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  useEffect(() => {
-    if (!token) return;
-    getLogs(token, includeSessions)
-      .then(setLogs)
-      .catch((error: unknown) => setRefusal(describeRefusal(error)));
-  }, [token, includeSessions]);
+  const { data: logs, error: refusal } = useLogs(token, includeSessions);
 
   const toggle = (id: string) => {
     const sessions = choice.sessions.includes(id)
@@ -204,7 +191,7 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
             width={W}
             y={y(rangeHi)}
             height={y(rangeLo) - y(rangeHi)}
-            fill="rgba(148,163,173,0.12)"
+            className="fill-fg-dim/10"
           />
           <rect
             data-floor="sd"
@@ -212,11 +199,11 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
             width={W}
             y={y(sd)}
             height={y(-sd) - y(sd)}
-            fill="rgba(148,163,173,0.22)"
+            className="fill-fg-dim/20"
           />
         </>
       )}
-      <line x1={0} x2={W} y1={y(0)} y2={y(0)} stroke="#94a3ad" />
+      <line x1={0} x2={W} y1={y(0)} y2={y(0)} className="stroke-fg-dim" />
       {result.bands.map((band, i) => {
         const v = band.error_pct ?? 0;
         const top = Math.min(y(v), y(0));
@@ -228,18 +215,24 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
               width={bw * 0.6}
               y={top}
               height={Math.abs(y(v) - y(0))}
-              fill={inside ? "#94a3ad" : v > 0 ? "#ffb547" : "#4fd6e0"}
+              className={inside ? "fill-fg-dim" : v > 0 ? "fill-accent" : "fill-accent-2"}
             />
             <text
               x={i * bw + bw / 2}
               y={v >= 0 ? top - 3 : top + Math.abs(y(v) - y(0)) + 10}
               textAnchor="middle"
               fontSize={10}
-              fill="#e6edf3"
+              className="fill-fg"
             >
               {v.toFixed(2)}% · n {band.n}
             </text>
-            <text x={i * bw + bw / 2} y={H + 14} textAnchor="middle" fontSize={9} fill="#94a3ad">
+            <text
+              x={i * bw + bw / 2}
+              y={H + 14}
+              textAnchor="middle"
+              fontSize={9}
+              className="fill-fg-dim"
+            >
               {band.rpm_band}
             </text>
           </g>
@@ -252,9 +245,7 @@ export function DeliveryChart({ result }: { result: DeliveryErrorResponse }) {
 function DeliveryView({ token, choice }: { token: string; choice: SessionChoice }) {
   const [measured, setMeasured] = useState("");
   const [minLoad, setMinLoad] = useState("");
-  const [result, setResult] = useState<DeliveryErrorResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { result, refusal, busy, run } = useAnalysisRun<DeliveryErrorResponse>();
   const semantic = measured.startsWith("semantic:");
   const ready = Boolean(token && measured && (choice.sessions.length || choice.revision));
   return (
@@ -292,17 +283,14 @@ function DeliveryView({ token, choice }: { token: string; choice: SessionChoice 
           className={buttonClass}
           disabled={!ready || busy}
           onClick={() =>
-            run(
-              () =>
-                getDeliveryError(
-                  token,
-                  choice,
-                  measured,
-                  !semantic && minLoad.trim() ? Number(minLoad) : null,
-                ),
-              setResult,
-              setRefusal,
-              setBusy,
+            run((signal) =>
+              getDeliveryError(
+                token,
+                choice,
+                measured,
+                !semantic && minLoad.trim() ? Number(minLoad) : null,
+                signal,
+              ),
             )
           }
         >
@@ -350,9 +338,7 @@ function DeliveryView({ token, choice }: { token: string; choice: SessionChoice 
 // ---------------------------------------------------------------- trim
 
 function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
-  const [result, setResult] = useState<TrimSurfaceResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [busy, setBusy] = useState(false);
+  const { result, refusal, busy, run } = useAnalysisRun<TrimSurfaceResponse>();
   const [bank, setBank] = useState("b1");
   const [split, setSplit] = useState("pooled");
   const ready = Boolean(token && (choice.sessions.length || choice.revision));
@@ -368,7 +354,7 @@ function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
           type="button"
           className={buttonClass}
           disabled={!ready || busy}
-          onClick={() => run(() => getTrimSurface(token, choice), setResult, setRefusal, setBusy)}
+          onClick={() => run((signal) => getTrimSurface(token, choice, signal))}
         >
           {busy ? "Running…" : "Run"}
         </button>
@@ -419,6 +405,7 @@ function TrimView({ token, choice }: { token: string; choice: SessionChoice }) {
               valueKey="total"
               unit={`% total correction; rows ${result.axes.rpm}, columns ${result.axes.airflow}`}
               label="Trim surface"
+              scale="diverging"
             />
           ) : (
             <EmptyResult
@@ -455,39 +442,31 @@ function comparedAsCells(result: PullComparisonResponse): Cell[] {
 }
 
 function TimingView({ token, choice }: { token: string; choice: SessionChoice }) {
-  const [result, setResult] = useState<TimingResponse | null>(null);
-  const [compare, setCompare] = useState<PullComparisonResponse | null>(null);
-  const [refusal, setRefusal] = useState<Refusal | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [mode, setMode] = useState<"cells" | "compare">("cells");
-  const [revisions, setRevisions] = useState<string[]>([]);
+  // One run per mode: a Compare refusal belongs under Compare, not Cells.
+  const cells = useAnalysisRun<TimingResponse>();
+  const comparison = useAnalysisRun<PullComparisonResponse>();
+  const result = cells.result;
+  const compare = comparison.result;
+  const [mode, setMode] = useState<TimingMode>("cells");
   const [revA, setRevA] = useState("");
   const [revB, setRevB] = useState("");
   const [floorChannel, setFloorChannel] = useState("");
-  useEffect(() => {
-    if (!token || mode !== "compare") return;
-    controlJson<{ history: Array<{ revision: string }> }>("/control/calibration", token)
-      .then((data) => setRevisions(data.history.map((h) => h.revision)))
-      .catch(() => setRevisions([]));
-  }, [token, mode]);
+  const calibration = useControlResource(
+    useCallback((signal: AbortSignal) => getCalibration(token, signal), [token]),
+    { enabled: Boolean(token) && mode === "compare", intervalMs: null },
+  );
+  const revisions = calibration.data?.history.map((h) => h.revision) ?? [];
   const ready = Boolean(token && (choice.sessions.length || choice.revision));
   return (
     <Panel
       title="Final timing per cell"
       actions={
-        <div role="group" aria-label="Timing mode" className="flex gap-1">
-          {(["cells", "compare"] as const).map((m) => (
-            <button
-              key={m}
-              type="button"
-              aria-pressed={mode === m}
-              className={cn(buttonClass, mode === m && "border-accent text-accent")}
-              onClick={() => setMode(m)}
-            >
-              {m === "cells" ? "Cells" : "Compare revisions"}
-            </button>
-          ))}
-        </div>
+        <SegmentedControl
+          label="Timing mode"
+          options={TIMING_MODES}
+          value={mode}
+          onChange={setMode}
+        />
       }
     >
       {mode === "cells" && (
@@ -495,12 +474,12 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
           <button
             type="button"
             className={cn(buttonClass, "mb-3")}
-            disabled={!ready || busy}
-            onClick={() => run(() => getTiming(token, choice), setResult, setRefusal, setBusy)}
+            disabled={!ready || cells.busy}
+            onClick={() => cells.run((signal) => getTiming(token, choice, signal))}
           >
-            {busy ? "Running…" : "Run"}
+            {cells.busy ? "Running…" : "Run"}
           </button>
-          <RefusalNotice refusal={refusal} />
+          <RefusalNotice refusal={cells.refusal} />
           {result &&
             (result.available ? (
               <CellGrid
@@ -557,20 +536,17 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
             <button
               type="button"
               className={buttonClass}
-              disabled={!token || !revA || !revB || revA === revB || busy}
+              disabled={!token || !revA || !revB || revA === revB || comparison.busy}
               onClick={() =>
-                run(
-                  () => getPullComparison(token, revA, revB, floorChannel.trim() || null),
-                  setCompare,
-                  setRefusal,
-                  setBusy,
+                comparison.run((signal) =>
+                  getPullComparison(token, revA, revB, floorChannel.trim() || null, signal),
                 )
               }
             >
-              {busy ? "Running…" : "Compare"}
+              {comparison.busy ? "Running…" : "Compare"}
             </button>
           </div>
-          <RefusalNotice refusal={refusal} />
+          <RefusalNotice refusal={comparison.refusal} />
           {compare &&
             (compare.available ? (
               <>
@@ -582,6 +558,7 @@ function TimingView({ token, choice }: { token: string; choice: SessionChoice })
                   unit={`${compare.value} change ${compare.revision_a} → ${compare.revision_b}`}
                   highlight={(cell) => cell.dropped === true}
                   label="Timing comparison"
+                  scale="diverging"
                 />
                 <p className="m-0 mt-1 text-xs text-warn">
                   {compare.cells.filter((c) => c.dropped).length} cell(s) outlined: timing dropped
@@ -632,26 +609,7 @@ export function AnalysisPage({
         runningRevision={runningRevision}
         selectedLogId={context.selectedLogId}
       />
-      <div role="tablist" aria-label="Analysis views" className="flex gap-1">
-        {(
-          [
-            ["delivery", "Delivery error"],
-            ["trim", "Trim surface"],
-            ["timing", "Timing"],
-          ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            role="tab"
-            aria-selected={view === id}
-            className={cn(buttonClass, view === id && "border-accent text-accent")}
-            onClick={() => setView(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <SegmentedControl label="Analysis views" options={VIEWS} value={view} onChange={setView} />
       {view === "delivery" && <DeliveryView token={token} choice={choice} />}
       {view === "trim" && <TrimView token={token} choice={choice} />}
       {view === "timing" && <TimingView token={token} choice={choice} />}

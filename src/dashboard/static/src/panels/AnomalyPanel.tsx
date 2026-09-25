@@ -237,7 +237,7 @@ export function AnomalyPanel({ events, token, liveScores }: AnomalyPanelProps) {
                   values={indexSeries}
                   width={500}
                   height={72}
-                  stroke="#FFB84A"
+                  stroke="accent"
                   min={0}
                   max={100}
                   baseline={50}

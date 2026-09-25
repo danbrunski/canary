@@ -7,6 +7,7 @@ import {
   formatHeading,
   formatNumber,
   formatPercent,
+  formatReading,
   formatTemp,
   toneClass,
 } from "./format";
@@ -83,5 +84,36 @@ describe("numberMap / record", () => {
     expect(numberMap([1, 2])).toBeNull();
     expect(record([1])).toBeNull();
     expect(record({ a: 1 })).toEqual({ a: 1 });
+  });
+});
+
+describe("formatReading (R08.5)", () => {
+  it("keeps each former caller's output through options", () => {
+    // LogsPage table cells.
+    const logs = { digits: 3, trimZeros: true, bigAt: 1000, missing: "" } as const;
+    expect(formatReading(1234.5, logs)).toBe("1235");
+    expect(formatReading(12.5, logs)).toBe("12.5");
+    expect(formatReading(3, logs)).toBe("3");
+    expect(formatReading(null, logs)).toBe("");
+    // DataSourcesPanel live values.
+    expect(formatReading(1234.5, { trimZeros: true })).toBe("1234.5");
+    expect(formatReading(100, { trimZeros: true })).toBe("100");
+    expect(formatReading(0.125, { trimZeros: true })).toBe("0.13");
+    // ChartsPanel readouts.
+    expect(formatReading(1234.5, { bigAt: 1000 })).toBe("1235");
+    expect(formatReading(12.345, { bigAt: 1000 })).toBe("12.35");
+    // behaviorOverlay.fmt and CaptureProfilesPanel.
+    expect(formatReading(12.345, { digits: 1 })).toBe("12.3");
+    expect(formatReading(1234.5)).toBe("1234.50");
+  });
+
+  it("says missing for null, undefined and non-finite", () => {
+    expect(formatReading(undefined)).toBe("—");
+    expect(formatReading(Number.NaN)).toBe("—");
+    expect(formatReading(Number.POSITIVE_INFINITY, { missing: "-" })).toBe("-");
+  });
+
+  it("does not trim the zeros of a whole number", () => {
+    expect(formatReading(100, { digits: 0, trimZeros: true })).toBe("100");
   });
 });

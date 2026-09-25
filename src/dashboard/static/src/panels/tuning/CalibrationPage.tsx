@@ -1,61 +1,23 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 
-import { controlJson } from "../../api/core";
+import {
+  getCalibration,
+  getMemoryChannels,
+  recordFlash,
+  verifyMemoryChannels,
+} from "../../api/workbench";
 import { Notice } from "../../components/Notice";
 import { Panel } from "../../components/Panel";
+import { useAsyncAction } from "../../hooks/useAsyncAction";
+import { useControlResource } from "../../hooks/useControlResource";
 import { buttonClass, inputClass } from "../../styles";
 import type { StatusResponse } from "../../types";
-
-type MemoryState = "verified" | "checked earlier" | "carried" | "unverifiable";
-interface MemoryChannel {
-  name: string;
-  address: string;
-  window: string | null;
-  unit: string;
-  verified_tune_revision: string;
-  revision_carried_reason: string | null;
-  known_answer: { relation: string; did: number; notes?: string | null } | null;
-  state: MemoryState;
-}
-interface CalibrationData {
-  running_revision: string | null;
-  registry_calibration_id: string | null;
-  ecu_calibration_id: string | null;
-  ecu_calibration_read_at: string | null;
-  calibration_matches_registry: boolean | null;
-  calibration_changed: boolean;
-  history: Array<{
-    revision: string;
-    flashed_at: string;
-    calibration_id: string | null;
-    k: number | null;
-    rom_file: string | null;
-    rom_sha256: string | null;
-    notes: string;
-  }>;
-}
-interface MemoryData {
-  running_revision: string | null;
-  count: number;
-  channels: MemoryChannel[];
-}
-interface VerifyData {
-  verdicts: Array<{
-    channel: string;
-    outcome: string;
-    reason: string;
-    samples: number;
-    agreements: number;
-  }>;
-  counts: Record<string, number>;
-  recorded: number;
-  notes: string[];
-}
+import type { MemoryChannel, MemoryState, VerifyMemoryResponse } from "../../types/workbench";
 
 const stateClass: Record<MemoryState, string> = {
-  verified: "text-emerald-400",
-  "checked earlier": "text-amber-300",
-  carried: "text-sky-300",
+  verified: "text-ok",
+  "checked earlier": "text-warn",
+  carried: "text-accent-2",
   unverifiable: "text-fg-faint",
 };
 
@@ -66,25 +28,26 @@ export function CalibrationPage({
   token: string;
   status: StatusResponse | null;
 }) {
-  const [calibration, setCalibration] = useState<CalibrationData | null>(null);
-  const [memory, setMemory] = useState<MemoryData | null>(null);
-  const [verification, setVerification] = useState<VerifyData | null>(null);
-  const [busy, setBusy] = useState("");
-  const [error, setError] = useState("");
+  const enabled = Boolean(token);
+  const calibrationRes = useControlResource(
+    useCallback((signal: AbortSignal) => getCalibration(token, signal), [token]),
+    { enabled, intervalMs: null },
+  );
+  const memoryRes = useControlResource(
+    useCallback((signal: AbortSignal) => getMemoryChannels(token, signal), [token]),
+    { enabled, intervalMs: null },
+  );
+  const calibration = calibrationRes.data;
+  const memory = memoryRes.data;
+  const loadError = calibrationRes.error ?? memoryRes.error;
+  const [verification, setVerification] = useState<VerifyMemoryResponse | null>(null);
+  const { notice, busy, run } = useAsyncAction();
   const [carryReason, setCarryReason] = useState("");
 
-  const refresh = useCallback(async () => {
-    if (!token) return;
-    const [nextCalibration, nextMemory] = await Promise.all([
-      controlJson<CalibrationData>("/control/calibration", token),
-      controlJson<MemoryData>("/control/memory-channels", token),
-    ]);
-    setCalibration(nextCalibration);
-    setMemory(nextMemory);
-  }, [token]);
-  useEffect(() => {
-    refresh().catch((reason: unknown) => setError(String(reason)));
-  }, [refresh]);
+  const refresh = () => {
+    calibrationRes.refresh();
+    memoryRes.refresh();
+  };
 
   const groups = useMemo(() => {
     const result = new Map<string, MemoryChannel[]>();
@@ -98,53 +61,45 @@ export function CalibrationPage({
     memory?.channels.some((channel) => channel.state === "unverifiable") ?? false;
   const captureActive = status?.capture_profile?.active ?? false;
 
-  async function verify(record: boolean) {
-    setBusy(record ? "Recording verification" : "Re-verifying memory channels");
-    setError("");
-    try {
-      const data = await controlJson<VerifyData>("/control/memory-channels/verify", token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          record_revision: record ? calibration?.running_revision : null,
-          carry_reason: record && hasUnverifiable ? carryReason || null : null,
-        }),
-      });
-      setVerification(data);
-      await refresh();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy("");
-    }
+  function verify(record: boolean) {
+    return run(
+      record ? "Recording verification" : "Re-verifying memory channels",
+      async () => {
+        setVerification(
+          await verifyMemoryChannels(token, {
+            record_revision: record ? (calibration?.running_revision ?? null) : null,
+            carry_reason: record && hasUnverifiable ? carryReason || null : null,
+          }),
+        );
+      },
+      { then: refresh, okText: null },
+    );
   }
 
-  async function recordFlash(event: FormEvent<HTMLFormElement>) {
+  function submitFlash(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    setBusy("Recording flash");
-    setError("");
-    try {
-      await controlJson("/control/calibration", token, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          revision: form.get("revision"),
-          flashed_at: form.get("flashed_at"),
-          calibration_id: form.get("calibration_id") || null,
-          k: form.get("k") ? Number(form.get("k")) : null,
-          rom_file: form.get("rom_file") || null,
-          rom_sha256: form.get("rom_sha256") || null,
-          notes: form.get("notes") || "",
-        }),
-      });
-      event.currentTarget.reset();
-      await refresh();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy("");
-    }
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const text = (name: string) => {
+      const value = form.get(name);
+      return typeof value === "string" ? value : "";
+    };
+    return run(
+      "Recording flash",
+      async () => {
+        await recordFlash(token, {
+          revision: text("revision"),
+          flashed_at: text("flashed_at"),
+          calibration_id: text("calibration_id") || null,
+          k: text("k") ? Number(text("k")) : null,
+          rom_file: text("rom_file") || null,
+          rom_sha256: text("rom_sha256") || null,
+          notes: text("notes"),
+        });
+        formElement.reset();
+      },
+      { then: refresh, okText: null },
+    );
   }
 
   const mismatch =
@@ -161,8 +116,8 @@ export function CalibrationPage({
             }}
           />
         )}
-        {error && <Notice notice={{ kind: "error", text: error }} />}
-        {busy && <Notice notice={{ kind: "busy", text: busy }} />}
+        {loadError && <Notice notice={{ kind: "error", text: loadError }} />}
+        {busy ? <Notice notice={{ kind: "busy", text: busy }} /> : <Notice notice={notice} />}
         <div className="grid gap-1 text-sm">
           <span>ECM: {calibration?.ecu_calibration_id ?? "not read yet"}</span>
           <span>
@@ -183,7 +138,7 @@ export function CalibrationPage({
                   {item.revision}
                   {item.revision === calibration.running_revision ? " · running" : ""}
                 </div>
-                <div className="text-xs text-fg-muted">
+                <div className="text-xs text-fg-dim">
                   {new Date(item.flashed_at).toLocaleString()} · K {item.k ?? "unknown"} ·{" "}
                   {item.rom_file ?? "ROM file unrecorded"}
                 </div>
@@ -269,12 +224,12 @@ export function CalibrationPage({
           </button>
         </div>
         {captureActive && (
-          <p className="text-sm text-amber-300">
+          <p className="text-sm text-warn">
             Verification is deferred while {status?.capture_profile?.name} is recording.
           </p>
         )}
         {status?.vehicle_state?.state === "engine_off" && (
-          <p className="text-xs text-fg-muted">
+          <p className="text-xs text-fg-dim">
             Engine-off verification is allowed, but fast-moving relations cannot distinguish a moved
             address while nothing is moving.
           </p>
@@ -286,10 +241,10 @@ export function CalibrationPage({
                 key={item.channel}
                 className={
                   item.outcome === "fail"
-                    ? "text-red-400"
+                    ? "text-bad"
                     : item.outcome === "pass"
-                      ? "text-emerald-400"
-                      : "text-fg-muted"
+                      ? "text-ok"
+                      : "text-fg-dim"
                 }
               >
                 {item.channel}: {item.outcome} — {item.reason}
@@ -300,7 +255,7 @@ export function CalibrationPage({
       </Panel>
 
       <Panel title="Record a flash">
-        <form className="grid grid-cols-2 gap-3 max-[700px]:grid-cols-1" onSubmit={recordFlash}>
+        <form className="grid grid-cols-2 gap-3 max-[700px]:grid-cols-1" onSubmit={submitFlash}>
           <input className={inputClass} name="revision" placeholder="Revision name" required />
           <input className={inputClass} name="flashed_at" type="datetime-local" required />
           <input className={inputClass} name="calibration_id" placeholder="ECU calibration id" />

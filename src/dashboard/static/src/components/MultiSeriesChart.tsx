@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { prepareCanvas } from "../lib/canvas";
+import { cssColor, useThemeVersion, withAlpha } from "../lib/chartTheme";
 import { buttonClass, cn } from "../styles";
+import { downloadText } from "../util/browser";
 
 export interface ChartSeries {
   key: string;
@@ -47,16 +50,6 @@ function formatTimeLabel(iso: string): string {
   return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 }
 
-function downloadBlob(content: string, filename: string, mime: string): void {
-  const blob = new Blob([content], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 /** Multi-channel trend chart on a single canvas (Task 6.10; ergonomics —
  *  shared/dual Y axis, hover cursor, time labels, PNG/CSV export — Task
  *  5.5). One canvas, no chart-lib dep, consistent with the Sparkline
@@ -71,6 +64,7 @@ export function MultiSeriesChart({
 }: MultiSeriesChartProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+  const themeVersion = useThemeVersion();
 
   const sampleCount = useMemo(() => Math.max(0, ...series.map((s) => s.values.length)), [series]);
 
@@ -90,19 +84,13 @@ export function MultiSeriesChart({
   useEffect(() => {
     const canvas = ref.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+    const ctx = prepareCanvas(canvas, width, height);
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${height}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, width, height);
+    const fg = cssColor("fg");
 
     // Horizontal gridlines (quartiles) — orientation only; the legend has
     // the numbers.
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    ctx.strokeStyle = withAlpha(fg, 0.06);
     ctx.lineWidth = 1;
     for (let i = 1; i < 4; i++) {
       const y = (height * i) / 4;
@@ -138,7 +126,7 @@ export function MultiSeriesChart({
     // Hover crosshair.
     if (hoverIndex !== null && sampleCount > 1) {
       const x = (width * hoverIndex) / (sampleCount - 1);
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.strokeStyle = withAlpha(fg, 0.35);
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -149,7 +137,7 @@ export function MultiSeriesChart({
     // X-axis time labels (only when timestamps were supplied — the live
     // ChartsPanel's ring buffers don't carry them).
     if (timestamps && timestamps.length > 1) {
-      ctx.fillStyle = "rgba(255,255,255,0.45)";
+      ctx.fillStyle = withAlpha(fg, 0.45);
       ctx.font = "10px system-ui, sans-serif";
       const ticks = 4;
       for (let i = 0; i <= ticks; i++) {
@@ -161,7 +149,17 @@ export function MultiSeriesChart({
         ctx.fillText(label, x, height - 4);
       }
     }
-  }, [series, width, height, timestamps, yAxisMode, sharedExtent, hoverIndex, sampleCount]);
+  }, [
+    series,
+    width,
+    height,
+    timestamps,
+    yAxisMode,
+    sharedExtent,
+    hoverIndex,
+    sampleCount,
+    themeVersion,
+  ]);
 
   const handleMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (sampleCount < 2) return;
@@ -190,7 +188,7 @@ export function MultiSeriesChart({
       ];
       rows.push(cells.join(","));
     }
-    downloadBlob(rows.join("\n"), "chart.csv", "text/csv");
+    downloadText(rows.join("\n"), "chart.csv", "text/csv");
   };
 
   return (
