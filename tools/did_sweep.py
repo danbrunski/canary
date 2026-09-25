@@ -42,7 +42,7 @@ from src.analysis.did_scan import (
     sweep_dids,
     sweep_dids_batched,
 )
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
 from src.collection.obd_scheduler import did_access
@@ -197,12 +197,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     hits = 0
     t0 = time.time()
     try:
-        response_id = request_id + 8
+        # The client pins a physical request to its one responder
+        # (request + 8) itself since R02.5.
         client = CanObdClient(
             bus,
             request_id=request_id,
-            response_id_min=response_id,
-            response_id_max=response_id,
             timeout_seconds=args.read_timeout,
         )
         transport = CanableMode22Transport(

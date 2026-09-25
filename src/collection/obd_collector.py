@@ -43,7 +43,7 @@ from src.collection.obd_reading import ObdReading as ObdReading
 from src.collection.obd_reading import acquisition_metadata as acquisition_metadata
 from src.collection.obd_reading import reading_to_record as reading_to_record
 from src.collection.queueing import DropCallback, QueueDropCounter, threadsafe_enqueue
-from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
+from src.collection.reconnect import DEFAULT_RECONNECT_POLICY, ReconnectPolicy, run_with_reconnect
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -137,9 +137,6 @@ class ObdConnection(Protocol):
     def start(self) -> None: ...
 
     def stop(self) -> None: ...
-
-
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 
 def resolve_pids(names: tuple[str, ...]) -> list[Any]:

@@ -1123,3 +1123,27 @@ def test_walk_blames_the_pid_before_a_stray_boundary_byte() -> None:
     walk = walk_batched_response(bytes.fromhex("0C0BB85590"), registry.get, expected={0x0C, 0x55})
     assert not walk.clean and walk.suspect == 0x55
     assert walk.readings == {0x0C: b"\x0b\xb8"}
+
+
+def test_exit_snapshot_reports_the_narrowed_batch_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R02.9: the in-loop metrics passed the live batch sizes and the call at
+    loop exit omitted them, so the final snapshot's ``resolved_plan`` reported
+    the *configured* six after batching had been disabled."""
+    clock = FakeClock()
+    install_clock(monkeypatch, clock)
+    bus = _BatchingEcu(answer_batches=False, clock=clock)
+    snapshots: list = []
+    stats = run_can_obd_loop(
+        bus,  # type: ignore[arg-type]
+        _spec(pids=_SIX_FAST, batch_max_pids=6, request_timeout_seconds=0.02),
+        on_frame=lambda _m: None,
+        on_reading=lambda _r: None,
+        stop_event=threading.Event(),
+        deadline_monotonic=clock.monotonic() + 1.0,
+        on_scheduler_metrics=snapshots.append,
+        scheduler_metrics_interval_seconds=10.0,
+    )
+
+    assert stats.batch_size_narrowings == 3  # 6 -> 4 -> 2 -> off
+    final = snapshots[-1]
+    assert final.resolved_plan["batch_max"]["mode01"] == 1

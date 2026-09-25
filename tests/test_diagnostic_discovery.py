@@ -47,6 +47,7 @@ from src.collection.request_eligibility import (
 from src.config import CanaryConfig, CanBusConfig
 from src.dashboard.api import create_app
 from tests.capture_round_fakes import (
+    SUPPORT_GROUPS,
     FakeClock,
     ScriptedEcu,
     broadcast_sequence,
@@ -758,3 +759,47 @@ def test_a_busy_nrc_parked_walk_is_rearmed_by_contact_like_a_timeout() -> None:
     assert parked.on_contact(2.0).next_probe_at == 2.0
     ended = walk.with_probe(SupportProbe(negative_response_code=0x11), now=1.0)
     assert ended.complete and ended.on_contact(2.0) is ended
+
+
+# ---------------------------------------------------------------------------
+# R02.1 — an slcan parse error inside a discovery probe is a dropped frame,
+# not a config error that ends the collector
+# ---------------------------------------------------------------------------
+
+
+class _GarbledProbeEcu(ScriptedEcu):
+    """The driver's slcan parser raises once, on the first receive of a probe."""
+
+    def __init__(self, clock: FakeClock, **kwargs: object) -> None:
+        super().__init__(clock, **kwargs)  # type: ignore[arg-type]
+        self._armed = False
+        self.garbled = 0
+
+    def send(self, msg: object, timeout: float | None = None) -> None:
+        super().send(msg, timeout)  # type: ignore[arg-type]
+        data = bytes(msg.data)  # type: ignore[attr-defined]
+        if not self.garbled and len(data) >= 3 and data[1] == 0x01 and data[2] in SUPPORT_GROUPS:
+            self._armed = True
+
+    def recv(self, timeout: float | None = None) -> object:
+        if self._armed:
+            self._armed = False
+            self.garbled += 1
+            raise ValueError("could not parse slcan frame 't7E8'")
+        return super().recv(timeout)
+
+
+def test_parse_error_during_a_discovery_probe_leaves_the_loop_running(
+    clock: FakeClock, runtime_reset: object, registry_reset: object
+) -> None:
+    """R02.1: the error travelled probe_support -> _issue_discovery_probe ->
+    run_with_reconnect(reraise=(ValueError,)), which treats it as a config
+    error. It is one malformed frame: counted, logged, and the loop goes on."""
+    bus = _GarbledProbeEcu(clock, mode01_support=MODE01_SUPPORT)
+    run = _run(clock, bus, _spec(pids=("auto",)), seconds=2.0)
+
+    assert bus.garbled == 1
+    assert run.stats is not None
+    assert run.stats.parse_errors == 1
+    assert probes(bus, 0x01), "no support probe was issued"
+    assert {r.pid for r in run.readings} >= {"RPM", "SPEED"}

@@ -15,7 +15,13 @@ from collections.abc import Iterable, Mapping
 import can
 import pytest
 
-from src.collection import can_obd_collector, obd_scheduler, tuning_profile
+from src.collection import (
+    can_obd_io,
+    can_obd_loop,
+    obd_response_decode,
+    tuning_profile,
+)
+from src.collection.obd_scheduler import cadence as scheduler_cadence
 
 #: Mode 01 payloads the fake ECU answers with.
 DEFAULT_VALUES: dict[int, bytes] = {
@@ -57,7 +63,13 @@ class FakeClock:
 
 def install_clock(monkeypatch: pytest.MonkeyPatch, clock: FakeClock) -> None:
     """Bind ``clock`` as the ``time`` module of every module the loop reads."""
-    for module in (can_obd_collector, obd_scheduler, tuning_profile):
+    for module in (
+        can_obd_loop,
+        can_obd_io,
+        obd_response_decode,
+        scheduler_cadence,
+        tuning_profile,
+    ):
         monkeypatch.setattr(module, "time", clock)
 
 

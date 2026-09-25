@@ -13,19 +13,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import json
 import logging
-import socket
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
 
 import can
 
+# Bus construction and the shared frame primitives moved to can_bus
+# (R02.12); these names stay importable from here.
+from src.collection.can_bus import bus_factory as bus_factory
+from src.collection.can_bus import frame_to_record as frame_to_record
 from src.collection.queueing import (
     DEFAULT_HANDOFF_CAPACITY,
     DEFAULT_HANDOFF_MAX_BATCH,
@@ -35,68 +34,22 @@ from src.collection.queueing import (
     flush_dropped_can_frame_log,
     log_dropped_can_frame,
 )
+from src.collection.reconnect import DEFAULT_RECONNECT_POLICY as DEFAULT_RECONNECT_POLICY
 from src.collection.reconnect import (
-    BusReconnector,
-    RebuildOutcome,
     ReconnectPolicy,
     run_with_reconnect,
     wait_for_stop_or_timeout,
 )
+from src.collection.recording import (
+    DiskWriteError,
+    RecorderRun,
+    RecordingResult,
+)
 from src.config import CanBusConfig, VehicleConfig
 from src.session import SessionPaths
-from src.session import make_session_dir as _make_session_dir
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
-
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
-
-
-@dataclass(frozen=True)
-class RecordingResult:
-    started_at: datetime
-    ended_at: datetime
-    frames_recorded: int
-    stopped_by: str  # "deadline" | "signal" | "error" | "disk_error" | "reconnect_exhausted"
-    parse_errors: int = 0  # malformed frames dropped without aborting the run
-    reconnects: int = 0  # successful bus rebuilds during the recording
-    dropped_writes: int = 0  # frames the disk writer failed to persist
-
-
-def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
-    """Create a timestamped recording session directory."""
-    return _make_session_dir(out_root, started_at)
-
-
-def bus_factory(spec: CanBusConfig) -> can.BusABC:
-    """Construct a python-can Bus from config.
-
-    `bitrate` is omitted for `virtual` (the backend rejects it as unknown).
-
-    The collector is a sniffer by FR-02: it never calls `bus.send()`,
-    so no data frame is ever injected regardless of how the adapter is opened.
-    Hardware bus-monitoring (no ACK either) is desirable but adapter-dependent:
-    python-can's slcan `listen_only=True` sends the `L` open command, but the
-    knockoff "CANable2" CAN-FD adapter used in dev returns zero frames in that
-    mode (its firmware doesn't honor `L`), so we open normally (`O`) and rely
-    on the never-transmit invariant — ACK-only on a busy multi-node vehicle bus
-    is benign and is exactly what every scan tool on the port already does.
-    SocketCAN's listen-only is configured out-of-band via
-    `ip link set ... listen-only on` (see docs/can-setup.md).
-    """
-    kwargs: dict[str, Any] = {"interface": spec.interface, "channel": spec.channel}
-    if spec.interface != "virtual":
-        kwargs["bitrate"] = spec.bitrate
-    return can.Bus(**kwargs)
-
-
-def frame_to_record(msg: can.Message) -> TelemetryRecord:
-    """Convert a python-can message into the shared telemetry schema."""
-    return TelemetryRecord.can(
-        float(msg.timestamp),
-        int(msg.arbitration_id),
-        bytes(msg.data),
-    )
 
 
 @dataclass(frozen=True)
@@ -419,16 +372,23 @@ def record(
     recording cleanly with `stop_reason = "disk_error"` and a count of
     `dropped_writes`. The manifest still gets written.
     """
-    started_at = datetime.now(UTC)
-    deadline = time.monotonic() + duration if duration is not None else None
-    stop_reason = "signal"
-    count = 0
-    parse_errors = 0  # python-can slcan parser blows up on corrupt frames; count them
     #: Identity of this loop's parse-error log throttle — per recorder, so two
     #: live buses never share (and suppress) each other's warning lines.
     parse_error_owner = f"record:{spec.channel}"
-    dropped_writes = 0  # frames the disk writer couldn't persist
-
+    run = RecorderRun(
+        bus,
+        paths,
+        spec=spec,
+        vehicle=vehicle,
+        duration=duration,
+        vehicle_state=vehicle_state,
+        stop_event=stop_event,
+        factory=factory,
+        reconnect_policy=reconnect_policy,
+        max_reconnects=max_reconnects,
+        log=log,
+        parse_error_owner=parse_error_owner,
+    )
     log.info(
         "recording started",
         extra={
@@ -437,205 +397,53 @@ def record(
             "channel": spec.channel,
             "bitrate": spec.bitrate,
             "duration_seconds": duration,
-            "auto_reconnect": factory is not None and reconnect_policy is not None,
+            "auto_reconnect": run.reconnect_enabled,
         },
     )
 
-    reconnect_enabled = factory is not None and reconnect_policy is not None
-    current_bus: can.BusABC | None = bus
-    # Owns the bounded-backoff rebuild accounting (delay, failed_rebuilds,
-    # reconnects) — the WSL2 wedged-adapter cap lives in BusReconnector.
-    reconnector = (
-        BusReconnector(reconnect_policy, max_reconnects, log)
-        if reconnect_enabled and reconnect_policy is not None
-        else None
-    )
-
-    error: BaseException | None = None
-    result: RecordingResult
-    try:
-        with can.io.CanutilsLogWriter(str(paths.frames)) as writer:
-            while True:
-                if stop_event is not None and stop_event.is_set():
-                    stop_reason = "signal"
+    with run, can.io.CanutilsLogWriter(str(paths.frames)) as writer:
+        write = run.frame_writer(writer)
+        while not run.should_stop():
+            current_bus = run.ensure_bus()
+            if current_bus is None:
+                if run.finished:
                     break
-                if deadline is not None and time.monotonic() >= deadline:
-                    stop_reason = "deadline"
-                    break
-
-                # If we lost the bus on a previous iteration and reconnect is
-                # configured, try to rebuild it before attempting to recv.
-                if current_bus is None:
-                    assert reconnector is not None and factory is not None
-                    outcome, current_bus = reconnector.rebuild(
-                        factory,
-                        spec,
-                        stop_event=stop_event,
-                        deadline_monotonic=deadline,
-                        frames_recorded=count,
-                    )
-                    if outcome is RebuildOutcome.STOP_SIGNAL:
-                        stop_reason = "signal"
-                        break
-                    if outcome is RebuildOutcome.STOP_DEADLINE:
-                        stop_reason = "deadline"
-                        break
-                    if outcome is RebuildOutcome.EXHAUSTED:
-                        stop_reason = "reconnect_exhausted"
-                        error = reconnector.last_error
-                        break
-                    if outcome is RebuildOutcome.RETRY:
-                        continue
-                    # Only REBUILT falls through — it always returns a bus.
-                    assert current_bus is not None
-
-                try:
-                    msg = current_bus.recv(timeout=poll_interval)
-                except (ValueError, IndexError) as exc:
-                    # Frame-level parser error from python-can's slcan parser:
-                    # slcan.py:282 (ValueError) and slcan.py:304 (IndexError).
-                    # Drop the bad line, keep recording. We DO NOT trap
-                    # can.CanError here — its subclasses (CanOperationError
-                    # from a dead serial pipe, CanInitializationError, etc.)
-                    # are bus-level failures that need the reconnect branch
-                    # below. Catching them as "parse errors" caused a 27-min
-                    # tight loop in session 2026-05-15T020322 — 63M errors,
-                    # zero reconnects, frames stopped 5 min in. A small sleep
-                    # keeps even legit storms of parse errors from burning CPU.
-                    parse_errors += 1
-                    log_dropped_can_frame(exc, owner=parse_error_owner)
-                    time.sleep(0.001)
-                    continue
-                except Exception as exc:
-                    # Bus-level failure (OSError from a USB disconnect,
-                    # RuntimeError from adapter reset, etc.). Either we can
-                    # reconnect — close the dead bus and let the next loop
-                    # iteration rebuild it — or we propagate (backward-compat
-                    # behavior when factory / reconnect_policy aren't set).
-                    if not reconnect_enabled:
-                        raise
-                    assert reconnector is not None
-                    log.warning(
-                        "bus recv failed; will attempt reconnect",
-                        extra={
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "delay_seconds": reconnector.delay,
-                        },
-                    )
-                    try:
-                        current_bus.shutdown()
-                    except Exception:
-                        # Bus may already be dead; shutting it down is best-effort.
-                        pass
-                    current_bus = None
-                    continue
-
-                if msg is None:
-                    continue
-
-                flush_dropped_can_frame_log(owner=parse_error_owner)
-                try:
-                    writer.on_message_received(msg)
-                    count += 1
-                except OSError as exc:
-                    # Disk failure mid-flush — full disk, read-only filesystem,
-                    # SD card hiccup. Recording can't continue meaningfully.
-                    # End the loop cleanly so the manifest still writes with
-                    # an accurate stopped_by + dropped_writes.
-                    dropped_writes += 1
-                    log.error(
-                        "disk write failed; stopping recording",
-                        extra={
-                            "error": f"{type(exc).__name__}: {exc}",
-                            "frames_recorded_before_failure": count,
-                        },
-                    )
-                    stop_reason = "disk_error"
-                    error = exc
-                    break
-    except BaseException as exc:
-        error = exc
-        stop_reason = "error"
-        raise
-    finally:
-        ended_at = datetime.now(UTC)
-        # The recording is over: a parse-error burst that ran to the end is
-        # summarized here or never.
-        flush_dropped_can_frame_log(owner=parse_error_owner, force=True)
-        # The bus may have been rebuilt during reconnect; the caller's
-        # reference is stale. Close whatever we're currently holding so
-        # we don't leak a USB handle even on the disk-error path. The
-        # original bus (if it's the same object) gets closed twice, which
-        # python-can tolerates.
-        if reconnect_enabled and current_bus is not None and current_bus is not bus:
+                continue
             try:
-                current_bus.shutdown()
-            except Exception:
-                pass
-        reconnects_total = reconnector.reconnects if reconnector is not None else 0
-        result = RecordingResult(
-            started_at=started_at,
-            ended_at=ended_at,
-            frames_recorded=count,
-            stopped_by=stop_reason,
-            parse_errors=parse_errors,
-            reconnects=reconnects_total,
-            dropped_writes=dropped_writes,
-        )
-        try:
-            _write_manifest(
-                paths.manifest,
-                spec=spec,
-                vehicle=vehicle,
-                result=result,
-                vehicle_state=vehicle_state,
-                error=error,
-            )
-        except Exception:
-            if error is None:
-                raise
-            log.exception("failed to write manifest after recording error")
-        log.info(
-            "recording stopped",
-            extra={
-                "frames_recorded": count,
-                "stopped_by": stop_reason,
-                "elapsed_seconds": (ended_at - started_at).total_seconds(),
-                "parse_errors": parse_errors,
-                "reconnects": reconnects_total,
-                "dropped_writes": dropped_writes,
-            },
-        )
-    return result
+                msg = current_bus.recv(timeout=poll_interval)
+            except (ValueError, IndexError) as exc:
+                # Frame-level parser error from python-can's slcan parser:
+                # slcan.py:282 (ValueError) and slcan.py:304 (IndexError).
+                # Drop the bad line, keep recording. We DO NOT trap
+                # can.CanError here — its subclasses (CanOperationError
+                # from a dead serial pipe, CanInitializationError, etc.)
+                # are bus-level failures that need the reconnect branch
+                # below. Catching them as "parse errors" caused a 27-min
+                # tight loop in session 2026-05-15T020322 — 63M errors,
+                # zero reconnects, frames stopped 5 min in. A small sleep
+                # keeps even legit storms of parse errors from burning CPU.
+                run.parse_errors += 1
+                log_dropped_can_frame(exc, owner=parse_error_owner)
+                time.sleep(0.001)
+                continue
+            except Exception as exc:
+                # Bus-level failure (OSError from a USB disconnect,
+                # RuntimeError from adapter reset, etc.): rebuild on the next
+                # pass, or propagate without a factory/policy.
+                run.on_bus_failure(exc, "bus recv failed; will attempt reconnect")
+                continue
 
+            if msg is None:
+                continue
 
-def _write_manifest(
-    path: Path,
-    *,
-    spec: CanBusConfig,
-    vehicle: VehicleConfig | None,
-    result: RecordingResult,
-    vehicle_state: str | None = None,
-    error: BaseException | None = None,
-) -> None:
-    payload: dict[str, Any] = {
-        "started_at": result.started_at.isoformat(),
-        "ended_at": result.ended_at.isoformat(),
-        "duration_seconds": (result.ended_at - result.started_at).total_seconds(),
-        "host": socket.gethostname(),
-        "vehicle": vehicle.model_dump() if vehicle is not None else None,
-        "vehicle_state": vehicle_state,
-        "bus": {
-            "interface": spec.interface,
-            "channel": spec.channel,
-            "bitrate": spec.bitrate,
-        },
-        "frames_recorded": result.frames_recorded,
-        "stopped_by": result.stopped_by,
-        "parse_errors": result.parse_errors,
-        "reconnects": result.reconnects,
-        "dropped_writes": result.dropped_writes,
-    }
-    if error is not None:
-        payload["error"] = f"{type(error).__name__}: {error}"
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True))
+            flush_dropped_can_frame_log(owner=parse_error_owner)
+            try:
+                write(msg)
+            except DiskWriteError as exc:
+                # Full disk, read-only filesystem, SD card hiccup: recording
+                # can't continue meaningfully. End cleanly so the manifest
+                # still writes with an accurate stopped_by + dropped_writes.
+                run.on_disk_error(exc)
+                break
+    assert run.result is not None
+    return run.result

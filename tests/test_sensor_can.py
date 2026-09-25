@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 
 import can
@@ -12,7 +13,11 @@ from pydantic import ValidationError
 from src.analysis.channels import parse_spec
 from src.collection.collectors import _sensor_collectors
 from src.collection.reconnect import ReconnectPolicy
-from src.collection.sensor_can_collector import collect_sensor_can, frame_to_records
+from src.collection.sensor_can_collector import (
+    SensorCanStats,
+    collect_sensor_can,
+    frame_to_records,
+)
 from src.config import CanaryConfig, SensorCanConfig
 from src.decode.sensor_can import (
     SensorCanCatalog,
@@ -96,12 +101,54 @@ def test_collector_records_sensor_channel_from_a_virtual_bus() -> None:
     assert record.metadata["arbitration_id"] == "0x000a0301"
 
 
+class _GarbledOnceBus:
+    """A sensor bus whose slcan parser raises once, then delivers one frame."""
+
+    def __init__(self, frame: can.Message) -> None:
+        self._replies: list[can.Message | Exception] = [
+            ValueError("could not parse slcan frame"),
+            frame,
+        ]
+
+    def recv(self, timeout: float | None = None) -> can.Message | None:
+        if not self._replies:
+            time.sleep(min(timeout or 0.0, 0.01))
+            return None
+        reply = self._replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+
+def test_sensor_bus_parse_error_is_counted_not_fatal() -> None:
+    """R02.1: a bare ``bus.recv`` let an slcan parse error end the collector."""
+    frame = can.Message(arbitration_id=AEM_ID, is_extended_id=True, data=_aem_frame(340))
+    stats = SensorCanStats()
+
+    async def run() -> TelemetryRecord:
+        queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            collect_sensor_can(_GarbledOnceBus(frame), CATALOG, queue, stop, stats=stats)  # type: ignore[arg-type]
+        )
+        record = await asyncio.wait_for(queue.get(), timeout=5)
+        stop.set()
+        await asyncio.wait_for(task, timeout=5)
+        return record
+
+    record = asyncio.run(run())
+    assert record.value == 340.0
+    assert stats.parse_errors == 1
+    assert stats.frames_seen == 1
+
+
 def test_frame_time_is_the_receive_stamp() -> None:
+    stamp = time.time() - 0.25
     msg = can.Message(
-        timestamp=1_790_000_000.25, arbitration_id=AEM_ID, is_extended_id=True, data=_aem_frame(1)
+        timestamp=stamp, arbitration_id=AEM_ID, is_extended_id=True, data=_aem_frame(1)
     )
     (record,) = frame_to_records(CATALOG, msg)
-    assert record.timestamp.timestamp() == pytest.approx(1_790_000_000.25)
+    assert record.timestamp.timestamp() == pytest.approx(stamp, abs=1e-6)
 
 
 def test_sensor_bus_is_off_unless_enabled() -> None:

@@ -25,6 +25,7 @@ import serial
 from src.collection.gps_nmea import GpsReading, sentence_type, update_reading
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import (
+    DEFAULT_RECONNECT_POLICY,
     ReconnectPolicy,
     run_with_reconnect,
 )
@@ -32,7 +33,6 @@ from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 #: Ground speed below this (km/h) is reported as 0. A GPS receiver has a
 #: speed-over-ground noise floor — even stationary it computes a small SOG

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Container, Sequence
 from dataclasses import dataclass
+from typing import Generic, Protocol, TypeVar
 
 DEFAULT_REQUEST_ID = 0x7DF
 DEFAULT_RESPONSE_ID_MIN = 0x7E8
@@ -478,7 +479,146 @@ class IsoTpResponseAssembler:
         return IsoTpFrameResult()
 
 
+#: Extra wait granted each time the ECU answers `0x78 responsePending`
+#: (ISO 14229 P2*). The ECU has told us it is working, so scoring this as a
+#: timeout throws away an answer that was on its way.
+RESPONSE_PENDING_EXTENSION_SECONDS = 0.5
+#: Cap on those extensions, so a stuck ECU cannot hold the bus indefinitely.
+#: Exceeding it is a real failure and is reported as NRC 0x78.
+MAX_RESPONSE_PENDING_EXTENSIONS = 4
+
+
+class ReceivedFrame(Protocol):
+    """What :func:`await_response` needs of a received frame (a ``can.Message``)."""
+
+    @property
+    def arbitration_id(self) -> int: ...
+
+    @property
+    def data(self) -> bytearray | bytes: ...
+
+
+FrameT = TypeVar("FrameT", bound=ReceivedFrame)
+
+
+@dataclass(frozen=True)
+class Exchange(Generic[FrameT]):
+    """How one request/response exchange ended.
+
+    ``response`` on a positive answer; ``negative_response_code`` on a
+    definitive ``7F <service> <NRC>`` (or 0x78 once the pending extensions are
+    spent); both ``None`` on silence or a stop. ``first_frame`` is the
+    multi-frame First Frame (its arrival is the acquisition instant) and
+    ``final_frame`` the frame that completed the response.
+    """
+
+    response: ObdResponse | None = None
+    negative_response_code: int | None = None
+    first_frame: FrameT | None = None
+    final_frame: FrameT | None = None
+
+
+def expected_responder(
+    request_id: int,
+    response_ids: tuple[int, int] = (DEFAULT_RESPONSE_ID_MIN, DEFAULT_RESPONSE_ID_MAX),
+) -> int | None:
+    """The one responder a request may be answered by, or ``None`` for any.
+
+    A caller that declares a single response id (``response_ids`` with
+    ``lo == hi``, e.g. a vehicle profile's ``ecu_response_id`` from
+    ``dids.yaml``) is pinned to exactly that id: the pairing is vehicle data,
+    and a module answering ``0x745 -> 0x765`` is not ``request + 8``.
+    Otherwise the functional address (``0x7DF``) may be answered by any ECU in
+    the window, and a physical request is owned by ``request + 8`` (``0x7E0``
+    -> ``0x7E8``): accepting ``0x7E9`` would attach another module's bytes to
+    the engine ECU's request.
+    """
+    lo, hi = response_ids
+    if lo == hi:
+        return lo
+    return None if request_id == DEFAULT_REQUEST_ID else request_id + 8
+
+
+def await_response(
+    recv: Callable[[float], FrameT | None],
+    send_flow_control: Callable[[int], None],
+    assembler: IsoTpResponseAssembler,
+    request_id: int,
+    deadline: float,
+    *,
+    clock: Callable[[], float],
+    stop: Callable[[], bool] | None = None,
+    hard_deadline: float | None = None,
+    response_ids: tuple[int, int] = (DEFAULT_RESPONSE_ID_MIN, DEFAULT_RESPONSE_ID_MAX),
+) -> Exchange[FrameT]:
+    """The one receive-loop policy for a request just sent (R02.5).
+
+    Every OBD/UDS exchange — the collector's single and batched polls and the
+    standalone client (``/control/obd_request``, the tools) — waits here, so
+    none can differ on:
+
+    * the response window, and **responder pinning** (:func:`expected_responder`):
+      a declared single response id, else ``request_id + 8`` for a physical
+      request — not optional, so no caller can forget it;
+    * ``0x78`` responsePending: each one extends ``deadline`` by
+      :data:`RESPONSE_PENDING_EXTENSION_SECONDS`, at most
+      :data:`MAX_RESPONSE_PENDING_EXTENSIONS` times and never past
+      ``hard_deadline`` (a shutdown or capture deadline);
+    * an NRC ends the wait at once;
+    * a First Frame is answered with flow control and remembered as the
+      acquisition instant.
+
+    ``recv(remaining_seconds)`` returns the next frame or ``None``; the caller
+    bounds each slice and taps the frame. ``stop()`` ends the wait early.
+    """
+    lo, hi = response_ids
+    owner = expected_responder(request_id, response_ids)
+    extensions = 0
+    first_frame: FrameT | None = None
+    while True:
+        now = clock()
+        if now >= deadline or (stop is not None and stop()):
+            return Exchange(first_frame=first_frame)
+        frame = recv(deadline - now)
+        if frame is None:
+            continue
+        responder = int(frame.arbitration_id)
+        if not lo <= responder <= hi:
+            continue
+        if owner is not None and responder != owner:
+            continue
+        data = bytes(frame.data)
+        if not data:
+            continue
+        result = assembler.accept(responder, data)
+        if result.response_pending:
+            if extensions >= MAX_RESPONSE_PENDING_EXTENSIONS:
+                return Exchange(negative_response_code=RESPONSE_PENDING_NRC)
+            extensions += 1
+            deadline += RESPONSE_PENDING_EXTENSION_SECONDS
+            if hard_deadline is not None:
+                deadline = min(deadline, hard_deadline)
+            continue
+        if result.negative_response:
+            return Exchange(negative_response_code=result.negative_response_code)
+        if result.flow_control_id is not None:
+            # Multi-frame response: the FIRST frame's arrival is the
+            # acquisition instant. Flow control goes to the responder's
+            # tester address (responder - 8, e.g. 0x7E8 -> 0x7E0).
+            first_frame = frame
+            send_flow_control(result.flow_control_id)
+            continue
+        if result.response is not None:
+            return Exchange(response=result.response, first_frame=first_frame, final_frame=frame)
+
+
 __all__ = [
+    "MAX_RESPONSE_PENDING_EXTENSIONS",
+    "RESPONSE_PENDING_EXTENSION_SECONDS",
+    "Exchange",
+    "ReceivedFrame",
+    "await_response",
+    "expected_responder",
     "split_batched_response",
     "walk_batched_response",
     "BatchWalk",

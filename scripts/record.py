@@ -30,19 +30,17 @@ import threading
 from collections.abc import Sequence
 from pathlib import Path
 
-from _cli import add_common_args, load_config
+try:
+    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
+except ImportError:  # loaded as `scripts.record` — repo root on path, not scripts/
+    from scripts._cli import add_common_args, load_config
 
-from src.collection.can_collector import (
-    DEFAULT_RECONNECT_POLICY,
-    bus_factory,
-    make_session_dir,
-    record,
-)
+from src.can_ids import parse_standard_can_id
+from src.collection.can_bus import bus_factory
+from src.collection.can_collector import record
 from src.collection.can_obd_collector import (
     CanObdSpec,
-    parse_can_id,
     record_can_obd,
-    resolve_did_session_spec,
 )
 from src.collection.obd_collector import (
     JsonlReadingWriter,
@@ -51,9 +49,10 @@ from src.collection.obd_collector import (
     resolve_pids,
     supervise_obd_capture,
 )
+from src.collection.reconnect import DEFAULT_RECONNECT_POLICY
 from src.log import configure_logging
 from src.paths import DIDS_YAML
-from src.session import PID_FILENAME
+from src.session import PID_FILENAME, make_session_dir
 from src.storage.monitor import free_space_mb
 
 log = logging.getLogger(__name__)
@@ -157,10 +156,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--obd-did-header",
-        default="7E0",
+        default=None,
         help=(
-            "Request header / CAN ID for Mode 22 DID polling "
-            "(default 7E0 = engine ECU). Other modules: 7E1 = trans, 7E2 = ABS, etc."
+            "Request header / CAN ID for Mode 22 DID polling. Default: "
+            "collection.obd_did_request_id from the config (7E0 = engine ECU). "
+            "Other modules: 7E1 = trans, 7E2 = ABS, etc."
         ),
     )
     parser.add_argument(
@@ -340,14 +340,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         if obd_source == "canable":
             obd_writer = JsonlReadingWriter(paths.pids)
-            can_obd_spec = CanObdSpec(
-                can=spec,
-                poll_rate_hz=config.collection.obd_poll_rate_hz,
+            # The daemon's builder (R02.7): batching, DID widths, the
+            # priority lane, DTC/monitor cadence, custom PIDs and the
+            # calibration-id read all come from config, as they do live. Only
+            # the selection is the recorder's own (CLI flags, else config),
+            # and it is polled ungated: no capture-profile union here.
+            can_obd_spec = CanObdSpec.from_config(
+                config.collection,
+                spec,
                 pids=pids,
                 dids=dids,
-                did_request_id=parse_can_id(args.obd_did_header),
-                request_timeout_seconds=config.collection.obd_request_timeout_seconds,
-                did_session=resolve_did_session_spec(config.collection),
+                did_request_id=(
+                    None
+                    if args.obd_did_header is None
+                    else parse_standard_can_id(args.obd_did_header)
+                ),
+                custom_pids_path=config.daemon.custom_pids,
+                vehicle=config.vehicle,
             )
             log.info(
                 "starting Canable-native OBD capture",
@@ -394,7 +403,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     baudrate=args.obd_baud,
                     pids=pids,
                     dids=dids,
-                    did_header=args.obd_did_header,
+                    did_header=(args.obd_did_header or f"{config.collection.obd_did_request_id:X}"),
                 )
                 log.info(
                     "starting parallel ELM327 OBD capture (supervised)",

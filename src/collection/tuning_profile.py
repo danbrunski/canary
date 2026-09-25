@@ -11,12 +11,20 @@ import logging
 import threading
 import time
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.analysis.tune_revisions import calibration_matches
 from src.collection import capture_generation, capture_lifetime
 from src.collection.capture_profiles import CaptureProfile
-from src.collection.request_eligibility import Eligibility, ProfileClass, evaluate
+from src.collection.profile_view import (
+    ProfileView,
+    classify_profile,
+    request_channel_names,
+)
+from src.collection.request_eligibility import Eligibility, ProfileClass
+
+if TYPE_CHECKING:
+    from src.collection.obd_scheduler import PollRequest
 
 log = logging.getLogger(__name__)
 #: Mode 01 channels the legacy boolean ``POST /control/tuning-mode`` polls when
@@ -314,18 +322,6 @@ def mode01_batch_compatible(first: str, second: str) -> bool:
     return False
 
 
-def did_interval_override() -> float | None:
-    """Profile's Mode-22 window cadence, or ``None`` to use the config default."""
-    with _lock:
-        return _profile.did_interval_seconds
-
-
-def did_cycle_override() -> float | None:
-    """Profile's start-to-start hybrid cycle (C04.3), or ``None`` for the config policy."""
-    with _lock:
-        return _profile.did_cycle_seconds
-
-
 def broadcast_decode_enabled() -> bool:
     with _lock:
         return _profile.broadcast_decode
@@ -370,7 +366,19 @@ def set_active(
     return previous
 
 
-def request_eligible(index: int, request: Any) -> bool:
+def view() -> ProfileView:
+    """The active profile's policy as a :class:`ProfileView`, under one lock.
+
+    Every getter below is a thin wrapper over it, so the live gate and the
+    capture-profile preview (which builds a view of a *candidate* profile)
+    run the same policy code (R02.3). The profile object is replaced, never
+    mutated, on activation, so the view holds it without a copy.
+    """
+    with _lock:
+        return ProfileView(_profile, _did_channels, _paused)
+
+
+def request_eligible(index: int, request: PollRequest) -> bool:
     """The profile gate: is this request selected by the active profile right now?
 
     A projection of the C06.7 eligibility matrix with no session knowledge
@@ -379,43 +387,12 @@ def request_eligible(index: int, request: Any) -> bool:
     ``request_eligibility``, not here.
     """
     del index
-    return request_verdict(request).eligible
+    return view().request_eligible(request)
 
 
-def request_verdict(request: Any) -> Eligibility:
+def request_verdict(request: PollRequest) -> Eligibility:
     """The profile gate's verdict with its reason (``paused``, ``not_selected`` …)."""
-    # A request without a kind is a Mode 01 PID (the legacy shape callers
-    # still pass); nothing else is guessed.
-    kind = str(getattr(request, "kind", None) or "pid")
-    channel = str(getattr(request, "channel", ""))
-    names = request_channel_names(request)
-    with _lock:
-        profile = _profile
-        paused = _paused
-        aliases = _did_channels
-    return evaluate(
-        kind,
-        classify_profile(profile),
-        "none",
-        selection=_selection_exclusion(profile, aliases, kind, channel, names),
-        paused=paused,
-    )
-
-
-def classify_profile(profile: CaptureProfile) -> ProfileClass:
-    """Which eligibility-matrix column a profile falls in."""
-    if profile.did_continuous:
-        return "continuous_did"
-    if profile.name == "default":
-        return "default"
-    # Memory channels count: a service-0x23 read holds the same 0xC0
-    # session as Mode 22, so a profile selecting only memory channels still
-    # owns the session. Classifying it `focused_mode01` made every one of
-    # its reads ineligible — a profile that cannot run the only requests it
-    # asks for.
-    if (profile.mode22 or profile.memory) and profile.mode22_enabled:
-        return "mode22_owning"
-    return "focused_mode01"
+    return view().request_verdict(request)
 
 
 def profile_class() -> ProfileClass:
@@ -423,20 +400,7 @@ def profile_class() -> ProfileClass:
         return classify_profile(_profile)
 
 
-def request_channel_names(request: Any) -> tuple[str, ...]:
-    """Every catalog channel `request` would produce a reading for.
-
-    One for most kinds. A memory WINDOW carries several and is named after
-    the window, so its own channel name matches nothing in a profile's
-    selection — which silently dropped every windowed read on the vehicle.
-    """
-    memory_read = getattr(request, "memory_read", None)
-    if memory_read is not None:
-        return tuple(c.name for c in memory_read.channels)
-    return (str(getattr(request, "channel", "")),)
-
-
-def selection_exclusion(request: Any) -> str | None:
+def selection_exclusion(request: PollRequest) -> str | None:
     """Why the active profile's selection excludes `request`, or ``None``.
 
     Takes the request rather than ``(kind, channel)`` on purpose. A window's
@@ -445,47 +409,7 @@ def selection_exclusion(request: Any) -> str | None:
     function had two callers and only one was fixed when windows landed,
     which cost a drive.
     """
-    kind = str(getattr(request, "kind", None) or "pid")
-    channel = str(getattr(request, "channel", ""))
-    with _lock:
-        return _selection_exclusion(
-            _profile, _did_channels, kind, channel, request_channel_names(request)
-        )
-
-
-def _selection_exclusion(
-    profile: CaptureProfile,
-    aliases: dict[str, str],
-    kind: str,
-    channel: str,
-    names: tuple[str, ...] = (),
-) -> str | None:
-    if kind == "memory":
-        # Same session, so the same enable flag governs both.
-        if not profile.mode22_enabled:
-            return "mode22_disabled"
-        selected = {item.upper() for item in profile.memory}
-        candidates = names or (channel.split(":", 1)[-1],)
-        # One read is issued if ANY member is selected; the collector decodes
-        # only what the catalog names, so an unselected neighbour in the same
-        # window costs nothing and is not emitted.
-        if any(name.split(":", 1)[-1].upper() in selected for name in candidates):
-            return None
-        return "not_selected"
-    if kind == "did":
-        if not profile.mode22_enabled:
-            return "mode22_disabled"
-        requested = {item.upper() for item in profile.mode22}
-        resolved = {aliases.get(item, item) for item in requested}
-        upper = channel.upper()
-        if upper in resolved or channel.removeprefix("DID_").upper() in resolved:
-            return None
-        return "not_selected"
-    if not profile.mode01_enabled:
-        return "mode01_disabled"
-    if channel.upper() in profile.mode01 or "AUTO" in profile.mode01:
-        return None
-    return "not_selected"
+    return view().selection_exclusion(request)
 
 
 def profile_channel_for(channel: str) -> str | None:
@@ -501,23 +425,7 @@ def profile_channel_for(channel: str) -> str | None:
     Returns the profile's own name, or ``None`` when this request is not part
     of the active profile's selection.
     """
-    upper = channel.upper()
-    stripped = channel.removeprefix("DID_").upper()
-    with _lock:
-        # Mode 01 needs no translation: scheduler and profile use the same PID
-        # channel name. "AUTO" selects every supported PID, so the request's own
-        # name is the profile's name for it.
-        if upper in _profile.mode01 or "AUTO" in _profile.mode01:
-            return upper
-        for item in _profile.mode22:
-            resolved = _did_channels.get(item.upper(), item.upper())
-            if upper in {resolved, item.upper()} or stripped in {resolved, item.upper()}:
-                return item
-        memory_name = channel.split(":", 1)[-1].upper()
-        for item in _profile.memory:
-            if item.upper() == memory_name:
-                return item
-    return None
+    return view().profile_channel_for(channel)
 
 
 def rate_weight(channel: str) -> float:
@@ -531,15 +439,7 @@ def priority_channel(channel: str, default: bool) -> bool:
     ``None`` inherits the scheduler/config decision. An explicit tuple,
     including an empty one, owns the lane for the active profile.
     """
-    profile_name = profile_channel_for(channel)
-    with _lock:
-        configured = _profile.priority_channels
-        if configured is None:
-            return default
-        candidates = {channel.upper()}
-        if profile_name is not None:
-            candidates.add(profile_name.upper())
-        return bool(candidates & set(configured))
+    return view().priority_channel(channel, default)
 
 
 def did_rate_weight(channel: str) -> float:
@@ -550,15 +450,7 @@ def did_rate_weight(channel: str) -> float:
     through the same alias table as selection and profile-channel reporting so
     a renamed DID cannot silently lose its configured cadence.
     """
-    upper = channel.upper()
-    stripped = channel.removeprefix("DID_").upper()
-    with _lock:
-        for item in _profile.mode22:
-            item_upper = item.upper()
-            resolved = _did_channels.get(item_upper, item_upper)
-            if upper in {resolved, item_upper} or stripped in {resolved, item_upper}:
-                return _profile.mode22_rate_weights.get(item_upper, 1.0)
-    return 1.0
+    return view().did_rate_weight(channel)
 
 
 def did_continuous_enabled() -> bool:
@@ -589,24 +481,10 @@ def absolute_rate_hz(channel: str) -> float | None:
     exactly the case where the rate has to be sayable, and DID names are
     matched through the same alias resolution ``request_eligible`` uses.
     """
-    with _lock:
-        target = _profile.target_rate_hz
-        if target is None:
-            return None
-        name = channel.upper()
-        weight = _profile.mode01.get(name)
-        if weight is not None:
-            return target * weight
-        stripped = channel.removeprefix("DID_").upper()
-        for item in _profile.mode22:
-            item_upper = item.upper()
-            resolved = _did_channels.get(item_upper, item_upper)
-            if name in {resolved, item_upper} or stripped in {resolved, item_upper}:
-                return target * _profile.mode22_rate_weights.get(item_upper, 1.0)
-        return None
+    return view().absolute_rate_hz(channel)
 
 
-def request_absolute_rate_hz(request: Any) -> float | None:
+def request_absolute_rate_hz(request: PollRequest) -> float | None:
     """:func:`absolute_rate_hz` for a request rather than a channel string.
 
     A memory window is named after the window, so looking its own name up in
@@ -614,17 +492,7 @@ def request_absolute_rate_hz(request: Any) -> float | None:
     tier rate inside a capture that asked for 10. Same shape as the selection
     gate bug: the membership lives on the request, so ask the request.
     """
-    if str(getattr(request, "kind", "")) == "memory":
-        with _lock:
-            target = _profile.target_rate_hz
-            if target is None:
-                return None
-            selected = {name.upper() for name in _profile.memory}
-        names = request_channel_names(request)
-        if any(name.split(":", 1)[-1].upper() in selected for name in names):
-            return target
-        return None
-    return absolute_rate_hz(str(getattr(request, "channel", "")))
+    return view().request_absolute_rate_hz(request)
 
 
 def rate_policy(channel: str) -> tuple[float, bool]:
@@ -673,7 +541,6 @@ __all__ = [
     "channels",
     "capture_started_monotonic",
     "did_continuous_enabled",
-    "did_cycle_override",
     "did_rate_weight",
     "configure_default",
     "configure_did_aliases",
@@ -691,6 +558,7 @@ __all__ = [
     "profile_class",
     "priority_channel",
     "rate_weight",
+    "request_channel_names",
     "request_eligible",
     "request_verdict",
     "selection_exclusion",
@@ -698,4 +566,5 @@ __all__ = [
     "set_active",
     "set_session_dir",
     "snapshot",
+    "view",
 ]

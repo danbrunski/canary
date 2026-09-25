@@ -16,23 +16,38 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import can
 
+from src.collection.can_bus import bus_kwargs, receive_frame
+from src.collection.frame_time import frame_arrival
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
+from src.collection.reconnect import DEFAULT_RECONNECT_POLICY, ReconnectPolicy, run_with_reconnect
 from src.config import SensorCanConfig
 from src.decode.sensor_can import SensorCanCatalog, decode_frame, load_sensor_can_catalog
 from src.telemetry import SENSOR_SOURCE, TelemetryRecord
 
 log = logging.getLogger(__name__)
 
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 #: How long one blocking receive may wait before re-checking the stop event.
 RECV_TIMEOUT_SECONDS = 0.5
+#: Parse-error log throttle identity for the sensor bus.
+_PARSE_ERROR_OWNER = "sensor-can"
+
+
+@dataclass
+class SensorCanStats:
+    """Exact receive counters for the sensor bus; the log line is throttled."""
+
+    frames_seen: int = 0
+    #: Malformed frames the driver could not parse (slcan noise), dropped.
+    parse_errors: int = 0
+
+    def count_parse_error(self, _exc: Exception) -> None:
+        self.parse_errors += 1
 
 
 def sensor_bus_factory(config: SensorCanConfig, catalog: SensorCanCatalog) -> can.BusABC:
@@ -45,20 +60,15 @@ def sensor_bus_factory(config: SensorCanConfig, catalog: SensorCanCatalog) -> ca
         }
         for signal in catalog.signals
     ]
-    kwargs: dict[str, Any] = {
-        "interface": config.interface,
-        "channel": config.channel,
-        "can_filters": filters,
-    }
-    if config.interface != "virtual":
-        kwargs["bitrate"] = config.bitrate
-    return can.Bus(**kwargs)
+    return can.Bus(
+        **bus_kwargs(config.interface, config.channel, config.bitrate), can_filters=filters
+    )
 
 
-def frame_to_records(
-    catalog: SensorCanCatalog, msg: can.Message, *, now_fn: Callable[[], float] = time.time
-) -> list[TelemetryRecord]:
-    stamp = msg.timestamp if msg.timestamp and msg.timestamp > 0 else now_fn()
+def frame_to_records(catalog: SensorCanCatalog, msg: can.Message) -> list[TelemetryRecord]:
+    # The receive paths' one stamp policy (R02.4), so a sensor reading pairs
+    # same-instant with the vehicle bus even after a stale driver stamp.
+    stamp = frame_arrival(msg).at
     data = bytes(msg.data)
     return [
         TelemetryRecord.from_epoch(
@@ -81,14 +91,27 @@ async def collect_sensor_can(
     stop_event: asyncio.Event,
     *,
     drop_counter: QueueDropCounter | None = None,
-    now_fn: Callable[[], float] = time.time,
+    stats: SensorCanStats | None = None,
 ) -> None:
     on_drop = QueueDropCounter("sensor") if drop_counter is None else drop_counter
+    counters = SensorCanStats() if stats is None else stats
     while not stop_event.is_set():
-        msg = await asyncio.to_thread(bus.recv, RECV_TIMEOUT_SECONDS)
-        if msg is None or msg.is_error_frame or msg.is_remote_frame:
+        # ``receive_frame`` turns an slcan parse error into a counted, dropped
+        # frame; a bare ``bus.recv`` let it end the collector (R02.1).
+        msg = await asyncio.to_thread(
+            receive_frame,
+            bus,
+            timeout=RECV_TIMEOUT_SECONDS,
+            on_frame=None,
+            on_parse_error=counters.count_parse_error,
+            parse_error_owner=_PARSE_ERROR_OWNER,
+        )
+        if msg is None:
             continue
-        for record in frame_to_records(catalog, msg, now_fn=now_fn):
+        counters.frames_seen += 1
+        if msg.is_error_frame or msg.is_remote_frame:
+            continue
+        for record in frame_to_records(catalog, msg):
             put_nowait_or_drop(queue, record, on_drop=on_drop)
 
 
@@ -147,6 +170,7 @@ async def collect_sensor_can_from_config(
 
 
 __all__ = [
+    "SensorCanStats",
     "collect_sensor_can",
     "collect_sensor_can_from_config",
     "frame_to_records",

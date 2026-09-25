@@ -23,17 +23,13 @@ from typing import TYPE_CHECKING, Any
 
 from src.analysis.tune_revisions import load_tune_revisions
 from src.collection import tuning_profile
-from src.collection.calibration_id import resolve_calibration_id_spec
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
     CanObdSpec,
     ObdSchedulerMetrics,
     collect_can_obd_from_config,
-    resolve_did_session_spec,
 )
 from src.collection.capture_profiles import CaptureProfileStore
-from src.collection.custom_pids import load_custom_pids
-from src.collection.discovery import vehicle_key
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.imu_collector import collect_imu_from_config
@@ -41,11 +37,8 @@ from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
     FreezeFrameTrigger,
-    did_access,
-    did_response_widths,
-    known_did_names,
-    memory_channels,
-    parse_did_token,
+    did_alias_table,
+    profile_did_union,
 )
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
@@ -85,6 +78,7 @@ def default_collectors(
         config.daemon.capture_profiles,
         config.collection,
         config.daemon.behavior_models,
+        custom_pids_path=config.daemon.custom_pids,
     )
     capture_catalog = capture_store.load()
     default_capture = capture_catalog.by_name("default")
@@ -92,20 +86,9 @@ def default_collectors(
     # Runtime state is intentionally reset on each daemon start (capture
     # profiles are persistent; the *active capture* is not).
     tuning_profile.configure_default(default_capture)
-    inventory_dids = known_did_names()
     tuning_profile.configure_did_aliases(
-        {
-            token: f"DID_{parse_did_token(token):04X}"
-            for token in dict.fromkeys(
-                [
-                    *config.collection.obd_dids,
-                    *inventory_dids,
-                    *(did for profile in capture_catalog.profiles for did in profile.mode22),
-                ]
-            )
-        }
+        did_alias_table(profile_did_union(config.collection, capture_catalog.profiles))
     )
-    did_widths, did_width_sources = did_response_widths()
     reconnect_policy = ReconnectPolicy(
         initial_delay_seconds=config.collection.reconnect_initial_delay_seconds,
         max_delay_seconds=config.collection.reconnect_max_delay_seconds,
@@ -124,45 +107,6 @@ def default_collectors(
     ]
 
     if config.collection.obd_source == "canable":
-        # Task 2.6: loaded once here, not per poll tick. Absent file ⇒ an
-        # empty set (load_custom_pids' own graceful-missing-file behavior).
-        custom_pids = load_custom_pids(config.daemon.custom_pids).custom_pids
-        configured_pids = config.collection.obd_pids
-        request_pids = (
-            configured_pids
-            if any(token.strip().lower() == "auto" for token in configured_pids)
-            else tuple(
-                dict.fromkeys(
-                    [
-                        *configured_pids,
-                        *(
-                            channel
-                            for profile in capture_catalog.profiles
-                            for channel in profile.mode01
-                        ),
-                    ]
-                )
-            )
-        )
-        request_dids = tuple(
-            dict.fromkeys(
-                [
-                    *config.collection.obd_dids,
-                    *inventory_dids,
-                    *(did for profile in capture_catalog.profiles for did in profile.mode22),
-                ]
-            )
-        )
-        # RAM addresses belong to the ECU's program code, which the flashes
-        # made on this vehicle do not change (operator, 2026-09-21: a
-        # 2026-09-20 table-edit flash left every address in place, confirmed
-        # by tools.verify_memory_channels). So channels are not gated on the
-        # running tune revision; the known-answer verify is the evidence check
-        # for a moved address, run on demand.
-        selected_memory = tuple(
-            dict.fromkeys(name for profile in capture_catalog.profiles for name in profile.memory)
-        )
-        usable_memory = [c for c in memory_channels() if c.name in selected_memory]
         # The operational registry (a flash recorded through the daemon, W06.5)
         # wins over the tracked profile copy, same as /control/calibration.
         registry = load_tune_revisions(active_registry_path(config))
@@ -171,44 +115,17 @@ def default_collectors(
             None if current is None else current.revision,
             calibration_id=None if current is None else current.calibration_id,
         )
-        can_obd_spec = CanObdSpec(
-            can=config.hardware.can,
-            poll_rate_hz=config.collection.obd_poll_rate_hz,
-            # ``auto`` already discovers every supported Mode-01 channel;
-            # explicit plans and DIDs are expanded to the saved-profile union.
-            # The runtime gate keeps default polling identical while making a
-            # profile switch restart-free.
-            pids=request_pids,
-            dids=request_dids,
-            capture_profiles_enabled=True,
-            batch_max_pids=config.collection.obd_batch_max_pids,
-            did_batch_max_dids=config.collection.obd_did_batch_max_dids,
-            did_response_widths=did_widths,
-            did_response_width_sources=did_width_sources,
-            did_request_id=config.collection.obd_did_request_id,
-            request_timeout_seconds=config.collection.obd_request_timeout_seconds,
-            did_session=resolve_did_session_spec(config.collection),
-            dtc_poll_interval_seconds=config.collection.obd_dtc_poll_interval_seconds,
-            service_poll_interval_seconds=config.collection.obd_monitor_poll_interval_seconds,
-            service_mids=config.collection.obd_monitor_mids,
+        # The request plan is the saved-profile union; the runtime gate keeps
+        # default polling identical while making a profile switch
+        # restart-free. Custom PIDs (Task 2.6) are loaded once, not per tick.
+        can_obd_spec = CanObdSpec.from_config(
+            config.collection,
+            config.hardware.can,
+            catalog=capture_catalog.profiles,
+            custom_pids_path=config.daemon.custom_pids,
+            vehicle=config.vehicle,
             freeze_frame_trigger=freeze_frame_trigger,
             force_poll_trigger=force_poll_trigger,
-            custom_pids=tuple(custom_pids),
-            memory=tuple(usable_memory),
-            priority_channels=config.collection.obd_priority_channels,
-            discovery_budget_requests_per_second=(
-                config.collection.obd_discovery_budget_requests_per_second
-            ),
-            # Support maps cached per vehicle across reconnects (C06.6).
-            discovery_key=vehicle_key(
-                config.vehicle.vin,
-                config.vehicle.make,
-                config.vehicle.model,
-                config.vehicle.year,
-            ),
-            # W02.2: the ECU's own calibration id, read per the vehicle's
-            # dids.yaml access block (which session it needs is data).
-            calibration_id=resolve_calibration_id_spec(did_access()),
         )
 
         async def canable_obd(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:

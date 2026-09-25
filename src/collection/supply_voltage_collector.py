@@ -19,7 +19,12 @@ from collections.abc import Callable
 from src.collection.ads1015 import Ads1015
 from src.collection.i2c_dev import LinuxI2cBus, RegisterBus
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
+from src.collection.reconnect import (
+    DEFAULT_RECONNECT_POLICY,
+    ReconnectPolicy,
+    run_with_reconnect,
+    wait_for_stop_or_timeout,
+)
 from src.config import SupplyVoltageConfig
 from src.telemetry import SENSOR_SOURCE, TelemetryRecord
 
@@ -27,7 +32,6 @@ log = logging.getLogger(__name__)
 
 CHANNEL = "SUPPLY_VOLTAGE"
 UNIT = "V"
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 BusFactory = Callable[[SupplyVoltageConfig], RegisterBus]
 
@@ -59,10 +63,7 @@ async def collect_supply_voltage(
     while not stop_event.is_set():
         stamp, volts = await asyncio.to_thread(adc.read_volts, config.input_channel)
         put_nowait_or_drop(queue, supply_record(config, stamp, volts), on_drop=on_drop)
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=period)
-        except TimeoutError:
-            pass
+        await wait_for_stop_or_timeout(stop_event, period)
 
 
 async def collect_supply_voltage_from_config(

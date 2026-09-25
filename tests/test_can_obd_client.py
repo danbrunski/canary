@@ -971,7 +971,7 @@ def test_query_handles_isotp_multi_frame_reassembly() -> None:
         ecu.shutdown()
     assert resp is not None
     # payload = count byte + VIN (response_body's `49 02` header is stripped
-    # by _extract_service_payload because we passed pid=0x02 echo).
+    # by isotp.extract_service_payload because we passed pid=0x02 echo).
     assert resp.payload == bytes([0x01]) + vin_bytes
 
 
@@ -1021,3 +1021,132 @@ def test_query_or_nrc_tells_a_refusal_from_silence() -> None:
         t.join(timeout=1.0)
         tester.shutdown()
         ecu.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# R02.5 — the response policy lives in the client, not in each caller
+# ---------------------------------------------------------------------------
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _ScriptedBus:
+    """Answers each request with scripted ``(delay, responder, frame)`` replies
+    on a fake clock, so timing assertions are exact."""
+
+    def __init__(self, clock: _Clock, replies: list[tuple[float, int, bytes]]) -> None:
+        self.clock = clock
+        self.script = replies
+        self.pending: list[tuple[float, int, bytes]] = []
+        self.sent: list[can.Message] = []
+
+    def send(self, msg: can.Message, timeout: float | None = None) -> None:
+        self.sent.append(msg)
+        if bytes(msg.data)[0] >> 4 == 0x3:  # our flow control
+            return
+        now = self.clock.now
+        self.pending = sorted(
+            [(now + delay, responder, frame) for delay, responder, frame in self.script],
+            key=lambda item: item[0],
+        )
+
+    def recv(self, timeout: float | None = None) -> can.Message | None:
+        wait = float(timeout or 0.0)
+        if self.pending and self.pending[0][0] <= self.clock.now + wait:
+            due, responder, frame = self.pending.pop(0)
+            self.clock.now = max(self.clock.now, due)
+            return can.Message(arbitration_id=responder, data=frame, is_extended_id=False)
+        self.clock.now += wait
+        return None
+
+
+def _frame(*body: int) -> bytes:
+    data = bytes([len(body), *body])
+    return data + bytes(8 - len(data))
+
+
+def test_physical_request_ignores_another_modules_reply() -> None:
+    """``obd_request`` to 0x7E0 accepted any 0x7E8-0x7EF reply, so a 0x7E9
+    answer to the same DID was attached to the engine ECU."""
+    clock = _Clock()
+    bus = _ScriptedBus(
+        clock,
+        [
+            (0.005, 0x7E9, _frame(0x62, 0x11, 0x01, 0xAA, 0xBB)),
+            (0.010, 0x7E8, _frame(0x62, 0x11, 0x01, 0x12, 0x34)),
+        ],
+    )
+    client = CanObdClient(bus, timeout_seconds=0.2, time_fn=clock)  # type: ignore[arg-type]
+    response = client.query(service=0x22, identifier=0x1101, request_id=0x7E0)
+    assert response is not None
+    assert response.responder_id == 0x7E8
+    assert response.payload == bytes([0x12, 0x34])
+
+
+def test_physical_request_with_only_a_foreign_reply_is_silence() -> None:
+    clock = _Clock()
+    bus = _ScriptedBus(clock, [(0.005, 0x7E9, _frame(0x62, 0x11, 0x01, 0xAA, 0xBB))])
+    client = CanObdClient(bus, timeout_seconds=0.2, time_fn=clock)  # type: ignore[arg-type]
+    assert client.query_or_nrc(service=0x22, identifier=0x1101, request_id=0x7E0) == (None, None)
+
+
+def test_client_honours_response_pending() -> None:
+    """``7F 22 78`` is the ECU saying the answer is coming (ISO 14229 P2*).
+    The client waited out its original deadline and returned nothing."""
+    clock = _Clock()
+    bus = _ScriptedBus(
+        clock,
+        [
+            (0.010, 0x7E8, _frame(0x7F, 0x22, 0x78)),
+            (0.350, 0x7E8, _frame(0x62, 0x11, 0x01, 0x12, 0x34)),
+        ],
+    )
+    client = CanObdClient(bus, timeout_seconds=0.2, time_fn=clock)  # type: ignore[arg-type]
+    response = client.query_mode_22(0x1101, request_id=0x7E0)
+    assert response is not None
+    assert response.payload == bytes([0x12, 0x34])
+
+
+def test_client_response_pending_is_bounded() -> None:
+    """An ECU that answers 0x78 forever ends as NRC 0x78, not a hung request."""
+    clock = _Clock()
+    bus = _ScriptedBus(
+        clock, [(0.01 + 0.1 * i, 0x7E8, _frame(0x7F, 0x22, 0x78)) for i in range(40)]
+    )
+    client = CanObdClient(bus, timeout_seconds=0.2, time_fn=clock)  # type: ignore[arg-type]
+    started = clock.now
+    assert client.query_or_nrc(service=0x22, identifier=0x1101, request_id=0x7E0) == (None, 0x78)
+    assert clock.now - started < 0.2 + 5 * 0.5 + 0.01
+
+
+def test_a_declared_response_id_is_the_pin_not_request_plus_8() -> None:
+    """A profile's request/response pair is vehicle data (``dids.yaml``
+    ``ecu_request_id``/``ecu_response_id``, as the calibration route builds
+    it). A module answering 0x745 on 0x765 must be heard, and a 0x74D reply
+    (request + 8) must not be taken for it."""
+    clock = _Clock()
+    bus = _ScriptedBus(
+        clock,
+        [
+            (0.005, 0x74D, _frame(0x62, 0x11, 0x01, 0xAA, 0xBB)),
+            (0.010, 0x765, _frame(0x62, 0x11, 0x01, 0x12, 0x34)),
+        ],
+    )
+    client = CanObdClient(
+        bus,  # type: ignore[arg-type]
+        request_id=0x745,
+        response_id_min=0x765,
+        response_id_max=0x765,
+        timeout_seconds=0.2,
+        time_fn=clock,
+    )
+    response = client.query_mode_22(0x1101)
+    assert response is not None
+    assert response.responder_id == 0x765
+    assert response.payload == bytes([0x12, 0x34])

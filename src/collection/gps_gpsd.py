@@ -39,12 +39,11 @@ from src.coerce import finite_float
 from src.collection.gps_collector import reading_to_records
 from src.collection.gps_nmea import GpsReading
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
+from src.collection.reconnect import DEFAULT_RECONNECT_POLICY, ReconnectPolicy, run_with_reconnect
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 
 #: Sent on connect to start the JSON stream. gpsd stays silent until watched.
 WATCH_COMMAND = b'?WATCH={"enable":true,"json":true}\n'

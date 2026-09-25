@@ -21,7 +21,7 @@ from statistics import median
 
 import pytest
 
-from src.collection import can_obd_collector, tuning_profile, tx_gate
+from src.collection import can_obd_loop, tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.hybrid_cycle import WakeDecision, next_wake_at, plan_cycle
@@ -197,13 +197,13 @@ def _record_wakes(monkeypatch: pytest.MonkeyPatch) -> list[tuple[float, WakeDeci
         wakes.append((now, decision))
         return decision
 
-    monkeypatch.setattr(can_obd_collector, "next_wake_at", wrapped)
+    monkeypatch.setattr(can_obd_loop, "next_wake_at", wrapped)
     return wakes
 
 
 def _record_drains(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     untils: list[float] = []
-    real = can_obd_collector._drain_frames_until
+    real = can_obd_loop._drain_frames_until
 
     def wrapped(
         bus: object, on_frame: object, stats: object, stop: object, until: float, deadline: object
@@ -211,7 +211,7 @@ def _record_drains(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         untils.append(until)
         real(bus, on_frame, stats, stop, until, deadline)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(can_obd_collector, "_drain_frames_until", wrapped)
+    monkeypatch.setattr(can_obd_loop, "_drain_frames_until", wrapped)
     return untils
 
 

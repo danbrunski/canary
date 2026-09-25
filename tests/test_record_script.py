@@ -263,3 +263,74 @@ def test_record_cli_rejects_malformed_did(tmp_path: Path, monkeypatch: pytest.Mo
                 "ZZZZ",
             ]
         )
+
+
+#: Fields that differ between the recorder and the daemon by design: the
+#: daemon's plan is the saved-capture-profile union behind the runtime gate,
+#: and only the daemon has the control-route triggers.
+_DAEMON_ONLY_SPEC_FIELDS = (
+    "pids",
+    "dids",
+    "memory",
+    "capture_profiles_enabled",
+    "freeze_frame_trigger",
+    "force_poll_trigger",
+)
+
+
+def test_recorder_spec_equals_the_daemon_spec_for_the_example_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R02.7: the recorder built its own 7-field spec and silently dropped
+    batching, DID widths, the priority lane, DTC/monitor cadence, monitor
+    MIDs, custom PIDs and the calibration-id read. Both now come from
+    ``CanObdSpec.from_config``; with the config's own selection the two
+    specs are equal field for field."""
+    import asyncio
+    import dataclasses
+
+    from src.collection.collectors import default_collectors
+    from src.config import CanaryConfig
+
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(record_script, "bus_factory", lambda _spec: FakeBus())
+    monkeypatch.setattr(record_script, "JsonlReadingWriter", lambda _path: FakeWriter())
+
+    def fake_record_can_obd(_bus: Any, paths: Any, **kwargs: Any) -> None:
+        captured["recorder"] = kwargs["spec"]
+        paths.pids.write_text('{"timestamp": 1.0, "channel": "RPM", "value": 700}\n')
+
+    monkeypatch.setattr(record_script, "record_can_obd", fake_record_can_obd)
+    rc = record_script.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out-dir",
+            str(tmp_path),
+            "--obd-source",
+            "canable",
+            "--seconds",
+            "1",
+        ]
+    )
+    assert rc == 0
+
+    async def fake_collect_can_obd(spec: Any, _queue: Any, stop: Any, **_kwargs: Any) -> None:
+        captured["daemon"] = spec
+        stop.set()
+
+    monkeypatch.setattr(
+        "src.collection.collectors.collect_can_obd_from_config", fake_collect_can_obd
+    )
+    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    starters = default_collectors(config)
+    asyncio.run(starters[0](asyncio.Queue(), asyncio.Event()))
+
+    recorder, daemon = captured["recorder"], captured["daemon"]
+    neutral = {name: None for name in _DAEMON_ONLY_SPEC_FIELDS}
+    assert dataclasses.replace(recorder, **neutral) == dataclasses.replace(daemon, **neutral)
+    # The behaviour change this item exists for: the recorder batches now.
+    assert recorder.batch_max_pids == config.collection.obd_batch_max_pids > 1
+    assert recorder.pids == tuple(config.collection.obd_pids)
+    assert recorder.dids == tuple(config.collection.obd_dids)
+    assert not recorder.capture_profiles_enabled

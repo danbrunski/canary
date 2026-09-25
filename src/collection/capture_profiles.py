@@ -11,7 +11,7 @@ import logging
 import math
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -25,6 +25,9 @@ from src.collection.bus_budget import (
 from src.config import CollectionConfig
 from src.decode.behavior_eligibility import required_channel_groups
 from src.decode.behavior_models import load_behavior_models
+
+if TYPE_CHECKING:
+    from src.collection.obd_scheduler import DidSessionSpec
 
 log = logging.getLogger(__name__)
 
@@ -521,6 +524,39 @@ class CaptureProfile(_Strict):
             raise ValueError("non-corpus profiles require a '_capture-<slug>' storage_prefix")
         return self
 
+    # ------------------------------------------------------------------
+    # Mode-22 window timing: the one precedence rule (R02.3)
+    # ------------------------------------------------------------------
+
+    def did_window_cycle(self, session: DidSessionSpec) -> float | None:
+        """Start-to-start cycle period: this profile's, else the config's.
+
+        ``None`` when neither sets one: the end-to-start interval policy.
+        """
+        if self.did_cycle_seconds is not None:
+            return self.did_cycle_seconds
+        return session.cycle_seconds
+
+    def did_window_interval(self, session: DidSessionSpec) -> float:
+        """End-to-start gap between windows: this profile's, else the config's."""
+        if self.did_interval_seconds is not None:
+            return self.did_interval_seconds
+        return session.window_interval_seconds
+
+    def did_window_period(self, session: DidSessionSpec) -> float:
+        """Seconds from one Mode-22 window opening to the next.
+
+        The one precedence rule, *profile cycle → config cycle → profile
+        interval → config interval*: a cycle, from either side, is the
+        schedule whenever one exists, and only without one does an interval
+        apply. The live scheduler, the window controller and the capture
+        preview all read it here. The preview used to spell it *profile
+        cycle → profile interval → config cycle*, so a profile interval beat a
+        configured cycle there and nowhere else (R02.3).
+        """
+        cycle = self.did_window_cycle(session)
+        return cycle if cycle is not None else self.did_window_interval(session)
+
 
 class CaptureProfileCatalog(_Strict):
     schema_version: int = SCHEMA_VERSION
@@ -705,155 +741,39 @@ def model_input_warnings(
 
 
 class CaptureProfileStore:
-    def __init__(self, path: Path, collection: CollectionConfig, behavior_models_path: Path):
+    def __init__(
+        self,
+        path: Path,
+        collection: CollectionConfig,
+        behavior_models_path: Path,
+        *,
+        custom_pids_path: Path | None = None,
+    ):
         self.path = path
         self.collection = collection
         self.behavior_models_path = behavior_models_path
+        #: The daemon's custom-PID file, so the preview's request universe
+        #: matches the live one. ``None`` previews without custom PIDs.
+        self.custom_pids_path = custom_pids_path
 
     def load(self) -> CaptureProfileCatalog:
         return load_capture_profiles(self.path, self.collection)
 
     def resolved_plan(self, profile: CaptureProfile) -> dict[str, Any]:
-        """Build the same identifier-level plan used by live metrics.
+        """The identifier-level plan ``profile`` would run: the live plan, asked early.
 
-        Imports are local because scheduler configuration already depends on
-        this profile module. The preview is intentionally built from the
-        configured request universe; live metrics refine it with discovered
-        support and the batch size that survived capability fallback.
+        One function with the live metrics (``obd_scheduler.preview_polling_plan``
+        runs the scheduler's own spec, request and plan builders with the
+        candidate in place of the active profile). The copy this replaced
+        disagreed with live on DID-window precedence, capped DID rates live
+        does not, and ignored ``round_timestamps`` (R02.3). The import is local
+        because the scheduler already depends on this profile module.
         """
-        from src.collection.can_obd_client import DEFAULT_REQUEST_ID, PID_DECODERS
-        from src.collection.obd_registry import lookup
-        from src.collection.obd_scheduler import (
-            BUS_BUDGET_MULTIPLIER,
-            MIN_BUS_BUDGET_REQUESTS_PER_SECOND,
-            TIER_RATE_FACTORS,
-            did_response_widths,
-            parse_did_token,
-            parse_pid_token,
-            resolve_did_session_spec,
-        )
-        from src.collection.polling_plan import PlanMember, ResolvedPollingPlan
+        from src.collection.obd_scheduler import preview_polling_plan
 
-        required = {item.upper() for item in profile.required_tuple}
-        priority = {
-            item.upper()
-            for item in (
-                self.collection.obd_priority_channels
-                if profile.priority_channels is None
-                else profile.priority_channels
-            )
-        }
-        members: list[PlanMember] = []
-        if profile.mode01_enabled:
-            pids: list[tuple[str, int, float]] = []
-            for channel, weight in profile.mode01.items():
-                parsed = parse_pid_token(channel)
-                if parsed is None:
-                    pids.extend(
-                        (name, pid, weight) for pid, (name, _decoder) in PID_DECODERS.items()
-                    )
-                else:
-                    pids.append((channel, parsed, weight))
-            for profile_channel, pid, weight in pids:
-                definition = lookup(0x01, pid)
-                channel = definition.channel if definition is not None else PID_DECODERS[pid][0]
-                tier = definition.poll_tier if definition is not None else "medium"
-                rate = (
-                    profile.target_rate_hz * weight
-                    if profile.target_rate_hz is not None
-                    else self.collection.obd_poll_rate_hz * TIER_RATE_FACTORS[tier] * weight
-                )
-                members.append(
-                    PlanMember(
-                        kind="pid",
-                        service=0x01,
-                        request_id=DEFAULT_REQUEST_ID,
-                        identifier=pid,
-                        channel=channel,
-                        profile_channel=profile_channel,
-                        rate_hz=rate,
-                        priority=profile_channel.upper() in priority or channel.upper() in priority,
-                        required=profile_channel.upper() in required or channel.upper() in required,
-                        response_payload_bytes=(
-                            definition.byte_length
-                            if definition is not None and definition.byte_length > 0
-                            else None
-                        ),
-                        decoded_rows_per_read=2 if pid == 0x01 else 1,
-                    )
-                )
-        widths, _sources = did_response_widths()
-        if profile.mode22_enabled:
-            for profile_channel in profile.mode22:
-                did = parse_did_token(profile_channel)
-                weight = profile.mode22_rate_weights.get(profile_channel.upper(), 1.0)
-                if profile.target_rate_hz is not None:
-                    rate = profile.target_rate_hz * weight
-                else:
-                    rate = self.collection.obd_poll_rate_hz * TIER_RATE_FACTORS["medium"] * weight
-                if not profile.did_continuous:
-                    period = (
-                        profile.did_cycle_seconds
-                        or profile.did_interval_seconds
-                        or self.collection.obd_did_cycle_seconds
-                        or self.collection.obd_did_window_interval_seconds
-                    )
-                    rate = min(
-                        profile.target_rate_hz * weight
-                        if profile.target_rate_hz is not None
-                        else weight / period,
-                        1.0 / period,
-                    )
-                members.append(
-                    PlanMember(
-                        kind="did",
-                        service=0x22,
-                        request_id=self.collection.obd_did_request_id,
-                        identifier=did,
-                        channel=f"DID_{did:04X}",
-                        profile_channel=profile_channel,
-                        rate_hz=rate,
-                        priority=profile_channel.upper() in priority,
-                        required=profile_channel.upper() in required,
-                        response_payload_bytes=widths.get(did),
-                    )
-                )
-        session_overhead = 0.0
-        session = resolve_did_session_spec(self.collection)
-        if (
-            profile.mode22_enabled
-            and profile.mode22
-            and session is not None
-            and not profile.did_continuous
-        ):
-            period = (
-                profile.did_cycle_seconds
-                or session.cycle_seconds
-                or profile.did_interval_seconds
-                or session.window_interval_seconds
-            )
-            session_overhead = (1 + int(session.exit_session is not None)) / period
-        budget = profile.bus_budget_override or max(
-            MIN_BUS_BUDGET_REQUESTS_PER_SECOND,
-            self.collection.obd_poll_rate_hz * BUS_BUDGET_MULTIPLIER,
+        return preview_polling_plan(
+            self.collection, profile, custom_pids_path=self.custom_pids_path
         )
-        plan = ResolvedPollingPlan.build(
-            members,
-            bus_budget_requests_per_second=budget,
-            pid_batch_max=self.collection.obd_batch_max_pids,
-            did_batch_max=self.collection.obd_did_batch_max_dids,
-            session_control_requests_per_second=session_overhead,
-            discovery_requests_per_second=(
-                min(
-                    self.collection.obd_discovery_budget_requests_per_second,
-                    budget,
-                )
-                if any(name.strip().lower() == "auto" for name in profile.mode01)
-                else 0.0
-            ),
-        ).to_dict()
-        plan["priority_source"] = "collection" if profile.priority_channels is None else "profile"
-        return plan
 
     def save(
         self,

@@ -203,7 +203,7 @@ def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
     # python-can collector deps present.
     import can
 
-    from src.collection.can_collector import bus_factory
+    from src.collection.can_bus import bus_factory
     from src.collection.can_obd_client import (
         DEFAULT_RESPONSE_ID_MAX,
         DEFAULT_RESPONSE_ID_MIN,

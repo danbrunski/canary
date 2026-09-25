@@ -29,7 +29,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import (
     PID_DECODERS,
     BatchedMode01Response,

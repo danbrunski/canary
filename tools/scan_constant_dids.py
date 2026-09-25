@@ -44,7 +44,7 @@ from src.analysis.did_scan import (
     classify_dids,
     sweep_dids,
 )
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.config import CanaryConfig
 

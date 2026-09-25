@@ -16,7 +16,7 @@ from src.analysis.memory_verification import (
     restamp,
     verify_channel,
 )
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.config import CanaryConfig
 from src.decode.dids import load_did_map
@@ -40,8 +40,6 @@ def _open_client(
         yield CanObdClient(
             bus,
             request_id=request_id,
-            response_id_min=request_id + 8,
-            response_id_max=request_id + 8,
             timeout_seconds=read_timeout,
         )
     finally:

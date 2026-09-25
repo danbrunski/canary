@@ -72,7 +72,7 @@ from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 from src.analysis.did_scan import BatchRead, CanableMode22Transport, sweep_dids
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
 from src.collection.obd_scheduler import did_access

@@ -6,6 +6,13 @@ on 2026-09-20.  The apparent no-op/negative probes are currently required to
 reach the state in which ordinary ``0x22`` reads succeed, so removing one is an
 experiment rather than a cleanup.
 
+**This sequence is the development vehicle's, not a platform one.** It was
+captured on the 2008 Nissan Xterra's ECM behind UpRev's Cipher cable: the
+7E0/7E8 route, the 0x85 and 0xC0 sessions, the calibration/identity reads and
+the 0x1100-0x1300 support groups are that ECM's. Another vehicle needs its own
+capture, which belongs in its vehicle profile (``data/<vehicle>/``) rather
+than as an edit here. :data:`CAPTURED_ON` names where it was proven.
+
 Only diagnostic-session and read operations live here.  There are no ECU
 memory-write, download, transfer, erase, or reflash payloads.
 """
@@ -17,6 +24,10 @@ from dataclasses import dataclass
 
 from src.collection.uprev_protocol import STREAM_DATA_PREFIX
 from src.collection.uprev_usb import UpRevUsbError, UpRevUsbTransport
+
+#: The one vehicle this literal startup sequence is proven on (see the module
+#: docstring): Xterra-specific, not a platform default.
+CAPTURED_ON = "2008 Nissan Xterra (development vehicle), UpRev Cipher K-line, 2026-09-20"
 
 _CABLE_INFO = bytes.fromhex("08")
 _CABLE_SYNC = bytes.fromhex("06")

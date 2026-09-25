@@ -116,16 +116,19 @@ def test_collector_reads_the_override_live_not_at_startup() -> None:
     """
     import inspect
 
-    from src.collection import can_obd_collector
+    from src.collection import can_obd_loop
 
-    source = inspect.getsource(can_obd_collector)
+    source = inspect.getsource(can_obd_loop)
     # The pacing sites divide by the rate; every one of them must go through
-    # the gate rather than the captured default.
+    # the gate rather than the captured default. Since R02.9 they are one
+    # method, `_spend_budget_slot`, which every served slot calls.
     assert "1.0 / budget_rps" not in source, (
         "a pacing site still uses the startup-captured rate; an override "
         "armed mid-drive would not take effect"
     )
-    assert source.count("bus_budget.effective(budget_rps)") >= 3
+    assert "1.0 / self.budget_rps" not in source
+    assert source.count("bus_budget.effective(self.budget_rps)") == 1
+    assert source.count("self._spend_budget_slot()") >= 5
 
 
 def test_status_reports_the_effective_rate_not_the_configured_one() -> None:

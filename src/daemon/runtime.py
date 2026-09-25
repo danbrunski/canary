@@ -397,6 +397,7 @@ async def run_daemon(
             config.daemon.capture_profiles,
             config.collection,
             config.daemon.behavior_models,
+            custom_pids_path=config.daemon.custom_pids,
         ),
         health_monitor=components.health_monitor,
     )

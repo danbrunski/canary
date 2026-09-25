@@ -173,6 +173,7 @@ def create_app(
         config.daemon.capture_profiles,
         config.collection,
         behavior_models_path,
+        custom_pids_path=config.daemon.custom_pids,
     )
     # Stash them on app.state so producer threads / app extensions can reach
     # the same instances after construction.

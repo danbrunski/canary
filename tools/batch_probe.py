@@ -48,7 +48,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient, RawReply
 from src.config import CanaryConfig
 from tools.did_log import (

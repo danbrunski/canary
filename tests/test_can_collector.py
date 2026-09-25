@@ -21,11 +21,11 @@ from src.collection.can_collector import (
     collect_can,
     collect_can_from_config,
     frame_to_record,
-    make_session_dir,
     record,
 )
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig, VehicleConfig
+from src.session import make_session_dir
 
 VIRTUAL_CHANNEL = "canary-test"
 
@@ -773,9 +773,12 @@ class _SnifferBus:
 
 
 def _frames(n: int, start: int = 0) -> list[can.Message]:
+    # Fresh driver stamps: one further than KERNEL_STAMP_MAX_SKEW_SECONDS from
+    # the wall clock is replaced by the receipt time (R02.4).
+    base = time.time()
     return [
         can.Message(
-            timestamp=1_778_000_000.0 + i * 0.001,
+            timestamp=base + i * 0.0001,
             arbitration_id=0x100 + (i % 8),
             data=bytes([i & 0xFF] * 8),
             is_extended_id=False,

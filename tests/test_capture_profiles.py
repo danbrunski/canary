@@ -678,11 +678,12 @@ def test_capture_profile_api_crud_and_auth(tmp_path: Path) -> None:
     listed = client.get("/control/capture/profiles", headers=headers)
     assert listed.status_code == 200
     fuel_plan = listed.json()["resolved_plans"]["fuel-map"]
-    assert (
-        fuel_plan["channel_reads_per_second"] == 45.0
-    )  # 9 fast x 4 Hz + 9 context x 1 Hz (baro added 2026-09-21)
+    # 9 fast x 4 Hz + 9 context x 1 Hz (baro added 2026-09-21), plus the three
+    # DTC polls (1/300 s each) the live plan issues under every profile: the
+    # preview is the live plan since R02.3, and the old copy left them out.
+    assert fuel_plan["channel_reads_per_second"] == 45.01
     assert fuel_plan["diagnostic_requests_per_second"]["best_case_batched"] < 20.0
-    assert fuel_plan["diagnostic_requests_per_second"]["single_request_fallback"] == 45.0
+    assert fuel_plan["diagnostic_requests_per_second"]["single_request_fallback"] == 45.01
     assert fuel_plan["fallback_feasible"] is False
     profile = {
         "name": "idle-map",

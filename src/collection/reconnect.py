@@ -32,6 +32,11 @@ class ReconnectPolicy:
         return min(self.max_delay_seconds, current_delay * self.multiplier)
 
 
+#: The reconnect schedule every collector uses unless the config overrides
+#: it. One definition (R02.12): seven modules each wrote ``ReconnectPolicy()``.
+DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
+
+
 async def wait_for_stop_or_timeout(stop_event: asyncio.Event, delay_seconds: float) -> bool:
     """Wait for either stop_event or delay; return True when stop_event fired."""
     if delay_seconds <= 0:

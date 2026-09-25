@@ -1,8 +1,10 @@
-"""Registry of OBD-II PIDs that CANary polls.
+"""Registry of the OBD-II PIDs the ELM327 path (``obd_collector``) polls.
 
-Single source of truth — collectors, the Parquet schema, and downstream
-preprocessing all reference these specs. Adding a new PID is a one-line
-append; the collector picks it up automatically.
+The source of truth for that one transport only, through python-OBD's
+command objects. The CAN-native path decodes through
+``pid_decoders.PID_DECODERS`` with its metadata in ``obd_registry``; the two
+PID sets are complementary by design (the July decision), not a single table.
+Adding a PID here reaches the ELM327 collector only.
 
 The set comes from FR-01: RPM, Vehicle Speed, Engine Load, Coolant Temp,
 Intake Air Temp, MAF Air Flow Rate, Throttle Position, Short/Long Fuel Trim

@@ -33,7 +33,7 @@ before the structural ones.
 
 ## Correctness first
 
-- [ ] **R02.1 Catch slcan parse errors inside `receive_frame`.** *Drift bug,
+- [x] **R02.1 Catch slcan parse errors inside `receive_frame`.** *Drift bug,
   serve path.*
   - The collector's `_recv_and_tap` catches `ValueError`/`IndexError` (slcan
     parser errors). `can_obd_client.receive_frame` documents "Parse errors
@@ -57,7 +57,21 @@ before the structural ones.
   loop running and counts one parse error, and the same holds on the sensor
   bus. Size **S**.
 
-- [ ] **R02.2 One "served in the Mode 22 window" predicate.** *Drift bug
+  **Done 2026-09-25.** `receive_frame` (now in `can_bus`, re-exported from
+  `can_obd_client`) catches `FRAME_PARSE_ERRORS` (`ValueError`, `IndexError`),
+  reports them to `on_parse_error` and the throttled `log_dropped_can_frame`
+  under a named owner, and returns `None`. `CanObdClient` takes
+  `on_parse_error`/`parse_error_owner`; the loop hands it
+  `CanObdLoopStats.count_parse_error`. `_recv_and_tap` is accounting only.
+  The sensor bus receives through `receive_frame` into a new `SensorCanStats`.
+  Failing first at `1ff1921`, passing now:
+  `test_diagnostic_discovery.py::test_parse_error_during_a_discovery_probe_leaves_the_loop_running`
+  (raised `ValueError` out of the loop; now `parse_errors == 1`, RPM/SPEED
+  still read) and `test_sensor_can.py::test_sensor_bus_parse_error_is_counted_not_fatal`.
+  Behaviour: a standalone client (tools, `/control/obd_request`) now sees a
+  garbled frame as a dropped frame, not an exception.
+
+- [x] **R02.2 One "served in the Mode 22 window" predicate.** *Drift bug
   (latent), serve path.*
   - `obd_scheduler.SESSION_WINDOW_KINDS = {"did", "memory"}` exists so that
     the window controller, the plan and the eligibility matrix cannot
@@ -91,7 +105,23 @@ before the structural ones.
   counted in the cycle plan. `grep -n 'kind == "did"' src/collection` lists
   only batching sites. Size **S–M**.
 
-- [ ] **R02.3 Make the capture-profile preview and the live plan one
+  **Done 2026-09-25.** `PollRequest.in_session_window` (over
+  `SESSION_WINDOW_KINDS`) drives all four sites. The loop's
+  `_loop_request_verdict` now composes `DidWindowController.request_verdict(
+  index, request, selection=, paused=, forced=)` (which gained the profile
+  gates) instead of re-implementing the window check;
+  `DidWindowController.request_eligible` is deleted; the plan's dead per-DID
+  window cap is gone. `tests/test_session_window_predicate.py` (9 tests, all 9
+  failing at `1ff1921`): a windowed memory read is anchored to the window grid,
+  charged `(1+exit)/period` session control, counted in `CyclePlan.did_requests`,
+  and deferred `attempted_this_window` by the production verdict; the four
+  functions carry no window-semantics `kind == "did"`. What
+  `grep -rn 'kind == "did"' src/collection` still lists is Mode 22 batching
+  (batch companions, `BatchGovernor`, `0x62` synthesis, DID widths), the DID
+  hex-payload decode, the DID-vs-memory *selection* branch in `profile_view`,
+  and a log list.
+
+- [x] **R02.3 Make the capture-profile preview and the live plan one
   function.** *Drift bug.*
   - `CaptureProfileStore.resolved_plan` (142 lines) says it is "the same
     identifier-level plan used by live metrics". It is a re-implementation of
@@ -124,7 +154,41 @@ before the structural ones.
   Size **M–L**. Callers: dashboard `routes/control.py` preview routes plus
   the serve-path rate policy.
 
-- [ ] **R02.4 One frame-timestamp policy.** *Drift bug, serve path.* Three
+  **Done 2026-09-25.** `CaptureProfile.did_window_cycle /
+  did_window_interval / did_window_period(session)` is the one precedence
+  (*profile cycle → config cycle → profile interval → config interval*); the
+  controller, the rate policy, the plan and the cycle plan all read it, and the
+  `did_*_override` getters are deleted. The policy is pure: `profile_view.ProfileView`
+  (profile + DID alias table + pause) owns selection, priority, weights and
+  absolute rates; every `tuning_profile` getter is a thin wrapper over
+  `tuning_profile.view()`. `_request_rate_hz(request, spec, view)` and
+  `_resolved_polling_plan(..., view=, budget_rps=)` take it explicitly.
+  `CaptureProfileStore.resolved_plan` (call signature unchanged) is now
+  `obd_scheduler.preview_polling_plan`: `CanObdSpec.from_config` with the
+  candidate as catalog, `build_poll_requests`, and the same plan function.
+  `tests/test_capture_profile_preview_parity.py`: preview == live plan over
+  4 configs (example, no DID session, config cycle, explicit PIDs) × every
+  starter profile plus a windowed-interval, a uniform-rounds and a
+  memory-window profile, each with and without `round_timestamps` (32 cases),
+  the live side built as the daemon builds it (whole catalog, aliases, profile
+  activated, budget armed as the capture route arms it). The replaced preview
+  body differs from the live plan in 32 of 32 of those cases: it omitted the
+  three DTC polls live issues under every profile (3 × 1/300 s), omitted
+  memory members and their session overhead (0 → 4.0 req/s for a 0.5 s memory
+  window), ignored uniform cadence (COOLANT_TEMP 0.083 → 0.25 Hz), put a
+  profile interval before a configured cycle (a DID at 0.25 → 0.333 Hz), and
+  capped DIDs without a session (0.25 → 0.167 Hz).
+  `test_capture_profiles.py::test_capture_profile_api_crud_and_auth` pinned
+  the old preview (`45.0`); it now expects `45.01`, the DTC polls above.
+  Every store the daemon builds passes `custom_pids_path=config.daemon.custom_pids`
+  (`collectors.default_collectors`, `daemon/runtime.py`'s capture lifecycle,
+  `dashboard/api.create_app`), so the preview's request universe includes the
+  vehicle's custom PIDs as live does:
+  `test_capture_profile_preview_parity.py::test_dashboard_preview_includes_the_daemons_custom_pids`
+  (`custom:OIL_PRESS` in `GET /control/capture/profiles`; fails with the
+  `api.py` argument removed).
+
+- [x] **R02.4 One frame-timestamp policy.** *Drift bug, serve path.* Three
   policies stamp received frames:
   - `can_collector.frame_to_record` uses raw `float(msg.timestamp)` with no
     guard. Every broadcast row on both paths goes through it.
@@ -140,7 +204,19 @@ before the structural ones.
   all three. **Accept:** a failing test first: a frame with a stale kernel
   stamp gets the same timestamp on the broadcast and OBD paths. Size **S–M**.
 
-- [ ] **R02.5 Pin the OBD request's responder in the client, not in each
+  **Done 2026-09-25.** `src/collection/frame_time.py`: `frame_arrival(msg,
+  now=None)` with `KERNEL_STAMP_MAX_SKEW_SECONDS`, used by
+  `can_bus.frame_to_record` (every broadcast row), the OBD loop
+  (`can_obd_io._frame_arrival`, on the loop's own clock) and
+  `sensor_can_collector.frame_to_records`. `tests/test_frame_time.py`
+  (stale-by-600 s, 0.0 and sane stamps): the two bad-stamp cases failed at
+  `1ff1921` and pass. Two fixtures used months-old fixed stamps and now use
+  fresh ones (`test_can_collector._frames`,
+  `test_sensor_can::test_frame_time_is_the_receive_stamp`). Behaviour: a
+  broadcast or sensor row whose driver stamp is more than 5 s off the wall
+  clock is stamped at receipt, like the OBD reading beside it.
+
+- [x] **R02.5 Pin the OBD request's responder in the client, not in each
   caller.** *Drift bug.*
   - Inside `can_obd_collector.py`, `_query_with_tap` and
     `_query_batched_with_tap` are the same ~45-line receive loop: deadline,
@@ -167,7 +243,25 @@ before the structural ones.
 
   Size **M**.
 
-- [ ] **R02.6 `record_can_obd` must stop on a full disk.** *Drift bug,
+  **Done 2026-09-25.** `isotp.await_response(recv, send_flow_control,
+  assembler, request_id, deadline, *, clock, stop, hard_deadline,
+  response_ids) -> Exchange`; pinning comes from `isotp.expected_responder(
+  request_id)` (none for 0x7DF) and cannot be switched off; `0x78` extends by
+  `RESPONSE_PENDING_EXTENSION_SECONDS` up to `MAX_RESPONSE_PENDING_EXTENSIONS`
+  (moved to `isotp`, re-exported). Used by `CanObdClient._collect_response_or_nrc`
+  and the loop's single and batched polls (`can_obd_io._await_exchange`).
+  Failing first at `1ff1921`, passing now (`test_can_obd_client.py`):
+  `test_physical_request_ignores_another_modules_reply`,
+  `test_physical_request_with_only_a_foreign_reply_is_silence`,
+  `test_client_honours_response_pending`,
+  `test_client_response_pending_is_bounded`. A caller that declares one
+  response id (`response_id_min == response_id_max`, e.g. the calibration
+  route's `dids.yaml` `ecu_response_id`) is pinned to that id, not request+8:
+  `test_a_declared_response_id_is_the_pin_not_request_plus_8` (0x745 → 0x765;
+  fails with request+8 pinning). The hand pinning in
+  `verify_memory_channels.py`/`did_sweep.py` is removed (the client pins).
+
+- [x] **R02.6 `record_can_obd` must stop on a full disk.** *Drift bug,
   recorder only.*
   - `can_collector.record` maps a writer `OSError` to
     `stopped_by="disk_error"` + `dropped_writes`.
@@ -184,7 +278,20 @@ before the structural ones.
   `OSError(ENOSPC)` ends `record_can_obd` with `stopped_by="disk_error"` on
   the first failure, with no rebuild. Size **S**.
 
-- [ ] **R02.7 Build the OBD spec from config in one place;
+  **Done 2026-09-25** (with R02.8). The frames writer is wrapped by
+  `RecorderRun.frame_writer`, which raises `recording.DiskWriteError` (not an
+  `OSError`); `record_can_obd` ends the run as `disk_error`.
+  `test_can_obd_collector.py::test_record_can_obd_stops_on_a_full_disk`
+  failed at `1ff1921` (`stopped_by == "deadline"` after rebuilding the bus) and
+  passes: `disk_error`, `dropped_writes == 1`, zero rebuilds, manifest error
+  names ENOSPC. The readings file flushes every line, so on a real full disk
+  it usually fails first, inside the poll loop: `RecorderRun.reading_writer`
+  wraps `obd_writer.write` the same way.
+  `test_record_can_obd_stops_when_the_readings_file_hits_a_full_disk`
+  (`write` raises ENOSPC) ends as `disk_error` with no rebuild; with the
+  unwrapped writer it fails.
+
+- [x] **R02.7 Build the OBD spec from config in one place;
   `scripts/record.py` has drifted.**
   - `collectors.default_collectors`, a 30-field `CanObdSpec`, and
     `scripts/record.py` build the spec from the same config differently.
@@ -202,9 +309,24 @@ before the structural ones.
   evidence: batching turns on in the recorder, and that is the point. Size
   **S–M**.
 
+  **Done 2026-09-25.** `CanObdSpec.from_config(collection, can, *, catalog,
+  pids, dids, did_request_id, custom_pids_path, vehicle, freeze_frame_trigger,
+  force_poll_trigger)`, with `profile_did_union` (the DID union, computed once)
+  and `did_alias_table`. `default_collectors` and `scripts/record.py` both use
+  it. `test_record_script.py::test_recorder_spec_equals_the_daemon_spec_for_the_example_config`
+  failed at `1ff1921` (service_mids, batch_max_pids and more differed) and
+  passes: equal field for field except the catalog union and the daemon-only
+  triggers. **Behaviour change (the point):** the recorder now batches
+  (`batch_max_pids` 6 from the example config), and takes DID widths, the
+  priority lane, DTC/monitor cadence, `obd_monitor_mids`, custom PIDs
+  (`daemon.custom_pids`), the calibration-id read and the discovery key from
+  config; `--obd-did-header` defaults to `collection.obd_did_request_id`.
+  Also: `scripts/record.py` gained the `scripts._cli` import fallback its
+  siblings have (the test file could not import it on its own at `1ff1921`).
+
 ## Structure
 
-- [ ] **R02.8 One recorder skeleton.**
+- [x] **R02.8 One recorder skeleton.**
   - `can_collector.record` (235 lines) and `record_can_obd` (200 lines)
     duplicate the stop checks, the four `RebuildOutcome` → `stop_reason`
     branches, best-effort shutdown, the `finally` that shuts down a rebuilt
@@ -218,7 +340,18 @@ before the structural ones.
   tests and `test_record_script` pass unchanged. There is no private
   cross-module import. Size **M**.
 
-- [ ] **R02.9 Turn `run_can_obd_loop` into a class, with a `BatchGovernor`.**
+  **Done 2026-09-25.** `src/collection/recording.py`: `RecordingResult`,
+  public `write_manifest`, `DiskWriteError`, and `RecorderRun` (stop checks,
+  the `RebuildOutcome` → `stopped_by` mapping, bus-failure rebuild,
+  finalization, manifest, the "recording stopped" line). `record` and
+  `record_can_obd` both run inside it; the private `can_collector._write_manifest`
+  import is gone. `test_can_collector`, the `test_can_obd_collector` recorder
+  tests and `test_record_script` pass without edits to their recorder cases.
+  Behaviour: `record_can_obd` now logs "recording stopped", and its
+  `frames_recorded` counts frames written, including across reconnects (it was
+  the loop's per-segment tally, which lost a segment that ended in a fault).
+
+- [x] **R02.9 Turn `run_can_obd_loop` into a class, with a `BatchGovernor`.**
   - `run_can_obd_loop` is 727 lines threading ~40 locals. The duplication is
     inside the function:
     - `next_budget_at = max(next_budget_at + 1/bus_budget.effective(...),
@@ -266,7 +399,45 @@ before the structural ones.
 
   Size **L**. Do it after R02.1–R02.5, which change the same code.
 
-- [ ] **R02.10 Split `obd_scheduler.py` into a package and make its de-facto
+  **Done 2026-09-25.** `can_obd_loop.py`: `_CanObdLoop` (state as attributes;
+  `_on_generation_change`, `_apply_triggers`, `_publish_metrics` — the one
+  snapshot site, also at exit — `_tick_controller`,
+  `_maybe_read_calibration_id`, `_maybe_probe_discovery`, `_ensure_round`,
+  `_serve_batch`, `_serve_single`, `_spend_budget_slot`, `_drain_until`) and
+  `BatchGovernor(max, narrow=, kind=, stats=)` with `size_for_next`,
+  `on_batch`, `on_single`, `on_ecu_answer`, `metrics`; Mode 01 narrows by
+  `_next_batch_size`, Mode 22 by `disable_batching`; `min(..., 3)` is
+  `isotp.MAX_BATCHED_DIDS`. `run_can_obd_loop()` is a thin wrapper.
+  `can_obd_io.py` holds the wire I/O, `obd_response_decode.py` the decoder;
+  `can_obd_collector.py` is 2,555 → 365 lines (entry points + re-exports).
+  Failing first: `test_multi_pid_batching.py::test_exit_snapshot_reports_the_narrowed_batch_size`
+  (`6 == 1` at `1ff1921`). Passing: `test_can_obd_collector`,
+  `test_multi_pid_batching`, `test_multi_did_batching`, `test_capture_rounds`,
+  `test_d02_accounting`, `test_ecu_calibration_id` (and the rest of the
+  collector files). Monkeypatch targets retargeted: `next_wake_at` and
+  `_drain_frames_until` → `can_obd_loop` (`test_hybrid_scheduling`);
+  `capture_round_fakes.install_clock` binds `can_obd_loop`, `can_obd_io`,
+  `obd_response_decode` and `obd_scheduler.cadence`; `test_bus_budget` checks
+  `can_obd_loop` (one `bus_budget.effective(self.budget_rps)`, in
+  `_spend_budget_slot`, which every served slot calls).
+  Sustained harness and pinned replay, before/after, as a clean A/B: two
+  worktrees of `dee0c42`, one bare and one with only this checklist's files
+  (other sessions' uncommitted edits excluded), `scripts/sustained_validation.py
+  run` over all 13 scenarios including `replay-drive-slice` (the pinned drive
+  slice, C10.9). Every scenario kept its limiting stage, sequence accounting
+  (`reconciled` everywhere, `reconciled_with_counted_loss` for the storage
+  overload, `not_applicable` for replay), C03 verdict and
+  `expected_failures_met`. The replay's known-answer pairs agree 1:1 on both
+  sides (ECM_RPM ~ RPM slope 0.99154 → 0.99168). Counts moved within the
+  real-clock noise: re-running `fuel-did-research` twice per side gave
+  complete tuples 191/184 (before) and 192/185 (after) against 196/177 in the
+  full runs; batch counts moved by ±10 % both ways between scenarios, and
+  `overload-rate` named `rate_shortfall` beside `unanswered_input` after where
+  it named `acquisition_gap` before (both are its declared overload
+  failures). `tests/test_sustained_validation.py -m ""`: 21 passed before
+  (main tree, 104 s) and after (worktree, 100 s).
+
+- [x] **R02.10 Split `obd_scheduler.py` into a package and make its de-facto
   public names public.**
   - `can_obd_collector` imports 12 underscore names from it
     (`_PollRequest`, `_PollRequestState`, `_select_next_due_request`,
@@ -292,7 +463,43 @@ before the structural ones.
   `PollRequest`. All ~25 importers work through the re-exports. Size **L**.
   Do it after R02.2, R02.3 and R02.9.
 
-- [ ] **R02.11 Make the scheduler-metrics contracts structural.**
+  **Done 2026-09-25.** `src/collection/obd_scheduler/` = `spec`, `requests`,
+  `cadence`, `selection`, `rounds`, `did_window`, `metrics` (import order is a
+  DAG: spec ← requests ← cadence ← selection ← metrics ← rounds; did_window ←
+  requests, spec). `__init__` re-exports every name the module had (95 in
+  `__all__`). External importers (51 files, `ast` walk of `from
+  src.collection.obd_scheduler import …` plus `obd_scheduler.<name>`) use:
+  ACHIEVED_HZ_WINDOW, AUTO_MISS_BACKOFF_SECONDS, AUTO_PIDS, BATCHING_COUNTERS,
+  CAPTURE_MISS_BACKOFF_SECONDS, CanObdLoopStats, CanObdSpec,
+  DEFAULT_DID_REQUEST_ID, DidSessionSpec, DidWindowController,
+  FAST_EXIT_RETRY_MIN_SECONDS, FREEZE_FRAME_CHANNEL_PREFIX, ForcePollTrigger,
+  FreezeFrameTrigger, MAX_MISS_BACKOFF_SECONDS, MODE01_DESYNC_BLAME_LIMIT,
+  MODE01_MIN_SHARE_SECONDS, MODE22_BATCHING_COUNTERS, Mode01WidthLedger,
+  ObdSchedulerMetrics, RequestFilter, RoundScheduler, RoundState,
+  SessionControlResult, _DiscoveryClient, _PollRequest, _PollRequestState,
+  _batching_metrics, _bus_budget_requests_per_second, _count_active_requests,
+  _initial_request_states, _next_due_at, _next_request_due_at,
+  _next_unsuppressed_at, _receive_metrics, _request_accounting_error,
+  _request_interval_seconds, _request_rate_hz, _request_sends_judged,
+  _resolved_polling_plan, _scheduler_metrics, _select_next_due_request,
+  _update_response_state, apply_mode01_support, build_poll_requests,
+  did_access, did_alias_table, did_response_widths, discovery_items,
+  is_batchable, known_did_names, load_repo_did_map, mode01_registry_width,
+  mode06_requests, parse_did_token, parse_pid_token, preview_discovery_active,
+  preview_polling_plan, profile_did_union, replan_for_generation,
+  resolve_did_session_spec, round_members, round_period_seconds,
+  select_batch_companions, select_did_batch_companions. `PollRequest` /
+  `PollRequestState` are public with `_PollRequest`/`_PollRequestState`
+  aliases (src uses the new names). The function-local `tuning_profile`
+  imports (12 at `1ff1921`) are 0; the `from_config` ones are hoisted too.
+  One kind Literal: `request_eligibility.RequestKind` (gained `session`,
+  `identification`; `UNGATED_KINDS` names the two the matrix never gates)
+  types `PollRequest.kind` and `evaluate(kind)`. `tuning_profile`'s `Any`
+  request parameters are `PollRequest`; `mypy src` is clean. Behaviour:
+  scheduler log records now carry submodule logger names
+  (`src.collection.obd_scheduler.did_window`, …), children of the old one.
+
+- [x] **R02.11 Make the scheduler-metrics contracts structural.**
   - `capture_quality.BATCHING_COUNTERS` / `MODE22_BATCHING_COUNTERS` read
     `_batching_metrics`' dict keys with `int(block.get(name) or 0)`. A renamed
     key reads as a verified zero, and no test pins the key sets.
@@ -306,7 +513,19 @@ before the structural ones.
   rather than reading zero. **Accept:** a test that the producer's keys equal
   the consumer's sets. Size **S**.
 
-- [ ] **R02.12 Move `bus_factory` and friends out of the sniffer module.**
+  **Done 2026-09-25.** `ObdSchedulerMetrics.to_dict` is `dataclasses.fields`
+  plus the `active_requests_unfiltered` alias. `BATCHING_COUNTERS` /
+  `MODE22_BATCHING_COUNTERS` are derived from the producer's own counter
+  functions (`obd_scheduler.metrics._mode01_batching_counters` /
+  `_mode22_batching_counters`) and imported by `capture_quality`, whose
+  `_counter_values` no longer reads an absent key as 0: the counter comes back
+  `null` and a note names it. (Refusal by `null` + note rather than an
+  exception: `capture_coverage` recomputes stored manifests that can predate a
+  key.) `tests/test_scheduler_metrics_contract.py` (4): producer keys ⊇ the
+  consumer's sets (the same tuple objects), a renamed counter is `null` with a
+  note, batching-off stays `None`, `to_dict` covers every field.
+
+- [x] **R02.12 Move `bus_factory` and friends out of the sniffer module.**
   - 15 importers take `bus_factory` from `can_collector`: `profiles`,
     `control/*`, `dashboard/routes/calibration`, 9 tools and `preflight`.
     Most of them transmit, and the module's docstring says "sniffer… never
@@ -319,7 +538,18 @@ before the structural ones.
   `can_collector`. Retarget `tests/test_profiles.py`'s patches of
   `src.collection.can_collector.bus_factory`. Size **S–M**.
 
-- [ ] **R02.13 Move the J1979 decoders out of the transport client.** This is
+  **Done 2026-09-25.** `src/collection/can_bus.py`: `bus_kwargs` (the one
+  virtual-bitrate rule, also used by `sensor_bus_factory`), `bus_factory`,
+  `frame_to_record`, and `receive_frame` with its parse-error primitives;
+  `can_collector` and `can_obd_client` re-export them.
+  `DEFAULT_RECONNECT_POLICY` is defined once, in `reconnect.py` (7 → 1).
+  Importers moved to `can_bus`: `src/profiles.py`, `scripts/record.py`,
+  `scripts/preflight.py`, and 8 tools; `tests/test_profiles.py` patches
+  `src.collection.can_bus.bus_factory`. Still on the re-export:
+  `src/control/can_activity.py`, `src/control/obd_request.py`,
+  `src/dashboard/routes/calibration.py` (R03's area).
+
+- [x] **R02.13 Move the J1979 decoders out of the transport client.** This is
   a relocation, not a merge: the two decoder sets stay separate.
   - `can_obd_client.py` (1,178 lines) holds `CanObdClient` plus ~370 lines of
     pure decoders and `PID_DECODERS`.
@@ -330,7 +560,17 @@ before the structural ones.
   re-export from `can_obd_client`. `assert_pid_tables_consistent` still runs
   at import. Size **M**.
 
-- [ ] **R02.14 Small cleanups (batch them).**
+  **Done 2026-09-25.** `src/collection/pid_decoders.py` (no python-can import;
+  checked `'can' not in sys.modules` after importing it) holds the Mode 01
+  decoders, `PID_DECODERS`, `TIMING_ADVANCE_UNAVAILABLE` and
+  `parse_dtc_payload`; `can_obd_client` re-exports every name. The private
+  `_need` is public `need_bytes`, so `obd_registry` imports `pid_decoders`
+  and no longer imports the client at all; `assert_pid_tables_consistent`
+  still runs at registry import. With the cycle gone,
+  `query_mode_01_batch(byte_length_for=)` defaults to the registry width.
+  The decoder sets stay separate (July decision).
+
+- [~] **R02.14 Small cleanups (batch them).**
   - Delete dead code: `CanObdClient._handle_single_frame` (no callers) and
     `_extract_service_payload` (test-only).
   - Remove the 66 unused `# noqa: E501` in `obd_registry`
@@ -350,6 +590,20 @@ before the structural ones.
     the vehicle profile or name it as Xterra-specific.
 
   Size **S**.
+
+  **Done 2026-09-25 except one.** Deleted `CanObdClient._handle_single_frame`
+  and `_extract_service_payload`; `ruff --select RUF100 --fix` removed all 66
+  `# noqa: E501` in `obd_registry`; removed `can_obd_collector.parse_can_id`
+  and `can_collector.make_session_dir` (callers use `can_ids.parse_standard_can_id`
+  and `session.make_session_dir`); the IMU, supply-voltage and replay
+  collectors wait through `reconnect.wait_for_stop_or_timeout`; the
+  `can_obd_collector`/`can_obd_client` docstrings no longer call ELM327 dead
+  or the direction Canable-only; `pids.py` says it is the ELM327 path's
+  registry; `uprev_session` names its sequence as the Xterra's
+  (`CAPTURED_ON`, module docstring: another vehicle's capture belongs in its
+  profile). **Remainder:** `kline_collector._wait` → `wait_for_stop_or_timeout`
+  is not done: `src/collection/kline_collector.py` carries a human session's
+  uncommitted work.
 
 ## Looked at and fine
 

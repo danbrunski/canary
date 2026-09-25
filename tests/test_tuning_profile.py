@@ -10,7 +10,6 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
-from types import SimpleNamespace
 from typing import Any
 
 import can
@@ -20,7 +19,7 @@ from pydantic import ValidationError
 from src.collection import tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
-from src.collection.obd_scheduler import CanObdSpec, SessionControlResult
+from src.collection.obd_scheduler import CanObdSpec, SessionControlResult, _PollRequest
 from src.config import CanBusConfig
 
 
@@ -399,8 +398,9 @@ def test_continuous_capture_holds_the_session_open(monkeypatch: pytest.MonkeyPat
     ctrl.advance(states, 1.0)
     assert ctrl.phase == "window"
     # Both DIDs are due again, so the next round can proceed immediately.
-    assert ctrl.request_eligible(0, SimpleNamespace(kind="did"), now=1.0) is True
-    assert ctrl.request_eligible(1, SimpleNamespace(kind="did"), now=1.0) is True
+    did = _PollRequest(kind="did", service=0x22, identifier=0, request_id=0x7E0, channel="DID")
+    assert ctrl.request_verdict(0, did).eligible is True
+    assert ctrl.request_verdict(1, did).eligible is True
     # Past the window deadline it still does not close.
     ctrl.advance(states, 999.0)
     assert ctrl.phase == "window"

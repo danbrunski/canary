@@ -57,6 +57,7 @@ from src.collection.capture_losses import (
     VERIFIED,
     unknown_losses,
 )
+from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -229,23 +230,6 @@ class CaptureQuality:
 BATCHING_SCOPE_CAPTURE = "capture"
 
 #: Cumulative counters in the scheduler's ``batching`` block (Mode 01 level).
-BATCHING_COUNTERS: tuple[str, ...] = (
-    "batched_requests",
-    "batched_pids_requested",
-    "failures",
-    "desyncs",
-    "size_narrowings",
-    "failures_while_ecu_silent",
-)
-#: Cumulative counters in ``batching.mode22``.
-MODE22_BATCHING_COUNTERS: tuple[str, ...] = (
-    "batched_requests",
-    "members_requested",
-    "failures",
-    "desyncs",
-    "fallbacks",
-    "failures_while_ecu_silent",
-)
 #: Identity of the counters' owner (the collector loop's start instant). A
 #: different value at arm and now means the counters restarted in between,
 #: even if they have since climbed past their arm-time values.
@@ -266,12 +250,37 @@ def batching_baseline(scheduler: Mapping[str, Any] | None) -> dict[str, Any]:
     return {"recorded": True, "batching": None if block is None else dict(block)}
 
 
-def _counter_values(block: Mapping[str, Any] | None) -> dict[str, int]:
-    block = block or {}
-    mode22 = block.get("mode22") or {}
-    out = {name: int(block.get(name) or 0) for name in BATCHING_COUNTERS}
-    out |= {f"mode22.{name}": int(mode22.get(name) or 0) for name in MODE22_BATCHING_COUNTERS}
-    return out
+def _counter_values(block: Mapping[str, Any] | None) -> tuple[dict[str, int | None], list[str]]:
+    """The batching counters of one reading, and the ones it lacks.
+
+    ``None`` (batching off, nothing sent) is a genuine zero for every
+    counter. A reported block that lacks a counter is *not*: the key sets are
+    the producer's (``obd_scheduler.BATCHING_COUNTERS``), so an absent key is
+    a producer/consumer disagreement or an older payload, and reading it as 0
+    passed as a verified "no batch failures in this capture" (R02.11). Such a
+    counter comes back ``None`` and is named in the second element.
+    """
+    if block is None:
+        zeros: dict[str, int | None] = {name: 0 for name in BATCHING_COUNTERS}
+        return zeros | {f"mode22.{name}": 0 for name in MODE22_BATCHING_COUNTERS}, []
+    raw_mode22 = block.get("mode22")
+    mode22: Mapping[str, Any] = raw_mode22 if isinstance(raw_mode22, Mapping) else {}
+    values: dict[str, int | None] = {}
+    missing: list[str] = []
+    for name in BATCHING_COUNTERS:
+        if name in block:
+            values[name] = int(block[name] or 0)
+        else:
+            values[name] = None
+            missing.append(name)
+    for name in MODE22_BATCHING_COUNTERS:
+        key = f"mode22.{name}"
+        if name in mode22:
+            values[key] = int(mode22[name] or 0)
+        else:
+            values[key] = None
+            missing.append(key)
+    return values, missing
 
 
 def _ratio(num: int | None, den: int | None) -> float | None:
@@ -301,10 +310,18 @@ def scope_batching(
     start_block = (baseline or {}).get("batching") if recorded else None
     if current is None and start_block is None:
         return None, []
-    now_values = _counter_values(current)
-    start_values = _counter_values(start_block)
+    now_values, now_missing = _counter_values(current)
+    start_values, start_missing = _counter_values(start_block)
+    missing = sorted(set(now_missing) | set(start_missing))
     notes: list[str] = []
     reset_counters: list[str] = []
+    if missing:
+        notes.append(
+            "batching reading lacks counter(s) "
+            + ", ".join(missing)
+            + "; they are reported as null, not read as zero (an older payload, or the "
+            "scheduler's batching keys and capture_quality disagree)."
+        )
     if not recorded:
         status = UNKNOWN
         notes.append(
@@ -313,7 +330,11 @@ def scope_batching(
             "since the collector started and is not this capture's count."
         )
     else:
-        reset_counters = [name for name, value in now_values.items() if value < start_values[name]]
+        reset_counters = [
+            name
+            for name, value in now_values.items()
+            if value is not None and (start := start_values[name]) is not None and value < start
+        ]
         loop_then = (start_block or {}).get(BATCHING_LOOP_KEY)
         loop_now = (current or {}).get(BATCHING_LOOP_KEY)
         restarted = loop_then is not None and loop_now is not None and loop_then != loop_now
@@ -326,10 +347,14 @@ def scope_batching(
                 f"restart: {', '.join(reset_counters)}); the capture's batch failures and "
                 "desyncs are unknowable from the pair and are reported as null."
             )
-    deltas: dict[str, int | None] = {
-        name: (value - start_values[name] if status == VERIFIED else None)
-        for name, value in now_values.items()
-    }
+    deltas: dict[str, int | None] = {}
+    for name, value in now_values.items():
+        start = start_values[name]
+        deltas[name] = (
+            value - start
+            if status == VERIFIED and value is not None and start is not None
+            else None
+        )
     top = {name: deltas[name] for name in BATCHING_COUNTERS}
     mode22 = {name: deltas[f"mode22.{name}"] for name in MODE22_BATCHING_COUNTERS}
     pids = top["batched_pids_requested"]

@@ -32,6 +32,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, get_args
 
+#: Every request kind, the one Literal (R02.10): ``obd_scheduler.PollRequest.kind``
+#: and :func:`evaluate` share it, where two Literals used to disagree.
 RequestKind = Literal[
     "pid",
     "custom",
@@ -42,12 +44,21 @@ RequestKind = Literal[
     "freeze_frame",
     "forced_poll",
     "discovery",
+    "session",
+    "identification",
 ]
 ProfileClass = Literal["default", "focused_mode01", "mode22_owning", "continuous_did"]
 SessionPhase = Literal["none", "mode01", "window", "lapse"]
 Verdict = Literal["eligible", "deferred", "ineligible"]
 
-REQUEST_KINDS: tuple[RequestKind, ...] = get_args(RequestKind)
+#: Wire traffic the loop owns outright and the matrix never gates: session
+#: control (the controller decides when) and identification reads (the
+#: calibration-id schedule decides). ``evaluate`` calls them ``unknown_kind``.
+UNGATED_KINDS: frozenset[RequestKind] = frozenset({"session", "identification"})
+#: The kinds the matrix has rows for.
+REQUEST_KINDS: tuple[RequestKind, ...] = tuple(
+    kind for kind in get_args(RequestKind) if kind not in UNGATED_KINDS
+)
 PROFILE_CLASSES: tuple[ProfileClass, ...] = get_args(ProfileClass)
 SESSION_PHASES: tuple[SessionPhase, ...] = get_args(SessionPhase)
 
@@ -132,7 +143,7 @@ def selection_applies(kind: str, profile_class: str) -> bool:
 
 
 def evaluate(
-    kind: str,
+    kind: RequestKind,
     profile_class: ProfileClass,
     phase: SessionPhase,
     *,
@@ -191,6 +202,7 @@ __all__ = [
     "ProfileClass",
     "RequestKind",
     "SessionPhase",
+    "UNGATED_KINDS",
     "Verdict",
     "evaluate",
     "matrix_rows",

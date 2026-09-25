@@ -43,7 +43,7 @@ try:
 except ImportError:  # loaded as `scripts.preflight` — repo root on path, not scripts/
     from scripts._cli import add_common_args  # type: ignore[no-redef]
 
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import PID_DECODERS, CanObdClient
 from src.config import CanaryConfig, CanBusConfig
 from src.log import configure_logging

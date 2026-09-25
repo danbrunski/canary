@@ -12,7 +12,7 @@ from typing import Any
 import can
 import pytest
 
-from src.collection.can_collector import make_session_dir
+from src.can_ids import parse_standard_can_id
 from src.collection.can_obd_collector import (
     AUTO_BASELINE_PID_NAMES,
     MAX_RESPONSE_PENDING_EXTENSIONS,
@@ -23,7 +23,6 @@ from src.collection.can_obd_collector import (
     _query_with_tap,
     _response_to_reading,
     build_poll_requests,
-    parse_can_id,
     parse_did_token,
     parse_pid_token,
     record_can_obd,
@@ -49,6 +48,7 @@ from src.collection.obd_scheduler import (
 )
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
+from src.session import make_session_dir
 from tests.capture_round_fakes import FakeClock, install_clock
 from tests.waits import StopWhen, hang_guard_deadline
 
@@ -450,8 +450,8 @@ def test_parse_pid_token_accepts_auto_names_and_hex() -> None:
 def test_parse_did_and_can_id() -> None:
     assert parse_did_token("1101") == 0x1101
     assert parse_did_token("ECM_BASE_FUEL_SCHEDULE_CANDIDATE") == 0x1209
-    assert parse_can_id("7E0") == 0x7E0
-    assert parse_can_id("0x7e1") == 0x7E1
+    assert parse_standard_can_id("7E0") == 0x7E0
+    assert parse_standard_can_id("0x7e1") == 0x7E1
     with pytest.raises(ValueError, match="4-character"):
         parse_did_token("110")
 
@@ -1767,6 +1767,77 @@ def test_record_can_obd_bails_after_max_consecutive_reconnect_failures(
     assert "adapter wedged" in manifest["error"]
 
 
+class _GoodObdBus:
+    """Hands out broadcast frames forever; never fails."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def send(self, msg: can.Message) -> None:
+        pass
+
+    def recv(self, timeout: float = 0.0) -> can.Message | None:
+        self.calls += 1
+        return can.Message(arbitration_id=0x100, data=b"\x01\x02", is_extended_id=False)
+
+    def shutdown(self) -> None:
+        pass
+
+
+def test_record_can_obd_stops_on_a_full_disk(tmp_path: Path) -> None:
+    """R02.6: the frames writer runs inside ``on_frame``, so its OSError left
+    the loop and was taken for a bus fault — the bus was rebuilt (which
+    succeeds and resets the counters) and retried until the deadline, never
+    reporting ``disk_error``. A full disk ends the run on the first failure."""
+    import errno
+    import unittest.mock as mock
+
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+    writer = JsonlReadingWriter(paths.pids)
+    factory_calls = 0
+
+    def factory(_spec: CanBusConfig) -> _GoodObdBus:
+        nonlocal factory_calls
+        factory_calls += 1
+        return _GoodObdBus()
+
+    class FullDisk:
+        def __init__(self, _path: str) -> None:
+            self.writes = 0
+
+        def __enter__(self) -> FullDisk:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            pass
+
+        def on_message_received(self, _msg: can.Message) -> None:
+            self.writes += 1
+            if self.writes > 3:
+                raise OSError(errno.ENOSPC, "No space left on device")
+
+    with mock.patch.object(can.io, "CanutilsLogWriter", FullDisk):
+        result = record_can_obd(
+            _GoodObdBus(),  # type: ignore[arg-type]
+            paths,
+            spec=_SPEC,
+            vehicle=None,
+            duration=2.0,
+            obd_writer=writer,
+            factory=factory,  # type: ignore[arg-type]
+            reconnect_policy=ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01),
+        )
+    writer.close()
+
+    assert result.stopped_by == "disk_error"
+    assert result.dropped_writes == 1
+    assert result.reconnects == 0 and factory_calls == 0, "a full disk is not a bus fault"
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "disk_error"
+    assert manifest["dropped_writes"] == 1
+    assert "No space left on device" in manifest["error"]
+
+
 def test_record_can_obd_without_factory_propagates(tmp_path: Path) -> None:
     """Backward-compat: with no factory/policy a bus failure propagates as
     before (the daemon path's long-standing behavior), and the manifest is
@@ -2227,3 +2298,62 @@ def test_a_capture_armed_mid_window_does_not_wait_out_the_old_interval() -> None
             controller.advance(states, now=now + elapsed)
         # The 5 s lapse, not the 60 s window interval.
         assert elapsed <= 6.0, f"{phase}: first window {elapsed:.1f}s after the change"
+
+
+def test_record_can_obd_stops_when_the_readings_file_hits_a_full_disk(tmp_path: Path) -> None:
+    """R02.6, the readings half: ``pids.jsonl`` flushes every line, so on a
+    full disk it is usually the first write to fail — from inside the poll
+    loop, where a bare ``OSError`` was taken for a bus fault and rebuilt."""
+    import errno
+
+    paths = make_session_dir(tmp_path, datetime.now(UTC))
+    factory_calls = 0
+
+    def factory(_spec: CanBusConfig) -> _ReconnectableObdBus:
+        nonlocal factory_calls
+        factory_calls += 1
+        return _ReconnectableObdBus(good_frames=10_000)
+
+    class FullDiskReadings:
+        def write(self, _reading: object) -> None:
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    class AnsweringBus:
+        """Answers every RPM request so a reading reaches the writer."""
+
+        def __init__(self) -> None:
+            self.pending: list[can.Message] = []
+
+        def send(self, msg: can.Message, timeout: float | None = None) -> None:
+            if bytes(msg.data)[1] == 0x01:
+                self.pending.append(
+                    can.Message(
+                        arbitration_id=0x7E8,
+                        data=bytes([0x04, 0x41, 0x0C, 0x0B, 0xB8, 0, 0, 0]),
+                        is_extended_id=False,
+                    )
+                )
+
+        def recv(self, timeout: float = 0.0) -> can.Message | None:
+            return self.pending.pop(0) if self.pending else None
+
+        def shutdown(self) -> None:
+            pass
+
+    result = record_can_obd(
+        AnsweringBus(),  # type: ignore[arg-type]
+        paths,
+        spec=_SPEC,
+        vehicle=None,
+        duration=2.0,
+        obd_writer=FullDiskReadings(),  # type: ignore[arg-type]
+        factory=factory,  # type: ignore[arg-type]
+        reconnect_policy=ReconnectPolicy(initial_delay_seconds=0.01, max_delay_seconds=0.01),
+    )
+
+    assert result.stopped_by == "disk_error"
+    assert result.dropped_writes == 1
+    assert result.reconnects == 0 and factory_calls == 0, "a full disk is not a bus fault"
+    manifest = json.loads(paths.manifest.read_text())
+    assert manifest["stopped_by"] == "disk_error"
+    assert "No space left on device" in manifest["error"]

@@ -122,7 +122,7 @@ def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, mon
             pass
 
     config = _base_config(tmp_path, obd_source="canable")
-    monkeypatch.setattr("src.collection.can_collector.bus_factory", lambda _can: _FakeBus())
+    monkeypatch.setattr("src.collection.can_bus.bus_factory", lambda _can: _FakeBus())
     monkeypatch.setattr("src.collection.can_obd_client.CanObdClient", _FakeClient)
 
     from src.profiles import probe_vehicle_info
@@ -211,7 +211,7 @@ def _probe_with(
             "profiles": config.profiles.model_copy(update={"vin_probe_timeout_seconds": timeout})
         }
     )
-    monkeypatch.setattr("src.collection.can_collector.bus_factory", lambda _can: ecu)
+    monkeypatch.setattr("src.collection.can_bus.bus_factory", lambda _can: ecu)
     started = time.monotonic()
     probe = profiles_mod.probe_vehicle_info(config)
     return probe, time.monotonic() - started

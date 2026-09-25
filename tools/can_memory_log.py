@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from src.collection.can_collector import bus_factory
+from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import CanObdClient, RawReply
 from src.collection.isotp import ObdResponse
 from src.config import CanaryConfig

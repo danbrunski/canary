@@ -52,6 +52,7 @@ from typing import Any, cast
 import pandas as pd
 
 from src.collection.collectors import CollectorStarter
+from src.collection.reconnect import wait_for_stop_or_timeout
 from src.config import CanaryConfig
 from src.preprocessing.loader import (
     PARQUET_PATTERN,
@@ -423,12 +424,8 @@ async def replay_session(
             # capture pause can't stall the stream.
             target = wall_start + (orig_epoch - first_orig) / speed
             delay = min(_MAX_GAP_SECONDS, max(0.0, target - time.monotonic()))
-            if delay > 0:
-                try:
-                    await asyncio.wait_for(stop_event.wait(), timeout=delay)
-                    return  # stop fired during the sleep
-                except TimeoutError:
-                    pass
+            if delay > 0 and await wait_for_stop_or_timeout(stop_event, delay):
+                return  # stop fired during the sleep
             emitted_at = time.time()
             record = TelemetryRecord(
                 timestamp=datetime.fromtimestamp(emitted_at, tz=UTC),

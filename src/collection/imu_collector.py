@@ -26,13 +26,17 @@ from typing import Protocol
 from src.collection.i2c_dev import LinuxI2cBus, RegisterBus
 from src.collection.lsm6dsox import FifoBatch, ImuSettings, Lsm6dsox
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
-from src.collection.reconnect import ReconnectPolicy, run_with_reconnect
+from src.collection.reconnect import (
+    DEFAULT_RECONNECT_POLICY,
+    ReconnectPolicy,
+    run_with_reconnect,
+    wait_for_stop_or_timeout,
+)
 from src.config import ImuConfig
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)
 
-DEFAULT_RECONNECT_POLICY = ReconnectPolicy()
 ACCEL_CHANNELS = ("ACCEL_X", "ACCEL_Y", "ACCEL_Z")
 GYRO_CHANNELS = ("GYRO_X", "GYRO_Y", "GYRO_Z")
 ACCEL_UNIT = "g"
@@ -109,11 +113,8 @@ async def collect_imu(
     await asyncio.to_thread(device.start)
     try:
         while not stop_event.is_set():
-            try:
-                await asyncio.wait_for(stop_event.wait(), timeout=poll_seconds)
+            if await wait_for_stop_or_timeout(stop_event, poll_seconds):
                 break
-            except TimeoutError:
-                pass
             batch = await asyncio.to_thread(device.read_fifo)
             if batch.overrun:
                 stats.overruns += 1
