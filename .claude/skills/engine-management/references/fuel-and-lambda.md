@@ -1,5 +1,10 @@
 # Fuel control, lambda, and trim diagnosis
 
+Contents: λ / AFR / φ conventions and bands · mixture demand by condition (transient
+fuelling) · open loop (fuel-cut recovery, protection enrichment) · trim structure · trim
+differential diagnosis · confounders · oxygen sensors · how the ECU builds a pulse (why a K
+or MAF edit moves more than fuel) · injectors and fueling math.
+
 ## Lambda, AFR, phi — get the convention right first
 
 - **λ = actual AFR ÷ stoichiometric AFR.** λ = 1 is stoichiometric whatever the fuel.
@@ -19,9 +24,11 @@
 > Also: on a vehicle with only a narrowband sensor, PID 0x44 reports **1.0 throughout closed
 > loop by definition**, showing the real command only in open loop. A flat 1.000 there is
 > correct behavior, not a stuck channel.
-- Stoichiometric AFR **by mass** (not volume): gasoline ≈ 14.7:1, E10 ≈ 14.1:1,
-  E85 ≈ 9.8:1, methanol ≈ 6.4:1. Because the *ratio* moves with fuel, **λ is the
-  portable quantity** — quote λ when comparing across fuels or vehicles.
+- Stoichiometric AFR **by mass** (not volume): gasoline ≈ 14.7:1 (J1979 itself uses
+  14.64), E10 ≈ 14.1:1, true E85 ≈ 9.8:1, methanol ≈ 6.4:1. Pump "E85" in the US is
+  anywhere from 51 to 83 % ethanol, so its stoichiometric AFR is really ~9.9–11.7. Because the *ratio*
+  moves with fuel, **λ is the portable quantity** — quote λ when comparing across fuels
+  or vehicles.
 - Ethanol content also lowers energy density (E10 ≈ −3%), so fuel-trim and pulse-width
   baselines shift seasonally and regionally with blend. That is a real confounder in
   any long-horizon trim comparison.
@@ -32,9 +39,9 @@
 |---|---|---|
 | Rich, usable | 0.85–0.95 | WOT power/charge-cooling territory |
 | Best drivability | 0.9–1.1 | the engine runs fine anywhere in here |
-| **Catalyst window** | **0.99–1.00** | ~10× tighter than the drivable range |
+| **Catalyst window** | **≈ 0.99–1.00** | ~1 % wide and slightly *rich* of 1, not symmetric about it: NOx conversion collapses just lean of 1.00 |
 | Lean, usable | 1.05–1.30 | economy/lean-cruise territory |
-| Lean misfire limit | > 1.30 | too much air to support consistent combustion |
+| Lean misfire limit | engine-dependent, roughly > 1.3 | too much air to support consistent combustion; set by chamber design and charge motion |
 
 **An engine can run perfectly smoothly and emit badly.** Never infer catalyst health
 from how the engine feels or from λ sitting near 1 on average.
@@ -44,22 +51,28 @@ from how the engine feels or from λ sitting near 1 on average.
 | Objective | λ | AFR (E0) |
 |---|---|---|
 | Best torque | 0.85–0.90 | 12.5–13.2 |
-| Best brake-specific fuel consumption | 1.05–1.10 | 15.4–16.2 |
-| Three-way catalyst conversion | 1.000 ± ~0.01 (time-averaged) | ≈14.7 |
+| Best brake-specific fuel consumption | ≈ 1.05–1.20, engine-dependent (Bosch quotes 1.1–1.2) | 15.4–17.6 |
+| Three-way catalyst conversion | ≈ 0.995, time-averaged, within a ~1 % window | ≈14.6 |
 | NA WOT production calibration | 0.85–0.92 | 12.5–13.5 |
 | Boosted WOT, aggressive | 0.75–0.82 | 11.0–12.0 |
 
 Best-power λ is genuinely engine-specific — it moves with charge motion, compression ratio,
 chamber design, and residual fraction — and **the torque-vs-λ curve is flat near its peak**
-(typically well under 2% torque across λ 0.85–0.92). That flatness is why it is nearly
+(only a few percent of torque across λ 0.85–0.92). That flatness is why it is nearly
 always right to run the lean edge of the best-power band and spend what's left on knock
 margin, rather than chasing the exact peak.
 
-**Catalyst-window caveat.** The ±1% window is a *time-averaged* constraint, not an
+**Catalyst-window caveat.** The ~1 % window is a *time-averaged* constraint, not an
 instantaneous one. Engines deliberately **dither** rich/lean to exercise the washcoat's
-oxygen storage, with studied amplitudes of λ = 1 ± 0.02 to ± 0.08 at sub-Hz frequencies. A
-lambda channel oscillating a few percent around 1.0 at well under 1 Hz is the control
-system working correctly — not an AFR fault.
+oxygen storage. Production switching loops run near 1 Hz, with a period set by gas
+transport time; lab studies use λ = 1 ± 0.02 to ± 0.08. A lambda or commanded-λ channel
+oscillating a few percent around 1.0 at about 1 Hz or slower is the control system
+working correctly, not an AFR fault.
+
+**The rear sensor moves the front target.** On most modern ECUs the post-catalyst sensor
+runs an outer trim loop that shifts the front sensor's λ target to cancel sensor bias and
+keep the catalyst centred. A front λ that settles at 0.99x "at stoich" may be deliberate.
+Don't "correct" it.
 
 The three-way catalyst's two reactions want *opposite* oxygen environments — reduction
 (NOx) wants low O2, oxidation (HC, CO) wants high O2. That is why closed-loop control
@@ -79,8 +92,14 @@ fault.
 | Tip-out (open→closed) | transiently **rich** | fuel film on the port walls keeps arriving |
 | Decel fuel cut (DFCO) | injectors **off** | λ pegs fully lean, fuel flow zero, closed loop suspended |
 
-Tip-in/tip-out excursions are transport physics, not sensor error. Judging steady-state
-mixture requires gating on |dTPS/dt| ≈ 0 — or you are measuring the transient.
+Tip-in/tip-out excursions are transport physics, not sensor error. The standard model
+(Aquino's "X-tau") says a fraction X of each injection lands on the port wall and
+evaporates with a time constant τ. The film has to fill before delivered fuel matches
+injected fuel on tip-in, and it keeps evaporating after tip-out. Both X and τ grow when
+cold and at high load. ECUs compensate with transient-fuel tables, but imperfectly.
+Judging steady-state mixture therefore requires gating on |dTPS/dt| ≈ 0 **plus a settling
+time** of a second or more after the throttle stops moving. Otherwise you are measuring
+the transient, or the tables that compensate it.
 
 ## Open loop is not a mode you can diagnose in
 
@@ -97,6 +116,24 @@ to zero under a hard pull" is the system entering open loop, not the fault resol
 Never compute trim statistics over open-loop windows — and note that a bare
 "fuel status = open loop" filter captures DFCO too, which usually dominates a normal
 drive. Separate power enrichment from overrun before pooling anything.
+
+**Closed loop can be a property of the table cell.** Some ECUs don't use a separate
+closed-loop enable map. They run closed loop only where the target cell is exactly
+stoichiometric, so editing a cruise cell off stoich silently opens the loop there.
+Check how the ECU decides before assuming a region is closed-loop.
+
+Three open-loop windows to drop from any λ analysis:
+
+- **Fuel-cut recovery.** Injection resumes above idle speed with extra fuel to rebuild
+  the wall film. Many ECUs also run deliberately rich for a few seconds to refill the
+  catalyst's oxygen storage, which a fuel cut saturates with oxygen. Drop the cut *and*
+  the seconds after it. During the cut a wideband reads free air.
+- **After-start and warm-up enrichment**, which can persist well after closed loop is
+  first entered.
+- **Component-protection enrichment.** Many ECUs enrich from a *modelled* catalyst or
+  exhaust temperature that lags the operating point. Commanded λ at WOT then depends on
+  how long the engine has been at load, not only on rpm and load. Two pulls of different
+  length can command different λ in the same cell with nothing wrong.
 
 ## Fuel trim: the structure
 
@@ -148,11 +185,13 @@ everywhere.
 | beyond ~±20% | DTC territory |
 
 Two cautions. **Exactly 0.0% on both banks after warm-up is a stronger fault signal than
-±8%** — it usually means codes were just cleared, the loop is not closed, or the channel
-isn't live. And **there is no standardized numeric threshold for P0171/P0174**: published
-figures range from 12.5% to 35% because it is a manufacturer-calibrated value, evaluated on
-a weighted average of long-term trim rather than an instantaneous peak. Don't quote a
-constant as if it were universal.
+±8%** — it usually means codes were just cleared, adaptation was reset by a disconnect or
+reflash, the loop is not closed, or the channel isn't live. And **there is no standardized
+numeric threshold for P0171/P0174**: it is a manufacturer-calibrated monitor with its own
+entry conditions. Ford's, for example, trips on long-term trim > 25 % in the *currently
+active* adaptation cell (plus short-term > 1 %), only with purge at 0 %, and lights the MIL
+after two drive cycles. Others filter or average. Don't quote a constant as if it were
+universal.
 
 **Pegged vs large-but-moving is a different finding.** A correction term stuck at its
 authority limit means the controller ran out of range — categorically more serious than
@@ -207,9 +246,13 @@ current required* is the measurement. Consequences that matter:
 
 - The reported λ/AFR is **derived**, dependent on sensor temperature and on the pump
   circuit's calibration. It is not a raw signal.
-- Sensor aging shifts the current-to-λ mapping, so widebands drift in **gain**, not just
-  offset — which is exactly why an aftermarket wideband and the ECU's wideband can
-  disagree by a scale factor rather than a constant.
+- Sensor aging shifts the current-to-λ mapping in **both offset and gain**. The offset
+  shows at stoich, where the rear-sensor outer loop usually hides it. The gain error
+  shows *away* from λ = 1: at WOT and in fuel cut. That is why an aftermarket wideband and
+  the ECU's wideband can agree at cruise and disagree by a scale factor under
+  enrichment. Some ECUs re-learn the gain during fuel cut, where the sensor must read
+  free air (20.95 % O2). The reading also needs exhaust-pressure compensation, which
+  matters with boost or high backpressure.
 - Widebands track much further lean, which lets the ECU stay in closed loop during
   deceleration fuel cutoff and control transients more accurately.
 
@@ -218,11 +261,37 @@ elevated cold-start emissions, and unreliable trim data — a data-quality probl
 it is an emissions problem. Planar sensors reach operation in ~10 s versus far longer
 for older thimble types.
 
+## How the ECU builds a pulse, and why an edit moves more than fuel
+
+Most port-injection ECUs compute a *base* pulse from measured air and an injector
+constant, then multiply by corrections:
+
+```
+base pulse  = K × airflow per rev (or per intake event)       e.g. Nissan Tp, "base fuel schedule"
+final pulse = base × target/enrichment × (closed-loop + learned correction) + dead time
+```
+
+Three consequences an analyst needs:
+
+- **Only the product K × airflow scaling matters.** Two calibrations with a different
+  injector constant and a compensating MAF curve fuel identically. Compare the product,
+  never K alone.
+- **The base pulse, or a load derived from it (mg/stroke, relative charge, calculated
+  load), is usually the load axis of the fuel-target, spark, cam and torque tables.** An
+  edit to K or to the MAF curve changes that load value for the same air, so every
+  operating point moves to a different cell of every load-indexed table. "Raise K to add
+  fuel" also moves spark lookup, usually to less advance. Compare logs across such an
+  edit on measured airflow × rpm, never on the ECU's own load.
+- **Bigger injectors compress that axis.** The same air now gives a shorter base pulse,
+  so the load axis must be rescaled along with K, dead time, minimum pulse, and cranking
+  fuel. Otherwise the whole map shifts toward "light load".
+
 ## Injectors and fueling math
 
 - Required fuel mass = cylinder air mass ÷ (target λ × stoichiometric AFR).
-- Useful conversions: **duty % = PW[ms] × rpm / 1200** (four-stroke, one pulse per cycle);
-  **lb/hr × 10.5 ≈ cc/min** for gasoline at SG 0.72.
+- Useful conversions: **duty % = PW[ms] × rpm / 1200** (four-stroke, one pulse per cycle;
+  use / 600 for batch fire twice per cycle); **lb/hr × 10.0–10.2 ≈ cc/min** for real
+  gasoline (0.74–0.755 g/cc). The common × 10.5 assumes 0.72 g/cc and overstates by 3–5 %.
 - **Injector flow scales with √ΔP.** A 10% rail-pressure error is only about a 5% flow
   error — and it is a **pure multiplicative** error, so it lands in the multiplicative
   trim, never the additive one. Worked example: a rail running 51 psi where the calibration
@@ -230,11 +299,15 @@ for older thimble types.
   gets misread as a fueling-model error.
 - Know which fuel system you have. A **manifold-referenced (returned)** regulator holds a
   constant differential across the injector, so mass flow is a clean function of pulse
-  width. A **returnless** system holds constant absolute rail pressure, so the ECU must
-  apply a MAP-based correction itself — and on those systems a MAP error corrupts fueling
-  directly.
-- **Dead time / latency** is the non-flowing part of each pulse (order 1 ms at ~3 bar and
-  14 V, rising steeply as voltage falls). It matters most at small pulse widths — idle and
+  width. A **returnless** system regulates the rail against atmosphere (typically in the
+  tank), so the injector differential is `rail − (MAP − baro)`. It rises under vacuum and
+  **falls under boost**, and flow follows √ΔP. The ECU must correct for it from MAP. If
+  the engine has no MAP sensor (a MAF-only ECU), nothing corrects it and the error lands
+  in whatever table the tuner uses to absorb it. On any returnless system a MAP error
+  corrupts fueling directly.
+- **Dead time / latency** is the non-flowing part of each pulse (roughly 0.45–1.0 ms at
+  14 V and 3 bar, specific to the injector, rising steeply as voltage falls and as ΔP
+  rises). It matters most at small pulse widths — idle and
   low load — which is exactly where an uncorrected dead-time error masquerades as an
   additive trim, and why **a tune that is right at WOT but drifts at idle is a dead-time
   problem, not a fuel-map problem**.

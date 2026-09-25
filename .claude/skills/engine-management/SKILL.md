@@ -2,20 +2,18 @@
 name: engine-management
 description: >-
   Engine management fundamentals plus the working method for reading engine
-  datalogs and making calibration decisions. Use this whenever the task touches
-  how a gasoline engine actually behaves or what a log is saying — fuel trims,
-  lambda/AFR targets, volumetric efficiency and airflow, MAF vs speed-density,
-  ignition advance, MBT and knock retard, boost control, torque-based ECUs and
-  drive-by-wire, sensor and actuator failure signatures, or plain "is this
-  reading normal?". Reach for it on any request to analyze or interpret a
-  datalog, session, or capture; to diagnose a driveability, economy, or
-  down-on-power complaint; to decide whether and how much to change a fuel or
-  spark table; to plan what to log and at what rate; or to judge whether a log
-  can support a conclusion at all. Use it too whenever someone is about to draw
-  a conclusion from averaged log data or a single pull — the discipline here
-  exists to stop confident-but-wrong diagnoses. For decoding raw CAN bytes or
-  working out which PID/DID carries a signal, use ecu-reverse-engineering; for
-  planning a multi-factor test matrix, use designed-experiments.
+  datalogs and making calibration decisions. Use it whenever a task touches how
+  a gasoline engine behaves or what a log says: fuel trims, lambda/AFR targets,
+  VE and airflow, MAF vs speed-density, ignition advance, MBT and knock,
+  turbo or supercharger boost, torque-based drive-by-wire ECUs, sensor failure
+  signatures, or "is this reading normal?". Use it to analyze a datalog,
+  session, or capture; to diagnose a driveability, economy, or down-on-power
+  complaint; to decide whether and how much to change a fuel, spark, MAF, or
+  injector table before a reflash; to plan what to log; or to judge whether a
+  log can support a conclusion at all, especially one drawn from averaged data
+  or a single pull. For which PID/DID or CAN byte carries a signal, use
+  ecu-reverse-engineering; for a multi-factor test matrix, use
+  designed-experiments.
 ---
 
 # Engine management: performance, logs, and tuning
@@ -108,10 +106,11 @@ scaling error is the same percentage everywhere.
 
 Two calibration points. **Trims are not zero on a healthy engine** — ±3–6% is ordinary
 drift from injector tolerance, fuel volatility, and sensor aging, so *exactly* 0.0% on both
-banks after warm-up is a stronger fault signal than ±8% (codes just cleared, loop not
-closed, or the channel isn't live). And **there is no universal DTC threshold**: sources
-quote anywhere from 12.5% to 35% for P0171/P0174 because it is a manufacturer-calibrated
-value evaluated on a weighted average, not an instantaneous peak. Don't quote a constant.
+banks after warm-up is a stronger fault signal than ±8% (codes just cleared, adaptation
+reset by a disconnect or reflash, loop not closed, or the channel isn't live). And **there
+is no universal DTC threshold**: P0171/P0174 are manufacturer-calibrated monitors with
+their own entry conditions. Some use the active adaptation cell, others a filtered
+average. Don't quote a constant.
 
 Before diagnosing hardware, rule out the confounders that move trims with nothing broken:
 **purge** (unmetered fuel → negative trims), **secondary air** (upstream sensor reads
@@ -149,9 +148,10 @@ them is a common silent error:
 - **mg/stroke / relative charge** — the honest physical quantity. Prefer it.
 - **MAP** — a pressure, not a mass, until corrected for temperature.
 
-**Altitude changes everything and is routinely forgotten.** At ~80 kPa ambient (~2000 m)
-the density ratio is 0.79: about 21% less air, 21% less power, WOT MAP around 78 kPa, and
-absolute load falling from ~0.93 to ~0.73 on a perfectly healthy engine. Comparing any of
+**Altitude changes everything and is routinely forgotten.** At ~80 kPa ambient (~1950 m)
+the pressure ratio to sea level is 0.79. At equal intake temperature that is also the
+density ratio: about 21% less air, 21% less power, WOT MAP around 78 kPa, and absolute
+load falling from ~0.93 to ~0.73 on a perfectly healthy engine. Comparing any of
 those to a sea-level reference produces a phantom ~20% "restriction." **VE is essentially
 unchanged with altitude, which is exactly why VE and `MAP ÷ measured baro` are the metrics
 to compare across days, sites, and vehicles** — never raw g/s, raw mg/stroke, or absolute
@@ -159,11 +159,16 @@ load. Full treatment: `references/air-load-and-boost.md`.
 
 ## Spark
 
-Combustion takes roughly a fixed **time** (~2 ms), so advance rises nearly linearly with
-rpm — about **0.012 × rpm degrees** of speed-driven advance. The control objective is
-holding peak cylinder pressure at a fixed crank angle, not any particular spark angle.
-Timing is **MBT-limited at low load and knock-limited at high load**, so transient retard at
-high load is the system working at its intended edge; *sustained* retard is the anomaly.
+Turbulence, and with it flame speed, rises with piston speed, so the burn takes a roughly
+constant *angle*, not a constant time. Burn angle grows only as about **rpm^0.2–0.35**.
+Advance therefore climbs steeply at low rpm and **flattens at high rpm**: an NA engine
+near 24° at 2000 rpm needs something like 32–39° at 6000, not the ~72° a "fixed 2 ms burn"
+model predicts. Calibrations aim for MBT, which puts roughly half the charge burned
+(CA50) at ~8–10° ATDC and peak pressure at ~15° ATDC. A production ECU without cylinder
+pressure sensing *maps* to that; it does not control to it. MBT is a flat optimum: 5–7° of
+retard costs only about 1 % torque. Timing is **MBT-limited at low load and knock-limited
+at high load**, so transient retard at high load is the system working at its intended
+edge; *sustained* retard is the anomaly.
 
 Log **per-cylinder** retard — a mean hides one bad cylinder, and a persistent single-cylinder
 offset localizes a mechanical or fueling problem. Separate three things that all move final
@@ -173,14 +178,32 @@ retard is not knock retard. More: `references/spark-and-knock.md`.
 
 ## Boost
 
-Read the **duty cycle** alongside the pressure — they give opposite diagnoses from the same
-boost trace. Target missed with duty **saturated** = out of authority (leak, gate not
-sealing, compressor past its efficient flow). Target missed with duty **low** = the ECU is
-deliberately limiting. Reason in **absolute pressure and pressure ratio**, not gauge psi:
-pressure ratio sets compressor speed, which is why boost must be reduced at altitude and why
-gauge-referenced targets overspeed a turbo up a mountain. Charge temperature is the usual
-hidden variable — a heat-soaked intercooler pulls timing while the boost trace still looks
-healthy. See `references/air-load-and-boost.md`.
+**Name the compressor first.** What makes the boost decides which channel is the control
+effort, what "low boost" means, and what altitude does.
+
+- **Turbo.** Read wastegate **duty** alongside the pressure; they give opposite diagnoses
+  from the same trace. Target missed with duty **saturated** means out of authority (leak,
+  gate not sealing, compressor past its efficient flow). Target missed with duty **low**
+  means the ECU is deliberately limiting. A turbo can hold an absolute target at altitude
+  by spinning faster, which is why gauge-referenced targets overspeed it up a mountain.
+- **Belt-driven blower.** The **pulley ratio is the boost setting**, and there is no duty
+  to read. Low boost is a hardware or ambient fact, not a controller out of authority.
+  Every type **holds pressure ratio, not pressure**: 7 psi at sea level is ~5.5 psi at
+  80 kPa ambient, with nothing wrong.
+  - *Roots and twin-screw (positive displacement):* near-full boost from ~2,000 rpm.
+    Diagnose on **airflow per engine revolution** against a same-baro baseline. Low
+    airflow points at the blower side (belt slip, bypass valve, inlet). Normal airflow
+    with low boost and a rich WOT points at a leak after the MAF.
+  - *Centrifugal:* boost rises about as **rpm²** and peaks at redline, and compressor-map
+    surge and choke apply as on a turbo. The health check is that
+    `(PR^0.286 − 1) · T_in / rpm²` stays constant. If it falls at the top of a pull, the
+    belt is slipping.
+
+For both kinds, reason in **absolute pressure and pressure ratio**, never gauge psi, and
+carry baro in every boosted comparison. Charge temperature is the usual hidden variable:
+a heat-soaked intercooler pulls timing while the boost trace still looks healthy. A
+returnless fuel system also loses injector ΔP under boost, which the trims never see
+because WOT is open loop. See `references/air-load-and-boost.md`.
 
 ## Torque-structured ECUs (any drive-by-wire engine)
 
@@ -206,10 +229,18 @@ You are allowed to say what to change and roughly by how much. Do it in this ord
    fuel delivery (rail pressure falling, injector duty at its limit) — they produce an
    identical trace and need opposite fixes. Say which one the data supports and what would
    distinguish them if it doesn't.
-5. **State the expected result and the falsifier**: "if this is right, the next log shows X;
-   if instead you see Y, the hypothesis was wrong."
-6. **Re-log and verify.** One pull is an anecdote — the run-to-run spread is what says
-   whether a change did anything.
+5. **Say what else the edit moves.** Most ECUs index their fuel-target and spark tables on
+   their *own computed load* (base pulse width, mg/stroke, relative charge), which is
+   built from airflow and the injector constant. An edit to MAF scaling or the injector
+   constant therefore shifts every operating point to a different cell of every
+   load-indexed table, spark included. It is never "just fuel". Keep those edits apart
+   from table edits, one category per flash, or the response can't be attributed.
+6. **State the expected result and the falsifier *before* the drive**: "if this is right,
+   the next log shows X; if instead you see Y, the hypothesis was wrong." A prediction
+   written after the data arrives is a description.
+7. **Re-log and verify.** One pull is an anecdote. Judge the change against the measured
+   run-to-run spread *under the same conditions* (two logs of an unchanged tune give it),
+   not against zero.
 
 Stop short of writing numbers the data can't support. "The evidence supports about 6–8% in
 these cells; here's the log that would pin it down" is a better answer than a confident
@@ -231,15 +262,25 @@ table.
 - **Absence needs a reason.** "The filters removed everything," "the regime was never
   driven," and "the channel was never captured" are three different answers demanding
   opposite responses. Name which one.
+- **An error-versus-target metric can't tell a target edit from a delivery change.** If a
+  flash moved both the target table and a fuel/airflow table, measure delivery against
+  the ECU's own commanded value and read the target change from the map diff.
+- **Flashes, battery disconnects and hardware changes are change points.** A reflash or
+  disconnect erases fuel, idle, and throttle adaptation. An intake, MAF housing, injector
+  or throttle-body change invalidates the MAF transfer function, injector constant, dead
+  time, and every baseline. Never pool logs across one without saying so.
 
 ## Reference files
 
 - `references/fuel-and-lambda.md` — λ/AFR conventions and bands, closed-loop control, trim
-  structure and differential diagnosis, confounders, O2 sensor physics, injector/fueling math.
-- `references/air-load-and-boost.md` — VE and speed-density, MAF vs MAP, load definitions,
-  altitude and barometric correction, boost control, pressure ratio, charge cooling.
-- `references/spark-and-knock.md` — advance physics, MBT, the knock limit and what moves it,
-  knock control in logs, dwell, misfire.
+  structure and differential diagnosis, confounders, O2 sensor physics, how an ECU builds a
+  pulse (why K and MAF edits move spark too), transient and fuel-cut windows, injector math.
+- `references/air-load-and-boost.md` — VE and speed-density, MAF vs MAP and MAF housings,
+  load definitions, altitude and barometric correction, then boost by compressor type:
+  turbo, roots and twin-screw, centrifugal. Also load clamps, MAF placement, returnless
+  fuel under boost, and charge cooling.
+- `references/spark-and-knock.md` — burn phasing and how advance scales with rpm, MBT, the
+  knock limit and what moves it, knock control in logs, dwell, misfire.
 - `references/torque-structure.md` — torque-based ECUs, the two actuation paths, silent
   limiters, electronic throttle redundancy and adaptation.
 - `references/sensors-and-failure-signatures.md` — what each sensor/actuator failure looks

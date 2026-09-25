@@ -1,155 +1,209 @@
 ---
 name: vehicle-nissan-xterra-2008
 description: >-
-  Vehicle-specific facts for the 2008 Nissan Xterra (VQ40DE, manual 6-speed) —
+  Vehicle-specific facts for the 2008 Nissan Xterra (VQ40DE, manual 6-speed),
   the development vehicle for this CANary install, profile slug
-  `nissan-xterra-2008`. Use this whenever a task touches THIS truck's ECU or
-  telemetry: which diagnostic session gates Mode 22, what the keep-alive is,
-  which quantities are and are not on its broadcast bus, what its UpRev K-line
-  logger does, and the physical facts (no MAP sensor, ~80 kPa operating
-  altitude, no TCM) that change how its data must be read. Load it alongside
-  `ecu-reverse-engineering` (generic decode method) or `engine-management`
-  (generic engine behaviour) — those two stay vehicle-agnostic on purpose, and
-  this file is where the Xterra-isms live. Do NOT apply anything here to
-  another vehicle.
+  `nissan-xterra-2008`. Use this whenever a task touches THIS truck's ECU,
+  telemetry, logs, or tune: which PID is λ and which is φ, what a Mode 22 DID
+  or RAM channel really measures, how the diagnostic session and K-line
+  behave, what an UpRev flash resets, factory reference values and relearn
+  procedures, the upcoming supercharger build, and the physical facts
+  (MAF-only with no MAP sensor, 63–82 kPa ambient, no TCM, an IAT that reads
+  engine-bay air at idle) that change how its data must be read. Load it
+  alongside `ecu-reverse-engineering` (generic decode method) or
+  `engine-management` (generic engine behaviour). Those two stay
+  vehicle-agnostic on purpose, and this file is where the Xterra-isms live.
+  Do NOT apply anything here to another vehicle.
 ---
 
-# 2008 Nissan Xterra — vehicle-specific ECU facts
+# 2008 Nissan Xterra: vehicle-specific ECU facts
 
-Profile slug `nissan-xterra-2008`. Engine VQ40DE, 4.0 V6, port injection,
-naturally aspirated, drive-by-wire. **Manual 6-speed — there is no TCM on the
-bus**, so skip TCM steps in any capture protocol.
+Profile slug `nissan-xterra-2008`. Engine VQ40DE, 4.0 L V6, port injection,
+naturally aspirated (for now), drive-by-wire, mass-airflow metered.
+**Manual 6-speed, so there is no TCM on the bus**: skip TCM steps in any
+capture protocol.
 
 **This file is per-vehicle. Another CANary user may be on a completely
 different ECU.** Generic method belongs in `ecu-reverse-engineering` /
-`engine-management`; if you learn something here that is true of ECUs in
+`engine-management`. If you learn something here that is true of ECUs in
 general, put it there instead.
 
-## Planned: supercharger build (from late 2026-09)
+## Place every session on three boundaries before comparing anything
 
-The engine is about to change: Z1 Level 2 supercharger (Harrop HTV1900),
-Aeromotive 340 pump assembly, Bosch 700 cc injectors, 75 mm throttle body, and a cone
-intake. **Check which side of that boundary a session is on before comparing
-anything.** NA baselines, open questions, and the first-start plan are in
-`docs/roadmap/supercharger-build.md`. Boost and fuel pressure are not readable
-from this ECM (PIDs 0x0B, 0x0A, 0x22, 0x23, 0x59, 0x43 all unsupported).
+1. **Calibration.** The operator reflashes with UpRev often. Resolve each
+   session's calibration from `tune_revisions.yaml` by flash time
+   (`src.analysis.tune_revisions.resolve_session_revision`). The calibration
+   id does **not** change on an UpRev flash (it stays `1ZS44A00000`), so
+   comparing ids cannot detect an unrecorded flash. Every flash resets the
+   learned fuel trim (below). Whether it also clears throttle and idle learning
+   is unknown; if idle is off after a flash, run the FSM relearns
+   (`references/engine-and-ecu.md`).
+2. **Hardware.** A supercharger build lands from late 2026-09: Z1 Level 2
+   (Harrop HTV1900), Aeromotive 340 pump assembly, Bosch 700 cc injectors,
+   75 mm throttle body, cone intake. Every NA-learned quantity is invalidated
+   by it: the MAF transfer function, K and dead time, idle and throttle
+   learning, behaviour surfaces, and the trained detectors. NA baselines, open
+   questions and the first-start plan are in `docs/roadmap/supercharger-build.md`.
+   The build should be recorded as an `intervention` with
+   `corpus_boundary: true` in `labelled_events.yaml`. What it will look like in
+   this truck's data (generic mechanics are in `engine-management` →
+   `air-load-and-boost.md`):
+   - The HTV1900 is a positive-displacement roots blower, so it holds pressure
+     *ratio*. Expect about 21 % less gauge boost at home than a sea-level figure
+     (7 psi → ~5.5 psi), and less again on mountain drives (~4.4 psi at 63 kPa).
+     That is not belt slip.
+   - The ECM measures no boost. With returnless fuel and no MAP input, injector
+     ΔP falls by the boost pressure: a ~5–7 % WOT flow deficit that moves with
+     baro and that the trims never see (WOT is open loop). Unless the fuel
+     system gets a boost-referenced regulator, the TMAP and AEM data CANary
+     collects can only reach the ECM as Fuel Targets (rpm × BFS) numbers. That
+     table can't see baro or charge temperature. The ROM's commanded φ will also
+     read richer than what is delivered, by design. See
+     `supercharger-build.md` → "Boosted fuelling without a pressure input" and P5.
+   - Z1's other kit (2022+ Frontier, VQ38, same blower) moves the MAF into a new
+     tube and routes the ECU's IAT signal to a post-intercooler sensor through
+     the MAF connector. If this kit does the same, `INTAKE_TEMP` stops being
+     engine-bay air and becomes charge temperature. Check before reusing any IAT
+     trap from this file.
+   - Z1's figures on 93 octane: Level 1 309 whp / 307 wtq, Level 2 350 / 343,
+     Level 3 443 / 441 (snippets of Z1's own pages; the Level 2 boost and pulley
+     are still unpublished).
+3. **Altitude.** Home is **79–82 kPa** (Colorado Springs, ~2070 m), but drives
+   reach **63–73 kPa** (2,900–3,900 m). Read `BAROMETRIC_PRESSURE` (PID `0x33`)
+   per session. Never assume sea level, and never assume 80 kPa either. The
+   trained models fire out-of-distribution at 63–73 kPa, and that is not a
+   fault.
 
-## Canonical homes — check these before trusting anything below
+## Canonical homes: check these before trusting anything below
 
-Values drift; data files are the truth. This file exists for facts that have no
-structured home, and it **points at** the ones that do rather than copying them.
+Values drift, and the data files are the truth. This file holds facts that
+have no structured home, and it **points at** the ones that do rather than
+copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 
 | Fact | Lives in |
 |---|---|
 | Broadcast byte→signal bindings, scales, evidence | `data/bindings.yaml` |
 | Quantities searched for and NOT found on the bus | `data/bindings.yaml` → `absent_signals` |
-| Mode 22 DID catalogue, decode params | `data/dids.yaml` |
-| Gating session + keep-alive sub-function | `data/dids.yaml` → `access` |
-| Which PIDs the ECM actually answers | `get_obd_coverage` (live) |
+| Mode 22 DID catalogue, decode params, evidence | `data/dids.yaml` → `dids:` |
+| RAM (service `0x23`) channels and read windows | `data/dids.yaml` → `memory:` |
+| Session gating, keep-alive, exit, max read length | `data/dids.yaml` → `access` |
+| Which PIDs the ECM answers | `get_obd_coverage` (live); `pid-probe-2026-07-22.md` |
+| A/F sensor voltage → AFR, and the λ/φ proof | `afr_calibration.yaml` |
+| Which commanded-λ source is valid in which regime | `lambda_delivery.yaml` |
+| Flash history, which calibration was running | `tune_revisions.yaml` |
+| Trim resets, altitude trips, other non-fault events | `labelled_events.yaml` |
+| Run-to-run noise floor (by condition) | `noise_floor.yaml` |
+| K-line addresses, wake-up, modules (ECM, ABS) | `kline.yaml` |
+| ROM tables, axes, verified extraction | `rom_viewer.yaml`, `docs/uprev-rom-table-verification.md` |
+| Factory service manual (engine control = EC) | `xterra_fsm/ec.pdf` |
 | Per-vehicle partitioning of all learned state | `src/profiles.py`, keyed by VIN |
 
-## Diagnostic access
+## The traps that have cost the most on this truck
 
-- **Mode 22 is gated behind diagnostic session `0xC0`.** Reads outside it come
-  back negative. `did_sweep --session auto` resolves this from the `access`
-  block — don't hard-code it at a call site.
-- **TesterPresent (`0x3E`) is REJECTED by this ECM.** The session is held by
-  re-sending `10 C0` periodically instead. The textbook `0x3E`-every-1–2 s
-  keep-alive does not work here — reaching for it is a known dead end.
-- The OBD scheduler runs a `10 C0` → `10 81` cycle roughly every 60 s.
-- **Batched Mode 22 is REJECTED — one DID per request.** Raw frames,
-  2026-09-17, engine running, `10 C0` held: `03 22 12 01` → `05 62 12 01 00
-  A2`, but `05 22 12 01 12 03` and `07 22 12 01 12 03 12 04` both → `03 7F 22
-  12`. The earlier "verified 2026-08-08" claim rested on batched and unbatched
-  sweeps returning the same 138-DID set. `sweep_dids_batched` silently re-read
-  every rejected group one DID at a time, so that match could not tell success
-  from fallback. UpRev's own two-DID `22 11 03 04 01` is rejected the same way
-  (see below). Don't plan on same-instant multi-DID sampling here.
-- **No MAP sensor.** The VQ40DE is mass-airflow based, not speed-density.
-  **Mode 01 PID `0x0B` is unsupported** — never reach for it as a reference.
-  `BAROMETRIC_PRESSURE` (`0x33`) and `EVAP_VAPOR_PRESSURE` (`0x32`) *are*
-  supported. A "manifold pressure" label on any byte of this vehicle is wrong
-  by construction; that mistake sat in `bindings.yaml` for three months.
-- DID space: **138 of 512 DIDs in `0x1100`–`0x12FF` answer** at idle; **27 of
-  them vary** at constant idle (the live engine channels). The rest are static
-  configuration/status. Sweep cost is ~1.9 s over the whole range; the 138
-  answering DIDs alone take ~0.2 s at full speed, or 1.17 s paced at ~118 req/s.
+- **PID `0x24` is λ and PID `0x44` is φ.** They are reciprocal conventions on
+  one ECM, so neither can be inferred from the other. In closed loop `0x44`
+  dithers 0.9796 / 1.0204, not a flat 1.000.
+- **No MAP sensor, and no boost, fuel pressure, or torque from the ECM.** PID
+  `0x0B` is unsupported (the VQ40DE is MAF-metered), and so are `0x0A`, `0x22`,
+  `0x23`, `0x59`, `0x43` and `0x61`–`0x63`. A "manifold pressure" label on any
+  byte of this vehicle is wrong by construction; that mistake sat in
+  `bindings.yaml` for three months.
+- **Mode 01 and Mode 22 are mutually exclusive.** Mode 22 needs session `0xC0`,
+  and inside it Mode 01 goes silent. `10 81` is the only fast exit. TesterPresent
+  is rejected, and Mode 22 takes one DID per request. Details:
+  `references/diagnostic-access.md`.
+- **Several DIDs are not what they were first named.** The worst one is
+  `0x1208` (`ECM_AIR_CHARGE`): it is air charge × K, not injector pulse width,
+  so never derive fuel mass or φ from it. Read a DID's `description` and
+  evidence in `data/dids.yaml` before trusting its name.
+- **Long-term fuel trim resets on every flash and every battery disconnect, and
+  relearns slowly.** After the 2026-06-28 disconnect it read exactly 0.00 % on
+  both banks until sometime between 09-10 and 09-18. The 09-20 flash reset it
+  again, and it was still 0.00 on 09-23. That 0.00 is the neutral value (raw
+  `0x80` on the PID `0x07` scale), not a decode bug or a fault. While it sits
+  there, trim analysis is STFT-only. Once it is active, use total trim
+  `(1+STFT)(1+LTFT)−1`. The Mode 22 learned-trim DIDs `0x1102`/`0x1125` show
+  the cell-indexed table directly.
+- **IAT reads engine-bay air at idle, not heat soak.** It is
+  stagnation-dominated: above ~8 g/s it pins to ambient, and the high readings
+  occur only at idle (corr with rpm −0.80). "IAT rose through the drive" was
+  idle fraction. A hot-versus-cool comparison needs two sessions, not early
+  versus late in one.
+- **`ENGINE_LOAD` reads ~20 % at idle and at light cruise.** It cannot separate
+  parked from moving. Bin on **MAF + rpm**.
+- **K and the MAF table move timing too.** The ECM's load axis is the base
+  fuel schedule (BFS = MAF × K), and Fuel Targets, Timing Trim and Cam Phasing
+  are all indexed on it. A K or MAF edit therefore shifts every operating point
+  to a different cell of those tables. Only the product K × MAF matters. Compare
+  logs across such an edit on g/s × rpm, never on BFS, and make one category of
+  edit per flash.
+- **Closed loop exists only where the Target AFR cell is exactly 14.7.** Any
+  other value in a cell opens the loop there, so its trims freeze.
+- **Near-WOT enrichment at mid rpm is a pedal switch.** At 1,600–3,600 rpm the
+  ECM goes rich when broadcast pedal reaches ≥ ~227/255 (~89 %) and uses the
+  Fuel Targets map's **last load column**. No load threshold and no timer are
+  involved (20 errors in 27,415 rows; evidence on DID `0x1134` in
+  `data/dids.yaml`). To change mid-rpm WOT fuelling, edit that column.
+- **The factory A/F sensors floor at 10.0 AFR** in UpRev logs, so samples there
+  are censored. They are good to roughly ±5 % at WOT. Don't chase a smaller WOT
+  error with them.
+- **A flash can change two things at once.** On 2026-08-03 the operator raised
+  fuel compensation *and* the AFR target in one flash. An error-versus-target
+  metric credited the target move to delivery. Get the edit list from the
+  operator or the map diff; never infer a target change from binned data.
 
-## Broadcast bus
+## Air, fuel and altitude numbers worth knowing
 
-500 kbit/s, ~1640 frames/s at idle, 27 distinct IDs passively (29 when CANary
-is also polling — `7DF` and `7E8` are the two extras).
+- WOT airflow at home plateaus near **145 g/s from ~5,000–5,850 rpm**. Against
+  the measured 80 kPa that is 85–93 % VE, a healthy NA curve. Against an assumed
+  101.3 kPa the same data computes to 67–73 % and looks like a restriction that
+  isn't there. The sea-level equivalent (~184 g/s) is consistent with the
+  rating.
+- The Mode 22 MAF DID (`ECM_MAF_GPS`) agrees 1:1 with PID `0x10` (median ratio
+  1.000 ± 0.007, 3–134 g/s) once gated to |dMAF/dt| ≤ 5 %/s. An apparent 5 %
+  shortfall at high flow was acquisition skew.
+- **Mode 01 does report the WOT target.** On a 5,762 rpm / 144 g/s pull, PID
+  `0x44` read φ 1.195–1.242 while `0x24` measured within ~2 %. An earlier
+  "unobtainable over Mode 01" conclusion came from never reaching real WOT.
+- The ECM's final commanded φ is also in RAM (`mem:ECM_TARGET_EQUIV_RATIO`),
+  which `lambda_delivery.yaml` prefers as the commanded source.
+- After the build, boost and post-intercooler temperature come from the kit's
+  Bosch TMAP read by the CANary-HAT, and fuel pressure from an AEM CAN gauge
+  (`sensor:FUEL_PRESSURE`), not from the ECM (`supercharger-build.md` → P2).
+  The fuel system is returnless, so injector ΔP = rail − (MAP − baro) falls
+  under boost. That derived channel is why the two sensors matter together.
 
-**Confirmed absent from the broadcast bus** (well-powered no-load sweep,
-2026-08-08 — see `absent_signals` for the range each search covered): ignition
-timing, wideband AFR, intake cam timing, injector pulse width, base fuel
-schedule, calculated load, and any fine-grained MAF. If you need those, Mode 22
-or the UpRev K-line log are the only sources. **Caveat: that sweep was no-load
-only**, so a signal appearing only under road load could still have been missed.
+- **The FSM's reference values are sea-level, stock-calibration figures.** Its
+  spec check is defined only at 98.3–104.3 kPa barometric pressure, so a healthy
+  engine here reads low on airflow and base fuel schedule. Warm idle is
+  625 ± 50 rpm at 15 ± 5° BTDC. The VIAS power valve is closed from 2,200 to
+  3,300 rpm, so expect VE and torque steps near those speeds; they are not a
+  sensor fault.
+- **Bank 1 is cylinders 1-3-5, on the right (passenger) side.** Firing order is
+  1-2-3-4-5-6.
 
-`ECM_RPM` (`0x1F9` bytes 2–3 big-endian, ×0.125) is the strongest control for
-validating any time alignment or decode chain — it fits slope 1.0000 against
-UpRev RPM with scale stability 0.9985–1.0011 across 750–3700 rpm.
+Engine specifications, factory reference values, the Nissan fuel equation as
+this ECM implements it (base fuel schedule, K, which tables K moves), spark and
+knock behaviour, the relearn procedures, and known failure modes are in
+`references/engine-and-ecu.md`.
 
-## K-line (OBD pin 7)
+## Physical and environmental facts
 
-Read off UpRev's own session with the CANary-HAT sniffing, then reproduced by
-the HAT alone (2026-09-23, KOEO). Details and the full exchange:
-`docs/uprev-usb-kline-research.md` → "On-wire view".
-
-- **10400 baud 8N1, KWP2000 (ISO 14230).** ECM address **`0x10`**.
-- **Tester address `0xFC`, not the ISO 14230-4 default `0xF1`.** A
-  StartCommunication from `0xF1` (or to `0x33`/`0x11`/`0x01`/`0x12`) gets
-  silence — which reads exactly like dead hardware.
-- **The standard 25 ms fast init is ignored.** The wake-up this ECM answers is
-  **518.9 ms low, then 18.1 ms high**, then `81 10 FC 81 0E` sent back-to-back
-  → `83 FC 10 C1 5D 8F 3C` (key bytes `5D 8F`).
-- After StartCommunication, frames are `<len> <data…> <sum & 0xff>` with no
-  address bytes. StopCommunication is `01 82 83` → `01 C2 C3`.
-- **Known answer:** `05 22 11 03 04 01 40` → `04 62 11 03 <value> <cs>` (value
-  0x99–0x9A at KOEO). The same two-DID request is rejected on CAN (below); on
-  K-line it is answered.
-- **One diagnostic session, two transports.** The ECM's session state is
-  shared between CAN and K-line: put CANary in passive mode
-  (`POST /control/passive` with a TTL) while anything else owns K-line.
-- **A local identifier's reply is capped at ~61 data bytes.** A definition
-  that would exceed it is refused `7F AC 12`; UpRev then drops the session and
-  restarts, which looks like a flaky start. The fix is fewer measurands
-  (2026-09-24; layout in `docs/uprev-usb-kline-research.md`).
-
-## The UpRev logger on this truck
-
-- **Its logging is K-line (pins 7/15), not CAN.** With CANary passive it emits
-  *zero* CAN frames. Broadcast logging alongside it is completely safe.
-- If CANary transmits, UpRev reacts on CAN: it flow-controls CANary's
-  multi-frame Mode 06 responses on `7E8`, and may fire its own `22 11 03 04 01`
-  reads which this ECM rejects. Harmless to UpRev's logging, but it means both
-  tools share the `7E0`/`7E8` endpoint. `POST /control/passive` gates every
-  CANary transmit for simultaneous windows.
-- **UpRev dies on its own every few minutes.** Confirmed independent of
-  CANary — the operator reproduced it with no Y-cable and no CANary present.
-  Do not diagnose this as bus interference. Keep windows ≤ ~3 minutes.
-- **It is rotation-polled: channels do NOT share a timestamp.** Aligning a CSV
-  to CAN on RPM leaves other channels skewed — MAF sits **+0.10 s** later than
-  RPM. Always scan a per-channel lag before concluding a channel has no
-  broadcast home; ignoring this nearly killed a valid airflow binding.
-- CSV `Time` is milliseconds from log start and is UpRev's receipt time of
-  each reply (±10 ms against the wire, 2026-09-24). `Time = 0` fell **1.72 s
-  after the filename timestamp** on the Pi clock (setup plus clock offset;
-  one measurement). It logs to memory — the operator saves the CSV
-  manually, so mtime is the save time, not the stop time.
-- Aligning by RPM cross-correlation **fails at idle** (CANary polls RPM every
-  5–7 s and idle blips alias). Use a rev sweep, or decode RPM off `0x1F9` for a
-  ~100 Hz reference.
-
-## Physical / environmental
-
-- **Operating altitude ~80 kPa ambient (~2072 m).** Never assume sea level: it
-  fakes a ~20 % "restriction" in airflow and power math, and drops absolute
-  load from ~0.93 to ~0.73 on a perfectly healthy engine. Compare VE or
-  `MAP ÷ measured baro`, never raw g/s or absolute load.
-- **A/C cannot run with the blower off** by design. The reachable states are
-  both-off, blower-only, and blower+A/C — which is still enough to separate
+- **A/C cannot run with the blower off**, by design. The reachable states are
+  both-off, blower-only, and blower+A/C, which is still enough to separate
   blower bits from A/C bits by nesting.
-- `LONG_FUEL_TRIM` reading flat 0.0 % is the ECU returning the `0x80` sentinel,
-  not a decode bug and not a fault. It needs a warm steady-state relearn cycle.
+- **Manual transmission.** Clutch and gear are driver actions, not ECU states,
+  and no transmission module requests a torque reduction at a shift.
+
+## Reference files
+
+- `references/diagnostic-access.md`: Mode 01, Mode 22 and the session
+  (exclusivity, exits, keep-alive, rates), RAM reads and the calibration id,
+  the broadcast bus, K-line (addresses, wake-up, modules), and running beside
+  the UpRev logger. Read it before sending anything to this ECM or planning a
+  capture's request mix.
+- `references/engine-and-ecu.md`: VQ40DE specifications and FSM reference
+  values, the fuel equation (Tp/base fuel schedule, K, α) and ROM tables,
+  cam timing and variable intake, relearn procedures, and common VQ40DE faults.
+  Read it for "is this reading normal?", before advising on a table edit, and
+  after any flash or throttle-body change.

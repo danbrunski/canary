@@ -22,22 +22,55 @@ automated fetches, so the Level 2 details below are open questions, not facts.
 
 **Open questions for Z1 / the install** (answer them here, with the source):
 
-- [ ] Boost at Level 2 (psi), pulley size, and what separates Level 1/2/3/4.
-- [ ] Does Z1 supply a base UpRev tune for this combination, or only a
+Web research on 2026-09-25 answered part of this list. Z1's pages still return
+403, so Z1 figures come from search-engine snippets of them. Z1's installation
+manual for the **2022+ D41 Frontier kit** (VQ38, same HTV1900 blower) did download
+from Z1's CDN. Its facts are marked *D41* and may not carry over to the VQ40 kit.
+
+- [~] Boost at Level 2 (psi), pulley size, and what separates Level 1/2/3/4.
+  *Partly answered:* Z1's published results on 93 octane are Level 1
+  309 whp / 307 wtq, Level 2 350 / 343, and Level 3 443 / 441, against about
+  220 / 220 stock. One unsourced snippet says Level 1 is the tune only, Level 2
+  adds colder plugs, and Level 3 adds a low-pressure fuel pump (low confidence).
+  Z1's Frontier upgrade page lists an 85 mm "Level 2" pulley, but its power
+  figures match the VQ38 kit. Level 2 boost in psi is not published anywhere
+  found. Z1 says a retune is mandatory before driving on a changed pulley.
+- [ ] Crank and blower pulley diameters. Blower rpm = engine rpm × crank ÷ blower
+  diameter, and it must stay under the rotor pack's rating at the rev limit (Eaton
+  R1900: about 18,000 rpm, per a snippet of Eaton's page).
+- [~] Does Z1 supply a base UpRev tune for this combination, or only a
   recommendation? Its injector data (K, dead times) for the Bosch 700 cc.
-- [ ] Where the MAF sits in the kit's intake path and its housing diameter —
-  the MAF scaling depends on both.
+  *Partly answered:* Z1 tunes with UpRev and EcuTek. Whether a base ROM ships
+  with the VQ40 kit was not found. UpRev's injector-swap procedure lists every
+  table to change (K, latency, Cranking Enrichment Initial, Injector Minimum,
+  Load Point Scaler); see the vehicle skill's `references/engine-and-ecu.md`.
+- [~] Where the MAF sits in the kit's intake path and its housing diameter —
+  the MAF scaling depends on both. *Partly answered (D41):* the throttle body
+  sits upstream of the blower inlet, and the MAF moves into a new intake tube.
+  Z1 calls the VQ40 kit "limited only by the factory mass air flow sensor". If
+  the factory MAF saturates, UpRev sells a MAF GT for this sensor's part number
+  (22680-7S000), with about 180 % of the factory range; it needs a new MAF curve.
 - [~] Where intake-air temperature is measured after the kit (pre- or
   post-intercooler). Every VE and density number depends on it. *Partly
   answered:* CANary gets a **post-intercooler** IAT from the kit's Bosch TMAP
-  (ADC, HAT rev 2.1). Where the ECM's own IAT (in the MAF) ends up is still
-  open — the two read different air, and that difference is the intercooler.
+  (ADC, HAT rev 2.1). *D41:* an adapter harness feeds the TMAP's IAT into the
+  **MAF connector**, so the ECM's IAT becomes post-intercooler charge air. If
+  the VQ40 kit does the same, `INTAKE_TEMP` changes meaning at the build
+  boundary. The NA-era "IAT is engine-bay air at idle" rule then no longer
+  applies, and nothing in the ECM reads inlet air any more.
 - [~] Fuel pressure the Aeromotive assembly regulates to, and whether it is
   referenced to manifold pressure. *Partly answered:* the system is
   **returnless** — the regulator does not see manifold pressure, so injector
-  ΔP falls with boost (`docs/CANary-HAT-Rev2.1.md` §13.5). The set pressure is
-  still open; the AEM gauge will measure it.
-- [ ] Bypass-valve behaviour at part throttle (what the ECM's MAF sees off-boost).
+  ΔP falls with boost (`docs/CANary-HAT-Rev2.1.md` §13.5). The stock set point
+  is ≈ 350 kPa (51 psi) at idle (FSM EC-494/499). The Aeromotive assembly's set
+  point is still open; the AEM gauge will measure it. For comparison, Z1's VQ35
+  kits keep returnless fuel up to 400 hp and add a return system at 500 hp.
+- [~] Bypass-valve behaviour at part throttle (what the ECM's MAF sees off-boost).
+  *Partly answered (generic roots):* a spring-closed butterfly opened by manifold
+  vacuum. At idle and cruise it is open and the rotors recirculate, so the MAF
+  sees near-NA airflow. It closes as vacuum falls. *D41:* a "diverter valve" hose
+  returns to the blower inlet, downstream of the MAF, so recirculated air is not
+  metered twice. Where the VQ40 kit's bypass returns is still open.
 
 ## What the build breaks in CANary
 
@@ -62,6 +95,15 @@ one. Name them now, before data from the new engine arrives looking plausible:
 - **Calculated load (PID 0x04) saturates at 100 %** by construction, so it cannot
   separate 0 psi from full boost. Gates that use `load >= 85` as "WOT" still work
   as a gate, not as a measure.
+- **Boost falls with altitude, by design.** A roots blower holds pressure
+  *ratio*, so a pulley making 7 psi at sea level makes ~5.5 psi at home (80 kPa)
+  and ~4.4 psi at 63 kPa (93 kPa absolute, below sea-level atmosphere). Low gauge
+  boost at altitude is not belt slip. Every boosted comparison needs baro. A
+  belt-slip check compares **airflow per engine revolution** with a same-baro
+  baseline: slip is boost sagging at high rpm and varying pull to pull.
+- **Commanded λ stops meaning delivered λ under boost** (see "Boosted fuelling
+  without a pressure input" below). The delivery residual gains a
+  boost-dependent lean offset by design.
 - **Every learned "normal" is invalidated.** IF/LSTM/TCN models and behavior
   surfaces are trained on the NA engine; on the new engine they will fire
   everywhere. The corpus needs a hardware boundary as firm as a tune boundary.
@@ -73,6 +115,46 @@ one. Name them now, before data from the new engine arrives looking plausible:
 - **Injector-derived channels.** `ECM_INJECTOR_PULSE_1/2` (0x1206/0x1207) stay in
   ms, but ms → fuel mass changes with the 700 cc injectors. `ECM_AIR_CHARGE`
   (0x1208, air × K) changes scale with K.
+
+## Boosted fuelling without a pressure input
+
+The ECM has no MAP input, and the fuel system is returnless. Injector ΔP =
+rail − (MAP − baro) therefore falls under boost, and **nothing in the ECM
+corrects for it.** Flow follows √ΔP: 7 psi (48 kPa) against a 350 kPa rail
+leaves ΔP ≈ 302 kPa, flow 0.93, a **~7 % deficit**. WOT is open loop, so the
+trims never see it. There are two ways to handle it:
+
+1. **Remove it at source**: a 1:1 boost-referenced regulator on a return
+   conversion holds ΔP constant, and the ECM's NA assumption holds again. This is
+   an operator decision about hardware, not decided here.
+2. **Carry it in the fuel tables**: pre-compensate the cells that see boost. The
+   ECM can't read the TMAP, but CANary can. What CANary learns from the TMAP and
+   the AEM gauge ends up as ROM numbers.
+
+If option 2 is the path, these are the facts that shape it:
+
+- **The correction is computed, not discovered.** With the AEM (rail) and the
+  TMAP (manifold) logged, the expected flow ratio `√(ΔP / ΔP_ref)` is known per
+  sample (ΔP_ref = rail gauge pressure, i.e. manifold at ambient, which is what
+  the NA calibration was tuned at). Measure the rail rather than assume 350 kPa:
+  the Aeromotive set point is unknown, and rail pressure can sag at high flow.
+- **Fuel Targets is the table that can hold it.** It is indexed on rpm × BFS, and
+  BFS is air per rev, which pins manifold absolute pressure at a given charge
+  temperature. Fuel Comp is indexed on throttle flow ratio, which saturates at
+  WOT and cannot tell boost levels apart. The Target AFR table has only 8 BFS
+  columns, and the Load Point Scaler decides how many of them land in the boosted
+  range after the injector swap.
+- **Two things the table cannot see**, and both push lean at the worst moment:
+  - *Baro.* In one cell, ΔP moves 1:1 with ambient pressure, so a table tuned at
+    home runs ~2.5 % lean at 63 kPa.
+  - *Charge temperature.* Hotter charge raises manifold pressure for the same air
+    mass, so heat soak leans the mixture by ~2 % per +30 °C near 7 psi.
+
+  The within-cell spread of ΔP over real drives is the error no table can
+  remove. Measure it before deciding how much margin the targets need.
+- **The ROM's target stops meaning delivered λ.** A 7 % deficit with a λ 0.80
+  goal means commanding λ ≈ 0.75. PID `0x44` and `mem:ECM_TARGET_EQUIV_RATIO`
+  will then read richer than the engine actually runs, by the ΔP term.
 
 ## Phase 1 — Catalog the NA engine (now, before teardown)
 
@@ -172,6 +254,15 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
 - [ ] **P4 — Boosted capture profile.** The `tuning` profile plus whatever P2
   adds, at rates set for a boosted pull (a roots blower makes boost almost at
   once, so transients are faster).
+- [ ] **P5 — ΔP in the delivery residual.** `lambda_delivery` / `delivery_error`
+  must include the predicted flow ratio `√(ΔP / ΔP_ref)` from
+  `sensor:FUEL_PRESSURE` and the TMAP. Without it, every boosted cell shows a
+  "lean of command" that is the returnless deficit, pre-compensated in the ROM by
+  design, and that will be misread as a MAF or K error. For a boosted sample
+  without both pressure channels, the residual refuses and names the missing
+  channel. It does not report a number. The same channels give the within-cell ΔP
+  spread (baro and charge temperature) that sets how much target margin the
+  boosted cells need.
 
 ## Phase 3 — First start and the safe tune
 

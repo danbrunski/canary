@@ -1,0 +1,60 @@
+{
+  "skill_name": "vehicle-nissan-xterra-2008",
+  "evals": [
+    {
+      "id": 0,
+      "name": "lambda-vs-phi-pids",
+      "prompt": "Pulled a tuning capture off the Xterra from this morning. During the 3rd gear pull at ~5200 rpm Mode 01 PID 0x44 reads 1.21 and PID 0x24 reads 0.83. Is it running richer or leaner than commanded, and by how much in AFR?",
+      "expected_output": "Treats PID 0x44 as phi (equivalence ratio, >1 rich) and PID 0x24 as lambda on this ECM — reciprocal conventions verified on this truck — so commanded lambda = 1/1.21 = 0.826 (AFR ~12.15) and measured lambda 0.83 (AFR ~12.2): within ~0.5 % of target, slightly lean, well inside the factory A/F sensors' ~±5 % WOT accuracy. Checks the two readings are same-instant pairs (0x44 and 0x24 share a Mode 01 batch) and that the pull was out of closed loop.",
+      "assertions": [
+        "Interprets PID 0x44 as phi (equivalence ratio, >1 = rich) and PID 0x24 as lambda, rather than treating both as the same convention",
+        "Computes commanded AFR ≈ 12.1–12.2 (λ ≈ 0.826) and measured AFR ≈ 12.2 (λ 0.83)",
+        "Concludes the error is small (≈0.5 % lean) and does not call it a meaningful fuelling fault",
+        "Mentions the factory A/F sensors' limited WOT accuracy (roughly ±5 %) or their 10.0 AFR floor as a limit on how small an error can be resolved",
+        "Does not apply generic advice that PID 0x44 is always λ per SAE J1979 without noting this ECM differs"
+      ],
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "ltft-zero-after-flash",
+      "prompt": "Since the flash on Saturday both LONG_FUEL_TRIM_1 and _2 read exactly 0.00 in every session, and warm idle STFT is sitting around -6%. Before the flash LTFT was moving around a few percent. Is the decode broken or did the flash kill something?",
+      "expected_output": "Neither. Every UpRev flash (and every battery disconnect) resets the learned trim on this ECM; 0.00 is the neutral value (raw 0x80 on the PID 0x07 scale), not a decode bug. Relearn has been slow on this truck (weeks after the 2026-06-28 disconnect), so trim analysis is STFT-only until it moves; when it does, use total trim (1+STFT)(1+LTFT)-1. Negative idle STFT with LTFT at zero was also seen after the 09-20 flash. Points at labelled_events.yaml and the 0x1102/0x1125 learned-trim DIDs.",
+      "assertions": [
+        "States that the flash reset the learned long-term trim and that 0.00 is the neutral value, not a decode fault",
+        "Notes that relearn on this truck has taken weeks, so LTFT may stay at zero for a long time",
+        "Says trim analysis is STFT-only while LTFT is zero, and to use total trim (1+STFT)(1+LTFT)-1 once it moves",
+        "Does not diagnose a failed A/F sensor or ECM fault from the zero LTFT alone",
+        "Mentions a way to confirm (e.g. labelled_events.yaml history, or the Mode 22 learned-trim DIDs 0x1102/0x1125)"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "capture-profile-mode01-mode22",
+      "prompt": "For the next drive I want a capture that polls DIDs 0x1206 and 0x1208 (injector pulse B1 and 'injector PW') plus Mode 01 RPM and 0x44, all at 20 Hz on the same timestamps so I can compute fuel mass per injection against commanded AFR. Can you set that up? I'll keep a TesterPresent going so the session doesn't drop.",
+      "expected_output": "Explains that on this ECM Mode 22 requires session 0xC0 and Mode 01 is silent inside that session, so Mode 01 and Mode 22 can't be sampled on the same timestamps — the scheduler alternates windows and exits with 10 81 (the only fast exit). TesterPresent 0x3E is rejected; the session is held by re-sending 10 C0 (or by continuous reads). Mode 22 is one DID per request. Flags that 0x1208 is air charge × K (base fuel schedule), not injector pulse width, so it cannot give fuel mass; 0x1206 is the injected pulse. Suggests the RAM commanded-phi channel or pairing via compare_channels instead.",
+      "assertions": [
+        "States that Mode 01 and Mode 22 are mutually exclusive on this ECM (Mode 01 goes silent inside session 0xC0), so same-timestamp sampling is impossible",
+        "Says TesterPresent (0x3E) is rejected and the session is held by re-sending 10 C0 (or by continuous reads)",
+        "Mentions 10 81 as the exit back to Mode 01",
+        "Flags that DID 0x1208 is air charge × K / base fuel schedule, not injector pulse width, and must not be used for fuel mass",
+        "Proposes a workable alternative (alternating windows with same-instant pairing via compare_channels/align_pairs, or the RAM commanded-phi channel)"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "wot-maf-plateau-altitude",
+      "prompt": "WOT log from the Xterra at home: MAF flattens out around 145 g/s from about 5000 to 5800 rpm. A stock VQ40 should be pulling way more than that at redline. Is my intake or cat restricted? I'm about to order a cone intake anyway.",
+      "expected_output": "Not a restriction: home ambient is ~80 kPa (measured, PID 0x33), so peak airflow is ~21 % below a sea-level figure. Computing VE against measured baro gives ~85–93 %, a healthy NA curve; against an assumed 101.3 kPa it would falsely read 67–73 %. Advises reading baro per session (trips go to 63 kPa). Notes a cone intake changes the MAF transfer function and needs a MAF rescale, and that the build boundary invalidates baselines.",
+      "assertions": [
+        "Attributes the lower airflow to altitude (~80 kPa ambient) rather than to a restriction",
+        "Computes or cites VE of roughly 85–93 % using measured baro, and/or shows how assuming 101.3 kPa produces a false ~70 % VE",
+        "Recommends reading barometric pressure (PID 0x33) per session instead of assuming a fixed value",
+        "Notes that a cone intake changes the MAF housing/flow and so the MAF calibration, requiring a rescale"
+      ],
+      "files": []
+    }
+  ]
+}

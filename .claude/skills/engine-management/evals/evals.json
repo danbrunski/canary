@@ -50,6 +50,35 @@
         "Notes that high-rpm boost taper is partly expected rather than treating any taper as a fault"
       ],
       "files": []
+    },
+    {
+      "id": 3,
+      "name": "spark-advance-high-rpm-sanity",
+      "prompt": "NA 3.5 V6 on pump 91, no knock events logged anywhere. WOT timing from my log: 22° at 2000, 29° at 3000, 33° at 4000, 35° at 5000, 36° at 6000. A buddy says combustion takes a fixed ~2 ms so advance should scale linearly with rpm — about 0.012 × rpm, so ~70° at 6000 — and that my tune is leaving a ton of power on the table up top. Should I add 10-15° above 5000?",
+      "expected_output": "No. The fixed-time burn model is wrong above low speed: turbulence and flame speed scale with piston speed, so burn duration is nearly constant in crank degrees (growing only ~rpm^0.2-0.35) and MBT advance flattens at high rpm — the logged curve's shape is normal, and ~70° at 6000 would be absurd. MBT is a flat optimum (several degrees of retard ≈ 1 % torque), so even if timing were a few degrees short the gain would be small. Zero knock events are only reassuring if the knock channel is live and enabled. The way to find out is a controlled spark sweep in a few cells (small steps, watching knock and measuring torque/acceleration with repeat runs), not a blanket +10-15°.",
+      "assertions": [
+        "Rejects the fixed-2-ms / 0.012 × rpm model, explaining that burn duration is roughly constant in crank angle because flame speed rises with turbulence/piston speed",
+        "States that the logged curve flattening at high rpm is normal and that ~70° at 6000 rpm is not a realistic target",
+        "Notes that MBT is a flat optimum, so a few degrees short of MBT costs only around 1 % torque",
+        "Does not recommend adding 10-15° across the top end",
+        "Recommends a controlled, incremental spark test (small steps, knock monitored, repeated runs or a torque/acceleration measure) instead",
+        "Treats 'no knock events logged' as meaningful only if the knock channel is live/enabled, or otherwise notes the knock-limited ceiling"
+      ],
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "pd-supercharger-boost-at-altitude",
+      "prompt": "Just finished a roots-type supercharger install (Eaton TVS) on my V6 — the kit is advertised at 7 psi. I live at about 6,500 ft and my boost gauge only shows 5.4-5.6 psi at WOT, flat from ~2500 rpm up. IATs look fine. Is the belt slipping or is the bypass valve stuck? Should I go down a pulley size to get my 7 psi?",
+      "expected_output": "Probably neither. A positive-displacement blower multiplies ambient pressure — it holds a roughly constant pressure ratio, not a gauge pressure. 7 psi at sea level is PR ≈ 1.48; at ~80 kPa ambient (6,500 ft) that is ~118 kPa absolute ≈ 5.5 psi gauge, exactly what the gauge shows. Flat boost from low rpm is the normal PD shape. Belt slip would show boost sagging at high rpm and varying pull to pull; a stuck-open bypass would leave airflow per rev near NA. Discriminate with airflow per rev (MAF g/rev) vs expectation and repeat pulls. Going down a pulley raises PR, blower speed, discharge temperature and knock risk and requires a retune (fuel and timing), and on a returnless fuel system increases the ΔP deficit — it is a calibration decision, not a fix for a fault.",
+      "assertions": [
+        "Explains that a positive-displacement supercharger delivers a roughly constant pressure ratio, so gauge boost falls with ambient pressure at altitude",
+        "Shows or states that 7 psi at sea level corresponds to roughly 5.5 psi gauge (~118 kPa absolute) at ~80 kPa / 6,500 ft",
+        "Concludes the reading is consistent with a healthy system and does not diagnose belt slip or a stuck bypass from it",
+        "Names what belt slip or a stuck-open bypass would actually look like (e.g. boost sagging at high rpm / varying pull to pull; WOT airflow per rev near NA)",
+        "Says a smaller pulley is a calibration change requiring a retune (fuel and timing), with more heat and knock risk and blower-speed limits to check, not a repair"
+      ],
+      "files": []
     }
   ]
 }

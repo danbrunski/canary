@@ -1,29 +1,46 @@
 # Ignition timing, MBT, and knock
 
-## The invariant: peak-pressure angle, not spark angle
+## The invariant: burn phasing, not spark angle
 
-Combustion takes roughly a fixed **time** — order 2 ms from spark to complete burn,
-approximately independent of engine speed. The *time available* shrinks as rpm rises, so
-the spark must occur earlier in crank angle. That is all ignition advance is.
+The quantity that matters is *where the burn lands*, not when the spark fires. Classic
+MBT criteria (Heywood) put peak cylinder pressure at about 15–16° ATDC and half the charge
+burned at about 10° ATDC. Modern practice targets **CA50 ≈ 8° ATDC**; the true optimum
+moves between about 5° and 11° with heat transfer, burn duration, and compression ratio.
+Advance is whatever achieves that phasing. A production ECU without cylinder pressure
+sensing does not *control* to it. It runs maps that were calibrated to it.
 
-2 ms of crank rotation = rpm × 360 ÷ 60000 degrees ≈ **0.012 × rpm degrees**:
+**How advance scales with rpm.** A popular simplification, still printed in some Bosch
+training material, says combustion takes a fixed ~2 ms, so advance ≈ 0.012 × rpm degrees.
+That is wrong above low speed. Turbulence intensity scales with mean piston speed, so flame
+speed rises with rpm and the burn takes a nearly constant *crank angle*:
 
-| rpm | speed-driven advance |
-|---|---|
-| 600 | ~7° |
-| 2000 | ~24° |
-| 4000 | ~48° |
-| 6000 | ~72° |
+- A typical fast-burn engine at medium speed and part load burns 0–10 % in ~15°, 0–50 % in
+  ~25°, and 0–90 % in ~35° (MIT 2.61).
+- Burn angle grows only about as **rpm^0.2–0.35**. Heywood's data show the 0–10 % and 0–90 %
+  angles growing ×1.6 for a ×4 speed increase. Most of that growth is in the 0–10 %
+  flame-development phase.
 
-This is a first-order model — real burn duration shortens with charge motion and
-turbulence at speed, and lengthens with dilution (EGR, residuals, lean mixture) — but it
-explains why base advance maps rise nearly linearly with rpm and gives a sanity band for
-any logged timing surface. A map that does not roughly follow this shape needs an
-explanation.
+A usable sanity band, scaling from a known MBT point (SA_ref at N_ref):
 
-**The control objective is holding the peak-pressure crank angle fixed** (conventionally
-around 14–16° ATDC), not holding any particular spark angle. Advance is whatever
-achieves that.
+```
+SA_MBT(N) ≈ (SA_ref + CA50) × (N / N_ref)^k − CA50        k ≈ 0.2–0.35, CA50 ≈ 8° ATDC
+```
+
+| From 24° BTDC at 2000 rpm | fixed-2-ms model (wrong) | angle-scaling model |
+|---|---|---|
+| 4000 rpm | ~48° | ~29–33° |
+| 6000 rpm | ~72° | ~32–39° |
+
+So advance climbs steeply off idle and **flattens at high rpm**. Three things pull a real
+map below that band: dilution (EGR, residuals, lean mixture) lengthens the burn, idle is
+often deliberately retarded for torque reserve, and low-to-mid rpm at WOT is usually
+knock-limited. A logged high-rpm timing curve that keeps rising linearly with rpm needs an
+explanation. So does one that sits far above this band.
+
+**MBT is a flat optimum.** About 5–7° of retard from MBT costs roughly 1 % of torque. That
+is why production calibrations can sit a few degrees retarded for knock margin at almost
+no cost. It is also why a 1–2° timing difference between two logs is rarely visible in a
+torque or acceleration measurement.
 
 ## MBT and the knock ceiling
 
@@ -57,13 +74,21 @@ often **learn** a long-term octane adaptation that biases the base table (GM "oc
 scalar", Ford "octane adjust ratio", VAG knock adaptation) so a bad tank isn't rediscovered
 every trip.
 
-Two implementation details that shape what you see: restore is deliberately **10–100×
-slower than retard** (documented restore rates go as low as fractions of a degree per
-second), which produces the characteristic **sawtooth — fast drop, slow climb**; and
-detection-to-action latency is typically **1–3 ignition events**. Some controllers use a
-*progressive* step, shrinking to a fraction of the base step on repeated events to avoid
-over-retarding on a burst. Exact step and restore constants are manufacturer-calibrated —
-treat any specific figure as one implementation, not a universal.
+Implementation details that shape what you see:
+
+- **Restore is deliberately 10–100× slower than retard.** Bosch Motronic 2.5, for example,
+  retards 3° per knock event, then advances in 0.75° steps only after ~2 s (20–120 cycles)
+  without knock. That produces the characteristic **sawtooth: fast drop, slow climb**.
+- **Latency is about one engine cycle.** A cylinder-selective controller retards the
+  knocking cylinder's *next* firing.
+- Some controllers use a *progressive* step, shrinking to a fraction of the base step on
+  repeated events so a burst doesn't over-retard.
+- **Many controllers fall back to a fixed, large global retard when the knock system
+  itself is faulted** (Motronic 2.5: 10.5°). A flat, large, event-free retard can
+  therefore mean a knock-sensor fault, not knock.
+
+Exact step and restore constants are manufacturer-calibrated. Treat any specific figure
+as one implementation, not a universal.
 
 Reading the sawtooth:
 
