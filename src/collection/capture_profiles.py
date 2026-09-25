@@ -147,13 +147,17 @@ class CaptureProfile(_Strict):
     #: its ``known_answer``). Gated by ``mode22_enabled`` -- they need the
     #: same diagnostic session.
     memory: tuple[str, ...] = ()
-    #: DIDs and memory channels to read over **K-line** through the
-    #: CANary-HAT (``src.collection.kline_collector``), by catalog name or
-    #: DID hex. Non-empty means that while this profile is active the K-line
-    #: collector owns the ECM's diagnostic session, so CAN diagnostic polling
-    #: pauses (``tx_gate``); broadcast CAN capture carries on. Empty (the
-    #: default) means K-line is never commanded (operator decision 2026-09-23).
-    #: Every entry needs a catalog width; see ``src.collection.kline.plan``.
+    #: Channels to read over **K-line** through the CANary-HAT
+    #: (``src.collection.kline_collector``), all from one module: bare entries
+    #: (catalog name or DID hex) are the ECM's; ``<MODULE>:<token>``
+    #: (``ABS:ENGINE_SPEED``, ``ABS:1102``) names another module from the
+    #: vehicle's K-line profile. Non-empty means that while this profile is
+    #: active the K-line collector holds that module's session. Only for the
+    #: ECM does that pause CAN diagnostic polling (``tx_gate``: the ECM's
+    #: session is shared); another module shares only the wire. Broadcast CAN
+    #: capture carries on either way. Empty (the default) means K-line is never
+    #: commanded (operator decision 2026-09-23). Every entry needs a recorded
+    #: width (catalog or K-line profile); see ``src.collection.kline.plan``.
     kline: tuple[str, ...] = ()
     #: Whether each service is polled at all. Disabling keeps the selection
     #: intact so re-enabling doesn't mean rebuilding it — "off for this

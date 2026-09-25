@@ -385,3 +385,15 @@ def test_ownership_changes_open_and_close_capture_pause_windows(
         (True, "ecm-session-kline"),
         (False, "ecm-session-kline"),
     ]
+
+
+def test_passive_armed_is_the_operators_switch_not_a_session_claim() -> None:
+    """K01.5: the K-line reader may start while it (or CAN) holds a claim, but
+    never while the operator has armed passive mode for another tool."""
+    tx_gate.claim_ecm_session("kline", now=0.0)
+    assert tx_gate.is_passive() and not tx_gate.passive_armed()
+    tx_gate.release_ecm_session("kline", now=1.0)
+    tx_gate.set_passive(True, source="test")
+    assert tx_gate.passive_armed()
+    tx_gate.set_passive(False, source="test")
+    assert not tx_gate.passive_armed()

@@ -21,6 +21,7 @@ from src.collection.kline.transport import (
     HatPins,
     KlineTimeoutError,
     KlineTransport,
+    KlineTransportError,
     Mode,
     NoEchoError,
     TransmitRefusedError,
@@ -329,3 +330,62 @@ def test_no_echo_at_all_names_the_unpowered_transceiver() -> None:
 
     with make(world, port=Silent(world)) as transport, pytest.raises(NoEchoError, match="12 V"):
         transport.send_frame(F["native_stop"])
+
+
+def _abs() -> Ecu:
+    start = kp.start_communication(0x28, PROFILE.tester_address)
+    replies = {
+        start: bytes.fromhex("83 fc 28 c1 6d 8f 64"),
+        kp.encode_length_frame(b"\x3e"): kp.encode_length_frame(b"\x7e"),
+    }
+    return replies.get
+
+
+def test_start_communication_addresses_the_module_asked_for() -> None:
+    """K01.5: the ABS at 0x28, bytes as the scan tool sent them on 2026-09-24."""
+    world = World()
+    with make(world, ecu=_abs()) as transport:
+        reply = transport.start_communication(0x28)
+        transport.tester_present()
+    assert (reply.source, reply.key_bytes) == (0x28, b"\x6d\x8f")
+    writes = [e[1] for e in world.log if e[0] == "write"]
+    assert writes == [bytes.fromhex("81 28 fc 81 26"), kp.encode_length_frame(b"\x3e")]
+
+
+def test_a_start_answered_by_another_module_is_refused() -> None:
+    world = World()
+    with (
+        make(world, ecu=xterra()) as transport,
+        pytest.raises(KlineTimeoutError),
+    ):
+        transport.start_communication(0x28)  # the ECM does not answer for the ABS
+    start_28 = kp.start_communication(0x28, PROFILE.tester_address)
+    with (
+        make(World(), ecu=lambda f: F["start_communication_reply"] if f == start_28 else None) as t,
+        pytest.raises(KlineTransportError, match="to 0x28 answered by 0x10"),
+    ):
+        t.start_communication(0x28)
+
+
+def test_armed_passive_refuses_every_byte_by_name() -> None:
+    """Passive armed means nothing of CANary's transmits: no wake-up, no 81,
+    no request, no StopCommunication; the transport refuses before the port."""
+    from src.collection import tx_gate
+    from src.collection.kline.transport import PassiveArmedError
+
+    world = World()
+    with make(world, ecu=xterra()) as transport:
+        transport.start_communication()
+        tx_gate.set_passive(True, source="test")
+        written = len([e for e in world.log if e[0] in ("write", "break")])
+        (answer,) = PROFILE.known_answers
+        for send in (
+            lambda: transport.request(answer.request_bytes()),
+            transport.stop_communication,
+            transport.tester_present,
+            lambda: transport.wake(PROFILE.wakeups[0]),
+            transport.start_communication,
+        ):
+            with pytest.raises(PassiveArmedError, match="passive mode is armed"):
+                send()
+        assert len([e for e in world.log if e[0] in ("write", "break")]) == written

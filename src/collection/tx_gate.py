@@ -110,6 +110,18 @@ def is_passive() -> bool:
         return _passive or bool(_claims)
 
 
+def passive_armed() -> bool:
+    """The operator's passive switch alone, without session claims.
+
+    :func:`is_passive` is also true while CANary's own K-line reader holds the
+    ECM, so it cannot answer "may the K-line reader start?" — this can. Armed
+    passive means *nothing* of CANary's transmits, on any bus: it is armed for
+    another tool (a scan tool, a reflash), not for CAN alone.
+    """
+    with _lock:
+        return _passive
+
+
 def ecm_session_owner() -> EcmSessionOwner:
     """Who owns the ECM's diagnostic session right now."""
     with _lock:
@@ -300,6 +312,7 @@ __all__ = [
     "claim_ecm_session",
     "ecm_session_owner",
     "is_passive",
+    "passive_armed",
     "release_ecm_session",
     "reset_ecm_session_claims",
     "reset_suppressed",

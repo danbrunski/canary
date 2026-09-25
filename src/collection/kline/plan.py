@@ -1,13 +1,26 @@
-"""Turn a capture profile's ``kline:`` list into one K-line definition.
+"""Turn a capture profile's ``kline:`` list into one module's read plan.
 
-Each entry names a DID (catalog name or 4-digit hex, as ``mode22`` does) or a
-service-0x23 memory channel (catalog name, as ``memory`` does). A DID becomes
-one ``02 hh ll`` descriptor and needs a catalog ``response_length``; a memory
-channel becomes one ``83`` byte descriptor per byte of the value it names
-(``address + byte_start``, ``byte_length`` bytes). Nothing is guessed: an
-unknown name or a DID with no recorded width refuses the whole plan, naming
-it, because the reply carries no boundaries and one wrong width misattributes
-every value after it.
+An entry is ``<MODULE>:<token>`` (``ABS:1202``, ``ABS:ENGINE_SPEED``) or a bare
+token, which means the ECM (the only module before K01.5). Every entry must
+name the same module: K-line is one wire and holds one session at a time.
+
+**The ECM** (a ``local_id`` reader). Each token names a DID (catalog name or
+4-digit hex, as ``mode22`` does) or a service-0x23 memory channel (catalog
+name, as ``memory`` does). A DID becomes one ``02 hh ll`` descriptor and needs
+a catalog ``response_length``; a memory channel becomes one ``83`` byte
+descriptor per byte of the value it names (``address + byte_start``,
+``byte_length`` bytes). The whole set is one ``AC`` definition, refused
+before it is sent when its reply would pass the module's
+``max_local_id_reply_bytes`` (the Xterra's ECM answered ``7F AC 12`` past 61).
+
+**Any other module** (a ``common_id`` reader) reads one ``22 hh ll`` per DID,
+as the scan tool did; tokens resolve against that module's profile entry
+(``data/<vehicle>/kline.yaml``), whose recorded ``width`` every reply must
+match.
+
+Nothing is guessed: an unknown name or a DID with no recorded width refuses
+the whole plan, naming it, because a ``21`` reply carries no boundaries and
+one wrong width misattributes every value after it.
 """
 
 from __future__ import annotations
@@ -15,6 +28,8 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from src.collection.kline.names import MEM_PREFIX
+from src.collection.kline.profile import KlineProfile, ModuleDid
 from src.collection.kline.protocol import (
     DidDescriptor,
     MemoryByteDescriptor,
@@ -37,7 +52,7 @@ class KlinePlanError(ValueError):
 class PlannedChannel:
     """One recorded channel: its descriptors, in order, and its value width."""
 
-    channel: str  # ``DID_1201`` or ``MEM_<NAME>``
+    channel: str  # the item after ``<module>:`` — ``1201`` or ``MEM_<NAME>``
     descriptors: tuple[ValueDescriptor, ...]
     width: int
 
@@ -77,7 +92,10 @@ def _did_for(token: str, did_map: DidMap) -> int | None:
     return None
 
 
-def resolve_plan(entries: Sequence[str], did_map: DidMap) -> KlinePlan:
+def resolve_plan(
+    entries: Sequence[str], did_map: DidMap, *, max_reply_bytes: int = MAX_REPLY_DATA
+) -> KlinePlan:
+    """The ECM's local-id plan: ``entries`` are bare tokens (no module)."""
     if not entries:
         raise KlinePlanError("a K-line plan needs at least one channel")
     memory = {channel.name.upper(): channel for channel in did_map.memory}
@@ -96,7 +114,7 @@ def resolve_plan(entries: Sequence[str], did_map: DidMap) -> KlinePlan:
             descriptors: tuple[ValueDescriptor, ...] = tuple(
                 MemoryByteDescriptor(start + offset) for offset in range(channel.byte_length)
             )
-            name = f"MEM_{channel.name}"
+            name = f"{MEM_PREFIX}{channel.name}"
         else:
             did = _did_for(entry, did_map)
             if did is None:
@@ -104,7 +122,7 @@ def resolve_plan(entries: Sequence[str], did_map: DidMap) -> KlinePlan:
                     f"kline entry {entry!r} is neither a DID nor a memory channel in the catalog"
                 )
             descriptors = (DidDescriptor(did),)
-            name = f"DID_{did:04X}"
+            name = f"{did:04X}"
         if name in seen:
             raise KlinePlanError(f"kline entry {entry!r} repeats {name}")
         seen.add(name)
@@ -123,11 +141,98 @@ def resolve_plan(entries: Sequence[str], did_map: DidMap) -> KlinePlan:
             f"definition needs {definition} descriptor bytes; one frame carries "
             f"{MAX_DEFINITION_BYTES}"
         )
-    if plan.reply_bytes > MAX_REPLY_DATA:
+    if plan.reply_bytes > max_reply_bytes:
         raise KlinePlanError(
-            f"reply would carry {plan.reply_bytes} value bytes; one frame carries {MAX_REPLY_DATA}"
+            f"reply would carry {plan.reply_bytes} value bytes; the module answers at most "
+            f"{max_reply_bytes} (a longer definition is refused with 7F AC 12)"
         )
     return plan
+
+
+@dataclass(frozen=True)
+class ModulePlan:
+    """One K-line session's worth of reads, against one module."""
+
+    address: int
+    label: str
+    service: str  # ``local_id`` or ``common_id``
+    #: ``local_id``: the definition to poll.
+    local: KlinePlan | None = None
+    #: ``common_id``: the DIDs to read one by one, in order.
+    reads: tuple[ModuleDid, ...] = ()
+    #: Send TesterPresent after this long without a request (``None``: never).
+    tester_present_seconds: float | None = None
+
+
+def split_module(entry: str) -> tuple[str | None, str]:
+    """``ABS:1202`` -> (``ABS``, ``1202``); a bare token has no module."""
+    module, sep, token = entry.strip().partition(":")
+    if not sep:
+        return None, module
+    return module.strip().upper(), token.strip()
+
+
+def resolve_module_plan(
+    entries: Sequence[str], profile: KlineProfile, did_map: DidMap
+) -> ModulePlan:
+    """Resolve a capture profile's ``kline:`` list against the vehicle's
+    K-line profile. Refuses (:class:`KlinePlanError`) rather than guesses."""
+    if not entries:
+        raise KlinePlanError("a K-line plan needs at least one channel")
+    ecm_label = profile.module_label(profile.ecm_address)
+    grouped: dict[str, list[str]] = {}
+    for entry in entries:
+        named, token = split_module(entry)
+        grouped.setdefault(named or ecm_label, []).append(token)
+    if len(grouped) > 1:
+        raise KlinePlanError(
+            f"kline entries name {len(grouped)} modules ({', '.join(sorted(grouped))}); "
+            "K-line is one wire and holds one session at a time"
+        )
+    ((label, tokens),) = grouped.items()
+    try:
+        address = profile.module_address(label)
+    except LookupError as exc:
+        raise KlinePlanError(str(exc)) from exc
+    module = profile.modules.get(address)
+    if address == profile.ecm_address:
+        reader = module.reader if module is not None else None
+        if reader is not None and reader.read_service != "local_id":
+            raise KlinePlanError(f"{label}: only a local_id reader is built for the ECM")
+        cap = (
+            reader.max_local_id_reply_bytes
+            if reader is not None and reader.max_local_id_reply_bytes is not None
+            else MAX_REPLY_DATA
+        )
+        return ModulePlan(
+            address,
+            label,
+            "local_id",
+            local=resolve_plan(tokens, did_map, max_reply_bytes=cap),
+            tester_present_seconds=reader.tester_present_seconds if reader else None,
+        )
+    if module is None or module.reader is None:
+        raise KlinePlanError(
+            f"module {label} has no reader in the vehicle's K-line profile: nothing says "
+            "how it may be read, so CANary does not command it"
+        )
+    if module.reader.read_service != "common_id":
+        raise KlinePlanError(f"{label}: a local_id reader is built only for the ECM")
+    reads: list[ModuleDid] = []
+    for token in tokens:
+        try:
+            did_entry, _ = module.resolve(token)
+        except LookupError as exc:
+            raise KlinePlanError(str(exc)) from exc
+        if did_entry not in reads:  # two flags of one word are one read
+            reads.append(did_entry)
+    return ModulePlan(
+        address,
+        label,
+        "common_id",
+        reads=tuple(reads),
+        tester_present_seconds=module.reader.tester_present_seconds,
+    )
 
 
 def split_reply(plan: KlinePlan, values: Sequence[bytes]) -> list[tuple[str, bytes]]:
@@ -146,7 +251,10 @@ def split_reply(plan: KlinePlan, values: Sequence[bytes]) -> list[tuple[str, byt
 __all__ = [
     "KlinePlan",
     "KlinePlanError",
+    "ModulePlan",
     "PlannedChannel",
+    "resolve_module_plan",
     "resolve_plan",
+    "split_module",
     "split_reply",
 ]

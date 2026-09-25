@@ -256,3 +256,43 @@ def test_a_zero_length_format_byte_met_in_resync_is_skipped_not_fatal() -> None:
     decoder = FrameDecoder()
     got = [f for b in bytes.fromhex("80806464") for f in decoder.feed(0.0, b, quiet_s=0.0)]
     assert got == [] and decoder.stats.checksum_resyncs >= 1
+
+
+# --------------------------------------------------------------------------
+# K01.1 — every frame is attributed to its module
+# --------------------------------------------------------------------------
+
+
+def test_uprevs_whole_session_is_the_ecms() -> None:
+    _, frames = _decode(STREAM)
+    # Twelve wake-ups, and each session's frames carry the ECM's address.
+    assert {f.module for f in frames} == {0x10}
+
+
+def test_a_scan_tool_session_on_the_abs_is_stamped_until_it_stops() -> None:
+    from tests.builders import abs_scan_tool_frames, kline_wire
+
+    _, frames = _decode(kline_wire(abs_scan_tool_frames(cycles=2)))
+    by_payload = [(f.payload.hex(), f.direction, f.module) for f in frames]
+    # Heard before any StartCommunication: unknown, not guessed.
+    assert by_payload[:2] == [("2212020401", "tester", None), ("62120200f5", "ecu", None)]
+    # StartCommunication names the target; its reply names the source.
+    assert by_payload[2][1:] == ("tester", 0x28) and by_payload[3][1:] == ("ecu", 0x28)
+    stop = next(i for i, f in enumerate(frames) if f.payload == b"\xc2")
+    assert {f.module for f in frames[2 : stop + 1]} == {0x28}
+    # A new wake-up and StartCommunication: the ECM's 0x1210 is not the ABS's.
+    ecm = frames[stop + 1 :]
+    assert {f.module for f in ecm} == {0x10}
+    assert [f.payload.hex() for f in ecm][-1] == "621210001a"
+
+
+def test_a_reply_whose_request_was_missed_still_reads_as_a_reply() -> None:
+    """189 ABS replies were stored as requests on 2026-09-24: direction was
+    judged against the pending request, which the sniffer had missed."""
+    from tests.builders import abs_scan_tool_frames, kline_wire
+
+    _, frames = _decode(kline_wire(abs_scan_tool_frames(cycles=1)))
+    at = max(i for i, f in enumerate(frames) if f.payload == bytes.fromhex("621118a1"))
+    previous, orphan = frames[at - 1], frames[at]
+    assert previous.payload == b"\x7e"  # nothing pending when it arrived
+    assert orphan.direction == "ecu"

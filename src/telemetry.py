@@ -60,9 +60,11 @@ UPREV_SOURCE: Final = "uprev"
 #: (``data/sensor_can_signals.yaml``), not code.
 SENSOR_SOURCE: Final = "sensor"
 #: ECU data CANary reads itself over K-line, through the CANary-HAT's own
-#: transceiver (``src.collection.kline``): ``kline:DID_<hex>`` and
-#: ``kline:MEM_<NAME>`` values, and raw ``kline:FRAME`` rows carrying the
-#: wire bytes so any session can be re-decoded later. A different instrument
+#: transceiver (``src.collection.kline``): module-scoped values
+#: (``kline:<module>:<hex>``, ``kline:ECM:MEM_<NAME>``; K01.1, named by
+#: ``src.collection.kline.names``), and raw ``kline:FRAME`` rows carrying the
+#: wire bytes so any session can be re-decoded later. Rows stored before K01.1
+#: are ``kline:DID_<hex>``/``kline:MEM_<NAME>`` with no module. A different instrument
 #: from ``uprev`` (the UpRev cable's logs, import-only) and from ``obd`` (the
 #: same DIDs over CAN): lineage decides which instrument a value came from
 #: (all-did-tuning-hardening 2.7, 8.5). Not trainable until the operator

@@ -368,3 +368,96 @@ def sequence_training_frame(rows: int = 14) -> pd.DataFrame:
             "speed": [float(idx % 5) for idx in range(rows)],
         }
     )
+
+
+# ---------------------------------------------------------------------------
+# K-line wire traffic (K01)
+# ---------------------------------------------------------------------------
+
+#: A wake-up on the wire: the sniffer reads the 25 ms low as one 0x00 byte.
+KLINE_WAKE = None
+#: The scan tool's ``22`` trailer, the same ``04 01`` UpRev sends the ECM.
+KLINE_TRAILER = b"\x04\x01"
+#: The ABS live-data screen's cycle as the scan tool read it on 2026-09-24
+#: (data/analyses/2026-09-24-abs-kline-scan-tool.md), with the parked values.
+ABS_SCREEN_CYCLE: tuple[tuple[int, bytes], ...] = (
+    (0x1301, b"\x00\x0f"),
+    (0x111A, b"\x7f"),
+    (0x1105, b"\x00"),
+    (0x1104, b"\x00"),
+    (0x1102, b"\x00"),
+    (0x1103, b"\x00"),
+    (0x1302, b"\x00\x8f"),
+    (0x1303, b"\xa0\xfe"),
+    (0x1210, b"\xff\xff"),
+    (0x1118, b"\xa1"),
+    (0x1202, b"\x00\x00"),
+)
+
+
+def kline_wire(
+    frames: list[bytes | None],
+    *,
+    start: float = 1000.0,
+    byte_s: float = 0.001,
+    frame_gap_s: float = 0.03,
+) -> list[tuple[float, int]]:
+    """``(at, byte)`` as the sniffer's reader sees them: bytes ``byte_s``
+    apart, frames ``frame_gap_s`` apart (longer than the sniffer's
+    inter-byte gap), :data:`KLINE_WAKE` as a lone 0x00."""
+    out: list[tuple[float, int]] = []
+    t = start
+    for frame in frames:
+        t += frame_gap_s
+        if frame is None:
+            out.append((t, 0x00))
+            continue
+        for byte in frame:
+            out.append((t, byte))
+            t += byte_s
+    return out
+
+
+def _kline_read(did: int, value: bytes) -> list[bytes | None]:
+    from src.collection.kline import protocol as kp
+
+    request = kp.read_did(did, KLINE_TRAILER)
+    return [kp.encode_length_frame(request), kp.encode_length_frame(b"\x62" + request[1:3] + value)]
+
+
+def abs_scan_tool_frames(
+    *, cycles: int = 6, brake_cycles: tuple[int, ...] = ()
+) -> list[bytes | None]:
+    """A scan tool on the Xterra's ABS screen, built from the 2026-09-24 bytes.
+
+    Modelled on the documented capture, not the capture itself (session
+    2026-09-24T162507 is still on the Pi): a read the capture attached in the
+    middle of (no StartCommunication yet), the wake-up and StartCommunication
+    to 0x28 (``81 28 FC 81 26`` -> ``83 FC 28 C1 6D 8F 64``), identification
+    (one refused ``7F 1A 12``), one-off reads at screen load (one refused
+    ``7F 22 12``), ``cycles`` repetitions of the screen's cycle with a
+    TesterPresent each, the stop-lamp bit 0x0200 of 0x1303 set during
+    ``brake_cycles``, one reply whose request was missed, StopCommunication;
+    then UpRev's ECM session reading its own 0x1210 (TPS2).
+    """
+    from src.collection.kline import protocol as kp
+
+    length = kp.encode_length_frame
+    frames: list[bytes | None] = _kline_read(0x1202, b"\x00\xf5")  # attached mid-session
+    frames += [KLINE_WAKE, bytes.fromhex("8128FC8126"), bytes.fromhex("83FC28C16D8F64")]
+    frames += [length(b"\x1a\x80"), length(b"\x5a\x80\x41\x42\x53")]
+    frames += [length(b"\x1a\x00"), length(b"\x7f\x1a\x12")]
+    for did, value in ((0x1100, b"\xf8\x00\x0b\x41"), (0x1200, b"\xc1\xbf\x00\x00")):
+        frames += _kline_read(did, value)
+    frames += [length(kp.read_did(0x1307, KLINE_TRAILER)), length(b"\x7f\x22\x12")]
+    for cycle in range(cycles):
+        for did, value in ABS_SCREEN_CYCLE:
+            if did == 0x1303 and cycle in brake_cycles:
+                value = b"\xa2\xfe"  # stop-lamp switch 0x0200 set
+            frames += _kline_read(did, value)
+        frames += [length(b"\x3e"), length(b"\x7e")]
+    frames += [length(b"\x62\x11\x18\xa1")]  # its request was never heard
+    frames += [length(b"\x82"), length(b"\xc2")]
+    frames += [KLINE_WAKE, bytes.fromhex("8110FC810E"), bytes.fromhex("83FC10C15D8F3C")]
+    frames += _kline_read(0x1210, b"\x00\x1a")
+    return frames

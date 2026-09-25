@@ -47,6 +47,9 @@ SID_STOP_COMMUNICATION = 0x82
 SID_DEFINE_LOCAL_ID = 0xAC
 SID_NEGATIVE_RESPONSE = 0x7F
 POSITIVE_OFFSET = 0x40
+#: Seen from a scan tool on 2026-09-24 (the ABS's steering-angle calibration).
+#: Named for reports only: this client never sends it (not on the allowlist).
+SID_IO_CONTROL_BY_LOCAL_ID = 0x30
 
 #: Services this client may send. Everything else is refused by id.
 ALLOWED_SERVICES: frozenset[int] = frozenset(
@@ -78,6 +81,32 @@ WRITE_SERVICES: Mapping[int, str] = {
     0x37: "RequestTransferExit",
     0x3B: "WriteDataByLocalIdentifier",
     0x3D: "WriteMemoryByAddress",
+}
+
+#: Every service id a report may meet, by name. Naming is not permission: what
+#: this client may *send* is :data:`ALLOWED_SERVICES`.
+SERVICE_NAMES: Mapping[int, str] = {
+    SID_START_DIAGNOSTIC_SESSION: "StartDiagnosticSession",
+    0x11: "ECUReset",
+    0x14: "ClearDiagnosticInformation",
+    0x17: "ReadStatusOfDiagnosticTroubleCodes",
+    0x18: "ReadDiagnosticTroubleCodesByStatus",
+    SID_READ_ECU_IDENTIFICATION: "ReadEcuIdentification",
+    0x20: "StopDiagnosticSession",
+    SID_READ_DATA_BY_LOCAL_ID: "ReadDataByLocalIdentifier",
+    SID_READ_DATA_BY_COMMON_ID: "ReadDataByCommonIdentifier",
+    SID_READ_MEMORY_BY_ADDRESS: "ReadMemoryByAddress",
+    0x27: "SecurityAccess",
+    0x2E: "WriteDataByCommonIdentifier",
+    0x2F: "InputOutputControlByCommonIdentifier",
+    SID_IO_CONTROL_BY_LOCAL_ID: "InputOutputControlByLocalIdentifier",
+    0x31: "StartRoutineByLocalIdentifier",
+    0x3B: "WriteDataByLocalIdentifier",
+    SID_TESTER_PRESENT: "TesterPresent",
+    SID_START_COMMUNICATION: "StartCommunication",
+    SID_STOP_COMMUNICATION: "StopCommunication",
+    0x83: "AccessTimingParameters",
+    SID_DEFINE_LOCAL_ID: "DynamicallyDefineLocalIdentifier",
 }
 
 NEGATIVE_RESPONSE_CODES: Mapping[int, str] = {
@@ -198,6 +227,16 @@ def check_request(payload: bytes) -> None:
             f"service 0x{service:02x} sub-function 0x{payload[1]:02x} is refused "
             "(the programming session exists only to flash)"
         )
+
+
+def is_response_sid(service: int) -> bool:
+    """Whether a frame's service byte is a reply's (ISO 14230-3).
+
+    A positive reply is the request's id plus ``0x40`` and a negative one is
+    ``7F``; request ids live in ``0x00-0x3F`` and ``0x80-0xBF``, so bit 6 alone
+    says which way a frame went — without knowing the request it answers.
+    """
+    return bool(service & POSITIVE_OFFSET)
 
 
 def expect_positive(request_service: int, reply: bytes) -> bytes:
@@ -397,6 +436,7 @@ def split_did_reply(did: int, params: bytes) -> bytes:
 
 __all__ = [
     "ALLOWED_SERVICES",
+    "SERVICE_NAMES",
     "AddressedFrame",
     "Descriptor",
     "DidDescriptor",
@@ -418,6 +458,7 @@ __all__ = [
     "encode_length_frame",
     "expand_local_id",
     "expect_positive",
+    "is_response_sid",
     "parse_define_local_id",
     "parse_start_communication_reply",
     "read_did",

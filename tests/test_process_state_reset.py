@@ -19,6 +19,7 @@ from src.collection import (
     tx_gate,
 )
 from src.collection.capture_profiles import CaptureProfile
+from src.collection.kline.sessions import MODULE_SESSIONS
 from src.collection.process_state import (
     COVERED_GLOBALS,
     COVERED_MODULES,
@@ -45,6 +46,7 @@ def _state() -> dict[str, Any]:
         "discovery_vehicles": discovery.registry_snapshot(now)["vehicles"],
         "drop_logs": dict(queueing._CAN_FRAME_DROP_LOGS),
         "unattributed_drops": queueing._UNATTRIBUTED_QUEUE_DROPS.dropped,
+        "kline": MODULE_SESSIONS.snapshot(now=now),
     }
 
 
@@ -88,6 +90,7 @@ def _dirty_everything() -> None:
     discovery.remember(discovery.DiscoveryState(key="VIN-X", version=discovery.cache_version()))
     queueing._can_frame_drop_log("test-loop")
     queueing._drop_callback(None)(TelemetryRecord.obd(0.0, "RPM", 1.0, "rpm"))
+    MODULE_SESSIONS.claim(0x10, "foreign")
 
 
 def test_reset_returns_every_global_to_the_start_up_value() -> None:
@@ -130,6 +133,7 @@ class TestTheNextTestSeesTheDefault:
         assert state["discovery_vehicles"] == {}
         assert state["drop_logs"] == {}
         assert state["unattributed_drops"] == 0
+        assert state["kline"] == {}
 
 
 def _mutates_module_globals(path: Path) -> bool:
@@ -188,6 +192,7 @@ NOT_STATE: dict[tuple[str, str], str] = {
             ("kline/protocol.py", "REFUSED_SUBFUNCTIONS"),
             ("kline/protocol.py", "WRITE_SERVICES"),
             ("kline/protocol.py", "NEGATIVE_RESPONSE_CODES"),
+            ("kline/protocol.py", "SERVICE_NAMES"),
             ("lsm6dsox.py", "ODR_CODES"),
             ("lsm6dsox.py", "ACCEL_RANGES"),
             ("lsm6dsox.py", "GYRO_RANGES"),

@@ -77,6 +77,32 @@ def test_decoded_rows_are_scaled_not_taken_at_face_value(tmp_path: Path) -> None
     assert frame.loc[frame["spec"] == "decoded:ECM_RPM", "unit"].iloc[0] == "rpm"
 
 
+def test_kline_module_rows_read_as_raw_counts_from_their_hex(tmp_path: Path) -> None:
+    """K-line rows store hex like DID rows; ``value_number`` is empty, so the
+    old numeric reader returned nothing for every ``kline:`` spec."""
+    session = _session(
+        tmp_path,
+        [
+            TelemetryRecord(timestamp=T0, source="kline", channel="ABS:1202", value="00f5"),
+            TelemetryRecord(timestamp=T0, source="kline", channel="ECM:1202", value="0001"),
+        ],
+    )
+    frame = read_channels(session, ["kline:ABS:1202"], bindings_path=BINDINGS, dids_path=DIDS)
+    assert frame["value"].tolist() == [245.0]
+    assert frame["unit"].tolist() == ["counts"]
+
+
+def test_a_legacy_kline_did_spec_is_refused_by_name(tmp_path: Path) -> None:
+    """``kline:DID_1202`` names no module (pre-K01.1 rows); reading it would mix
+    the ABS's 0x1202 with the ECM's. The refusal names the way forward."""
+    session = _session(
+        tmp_path,
+        [TelemetryRecord(timestamp=T0, source="kline", channel="DID_1202", value="00f5")],
+    )
+    with pytest.raises(ChannelSpecError, match="attribute_modules"):
+        read_channels(session, ["kline:DID_1202"], bindings_path=BINDINGS, dids_path=DIDS)
+
+
 def test_did_values_come_from_value_text_hex(tmp_path: Path) -> None:
     """DID readings live in ``value_text`` as hex; ``value_number`` is empty.
 

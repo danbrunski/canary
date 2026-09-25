@@ -103,6 +103,18 @@ def test_decode_unpinned_scale_falls_back_to_raw() -> None:
     assert did.iloc[0]["unit"] == "raw"
 
 
+def test_a_legacy_kline_did_row_is_not_decoded_against_the_ecm_catalog() -> None:
+    """K01.1: ``kline:DID_<hex>`` rows (pre-2026-09-24) name no module. The
+    scan tool's ABS 0x1210 (yaw) is not the ECM's 0x1210, so decoding one
+    against ``dids.yaml`` invents a reading. Offline, live and REST all refuse."""
+    frame = _long_with_did("DID_1225", "01ae").assign(source="kline")
+    out = decode_did_rows(frame, _did_map())
+    assert (out["source"] == DID_SOURCE).sum() == 0
+    source = LiveFeatureSource(config=_config(), did_map=_did_map())
+    record = TelemetryRecord.from_epoch(0.0, source="kline", channel="DID_1225", value="01ae")
+    assert source.decode_did_for_telemetry(record) is None
+
+
 def test_unknown_did_hex_is_skipped() -> None:
     frame = _long_with_did("DID_9999", "0102")
     out = decode_did_rows(frame, _did_map())

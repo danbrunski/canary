@@ -472,7 +472,9 @@ class LiveFeatureSource:
         becomes a ``TelemetryRecord`` that could reach storage — the raw
         poll stays the persisted truth and preprocessing re-decodes it.
         """
-        return decode_raw_did_reading(self._did_by_hex, record.channel, record.value)
+        return decode_raw_did_reading(
+            self._did_by_hex, record.channel, record.value, source=record.source
+        )
 
     def _apply_did_decode(self, record: TelemetryRecord) -> None:
         """Mirror ``decode_did_rows``: decode a raw ``DID_<hex>`` reading into

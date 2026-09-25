@@ -49,3 +49,181 @@ known_answers:
     evidence: >-
       UpRev's ECU check, repeated ~3.6 Hz (replies 62 11 03 9A), and the HAT's
       own read (62 11 03 99), 2026-09-23 KOEO.
+# The modules on this K-line, by KWP2000 address (model: KlineModule in
+# src/collection/kline/profile.py). The name is what K-line channels are called
+# (kline:ABS:1303); an address with no entry here is written in hex
+# (kline:28:1303), and a frame seen before any StartCommunication is
+# kline:unknown:<did>. A `reader` says how CANary may read the module itself;
+# without one it never commands the module. `dids` records each DID's reply
+# width (a fact) and, only where a known answer backs it, a binding.
+modules:
+  0x10:
+    name: ECM
+    key_bytes: [0x5D, 0x8F]
+    evidence: >-
+      81 10 FC 81 0E -> 83 FC 10 C1 5D 8F 3C, from UpRev's cable and from the
+      HAT itself, 2026-09-23 KOEO (docs/uprev-usb-kline-research.md "On-wire
+      view").
+    reader:
+      read_service: local_id
+      # UpRev's 21 84 reply of exactly 61 data bytes was answered; its longer
+      # AC 84 definition (the same set plus 1249, 124A and 121A) drew
+      # 7F AC 12 on two starts (docs/uprev-usb-kline-research.md "UpRev CSV vs
+      # the wire", 2026-09-24). The true limit lies between 61 and that length.
+      max_local_id_reply_bytes: 61
+      # TesterPresent has not been seen answered by this ECM on K-line (on CAN
+      # it is rejected), so it is not sent: polling alone keeps the session.
+      evidence: >-
+        UpRev and the HAT held K-line sessions with AC definitions and 21
+        polls, 2026-09-23/24; the 61-byte cap from UpRev's refused start.
+  0x28:
+    name: ABS
+    key_bytes: [0x6D, 0x8F]
+    evidence: >-
+      The operator's scan tool on the ABS live-data screen, session
+      2026-09-24T162507: 81 28 FC 81 26 -> 83 FC 28 C1 6D 8F 64, three times
+      (16:32:00, 16:32:02.9, 16:32:41.8Z), then length-byte frames
+      (data/analyses/2026-09-24-abs-kline-scan-tool.md).
+    reader:
+      # The scan tool read the ABS one 22 per DID, with the same 04 01 trailer
+      # UpRev sends the ECM. AC/21 has never been tried on the ABS.
+      read_service: common_id
+      # The scan tool's own keep-alive: 3E -> 7E three times, 1.50 s apart
+      # (16:32:43.95, 45.45, 46.95Z) while its screen changed.
+      tester_present_seconds: 1.5
+      evidence: >-
+        Session 2026-09-24T162507: 1,900-odd 22 reads answered 62 hh ll ...
+        (or 7F 22 12 for DIDs it lacks) at 25-40 ms, and 3E answered 7E.
+        CANary's own KOEO read of the ABS is K01.5's truck item.
+    dids:
+      - did: 0x1102
+        width: 1
+        evidence: 137 replies 62 11 02 00, 2026-09-24T162507 (parked)
+        note: >-
+          Hypothesis: FR LH wheel speed (the screen's first of four one-byte
+          items, all 0 km/h parked). Unbound until a drive pairs 0x1102-0x1105
+          against the CAN 0x6F7 wheel speeds and GPS (K01.4), wheel order included.
+      - did: 0x1103
+        width: 1
+        evidence: 137 replies 62 11 03 00, 2026-09-24T162507 (parked)
+        note: Hypothesis FR RH wheel speed; unbound (see 0x1102).
+      - did: 0x1104
+        width: 1
+        evidence: 156 replies 62 11 04 00, 2026-09-24T162507 (parked)
+        note: Hypothesis RR LH wheel speed; unbound (see 0x1102).
+      - did: 0x1105
+        width: 1
+        evidence: 164 replies 62 11 05 00, 2026-09-24T162507 (parked)
+        note: Hypothesis RR RH wheel speed; unbound (see 0x1102).
+      - did: 0x1118
+        width: 1
+        evidence: 167 replies, 2026-09-24T162507
+        name: BATTERY_VOLTAGE
+        unit: V
+        scale: 0.078125
+        status: provisional
+        known_answer: >-
+          Two points against the scan tool's display, no same-instant
+          reference: raw 160-161 at 12.48 V KOEO, 175-176 at 13.73 V running
+          (16:40-16:42Z), both ~0.078 V/count; 1/12.8 fits within display
+          rounding. Confirm against a same-instant voltage (Mode 01
+          CONTROL_MODULE_VOLTAGE or the HAT's supply ADC) over a changing rail.
+      - did: 0x111A
+        width: 1
+        evidence: 171 replies 7F (once 80), 2026-09-24T162507 (parked)
+        name: DECEL_G
+        unit: g
+        scale: 0.01
+        offset: -1.28
+        status: provisional
+        known_answer: >-
+          (raw - 128) x 0.01 g: raw 127 displayed as -0.01 G, raw 128 as 0.00,
+          parked. Two adjacent counts only; confirm under hard braking and
+          acceleration against d(speed)/dt (K01.4 drive).
+      - did: 0x1202
+        width: 2
+        evidence: 149 replies, 2026-09-24T162507 (0000 KOEO, 232-334 running)
+        name: ENGINE_SPEED
+        unit: rpm
+        scale: 3.125
+        status: confirmed
+        known_answer: >-
+          Paired same-instant (within 100 ms, compare_channels) against
+          decoded:ECM_RPM, the ECM's own CAN broadcast (a confirmed binding),
+          16:40-16:42Z idle and blips, session 2026-09-24T162507: per-sample
+          rpm/count ratio ~3.13, spread 0.3 % over raw 232-334
+          (data/analyses/2026-09-24-abs-kline-scan-tool.md; the session is
+          still on the Pi, so no committed fixture re-derives it yet).
+          3.125 = 100/32; 245 counts = 766 rpm, inside the displayed 750-820.
+          Checked only over 725-1045 rpm.
+      - did: 0x1210
+        width: 2
+        evidence: 158 replies 0000 / FFFF, 2026-09-24T162507 (parked)
+        note: >-
+          Hypothesis: yaw rate, signed 16-bit, ~0.27 deg/s per count (FFFF
+          displayed as -0.27 deg/s). Not the ECM's 0x1210. Unbound until left
+          and right turns pair it against the GPS heading rate (sign and scale).
+      - did: 0x1301
+        width: 2
+        evidence: 249 replies, all 000F, 2026-09-24T162507
+        note: >-
+          A status word that did not move under brake, VDC OFF switch, engine
+          start or the steering-angle calibration. Unidentified.
+      - did: 0x1302
+        width: 2
+        evidence: 134 replies, all 008F, 2026-09-24T162507
+        note: Constant through KOEO and idle. Unidentified.
+      - did: 0x1303
+        width: 2
+        evidence: 304 replies, 2026-09-24T162507
+        note: >-
+          Switch and lamp word. BASELINE WAS A FAULT: until the steering-angle
+          calibration at 16:51:04Z the SLIP light (0x8000) and the VDC OFF
+          lamp (0x2000) were set because the steering-angle sensor needed
+          calibrating, so B0FE/A0FE is not a normal rest state; after
+          calibration the parked word read 10FE/00FE. Bit 0x1000 toggles every
+          ~8-18 s whatever the operator does (unidentified). The low byte FE
+          never moved.
+        flags:
+          - name: STOP_LAMP_SWITCH
+            mask: 0x0200
+            meaning: brake pedal stop-lamp switch, set while the pedal is pressed
+            status: confirmed
+            evidence: >-
+              Brake held 16:42:55-16:43:33Z KOEO (operator): the bit set at
+              16:42:55.40 and cleared at 16:43:33.17, with three release/press
+              flickers at 16:43:20-25; nothing else in the word followed it.
+              Also 16:40:46.76-16:40:49.72Z during the running window.
+              Session 2026-09-24T162507.
+          - name: OFF_SWITCH
+            mask: 0x4000
+            meaning: >-
+              the scan tool's "Off SW" item: the VDC OFF switch state, set when
+              VDC is switched off and cleared when it is switched back on (not
+              the lamp)
+            status: confirmed
+            evidence: >-
+              Set at 16:43:35.92Z and cleared at 16:43:48.02Z, the operator's
+              two VDC OFF presses (session 2026-09-24T162507); set again at
+              16:52:16.2Z when VDC was switched off (session
+              2026-09-24T164502, operator-relayed, not re-derived here). Only
+              "Off SW" changed on the screen.
+          - name: OFF_LAMP
+            mask: 0x2000
+            meaning: the VDC OFF indicator lamp
+            status: provisional
+            evidence: >-
+              Set with the steering-angle fault before calibration, cleared at
+              the calibration (16:51:04Z), set again with 0x4000 at 16:52:16.2Z
+              when VDC was switched off (10FE -> 70FE), the VDC OFF lamp
+              lighting on the dash. Session 2026-09-24T164502 (operator-relayed;
+              not yet on the laptop, so not re-derived by the report tool).
+          - name: SLIP_LIGHT
+            mask: 0x8000
+            meaning: the SLIP indicator lamp
+            status: provisional
+            evidence: >-
+              Set during the steering-angle fault, cleared at the calibration
+              (16:51:04Z) together with 0x2000, and not set by VDC-off at
+              16:52:16.2Z (SLIP stayed off, 0x2000 set alone). Session
+              2026-09-24T164502 (operator-relayed; not re-derived here).

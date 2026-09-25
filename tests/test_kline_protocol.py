@@ -210,3 +210,18 @@ def test_every_request_this_client_builds_passes_its_own_allowlist() -> None:
 def test_functional_addressing_sets_the_format_bits() -> None:
     frame = kp.encode_addressed(AddressedFrame(0x33, 0xF1, b"\x81", functional=True))
     assert frame == bytes.fromhex("c1 33 f1 81 66")
+
+
+def test_direction_comes_from_the_service_byte_alone() -> None:
+    """K01.1: a reply whose request the sniffer missed still reads as a reply."""
+    requests = [sid for sid in kp.SERVICE_NAMES]
+    assert requests and not any(kp.is_response_sid(sid) for sid in requests)
+    assert all(kp.is_response_sid(sid + kp.POSITIVE_OFFSET) for sid in requests)
+    assert kp.is_response_sid(kp.SID_NEGATIVE_RESPONSE)
+
+
+def test_naming_a_service_is_not_permission_to_send_it() -> None:
+    assert kp.SERVICE_NAMES[kp.SID_IO_CONTROL_BY_LOCAL_ID] == "InputOutputControlByLocalIdentifier"
+    with pytest.raises(kp.ServiceRefusedError):
+        kp.check_request(bytes([kp.SID_IO_CONTROL_BY_LOCAL_ID, 0x01]))
+    assert set(kp.ALLOWED_SERVICES) <= set(kp.SERVICE_NAMES)

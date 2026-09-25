@@ -417,6 +417,45 @@ def _numeric_series(frame: pd.DataFrame, spec: ChannelSpec, source: str) -> pd.D
     return out.dropna(subset=["value"])
 
 
+def _kline_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
+    """``kline:<module>:<item>`` — K-line values, as raw counts.
+
+    Stored like DID rows: the value is hex in ``value_text`` and
+    ``value_number`` is empty, so a numeric select returned nothing. Decoded
+    here as the unsigned big-endian integer the bytes hold, unit ``counts``:
+    engineering units are the vehicle's K-line profile bindings, applied by
+    ``src.analysis.kline_exchanges``, not guessed here.
+
+    A legacy name (``DID_1202``, stored before K01.1) is refused: it names no
+    module, and the ABS's 0x1202 is not the ECM's.
+    """
+    from src.collection.kline.names import is_legacy
+
+    if is_legacy(spec.name):
+        raise ChannelSpecError(
+            f"{spec.text!r} is a pre-K01.1 K-line name with no module; recover the module "
+            "with src.analysis.kline_exchanges.attribute_modules and ask for "
+            "kline:<MODULE>:<hex>"
+        )
+    channel = frame["channel"].astype("string").str.casefold()
+    rows = frame[(frame["source"] == "kline") & (channel == spec.name.casefold())]
+    out = rows.loc[:, ["timestamp"]].copy()
+    numeric = pd.to_numeric(rows["value_number"], errors="coerce")
+    text = rows["value_text"].astype("string")
+    counts = text.map(_hex_counts, na_action="ignore")
+    out["value"] = numeric.where(numeric.notna(), pd.to_numeric(counts, errors="coerce"))
+    out["unit"] = rows["unit"].astype("string").fillna("").where(numeric.notna(), _RAW_UNIT)
+    return out.dropna(subset=["value"])
+
+
+def _hex_counts(text: str) -> float | None:
+    try:
+        raw = bytes.fromhex(text)
+    except ValueError:
+        return None
+    return float(int.from_bytes(raw, "big")) if raw else None
+
+
 def _memory_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
     """``mem:`` — service-0x23 channels, scaled at collection.
 
@@ -444,7 +483,18 @@ def _memory_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
 def _did_series(frame: pd.DataFrame, spec: ChannelSpec, catalogs: _Catalogs) -> pd.DataFrame:
     entry = catalogs.did(spec.name)
     channel = f"DID_{entry.did:04X}"
-    rows = frame[frame["channel"] == channel]
+    # A legacy ``kline:DID_<hex>`` row is some K-line module's, not this
+    # catalog's (the ABS's 0x1210 is yaw rate, the ECM's is TPS2).
+    named = frame["channel"] == channel
+    foreign = frame["source"].isin(dids_decode.FOREIGN_DID_SOURCES)
+    rows = frame[named & ~foreign]
+    if rows.empty and (named & foreign).any():
+        # Say which kind of empty: the hex was read, but by some K-line module.
+        raise ChannelSpecError(
+            f"{spec.text!r}: this session's only {channel} rows are pre-K01.1 K-line rows, "
+            "which name no module and are not this catalog's; recover their module with "
+            "src.analysis.kline_exchanges.attribute_modules and ask for kline:<MODULE>:<hex>"
+        )
     out = rows.loc[:, ["timestamp"]].copy()
     text = rows["value_text"].astype("string")
 
@@ -575,7 +625,7 @@ def read_channels(
         "gps": lambda s: _numeric_series(frame, s, "gps"),
         "imu": lambda s: _numeric_series(frame, s, "imu"),
         "sensor": lambda s: _numeric_series(frame, s, "sensor"),
-        "kline": lambda s: _numeric_series(frame, s, "kline"),
+        "kline": lambda s: _kline_series(frame, s),
         "mem": lambda s: _memory_series(frame, s),
         "did": lambda s: _did_series(frame, s, catalogs),
         "decoded": lambda s: _decoded_series(frame, s, catalogs),

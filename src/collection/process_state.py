@@ -19,8 +19,6 @@ function; ``tests/conftest.py`` calls it around every test.
 Deliberately not reset (derived caches, keyed so a stale entry cannot be
 wrong): ``capture_profiles._SERVING_DID_CACHE`` (path + mtime) and the
 ``lru_cache`` loaders in ``obd_scheduler.spec`` (static catalogue files).
-Not yet reset: ``kline.sessions.MODULE_SESSIONS``, whose module is still
-uncommitted K-line work; add ``MODULE_SESSIONS.reset()`` here when it lands.
 """
 
 from __future__ import annotations
@@ -34,6 +32,7 @@ from src.collection import (
     tuning_profile,
     tx_gate,
 )
+from src.collection.kline.sessions import MODULE_SESSIONS
 
 #: Every collection module holding process-global state this function resets,
 #: as ``src/collection``-relative paths.
@@ -43,6 +42,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
         "capture_generation.py",
         "capture_lifetime.py",
         "discovery.py",
+        "kline/sessions.py",
         "queueing.py",
         "tuning_profile.py",
         "tx_gate.py",
@@ -57,6 +57,7 @@ COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
     {
         ("capture_lifetime.py", "_ledger"),
         ("discovery.py", "_remembered"),
+        ("kline/sessions.py", "MODULE_SESSIONS"),
         ("queueing.py", "_CAN_FRAME_DROP_LOGS"),
         ("queueing.py", "_UNATTRIBUTED_QUEUE_DROPS"),
         ("tuning_profile.py", "_did_channels"),
@@ -79,6 +80,7 @@ def reset_process_state_for_tests() -> None:
     tuning_profile._reset_for_tests()
     discovery.reset_discovery()
     queueing._reset_for_tests()
+    MODULE_SESSIONS.reset()
     capture_lifetime._reset_for_tests()
     capture_generation._reset_for_tests()
 

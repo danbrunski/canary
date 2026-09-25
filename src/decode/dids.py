@@ -627,10 +627,21 @@ def did_entries_by_hex(did_map: DidMap) -> dict[str, DidEntry]:
     return {f"{entry.did:04X}": entry for entry in did_map.dids}
 
 
+#: Sources whose ``DID_<hex>`` rows are *not* this catalog's. ``kline`` rows of
+#: that form predate K01.1 (2026-09-24) and name no module: a scan tool's ABS
+#: 0x1210 (yaw rate) was stored exactly like the ECM's 0x1210 (TPS2). Newer
+#: K-line rows are ``<module>:<hex>`` (``src.collection.kline.names``) and never
+#: match the prefix at all.
+FOREIGN_DID_SOURCES: frozenset[str] = frozenset({"kline"})
+
+
 def decode_raw_did_reading(
-    by_hex: Mapping[str, DidEntry], channel: str, payload_hex: object
+    by_hex: Mapping[str, DidEntry], channel: str, payload_hex: object, *, source: str
 ) -> DecodedDid | None:
     """Decode one raw ``DID_<hex>`` reading, or ``None`` if it isn't one.
+
+    ``source`` is required so no caller can decode a row without saying whose
+    it is: a legacy ``kline:DID_<hex>`` row is refused (it may be any module's).
 
     The single home for the raw-reading decode policy, shared by the offline
     frame path (:func:`decode_did_rows`), the live feature source, and the
@@ -643,7 +654,7 @@ def decode_raw_did_reading(
     returned with unit ``"raw"`` — see :func:`decode_did_rows` for why that
     is useful rather than a failure.
     """
-    if not channel.startswith(_RAW_DID_CHANNEL_PREFIX):
+    if source in FOREIGN_DID_SOURCES or not channel.startswith(_RAW_DID_CHANNEL_PREFIX):
         return None
     entry = by_hex.get(channel[len(_RAW_DID_CHANNEL_PREFIX) :].upper())
     if entry is None:
@@ -690,6 +701,8 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
         return long_frame
 
     raw = long_frame[long_frame["channel"].astype("string").str.startswith(_RAW_DID_CHANNEL_PREFIX)]
+    if "source" in raw.columns:
+        raw = raw[~raw["source"].isin(FOREIGN_DID_SOURCES)]
     if raw.empty:
         return long_frame
 
@@ -700,7 +713,9 @@ def decode_did_rows(long_frame: pd.DataFrame, did_map: DidMap) -> pd.DataFrame:
     has_session_path = "session_path" in long_frame.columns
     records: list[dict[str, Any]] = []
     for _, row in raw.iterrows():
-        hit = decode_raw_did_reading(by_hex, str(row["channel"]), row.get("value_text"))
+        hit = decode_raw_did_reading(
+            by_hex, str(row["channel"]), row.get("value_text"), source=str(row.get("source", ""))
+        )
         if hit is None:
             continue
         entry, numeric = hit.entry, hit.value

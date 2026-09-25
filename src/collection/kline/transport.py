@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal, Protocol
 
+from src.collection import tx_gate
 from src.collection.kline import protocol as kp
 from src.collection.kline.profile import KlineProfile, Wakeup
 
@@ -69,6 +70,13 @@ class WakeupTimingError(KlineTransportError):
 
 class TransmitRefusedError(KlineTransportError):
     """Sniff mode never transmits."""
+
+
+class PassiveArmedError(TransmitRefusedError):
+    """The operator armed passive mode: nothing of CANary's transmits, on any
+    bus. Passive hands the one K-line wire to another tool (a scan tool, a
+    reflash); a late StopCommunication or wake-up from CANary would garble its
+    wake-up or StartCommunication. Checked on every byte CANary would drive."""
 
 
 @dataclass(frozen=True)
@@ -235,6 +243,11 @@ class KlineTransport:
     def _require_command(self) -> None:
         if self.mode is not Mode.COMMAND:
             raise TransmitRefusedError("sniff mode never transmits")
+        if tx_gate.passive_armed():
+            raise PassiveArmedError(
+                "passive mode is armed: the K-line wire belongs to another tool, so "
+                "nothing is sent (not even StopCommunication)"
+            )
 
     # ------------------------------------------------------------------ bytes
 
@@ -337,10 +350,12 @@ class KlineTransport:
             )
         return measured_ms
 
-    def start_communication(self) -> kp.StartCommunicationReply:
-        """Try each wake-up in profile order until the ECU answers."""
+    def start_communication(self, target: int | None = None) -> kp.StartCommunicationReply:
+        """Try each wake-up in profile order until ``target`` (default: the
+        ECM) answers."""
         failures: list[str] = []
-        request = kp.start_communication(self.profile.ecm_address, self.profile.tester_address)
+        address = self.profile.ecm_address if target is None else target
+        request = kp.start_communication(address, self.profile.tester_address)
         for wakeup in self.profile.wakeups:
             try:
                 self.wake(wakeup)
@@ -354,6 +369,10 @@ class KlineTransport:
                 raise KlineTransportError(
                     f"StartCommunication answered to 0x{reply.target:02x}, "
                     f"not this tester 0x{self.profile.tester_address:02x}"
+                )
+            if reply.source != address:
+                raise KlineTransportError(
+                    f"StartCommunication to 0x{address:02x} answered by 0x{reply.source:02x}"
                 )
             return reply
         raise KlineTimeoutError("no StartCommunication reply: " + "; ".join(failures))
@@ -381,6 +400,10 @@ class KlineTransport:
     def stop_communication(self) -> None:
         self.request(bytes([kp.SID_STOP_COMMUNICATION]))
 
+    def tester_present(self) -> None:
+        """Keep the session open across a pause longer than P3max allows."""
+        self.request(bytes([kp.SID_TESTER_PRESENT]))
+
 
 __all__ = [
     "BusBusyError",
@@ -394,6 +417,7 @@ __all__ = [
     "OutputLines",
     "RxChunk",
     "SerialPort",
+    "PassiveArmedError",
     "TransmitRefusedError",
     "WakeupTimingError",
 ]

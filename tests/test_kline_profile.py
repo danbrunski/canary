@@ -52,3 +52,78 @@ def test_same_ecm_and_tester_address_is_refused() -> None:
     raw = yaml.safe_load(XTERRA.read_text())
     with pytest.raises(ValueError, match="must differ"):
         KlineProfile.model_validate({**raw, "tester_address": raw["ecm_address"]})
+
+
+# --------------------------------------------------------------------------
+# K01.1 / K01.4 — modules, their DIDs and the bindings a known answer backs
+# --------------------------------------------------------------------------
+
+
+def _with_abs_did(**did: object) -> dict[str, object]:
+    raw = yaml.safe_load(XTERRA.read_text())
+    raw["modules"][0x28]["dids"] = [{"did": 0x1303, "width": 2, "evidence": "test", **did}]
+    return raw
+
+
+def test_the_modules_are_named_by_address_and_unnamed_ones_by_hex() -> None:
+    profile = load_kline_profile(XTERRA)
+    assert {address: m.name for address, m in profile.modules.items()} == {0x10: "ECM", 0x28: "ABS"}
+    assert profile.module_label(0x28) == "ABS"
+    assert profile.module_label(0x33) == "33"
+    assert profile.module_label(None) == "unknown"
+    assert profile.module_address("abs") == 0x28
+    assert profile.module_address("33") == 0x33
+    with pytest.raises(LookupError, match="TCM"):
+        profile.module_address("TCM")
+    abs_module = profile.modules[0x28]
+    assert abs_module.key_bytes == (0x6D, 0x8F)
+    assert kp.start_communication(0x28, profile.tester_address) == bytes.fromhex("81 28 fc 81 26")
+
+
+def test_the_abs_bindings_decode_their_known_answers() -> None:
+    abs_module = load_kline_profile(XTERRA).modules[0x28]
+    speed, _ = abs_module.resolve("ENGINE_SPEED")
+    # 245 counts displayed as 750-820 rpm at idle (2026-09-24).
+    assert speed.decode(b"\x00\xf5") == {"ENGINE_SPEED": pytest.approx(765.625)}
+    decel, _ = abs_module.resolve("0x111A")
+    assert decel.decode(b"\x7f") == {"DECEL_G": pytest.approx(-0.01)}  # displayed -0.01 G
+    battery, _ = abs_module.resolve("BATTERY_VOLTAGE")
+    assert battery.decode(b"\xa1")["BATTERY_VOLTAGE"] == pytest.approx(12.58, abs=0.1)
+    word, asked = abs_module.resolve("stop_lamp_switch")
+    assert (word.did, asked) == (0x1303, "STOP_LAMP_SWITCH")
+    brake = word.decode(b"\xa2\xfe")
+    assert brake["STOP_LAMP_SWITCH"] is True and brake["OFF_SWITCH"] is False
+    wheel, _ = abs_module.resolve("1102")
+    assert not wheel.bound and wheel.decode(b"\x00") == {}  # a hypothesis, unbound
+    with pytest.raises(ValueError, match="2 byte"):
+        speed.raw(b"\x00")
+
+
+def test_a_binding_without_its_known_answer_is_refused() -> None:
+    with pytest.raises(ValueError, match="missing \\['known_answer'\\]"):
+        KlineProfile.model_validate(
+            _with_abs_did(name="WORD", unit="counts", scale=1.0, status="provisional")
+        )
+
+
+@pytest.mark.parametrize(
+    ("mask", "named"), [(0x0300, "single bit"), (0x10000, "wider than its 2-byte reply")]
+)
+def test_a_flag_is_one_bit_inside_its_reply(mask: int, named: str) -> None:
+    flag = {"name": "F", "mask": mask, "meaning": "m", "status": "provisional", "evidence": "e"}
+    with pytest.raises(ValueError, match=named):
+        KlineProfile.model_validate(_with_abs_did(flags=[flag]))
+
+
+def test_a_module_name_that_reads_as_a_hex_address_is_refused() -> None:
+    raw = yaml.safe_load(XTERRA.read_text())
+    raw["modules"][0x28]["name"] = "AB"
+    with pytest.raises(ValueError, match="reads as a hex address"):
+        KlineProfile.model_validate(raw)
+
+
+def test_a_local_id_reader_needs_its_reply_limit() -> None:
+    raw = yaml.safe_load(XTERRA.read_text())
+    del raw["modules"][0x10]["reader"]["max_local_id_reply_bytes"]
+    with pytest.raises(ValueError, match="max_local_id_reply_bytes"):
+        KlineProfile.model_validate(raw)

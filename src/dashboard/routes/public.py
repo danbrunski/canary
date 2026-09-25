@@ -228,7 +228,9 @@ def register_public_routes(
         by_hex = did_entries_by_hex(load_did_map(dids_path))
         decoded: list[dict[str, Any]] = []
         for row in raw:
-            hit = decode_raw_did_reading(by_hex, str(row["channel"]), row.get("value"))
+            hit = decode_raw_did_reading(
+                by_hex, str(row["channel"]), row.get("value"), source=str(row.get("source", ""))
+            )
             if hit is None:
                 continue
             decoded.append(
