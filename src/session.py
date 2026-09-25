@@ -6,7 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from json import JSONDecodeError
 from pathlib import Path
@@ -200,11 +200,45 @@ def dir_size(path: Path) -> int:
 
 
 def make_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
-    """Create `out_root/<UTC-timestamp>/` and return the file layout."""
+    """Create `out_root/<UTC-timestamp>/` and return the file layout.
+
+    Refuses (``FileExistsError``) when that second's directory exists: reusing
+    it would mix two recordings. A writer that must open a session whatever
+    the clock says uses :func:`make_unique_session_dir`.
+    """
     ts = format_session_timestamp(started_at)
     root = out_root / ts
     root.mkdir(parents=True, exist_ok=False)
     return session_paths(root)
+
+
+#: How many seconds :func:`make_unique_session_dir` bumps before giving up.
+UNIQUE_SESSION_DIR_ATTEMPTS = 60
+
+
+def make_unique_session_dir(out_root: Path, started_at: datetime) -> SessionPaths:
+    """Create a fresh session directory at ``started_at``, or the first free
+    second after it.
+
+    Session directories are named to the second, so a daemon restart, a
+    record-gap or run-time rotation, or a capture ending inside the same
+    wall-clock second as the previous session's start found its name taken
+    and ``make_session_dir`` raised; on 2026-09-25 that killed a restarted
+    daemon before any collector ran (T01.11). The bumped name is still a
+    plain, parseable stamp, and it sorts after the directory it avoided under
+    :func:`session_sort_key`. Each attempt is an exclusive ``mkdir``, so two
+    writers racing for one second cannot both get it.
+    """
+    attempt = started_at
+    for _ in range(UNIQUE_SESSION_DIR_ATTEMPTS):
+        try:
+            return make_session_dir(out_root, attempt)
+        except FileExistsError:
+            attempt += timedelta(seconds=1)
+    raise FileExistsError(
+        f"no free session directory under {out_root} within {UNIQUE_SESSION_DIR_ATTEMPTS} s "
+        f"of {format_session_timestamp(started_at)}"
+    )
 
 
 def load_tags(path: Path) -> list[dict[str, Any]]:

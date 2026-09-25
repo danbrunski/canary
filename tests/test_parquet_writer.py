@@ -10,6 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
+from src.collection.capture_profiles import CaptureProfile
 from src.storage import parquet_writer
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,
@@ -655,3 +656,95 @@ def test_exit_tuning_mode_avoids_a_name_collision(tmp_path: Path) -> None:
     writer.enter_tuning_mode("t1")
     writer.exit_tuning_mode(started_at=started)
     assert writer.paths.root.name == "2026-07-27T120001"
+
+
+# --- Session directories never collide on the second (T01.11 follow-up) ---
+
+_SECOND = datetime(2026, 9, 25, 23, 30, 19, tzinfo=UTC)
+
+
+def _frozen_clock() -> datetime:
+    """Every read lands in one wall-clock second: the collision case."""
+    return _SECOND
+
+
+def _values(session: Path) -> list[float]:
+    return [
+        value
+        for chunk in sorted(session.glob("telemetry-*.parquet"))
+        for value in pq.read_table(chunk).column("value_number").to_pylist()
+    ]
+
+
+def _capture_profile() -> CaptureProfile:
+    return CaptureProfile(
+        name="diagnostic",
+        mode01={"RPM": 2.0},
+        corpus_eligible=False,
+        storage_prefix="_capture-diagnostic",
+    )
+
+
+def test_a_restart_in_the_previous_sessions_second_takes_the_next_second(
+    tmp_path: Path,
+) -> None:
+    """The daemon's writer (clock-stamped) opening where a session already is.
+
+    On 2026-09-25 this raised ``FileExistsError`` and killed the restarted
+    daemon before any collector ran (T01.11).
+    """
+    first = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock)
+    second = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock)
+    assert first.paths.root.name == "2026-09-25T233019"
+    assert second.paths.root.name == "2026-09-25T233020"
+
+
+def test_a_named_session_start_that_is_taken_still_refuses(tmp_path: Path) -> None:
+    """``session_started_at`` names the session (an import of a dated log), so
+    a taken name is a duplicate import, not a clock coincidence."""
+    ParquetTelemetryWriter(tmp_path, session_started_at=_SECOND)
+    with pytest.raises(FileExistsError):
+        ParquetTelemetryWriter(tmp_path, session_started_at=_SECOND)
+
+
+def test_rotation_in_the_same_second_takes_the_next_second(tmp_path: Path) -> None:
+    writer = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock, max_rows=1)
+    writer.write(TelemetryRecord.obd(1_790_000_000.0, "RPM", 800.0, "rpm"))
+    writer.rotate_session()
+    writer.write(TelemetryRecord.obd(1_790_000_000.5, "RPM", 900.0, "rpm"))
+    # A record-gap / run-time rotation passes a record timestamp instead.
+    writer.rotate_session(started_at=_SECOND)
+    names = [paths.root.name for paths in writer.session_paths]
+    assert names == ["2026-09-25T233019", "2026-09-25T233020", "2026-09-25T233021"]
+    # Nothing was merged: each session kept its own chunk.
+    assert _values(tmp_path / names[0]) == [800.0]
+    assert _values(tmp_path / names[1]) == [900.0]
+
+
+def test_capture_enter_exit_and_rotate_within_one_second(tmp_path: Path) -> None:
+    """Start a capture, end it and roll the session, all in one second, then
+    restart: every live session gets its own directory, in start order."""
+    writer = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock, max_rows=1)
+    writer.write(TelemetryRecord.obd(1_790_000_000.0, "RPM", 700.0, "rpm"))
+    writer.enter_capture_mode(_capture_profile(), "2026-09-25T233019")
+    writer.write(TelemetryRecord.obd(1_790_000_000.1, "RPM", 710.0, "rpm"))
+    writer.exit_capture_mode()
+    writer.write(TelemetryRecord.obd(1_790_000_000.2, "RPM", 720.0, "rpm"))
+    writer.rotate_session()
+    writer.write(TelemetryRecord.obd(1_790_000_000.3, "RPM", 730.0, "rpm"))
+    restarted = ParquetTelemetryWriter(tmp_path, clock=_frozen_clock)
+
+    names = [paths.root.name for paths in writer.session_paths]
+    assert names == [
+        "2026-09-25T233019",
+        "_capture-diagnostic-2026-09-25T233019",
+        "2026-09-25T233020",
+        "2026-09-25T233021",
+    ]
+    assert restarted.paths.root.name == "2026-09-25T233022"
+    assert {name: _values(tmp_path / name) for name in names} == {
+        "2026-09-25T233019": [700.0],
+        "_capture-diagnostic-2026-09-25T233019": [710.0],
+        "2026-09-25T233020": [720.0],
+        "2026-09-25T233021": [730.0],
+    }

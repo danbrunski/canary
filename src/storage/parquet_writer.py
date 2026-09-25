@@ -15,7 +15,7 @@ import json
 import logging
 import os
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +25,7 @@ import pyarrow.parquet as pq
 from src.atomic_write import atomic_write_text
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.record_arming import RecordArmingGate
-from src.session import SessionPaths, format_session_timestamp, make_session_dir, session_paths
+from src.session import SessionPaths, make_session_dir, make_unique_session_dir, session_paths
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
 )
@@ -87,8 +87,16 @@ class ParquetTelemetryWriter:
             (lambda: datetime.now(UTC)) if clock is None else clock
         )
         self._out_root = out_root
-        started_at = self._clock() if session_started_at is None else session_started_at
-        self.paths: SessionPaths = make_session_dir(self._out_root, started_at)
+        # A clock-stamped session takes the next free second when its own is
+        # taken (a restart inside the previous session's second, T01.11). A
+        # caller that names the start (``session_started_at``: an import of a
+        # dated log) names the session, so a taken name is a duplicate and
+        # stays a ``FileExistsError`` (``tools/import_uprev_log.py``).
+        self.paths: SessionPaths = (
+            make_unique_session_dir(self._out_root, self._clock())
+            if session_started_at is None
+            else make_session_dir(self._out_root, session_started_at)
+        )
         self.max_rows = max_rows
         self.flush_interval_seconds = flush_interval_seconds
         self.engine_run_time_reset_threshold_seconds = engine_run_time_reset_threshold_seconds
@@ -157,7 +165,7 @@ class ParquetTelemetryWriter:
     def rotate_session(self, *, started_at: datetime | None = None) -> Path | None:
         """Flush the current buffer and start a new timestamped session directory."""
         flushed = self.flush()
-        self.paths = make_session_dir(
+        self.paths = make_unique_session_dir(
             self._out_root,
             self._clock() if started_at is None else started_at,
         )
@@ -208,22 +216,13 @@ class ParquetTelemetryWriter:
     def _exit_isolated_dir(self, started_at: datetime | None = None) -> Path | None:
         """Flush the isolated buffer and roll back to a fresh live session dir.
 
-        :func:`make_session_dir` collides if called twice in one wall-clock
-        second (it uses ``exist_ok=False`` on purpose to make collisions
-        loud). After a short replay or tuning window, the resuming timestamp
-        can match the one from before it — bump forward a second until the
-        new dir name is available.
+        After a short replay or tuning window the resuming timestamp can match
+        the session from before it; :func:`make_unique_session_dir` bumps
+        forward a second until the name is free.
         """
         flushed = self.flush()
         clock_now = self._clock() if started_at is None else started_at
-        existing_names = {p.root.name for p in self.session_paths}
-        attempt = clock_now
-        for _ in range(60):
-            name = format_session_timestamp(attempt.astimezone(UTC))
-            if name not in existing_names and not (self._out_root / name).exists():
-                break
-            attempt = attempt + timedelta(seconds=1)
-        self.paths = make_session_dir(self._out_root, attempt)
+        self.paths = make_unique_session_dir(self._out_root, clock_now.astimezone(UTC))
         self.session_paths.append(self.paths)
         self.rows_written = 0
         self._chunk_index = 0

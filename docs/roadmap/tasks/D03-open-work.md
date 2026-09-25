@@ -1713,6 +1713,41 @@ live here now, so the documents could be archived
     `::test_passive_keeps_verdicts_that_rest_on_evidence`,
     `::test_the_derivations_read_passive_from_the_gate`.
 
+- [x] **D03.31 A live session opened in the previous session's second raised
+  `FileExistsError`.** Found through T01.11 (2026-09-25): session directories
+  are named to the second and `make_session_dir` creates them `exist_ok=False`,
+  so a second `ParquetTelemetryWriter` in the same UTC second killed a
+  restarted daemon before any collector ran. `rotate_session` (record gap,
+  engine run-time reset) had the same hole; only `_exit_isolated_dir` bumped.
+  *Done 2026-09-25 (desk).* One helper, `src.session.make_unique_session_dir`:
+  an exclusive `mkdir` per attempt, bumping a second at a time (at most
+  `UNIQUE_SESSION_DIR_ATTEMPTS` = 60, then a `FileExistsError` naming the
+  window). Bumped names stay plain stamps and sort after the directory they
+  avoided under `session_sort_key`. The writer's clock-stamped init,
+  `rotate_session` and `_exit_isolated_dir` (capture, tuning and replay exit)
+  all use it. `make_session_dir` keeps its refusal for direct callers
+  (`test_make_session_dir_refuses_collision`). So does a writer given an
+  explicit `session_started_at`: that caller names the session, and
+  `tools/import_uprev_log.py` relies on the refusal to catch a duplicate import
+  (`test_main_rejects_a_started_at_collision_cleanly`, unchanged, green).
+  Tests: `tests/test_parquet_writer.py::test_a_restart_in_the_previous_sessions_second_takes_the_next_second`,
+  `::test_a_named_session_start_that_is_taken_still_refuses`,
+  `::test_rotation_in_the_same_second_takes_the_next_second`,
+  `::test_capture_enter_exit_and_rotate_within_one_second` (live, capture,
+  exit, rotate, restart on one frozen second: five directories, each with its
+  own rows); `tests/test_session.py::test_make_unique_session_dir_bumps_past_taken_seconds_in_order`,
+  `::test_make_unique_session_dir_gives_up_naming_the_window`. Mutation: with
+  init and `rotate_session` back on `make_session_dir`, the three writer
+  collision tests fail. **Not covered:** re-entering an isolated
+  directory (`_capture-<profile>-<id>`, `_tuning-<id>`, `_replay-<id>`) with
+  the same id. `_enter_isolated_dir` uses `exist_ok=True` and restarts the
+  chunk index at 0, so a second capture started in the same second as the
+  first overwrites the first's `telemetry-00000.parquet` and its
+  `capture_profile.json`. Reproduced in a scratch run. The caller picks the id
+  (`profile_capture`, `bus.py`, `replay_control`, and `replay_control` rebuilds
+  the output path from the id), so this is a control-layer contract change and
+  was left open.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi

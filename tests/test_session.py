@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from src import session as session_mod
 from src.session import (
     ALL_SESSION_KINDS,
     RECORDED_SESSION_KINDS,
@@ -18,6 +19,8 @@ from src.session import (
     format_session_timestamp,
     iter_sessions,
     load_tags,
+    make_session_dir,
+    make_unique_session_dir,
     parse_session_timestamp,
     session_sort_key,
 )
@@ -319,3 +322,30 @@ def test_dir_size_counts_nested_files(tmp_path: Path) -> None:
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub" / "b").write_bytes(b"45")
     assert dir_size(tmp_path) == 5
+
+
+def test_make_unique_session_dir_bumps_past_taken_seconds_in_order(tmp_path: Path) -> None:
+    started = datetime(2026, 9, 25, 23, 30, 19, tzinfo=UTC)
+    made = [make_unique_session_dir(tmp_path, started).root for _ in range(3)]
+    assert [path.name for path in made] == [
+        "2026-09-25T233019",
+        "2026-09-25T233020",
+        "2026-09-25T233021",
+    ]
+    # Still plain, parseable stamps, ordered by start under the one sort key.
+    assert all(classify_session_name(path.name) is not None for path in made)
+    assert sorted(made, key=session_sort_key) == made
+    # The strict form keeps refusing for callers that rely on it.
+    with pytest.raises(FileExistsError):
+        make_session_dir(tmp_path, started)
+
+
+def test_make_unique_session_dir_gives_up_naming_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(session_mod, "UNIQUE_SESSION_DIR_ATTEMPTS", 2)
+    started = datetime(2026, 9, 25, 23, 30, 19, tzinfo=UTC)
+    make_unique_session_dir(tmp_path, started)
+    make_unique_session_dir(tmp_path, started)
+    with pytest.raises(FileExistsError, match="within 2 s of 2026-09-25T233019"):
+        make_unique_session_dir(tmp_path, started)
