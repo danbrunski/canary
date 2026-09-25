@@ -16,7 +16,9 @@ def client(monkeypatch):
     app = FastAPI()
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
     rom_maps.register_rom_routes(app, config=config, resolved_control_token="secret")
-    monkeypatch.setattr(rom_maps, "inspect_rom", lambda data, path, dids=None: {"bytes": len(data)})
+    monkeypatch.setattr(
+        rom_maps, "inspect_rom", lambda data, path, dids=None, **_kw: {"bytes": len(data)}
+    )
     with TestClient(app) as client:
         yield client
 
@@ -44,7 +46,7 @@ def test_upload_size_type_and_errors(client, monkeypatch):
         == 415
     )
 
-    def reject(data, path, dids=None):
+    def reject(data, path, dids=None, **_kw):
         raise ValueError("Unrecognized source hash")
 
     monkeypatch.setattr(rom_maps, "inspect_rom", reject)
@@ -69,7 +71,9 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(rom_maps.TargetEditor, "from_bytes", lambda data, path: fake)
     before = set(tmp_path.iterdir())
-    result = rom_maps.inspect_rom(b"synthetic", tmp_path)
+    result = rom_maps.inspect_rom(
+        b"synthetic", tmp_path, registry_path=tmp_path / "tune_revisions.yaml"
+    )
     assert set(tmp_path.iterdir()) == before
     assert result["map_slots"] == [1, 2, 3, 4, 5]
     assert len(result["tables"]) == 10
@@ -89,4 +93,4 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     assert trace["y"]["axis_mapping"] == "verified"
     assert all(t["trace"] is None for t in result["tables"] if t["status"] == "tbd")
     with pytest.raises(ValueError, match="empty"):
-        rom_maps.inspect_rom(b"", tmp_path)
+        rom_maps.inspect_rom(b"", tmp_path, registry_path=tmp_path / "tune_revisions.yaml")

@@ -18,6 +18,7 @@ from typing import Any
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import isolation_forest_source
+from src.daemon.health import HealthMonitor
 from src.models.alert_budget import (
     AlertBudgetCheck,
     DetectorBudget,
@@ -26,8 +27,8 @@ from src.models.alert_budget import (
     verdict_record,
     write_verdict,
 )
-from src.models.health import HealthMonitor
 from src.models.role_gate import DetectorRoleGate, resolve_role
+from tests.configs import isolate
 
 
 def _artifact(directory: Path, content: bytes = b"weights-v1") -> Path:
@@ -268,7 +269,8 @@ def test_the_daemon_wires_the_gate_into_components(tmp_path: Path) -> None:
     path.write_text(
         text.replace(old, "  roles:\n    isolation_forest: alert\n    sequence: evidence\n")
     )
-    config = CanaryConfig.from_yaml(path)
+    # Every daemon state path under tmp_path, not only these two (R07.2).
+    config = isolate(CanaryConfig.from_yaml(path), tmp_path)
     config.daemon.models_dir = tmp_path / "models"
     config.daemon.anomalies_dir = tmp_path / "anomalies"
 

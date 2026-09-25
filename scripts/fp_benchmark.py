@@ -72,12 +72,16 @@ def run_false_positive_benchmark(
         scaler=scaler,
         observation_mask=observation_mask_from_schema(trained.manifest.schema)[0],
     )
+    # R04.1: score the detector the daemon serves -- the configured
+    # suppress_channels for this backbone are kept out of the score there.
+    block = getattr(config.models, str(trained.manifest.model_type), None)
     return benchmark_false_positives(
         trained,
         dataset,
         k_grid=k_grid,
         batch_size=batch_size,
         device=device,
+        suppress_channels=tuple(getattr(block, "suppress_channels", ()) or ()),
     )
 
 

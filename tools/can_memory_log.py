@@ -19,23 +19,24 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
-from datetime import UTC, datetime
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Protocol, TextIO
 
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient, RawReply
+from src.collection.can_obd_client import RawReply
 from src.collection.isotp import ObdResponse
-from src.config import CanaryConfig
-from tools.did_log import (
-    PASSIVE_REASON,
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    RECORD_KEY,
     PassiveChecker,
-    _passive_problem,
-    _resolve_session,
-    _resolve_token,
-    http_passive_checker,
+    PassiveRefusedError,
+    add_bus_tool_args,
+    header_record,
+    open_client,
+    parse_header,
+    passive_problem,
+    require_passive,
+    resolve_session,
 )
 
 SESSION_REFRESH_SECONDS = 1.5
@@ -87,20 +88,19 @@ def log_memory(
     body = kwp32_memory_body(address, length)
     writer.write(
         json.dumps(
-            {
-                "type": "header",
-                "tool": "can_memory_log",
-                "started_at": datetime.now(UTC).isoformat(),
-                "request_id": f"0x{request_id:X}",
-                "session": None if session is None else f"0x{session:X}",
-                "service": "0x23",
-                "form": "kwp32",
-                "address": f"0x{address:08X}",
-                "length": length,
-                "samples_requested": samples,
-                "interval_seconds": interval_seconds,
-                "dids": [f"0x{did:04X}" for did in dids],
-            }
+            header_record(
+                "can_memory_log",
+                started_at=wall_time(),
+                request_id=f"0x{request_id:X}",
+                session=None if session is None else f"0x{session:X}",
+                service="0x23",
+                form="kwp32",
+                address=f"0x{address:08X}",
+                length=length,
+                samples_requested=samples,
+                interval_seconds=interval_seconds,
+                dids=[f"0x{did:04X}" for did in dids],
+            )
         )
         + "\n"
     )
@@ -118,7 +118,7 @@ def log_memory(
     for index in range(samples):
         now = monotonic()
         if passive_checker is not None and now >= next_passive_check:
-            problem = _passive_problem(passive_checker(), passive_check_seconds)
+            problem = passive_problem(passive_checker(), passive_check_seconds)
             if problem is not None:
                 reason = f"passive_{problem}"
                 break
@@ -141,7 +141,7 @@ def log_memory(
         writer.write(
             json.dumps(
                 {
-                    "type": "read",
+                    RECORD_KEY: "read",
                     "index": index,
                     "t_send": t_send,
                     "t_recv": t_recv,
@@ -168,7 +168,7 @@ def log_memory(
             writer.write(
                 json.dumps(
                     {
-                        "type": "did",
+                        RECORD_KEY: "did",
                         "memory_index": index,
                         "did": f"0x{did:04X}",
                         "t_send": did_t_send,
@@ -183,7 +183,7 @@ def log_memory(
             sleep(interval_seconds)
 
     summary: dict[str, int | float | str] = {
-        "type": "summary",
+        RECORD_KEY: "summary",
         "reason": reason,
         "samples_requested": samples,
         "reads_ok": reads_ok,
@@ -199,50 +199,26 @@ def log_memory(
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_bus_tool_args(parser)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--address", type=lambda value: int(value, 0), required=True)
     parser.add_argument("--length", type=int, required=True)
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--interval-seconds", type=float, default=0.05)
-    parser.add_argument("--header", default="7E0")
-    parser.add_argument("--session", default="auto")
     parser.add_argument(
         "--did",
         action="append",
         default=[],
         help="Mode 22 DID to read after every memory sample (hex; repeatable)",
     )
-    parser.add_argument("--read-timeout", type=float, default=1.0)
-    parser.add_argument("--passive-check-seconds", type=float, default=5.0)
-    parser.add_argument("--daemon-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--no-daemon", action="store_true")
     return parser.parse_args(argv)
-
-
-@contextmanager
-def _open_client(
-    config_path: Path, *, request_id: int, read_timeout: float
-) -> Iterator[CanObdClient]:
-    config = CanaryConfig.from_yaml(config_path)
-    bus = bus_factory(config.hardware.can)
-    try:
-        yield CanObdClient(
-            bus,
-            request_id=request_id,
-            response_id_min=request_id + 8,
-            response_id_max=request_id + 8,
-            timeout_seconds=read_timeout,
-        )
-    finally:
-        bus.shutdown()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        request_id = int(args.header, 16)
-        session = _resolve_session(args.session)
+        request_id = parse_header(args.header)
+        session = resolve_session(args.session)
         kwp32_memory_body(args.address, args.length)
         dids = tuple(int(token, 16) for token in args.did)
         if any(not 0 <= did <= 0xFFFF for did in dids):
@@ -257,20 +233,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
-    checker: PassiveChecker | None = None
-    if not args.no_daemon:
-        checker = http_passive_checker(args.daemon_url, _resolve_token())
-        problem = _passive_problem(checker(), args.passive_check_seconds)
-        if problem is not None:
-            print(
-                f"refusing: daemon passive mode is not usable ({problem}); {PASSIVE_REASON}",
-                file=sys.stderr,
-            )
-            return 2
+    try:
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
 
     args.out.parent.mkdir(parents=True, exist_ok=True)
     with (
-        _open_client(args.config, request_id=request_id, read_timeout=args.read_timeout) as client,
+        open_client(args, passive) as client,
         args.out.open("w", encoding="utf-8", buffering=1) as writer,
     ):
         summary = log_memory(
@@ -283,7 +254,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             request_id=request_id,
             session=session,
             dids=dids,
-            passive_checker=checker,
+            passive_checker=passive.checker,
             passive_check_seconds=args.passive_check_seconds,
         )
     print(json.dumps(summary, indent=2))

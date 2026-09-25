@@ -8,10 +8,11 @@ import pytest
 from tools.analyze_can_memory_log import analyze_capture, load_capture
 
 
-def _write_capture(path: Path, *, samples: int = 90) -> None:
+def _write_capture(path: Path, *, samples: int = 90, key: str = "type") -> None:
+    """``key="type"`` is the pre-R06.1 record shape, ``"kind"`` the current one."""
     rows: list[dict[str, object]] = [
         {
-            "type": "header",
+            key: "header",
             "address": "0xFFFF1000",
             "length": 3,
         }
@@ -22,14 +23,14 @@ def _write_capture(path: Path, *, samples: int = 90) -> None:
         rows.extend(
             [
                 {
-                    "type": "read",
+                    key: "read",
                     "index": index,
                     "t_send": acquired,
                     "t_recv": acquired + 0.001,
                     "payload_hex": f"55{value:04x}",
                 },
                 {
-                    "type": "did",
+                    key: "did",
                     "memory_index": index,
                     "did": "0x1206",
                     "t_send": acquired + 0.002,
@@ -55,6 +56,13 @@ def test_load_and_compare_uses_paired_observations(tmp_path: Path) -> None:
     assert exact["slope"] == pytest.approx(1.0)
     assert exact["offset"] == pytest.approx(0.0)
     assert exact["scale_verdict"] == "stable"
+
+
+def test_reads_the_current_kind_record_shape(tmp_path: Path) -> None:
+    path = tmp_path / "capture.jsonl"
+    _write_capture(path, key="kind")
+    capture = load_capture(path)
+    assert len(capture.memory) == 90
 
 
 def test_rejects_memory_payload_length_mismatch(tmp_path: Path) -> None:

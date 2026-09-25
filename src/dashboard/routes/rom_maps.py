@@ -21,11 +21,26 @@ from src.dashboard.security import (
     control_auth_dependency,
 )
 from src.paths import DIDS_YAML
+from src.profiles import active_registry_path
+from src.profiles import profile_dir as vehicle_profile_dir
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
 
 
-def inspect_rom(data: bytes, profile_dir: Path, dids_path: Path = DIDS_YAML) -> dict[str, Any]:
+def inspect_rom(
+    data: bytes,
+    profile_dir: Path,
+    dids_path: Path = DIDS_YAML,
+    *,
+    registry_path: Path,
+) -> dict[str, Any]:
+    """Decode one uploaded ROM against the vehicle's map definitions.
+
+    ``registry_path`` is required, not derived from ``profile_dir``: the live
+    flash registry is :func:`src.profiles.active_registry_path` — the
+    operational copy once a flash was recorded from the dashboard — and the
+    tracked file beside the profile data would miss that flash (R05.1).
+    """
     if not data or len(data) > MAX_ROM_UPLOAD:
         raise ValueError("ROM upload is empty or exceeds 2 MiB")
     definition = load_viewer_definition(profile_dir)
@@ -59,7 +74,7 @@ def inspect_rom(data: bytes, profile_dir: Path, dids_path: Path = DIDS_YAML) -> 
         live[role] = (
             provider.model_dump() if provider and provider.confidence == "confirmed" else None
         )
-    revisions = load_tune_revisions(profile_dir / "tune_revisions.yaml")
+    revisions = load_tune_revisions(registry_path)
     current = revisions.at(datetime.now(UTC)) if revisions else None
     return {
         "source_sha256": sha256(data),
@@ -95,7 +110,11 @@ def register_rom_routes(
             body.extend(chunk)
         try:
             return await run_in_threadpool(
-                inspect_rom, bytes(body), config.daemon.afr_calibration.parent, dids_path
+                inspect_rom,
+                bytes(body),
+                vehicle_profile_dir(config),
+                dids_path,
+                registry_path=active_registry_path(config),
             )
         except FileNotFoundError as exc:
             raise HTTPException(409, "ROM map definitions unavailable for this vehicle") from exc

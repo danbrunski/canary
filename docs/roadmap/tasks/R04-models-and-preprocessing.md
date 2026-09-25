@@ -25,7 +25,7 @@ about: a rule copied four times is a rule that four places can disagree on.
 
 ## Correctness first
 
-- [ ] **R04.1 The false-positive benchmark must score the detector that is
+- [~] **R04.1 The false-positive benchmark must score the detector that is
   served.** *Drift bug, offline but published.*
   - `models/false_positive_benchmark._reconstruction_errors` scores with
     `model.reconstruction_error(reduction="sample")`, which averages over
@@ -51,7 +51,31 @@ about: a rule copied four times is a rule that four places can disagree on.
   flagged-window count in the benchmark as in `score_window` over the same
   windows. `tests/test_false_positive_benchmark.py` passes. Size **S–M**.
 
-- [ ] **R04.2 One kernel for the served sequence-scoring rule.** *Parity,
+  *Done 2026-09-25, one caller remainder.* `benchmark_false_positives` takes
+  `suppress_channels`, resolves the served exclusions with
+  `sequence_scoring.score_exclusions` (suppressed + uncalibrated + context,
+  exactly as the engine) and flags with the R04.2 kernel (global mode band OR
+  family path), one forward pass per batch (`reconstruction_error(...,
+  reduction="none")`). The k/quantile sweep recomputes the *global* bands and
+  ORs the calibrated family flag in. `_error_distribution` is gone (uses
+  `sequence_calibration.error_distribution`); `_window_modes` is a view of
+  `sequence_calibration.window_modes`. The report gains
+  `family_flagged_windows` and `excluded_columns`. `scripts/fp_benchmark.py`
+  passes `models.<type>.suppress_channels`.
+  - Failing test first:
+    `test_benchmark_scores_the_served_rule_with_a_suppressed_noisy_channel`.
+    Against the pre-change module the same fixture gives benchmark 0 flagged
+    vs served 4 of 37 windows; now they agree, and the unsuppressed benchmark
+    flags more (the count depends on the suppression).
+  - `pytest -m "" tests/test_false_positive_benchmark.py`: 21 passed (the
+    stub test now returns the `"none"` cell error).
+  - **Remaining:** `scripts/train_sequence.py --evaluate` and
+    `scripts/sequence_bakeoff.py` still call the benchmark without
+    `suppress_channels` (they now get uncalibrated/context exclusions and the
+    family path, but not the configured suppress list). Both files are held by
+    another session's uncommitted work.
+
+- [x] **R04.2 One kernel for the served sequence-scoring rule.** *Parity,
   serve path.*
   - The rule: masked global MAE over scored channels → mode band with global
     fallback → family max normalized by the family band. It is written four
@@ -86,7 +110,31 @@ about: a rule copied four times is a rule that four places can disagree on.
 
   Size **M**.
 
-- [ ] **R04.3 Define the rolling-suffix / base-channel parser once.** *Latent
+  *Done 2026-09-25.* `src/models/sequence_scoring.py` (numpy, no torch):
+  `family_index`, `score_exclusions`/`ScoreExclusions`, and
+  `SequenceScoringRule.score_batch(error, score_mask, modes) -> BatchScores`
+  (global, per-mode threshold, channel, family scores/max, verdict). It is a
+  class built once per artifact rather than a bare function, so the per-tick
+  call does no family grouping. `SequenceThresholdCalibration.threshold_for_mode`
+  replaces the three `per_mode_errors or {}` lookups. Serve
+  (`SequenceInferenceEngine.score_window`, B=1), `BatchedSequenceScorer.score`
+  and the FP benchmark call it; calibration groups by the same `family_index`.
+  - **Replay parity** (deployed 2026-09-20 IF + LSTM, `2026-09-23T002340`,
+    937 featurized rows, row-by-row `observe`, before vs after): IF scores
+    max diff 0.0, 0 categorical mismatches; sequence 908 windows, 798
+    anomalies both sides, 0 categorical mismatches (`is_anomaly`,
+    `anomalous_channels`, `top_channels`, `ranking_scope`), max score diff
+    7.8e-6 absolute / 2.8e-7 relative (serve now sums float64 in numpy
+    instead of float32 in torch); `BatchedSequenceScorer` bit-identical
+    (max diff 0.0, 0 verdict mismatches).
+  - **Per-tick cost** (laptop, 1 torch thread, deployed LSTM, T=30 F=361,
+    min of interleaved runs): `score_window` 4.52 ms before, 4.16 ms after;
+    the kernel alone 34.5 us per window (`np.maximum.reduceat` over families).
+  - Tests: `tests/test_sequence_scoring.py` (8, new), and
+    `pytest -m ""` on `test_lstm_inference.py`, `test_evaluation_detectors.py`,
+    `test_sequence_calibration.py` pass (in the 788-pass run below).
+
+- [~] **R04.3 Define the rolling-suffix / base-channel parser once.** *Latent
   parity bug, serve path.*
   - `("__mean", "__std", "__roc")` is re-declared or inlined 9 times, though
     the producer, `preprocessing/features.py`, already exports
@@ -109,7 +157,25 @@ about: a rule copied four times is a rule that four places can disagree on.
   the suffix tuple, and point every copy at them. **Accept:** `grep -rn
   '"__roc"' src` returns only `features.py`. Size **S**.
 
-- [ ] **R04.4 One decode path for CAN records: live, storage, backfill,
+  *Done 2026-09-25 except one copy.* `features.ROLLING_SUFFIXES`,
+  `split_rolling()` and `base_channel()` are public (`_FEATURE_SUFFIXES`
+  removed; no other importer). Pointed at them: `_base_channel` in
+  `evaluation_detectors`, `isolation_forest`, `inference`;
+  `sequence_training._feature_family` (now `sequence_scoring.family_index`);
+  `feature_pipeline._base_feature_name`/`_ROLLING_SUFFIXES`
+  (`expand_suppress_channels` uses `split_rolling`);
+  `sequence_feature_set._ROLLING_SUFFIXES`/`_split_rolling` (and `ROLLING_KEPT`
+  uses `ROC_SUFFIX`); `spec_producibility.base_feature_name`;
+  `sequence_dataset._channel_base`; `trainability._base` (lazy import:
+  preprocessing imports trainability).
+  - `grep -rn '"__roc"' src` now lists `features.py` and
+    `decode/behavior_decoder.py:570` only (`analysis/behavior_input_inventory`
+    uses `removesuffix("__roc")` on a condition channel, a different job).
+  - **Remaining:** `decode/behavior_decoder.deviation_model_name`'s
+    `("__mean", "__std", "__roc", "__gap")` — `src/decode/**` is the
+    concurrent R05 agent's area.
+
+- [~] **R04.4 One decode path for CAN records: live, storage, backfill,
   offline.** *Drift, serve path.*
   - `preprocessing/live._decode_signal_raw` is a line-for-line copy of
     `decode/bindings.decode_raw`.
@@ -141,7 +207,23 @@ about: a rule copied four times is a rule that four places can disagree on.
 
   Size **S–M**.
 
-- [ ] **R04.5 Promotion gate: a withheld detector must fail, not pass.**
+  *Partial 2026-09-25.* `preprocessing/decode.decode_signal_column(payloads,
+  signal)` is built on `decode/bindings.decode_raw`; `decode_can_rows` and
+  `tools/backfill_decoded.decode_session_frame` both call it (the two
+  AST-identical `_extract` closures are gone). Backfill still drops NaN rows;
+  unchanged here. Test: `test_decode_signal_column_matches_decode_raw`;
+  `test_preprocessing_decode.py`, `test_frame_decoder.py`,
+  `test_decoded_mode_signals.py`, `test_backfill_decoded.py` pass.
+  Frontend re-checked: no `.tsx`/`.ts` outside tests reads `confidence` or
+  `binding_confidence` from a telemetry record (the three hits are DID/catalog
+  confidence and the LLM hypothesis).
+  - **Remaining:** (1) `LiveFeatureSource` holding a `FrameDecoder` for both
+    jobs, dropping `_decode_signal_raw`, and the live-vs-storage same-record
+    test — needs `src/preprocessing/live.py`, held by a human session with
+    uncommitted work. (2) `Signal.display_unit` for the five `!= "unknown"`
+    copies — `src/decode/**` is the concurrent R05 agent's (R05.9).
+
+- [x] **R04.5 Promotion gate: a withheld detector must fail, not pass.**
   *Drift bug, offline gate.*
   - `promotion_gate.evaluate_promotion_gate` skips any detector whose recall
     is missing: `if golden_recall is None or candidate_recall is None:
@@ -156,7 +238,27 @@ about: a rule copied four times is a rule that four places can disagree on.
   golden has one fails and names the reason. **Accept:** failing tests first
   for both silent passes. `test_promotion_gate.py` passes. Size **S**.
 
-- [ ] **R04.6 Evaluate the detectors on default-profile data only.**
+  *Done 2026-09-25.* `evaluate_promotion_gate` is a sequence of
+  `_check_calibration`, `_check_contamination`, `_check_quarantine_trend`,
+  `_check_recall`, `_check_fp_budget` and `_check_agreement`, each returning
+  `(ok, reason, detail)`. A (detector, fault) cell the golden graded and the
+  candidate did not fails with `missing: True` and a reason naming it; a
+  detector with no `per_hour` fails the FP budget (it defaulted to 0.0) and
+  the agreement check; the FP budget covers every detector either report
+  names. A cell the golden never graded is still skipped (recall).
+  - Behaviour change, agreement check: a missing rate fails on *either*
+    side. A golden detector with no `per_hour` used to be compared as 0.0
+    (a zero candidate "agreed"); it now fails with "golden recorded no
+    held-out per_hour to compare against: <detector>" —
+    `test_gate_fails_agreement_when_the_golden_recorded_no_rate`.
+  - Failing tests first (3 failed before the split):
+    `test_gate_fails_a_candidate_whose_detector_was_withheld_where_golden_was_graded`,
+    `test_gate_fails_a_candidate_with_no_recorded_false_positive_rate`,
+    `test_gate_fails_a_candidate_missing_a_nominal_detector_the_golden_has`;
+    plus `test_gate_ignores_a_cell_the_golden_never_graded` and the
+    golden-side test above. `tests/test_promotion_gate.py`: 25 passed.
+
+- [~] **R04.6 Evaluate the detectors on default-profile data only.**
   *Operator decision 2026-09-24: tuning logs don't represent the default
   profile, so they are not in the anomaly detectors. See R03.12 for the live
   half.*
@@ -195,7 +297,42 @@ about: a rule copied four times is a rule that four places can disagree on.
 
   Size **S–M**.
 
-- [ ] **R04.7 Write the fast/slow max-gap rule once.**
+  *Code done 2026-09-25; the regenerated table is owed.*
+  `src/models/evaluation.default_profile_exclusion(session_dir)` names why a
+  session's rows are out: a `_tuning-*` session, or a capture whose manifest
+  is not `corpus_eligible` (a capture with no readable manifest counts as
+  eligible, as the R03.12 replay guard reads it). In
+  `scripts/evaluate_detectors.py` captures still build drives; an excluded
+  session is not loaded, scored, injected into, shift-tested or counted, and
+  is listed per drive under `excluded_sessions` (not `missing_sessions`). A
+  drive with nothing else is `skipped: no default-profile rows (<session>:
+  <reason>)`. `--plan` prints each excluded session with its reason.
+  `synthetic_fault_eval._running_mask` left as is (default-profile rows carry
+  Mode 01).
+  - Failing test first: `test_tuning_capture_rows_reach_no_metric` (a default
+    session + an overlapping `_capture-tuning-*` sibling, plus a
+    `_tuning-*`-only drive) failed on the old script (the tuning-only drive
+    was scored as a second drive); now one drive is scored on the default
+    session's rows only, the capture is named in `excluded_sessions`, the
+    shift test and injections never see it, and the tuning-only drive is
+    skipped with that reason. Also `test_default_profile_exclusion_names_each_kind`.
+  - On the real corpus (`--plan`, the A02.11 command): 18 drives evaluated
+    with 24 capture sessions inside them not scored, and 5 capture-only drives
+    now skipped. The 2026-09-23 baseline scored 16 drives, 8 of them with
+    capture sessions and 6 made of captures alone.
+  - A00's decisions list records the decision and that both halves are closed.
+  - The tuning rule is `src.session.session_kind(name) is
+    SessionKind.TUNING`, not a restated prefix.
+  - **Remaining (deferred compute, accepted by the orchestrator pending the
+    operator's scheduling decision):** regenerate the A02.11 table and record
+    it next to it. A `--cache-only` run found only 10 of 67 needed sessions decoded under the
+    current cache key (the catalogs changed since 09-23), and a full re-decode
+    ran at ~4 min per session at 10 GB RSS — about 4 h serially for the 57
+    left, so it was stopped. Run the A02.11 command without `--cache-only`
+    (it caches as it goes) and write
+    `data/analyses/<date>-a02-detector-baseline.{json,md}`.
+
+- [~] **R04.7 Write the fast/slow max-gap rule once.**
   - The resampler honours `ResampleConfig.fast_channels`/`slow_channels`.
   - `live._gap_flags` (serve) and
     `synthetic_fault_eval._max_gap_seconds_for` re-derive the rule from the
@@ -206,9 +343,23 @@ about: a rule copied four times is a rule that four places can disagree on.
   three. **Accept:** a test with a non-default `fast_channels` gets identical
   gap flags from resampler and live. Size **S**.
 
+  *Partial 2026-09-25.* `ResampleConfig.is_fast(channel)`,
+  `max_gap_for(channel)` and `max_gap_seconds_for(channel)` state the rule
+  once (explicit `fast_channels` wins; else not-slow-hinted is fast). Both
+  resampler paths use `max_gap_for` (`_fast_channels` deleted) and
+  `synthetic_fault_eval._max_gap_seconds_for` returns
+  `resample_config_for(config).max_gap_seconds_for(channel)`. Test:
+  `test_max_gap_for_follows_explicit_fast_channels` (non-default
+  `fast_channels` flips coolant to the grid ceiling and RPM to the slow one,
+  in the method and in the resampler's `__gap` flags);
+  `test_resample_config_construction.py` passes.
+  - **Remaining:** `live._gap_flags` still re-derives from the default hints,
+    and the resampler-vs-live acceptance test needs it — both need
+    `src/preprocessing/live.py`, held by a human session with uncommitted work.
+
 ## Structure
 
-- [ ] **R04.8 Move `HealthMonitor` and the system probes out of
+- [~] **R04.8 Move `HealthMonitor` and the system probes out of
   `src/models/`.**
   - `models/health.py` (930 lines) is daemon/system health: cgroup memory,
     CPU temperature, power, can0 counters, throttling, telemetry queues,
@@ -224,7 +375,31 @@ about: a rule copied four times is a rule that four places can disagree on.
   `test_daemon.py` import `_MODE_BLIND_WINDOW`. **Accept:** the tier stops
   triggering on health changes. The move itself triggers it once. Size **M**.
 
-- [ ] **R04.9 Break up `fit_isolation_forest` (552 lines).** Its phases:
+  *Done 2026-09-25 except four importers.* `src/daemon/health.py` holds the
+  monitor and the host probes; `src/models/drift.py` holds
+  `FeatureDriftReport`, `feature_drift` and `reconstruction_error_drift`
+  (re-exported by `daemon.health`). `src/models/health.py` is a shim that
+  replaces itself in `sys.modules` with `src.daemon.health`, so the old import
+  path still works *and* `monkeypatch.setattr(src.models.health, ...)` patches
+  the running code (`test_health.py` does that). The shim never changes, so a
+  health change no longer touches `scripts/ml_paths.txt`'s `src/models/`.
+  Importers moved: `control/profile_capture`, `daemon/{components,drain,
+  polling,runtime,detectors/isolation_forest}`, `dashboard/{api,status,
+  behavior_live}`, `dashboard/routes/control/{__init__,context}`, and tests
+  `test_capture_profiles`, `test_role_gate`, `test_route_table_snapshot`,
+  `test_scoring_continuity`. The dashboard modules and `profile_capture` import
+  it under `TYPE_CHECKING` only: a runtime import of `src.daemon.health` loads
+  the whole `src.daemon` package, which cycles through `profile_capture`.
+  `test_health.py`, `test_daemon.py`, `test_cold_start_imports.py`,
+  `test_layering.py`'s forbidden-edge test (the move adds none), `test_role_gate.py`,
+  `test_route_table_snapshot.py`, `test_scoring_continuity.py` and
+  `test_profile_capture.py` pass.
+  - **Remaining:** `dashboard/routes/public.py` (human session) and
+    `tests/{test_health,test_daemon,test_profile_capture}.py` (another
+    session's uncommitted work) still import `src.models.health`; move them,
+    then delete the shim.
+
+- [x] **R04.9 Break up `fit_isolation_forest` (552 lines).** Its phases:
   1. validate and resolve the spec;
   2. the per-mode planning loop (eligibility, joint completeness, split,
      drive floors, skip records) → `_plan_modes(...) -> (dict[str,
@@ -247,7 +422,22 @@ about: a rule copied four times is a rule that four places can disagree on.
   **Accept:** a manifest byte-diff on a fixed-seed fit before and after. The
   10 test files that call `fit_isolation_forest` pass. Size **M**.
 
-- [ ] **R04.10 Break up `train_sequence_autoencoder` (367 lines).** Its
+  *Done 2026-09-25.* `fit_isolation_forest` is now five calls:
+  `_resolve_fit_settings` (-> `_FitSettings`), `_plan_modes` (with a per-mode
+  `_plan_mode` returning a plan, a `SkippedModeSummary` or nothing),
+  `_fit_scaler`, `_fit_mode` (-> model, medians, `ModeTrainingSummary`) and
+  `_build_manifest` (dropped-fraction gate + manifest). The optional move of
+  the calibration cluster to `isolation_forest_calibration.py` was not done.
+  - Manifest byte-diff: a fixed-seed fit (6 drives x 300 rows, 2 modes, 14
+    features, external 3-drive calibration frame) before and after —
+    `cmp` identical.
+  - The 10 test files pass: `test_bearing_wear_validation`,
+    `test_evaluation_detectors`, `test_evaluate_detectors_script`,
+    `test_feature_pipeline`, `test_detector_benchmark`,
+    `test_isolation_forest_a04`, `test_isolation_forest`,
+    `test_retrain_script`, `test_replay_script`, `test_synthetic_fault_eval`.
+
+- [x] **R04.10 Break up `train_sequence_autoencoder` (367 lines).** Its
   phases:
   1. preflight refusals: in-sample, mask mismatch, unknown context;
   2. validation split and envelopes → `_TrainingPlan`;
@@ -260,7 +450,21 @@ about: a rule copied four times is a rule that four places can disagree on.
   fixed-seed CPU training run gives an identical manifest before and after,
   and the 9 test files pass. Size **M**.
 
-- [ ] **R04.11 Split `sequence_training.py` (1,423 lines) by concern, and give
+  *Done 2026-09-25.* `_preflight` (-> `_Preflight`), `_plan_training`
+  (-> `_TrainingPlan`), `_setup_execution` (-> `_Execution`, receives
+  `torch`/`optim`/`data`), `_run_epochs` (-> `_FitOutcome`),
+  `_build_sequence_manifest`, `_calibrate_and_stamp`; the RNG is consumed in
+  the same order.
+  - Fixed-seed CPU runs before and after: LSTM (no validation) and TCN
+    (validation_fraction 0.34, 885 validation windows), held-out calibration,
+    4 epochs — both manifests `cmp` identical and every `state_dict` tensor
+    `torch.equal`.
+  - `test_lstm_training`, `test_tcn_training`, `test_train_lstm`,
+    `test_train_tcn`, `test_sequence_autoencoder_training`,
+    `test_train_sequence_columns`, `test_sequence_novelty_screen`,
+    `test_sequence_bakeoff`, `test_lstm_inference` pass (`-m ""`).
+
+- [x] **R04.11 Split `sequence_training.py` (1,423 lines) by concern, and give
   serve a torch-free home for thresholds.**
   - It mixes:
     - manifest dataclasses;
@@ -282,7 +486,28 @@ about: a rule copied four times is a rule that four places can disagree on.
   share their "max finite per block" tail, so merge them here. **Accept:**
   serve imports nothing from `sequence_training`. Size **M**.
 
-- [ ] **R04.12 One mixin for the LSTM/TCN autoencoder modules.**
+  *Done 2026-09-25.* `sequence_training.py` is 312 lines: the manifest
+  protocol and `EpochLoss`, the loop primitives and the dataset-health
+  helpers, re-exporting everything else. New: `sequence_calibration.py`
+  (distributions, `SequenceThresholdCalibration`, `calibrate_*`, blocks and
+  modes, `block_maxima`, `training_data_hash`, `coerce_timestamp`),
+  `sequence_validation_split.py`, `sequence_envelope.py`, and
+  `sequence_device.py` (the torch/device helpers, so calibration does not
+  import the trainer). `evaluation.block_maxima` now computes its time blocks
+  and calls `sequence_calibration.block_maxima`. The unused
+  `_non_overlapping_window_count` was dropped. `models/__init__` lazy exports
+  point at the new homes. No monkeypatch targets needed retargeting.
+  - `EpochLoss` moved to `sequence_calibration` (the registry parses manifest
+    histories with it) and `isolation_forest` takes `coerce_timestamp` from
+    there too; both were pulling the trainer into serve.
+  - Acceptance: `test_serve_imports_nothing_from_the_training_module`
+    (fresh interpreter: `models.inference`, `sequence_scoring`,
+    `sequence_feature_set`, the feature pipeline, `models.isolation_forest`,
+    `sequence_registry`, `daemon.inference`, `daemon.inference_worker`,
+    `daemon.health` and `control.sequence_detector` load neither
+    `sequence_training` nor torch).
+
+- [x] **R04.12 One mixin for the LSTM/TCN autoencoder modules.**
   - `reconstruction_error`, `_masked_mean`, `_validate_inputs` and `forward`
     are AST-identical in `lstm_autoencoder.py` and `tcn.py`.
   - `_module_base` and `_torch_modules` are structurally identical.
@@ -296,7 +521,20 @@ about: a rule copied four times is a rule that four places can disagree on.
   benchmark reaches it through `Any` today. **Accept:** the `state_dict` keys
   are unchanged, and a saved model from before loads after. Size **S**.
 
-- [ ] **R04.13 Validation harness: reuse the daemon's wiring and break up
+  *Done 2026-09-25.* `src/models/sequence_module.py`: `module_base()`,
+  `masked_mean` and `MaskedReconstructionMixin` (`forward`,
+  `reconstruction_error`, `_validate_inputs`), torch-free.
+  `class LSTMAutoencoder(MaskedReconstructionMixin, module_base())`, same for
+  TCN; `_torch_modules` stays per module (distinct exception types, July).
+  `SequenceAutoencoder` gained `reconstruction_error`, and the benchmark
+  reaches it typed. `ReconstructionReduction` lives in `sequence_module`
+  (re-exported by `tcn` and `src.models`).
+  - `state_dict` keys and values of fixed-seed LSTM/TCN fits identical before
+    and after; the deployed 2026-09-20 `model.pt` (saved before) loads and
+    scores 908 windows identically (R04.2 replay).
+    `test_both_backbones_share_one_reconstruction_implementation`.
+
+- [~] **R04.13 Validation harness: reuse the daemon's wiring and break up
   `run_scenario`.**
   - `validation/harness.run_scenario` is 324 lines: setup, task start,
     collector callbacks, arm, stop/finalize.
@@ -314,7 +552,14 @@ about: a rule copied four times is a rule that four places can disagree on.
   `test_sustained_validation.py` and `test_replay_row_accounting.py` pass.
   This item does not trigger the ml tier. Size **M**.
 
-- [ ] **R04.14 `build_feature_frame`: break it up and make the segmenter
+  *Not started 2026-09-25.* Every part edits `src/validation/harness.py`,
+  which carries the concurrent R07 agent's uncommitted hunks (its
+  `rebase_state_paths` swap for `_SCRATCH_DAEMON_PATHS` is already there).
+  **Remaining:** all of it, once R07 lands: compose runtime's observer and
+  drain-kwargs factories, split `run_scenario` into `_start_pipeline`,
+  `_start_collector`, `_arm`, `_finish`.
+
+- [~] **R04.14 `build_feature_frame`: break it up and make the segmenter
   inputs public.**
   - `build_feature_frame` (167 lines) splits into `_load_cached`,
     `_load_decode_inputs` and `_resample_sessions` (pool + `BrokenExecutor`
@@ -333,7 +578,32 @@ about: a rule copied four times is a rule that four places can disagree on.
   gets the same columns from both callers. There are 53 importers, so
   re-export everything. Size **S–M**.
 
-- [ ] **R04.15 One z-score denominator rule.**
+  *Partial 2026-09-25.* `build_feature_frame` is `_load_cached`,
+  `_load_decode_inputs` (-> `_DecodeInputs`) and `_resample_sessions` (pool +
+  `BrokenExecutor` serial fallback), with R01.2's `dids_path` threaded into
+  loading and the cache key. `SEGMENTER_SIGNAL_COLUMNS` is public (the private
+  name stays as an alias for its importers) with `segmenter_input_columns()`
+  flattening it once; `plausibility.offline.segmenter_channels` uses it.
+  `preprocessing.decode.read_session_decoded_subset(session, bindings=,
+  decoded=)` is the one bounded reader: non-CAN rows plus only the raw CAN
+  frames the named bindings read, pushed down under every era's spelling
+  (`can_channel_spellings`: `0x551`, `0X551`, `551`, `0x0551`, `0551`, ...) and
+  matched by parsed id. `plausibility.offline.session_long` reads through it
+  (no more whole-bus read and fallback parse).
+  - Tests: `test_read_session_decoded_subset_reads_every_channel_spelling`
+    (5 spellings; the reader and `session_long` both decode the same values),
+    `test_read_session_decoded_subset_without_wanted_signals_reads_no_can`;
+    `test_plausibility.py`, `test_feature_pipeline.py`,
+    `test_decoded_mode_signals.py`, `test_feature_policy.py`,
+    `test_preprocessing_segmenter.py` pass.
+  - **Remaining:** `analysis/behavior_validation.build_evaluation_frame` (and
+    `evaluation_decoded_signals`, which flattens the segmenter columns a
+    second time) still push down `0x{id:X}` only; switching them to
+    `read_session_decoded_subset` / `segmenter_input_columns` is in
+    `src/analysis/**`, the concurrent R05 agent's area. The cross-caller test
+    lands with that switch.
+
+- [x] **R04.15 One z-score denominator rule.**
   - The rule `std if std >= std_floor else 1.0` is re-derived in
     `isolation_forest._scaled_array` / `_scaled_medians`, `inference.py` and
     `evaluation_detectors.py`.
@@ -342,6 +612,16 @@ about: a rule copied four times is a rule that four places can disagree on.
 
   **Do:** add `ZScoreScaler.vectors(columns) -> (means, denoms)` and use it
   everywhere. **Accept:** replay parity on IF scores. Size **S**.
+
+  *Done 2026-09-25.* `ZScoreScaler.denominator(column)` states the rule once;
+  `transform` and `vectors(columns) -> (means, denoms)` use it, and so do
+  `SequenceInferenceEngine`, `BatchedSequenceScorer`,
+  `isolation_forest._scaled_array` and `_scaled_medians`. IF training keeps
+  its float32 arithmetic (the fit matrix is the largest training allocation)
+  on the float64 vectors cast once, so the fixed-seed IF manifest stays
+  byte-identical (R04.9's check).
+  - Replay parity on IF scores: deployed IF over `2026-09-23T002340`, 937
+    rows, max score diff 0.0, 0 categorical mismatches (R04.2's run).
 
 ## Looked at and fine
 

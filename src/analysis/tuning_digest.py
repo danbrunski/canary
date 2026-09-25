@@ -15,39 +15,46 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 5.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import numpy as np
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration, TargetAfrMap, load_afr_calibration, voltage_to_afr
-from src.analysis.channels import read_aligned, read_channels
-from src.analysis.noise_floor import load_noise_floor
+from src.analysis.afr import AfrCalibration, TargetAfrMap, voltage_to_afr
+from src.analysis.channels import ChannelSpecError, read_aligned, read_channels
+from src.analysis.compare import align_pairs, compare_channels
+from src.analysis.noise_floor import FloorRefusal, Significance
+from src.analysis.pairing import ComparisonRefusedError, InputNotCapturedError, PairingPolicy
 from src.analysis.pull_tags import is_pull_end, is_pull_start
 from src.analysis.tune_revisions import (
-    load_tune_revisions,
     resolve_session_revision,
     session_started_at,
 )
 from src.analysis.tuning import (
-    DEFAULT_RPM_BANDS,
     GateError,
     delivery_error,
     delivery_error_from_semantic_frame,
 )
-from src.analysis.tuning_frame import WotCriterion, build_tuning_frame, section_capabilities
+from src.analysis.tuning_context import TuningContext
+from src.analysis.tuning_frame import (
+    LoadWotCriterion,
+    TuningFrame,
+    WotCriterion,
+    build_tuning_frame,
+    section_capabilities,
+)
 from src.collection.capture_profiles import FUEL_DELIVERY_TUPLE
 from src.config import CanaryConfig
 from src.control.capture_manifest import read_capture_manifest, read_capture_quality
 from src.session import load_tags
 
-#: Load floor for the WOT inventory. The OBD throttle percentage tops out
-#: around 89 % and understates true WOT, so load is the better gate.
-WOT_LOAD_FLOOR = 85.0
-WOT_RPM_FLOOR = 2500.0
+# The WOT load and rpm floors and the rpm band edges are vehicle facts: they
+# come from the profile's ``tuning_providers.yaml`` ``mode01_wot`` (R05.13),
+# never from constants here. A vehicle that declares none gets an
+# "unavailable" WOT inventory that says so.
 
 #: How a WOT inventory knows its seconds were WOT. See :class:`WotInventory`.
 WotSource = Literal["tagged", "inferred", "unavailable"]
@@ -458,9 +465,9 @@ def _target_map_summary(
     return result
 
 
-def _bands(per_second: pd.Series) -> list[dict[str, Any]]:
-    """Seconds per rpm band, in the shared band edges."""
-    counts = per_second.groupby(pd.cut(per_second, list(DEFAULT_RPM_BANDS)), observed=True).size()
+def _bands(per_second: pd.Series, rpm_bands: Sequence[float]) -> list[dict[str, Any]]:
+    """Seconds per rpm band, in the vehicle's band edges."""
+    counts = per_second.groupby(pd.cut(per_second, list(rpm_bands)), observed=True).size()
     return [{"rpm_band": str(band), "seconds": int(seconds)} for band, seconds in counts.items()]
 
 
@@ -471,6 +478,7 @@ def _infer_wot(
     rpm_spec: str,
     demand_spec: str,
     measured_afr_specs: list[str],
+    rpm_bands: Sequence[float] | None,
 ) -> WotInventory:
     """WOT seconds from the throttle's own saturation, with no tags.
 
@@ -553,7 +561,7 @@ def _infer_wot(
         # which this profile disables. Kept rather than dropped so the number
         # that gates delivery error stays visible.
         with_afr_pair=0,
-        by_band=_bands(at_wot[rpm_spec]),
+        by_band=[] if rpm_bands is None else _bands(at_wot[rpm_spec], rpm_bands),
         source="inferred",
         reason=None,
         with_measured_afr=measured,
@@ -569,6 +577,7 @@ def _wot_inventory(
     criterion: WotCriterion | None = None,
     demand_spec: str | None = None,
     measured_afr_specs: list[str] | None = None,
+    load_wot: LoadWotCriterion | None = None,
 ) -> WotInventory:
     """Seconds at WOT by rpm band, and how many carry a usable AFR pair.
 
@@ -576,10 +585,11 @@ def _wot_inventory(
     measured and a commanded AFR in the same second cannot answer anything,
     and the July corpus had 25 such seconds against 4 usable ones.
     """
+    rpm_bands = None if load_wot is None else load_wot.rpm_bands
     tags = load_tags(session_dir / "tags.jsonl")
     starts = [float(tag["t"]) for tag in tags if is_pull_start(tag)]
     ends = [float(tag["t"]) for tag in tags if is_pull_end(tag)]
-    if starts and rpm_spec is not None:
+    if starts and rpm_spec is not None and load_wot is not None:
         try:
             rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
             if not rpm.empty:
@@ -592,14 +602,14 @@ def _wot_inventory(
                 for start in starts:
                     end = next((item for item in ends if item > start), float(epoch.max()))
                     selected |= epoch.between(start, end, inclusive="left")
-                tagged = rpm[selected & (rpm["value"] > WOT_RPM_FLOOR)].copy()
+                tagged = rpm[selected & (rpm["value"] > load_wot.rpm_floor)].copy()
                 if not tagged.empty:
                     tagged["second"] = tagged["timestamp"].dt.floor("1s")
                     per_second = tagged.groupby("second", sort=True)["value"].last()
                     return WotInventory(
                         seconds=int(len(per_second)),
                         with_afr_pair=0,
-                        by_band=_bands(per_second),
+                        by_band=_bands(per_second, load_wot.rpm_bands),
                         source="tagged",
                     )
         except Exception:  # noqa: BLE001
@@ -616,6 +626,7 @@ def _wot_inventory(
                 rpm_spec=rpm_spec,
                 demand_spec=demand_spec,
                 measured_afr_specs=measured_afr_specs or [],
+                rpm_bands=rpm_bands,
             )
         missing = "wot_criterion" if criterion is None else "an rpm or operator_demand provider"
         return WotInventory(
@@ -628,6 +639,18 @@ def _wot_inventory(
                 "vehicle, so nothing establishes which seconds were WOT"
             ),
         )
+    if load_wot is None:
+        return WotInventory(
+            0,
+            0,
+            [],
+            "unavailable",
+            reason=(
+                "no mode01_wot (load floor, rpm floor, rpm bands) is declared in this "
+                "vehicle's tuning_providers.yaml, so nothing establishes which seconds were WOT"
+            ),
+        )
+    load_floor, rpm_floor = load_wot.load_floor_pct, load_wot.rpm_floor
     try:
         frame = read_aligned(
             session_dir,
@@ -641,7 +664,7 @@ def _wot_inventory(
         return WotInventory(
             0, 0, [], "unavailable", reason="no seconds carry both obd:RPM and obd:ENGINE_LOAD"
         )
-    wot = frame[(frame["obd:RPM"] > WOT_RPM_FLOOR) & (frame["obd:ENGINE_LOAD"] > WOT_LOAD_FLOOR)]
+    wot = frame[(frame["obd:RPM"] > rpm_floor) & (frame["obd:ENGINE_LOAD"] > load_floor)]
     if wot.empty:
         return WotInventory(
             0,
@@ -649,12 +672,12 @@ def _wot_inventory(
             [],
             "inferred",
             reason=(
-                f"no second reached load > {WOT_LOAD_FLOOR:.0f} % above "
-                f"{WOT_RPM_FLOOR:.0f} rpm on this drive"
+                f"no second reached load > {load_floor:.0f} % above "
+                f"{rpm_floor:.0f} rpm on this drive"
             ),
         )
 
-    rows = _bands(wot["obd:RPM"])
+    rows = _bands(wot["obd:RPM"], load_wot.rpm_bands)
 
     paired = 0
     try:
@@ -665,10 +688,7 @@ def _wot_inventory(
             require_all=True,
         )
         paired = int(
-            (
-                (with_afr["obd:RPM"] > WOT_RPM_FLOOR)
-                & (with_afr["obd:ENGINE_LOAD"] > WOT_LOAD_FLOOR)
-            ).sum()
+            ((with_afr["obd:RPM"] > rpm_floor) & (with_afr["obd:ENGINE_LOAD"] > load_floor)).sum()
         )
     except Exception:  # noqa: BLE001
         paired = 0
@@ -684,8 +704,8 @@ def _wot_inventory(
             "role": "airflow_or_table_load",
             "provider": "obd:ENGINE_LOAD",
             "unit": "%",
-            "threshold_value": WOT_LOAD_FLOOR,
-            "rpm_floor": WOT_RPM_FLOOR,
+            "threshold_value": load_floor,
+            "rpm_floor": rpm_floor,
         },
     )
 
@@ -695,6 +715,7 @@ def _did_pull_inventory(
     *,
     role_capabilities: dict[str, Any],
     target_lookup_ready: bool,
+    rpm_floor: float | None,
 ) -> dict[str, Any]:
     """Count evidence inside physical-pull tags without inventing WOT thresholds.
 
@@ -774,44 +795,87 @@ def _did_pull_inventory(
         "pulls": len(intervals),
         "rpm_samples": int(len(tagged_rpm)),
         "rpm_seconds": int(len(per_second)),
-        "rpm_over_2500_seconds": int((per_second > WOT_RPM_FLOOR).sum()),
+        # The key predates R05.13 and names the dev vehicle's floor; the count
+        # is against *this* vehicle's ``mode01_wot.rpm_floor`` (None without
+        # one). Renaming it is a payload change for every digest reader.
+        "rpm_over_2500_seconds": None if rpm_floor is None else int((per_second > rpm_floor).sum()),
         "target_bearing_samples": 0 if target_lookup_ready else None,
         "target_lookup_ready": target_lookup_ready,
         **evidence,
     }
 
 
-def _cam_tracking(
-    session_dir: Path, *, command_spec: str, measured_spec: str
-) -> dict[str, Any] | None:
-    """How the measured cam angle followed its command.
+#: How far apart a commanded and a measured cam read may have been acquired
+#: and still count as one observation. Both are Mode 22 DIDs read in the same
+#: poll round, ~1.5 ms apart (the ECM refuses batched reads), and a round of
+#: the tuning DID set takes well under this; a looser bound would pair a
+#: command with the cam's response to the *previous* command.
+CAM_PAIRING = PairingPolicy.within("250ms")
+
+
+def _cam_tracking(session_dir: Path, *, command_spec: str, measured_spec: str) -> dict[str, Any]:
+    """How the measured cam angle followed its command, pair by pair.
 
     Only meaningful on an all-DID capture — cam angle exists as a DID and
-    nowhere else, so a Mode 01 capture legitimately has nothing here.
+    nowhere else, so a Mode 01 capture legitimately has nothing here (the
+    caller does not ask). Tracking error is ``measured - commanded`` over
+    same-instant pairs from :func:`~src.analysis.compare.align_pairs`, never
+    over 1 s grid cells (``read_aligned``'s output is not pairing evidence).
+    The scale relation comes from :func:`~src.analysis.compare.compare_channels`
+    and is reported with its ``scale_verdict`` — or with the reason it was
+    refused, which is routine at idle where the command does not move.
+
+    Unavailability says which kind (R05.3): ``not_captured`` when a side has
+    no observations, ``refused`` when pairing itself was refused.
     """
     try:
-        frame = read_aligned(
-            session_dir,
-            [command_spec, measured_spec],
-            grid="1s",
-            require_all=True,
-        )
-    except Exception:  # noqa: BLE001
-        return None
-    if len(frame) < 3:
-        return None
-    commanded = frame[command_spec].astype(float)
-    measured = frame[measured_spec].astype(float)
+        aligned = align_pairs(session_dir, command_spec, measured_spec, policy=CAM_PAIRING)
+    except ChannelSpecError as exc:
+        return {"available": False, "kind": "not_captured", "reason": str(exc)}
+    except InputNotCapturedError as exc:
+        return {"available": False, "kind": "not_captured", "reason": str(exc)}
+    except ComparisonRefusedError as exc:
+        return {"available": False, "kind": "refused", "reason": str(exc)}
+    if aligned.n_pairs < 3:
+        return {
+            "available": False,
+            "kind": "refused",
+            "reason": (
+                f"only {aligned.n_pairs} same-instant pairs within "
+                f"{CAM_PAIRING.max_separation_s * 1000.0:g} ms "
+                f"({aligned.n_a} commanded, {aligned.n_b} measured observations)"
+            ),
+        }
+    commanded = aligned.pairs["a"].astype(float)
+    measured = aligned.pairs["b"].astype(float)
     error = measured - commanded
+    fit: dict[str, Any]
+    try:
+        comparison = compare_channels(session_dir, command_spec, measured_spec, policy=CAM_PAIRING)
+    except ComparisonRefusedError as exc:
+        fit = {"available": False, "reason": str(exc)}
+    else:
+        fit = {
+            "available": True,
+            "r_squared": round(comparison.r_squared, 4),
+            "slope": round(comparison.slope, 4),
+            "offset": round(comparison.offset, 3),
+            "slope_drift_pct": None
+            if comparison.slope_drift_pct is None
+            else round(comparison.slope_drift_pct, 2),
+            "scale_verdict": comparison.scale_verdict,
+        }
     return {
-        "n": int(len(frame)),
+        "available": True,
+        "n_pairs": aligned.n_pairs,
+        "unmatched": [aligned.unmatched_a, aligned.unmatched_b],
+        "policy": CAM_PAIRING.as_dict(),
         "commanded_range_deg": [round(float(commanded.min()), 1), round(float(commanded.max()), 1)],
         "measured_range_deg": [round(float(measured.min()), 1), round(float(measured.max()), 1)],
         "mean_tracking_error_deg": round(float(error.mean()), 2),
+        "p95_abs_tracking_error_deg": round(float(error.abs().quantile(0.95)), 2),
         "max_tracking_error_deg": round(float(error.abs().max()), 2),
-        "correlation": round(float(np.corrcoef(commanded, measured)[0, 1]), 4)
-        if commanded.std() > 0 and measured.std() > 0
-        else None,
+        "fit": fit,
     }
 
 
@@ -852,64 +916,117 @@ def _previous_capture(
     return None
 
 
-def compute_tuning_digest(
-    session_dir: Path,
-    config: CanaryConfig,
-) -> TuningDigest | None:
-    """Tuning section for a capture session, or ``None`` for an ordinary drive.
+#: The fuelling regime the digest's delivery error is gated to (open-loop
+#: enrichment), and so the regime whose declared floor it may quote.
+DELIVERY_REGIME = "enrichment"
 
-    Returns ``None`` rather than raising whenever the inputs are not a tuning
-    capture — a normal drive's digest must not fail because this section had
-    nothing to say.
+
+def _delivery_significance(
+    context: TuningContext, delta_pct: float
+) -> Significance | FloorRefusal | None:
+    """Sigma of a capture-to-capture delivery delta, or why there is none.
+
+    ``None`` when the vehicle has no floor at all (a note already says so).
+    The comparison's conditions come from the profile's declared floor for
+    the enrichment regime — never from the floor itself, which would make the
+    conditions check a tautology.
     """
-    profile = _capture_profile_name(session_dir)
-    is_capture = profile is not None or session_dir.name.startswith("_")
-    if not is_capture:
+    if context.noise_floor is None:
         return None
+    declared = context.regime_floors.get(DELIVERY_REGIME)
+    if declared is None:
+        return FloorRefusal(
+            channel="delivery_error_pct",
+            kind="no_floor",
+            reason=f"no noise floor is declared for the {DELIVERY_REGIME} regime",
+            requested_conditions=DELIVERY_REGIME,
+        )
+    return context.noise_floor.significance(
+        declared.channel, pd.Series([delta_pct]), conditions=declared.conditions
+    )
 
-    notes: list[str] = []
-    profile_data = config.daemon.afr_calibration.parent
-    calibration_path = config.daemon.afr_calibration
-    calibration = load_afr_calibration(calibration_path) if calibration_path.exists() else None
-    providers_path = profile_data / "tuning_providers.yaml"
+
+@dataclass(frozen=True)
+class _DigestInputs:
+    """What every digest section reads: the session, the vehicle's tuning
+    context (R05.1) and the capture's resolved identity and capabilities."""
+
+    session_dir: Path
+    context: TuningContext
+    profile: str | None
+    semantic: TuningFrame | None
+    capabilities: dict[str, Any]
+    did_continuous: bool
+    revision: str | None
+    revision_source: str
+    revision_conflict: bool
+
+    @property
+    def roles(self) -> dict[str, Any]:
+        roles: dict[str, Any] = self.capabilities.get("roles", {})
+        return roles
+
+    def section(self, name: str) -> dict[str, Any]:
+        sections: dict[str, Any] = self.capabilities.get("sections", {})
+        return dict(sections.get(name, {}))
+
+
+def _digest_inputs(session_dir: Path, config: CanaryConfig, profile: str | None) -> _DigestInputs:
+    # R05.1: one resolution of the vehicle's tuning facts — the *active* flash
+    # registry (a flash recorded from the dashboard lives in the operational
+    # copy), the profile's noise floor, and stoichiometry from the fuel.
+    context = TuningContext.from_config(config)
     capabilities: dict[str, Any] = {}
     semantic = None
-    if providers_path.exists():
+    if context.providers_path is not None:
         semantic = build_tuning_frame(
-            session_dir, providers_path=providers_path, calibration=calibration
+            session_dir,
+            providers_path=context.providers_path,
+            calibration=context.calibration,
+            afr_stoich=context.afr_stoich,
         )
         capabilities = {
             "roles": semantic.capability,
             "sections": section_capabilities(semantic.capability),
         }
-    revisions = load_tune_revisions(profile_data / "tune_revisions.yaml")
-    revision, revision_source, revision_conflict = resolve_session_revision(session_dir, revisions)
-    if revision_conflict:
-        notes.append(
-            "capture manifest tune revision conflicts with the timestamp registry; "
-            "automatic previous-capture comparison is refused."
-        )
-
-    role_capabilities = capabilities.get("roles", {})
-    rpm_provider = role_capabilities.get("rpm", {}).get("provider")
+    revision, revision_source, revision_conflict = resolve_session_revision(
+        session_dir, context.registry
+    )
     manifest = read_capture_manifest(session_dir)
-    did_continuous = manifest is not None and manifest.did_continuous
-    demand_provider = role_capabilities.get("operator_demand", {}).get("provider")
+    return _DigestInputs(
+        session_dir=session_dir,
+        context=context,
+        profile=profile,
+        semantic=semantic,
+        capabilities=capabilities,
+        did_continuous=manifest is not None and manifest.did_continuous,
+        revision=revision,
+        revision_source=revision_source,
+        revision_conflict=revision_conflict,
+    )
+
+
+def _section_wot(inputs: _DigestInputs) -> tuple[WotInventory, list[str]]:
+    roles = inputs.roles
+    rpm_provider = roles.get("rpm", {}).get("provider")
+    demand_provider = roles.get("operator_demand", {}).get("provider")
     afr_providers = [
-        str(role_capabilities.get(name, {}).get("provider"))
+        str(roles.get(name, {}).get("provider"))
         for name in ("measured_afr_b1", "measured_afr_b2")
-        if role_capabilities.get(name, {}).get("available", False)
+        if roles.get(name, {}).get("available", False)
     ]
     wot = _wot_inventory(
-        session_dir,
+        inputs.session_dir,
         rpm_spec=rpm_provider if isinstance(rpm_provider, str) else None,
-        did_continuous=did_continuous,
-        criterion=None if semantic is None else semantic.wot_criterion,
+        did_continuous=inputs.did_continuous,
+        criterion=None if inputs.semantic is None else inputs.semantic.wot_criterion,
         demand_spec=demand_provider if isinstance(demand_provider, str) else None,
         measured_afr_specs=afr_providers,
+        load_wot=inputs.context.mode01_wot,
     )
-    if did_continuous and not any(
-        is_pull_start(tag) for tag in load_tags(session_dir / "tags.jsonl")
+    notes: list[str] = []
+    if inputs.did_continuous and not any(
+        is_pull_start(tag) for tag in load_tags(inputs.session_dir / "tags.jsonl")
     ):
         notes.append(
             "pull inventory unavailable: all-DID captures require a tagged physical pull "
@@ -929,69 +1046,71 @@ def compute_tuning_digest(
             "WOT seconds were captured but none carry both a measured and a commanded AFR "
             "in the same second, so delivery error cannot be computed from this drive."
         )
+    return wot, notes
 
-    # An all-DID report measures exactly the semantic providers that were
-    # actually present; hard-coded Mode-01 names here previously made a DID
-    # capture look slower or emptier than it was.
-    #
-    # But the semantic registry is DID-oriented, so on a Mode-01 fuelling
-    # capture it resolves almost nothing and the report fell back to three
-    # hard-coded channels — RPM, lambda, timing. Those are the *fast* ones. The
-    # 2026-08-10 capture's rate summary therefore showed 0.67-0.78 Hz and
-    # omitted every channel that was actually running at 0.28 Hz and gating the
-    # analysis. A rate summary that silently drops the limiting channel is
-    # worse than none. The profile snapshot names what the capture asked for,
-    # so measure exactly that.
+
+def _rates(inputs: _DigestInputs) -> tuple[dict[str, float], dict[str, Any]]:
+    """Achieved rate and rate summary over exactly what the capture asked for.
+
+    An all-DID report measures exactly the semantic providers that were
+    actually present; hard-coded Mode-01 names here previously made a DID
+    capture look slower or emptier than it was.
+
+    But the semantic registry is DID-oriented, so on a Mode-01 fuelling
+    capture it resolves almost nothing and the report fell back to three
+    hard-coded channels — RPM, lambda, timing. Those are the *fast* ones. The
+    2026-08-10 capture's rate summary therefore showed 0.67-0.78 Hz and
+    omitted every channel that was actually running at 0.28 Hz and gating the
+    analysis. A rate summary that silently drops the limiting channel is
+    worse than none. The profile snapshot names what the capture asked for,
+    so measure exactly that.
+    """
     rate_specs = sorted(
         {
             str(role["provider"])
-            for role in role_capabilities.values()
+            for role in inputs.roles.values()
             if role.get("available", False) and isinstance(role.get("provider"), str)
         }
-        | {f"obd:{name.upper()}" for name in _profile_mode01_channels(session_dir)}
+        | {f"obd:{name.upper()}" for name in _profile_mode01_channels(inputs.session_dir)}
     )
-    if not rate_specs and not did_continuous:
+    if not rate_specs and not inputs.did_continuous:
         rate_specs = ["obd:RPM", "obd:O2_WR_LAMBDA_S1", "obd:TIMING_ADVANCE"]
-    achieved = _achieved_hz(session_dir, rate_specs)
-    rate_summary = _rate_summary(session_dir, rate_specs)
-    required_tuple, tuple_source = _resolve_required_tuple(session_dir)
-    complete_tuples = _complete_tuple_summary(session_dir, required_tuple, source=tuple_source)
-    capture_quality = read_capture_quality(session_dir)
-    measured_afr = _measured_afr_summary(
-        session_dir, calibration=calibration, role_capabilities=role_capabilities
-    )
-    target = None if calibration is None else calibration.target_map(revision)
-    target_map = _target_map_summary(target, revision=revision, role_capabilities=role_capabilities)
-    pull_inventory = (
-        _did_pull_inventory(
-            session_dir,
-            role_capabilities=role_capabilities,
-            target_lookup_ready=bool(target_map.get("lookup_ready", False)),
-        )
-        if did_continuous
-        else {}
+    return _achieved_hz(inputs.session_dir, rate_specs), _rate_summary(
+        inputs.session_dir, rate_specs
     )
 
+
+def _delivery(inputs: _DigestInputs) -> tuple[dict[str, Any] | None, list[str]]:
+    """Delivery error by whichever path the capture supports.
+
+    Three branches: an all-DID capture without the semantic roles (named as
+    unavailable), an all-DID capture through the semantic frame, and a
+    Mode 01 capture through :func:`delivery_error`.
+    """
+    context = inputs.context
+    notes: list[str] = []
     delivery: dict[str, Any] | None = None
-    delivery_available = (
-        capabilities.get("sections", {}).get("delivery_error", {}).get("available", False)
-    )
-    if did_continuous and not delivery_available:
-        missing = (
-            capabilities.get("sections", {}).get("delivery_error", {}).get("missing_roles", [])
+    section = inputs.section("delivery_error")
+    load_wot = context.mode01_wot
+    if load_wot is None:
+        notes.append(
+            "delivery error unavailable: no mode01_wot (rpm bands, load floor) is declared "
+            "in this vehicle's tuning_providers.yaml"
         )
+    elif inputs.did_continuous and not section.get("available", False):
+        missing = section.get("missing_roles", [])
         notes.append(
             "delivery error unavailable: all-DID capture lacks confirmed semantic roles "
             + ", ".join(map(str, missing))
         )
-    elif did_continuous and semantic is not None:
-        values = semantic.values.rename(
+    elif inputs.did_continuous and inputs.semantic is not None:
+        values = inputs.semantic.values.rename(
             columns={
                 "measured_afr_b1": "measured_afr",
                 "measured_afr_b1_censored": "measured_afr_censored",
             }
         )
-        provider = role_capabilities.get("measured_afr_b1", {}).get("provider")
+        provider = inputs.roles.get("measured_afr_b1", {}).get("provider")
         try:
             result = delivery_error_from_semantic_frame(
                 values,
@@ -1000,8 +1119,10 @@ def compute_tuning_digest(
                 # an all-DID delivery result cannot claim the Mode-01 load
                 # gate. Physical pull tags remain the evidence for demand.
                 min_load=None,
-                tune_revision=revision,
-                tune_revision_source=revision_source,
+                tune_revision=inputs.revision,
+                tune_revision_source=inputs.revision_source,
+                afr_stoich=context.afr_stoich,
+                rpm_bands=load_wot.rpm_bands,
             )
             delivery = result.as_dict() if result.n else None
             if result.n == 0:
@@ -1011,12 +1132,16 @@ def compute_tuning_digest(
                 )
         except (GateError, ValueError) as exc:
             notes.append(f"delivery error unavailable: {exc}")
-    elif calibration is not None:
+    elif context.calibration is not None:
         try:
             result = delivery_error(
-                session_dir,
-                calibration=calibration,
-                revisions=revisions,
+                inputs.session_dir,
+                calibration=context.calibration,
+                revisions=context.registry,
+                afr_stoich=context.afr_stoich,
+                mode01_exclusion_note=context.mode01_exclusion_note,
+                rpm_bands=load_wot.rpm_bands,
+                min_load=load_wot.load_floor_pct,
             )
             delivery = result.as_dict() if result.n else None
             if result.n == 0:
@@ -1026,102 +1151,183 @@ def compute_tuning_digest(
                 )
         except (GateError, ValueError) as exc:
             notes.append(f"delivery error unavailable: {exc}")
+    return delivery, notes
 
-    # Coverage in the terms an operator can act on, stated before any result:
-    # "captured but never co-observed" and "never captured" demand opposite
-    # responses, and a bare delivery-error `n` distinguishes neither.
-    if complete_tuples.get("available"):
-        if complete_tuples.get("absent_members"):
-            notes.append(
-                "required-tuple members absent from this session — "
-                f"{', '.join(complete_tuples['absent_members'])} — so the tuple could never "
-                "complete. Nothing about the drive can change this; fix the profile."
-            )
-        else:
-            qualifier = (
-                " (tuple inferred, not declared by this capture's profile)"
-                if complete_tuples.get("source") == "inferred"
-                else ""
-            )
-            notes.append(
-                f"{wot.seconds} WOT seconds, {wot.with_afr_pair} carrying an AFR pair, "
-                f"{complete_tuples['complete_cells']} seconds where the full required tuple "
-                f"({', '.join(complete_tuples['members'])}) was co-observed{qualifier}."
-            )
+
+def _coverage_notes(complete_tuples: dict[str, Any], wot: WotInventory) -> list[str]:
+    """Coverage in the terms an operator can act on, stated before any result:
+    "captured but never co-observed" and "never captured" demand opposite
+    responses, and a bare delivery-error ``n`` distinguishes neither."""
+    if not complete_tuples.get("available"):
+        return []
+    if complete_tuples.get("absent_members"):
+        return [
+            "required-tuple members absent from this session — "
+            f"{', '.join(complete_tuples['absent_members'])} — so the tuple could never "
+            "complete. Nothing about the drive can change this; fix the profile."
+        ]
+    qualifier = (
+        " (tuple inferred, not declared by this capture's profile)"
+        if complete_tuples.get("source") == "inferred"
+        else ""
+    )
+    return [
+        f"{wot.seconds} WOT seconds, {wot.with_afr_pair} carrying an AFR pair, "
+        f"{complete_tuples['complete_cells']} seconds where the full required tuple "
+        f"({', '.join(complete_tuples['members'])}) was co-observed{qualifier}."
+    ]
+
+
+def _capture_quality_notes(capture_quality: dict[str, Any] | None) -> list[str]:
     if capture_quality is None:
-        notes.append(
+        return [
             "no capture_quality.json in this session, so whether the capture met its "
             "profile's rate contract is unknown — not verified, and not a pass."
-        )
-    elif capture_quality.get("scope") == "trailing_snapshot":
-        clauses = ", ".join(
-            str(item.get("clause")) for item in capture_quality.get("failures") or []
-        )
-        notes.append(
+        ]
+    clauses = ", ".join(str(item.get("clause")) for item in capture_quality.get("failures") or [])
+    if capture_quality.get("scope") == "trailing_snapshot":
+        return [
             f"capture contract verdict: {capture_quality.get('verdict')}"
             + (f" ({clauses})" if clauses else "")
             + " — scored on the trailing 60 s at stop only (schema_version 1), not the "
             "capture; loss inside the capture is unknown. Recompute from the rows before "
             "trusting it."
-        )
-    elif capture_quality.get("verdict") != "pass":
-        clauses = ", ".join(
-            str(item.get("clause")) for item in capture_quality.get("failures") or []
-        )
-        notes.append(
+        ]
+    if capture_quality.get("verdict") != "pass":
+        return [
             f"capture contract verdict: {capture_quality.get('verdict')}"
             + (f" ({clauses})" if clauses else "")
             + " — read capture_quality.json before trusting any rate-sensitive result here."
-        )
+        ]
+    return []
 
-    floor = load_noise_floor(profile_data / "noise_floor.yaml")
-    if floor is None:
+
+def _previous(
+    inputs: _DigestInputs, delivery: dict[str, Any] | None
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """The newest earlier capture on this profile and revision, and the
+    delivery delta against it with its significance (R05.2)."""
+    context = inputs.context
+    notes: list[str] = []
+    if context.noise_floor is None:
         notes.append(
             "no measured noise floor for this vehicle, so deltas in any comparison against "
             "this drive carry no significance verdict; record one from a same-tune pair."
         )
-
-    previous: dict[str, Any] | None = None
     earlier = (
         None
-        if revision_conflict
-        else _previous_capture(session_dir, profile=profile, revision=revision, revisions=revisions)
+        if inputs.revision_conflict
+        else _previous_capture(
+            inputs.session_dir,
+            profile=inputs.profile,
+            revision=inputs.revision,
+            revisions=context.registry,
+        )
     )
-    if earlier is not None:
-        previous = {"session_id": earlier.name}
-        if delivery is not None and calibration is not None:
-            try:
-                before = delivery_error(
-                    earlier,
-                    calibration=calibration,
-                    revisions=revisions,
-                )
-            except (GateError, ValueError):
-                before = None
-            if before is not None and before.n:
-                previous["delivery_band_averaged_pct"] = before.band_averaged_pct
-                previous["delta_pct"] = delivery["band_averaged_pct"] - before.band_averaged_pct
-                sd = floor.sd_for("delivery_error_pct") if floor is not None else None
-                if sd:
-                    sigma = previous["delta_pct"] / sd
-                    previous["delta_sigma"] = round(sigma, 2)
-                    previous["distinguishable"] = abs(sigma) >= 2.0
-                else:
-                    previous["delta_sigma"] = None
-                    previous["distinguishable"] = None
+    if earlier is None:
+        return None, notes
+    previous: dict[str, Any] = {"session_id": earlier.name}
+    load_wot = context.mode01_wot
+    if delivery is None or context.calibration is None or load_wot is None:
+        return previous, notes
+    try:
+        before = delivery_error(
+            earlier,
+            calibration=context.calibration,
+            revisions=context.registry,
+            afr_stoich=context.afr_stoich,
+            mode01_exclusion_note=context.mode01_exclusion_note,
+            rpm_bands=load_wot.rpm_bands,
+            min_load=load_wot.load_floor_pct,
+        )
+    except (GateError, ValueError):
+        before = None
+    if before is not None and before.n:
+        previous["delivery_band_averaged_pct"] = before.band_averaged_pct
+        previous["delta_pct"] = delivery["band_averaged_pct"] - before.band_averaged_pct
+        verdict = _delivery_significance(context, previous["delta_pct"])
+        if isinstance(verdict, Significance):
+            sigma = float(verdict.delta_sigma.iloc[0])
+            previous["delta_sigma"] = round(sigma, 2)
+            previous["distinguishable"] = bool(verdict.distinguishable.iloc[0])
+        else:
+            previous["delta_sigma"] = None
+            previous["distinguishable"] = None
+            if verdict is not None:
+                previous["floor_refusal"] = verdict.as_dict()
+    return previous, notes
 
-    cam: dict[str, Any] | None = None
-    cam_roles = role_capabilities
-    if capabilities.get("sections", {}).get("cam_tracking", {}).get("available"):
-        command_spec = cam_roles["cam_command"]["provider"]
-        measured_spec = cam_roles["cam_measured"]["provider"]
-        if isinstance(command_spec, str) and isinstance(measured_spec, str):
-            cam = _cam_tracking(session_dir, command_spec=command_spec, measured_spec=measured_spec)
+
+def _cam(inputs: _DigestInputs) -> dict[str, Any] | None:
+    if not inputs.section("cam_tracking").get("available"):
+        return None
+    command_spec = inputs.roles["cam_command"]["provider"]
+    measured_spec = inputs.roles["cam_measured"]["provider"]
+    if not (isinstance(command_spec, str) and isinstance(measured_spec, str)):
+        return None
+    return _cam_tracking(inputs.session_dir, command_spec=command_spec, measured_spec=measured_spec)
+
+
+def compute_tuning_digest(
+    session_dir: Path,
+    config: CanaryConfig,
+) -> TuningDigest | None:
+    """Tuning section for a capture session, or ``None`` for an ordinary drive.
+
+    Returns ``None`` rather than raising whenever the inputs are not a tuning
+    capture — a normal drive's digest must not fail because this section had
+    nothing to say. Each section below returns its payload and its notes; the
+    notes are assembled in a fixed order so the digest reads the same way
+    whichever sections had something to say.
+    """
+    profile = _capture_profile_name(session_dir)
+    is_capture = profile is not None or session_dir.name.startswith("_")
+    if not is_capture:
+        return None
+
+    inputs = _digest_inputs(session_dir, config, profile)
+    calibration = inputs.context.calibration
+    load_wot = inputs.context.mode01_wot
+    notes: list[str] = []
+    if inputs.revision_conflict:
+        notes.append(
+            "capture manifest tune revision conflicts with the timestamp registry; "
+            "automatic previous-capture comparison is refused."
+        )
+    wot, wot_notes = _section_wot(inputs)
+    notes += wot_notes
+    achieved, rate_summary = _rates(inputs)
+    required_tuple, tuple_source = _resolve_required_tuple(session_dir)
+    complete_tuples = _complete_tuple_summary(session_dir, required_tuple, source=tuple_source)
+    capture_quality = read_capture_quality(session_dir)
+    measured_afr = _measured_afr_summary(
+        session_dir, calibration=calibration, role_capabilities=inputs.roles
+    )
+    target = None if calibration is None else calibration.target_map(inputs.revision)
+    target_map = _target_map_summary(
+        target, revision=inputs.revision, role_capabilities=inputs.roles
+    )
+    pull_inventory = (
+        _did_pull_inventory(
+            session_dir,
+            role_capabilities=inputs.roles,
+            target_lookup_ready=bool(target_map.get("lookup_ready", False)),
+            rpm_floor=None if load_wot is None else load_wot.rpm_floor,
+        )
+        if inputs.did_continuous
+        else {}
+    )
+    delivery, delivery_notes = _delivery(inputs)
+    notes += delivery_notes
+    notes += _coverage_notes(complete_tuples, wot)
+    notes += _capture_quality_notes(capture_quality)
+    previous, previous_notes = _previous(inputs, delivery)
+    notes += previous_notes
 
     return TuningDigest(
         session_id=session_dir.name,
         capture_profile=profile,
-        tune_revision=revision,
+        tune_revision=inputs.revision,
         wot=wot,
         achieved_hz=achieved,
         pull_inventory=pull_inventory,
@@ -1131,10 +1337,10 @@ def compute_tuning_digest(
         measured_afr=measured_afr,
         target_map=target_map,
         delivery=delivery,
-        cam=cam,
+        cam=_cam(inputs),
         previous=previous,
-        capabilities=capabilities,
-        notes=[*notes, f"tune revision source: {revision_source}"],
+        capabilities=inputs.capabilities,
+        notes=[*notes, f"tune revision source: {inputs.revision_source}"],
     )
 
 

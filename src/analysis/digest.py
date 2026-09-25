@@ -122,7 +122,8 @@ class SessionDigest:
     new_ledger_events: list[dict[str, Any]]
     #: Tuning section, present only for capture sessions. ``None`` on an
     #: ordinary drive rather than an empty block, so a reader can tell "not a
-    #: tuning capture" from "a capture that found nothing".
+    #: tuning capture" from "a capture that found nothing"; a section that
+    #: crashed reads ``{"available": False, "kind": "failed", ...}``.
     tuning: dict[str, Any] | None = None
     #: A06.5 — events from ``evidence``-role detectors, stored as low-weight
     #: evidence and never alerts. Kept apart so no reader can add them to the
@@ -418,14 +419,17 @@ def _tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] |
 
     Never raises: a normal drive's digest must not fail because the tuning
     section had nothing to say, or because a vehicle has no AFR calibration.
+    But "not a capture" and "the section crashed" are different answers
+    (R05.12): a crash is reported as ``{"available": False, "kind":
+    "failed", "error": ...}``, never as the ``None`` an ordinary drive gets.
     """
     from src.analysis.tuning_digest import compute_tuning_digest
 
     try:
         section = compute_tuning_digest(session_dir, config)
-    except Exception:  # noqa: BLE001 — a digest is a report, not a gate
+    except Exception as exc:  # noqa: BLE001 — a digest is a report, not a gate
         log.warning("tuning digest section failed for %s", session_dir.name, exc_info=True)
-        return None
+        return {"available": False, "kind": "failed", "error": f"{type(exc).__name__}: {exc}"}
     return None if section is None else section.to_dict()
 
 

@@ -30,10 +30,9 @@ try:
 except ImportError:  # loaded as `scripts.tuning_report`
     from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
 
-from src.analysis.afr import load_afr_calibration
 from src.analysis.noise_floor import load_noise_floor, record_null_run, save_noise_floor
-from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
+from src.analysis.tuning_context import TuningContext
 from src.config import CanaryConfig
 from src.profiles import resolve_profile_for_tooling, scope_config
 
@@ -51,15 +50,21 @@ def _session_dir(config: CanaryConfig, session: str) -> Path:
 
 def _run_delivery_error(args: argparse.Namespace) -> int:
     config = _scoped(args)
-    calibration = load_afr_calibration(config.daemon.afr_calibration)
-    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    context = TuningContext.from_config(config)
+    if context.calibration is None:
+        raise GateError(f"no afr_calibration.yaml found ({config.daemon.afr_calibration})")
+    if context.rpm_bands is None:
+        raise GateError("no mode01_wot.rpm_bands in this vehicle's tuning_providers.yaml")
     result = delivery_error(
         _session_dir(config, args.session),
-        calibration=calibration,
+        calibration=context.calibration,
         measured_spec=args.measured,
         min_load=args.min_load,
         cell_agg=args.cell_agg,
-        revisions=revisions,
+        revisions=context.registry,
+        afr_stoich=context.afr_stoich,
+        mode01_exclusion_note=context.mode01_exclusion_note,
+        rpm_bands=context.rpm_bands,
     )
     print(f"delivery error — measured from {result.measured_spec}")
     if result.n == 0:
@@ -86,8 +91,10 @@ def _run_delivery_error(args: argparse.Namespace) -> int:
 
 def _run_compare(args: argparse.Namespace) -> int:
     config = _scoped(args)
-    floor = load_noise_floor(Path(config.collection.storage_path).parent / "noise_floor.yaml")
-    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    # R05.1: the profile's floor, as every other reader resolves it — this CLI
+    # used to look beside the session store instead.
+    context = TuningContext.from_config(config)
+    floor = context.noise_floor
     if floor is None and args.floor_channel:
         floor = load_noise_floor(Path(args.floor_file)) if args.floor_file else None
     result = compare_sessions(
@@ -98,16 +105,24 @@ def _run_compare(args: argparse.Namespace) -> int:
         unsafe_axes=args.unsafe_axes,
         noise_floor=floor if args.floor_channel else None,
         floor_channel=args.floor_channel,
-        revisions=revisions,
+        conditions=args.conditions,
+        revisions=context.registry,
+        afr_stoich=context.afr_stoich,
     )
-    sd = floor.sd_for(args.floor_channel) if (floor and args.floor_channel) else None
+    sd = (
+        floor.sd_for(args.floor_channel)
+        if (floor and args.floor_channel and result.floor_refusal is None)
+        else None
+    )
     print(f"{args.value}: {args.session} -> {args.against}, gridded on {', '.join(result.axes)}")
     if result.n_cells == 0:
         print("  no cells matched in both sessions at the minimum sample count")
         return 1
     print(result.cells.round(3).to_string(index=False))
     print(f"\n  mean delta {result.mean_delta:+.3f} over {result.n_cells} cells")
-    if sd is None:
+    if result.floor_refusal is not None:
+        print(f"  noise floor refused: {result.floor_refusal['reason']}")
+    elif sd is None:
         print("  noise floor: unavailable — deltas carry no significance verdict")
     else:
         print(
@@ -121,14 +136,15 @@ def _run_compare(args: argparse.Namespace) -> int:
 def _run_null_run(args: argparse.Namespace) -> int:
     """Measure a floor from two same-tune captures and persist it."""
     config = _scoped(args)
-    revisions = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    context = TuningContext.from_config(config)
     result = compare_sessions(
         _session_dir(config, args.session),
         _session_dir(config, args.against),
         value=args.value,
         axes=tuple(args.axes),
         unsafe_axes=args.unsafe_axes,
-        revisions=revisions,
+        revisions=context.registry,
+        afr_stoich=context.afr_stoich,
     )
     if result.n_cells < 2:
         print(f"only {result.n_cells} matched cell(s) — need at least 2 to have a spread")
@@ -179,6 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
     cmp_.add_argument("--axes", nargs="+", default=["obd:RPM", "obd:MAF"])
     cmp_.add_argument("--floor-channel", default=None, help="Noise-floor channel to quote.")
     cmp_.add_argument("--floor-file", default=None)
+    cmp_.add_argument(
+        "--conditions",
+        default=None,
+        help="Regime this comparison was made under; required with --floor-channel. "
+        "The floor is refused unless it was measured under exactly these conditions.",
+    )
     cmp_.add_argument("--unsafe-axes", action="store_true", help="Override the axis gate.")
     cmp_.set_defaults(func=_run_compare)
 

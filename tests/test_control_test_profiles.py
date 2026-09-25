@@ -15,15 +15,20 @@ from scripts.guided_session import PROTOCOLS, available_protocols
 from src.config import CanaryConfig
 from src.control.test_profiles import load_test_profiles
 from src.dashboard.api import create_app
-from tests.test_dashboard_api import _config_yaml
+from tests.configs import isolated_config
 
 
 def _make_config(tmp_path: Path) -> CanaryConfig:
     storage = tmp_path / "storage"
     storage.mkdir()
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_config_yaml(storage))
-    return CanaryConfig.from_yaml(cfg)
+    # The shape of tests/test_dashboard_api.py's config: both detectors declared.
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        storage=storage,
+        models={"isolation_forest": {"enabled": True}, "lstm_autoencoder": {"enabled": True}},
+        dashboard={"port": 8000},
+    )
 
 
 GOOD = """

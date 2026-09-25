@@ -112,8 +112,8 @@ def _dashboard_app(tmp_path: Path) -> FastAPI:
     from src.control.audit import ControlAuditLogger
     from src.control.capture import CaptureController
     from src.control.replay_control import ReplayController
+    from src.daemon.health import HealthMonitor
     from src.dashboard.api import create_app
-    from src.models.health import HealthMonitor
     from src.storage.async_writer import AsyncParquetTelemetryWriter
     from src.storage.parquet_writer import ParquetTelemetryWriter
 

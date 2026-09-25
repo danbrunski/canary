@@ -28,7 +28,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from _cli import add_common_args, load_config
+from _cli import (
+    add_common_args,
+    add_log_level_arg,
+    load_config,
+)
 
 from src.config import CanaryConfig
 from src.log import configure_logging
@@ -131,9 +135,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--apply", action="store_true", help="Execute the moves (default: dry-run)."
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

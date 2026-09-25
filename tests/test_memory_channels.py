@@ -258,7 +258,7 @@ def test_commanded_afr_provider_converts_phi_to_afr(tmp_path: Path) -> None:
     session.mkdir()
     _session_frame().to_parquet(session / "telemetry-0001.parquet")
 
-    frame = build_tuning_frame(session, providers_path=registry).values
+    frame = build_tuning_frame(session, providers_path=registry, afr_stoich=14.7).values
 
     assert frame["commanded_afr"].dropna().iloc[0] == pytest.approx(12.63, abs=0.01)
     # The instrument reading survives the conversion, as it does for voltage.
@@ -295,7 +295,7 @@ def test_fueling_active_is_true_wherever_a_target_exists(tmp_path: Path) -> None
     session.mkdir()
     _session_frame().to_parquet(session / "telemetry-0001.parquet")
 
-    frame = build_tuning_frame(session, providers_path=registry).values
+    frame = build_tuning_frame(session, providers_path=registry, afr_stoich=14.7).values
 
     assert frame["fueling_active"].tolist() == [True]
 

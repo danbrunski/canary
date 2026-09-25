@@ -547,6 +547,202 @@ def _long_values(frame: pd.DataFrame | None) -> tuple[np.ndarray, np.ndarray]:
     return np.asarray(times, dtype=float), values
 
 
+@dataclass(frozen=True)
+class _TargetSide:
+    """Target observations merged with fuel-cut sentinels, time-ordered."""
+
+    times: np.ndarray
+    raw: np.ndarray
+    cut: np.ndarray
+    invalid: np.ndarray
+    target_lambda: np.ndarray
+
+
+def _target_side(
+    target: pd.DataFrame,
+    sentinel: pd.DataFrame | None,
+    *,
+    commanded: CommandedSource,
+    quantity: Quantity | None,
+    afr_stoich: float,
+) -> _TargetSide:
+    """One row per target observation *and* per fuel-cut sentinel observation,
+    so a cut is counted as ``fuel_cut`` instead of disappearing."""
+    t_times, t_raw = _long_values(target)
+    s_times, _ = _long_values(sentinel)
+    cut_value = commanded.fuel_cut_value
+    is_cut = np.zeros(len(t_raw), dtype=bool)
+    if cut_value is not None:
+        is_cut = np.isclose(t_raw, cut_value, rtol=0.0, atol=1e-9)
+    times = np.concatenate([t_times, s_times])
+    raw = np.concatenate([t_raw, np.full(len(s_times), np.nan)])
+    cut = np.concatenate([is_cut, np.ones(len(s_times), dtype=bool)])
+    order = np.argsort(times, kind="stable")
+    times, raw, cut = times[order], raw[order], cut[order]
+    plausible = (
+        np.isfinite(raw) & (raw >= commanded.plausible_min) & (raw <= commanded.plausible_max)
+    )
+    invalid = ~cut & ~plausible
+    target_lambda = (
+        np.full(len(times), np.nan)
+        if quantity is None
+        else np.where(cut | invalid, np.nan, to_lambda(raw, quantity, afr_stoich=afr_stoich))
+    )
+    return _TargetSide(times, raw, cut, invalid, target_lambda)
+
+
+@dataclass(frozen=True)
+class _MeasuredSide:
+    """Measured observations as lambda, with their censoring and rail flags."""
+
+    times: np.ndarray
+    lam: np.ndarray
+    railed: np.ndarray
+    censored: np.ndarray
+    calibration_missing: bool
+
+
+def _measured_side(
+    measured: pd.DataFrame,
+    *,
+    instrument: MeasuredSource,
+    calibration: AfrCalibration | None,
+    afr_stoich: float,
+) -> _MeasuredSide:
+    m_times, m_raw = _long_values(measured)
+    calibration_missing = False
+    censored = np.zeros(len(m_raw), dtype=bool)
+    if instrument.transform == "voltage_afr":
+        transfer = None if calibration is None else calibration.voltage_transfer
+        if transfer is None:
+            calibration_missing = True
+            m_value = np.full(len(m_raw), np.nan)
+        else:
+            m_value = voltage_to_afr(pd.Series(m_raw), transfer).to_numpy(dtype=float)
+            censored = (
+                ~np.isfinite(m_value)
+                | (m_value <= transfer.censored_floor_afr)
+                | (m_value >= transfer.censored_ceiling_afr)
+            )
+    else:
+        m_value = m_raw
+    railed = np.zeros(len(m_raw), dtype=bool)
+    if instrument.rail_high is not None:
+        railed |= m_raw >= instrument.rail_high
+    if instrument.rail_low is not None:
+        railed |= m_raw <= instrument.rail_low
+    m_lambda = to_lambda(m_value, instrument.quantity, afr_stoich=afr_stoich)
+    return _MeasuredSide(m_times, m_lambda, railed, censored, calibration_missing)
+
+
+def _seconds_since_cut(times: np.ndarray, cut: np.ndarray) -> np.ndarray:
+    """Seconds since the latest fuel-cut observation at or before each row
+    (``inf`` before the first cut)."""
+    last_cut = np.where(cut, times, -np.inf)
+    return np.asarray(times - np.maximum.accumulate(last_cut), dtype=float)
+
+
+def _range_extreme_table(values: np.ndarray, op: Any) -> list[np.ndarray]:
+    """Sparse table: ``table[k][i]`` is ``op`` over ``values[i : i + 2**k]``."""
+    table = [values]
+    width = 1
+    while 2 * width <= len(values):
+        previous = table[-1]
+        table.append(op(previous[: len(previous) - width], previous[width:]))
+        width *= 2
+    return table
+
+
+def _range_query(table: list[np.ndarray], lo: np.ndarray, hi: np.ndarray, op: Any) -> np.ndarray:
+    """``op`` over ``values[lo..hi]`` (inclusive) per pair, from :func:`_range_extreme_table`."""
+    length = hi - lo + 1
+    level = np.floor(np.log2(np.maximum(length, 1))).astype(np.intp)
+    out = np.empty(len(lo), dtype=float)
+    for k in np.unique(level):
+        rows = level == k
+        block = table[int(k)]
+        out[rows] = op(block[lo[rows]], block[hi[rows] - (1 << int(k)) + 1])
+    return out
+
+
+def _steady_target_mask(
+    times: np.ndarray,
+    target_lambda: np.ndarray,
+    cut: np.ndarray,
+    *,
+    dwell_s: float,
+    max_gap_s: float,
+    tolerance: float,
+) -> np.ndarray:
+    """Which target observations sit on a steady target.
+
+    Row ``i`` is steady when every target observation in ``[t_i - dwell, t_i)``
+    is finite, not a fuel cut, within ``tolerance`` of row ``i``'s own target,
+    consecutive observations are no more than ``max_gap_s`` apart, and the
+    observations reach back the whole dwell (the earliest one examined is at
+    or before ``t_i - dwell``). Rows whose own target is not finite are never
+    steady.
+
+    Vectorized (R05.12) from a per-row backward walk, which was
+    O(n x dwell) in pure Python; the walk's rule is kept exactly — the tests
+    compare the two on randomized traces. The walk from row ``i`` stops at
+    the first earlier row at or before ``t_i - dwell``, which is the last
+    row of the ``times <= t_i - dwell`` prefix, so each row's window is
+    ``[k_i, i)``: gaps are checked across ``(k_i, i]``, targets over
+    ``[k_i, i)`` with range min/max queries.
+    """
+    times = np.asarray(times, dtype=float)
+    target = np.asarray(target_lambda, dtype=float)
+    cut = np.asarray(cut, dtype=bool)
+    n = len(times)
+    steady = np.zeros(n, dtype=bool)
+    if n == 0:
+        return steady
+    finite = np.isfinite(target)
+    start = times - dwell_s
+    reached_at_once = times <= start
+    steady[finite & reached_at_once] = True
+    rows = np.flatnonzero(finite & ~reached_at_once)
+    if rows.size == 0:
+        return steady
+    first = np.searchsorted(times, start[rows], side="right") - 1
+    walkable = first >= 0
+    rows, first = rows[walkable], first[walkable]
+    if rows.size == 0:
+        return steady
+
+    def count_between(flags: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
+        """How many of ``flags[lo..hi]`` (inclusive) are set."""
+        cumulative = np.concatenate([[0], np.cumsum(flags, dtype=np.int64)])
+        return np.asarray(cumulative[hi + 1] - cumulative[lo])
+
+    gap_bad = np.zeros(n, dtype=bool)
+    gap_bad[1:] = np.diff(times) > max_gap_s
+    point_bad = cut | ~finite
+    ok = (count_between(gap_bad, first + 1, rows) == 0) & (
+        count_between(point_bad, first, rows - 1) == 0
+    )
+    if ok.any():
+        clean = np.where(finite, target, 0.0)
+        highest = _range_query(_range_extreme_table(clean, np.maximum), first, rows - 1, np.maximum)
+        lowest = _range_query(_range_extreme_table(clean, np.minimum), first, rows - 1, np.minimum)
+        own = target[rows]
+        ok &= (highest - own <= tolerance) & (own - lowest <= tolerance)
+    steady[rows[ok]] = True
+    return steady
+
+
+def _assign_states(n: int, conditions: list[tuple[str, np.ndarray]]) -> np.ndarray:
+    """Each row's state: the first condition in order that holds, else eligible."""
+    state = np.full(n, ELIGIBLE, dtype=object)
+    assigned = np.zeros(n, dtype=bool)
+    for name, mask in conditions:
+        take = mask & ~assigned
+        state[take] = name
+        assigned |= take
+    return state
+
+
 def delivery_samples(
     *,
     target: pd.DataFrame,
@@ -556,7 +752,7 @@ def delivery_samples(
     measured_source: str | None = None,
     sentinel: pd.DataFrame | None = None,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float,
     delay: TransportDelay | None = None,
     drive_id: str | None = None,
     evaluation: bool = False,
@@ -583,123 +779,61 @@ def delivery_samples(
     elig = declaration.eligibility
     quantity = resolve_quantity(commanded, calibration)
 
-    t_times, t_raw = _long_values(target)
-    s_times, _ = _long_values(sentinel)
-    cut_value = commanded.fuel_cut_value
-    is_cut = np.zeros(len(t_raw), dtype=bool)
-    if cut_value is not None:
-        is_cut = np.isclose(t_raw, cut_value, rtol=0.0, atol=1e-9)
-    times = np.concatenate([t_times, s_times])
-    raw = np.concatenate([t_raw, np.full(len(s_times), np.nan)])
-    cut = np.concatenate([is_cut, np.ones(len(s_times), dtype=bool)])
-    order = np.argsort(times, kind="stable")
-    times, raw, cut = times[order], raw[order], cut[order]
+    target_side = _target_side(
+        target, sentinel, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
+    )
+    times, raw, cut = target_side.times, target_side.raw, target_side.cut
+    target_lambda = target_side.target_lambda
     n = len(times)
-
-    plausible = (
-        np.isfinite(raw) & (raw >= commanded.plausible_min) & (raw <= commanded.plausible_max)
+    measured_side = _measured_side(
+        measured, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
     )
-    invalid = ~cut & ~plausible
-    target_lambda = (
-        np.full(n, np.nan)
-        if quantity is None
-        else np.where(cut | invalid, np.nan, to_lambda(raw, quantity, afr_stoich=afr_stoich))
-    )
-
-    # Measured side, converted to lambda with its censoring/rail flags.
-    m_times, m_raw = _long_values(measured)
-    calibration_missing = False
-    censored = np.zeros(len(m_raw), dtype=bool)
-    if instrument.transform == "voltage_afr":
-        transfer = None if calibration is None else calibration.voltage_transfer
-        if transfer is None:
-            calibration_missing = True
-            m_value = np.full(len(m_raw), np.nan)
-        else:
-            m_value = voltage_to_afr(pd.Series(m_raw), transfer).to_numpy(dtype=float)
-            censored = (
-                ~np.isfinite(m_value)
-                | (m_value <= transfer.censored_floor_afr)
-                | (m_value >= transfer.censored_ceiling_afr)
-            )
-    else:
-        m_value = m_raw
-    railed = np.zeros(len(m_raw), dtype=bool)
-    if instrument.rail_high is not None:
-        railed |= m_raw >= instrument.rail_high
-    if instrument.rail_low is not None:
-        railed |= m_raw <= instrument.rail_low
-    m_lambda = to_lambda(m_value, instrument.quantity, afr_stoich=afr_stoich)
 
     delay_s = 0.0 if delay is None else float(delay.seconds)
     policy = PairingPolicy.within(
         pd.Timedelta(seconds=declaration.acquisition.max_separation_s), reference="a"
     )
-    matched = match_ordered(times, m_times - delay_s, policy)
+    matched = match_ordered(times, measured_side.times - delay_s, policy)
     paired = np.full(n, -1, dtype=np.intp)
     separation = np.full(n, np.nan)
     paired[matched.index_a] = matched.index_b
     separation[matched.index_a] = matched.separation_s
     has_pair = paired >= 0
-    measured_lambda = np.where(has_pair, m_lambda[np.maximum(paired, 0)], np.nan)
-    pair_railed = has_pair & railed[np.maximum(paired, 0)]
-    pair_censored = has_pair & censored[np.maximum(paired, 0)]
+    measured_lambda = np.where(has_pair, measured_side.lam[np.maximum(paired, 0)], np.nan)
+    pair_railed = has_pair & measured_side.railed[np.maximum(paired, 0)]
+    pair_censored = has_pair & measured_side.censored[np.maximum(paired, 0)]
 
     regime = regime_of(target_lambda, elig.closed_loop_band)
+    steady = _steady_target_mask(
+        times,
+        target_lambda,
+        cut,
+        dwell_s=elig.steady_target_dwell_s,
+        max_gap_s=elig.max_target_gap_s,
+        tolerance=elig.target_step_tolerance,
+    )
+    since_cut = _seconds_since_cut(times, cut)
 
-    # Steady target: every target observation in [t - dwell, t] within
-    # tolerance of the current one, gaps no larger than max_target_gap_s, no
-    # cut in the window, and observations reaching back the whole dwell.
-    steady = np.zeros(n, dtype=bool)
-    since_cut = np.full(n, np.inf)
-    last_cut = -np.inf
-    for i in range(n):
-        if cut[i]:
-            last_cut = times[i]
-        since_cut[i] = times[i] - last_cut
-        if not np.isfinite(target_lambda[i]):
-            continue
-        start = times[i] - elig.steady_target_dwell_s
-        ok = True
-        reached = times[i] <= start
-        j = i
-        while j > 0 and ok and not reached:
-            if times[j] - times[j - 1] > elig.max_target_gap_s:
-                ok = False
-                break
-            j -= 1
-            if cut[j] or not np.isfinite(target_lambda[j]):
-                ok = False
-                break
-            if abs(target_lambda[j] - target_lambda[i]) > elig.target_step_tolerance:
-                ok = False
-                break
-            reached = times[j] <= start
-        steady[i] = ok and reached
-
-    state = np.full(n, ELIGIBLE, dtype=object)
-    conditions: list[tuple[str, np.ndarray]] = [
-        ("fuel_cut", cut),
-        ("target_invalid", invalid),
-        ("convention_unverified", np.full(n, quantity is None)),
-        ("calibration_unknown", np.full(n, calibration_missing)),
-        ("measured_missing", ~has_pair),
-        ("measured_rail", pair_railed),
-        ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
-        ("post_fuel_cut", since_cut < elig.post_fuel_cut_holdoff_s),
-        ("target_transient", ~steady),
-        (
-            "source_not_valid_in_regime",
-            np.isin(regime, ["closed_loop", "enrichment", "lean_target"])
-            & ~np.isin(regime, list(commanded.valid_regimes)),
-        ),
-        ("unsupported_regime", regime == "lean_target"),
-    ]
-    assigned = np.zeros(n, dtype=bool)
-    for name, mask in conditions:
-        take = mask & ~assigned
-        state[take] = name
-        assigned |= take
+    state = _assign_states(
+        n,
+        [
+            ("fuel_cut", cut),
+            ("target_invalid", target_side.invalid),
+            ("convention_unverified", np.full(n, quantity is None)),
+            ("calibration_unknown", np.full(n, measured_side.calibration_missing)),
+            ("measured_missing", ~has_pair),
+            ("measured_rail", pair_railed),
+            ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
+            ("post_fuel_cut", since_cut < elig.post_fuel_cut_holdoff_s),
+            ("target_transient", ~steady),
+            (
+                "source_not_valid_in_regime",
+                np.isin(regime, ["closed_loop", "enrichment", "lean_target"])
+                & ~np.isin(regime, list(commanded.valid_regimes)),
+            ),
+            ("unsupported_regime", regime == "lean_target"),
+        ],
+    )
 
     eligible = state == ELIGIBLE
     residual = np.full(n, np.nan)
@@ -747,7 +881,7 @@ def estimate_transport_delay(
     target_source: str | None = None,
     measured_source: str | None = None,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float,
     min_rows: int = 30,
 ) -> TransportDelay:
     """Choose one delay on training drives only and freeze it.

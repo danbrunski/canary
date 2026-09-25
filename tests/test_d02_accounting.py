@@ -9,7 +9,6 @@ was reported confidently and nothing owned the difference. See
 from __future__ import annotations
 
 import threading
-import time
 
 import pytest
 
@@ -27,8 +26,29 @@ from src.collection.obd_scheduler import (
 )
 from src.config import CanBusConfig
 from src.daemon.inference_metrics import InferenceTimingRecorder
-from tests.capture_round_fakes import FakeClock, install_clock
-from tests.test_multi_pid_batching import _BATCH_REFUSAL_WINDOW_SECONDS, _BatchingEcu
+from tests.capture_round_fakes import (
+    BATCH_REFUSAL_WINDOW_SECONDS,
+    DEFAULT_VALUES,
+    FakeClock,
+    ScriptedEcu,
+    install_clock,
+)
+
+#: ``build_poll_requests`` asks discovery only for ``auto``; these specs name PIDs.
+_NO_DISCOVERY = object()
+
+
+def _batch_refusing_ecu(clock: FakeClock) -> ScriptedEcu:
+    """Answers single Mode 01 reads and ignores every multi-PID request."""
+    return ScriptedEcu(clock, values=DEFAULT_VALUES, answer_batches=False)
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    """A :class:`FakeClock` bound as every collection module's ``time`` (T01.8)."""
+    fake = FakeClock()
+    install_clock(monkeypatch, fake)
+    return fake
 
 
 def _spec(**kw) -> CanObdSpec:
@@ -46,7 +66,7 @@ def _spec(**kw) -> CanObdSpec:
 # ---------------------------------------------------------------------------
 
 
-def test_failed_batch_names_every_send_it_swallowed() -> None:
+def test_failed_batch_names_every_send_it_swallowed(clock: FakeClock) -> None:
     """The drive's defect, minimised.
 
     `_issue_batched_request` counts a send for every member up front, then a
@@ -55,9 +75,9 @@ def test_failed_batch_names_every_send_it_swallowed() -> None:
     remainder, which read as "60 sent, 0 answered, 6 timeouts" on three
     healthy channels.
     """
-    bus = _BatchingEcu(answer_batches=False)
+    bus = _batch_refusing_ecu(clock)
     spec = _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6)
-    requests = build_poll_requests(bus, spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
     indices = _batchable(requests, ("RPM", "SPEED", "ENGINE_LOAD"))
 
@@ -71,7 +91,7 @@ def test_failed_batch_names_every_send_it_swallowed() -> None:
         on_reading=lambda _r: None,
         stop_event=threading.Event(),
         stats=_stats(),
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
     assert outcome.answered is False
@@ -83,13 +103,13 @@ def test_failed_batch_names_every_send_it_swallowed() -> None:
         assert _request_accounting_error(state) == 0
 
 
-def test_failed_batch_does_not_back_off_its_members() -> None:
+def test_failed_batch_does_not_back_off_its_members(clock: FakeClock) -> None:
     """The no-penalty rule D02.1 must not change: a batch-level failure is no
     evidence about any member, and backing six healthy channels off on it is
     the bug the docstring warns about."""
-    bus = _BatchingEcu(answer_batches=False)
+    bus = _batch_refusing_ecu(clock)
     spec = _spec(pids=("RPM", "SPEED", "ENGINE_LOAD"), batch_max_pids=6)
-    requests = build_poll_requests(bus, spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
     indices = _batchable(requests, ("RPM", "SPEED", "ENGINE_LOAD"))
 
@@ -103,7 +123,7 @@ def test_failed_batch_does_not_back_off_its_members() -> None:
         on_reading=lambda _r: None,
         stop_event=threading.Event(),
         stats=_stats(),
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
     for index in indices:
@@ -129,7 +149,7 @@ def test_accounting_reconciles_over_a_whole_run_with_failing_batches(
     """
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _BatchingEcu(answer_batches=False, clock=clock)
+    bus = _batch_refusing_ecu(clock)
     seen: list = []
     readings: list = []
     stats = run_can_obd_loop(
@@ -138,7 +158,7 @@ def test_accounting_reconciles_over_a_whole_run_with_failing_batches(
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=clock.monotonic() + _BATCH_REFUSAL_WINDOW_SECONDS,
+        deadline_monotonic=clock.monotonic() + BATCH_REFUSAL_WINDOW_SECONDS,
         on_scheduler_metrics=seen.append,
         scheduler_metrics_interval_seconds=0.05,
     )

@@ -58,6 +58,7 @@ from src.analysis.clock_align import Alignment, AlignmentError, align_clocks
 from src.analysis.tune_revisions import load_tune_revisions
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
+from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
 from src.session import format_session_timestamp
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -306,7 +307,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "row_count": len(records),
         "channels": channels,
     }
-    registry = load_tune_revisions(config.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    # R05.1: the live flash registry of the vehicle's profile — the operational
+    # copy once a flash was recorded from the dashboard. The unscoped config
+    # pointed at ``data/tune_revisions.yaml``, which no profile has.
+    scoped = scope_config(config, resolve_profile_for_tooling(config, None))
+    registry = load_tune_revisions(active_registry_path(scoped))
     inferred = registry.at(started_at).revision if registry and registry.at(started_at) else None
     manifest["tune_revision"] = args.tune_revision or inferred
     manifest["tune_revision_source"] = (

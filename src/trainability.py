@@ -63,14 +63,13 @@ TRAINABLE_WIDE_NAMESPACES: Final[Mapping[str, str]] = MappingProxyType(
 
 #: ``NON_TRAINABLE_SOURCES`` keyed for lookup by an arbitrary column prefix.
 _NON_TRAINABLE: Final = cast(Mapping[str, str], NON_TRAINABLE_SOURCES)
-_ROLLING_SUFFIXES: Final = ("__mean", "__std", "__roc")
 
 
 def _base(column: str) -> str:
-    for suffix in _ROLLING_SUFFIXES:
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
+    # Lazy: ``src.preprocessing`` imports this module.
+    from src.preprocessing.features import base_channel
+
+    return base_channel(column)
 
 
 def source_exclusion_reason(column: str) -> str | None:

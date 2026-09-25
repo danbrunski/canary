@@ -51,9 +51,19 @@ from typing import Any, get_args
 import pandas as pd
 
 try:
-    from _cli import add_common_args, load_config
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 except ImportError:  # loaded as `scripts.detector_benchmark` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
@@ -597,13 +607,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Where to discover sessions when none are given explicitly.",
     )
     add_common_args(parser)
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=DEFAULT_BINDINGS_PATH,
-        help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml; "
-        "skipped if absent).",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--if-model",
         type=Path,
@@ -668,11 +672,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Filesystem-safe timestamp for the default --out name and the report's "
         "generated_at field (default: now, UTC, YYYYMMDD-HHMMSS).",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

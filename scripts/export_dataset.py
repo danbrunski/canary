@@ -23,6 +23,7 @@ from pathlib import Path
 
 from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
     add_common_args,
+    add_log_level_arg,
     load_config,
 )
 
@@ -64,7 +65,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Flag a session as a training candidate and exit (no export).",
     )
-    p.add_argument("--log-level", default="INFO")
+    add_log_level_arg(p)
     return p.parse_args(argv)
 
 

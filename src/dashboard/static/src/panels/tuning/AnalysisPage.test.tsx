@@ -311,6 +311,66 @@ describe("AnalysisPage", () => {
     expect(container.querySelectorAll('[data-flagged="true"]').length).toBe(1);
     expect(screen.getByText(/1 cell\(s\) outlined/)).toBeInTheDocument();
   });
+
+  it("names a refused noise floor instead of drawing its band (R05.2)", async () => {
+    const compare: PullComparisonResponse = {
+      available: true,
+      unavailable_kind: null,
+      value: "obd:TIMING_ADVANCE",
+      revision_a: "A",
+      revision_b: "B",
+      axes: {
+        rpm: "obd:RPM",
+        airflow: "obd:MAF",
+        rpm_edges: [3000, 3500],
+        airflow_edges: [100, 130],
+      },
+      min_n: 5,
+      cells: [
+        {
+          rpm_index: 0,
+          airflow_index: 0,
+          rpm_range: [3000, 3500],
+          airflow_range: [100, 130],
+          n_a: 9,
+          n_b: 9,
+          mean_a: 24,
+          mean_b: 20,
+          delta: -4,
+          dropped: true,
+          delta_sigma: null,
+        },
+      ],
+      n_cells: 1,
+      gates: { started: 18, filtered: {}, remaining: 18 },
+      noise_floor: { ...FLOOR, channel: "timing_advance_deg", unit: "deg", sd: 0.48 },
+      significance: {
+        available: false,
+        channel: "timing_advance_deg",
+        kind: "conditions_mismatch",
+        reason: "mismatch",
+        floor_conditions: "WOT: throttle>=85, 3000-5000 rpm",
+        requested_conditions: "all conditions: every row, binned on rpm x airflow",
+      },
+      unavailable: [],
+      conditions: CONDITIONS,
+    };
+    route({
+      "/control/calibration": { history: [{ revision: "A" }, { revision: "B" }] },
+      "/analysis/pull-comparison": compare,
+    });
+    render(<AnalysisPage token="t" status={RUNNING} context={context()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Timing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Compare revisions" }));
+    await screen.findAllByRole("option", { name: "B" });
+    fireEvent.change(screen.getByLabelText("Revision A"), { target: { value: "A" } });
+    fireEvent.change(screen.getByLabelText("Revision B"), { target: { value: "B" } });
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    const note = await screen.findByRole("note", { name: "Noise floor refused" });
+    expect(note).toHaveTextContent("WOT: throttle>=85, 3000-5000 rpm");
+    expect(note).toHaveTextContent("all conditions: every row, binned on rpm x airflow");
+    expect(screen.queryByText(/Noise floor \(null run\)/)).not.toBeInTheDocument();
+  });
 });
 
 describe("AnalysisPage request state (R08.2)", () => {

@@ -54,6 +54,7 @@ from src.models.sequence_training import (
     MIN_CALIBRATION_SAMPLES,
     SequenceThresholdCalibration,
     ValidationChoice,
+    ValidationSplit,
     calibrate_sequence_thresholds,
     coerce_timestamp,
     cpu_state_dict,
@@ -270,7 +271,113 @@ def train_sequence_autoencoder(
     ``calibration_override`` (the operator's reason, required non-empty)
     publishes anyway and stamps the reason and every violation into
     ``calibration_holdout["override"]``.
+
+    Phases (R04.10): :func:`_preflight` (refusals), :func:`_plan_training`
+    (validation split and envelopes), :func:`_setup_execution` (model, loaders,
+    AMP, compile), :func:`_run_epochs` (the loop with early stopping),
+    :func:`_build_sequence_manifest`, then :func:`_calibrate_and_stamp`. Torch
+    stays lazy: the helpers receive the modules they need.
     """
+    preflight = _preflight(
+        backend,
+        dataset,
+        config,
+        calibrate_thresholds=calibrate_thresholds,
+        calibration_dataset=calibration_dataset,
+        allow_in_sample_calibration=allow_in_sample_calibration,
+        feature_spec=feature_spec,
+    )
+    plan = _plan_training(
+        backend,
+        dataset,
+        config,
+        preflight,
+        calibrate_thresholds=calibrate_thresholds,
+        calibration_dataset=calibration_dataset,
+        scaler=scaler,
+        calibration_override=calibration_override,
+        validation_choice=validation_choice,
+        scaler_fit_sessions=scaler_fit_sessions,
+        scaler_fit_until=scaler_fit_until,
+    )
+    torch, _nn, optim, data = _torch_training_modules(backend)
+    execution = _setup_execution(
+        backend,
+        dataset,
+        config,
+        plan,
+        context_columns=preflight.context_columns,
+        device=device,
+        dtype=dtype,
+        torch=torch,
+        optim=optim,
+        data=data,
+    )
+    outcome = _run_epochs(execution, config)
+    if outcome.best_state is None:
+        raise RuntimeError(f"{backend.model_type} training did not produce a checkpoint")
+    model = execution.model
+    model.load_state_dict(outcome.best_state)
+    model.to(execution.device)
+    model.eval()
+
+    created_at = _format_timestamp(coerce_timestamp(trained_at))
+    manifest = _build_sequence_manifest(
+        backend,
+        dataset,
+        config,
+        plan,
+        execution,
+        outcome,
+        created_at=created_at,
+        model_version=model_version,
+        feature_spec=feature_spec,
+        scaler=scaler,
+        dtype=dtype,
+    )
+    trained = TrainedSequenceAutoencoder(model=model, manifest=manifest)
+    if not calibrate_thresholds:
+        return trained
+    return _calibrate_and_stamp(
+        backend,
+        trained,
+        dataset,
+        config,
+        preflight,
+        plan,
+        calibration_dataset=calibration_dataset,
+        calibration_sessions_requested=calibration_sessions_requested,
+        created_at=created_at,
+        device=device,
+    )
+
+
+@dataclass(frozen=True)
+class _Preflight:
+    """What the refusals resolved: calibration provenance, the windows the
+    thresholds come from, the context columns kept out of the loss, and the
+    observation floors both datasets are held to."""
+
+    calibration_provenance: str | None
+    calibration_source: SequenceWindowDataset
+    context_columns: tuple[str, ...]
+    minimum_window_fraction: float
+    minimum_usable_fraction: float
+
+
+def _preflight(
+    backend: SequenceTrainingBackend,
+    dataset: SequenceWindowDataset,
+    config: SequenceAutoencoderTrainingConfigLike,
+    *,
+    calibrate_thresholds: bool,
+    calibration_dataset: SequenceWindowDataset | None,
+    allow_in_sample_calibration: bool,
+    feature_spec: Mapping[str, Any] | None,
+) -> _Preflight:
+    """Phase 1: refuse what cannot train — in-sample calibration without the
+    opt-in, a mask mismatch between training and calibration, unknown context
+    columns, unusable observation coverage."""
     _validate_training_config(backend, config)
     if len(dataset) == 0:
         raise ValueError(f"no sequence windows available to train {backend.model_type}")
@@ -312,6 +419,45 @@ def train_sequence_autoencoder(
     unknown_context = sorted(set(context_columns) - set(dataset.feature_columns))
     if unknown_context:
         raise ValueError(f"feature spec context columns not in the dataset: {unknown_context}")
+    return _Preflight(
+        calibration_provenance=calibration_provenance,
+        calibration_source=calibration_source,
+        context_columns=tuple(context_columns),
+        minimum_window_fraction=minimum_window_fraction,
+        minimum_usable_fraction=minimum_usable_fraction,
+    )
+
+
+@dataclass(frozen=True)
+class _TrainingPlan:
+    """The validation split and everything recorded about it, fixed before
+    anything trains."""
+
+    split: ValidationSplit
+    validation_record: dict[str, Any] | None
+    train_session_names: list[str]
+    training_envelope: Any
+    calibration_envelope: Any
+    override_record: dict[str, Any] | None
+    calibration_health: dict[str, Any] | None
+
+
+def _plan_training(
+    backend: SequenceTrainingBackend,
+    dataset: SequenceWindowDataset,
+    config: SequenceAutoencoderTrainingConfigLike,
+    preflight: _Preflight,
+    *,
+    calibrate_thresholds: bool,
+    calibration_dataset: SequenceWindowDataset | None,
+    scaler: ZScoreScaler | None,
+    calibration_override: str | None,
+    validation_choice: ValidationChoice | None,
+    scaler_fit_sessions: Sequence[str] | None,
+    scaler_fit_until: Mapping[str, str] | None,
+) -> _TrainingPlan:
+    """Phase 2: the validation split (A03.5), the scaler-leak check (A03.4),
+    the envelopes (A03.8) and the calibration coverage gate (A02.2/A02.12)."""
     # A03.5 — validation drives by the stated rule, fixed before anything
     # trains; A03.4 — the scaler the caller fit must not have seen them.
     split = validation_split(
@@ -364,11 +510,11 @@ def train_sequence_autoencoder(
     if calibrate_thresholds:
         violations = calibration_coverage_violations(
             dataset,
-            calibration_source,
+            preflight.calibration_source,
             held_out=calibration_dataset is not None,
             training_envelope=training_envelope,
             calibration_envelope=calibration_envelope,
-            context_columns=context_columns,
+            context_columns=preflight.context_columns,
         )
         if violations:
             if calibration_override is None or not calibration_override.strip():
@@ -382,16 +528,60 @@ def train_sequence_autoencoder(
             override_record = {"reason": calibration_override.strip(), "violations": violations}
     calibration_health = (
         validate_dataset_observations(
-            calibration_source,
-            minimum_window_fraction=minimum_window_fraction,
-            minimum_usable_fraction=minimum_usable_fraction,
+            preflight.calibration_source,
+            minimum_window_fraction=preflight.minimum_window_fraction,
+            minimum_usable_fraction=preflight.minimum_usable_fraction,
             context="calibration dataset",
         )
         if calibrate_thresholds
         else None
     )
+    return _TrainingPlan(
+        split=split,
+        validation_record=validation_record,
+        train_session_names=train_session_names,
+        training_envelope=training_envelope,
+        calibration_envelope=calibration_envelope,
+        override_record=override_record,
+        calibration_health=calibration_health,
+    )
 
-    torch, _nn, optim, data = _torch_training_modules(backend)
+
+@dataclass
+class _Execution:
+    """The model and everything that drives it through the epochs."""
+
+    torch: Any
+    device: Any
+    model: Any
+    execution_model: Any
+    optimizer: Any
+    train_loader: Any
+    validation_loader: Any
+    train_count: int
+    validation_count: int
+    loss_weights: Any
+    amp_dtype: Any
+    grad_scaler: Any
+    loader_kwargs: dict[str, Any]
+
+
+def _setup_execution(
+    backend: SequenceTrainingBackend,
+    dataset: SequenceWindowDataset,
+    config: SequenceAutoencoderTrainingConfigLike,
+    plan: _TrainingPlan,
+    *,
+    context_columns: Sequence[str],
+    device: str,
+    dtype: str,
+    torch: Any,
+    optim: Any,
+    data: Any,
+) -> _Execution:
+    """Phase 3: seed, model, loaders, loss weights, optimizer, AMP, compile —
+    in the order the RNG has always been consumed, so a fixed seed trains the
+    same weights."""
     torch.manual_seed(config.random_state)
 
     device_obj = torch.device(device)
@@ -401,9 +591,11 @@ def train_sequence_autoencoder(
         device=device,
         dtype=dtype,
     )
-    train_subset = data.Subset(dataset, split.train_indexes)
+    train_subset = data.Subset(dataset, plan.split.train_indexes)
     validation_subset = (
-        data.Subset(dataset, split.validation_indexes) if split.validation_indexes else None
+        data.Subset(dataset, plan.split.validation_indexes)
+        if plan.split.validation_indexes
+        else None
     )
     loss_weights = None
     if context_columns:
@@ -443,7 +635,41 @@ def train_sequence_autoencoder(
     execution_model = model
     if getattr(config, "compile_model", False) and hasattr(torch, "compile"):
         execution_model = torch.compile(model)
+    return _Execution(
+        torch=torch,
+        device=device_obj,
+        model=model,
+        execution_model=execution_model,
+        optimizer=optimizer,
+        train_loader=train_loader,
+        validation_loader=validation_loader,
+        train_count=len(train_subset),
+        validation_count=0 if validation_subset is None else len(validation_subset),
+        loss_weights=loss_weights,
+        amp_dtype=amp_dtype,
+        grad_scaler=grad_scaler,
+        loader_kwargs=loader_kwargs,
+    )
 
+
+@dataclass(frozen=True)
+class _FitOutcome:
+    """The best checkpoint the epoch loop kept, and how it got there."""
+
+    best_epoch: int
+    best_train_loss: float
+    best_validation_loss: float | None
+    best_state: dict[str, Any] | None
+    history: tuple[_EpochLoss, ...]
+    early_stopped: bool
+
+
+def _run_epochs(
+    execution: _Execution, config: SequenceAutoencoderTrainingConfigLike
+) -> _FitOutcome:
+    """Phase 4: train until ``max_epochs`` or ``early_stopping_patience``
+    epochs without a ``min_delta`` improvement on the monitored loss
+    (validation when there is any, training otherwise)."""
     best_epoch = 0
     best_train_loss = float("inf")
     best_validation_loss: float | None = None
@@ -455,23 +681,23 @@ def train_sequence_autoencoder(
 
     for epoch in range(1, config.max_epochs + 1):
         train_loss = train_one_epoch(
-            execution_model,
-            train_loader,
-            optimizer=optimizer,
-            device=device_obj,
-            amp_dtype=amp_dtype,
-            grad_scaler=grad_scaler,
-            loss_weights=loss_weights,
+            execution.execution_model,
+            execution.train_loader,
+            optimizer=execution.optimizer,
+            device=execution.device,
+            amp_dtype=execution.amp_dtype,
+            grad_scaler=execution.grad_scaler,
+            loss_weights=execution.loss_weights,
         )
         validation_loss = (
             None
-            if validation_loader is None
+            if execution.validation_loader is None
             else evaluate_loss(
-                execution_model,
-                validation_loader,
-                device=device_obj,
-                amp_dtype=amp_dtype,
-                loss_weights=loss_weights,
+                execution.execution_model,
+                execution.validation_loader,
+                device=execution.device,
+                amp_dtype=execution.amp_dtype,
+                loss_weights=execution.loss_weights,
             )
         )
         history.append(
@@ -484,24 +710,39 @@ def train_sequence_autoencoder(
             best_train_loss = train_loss
             best_validation_loss = validation_loss
             best_monitor_loss = monitor_loss
-            best_state = cpu_state_dict(model)
+            best_state = cpu_state_dict(execution.model)
             epochs_without_improvement = 0
         else:
             epochs_without_improvement += 1
             if epochs_without_improvement >= config.early_stopping_patience:
                 early_stopped = True
                 break
+    return _FitOutcome(
+        best_epoch=best_epoch,
+        best_train_loss=best_train_loss,
+        best_validation_loss=best_validation_loss,
+        best_state=best_state,
+        history=tuple(history),
+        early_stopped=early_stopped,
+    )
 
-    if best_state is None:
-        raise RuntimeError(f"{backend.model_type} training did not produce a checkpoint")
-    model.load_state_dict(best_state)
-    model.to(device_obj)
-    model.eval()
 
-    created_at = _format_timestamp(coerce_timestamp(trained_at))
+def _build_sequence_manifest(
+    backend: SequenceTrainingBackend,
+    dataset: SequenceWindowDataset,
+    config: SequenceAutoencoderTrainingConfigLike,
+    plan: _TrainingPlan,
+    execution: _Execution,
+    outcome: _FitOutcome,
+    *,
+    created_at: str,
+    model_version: str | None,
+    feature_spec: Mapping[str, Any] | None,
+    scaler: ZScoreScaler | None,
+    dtype: str,
+) -> SequenceAutoencoderManifest:
+    """Phase 5: the uncalibrated manifest."""
     version = model_version or f"{backend.model_type}_{created_at.replace(':', '')}"
-    train_count = len(train_subset)
-    validation_count = 0 if validation_subset is None else len(validation_subset)
     schema = (
         dict(feature_spec)
         if feature_spec is not None
@@ -518,7 +759,7 @@ def train_sequence_autoencoder(
     schema[OBSERVATION_MASK_SCHEMA_KEY] = observation_mask_record(
         dataset.observation_mask, dataset.freshness_fallback_columns
     )
-    manifest = SequenceAutoencoderManifest(
+    return SequenceAutoencoderManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
         model_type=backend.model_type,
         model_version=version,
@@ -529,14 +770,14 @@ def train_sequence_autoencoder(
         training_sessions=training_sessions(dataset),
         input_rows=len(dataset.frame),
         input_windows=len(dataset),
-        train_windows=train_count,
-        validation_windows=validation_count,
-        best_epoch=best_epoch,
-        best_train_loss=best_train_loss,
-        best_validation_loss=best_validation_loss,
-        stopped_epoch=history[-1].epoch,
-        early_stopped=early_stopped,
-        architecture=model.architecture.to_dict(),
+        train_windows=execution.train_count,
+        validation_windows=execution.validation_count,
+        best_epoch=outcome.best_epoch,
+        best_train_loss=outcome.best_train_loss,
+        best_validation_loss=outcome.best_validation_loss,
+        stopped_epoch=outcome.history[-1].epoch,
+        early_stopped=outcome.early_stopped,
+        architecture=execution.model.architecture.to_dict(),
         hyperparams={
             "batch_size": config.batch_size,
             "learning_rate": config.learning_rate,
@@ -547,22 +788,35 @@ def train_sequence_autoencoder(
             "random_state": config.random_state,
             "loss": "masked_mse",
             "optimizer": "adam",
-            "device": str(device_obj),
+            "device": str(execution.device),
             "dtype": dtype,
-            "mixed_precision": amp_dtype is not None,
-            "compiled": execution_model is not model,
-            "dataloader_workers": loader_kwargs["num_workers"],
+            "mixed_precision": execution.amp_dtype is not None,
+            "compiled": execution.execution_model is not execution.model,
+            "dataloader_workers": execution.loader_kwargs["num_workers"],
         },
         schema=schema,
-        history=tuple(history),
-        scaler=_resolve_manifest_scaler(scaler, dataset, train_session_names).to_dict(),
-        validation_holdout=validation_record,
-        training_envelope=training_envelope,
-        calibration_envelope=calibration_envelope,
+        history=outcome.history,
+        scaler=_resolve_manifest_scaler(scaler, dataset, plan.train_session_names).to_dict(),
+        validation_holdout=plan.validation_record,
+        training_envelope=plan.training_envelope,
+        calibration_envelope=plan.calibration_envelope,
     )
-    trained = TrainedSequenceAutoencoder(model=model, manifest=manifest)
-    if not calibrate_thresholds:
-        return trained
+
+
+def _calibrate_and_stamp(
+    backend: SequenceTrainingBackend,
+    trained: TrainedSequenceAutoencoder,
+    dataset: SequenceWindowDataset,
+    config: SequenceAutoencoderTrainingConfigLike,
+    preflight: _Preflight,
+    plan: _TrainingPlan,
+    *,
+    calibration_dataset: SequenceWindowDataset | None,
+    calibration_sessions_requested: Sequence[str] | None,
+    created_at: str,
+    device: str,
+) -> TrainedSequenceAutoencoder:
+    """Phase 6: thresholds, then the calibration provenance stamped on."""
     calibrated = calibrate_sequence_autoencoder_thresholds(
         trained,
         calibration_dataset if calibration_dataset is not None else dataset,
@@ -572,9 +826,9 @@ def train_sequence_autoencoder(
         calibrated_at=created_at,
         threshold_quantile=getattr(config, "threshold_quantile", None),
         training_observed_blocks=observed_block_counts(dataset),
-        context_columns=context_columns,
+        context_columns=preflight.context_columns,
     )
-    used_sessions = training_sessions(calibration_source)
+    used_sessions = training_sessions(preflight.calibration_source)
     holdout = (
         _calibration_holdout_report(
             backend, used=used_sessions, requested=calibration_sessions_requested
@@ -582,13 +836,13 @@ def train_sequence_autoencoder(
         if calibration_dataset is not None
         else None
     )
-    if override_record is not None:
-        holdout = {**(holdout or {}), "override": override_record}
+    if plan.override_record is not None:
+        holdout = {**(holdout or {}), "override": plan.override_record}
     stamped = replace(
         calibrated.manifest,
-        calibration=calibration_provenance,
+        calibration=preflight.calibration_provenance,
         calibration_sessions=used_sessions,
-        calibration_health=calibration_health,
+        calibration_health=plan.calibration_health,
         calibration_holdout=holdout,
     )
     return TrainedSequenceAutoencoder(model=calibrated.model, manifest=stamped)

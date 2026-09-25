@@ -44,7 +44,11 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from _cli import load_config  # noqa: F401  (keeps the repo-root bootstrap)
+from _cli import (  # noqa: F401  (keeps the repo-root bootstrap)
+    add_bindings_arg,
+    add_log_level_arg,
+    load_config,
+)
 
 from src.analysis.channels import read_channels
 from src.analysis.compare import (
@@ -55,8 +59,8 @@ from src.analysis.compare import (
 )
 from src.analysis.pairing import to_seconds
 from src.log import configure_logging
-from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import read_session
+from src.paths import DIDS_YAML
+from src.preprocessing.loader import has_telemetry, read_session
 
 log = logging.getLogger(__name__)
 
@@ -89,12 +93,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Command must be unchanged for this long (before and after) to count as steady.",
     )
     parser.add_argument("--max-rpm-range", type=float, default=200.0)
-    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
+    add_bindings_arg(parser)
     parser.add_argument("--dids", type=Path, default=DIDS_YAML)
     parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument(
-        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
-    )
+    add_log_level_arg(parser, default="WARNING")
     return parser.parse_args(argv)
 
 
@@ -219,7 +221,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sessions: dict[str, Path] = {}
     for path in args.sessions:
         path = path.expanduser()
-        if path.is_dir() and any(path.glob("telemetry-*.parquet")):
+        if path.is_dir() and has_telemetry(path):
             sessions.setdefault(path.name, path)
 
     report: dict[str, Any] = {

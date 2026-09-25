@@ -567,8 +567,13 @@ class ServingEligibility(_Strict):
 # ---------------------------------------------------------------------------
 
 
-class NoiseFloor(_Strict):
+class ResolutionFloor(_Strict):
     """The smallest output change this model can resolve, with its basis.
+
+    Named ``NoiseFloor`` until R05.14, which collided with
+    :class:`src.analysis.noise_floor.NoiseFloor` — the measured null-run
+    spread tuning comparisons gate on, a different quantity with a refusing
+    ``conditions`` rule. The old name remains an alias for existing imports.
 
     ``basis`` is required because a floor measured under one condition is
     routinely quoted against another (the WOT timing floor is 16x smaller
@@ -578,6 +583,10 @@ class NoiseFloor(_Strict):
 
     value: float = Field(gt=0)
     basis: str = Field(min_length=1)
+
+
+#: Pre-R05.14 name of :class:`ResolutionFloor`; kept so existing imports work.
+NoiseFloor = ResolutionFloor
 
 
 class SyntheticFault(_Strict):
@@ -628,7 +637,7 @@ class ResolutionSpec(_Strict):
     max_detection_delay_seconds: float = Field(gt=0)
     #: Measured short-horizon spread of the output where the model evaluates;
     #: its ``basis`` must say what was measured, on which drives.
-    measured_noise: NoiseFloor
+    measured_noise: ResolutionFloor
     diagnostic_question: str = Field(min_length=1)
     claim: str = Field(min_length=1)
     not_identified: list[str] = Field(min_length=1)
@@ -676,7 +685,7 @@ class ValidationCriteria(_Strict):
 
     kind: Literal["predictive_surface", "constant_baseline"]
     unit: str = Field(min_length=1)
-    noise_floor: NoiseFloor
+    noise_floor: ResolutionFloor
     #: The smallest deviation, in output units, the operator needs this model
     #: to resolve. Must exceed the noise floor.
     meaningful_deviation: float = Field(gt=0)

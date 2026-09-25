@@ -28,11 +28,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.afr import load_afr_calibration
-from src.analysis.noise_floor import load_noise_floor
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
 from src.analysis.tune_revisions import load_tune_revisions, resolve_session_revision
-from src.analysis.tuning_frame import load_provider_registry
+from src.analysis.tuning_context import context_fields
 from src.analysis.workbench import (
     Unavailable,
     WorkbenchInputs,
@@ -44,7 +42,6 @@ from src.analysis.workbench import (
 )
 from src.collection import tuning_profile
 from src.config import CanaryConfig
-from src.control.calibration import active_registry_path, profile_dir
 from src.control.sessions import is_session_dir_name, resolve_session, session_started_at
 from src.control.trip_end import (
     DIGEST_TIMEOUT_SECONDS,
@@ -56,6 +53,7 @@ from src.control.trip_end import (
     limit_address_space,
 )
 from src.preprocessing.loader import count_session_rows
+from src.profiles import active_registry_path, profile_dir
 from src.session import session_sort_key
 
 #: Most sessions one pooled request may name. Each is read in turn in the
@@ -121,24 +119,9 @@ def capture_deferral(config: CanaryConfig, sessions: list[str] | None = None) ->
 def workbench_inputs(
     config: CanaryConfig, *, bindings_path: Path, dids_path: Path
 ) -> WorkbenchInputs:
-    """Load the vehicle's profile data into one picklable bundle."""
-    data = profile_dir(config)
-    calibration_path = config.daemon.afr_calibration
-    providers_path = data / "tuning_providers.yaml"
-    idle = config.preprocessing.operating_modes.get("idle")
+    """The vehicle's :class:`TuningContext` plus the catalogs, as one picklable bundle."""
     return WorkbenchInputs(
-        bindings_path=bindings_path,
-        dids_path=dids_path,
-        calibration=load_afr_calibration(calibration_path) if calibration_path.exists() else None,
-        providers=load_provider_registry(providers_path) if providers_path.exists() else None,
-        providers_path=providers_path if providers_path.exists() else None,
-        registry=load_tune_revisions(active_registry_path(config)),
-        noise_floor=load_noise_floor(data / "noise_floor.yaml"),
-        idle_spec=(
-            None
-            if idle is None
-            else {"rpm_min": idle.rpm_min, "rpm_max": idle.rpm_max, "speed_max": idle.speed_max}
-        ),
+        **context_fields(config), bindings_path=bindings_path, dids_path=dids_path
     )
 
 

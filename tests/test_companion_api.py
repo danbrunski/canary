@@ -24,50 +24,23 @@ from src.config import CanaryConfig
 from src.control.jobs import JobController
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import write_isolated_config
 
 
-def _config_yaml(storage_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {storage_path}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes: {{}}
-models:
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
+def _write_config(tmp_path: Path, storage: Path) -> Path:
+    return write_isolated_config(
+        tmp_path,
+        storage=storage,
+        preprocessing={"rolling_window_seconds": 30},
+        models={
+            "isolation_forest": {"enabled": False},
+            "lstm_autoencoder": {"sequence_length": 60, "latent_dim": 16},
+        },
+    )
 
 
 def _config(tmp_path: Path) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "pi-sessions"))
-    return CanaryConfig.from_yaml(cfg_path)
+    return CanaryConfig.from_yaml(_write_config(tmp_path, tmp_path / "pi-sessions"))
 
 
 def _session_zip(session_id: str = "2026-05-17T120000") -> bytes:
@@ -437,8 +410,7 @@ def test_sync_session_from_pi_marks_action_failed_on_error(
 
 
 def test_local_control_jobs_run_against_companion_controller(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "sessions"))
+    cfg_path = _write_config(tmp_path, tmp_path / "sessions")
     config = CanaryConfig.from_yaml(cfg_path)
     lib = CanaryLibrary(tmp_path / "library")
 

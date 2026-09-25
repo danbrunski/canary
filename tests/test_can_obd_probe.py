@@ -10,31 +10,11 @@ from __future__ import annotations
 
 import argparse
 
-import can
 import pytest
 
 from src.collection.can_obd_client import CanObdClient
+from tests.fakes import CannedResponseBus
 from tools.can_obd_probe import batch_groups, parse_args, parse_pid_list, read_batch
-
-
-class _ScriptedBus:
-    """Replays a canned ISO-TP response to whatever is sent."""
-
-    def __init__(self, frames: list[bytes]) -> None:
-        self.sent: list[can.Message] = []
-        self._frames = list(frames)
-
-    def send(self, msg: can.Message, timeout: float | None = None) -> None:
-        self.sent.append(msg)
-
-    def recv(self, timeout: float | None = None) -> can.Message | None:
-        if not self._frames:
-            return None
-        return can.Message(arbitration_id=0x7E8, data=self._frames.pop(0), is_extended_id=False)
-
-    def shutdown(self) -> None:  # pragma: no cover - interface completeness
-        pass
-
 
 #: 41 0C 0000 0D 00 04 00 11 13 0E FF 10 0076 — 15 bytes, first frame + 2 CFs.
 SIX_PID_RESPONSE = [
@@ -56,7 +36,7 @@ def test_batch_flag_refuses_what_the_request_builder_would(bad: str) -> None:
 
 
 def test_read_batch_sends_one_request_and_splits_every_pid() -> None:
-    bus = _ScriptedBus(SIX_PID_RESPONSE)
+    bus = CannedResponseBus(SIX_PID_RESPONSE)
     client = CanObdClient(bus, timeout_seconds=0.5)  # type: ignore[arg-type]
 
     lines = read_batch(client, [0x0C, 0x0D, 0x04, 0x11, 0x0E, 0x10])
@@ -74,7 +54,7 @@ def test_read_batch_sends_one_request_and_splits_every_pid() -> None:
 
 def test_read_batch_names_a_pid_the_ecu_omitted() -> None:
     # Asked for 0C,0D,05; the ECU answered 0C and 0D only (single frame).
-    bus = _ScriptedBus([bytes([0x06, 0x41, 0x0C, 0x0B, 0xB8, 0x0D, 0x32, 0x00])])
+    bus = CannedResponseBus([bytes([0x06, 0x41, 0x0C, 0x0B, 0xB8, 0x0D, 0x32, 0x00])])
     client = CanObdClient(bus, timeout_seconds=0.3)  # type: ignore[arg-type]
 
     lines = read_batch(client, [0x0C, 0x0D, 0x05])
@@ -84,7 +64,7 @@ def test_read_batch_names_a_pid_the_ecu_omitted() -> None:
 
 
 def test_read_batch_reports_silence_as_no_answer() -> None:
-    client = CanObdClient(_ScriptedBus([]), timeout_seconds=0.1)  # type: ignore[arg-type]
+    client = CanObdClient(CannedResponseBus([]), timeout_seconds=0.1)  # type: ignore[arg-type]
     assert read_batch(client, [0x0C])[0].endswith(
         "no answer (timeout, negative response, or passive mode)"
     )

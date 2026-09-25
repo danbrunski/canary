@@ -156,7 +156,7 @@
     }
   },
   "compare_tuning_sessions": {
-    "description": "A/B two stored sessions on a matched grid (local). Refuses\n            calculated load as an axis \u2014 it is derived from BFS, so it moves\n            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass\n            ``floor_channel`` to quote each delta against the measured\n            same-tune noise floor, below which nothing is distinguishable.",
+    "description": "A/B two stored sessions on a matched grid (local). Refuses\n            calculated load as an axis \u2014 it is derived from BFS, so it moves\n            when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass\n            ``floor_channel`` with ``conditions`` (the regime this comparison\n            was made under) to quote each delta against the measured same-tune\n            noise floor, below which nothing is distinguishable; a floor\n            measured under other conditions is refused, not quoted.",
     "inputSchema": {
       "properties": {
         "against": {
@@ -177,6 +177,18 @@
           ],
           "default": null,
           "title": "Axes"
+        },
+        "conditions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conditions"
         },
         "floor_channel": {
           "anyOf": [

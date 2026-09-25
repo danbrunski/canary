@@ -19,8 +19,7 @@ from scripts.train_tcn import (
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.tcn_training import load_tcn_autoencoder_model
-from src.storage.parquet_writer import write_records_to_parquet
-from src.telemetry import TelemetryRecord
+from tests.builders import write_obd_session
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -70,25 +69,9 @@ def _no_bindings(tmp_path: Path) -> Path:
     return tmp_path / "no-bindings.yaml"
 
 
-def _write_obd_session(root: Path, name: str, *, rows: int, start_epoch: float) -> Path:
-    session = root / name
-    records: list[TelemetryRecord] = []
-    for i in range(rows):
-        t = start_epoch + i
-        records.extend(
-            [
-                TelemetryRecord.obd(t, "RPM", 780.0 + (i % 4), "rpm"),
-                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
-                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
-            ]
-        )
-    write_records_to_parquet(records, session, max_rows=10_000)
-    return session
-
-
 def test_build_dataset_uses_tcn_sequence_length(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
 
     dataset = build_dataset([session], config, bindings_path=_no_bindings(tmp_path))
 
@@ -100,7 +83,7 @@ def test_build_dataset_uses_tcn_sequence_length(tmp_path: Path) -> None:
 def test_train_writes_checkpoint_and_manifest(tmp_path: Path) -> None:
     _torch()
     config = _config(tmp_path)
-    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     out_dir = tmp_path / "models" / "tcn"
 
     trained = train([session], config, out_dir, bindings_path=_no_bindings(tmp_path))
@@ -125,8 +108,8 @@ def test_evaluate_runs_false_positive_benchmark(
 ) -> None:
     _torch()
     config = _config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     trained = train([train_session], config, tmp_path / "m", bindings_path=_no_bindings(tmp_path))
 
     report = evaluate(trained, [held_out], config, bindings_path=_no_bindings(tmp_path))
@@ -142,8 +125,8 @@ def test_evaluate_runs_false_positive_benchmark(
 def test_main_trains_and_evaluates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _torch()
     config_path = _write_config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     out_dir = tmp_path / "models" / "tcn"
 
     exit_code = main(
@@ -177,8 +160,8 @@ def test_main_errors_when_no_sessions(tmp_path: Path, capsys: pytest.CaptureFixt
 def test_resolve_training_sessions_excludes_evaluate_sessions(tmp_path: Path) -> None:
     root = tmp_path / "sessions"
     root.mkdir()
-    _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
 
     resolved = _resolve_training_sessions(
         SimpleNamespace(
@@ -196,9 +179,9 @@ def test_resolve_training_sessions_excludes_calibration_sessions(tmp_path: Path)
     its thresholds will be calibrated against."""
     root = tmp_path / "sessions"
     root.mkdir()
-    _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
-    calib = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
-    held_out = _write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
+    write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    calib = write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    held_out = write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
 
     resolved = _resolve_training_sessions(
         SimpleNamespace(

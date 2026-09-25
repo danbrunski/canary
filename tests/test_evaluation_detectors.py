@@ -3,7 +3,6 @@ rule's parity with the engine, and the A02.5 baselines."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -24,19 +23,9 @@ from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E402
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
+from tests.builders import IFConfig
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
-
-
-@dataclass(frozen=True)
-class _IFConfig:
-    enabled: bool = True
-    n_estimators: int = 40
-    contamination: float = 0.02
-    per_mode_contamination: dict[str, float] = field(default_factory=dict)
-    random_state: int = 7
-    calibration_holdout_fraction: float = 0.2
-    target_flag_rate: float = 0.05
 
 
 def _resampled(seed: int = 0, *, gap_after: int | None = None) -> pd.DataFrame:
@@ -66,7 +55,7 @@ def test_without_a_sequence_model_fused_is_withheld_not_zero() -> None:
     features = featurize_wide_frame(_resampled(), config).features
     trained_if = fit_isolation_forest(
         features,
-        _IFConfig(),
+        IFConfig(n_estimators=40),
         feature_columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"],
         fitted_at="2026-05-12T00:00:00Z",
     )

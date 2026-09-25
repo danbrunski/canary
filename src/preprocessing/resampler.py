@@ -104,6 +104,28 @@ class ResampleConfig:
     def slow_channel_max_gap(self) -> pd.Timedelta:
         return pd.Timedelta(seconds=self.slow_channel_max_gap_seconds)
 
+    def is_fast(self, channel: str) -> bool:
+        """Whether ``channel`` gets the grid-derived ``max_gap`` (fast) or the
+        slow-channel ceiling. ``fast_channels``, when set, is the explicit fast
+        list; otherwise every channel not matching ``slow_channels`` is fast.
+
+        The one statement of the rule (R04.7): the resampler, the live
+        feature source's ``__gap`` flags and the synthetic-dropout injector
+        all read it here, so a non-default ``fast_channels`` cannot flag a
+        channel stale at serve that training held fresh.
+        """
+        if self.fast_channels is not None:
+            return channel in self.fast_channels
+        return not is_slow_channel(channel, self.slow_channels)
+
+    def max_gap_for(self, channel: str) -> pd.Timedelta:
+        """The forward-fill ceiling for ``channel`` (see :meth:`is_fast`)."""
+        return self.max_gap if self.is_fast(channel) else self.slow_channel_max_gap
+
+    def max_gap_seconds_for(self, channel: str) -> float:
+        """:meth:`max_gap_for` in seconds."""
+        return float(self.max_gap_for(channel).total_seconds())
+
 
 def resample_config_for(config: CanaryConfig, *, hz: float | None = None) -> ResampleConfig:
     """The :class:`ResampleConfig` of the training recipe, built from ``config``.
@@ -222,7 +244,6 @@ def _resample_one_long(
     start = numeric[TIMESTAMP_COLUMN].min().floor(config.interval)
     end = numeric[TIMESTAMP_COLUMN].max().floor(config.interval)
     sampled_times = pd.Series(pd.date_range(start=start, end=end, freq=config.interval))
-    fast = set(_fast_channels(channels, config))
     values: dict[str, np.ndarray] = {}
     gaps: dict[str, np.ndarray] = {}
     arrivals: dict[str, np.ndarray] = {}
@@ -236,8 +257,7 @@ def _resample_one_long(
         # Match pivot_table(..., aggfunc="last") for duplicate observations.
         series = series.groupby(level=0, sort=True).last()
         sampled = series.resample(config.interval).last().reindex(sampled_times.array).ffill()
-        max_gap = config.max_gap if channel in fast else config.slow_channel_max_gap
-        stale = _gap_flags(series, sampled_times, max_gap).to_numpy()
+        stale = _gap_flags(series, sampled_times, config.max_gap_for(channel)).to_numpy()
         values[channel] = sampled.where(~stale, np.nan).to_numpy(dtype="float32")
         gaps[gap_column(channel)] = stale
         arrivals[arrived_column(channel)] = _arrival_flags(series, sampled_times, config.interval)
@@ -326,13 +346,11 @@ def _resample_one_session(
     # Both the masked values and the gap flags are collected up front and
     # attached in a single concat — assigning them column-by-column fragments
     # the frame (one block per channel) on wide corpora.
-    fast = set(_fast_channels(value_columns, config))
     masked: dict[str, np.ndarray] = {}
     gaps: dict[str, np.ndarray] = {}
     arrivals: dict[str, np.ndarray] = {}
     for column in value_columns:
-        max_gap = config.max_gap if column in fast else config.slow_channel_max_gap
-        stale = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], max_gap)
+        stale = _gap_flags(indexed[column], sampled[TIMESTAMP_COLUMN], config.max_gap_for(column))
         stale_mask = stale.to_numpy()
         gaps[gap_column(column)] = stale_mask
         masked[column] = sampled[column].where(~stale_mask, np.nan).to_numpy()
@@ -386,12 +404,6 @@ def _gap_flags(
     never_seen = last_seen.isna()
     stale = never_seen | ((sampled_times - last_seen) > max_gap)
     return pd.Series(np.asarray(stale), index=sampled_index.index)
-
-
-def _fast_channels(value_columns: list[str], config: ResampleConfig) -> list[str]:
-    if config.fast_channels is not None:
-        return [column for column in value_columns if column in config.fast_channels]
-    return [column for column in value_columns if not is_slow_channel(column, config.slow_channels)]
 
 
 def _value_columns(

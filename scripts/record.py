@@ -31,9 +31,17 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
+    from _cli import (  # type: ignore[import-not-found]
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 except ImportError:  # loaded as `scripts.record` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config
+    from scripts._cli import (
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.can_ids import parse_standard_can_id
 from src.collection.can_bus import bus_factory
@@ -200,11 +208,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Default 10."
         ),
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

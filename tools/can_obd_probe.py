@@ -27,9 +27,7 @@ from __future__ import annotations
 import argparse
 import sys
 from collections.abc import Sequence
-from pathlib import Path
 
-from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import (
     PID_DECODERS,
     BatchedMode01Response,
@@ -39,8 +37,23 @@ from src.collection.can_obd_client import (
 )
 from src.collection.isotp import MAX_BATCHED_PIDS
 from src.collection.obd_scheduler import mode01_registry_width
-from src.config import CanaryConfig
 from src.log import configure_logging
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    PassiveRefusedError,
+    add_bus_tool_args,
+    open_client,
+    parse_header,
+    require_passive,
+)
+
+#: Why this probe wants the daemon quiet: its functional (0x7DF) requests are
+#: answered on the same ids as the scheduler's, so the two would read each
+#: other's replies.
+_PASSIVE_REASON = (
+    "the daemon's scheduler polls Mode 01 on the same request/response ids, so "
+    "this probe and the daemon would each read the other's replies"
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -52,9 +65,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "sniffer uses."
         ),
     )
-    parser.add_argument(
-        "--config", type=Path, default=Path("canary.yaml"), help="canary.yaml path."
-    )
+    add_bus_tool_args(parser, header_default="7DF", session_default=None, timeout_alias=True)
     parser.add_argument(
         "--read-pids",
         action="store_true",
@@ -96,12 +107,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "After the bitmask walk, batch-read every supported PID that has a "
             f"registry width, {MAX_BATCHED_PIDS} per request."
         ),
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=1.0,
-        help="Per-request timeout in seconds (default 1.0).",
     )
     parser.add_argument(
         "--log-level",
@@ -175,11 +180,17 @@ def read_batch(client: CanObdClient, pids: Sequence[int]) -> list[str]:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = CanaryConfig.from_yaml(args.config)
-    bus = bus_factory(config.hardware.can)
     try:
-        client = CanObdClient(bus, timeout_seconds=args.timeout)
-
+        parse_header(args.header)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    try:
+        passive = require_passive(args, reason=_PASSIVE_REASON)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
+    with open_client(args, passive) as client:
         if args.supported_walk:
             print("walking Mode-01 supported-PID bitmask…", file=sys.stderr)
             supported = client.query_supported_mode_01_pids()
@@ -222,8 +233,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                         print(f"  {code}")
                 else:
                     print("  (none)")
-    finally:
-        bus.shutdown()
     return 0
 
 

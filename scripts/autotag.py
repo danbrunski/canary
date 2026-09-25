@@ -36,7 +36,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from _cli import add_common_args, discover_live_session_dirs, load_config
+from _cli import (
+    add_common_args,
+    add_log_level_arg,
+    discover_live_session_dirs,
+    load_config,
+)
 
 from src.analysis.autotag import TagEvent, detect_tags
 from src.collection.tags import write_tag
@@ -88,9 +93,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Detect and log candidate tags but don't write tags.jsonl.",
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

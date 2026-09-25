@@ -12,7 +12,9 @@ from typing import Any
 
 import pytest
 
-from src.jsonl_store import JsonlStore
+from src.config import CanaryConfig
+from tests import repo_guard
+from tests.repo_guard import GUARD, RepoTreeGuard
 
 #: Tests measured slower than the push gate can afford (scripts/mark_slow_tests.py
 #: writes this from a ``--durations`` run). They get the ``slow`` marker here, so
@@ -38,12 +40,82 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.slow)
 
 
-#: ``src.models.training_ledger.DEFAULT_TRAINING_LEDGER_PATH``, spelled out:
-#: importing it here would pull ``src.models`` (and torch) into every xdist
-#: worker. ``test_conftest_ledger_guard_matches_the_default_path`` pins the two.
-_REAL_TRAINING_LEDGER = (
-    Path(__file__).resolve().parents[1] / "data" / "control" / "training_runs.jsonl"
-).resolve()
+_REPO_BASELINE = pytest.StashKey[repo_guard.RunBaseline]()
+#: Refusals the xdist workers reported that no test was charged with.
+_WORKER_REFUSALS: list[str] = []
+
+
+def _is_xdist_worker(config: pytest.Config) -> bool:
+    return hasattr(config, "workerinput")
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    GUARD.install()
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    if not _is_xdist_worker(session.config):
+        session.config.stash[_REPO_BASELINE] = repo_guard.baseline()
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_protocol(item: pytest.Item, nextitem: pytest.Item | None) -> Iterator[None]:
+    GUARD.current_test = item.nodeid
+    try:
+        yield
+    finally:
+        GUARD.current_test = None
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node: Any, error: Any) -> None:
+    """xdist: collect a worker's uncharged refusals (see ``pytest_sessionfinish``)."""
+    _WORKER_REFUSALS.extend(getattr(node, "workeroutput", {}).get("repo_guard_refusals", []))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """Fail the run on a repo-tree write no single test was charged with.
+
+    - Refusals outside a test phase (collection, a module fixture's teardown
+      after the last test's check). A worker cannot fail the run itself, so
+      it hands them to the controller through ``workeroutput``.
+    - On the controller, files under ``data/``/``models/`` that changed during
+      the run and can only have been changed by it (a child process or a
+      native writer the audit hook cannot see). Changes that may be another
+      session's are listed as warnings; see ``repo_guard._attributable``.
+    """
+    refusals = [
+        f"refused ({nodeid or 'outside any test'}): {what}"
+        for nodeid, refused in GUARD.violations.items()
+        for what in refused
+    ]
+    if _is_xdist_worker(session.config):
+        session.config.workeroutput["repo_guard_refusals"] = refusals  # type: ignore[attr-defined]
+        return
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    problems = refusals + _WORKER_REFUSALS
+    for nodeid, allowed in GUARD.allowed.items():
+        if reporter is not None:
+            reason = GUARD.allowance_for(nodeid)
+            for what in allowed:
+                reporter.write_line(f"R07.2 allowance [{reason}] {nodeid}: {what}")
+    start = session.config.stash.get(_REPO_BASELINE, None)
+    warnings: list[str] = []
+    if start is not None:
+        failures, warnings = repo_guard.classify_changes(start)
+        problems += [f"changed during the run: {change}" for change in failures]
+    if reporter is not None and warnings:
+        reporter.write_sep("-", "R07.2: changed during the run, possibly by another session")
+        for change in warnings:
+            reporter.write_line(change)
+    if not problems:
+        return
+    if reporter is not None:
+        reporter.write_sep("=", "R07.2: the test run wrote into the repo tree", red=True)
+        for problem in problems:
+            reporter.write_line(problem)
+    if session.exitstatus == pytest.ExitCode.OK:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 @pytest.fixture(autouse=True)
@@ -73,32 +145,61 @@ def _restore_root_logger_state() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _refuse_writes_to_the_real_training_ledger(monkeypatch: pytest.MonkeyPatch) -> None:
-    """No test may append to the operator's ``data/control/training_runs.jsonl``.
+def _refuse_writes_into_the_repo_tree(request: pytest.FixtureRequest) -> Iterator[None]:
+    """No test may write into ``<repo>/data`` or ``<repo>/models`` (R07.2).
 
-    ``scripts/retrain.py`` defaults ``--ledger`` to that file and ``--if-out`` /
-    ``--sequence-out`` to the deployed model directories. Tests that ran
-    ``retrain.main`` with stubbed trainers and no ``--ledger`` therefore
-    re-ingested the *deployed* manifests on every run: by 2026-09-20 the ledger
-    held 4,252 lines for 40 real runs (419 MB), 1,174 of them carrying a
-    ``detector_benchmark_report_path`` inside a pytest tmp dir, and — latest
-    line per run wins — each one reset the real run's publish/approval state.
-
-    ``retrain._ingest_ledger`` now refuses a manifest it did not produce. This
-    is the second lock: any future path to the real file fails the test that
-    took it, instead of relying on every test remembering ``--no-ledger``.
+    The audit hook installed in :func:`pytest_configure` refuses the write as
+    it happens; this fails the test that attempted it, even when the code under
+    test caught the ``PermissionError``. The real training ledger
+    (``data/control/training_runs.jsonl``, 4,252 test-grown rows by 2026-09-20)
+    is one case of it. Point the path at ``tmp_path``: ``tests/configs.py``
+    ``isolated_config`` for daemon configs, ``retrain_argv`` for
+    ``scripts/retrain.py``.
     """
-    real_append = JsonlStore._append_record
+    yield
+    refused = GUARD.violations.pop(request.node.nodeid, None)
+    if refused:
+        pytest.fail(
+            "test wrote into the repo tree (R07.2):\n  " + "\n  ".join(refused),
+            pytrace=False,
+        )
 
-    def _guarded(self: Any, record: Any, **kwargs: Any) -> Any:
-        if Path(self.path).resolve() == _REAL_TRAINING_LEDGER:
-            raise AssertionError(
-                f"test attempted to append to the real training ledger "
-                f"{_REAL_TRAINING_LEDGER}; pass --ledger <tmp_path> / --no-ledger"
-            )
-        return real_append(self, record, **kwargs)
 
-    monkeypatch.setattr(JsonlStore, "_append_record", _guarded)
+@pytest.fixture(autouse=True)
+def _reset_collection_process_state() -> Iterator[None]:
+    """Every test starts and ends with collection's process-globals at start-up (R07.4).
+
+    The passive gate, the active capture profile, ECM session claims, the
+    bus-budget override, the capture ledger and generation, remembered
+    discovery results all live in module globals. Twelve
+    files reset a different subset by hand, so what a test saw depended on
+    which test its xdist worker ran before it.
+    """
+    from src.collection.process_state import reset_process_state_for_tests
+
+    reset_process_state_for_tests()
+    yield
+    reset_process_state_for_tests()
+
+
+@pytest.fixture
+def daemon_config(tmp_path: Path) -> CanaryConfig:
+    """A config ``run_daemon`` can start on: detectors off, in-process feature
+    build, fast model polling, every writable path under ``tmp_path``.
+
+    The shape of ``tests/test_daemon.py``'s ``config`` fixture, which two other
+    files used to import (pulling in all 2,800 lines of it) -- but isolated:
+    that fixture left ``trip_state`` pointing at ``data/control`` (R07.2).
+    """
+    from tests.configs import daemon_test_config
+
+    return daemon_test_config(tmp_path)
+
+
+@pytest.fixture
+def repo_write_guard() -> RepoTreeGuard:
+    """The repo-tree write guard, for tests that pin the guard itself."""
+    return GUARD
 
 
 @pytest.fixture

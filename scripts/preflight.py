@@ -39,9 +39,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 try:
-    from _cli import add_common_args
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+    )
 except ImportError:  # loaded as `scripts.preflight` — repo root on path, not scripts/
-    from scripts._cli import add_common_args  # type: ignore[no-redef]
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+    )
 
 from src.collection.can_bus import bus_factory
 from src.collection.can_obd_client import PID_DECODERS, CanObdClient
@@ -299,7 +305,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="If can0 is down/wrong, (re)configure it via `sudo ip link` first.",
     )
     p.add_argument("--json", action="store_true", help="Emit machine-readable JSON.")
-    p.add_argument("--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    add_log_level_arg(p, default="WARNING")
     return p.parse_args(argv)
 
 

@@ -169,14 +169,11 @@ async def test_run_daemon_shutdown_stops_through_the_session(
     from src.collection.capture_profiles import CaptureProfile
     from src.daemon import build_components
     from src.daemon import runtime as runtime_mod
-    from tests.test_daemon import _config_yaml
+    from tests.configs import daemon_test_config
     from tests.waits import settle, wait_until
 
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    config = CanaryConfig.from_yaml(cfg_path)
-    # Keep daemon state out of the repo tree (R07.2).
-    config.daemon.trip_state = tmp_path / "trip_odometer.json"
+    # Every daemon state path under tmp_path (R07.2).
+    config = daemon_test_config(tmp_path)
     reasons: list[str] = []
 
     class _Recording(ProfileCaptureSession):
@@ -231,19 +228,14 @@ async def test_an_http_started_capture_ended_by_daemon_shutdown_reports_its_epoc
     from src.daemon import build_components
     from src.daemon import runtime as runtime_mod
     from src.daemon import server as server_mod
-    from tests.test_daemon import _config_yaml
+    from tests.configs import daemon_test_config
     from tests.waits import settle, wait_until
 
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    config = CanaryConfig.from_yaml(cfg_path)
     # Every daemon state path under tmp_path (R07.2): the full run_daemon
     # touches the audit log, trip odometer, catalog and more.
-    for name, field in type(config.daemon).model_fields.items():
-        value = getattr(config.daemon, name)
-        if field.annotation is Path and not Path(value).is_relative_to(tmp_path):
-            setattr(config.daemon, name, tmp_path / "state" / Path(value).name)
-    config.daemon.capture_profiles = tmp_path / "vehicle" / "capture_profiles.yaml"
+    config = daemon_test_config(
+        tmp_path, daemon={"capture_profiles": tmp_path / "vehicle" / "capture_profiles.yaml"}
+    )
     monkeypatch.setenv(config.daemon.control_token_env, "secret")
 
     apps: list[Any] = []

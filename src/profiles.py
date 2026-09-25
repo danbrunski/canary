@@ -530,3 +530,43 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
     return config.model_copy(
         update={"collection": collection, "daemon": daemon, "vehicle": vehicle}
     )
+
+
+# ---------------------------------------------------------------------------
+# Profile data locations (R05.1)
+# ---------------------------------------------------------------------------
+#
+# Below ``control`` so analysis can resolve the same files the control plane
+# writes. ``src.control.calibration`` re-exports these; there is one answer to
+# "which flash registry is live?".
+
+
+def profile_dir(config: CanaryConfig) -> Path:
+    """The vehicle's tracked profile-data directory (beside ``afr_calibration``)."""
+    return config.daemon.afr_calibration.parent
+
+
+def source_registry_path(config: CanaryConfig) -> Path:
+    """The tracked flash registry shipped with the profile data."""
+    return profile_dir(config) / "tune_revisions.yaml"
+
+
+def operational_dir(config: CanaryConfig) -> Path:
+    """Mutable state outside tracked profile data, like capture-profile state."""
+    return config.daemon.jobs_dir.parent / "calibration"
+
+
+def operational_registry_path(config: CanaryConfig) -> Path:
+    """Where ``append_flash`` records flashes made from the dashboard."""
+    return operational_dir(config) / "tune_revisions.yaml"
+
+
+def active_registry_path(config: CanaryConfig) -> Path:
+    """The flash registry every reader uses: the operational copy once one exists.
+
+    ``append_flash`` seeds the operational copy from the source and appends to
+    it, so a reader of the source file never sees a dashboard-recorded flash
+    (R05.1: the trip-end digest and the MCP tuning tools did exactly that).
+    """
+    override = operational_registry_path(config)
+    return override if override.exists() else source_registry_path(config)

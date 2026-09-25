@@ -248,10 +248,15 @@ manual later showed that ABS diagnosis is DDL2 K-line instead.
 with the historical guess "7E0 = engine; trans 7E1, ABS 7E2, …". That mapping
 is not an Xterra FSM fact. This scanner issues service 0x22 requests only.
 
+The scanner refuses to start (exit 2) unless the daemon reports passive mode
+armed, because it shares the bus with the daemon's OBD scheduler. Arm it first
+(`POST /control/passive {"enabled": true, "ttl_seconds": 600}`, or the MCP
+`set_passive_mode` tool); on a bench with no daemon running, pass `--no-daemon`.
+
 ```bash
-# Try the default session FIRST. The ECM's 0xC0 gate is an ECM quirk; most
-# non-engine modules answer 0x22 in the default session, and if the ABS does,
-# there is no Mode 01 blackout and this can run alongside normal telemetry.
+# Arm passive mode first (see above). Try the default session FIRST. The ECM's
+# 0xC0 gate is an ECM quirk; most non-engine modules answer 0x22 in the default
+# session, and if the ABS does there is no Mode 01 blackout to worry about.
 .venv/bin/python tools/scan_constant_dids.py --canable --config /etc/canary/canary.yaml \
     --header 7E2 --start 0x0000 --end 0x0040 --passes 1 --out /tmp/probe-7e2.json
 ```
@@ -271,6 +276,9 @@ Mode 22 did not answer at the tested CAN addresses. It says nothing about
 K-line, other CAN addressing, or other diagnostic services.
 
 ## Phase 2 — DID sweep on whatever answered (KOEO → idle, stationary)
+
+Passive mode must stay armed for the whole sweep, both passes included. Give it
+a TTL longer than the sweep.
 
 ```bash
 .venv/bin/python tools/scan_constant_dids.py --canable --config /etc/canary/canary.yaml \

@@ -44,7 +44,8 @@ from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import Bindings, load_bindings
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
-from tests.test_digest import _config
+from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
+from tests.fakes import slow_digest
 
 #: A test vehicle's road-speed frame — deliberately NOT the Xterra's 0x6F7, so
 #: nothing here can pass by accident against a hard-coded id.
@@ -265,7 +266,7 @@ def test_a_session_whose_trip_ended_or_that_was_watched_closes_quietly() -> None
 def test_record_trip_end_unobservable_writes_the_refusal_once(tmp_path: Path) -> None:
     session = tmp_path / "2026-09-23T142900"
     session.mkdir()
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
     written = record_trip_end_unobservable(session, config, "no usable speed source")
     assert written is not None
     sidecar = read_digest_skipped(session)
@@ -278,17 +279,15 @@ def test_record_trip_end_unobservable_writes_the_refusal_once(tmp_path: Path) ->
 
 
 def test_record_trip_end_unobservable_never_shadows_a_digest_or_a_replay(tmp_path: Path) -> None:
-    from tests.test_trip_end_digest import _slow_digest
-
     digested = tmp_path / "2026-09-23T142900"
     digested.mkdir()
-    write_digest(digested, _slow_digest(0.0, [])(digested, _config(tmp_path)))
-    assert record_trip_end_unobservable(digested, _config(tmp_path), "x") is None
+    write_digest(digested, slow_digest(0.0, [])(digested, digest_config(tmp_path)))
+    assert record_trip_end_unobservable(digested, digest_config(tmp_path), "x") is None
     assert read_digest_skipped(digested) is None
 
     replay = tmp_path / "_replay-2026-09-23T142900"
     replay.mkdir()
-    assert record_trip_end_unobservable(replay, _config(tmp_path), "x") is None
+    assert record_trip_end_unobservable(replay, digest_config(tmp_path), "x") is None
 
 
 # --- through the daemon's drain -------------------------------------------
@@ -355,7 +354,7 @@ async def test_a_session_with_wheel_speed_and_no_gps_fix_ends_a_trip_and_runs_th
     assert ended == [writer.paths.root]
     assert unobservable == []
 
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
     _no_process_wide_rlimit(monkeypatch)
     with ThreadPoolExecutor(max_workers=1) as pool:
         digest = await handle_trip_end_off_loop(
@@ -670,10 +669,8 @@ async def test_a_capture_session_digests_with_its_trip_block(
 ) -> None:
     """``handle_trip_end_off_loop`` accepts a ``_capture-*`` directory ("which
     session is live" includes captures) and writes the trip block into it."""
-    from tests.test_digest import SESSION_END
-    from tests.test_fingerprint import _write_rich_session
 
-    capture = _write_rich_session(tmp_path, name="_capture-tuning-2026-05-20T180000")
+    capture = write_rich_session(tmp_path, name="_capture-tuning-2026-05-20T180000")
     parked = tmp_path / "2026-05-20T181000"
     end = TripEnd(
         observed=True,
@@ -681,13 +678,13 @@ async def test_a_capture_session_digests_with_its_trip_block(
         detail="stationary for 300 s on can:TEST_ROAD_SPEED",
         session=capture,
         sessions=(capture,),
-        started_epoch=SESSION_END.timestamp() - 300,
-        stopped_epoch=SESSION_END.timestamp() - 60,
+        started_epoch=RICH_SESSION_END.timestamp() - 300,
+        stopped_epoch=RICH_SESSION_END.timestamp() - 60,
     )
     _no_process_wide_rlimit(monkeypatch)
     with ThreadPoolExecutor(max_workers=1) as pool:
         digest = await handle_trip_end_off_loop(
-            capture, _config(tmp_path), trip=end, now=SESSION_END, executor=pool
+            capture, digest_config(tmp_path), trip=end, now=RICH_SESSION_END, executor=pool
         )
     assert digest is not None
     written = read_digest(capture)

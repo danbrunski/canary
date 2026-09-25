@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from src.analysis.session_deviations import analyze_session, compare_sessions
+from src.analysis.session_deviations import (
+    SurfaceDeviationSummary,
+    _compare_surface,
+    analyze_session,
+    compare_session_deviations,
+)
 from src.config import CanaryConfig
 from src.decode.behavior_models import (
     Axis1D,
@@ -206,7 +211,10 @@ def test_analyze_session_1d_surface_recovers_offset(config: CanaryConfig, tmp_pa
     report = analyze_session(session, config, models)
     (coolant,) = report.surfaces
     assert coolant.kind == "surface_1d"
-    assert coolant.cells == []  # binning is 2D-only
+    # R05.6: 1D surfaces are cell-binned too (equal cells over the axis
+    # domain), so an A/B comparison can cell-match them.
+    assert len(coolant.cells) == 1
+    assert coolant.cells[0]["y_bin"] is None and coolant.cells[0]["n"] == 8
     assert coolant.mean_deviation == pytest.approx(10.0, abs=1e-6)
     assert coolant.warning_fraction == 1.0  # 10 in [5, 15) -> warning
     assert coolant.critical_fraction == 0.0
@@ -283,7 +291,7 @@ def test_report_to_dict_round_trips_json_safely(config: CanaryConfig, tmp_path: 
 
 
 # ---------------------------------------------------------------------------
-# compare_sessions (Task 5.4)
+# compare_session_deviations (Task 5.4)
 # ---------------------------------------------------------------------------
 
 
@@ -315,13 +323,12 @@ def test_compare_sessions_computes_per_surface_and_per_cell_deltas(
     )
     models = BehaviorModels(schema_version=1, models=[_timing_model()])
 
-    comparison = compare_sessions(session_a, session_b, config, models)
+    comparison = compare_session_deviations(session_a, session_b, config, models)
 
     (timing,) = comparison.surfaces
     assert timing.name == "timing_vs_rpm_load"
-    assert timing.mean_deviation_a == pytest.approx(2.0, abs=1e-6)
-    assert timing.mean_deviation_b == pytest.approx(7.0, abs=1e-6)
-    assert timing.mean_deviation_delta == pytest.approx(5.0, abs=1e-6)
+    assert timing.n_matched_cells == 1
+    assert timing.matched_deviation_delta == pytest.approx(5.0, abs=1e-6)
 
     assert len(timing.cells) == 1
     cell = timing.cells[0]
@@ -360,7 +367,7 @@ def test_compare_sessions_cell_present_only_on_one_side(
     )
     models = BehaviorModels(schema_version=1, models=[_timing_model()])
 
-    comparison = compare_sessions(session_a, session_b, config, models)
+    comparison = compare_session_deviations(session_a, session_b, config, models)
 
     (timing,) = comparison.surfaces
     # Two distinct operating points visited (one per session) -> two cells,
@@ -402,9 +409,70 @@ def test_compare_sessions_to_dict_json_safe(config: CanaryConfig, tmp_path: Path
     )
     models = BehaviorModels(schema_version=1, models=[_timing_model()])
 
-    comparison = compare_sessions(session_a, session_b, config, models)
+    comparison = compare_session_deviations(session_a, session_b, config, models, min_n=3)
     payload = json.loads(json.dumps(comparison.to_dict()))
-    assert payload["surfaces"][0]["mean_deviation_delta"] == pytest.approx(3.0, abs=1e-6)
+    assert payload["surfaces"][0]["matched_deviation_delta"] == pytest.approx(3.0, abs=1e-6)
+    # Three rows a side is under the default minimum: no delta is claimed.
+    sparse = compare_session_deviations(session_a, session_b, config, models)
+    (surface,) = sparse.surfaces
+    assert surface.matched_deviation_delta is None
+    assert surface.cells[0]["sparse"] is True and surface.cells[0]["delta"] is None
+
+
+def _summary(cells: list[tuple[float, int, float]]) -> SurfaceDeviationSummary:
+    """A surface summary from ``(rpm_lo, n, mean_deviation)`` cells, with the
+    session-wide means the old comparison differenced (row-weighted)."""
+    rows = sum(n for _lo, n, _dev in cells)
+    mean_dev = sum(n * dev for _lo, n, dev in cells) / rows
+    return SurfaceDeviationSummary(
+        name="timing_vs_rpm_load",
+        kind="surface_2d",
+        operating_mode=None,
+        n_observed=rows,
+        n_in_domain=rows,
+        mean_actual=mean_dev,
+        mean_expected=0.0,
+        mean_deviation=mean_dev,
+        warning_fraction=0.0,
+        critical_fraction=0.0,
+        cells=[
+            {"x_bin": [lo, lo + 1000.0], "y_bin": [0.0, 50.0], "n": n, "mean_deviation": dev}
+            for lo, n, dev in cells
+        ],
+    )
+
+
+def test_same_per_cell_behaviour_with_a_different_rpm_mix_is_no_difference() -> None:
+    """R05.6: the "K responds 1:1" shape. Both drives behave identically in
+    every cell; drive B just spent its time at higher rpm. A session-wide mean
+    delta calls that a +3.3 shift; cell matching reports none."""
+    a = _summary([(0.0, 100, 1.0), (1000.0, 10, 5.0)])
+    b = _summary([(0.0, 10, 1.0), (1000.0, 100, 5.0)])
+    assert b.mean_deviation - a.mean_deviation == pytest.approx(3.27, abs=0.01)
+    comparison = _compare_surface(a, b, min_n=5, noise_floor=None, conditions=None)
+    assert comparison.n_matched_cells == 2
+    assert comparison.matched_deviation_delta == pytest.approx(0.0)
+    payload = comparison.to_dict()
+    assert not any(key.startswith("mean_") and key.endswith("_delta") for key in payload)
+    assert comparison.significance is None
+
+
+def test_a_deviation_floor_measured_elsewhere_is_refused() -> None:
+    from src.analysis.noise_floor import NoiseFloor
+
+    floor = NoiseFloor(
+        channels={
+            "timing_vs_rpm_load": {"unit": "deg", "sd": 0.5, "n_cells": 5, "conditions": "WOT"}
+        }
+    )
+    a = _summary([(0.0, 20, 1.0)])
+    b = _summary([(0.0, 20, 2.0)])
+    refused = _compare_surface(a, b, min_n=5, noise_floor=floor, conditions="idle")
+    assert refused.significance is not None
+    assert refused.significance["kind"] == "conditions_mismatch"
+    assert refused.cells[0]["delta_sigma"] is None
+    quoted = _compare_surface(a, b, min_n=5, noise_floor=floor, conditions="WOT")
+    assert quoted.cells[0]["delta_sigma"] == pytest.approx(2.0)
 
 
 def test_analyze_session_resamples_with_the_training_recipe(

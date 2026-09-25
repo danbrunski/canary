@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -31,22 +30,10 @@ from scripts.detector_benchmark import (  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
-from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
-from src.telemetry import TelemetryRecord  # noqa: E402
+from tests.builders import IFConfig, write_fixture_session
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
-
-
-@dataclass(frozen=True)
-class _IFConfig:
-    enabled: bool = True
-    n_estimators: int = 60
-    contamination: float = 0.02
-    per_mode_contamination: dict[str, float] = field(default_factory=dict)
-    random_state: int = 7
-    calibration_holdout_fraction: float = 0.2
-    target_flag_rate: float = 0.05
 
 
 def _config() -> CanaryConfig:
@@ -81,7 +68,7 @@ def _fit_if(resampled: pd.DataFrame, config: CanaryConfig):
     nominal_features = featurize_wide_frame(resampled, config).features
     return fit_isolation_forest(
         nominal_features,
-        _IFConfig(),
+        IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED", "obd:THROTTLE_POS"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -416,12 +403,12 @@ def test_main_baseline_flag_exits_nonzero_on_regression(
     from src.preprocessing.feature_pipeline import featurize_wide_frame
 
     config = _config()
-    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    session_a = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     long = load_resampled_session(session_a, config)
     features = featurize_wide_frame(long, config).features
     trained = fit_isolation_forest(
         features,
-        _IFConfig(),
+        IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -491,12 +478,12 @@ def test_main_missing_baseline_file_reports_distinct_error_code(
     from src.preprocessing.feature_pipeline import featurize_wide_frame
 
     config = _config()
-    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    session_a = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     long = load_resampled_session(session_a, config)
     features = featurize_wide_frame(long, config).features
     trained = fit_isolation_forest(
         features,
-        _IFConfig(),
+        IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -529,20 +516,8 @@ def test_main_missing_baseline_file_reports_distinct_error_code(
 # ---------------------------------------------------------------------------
 
 
-def _write_fixture_session(root: Path, name: str, *, seed: int = 0, n: int = 40) -> Path:
-    rng = np.random.default_rng(seed)
-    session = root / name
-    records: list[TelemetryRecord] = []
-    for i in range(n):
-        t = 1_778_000_000.0 + i
-        records.append(TelemetryRecord.obd(t, "RPM", float(rng.normal(1500.0, 50.0)), "rpm"))
-        records.append(TelemetryRecord.obd(t, "SPEED", float(rng.normal(30.0, 3.0)), "mph"))
-    write_records_to_parquet(records, session, max_rows=1000)
-    return session
-
-
 def test_load_resampled_session_reads_and_resamples_without_mode_column(tmp_path: Path) -> None:
-    session = _write_fixture_session(tmp_path, "2026-05-12T000000")
+    session = write_fixture_session(tmp_path, "2026-05-12T000000")
     config = _config()
 
     resampled = load_resampled_session(session, config)
@@ -566,7 +541,7 @@ def test_main_runs_end_to_end_and_writes_json(
     config = _config()
     # >=50 rows so the 0.2 calibration-holdout fraction clears the 7.2
     # minimum-holdout-samples floor (see isolation_forest._MIN_CALIBRATION_SAMPLES).
-    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    session_a = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
 
     # Train a tiny real IF artifact against the fixture's own schema and
     # write it to disk exactly like train_anomaly_model.py does.
@@ -576,7 +551,7 @@ def test_main_runs_end_to_end_and_writes_json(
     features = featurize_wide_frame(long, config).features
     trained = fit_isolation_forest(
         features,
-        _IFConfig(),
+        IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )
@@ -622,7 +597,7 @@ def test_main_runs_end_to_end_and_writes_json(
 
 
 def test_main_missing_if_model_reports_error(tmp_path: Path) -> None:
-    session_a = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000")
+    session_a = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000")
     rc = main(
         [
             str(session_a),

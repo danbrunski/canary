@@ -7,29 +7,9 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from src.companion.library import SCHEMA_VERSION, CanaryLibrary
-from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
-
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
+from tests.configs import isolated_config
 
 
 def _make_session(parent: Path, session_id: str, *, seconds: int = 70) -> Path:
@@ -75,9 +55,7 @@ def test_import_session_with_config_indexes_channels(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
     storage.mkdir()
     src = _make_session(storage, "2026-05-11T222447", seconds=70)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_CONFIG_YAML.format(storage=storage))
-    config = CanaryConfig.from_yaml(cfg_path)
+    config = isolated_config(tmp_path, storage=storage)
     with CanaryLibrary(tmp_path / "lib") as lib:
         s = lib.import_session(src, config=config)
         assert s.row_count == 70

@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import retrain  # noqa: E402 — reuse its auto-holdout picker (Task 3.3)
 import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
-from _cli import add_common_args, load_config  # noqa: E402
+from _cli import add_common_args, add_override_reason_arg, load_config  # noqa: E402
 from train_sequence import nothing_left_to_train  # noqa: E402
 
 from src.config import CanaryConfig  # noqa: E402
@@ -351,10 +351,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "thresholds are calibrated on the training windows themselves, which "
         "inflates cross-session false positives on both backbones.",
     )
-    parser.add_argument(
+    add_override_reason_arg(
+        parser,
         "--accept-thin-calibration",
-        default=None,
-        metavar="REASON",
         help="Train even though the calibration sessions do not cover what the models "
         "will score (fewer than three drives, a scored mode without its own band, a "
         "channel never observed). Refused without this (A02.2); the reason is stamped "

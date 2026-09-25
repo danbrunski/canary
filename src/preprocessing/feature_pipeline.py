@@ -40,6 +40,7 @@ from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bin
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.decode.dids import decode_did_rows, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
+from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
@@ -54,7 +55,9 @@ from src.preprocessing.feature_cache import (
 from src.preprocessing.features import (
     CONTEXT_COLUMN_PREFIX,
     FeatureConfig,
+    base_channel,
     compute_features,
+    split_rolling,
 )
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.quality_gate import apply_quality_gate
@@ -71,12 +74,13 @@ from src.trainability import source_exclusion_reason
 
 log = logging.getLogger(__name__)
 
-#: Default location of the hand-edited CAN signal bindings file.
-DEFAULT_BINDINGS_PATH = Path("data/bindings.yaml")
+#: Default location of the hand-edited CAN signal bindings file -- the repo's
+#: own, never the working directory's (R01.2).
+DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 
-#: Default location of the Mode-22 DID map (data/dids.yaml). Used to decode
-#: raw ``DID_<hex>`` poll readings into named ``did:<NAME>`` signals.
-DEFAULT_DIDS_PATH = Path("data/dids.yaml")
+#: Default location of the Mode-22 DID map (data/dids.yaml), repo-rooted. Used
+#: to decode raw ``DID_<hex>`` poll readings into named ``did:<NAME>`` signals.
+DEFAULT_DIDS_PATH = DIDS_YAML
 
 #: Default retrain-time cache for model-ready feature frames.
 DEFAULT_FEATURE_CACHE_DIR = Path("data/cache/feature_frames")
@@ -99,7 +103,7 @@ ALL_MODE = "all"
 #: *required* set; that one is the full candidate map. Keep the per-signal
 #: candidate lists in step between them — a fallback added there and not here
 #: silently does nothing on the training path.
-_SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
+SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     # Broadcast CAN sits last: ~98 Hz against Mode 01's 0.26-0.93 Hz, so it
     # fills the rows where the PID was stale rather than overriding it. See
     # segmenter.DEFAULT_SIGNAL_COLUMNS for the measured agreement and for why
@@ -112,6 +116,19 @@ _SEGMENTER_SIGNAL_COLUMNS: dict[str, str | tuple[str, ...]] = {
     "throttle": "obd:THROTTLE_POS",
     "coolant_temp": ("obd:COOLANT_TEMP", "decoded:ECM_COOLANT_TEMP"),
 }
+#: Pre-R04.14 private name, kept for its importers.
+_SEGMENTER_SIGNAL_COLUMNS = SEGMENTER_SIGNAL_COLUMNS
+
+
+def segmenter_input_columns() -> tuple[str, ...]:
+    """Every column :data:`SEGMENTER_SIGNAL_COLUMNS` names, flattened, in order,
+    once each: what a bounded reader must load for mode labels to match the
+    training path."""
+    columns: list[str] = []
+    for candidates in SEGMENTER_SIGNAL_COLUMNS.values():
+        columns.extend((candidates,) if isinstance(candidates, str) else candidates)
+    return tuple(dict.fromkeys(columns))
+
 
 #: GPS channels logged for trip reconstruction and data-quality context but
 #: deliberately excluded from model features. Absolute position would teach the
@@ -352,7 +369,7 @@ def feature_policy_exclusions(
             or column.startswith(CONTEXT_COLUMN_PREFIX)
         ):
             continue
-        base = _base_feature_name(column)
+        base = base_channel(column)
         if base in out:
             continue
         reason = resolved.exclusion_reason(base)
@@ -653,6 +670,7 @@ def build_feature_frame(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
     dbc_dir: Path = DEFAULT_DBC_DIR,
+    dids_path: Path = DEFAULT_DIDS_PATH,
     cache_dir: Path | None = None,
     force_rebuild: bool = False,
     max_workers: int | None = None,
@@ -661,10 +679,15 @@ def build_feature_frame(
 
     ``read_session`` → ``decode_can_rows`` (bindings.yaml, if present) →
     ``decode_can_rows_dbc`` (any ``.dbc`` files under ``dbc_dir``, if present —
-    Task 1.8 interop hook) → ``to_wide(coerce_numeric=True)`` → ``resample_wide``
-    → operating-mode segment (or constant ``"all"`` mode) →
-    ``append_deviation_columns`` (behavior models, if present — Task 4.E.7) →
-    ``compute_features``.
+    Task 1.8 interop hook) → ``decode_did_rows`` (``dids_path``, if present) →
+    ``to_wide(coerce_numeric=True)`` → ``resample_wide`` → operating-mode
+    segment (or constant ``"all"`` mode) → ``append_deviation_columns``
+    (behavior models, if present — Task 4.E.7) → ``compute_features``.
+
+    Every catalog path defaults to the repo's own file (:mod:`src.paths`), never
+    the working directory, and the cache key hashes exactly the files loaded
+    (R01.2): a build started outside the repo root used to drop every ``did:``
+    feature while its cache key hashed a different constant.
 
     The deviation columns land *before* ``compute_features`` so they pick up
     rolling mean/std/roc derivatives just like raw / decoded channels. The
@@ -681,48 +704,99 @@ def build_feature_frame(
             bindings_path=bindings_path,
             behavior_models_path=behavior_models_path,
             dbc_dir=dbc_dir,
+            dids_path=dids_path,
         )
         cache_path = Path(cache_dir) / f"{cache_metadata['cache_key']}.pkl"
-        if not force_rebuild and cache_path.exists():
-            try:
-                cached = pd.read_pickle(cache_path)
-                if not isinstance(cached, pd.DataFrame):
-                    raise TypeError(f"cached object is {type(cached).__name__}, not DataFrame")
-                log.info(
-                    "loaded feature frame cache",
-                    extra={
-                        "cache": str(cache_path),
-                        "rows": len(cached),
-                        "columns": len(cached.columns),
-                    },
-                )
+        if not force_rebuild:
+            cached = _load_cached(cache_path)
+            if cached is not None:
                 return _with_physical_drives(cached, session_dirs)
-            except Exception as exc:  # noqa: BLE001 - cache corruption should not fail retrain
-                log.warning(
-                    "feature frame cache unreadable; rebuilding",
-                    extra={"cache": str(cache_path), "error": str(exc)},
-                )
 
-    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
-    behavior_models = (
-        load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
+    inputs = _load_decode_inputs(
+        bindings_path=bindings_path,
+        behavior_models_path=behavior_models_path,
+        dbc_dir=dbc_dir,
+        dids_path=dids_path,
     )
-    dbc_database = load_dbc_dir(dbc_dir)
-    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
+    resampled = _resample_sessions(
+        session_dirs, inputs, resample_config_for(config), max_workers=max_workers
+    )
+    features = featurize_wide_frame(
+        resampled, config, behavior_models=inputs.behavior_models, bindings=inputs.bindings
+    ).features
+    if cache_path is not None and cache_metadata is not None:
+        _write_feature_frame_cache(cache_path, features, cache_metadata)
+    return _with_physical_drives(features, session_dirs)
 
-    # Decode → pivot → resample one session at a time. resample_wide and
-    # compute_features already group by session (no cross-session bleed), so
-    # per-session-then-concat is identical to concat-then-resample — but peak
-    # memory is now one session's raw bus-rate pivot instead of all of them
-    # concatenated, which OOM-kills the Pi on a full corpus.
-    #
-    # Sessions are independent, so for >= _PARALLEL_SESSION_THRESHOLD inputs we
-    # fan the per-session pipeline out across a ProcessPoolExecutor (one process
-    # per session, capped by CPU count and by the memory budget in
-    # ``_resolve_worker_count``). Caller can pin ``max_workers=1`` to
-    # force the serial path — kept exactly as it was for back-compat with tests
-    # and the Pi cold-start fall-back, where multiprocessing overhead would lose.
-    resample_config = resample_config_for(config)
+
+def _load_cached(cache_path: Path) -> pd.DataFrame | None:
+    """The cached feature frame at ``cache_path``, or ``None`` (absent or
+    unreadable: a corrupt cache rebuilds, it never fails a retrain)."""
+    if not cache_path.exists():
+        return None
+    try:
+        cached = pd.read_pickle(cache_path)
+        if not isinstance(cached, pd.DataFrame):
+            raise TypeError(f"cached object is {type(cached).__name__}, not DataFrame")
+    except Exception as exc:  # noqa: BLE001 - cache corruption should not fail retrain
+        log.warning(
+            "feature frame cache unreadable; rebuilding",
+            extra={"cache": str(cache_path), "error": str(exc)},
+        )
+        return None
+    log.info(
+        "loaded feature frame cache",
+        extra={"cache": str(cache_path), "rows": len(cached), "columns": len(cached.columns)},
+    )
+    return cached
+
+
+@dataclass(frozen=True)
+class _DecodeInputs:
+    """The catalogs a feature build decodes with; ``None`` where the file is absent."""
+
+    bindings: Bindings | None
+    behavior_models: BehaviorModels | None
+    dbc_database: Any
+    did_map: Any
+
+
+def _load_decode_inputs(
+    *, bindings_path: Path, behavior_models_path: Path, dbc_dir: Path, dids_path: Path
+) -> _DecodeInputs:
+    return _DecodeInputs(
+        bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
+        behavior_models=(
+            load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
+        ),
+        dbc_database=load_dbc_dir(dbc_dir),
+        did_map=load_did_map(dids_path) if dids_path.exists() else None,
+    )
+
+
+def _resample_sessions(
+    session_dirs: Sequence[Path],
+    inputs: _DecodeInputs,
+    resample_config: ResampleConfig,
+    *,
+    max_workers: int | None,
+) -> pd.DataFrame:
+    """Decode → pivot → resample one session at a time, then concatenate.
+
+    ``resample_wide`` and ``compute_features`` already group by session (no
+    cross-session bleed), so per-session-then-concat is identical to
+    concat-then-resample — but peak memory is one session's raw bus-rate pivot
+    instead of all of them concatenated, which OOM-kills the Pi on a full
+    corpus.
+
+    Sessions are independent, so for >= ``_PARALLEL_SESSION_THRESHOLD`` inputs
+    the per-session pipeline fans out across a ``ProcessPoolExecutor`` (one
+    process per session, capped by CPU count and by the memory budget in
+    ``_resolve_worker_count``). ``max_workers=1`` forces the serial path — kept
+    exactly as it was for back-compat with tests and the Pi cold-start
+    fall-back, where multiprocessing overhead would lose. An unreadable session
+    is skipped and named; no readable session at all raises.
+    """
     resampled_parts: list[pd.DataFrame] = []
     skipped: list[str] = []
 
@@ -734,7 +808,11 @@ def build_feature_frame(
             try:
                 resampled_parts.append(
                     _decode_session_to_resampled(
-                        session_dir, bindings, dbc_database, did_map, resample_config
+                        session_dir,
+                        inputs.bindings,
+                        inputs.dbc_database,
+                        inputs.did_map,
+                        resample_config,
                     )
                 )
             except Exception as exc:  # noqa: BLE001 — one bad session must not kill the corpus
@@ -753,7 +831,7 @@ def build_feature_frame(
             with ProcessPoolExecutor(
                 max_workers=effective_workers,
                 initializer=_init_feature_worker,
-                initargs=(bindings, dbc_database, did_map, resample_config),
+                initargs=(inputs.bindings, inputs.dbc_database, inputs.did_map, resample_config),
                 # ``spawn`` re-imports the codebase per worker rather than
                 # forking the parent's address space, which avoids the classic
                 # fork-with-threads deadlock (numpy / torch keep background
@@ -805,14 +883,7 @@ def build_feature_frame(
             ", ".join(skipped),
         )
     resampled = pd.concat(resampled_parts, ignore_index=True)
-    resampled = drop_fully_stale_rows(resampled)
-
-    features = featurize_wide_frame(
-        resampled, config, behavior_models=behavior_models, bindings=bindings
-    ).features
-    if cache_path is not None and cache_metadata is not None:
-        _write_feature_frame_cache(cache_path, features, cache_metadata)
-    return _with_physical_drives(features, session_dirs)
+    return drop_fully_stale_rows(resampled)
 
 
 def _with_physical_drives(features: pd.DataFrame, session_dirs: Sequence[Path]) -> pd.DataFrame:
@@ -986,7 +1057,7 @@ def segment_or_constant(
     second element.
 
     ``bindings`` is the catalog the ``decoded:`` candidates in
-    ``_SEGMENTER_SIGNAL_COLUMNS`` are scaled with — pass the same one the
+    ``SEGMENTER_SIGNAL_COLUMNS`` are scaled with — pass the same one the
     frame was *decoded* with (``build_feature_frame`` does, so ``--bindings``
     reaches the mode rules too). Omitted, the shared accessor uses the repo's
     ``data/bindings.yaml``, which is what every production decode path loads.
@@ -996,7 +1067,7 @@ def segment_or_constant(
         out[MODE_COLUMN] = ALL_MODE
         return out, False
     seg_cfg = SegmenterConfig(
-        signal_columns=dict(_SEGMENTER_SIGNAL_COLUMNS),
+        signal_columns=dict(SEGMENTER_SIGNAL_COLUMNS),
         recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
         mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
         bindings=bindings,
@@ -1188,7 +1259,7 @@ def candidate_feature_columns(
     # information — keep the ``decoded:*`` copy, drop the duplicate.
     # Genuinely external DBC signals (no bindings counterpart) still train.
     decoded_signal_names = {
-        _base_feature_name(str(c)).removeprefix("decoded:")
+        base_channel(str(c)).removeprefix("decoded:")
         for c in features.columns
         if str(c).startswith("decoded:")
     }
@@ -1203,16 +1274,16 @@ def candidate_feature_columns(
             continue
         if (
             col.startswith("dbc:")
-            and _base_feature_name(col).removeprefix("dbc:") in decoded_signal_names
+            and base_channel(col).removeprefix("dbc:") in decoded_signal_names
         ):
             continue
         # GPS position/quality channels (and their rolling derivatives) are
         # logged but never modeled — see NON_TRAINABLE_GPS_CHANNELS.
-        if _base_feature_name(col) in NON_TRAINABLE_GPS_CHANNELS:
+        if base_channel(col) in NON_TRAINABLE_GPS_CHANNELS:
             continue
         # Monotonic counters / odometers / run-clocks — see
         # NON_TRAINABLE_COUNTER_CHANNELS (kept in frame for behavior axes).
-        base = _base_feature_name(col)
+        base = base_channel(col)
         if base in NON_TRAINABLE_COUNTER_CHANNELS or base.startswith(
             _NON_TRAINABLE_MISFIRE_COUNTER_PREFIX
         ):
@@ -1226,7 +1297,7 @@ def candidate_feature_columns(
             continue
         # Committee divergence residuals marked non-trainable: computed and
         # logged, but kept out of the trained set — see analysis.committees.
-        if _base_feature_name(col) in non_trainable_committees:
+        if base_channel(col) in non_trainable_committees:
             continue
         if pd.api.types.is_numeric_dtype(features[col]):
             cols.append(col)
@@ -1269,13 +1340,6 @@ def sequence_feature_columns(
     ]
 
 
-#: Rolling derivatives that ``compute_features`` appends to every base channel.
-#: ``expand_suppress_channels`` recognises these suffixes so the operator can
-#: list the base sensor once and have the four feature-pipeline siblings come
-#: along.
-_ROLLING_SUFFIXES: tuple[str, ...] = ("__mean", "__std", "__roc")
-
-
 def expand_suppress_channels(
     suppress_bases: Sequence[str], feature_columns: Sequence[str]
 ) -> tuple[str, ...]:
@@ -1297,10 +1361,11 @@ def expand_suppress_channels(
         if column in suppress_set:
             matched.append(column)
             continue
-        for suffix in _ROLLING_SUFFIXES:
-            if column.endswith(suffix) and column[: -len(suffix)] in suppress_set:
-                matched.append(column)
-                break
+        # Rolling derivatives follow their base channel, so the operator lists
+        # the sensor once and its feature-pipeline siblings come along.
+        base, suffix = split_rolling(column)
+        if suffix and base in suppress_set:
+            matched.append(column)
     return tuple(matched)
 
 
@@ -1367,7 +1432,7 @@ def build_feature_spec(
         "feature_dtypes": {column: str(features[column].dtype) for column in columns},
         "source_prefixes": sorted({_source_prefix(column) for column in columns}),
         "behavior_model_columns": sorted(
-            {_base_feature_name(column) for column in columns if column.startswith("deviation:")}
+            {base_channel(column) for column in columns if column.startswith("deviation:")}
         ),
         "feature_health": summarize_feature_health(
             features,
@@ -1671,12 +1736,5 @@ def _column_health(series: pd.Series) -> dict[str, Any]:
     }
 
 
-def _base_feature_name(column: str) -> str:
-    for suffix in ("__mean", "__std", "__roc"):
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
-
-
 def _source_prefix(column: str) -> str:
-    return source_of(_base_feature_name(column)) or "derived"
+    return source_of(base_channel(column)) or "derived"

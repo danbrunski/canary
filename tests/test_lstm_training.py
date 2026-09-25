@@ -21,6 +21,7 @@ from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from tests.builders import sequence_training_frame
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -55,24 +56,15 @@ def _config(**updates):
     return base.model_copy(update=defaults)
 
 
-def _frame(rows: int = 14) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            SESSION_COLUMN: ["clean"] * rows,
-            TIMESTAMP_COLUMN: pd.date_range("2026-05-12T00:00:00Z", periods=rows, freq="s"),
-            "rpm": [700.0 + (idx % 4) for idx in range(rows)],
-            "speed": [float(idx % 5) for idx in range(rows)],
-        }
+def _scaler(frame: pd.DataFrame | None = None) -> ZScoreScaler:
+    """Per-feature z-score scaler for the synthetic test data."""
+    return ZScoreScaler.fit(
+        frame if frame is not None else sequence_training_frame(), columns=["rpm", "speed"]
     )
 
 
-def _scaler(frame: pd.DataFrame | None = None) -> ZScoreScaler:
-    """Per-feature z-score scaler for the synthetic test data."""
-    return ZScoreScaler.fit(frame if frame is not None else _frame(), columns=["rpm", "speed"])
-
-
 def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
-    frame = _frame(rows)
+    frame = sequence_training_frame(rows)
     scaler = _scaler(frame)
     # Tests run the model on the same scaled frame inference will see; the
     # ``SequenceInferenceEngine`` z-scores in-line so train/serve stay aligned.
@@ -403,7 +395,7 @@ def test_train_lstm_autoencoder_calibrates_on_held_out_dataset_when_given() -> N
     training windows."""
     _torch()
     train_ds = _dataset(rows=14)
-    held_out_frame = _frame(rows=8)
+    held_out_frame = sequence_training_frame(rows=8)
     held_out_frame.loc[:, [SESSION_COLUMN]] = "calib"
     scaler = _scaler()
     calib_ds = SequenceWindowDataset(

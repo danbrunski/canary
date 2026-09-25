@@ -19,6 +19,7 @@ from pathlib import Path
 
 from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
     add_common_args,
+    add_log_level_arg,
     load_config,
 )
 
@@ -35,7 +36,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p.add_argument("--json", action="store_true", help="Emit the full report as JSON.")
     p.add_argument("--min-sessions", type=int, default=3)
     p.add_argument("--min-rows", type=int, default=1000)
-    p.add_argument("--log-level", default="WARNING")
+    add_log_level_arg(p, default="WARNING")
     return p.parse_args(argv)
 
 

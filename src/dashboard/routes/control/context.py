@@ -14,7 +14,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, TypeVar
+from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -33,8 +33,11 @@ from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.control.sessions import resolve_session
 from src.dashboard.broadcast import Broadcaster
-from src.models.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+
+if TYPE_CHECKING:
+    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
+    from src.daemon.health import HealthMonitor
 
 _T = TypeVar("_T")
 

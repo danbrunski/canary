@@ -391,3 +391,103 @@ def test_compute_golden_divergence_handles_zero_golden_rate() -> None:
     )
     block = divergence["per_detector"]["isolation_forest"]
     assert block["relative_delta"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# R04.5 — a withheld detector fails, never passes silently
+# ---------------------------------------------------------------------------
+
+
+def _two_detector_report(*, sequence_recall: float | None, sequence_per_hour: float | None) -> dict:
+    report = _report(recall=1.0, per_hour=1.0)
+    if sequence_recall is not None:
+        report["table"].append(
+            {
+                "detector": "sequence",
+                "fault_kind": "spike",
+                "runs": 5,
+                "detected": 5,
+                "recall": sequence_recall,
+            }
+        )
+    block: dict = {"alerts": 1, "rows": 100, "hours": 1.0}
+    if sequence_per_hour is not None:
+        block["per_hour"] = sequence_per_hour
+    report["nominal_fp"]["sequence"] = block
+    return report
+
+
+def test_gate_fails_a_candidate_whose_detector_was_withheld_where_golden_was_graded() -> None:
+    """detector_benchmark emits no row for a withheld detector; the gate used to
+    ``continue`` past the missing recall and pass "recall non-regression"."""
+    result = evaluate_promotion_gate(
+        _record("candidate"),
+        _record("golden"),
+        candidate_report=_two_detector_report(sequence_recall=None, sequence_per_hour=1.0),
+        golden_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0),
+    )
+    assert not result.eligible
+    check = result.checks["recall_non_regression"]
+    assert check["ok"] is False
+    missing = [cell for cell in check["cells"] if cell.get("missing")]
+    assert [(c["detector"], c["fault_kind"]) for c in missing] == [("sequence", "spike")]
+    assert any("sequence" in reason and "spike" in reason for reason in result.reasons)
+
+
+def test_gate_fails_a_candidate_with_no_recorded_false_positive_rate() -> None:
+    """A missing ``per_hour`` used to default to 0.0 and pass the FP budget."""
+    result = evaluate_promotion_gate(
+        _record("candidate"),
+        _record("golden"),
+        candidate_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=None),
+        golden_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0),
+    )
+    assert not result.eligible
+    fp = result.checks["fp_budget"]
+    assert fp["ok"] is False
+    assert any(cell["detector"] == "sequence" and cell.get("missing") for cell in fp["cells"])
+    assert result.checks["holdout_score_agreement"]["ok"] is False
+    assert any("per_hour" in reason and "sequence" in reason for reason in result.reasons)
+
+
+def test_gate_fails_a_candidate_missing_a_nominal_detector_the_golden_has() -> None:
+    candidate_report = _two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0)
+    del candidate_report["nominal_fp"]["sequence"]
+    result = evaluate_promotion_gate(
+        _record("candidate"),
+        _record("golden"),
+        candidate_report=candidate_report,
+        golden_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0),
+    )
+    assert not result.eligible
+    assert result.checks["holdout_score_agreement"]["ok"] is False
+    assert result.checks["fp_budget"]["ok"] is False
+
+
+def test_gate_ignores_a_cell_the_golden_never_graded() -> None:
+    """Missing on the golden side is not a regression: nothing to compare."""
+    result = evaluate_promotion_gate(
+        _record("candidate"),
+        _record("golden"),
+        candidate_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=1.0),
+        golden_report=_report(recall=1.0, per_hour=1.0),
+    )
+    assert result.eligible, result.reasons
+
+
+def test_gate_fails_agreement_when_the_golden_recorded_no_rate() -> None:
+    """Symmetric with the candidate side: a golden ``per_hour`` that is missing
+    used to be compared as 0.0 (so any nonzero candidate "disagreed" and a zero
+    one "agreed"); now it fails and says why."""
+    result = evaluate_promotion_gate(
+        _record("candidate"),
+        _record("golden"),
+        candidate_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=0.0),
+        golden_report=_two_detector_report(sequence_recall=1.0, sequence_per_hour=None),
+    )
+    assert not result.eligible
+    agreement = result.checks["holdout_score_agreement"]
+    assert agreement["ok"] is False
+    (cell,) = [c for c in agreement["cells"] if c["detector"] == "sequence"]
+    assert cell["missing"] is True and cell["golden_per_hour"] is None
+    assert any("golden recorded no held-out per_hour" in r for r in result.reasons)

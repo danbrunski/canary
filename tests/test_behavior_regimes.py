@@ -24,7 +24,12 @@ from src.analysis.behavior_validation import (
 from src.analysis.refit import fit_recipe
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.preprocessing.segmenter import MODE_COLUMN
-from tests.test_behavior_resolution import PROFILE_CRITERIA, _corpus, _criteria, _recipe
+from tests.builders import (
+    BEHAVIOR_PROFILE_CRITERIA,
+    behavior_corpus,
+    behavior_criteria,
+    behavior_recipe,
+)
 
 REGIMES = ReportRegimes.model_validate(
     {
@@ -83,8 +88,8 @@ def test_calibration_stratum_names_the_revision_or_says_unknown() -> None:
 
 
 def test_breakdown_reports_only_groups_the_model_could_speak_for() -> None:
-    corpus = _corpus()
-    model = fit_recipe(_recipe(_criteria()), corpus).model
+    corpus = behavior_corpus()
+    model = fit_recipe(behavior_recipe(behavior_criteria()), corpus).model
     assert model is not None
     ev = evaluate_rows(model, corpus)
     labels = np.where(corpus["obd:ENGINE_LOAD"].to_numpy() < 50.0, "low", "high")
@@ -100,7 +105,7 @@ def test_breakdown_reports_only_groups_the_model_could_speak_for() -> None:
 
 
 def test_profile_declares_the_strata_the_report_quotes() -> None:
-    document = load_validation_document(PROFILE_CRITERIA)
+    document = load_validation_document(BEHAVIOR_PROFILE_CRITERIA)
     assert document is not None
     regimes = document.report_regimes
     assert regimes is not None

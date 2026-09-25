@@ -22,6 +22,7 @@ import pandas as pd
 
 from src.analysis.compare import compare_channels
 from src.analysis.pairing import ComparisonRefusedError, PairingPolicy
+from tools._bus_tool import record_kind
 
 
 @dataclass(frozen=True)
@@ -56,7 +57,7 @@ def load_capture(path: Path) -> MemoryCapture:
                 row = json.loads(line)
             except json.JSONDecodeError as exc:
                 raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
-            kind = row.get("type")
+            kind = record_kind(row)
             if kind == "header":
                 if header is not None:
                     raise ValueError(f"{path}:{line_number}: duplicate header")

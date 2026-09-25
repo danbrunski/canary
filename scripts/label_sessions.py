@@ -35,7 +35,12 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from _cli import add_common_args, discover_live_session_dirs, load_config
+from _cli import (
+    add_common_args,
+    add_log_level_arg,
+    discover_live_session_dirs,
+    load_config,
+)
 
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
@@ -96,9 +101,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
             "and run ``scripts/catalog.py rebuild`` afterward instead."
         ),
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

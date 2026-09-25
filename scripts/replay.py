@@ -47,6 +47,7 @@ from src.preprocessing.resampler import (
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.timefmt import format_timestamp
 
 
 @dataclass(frozen=True)
@@ -285,8 +286,8 @@ def _time_range(frame: pd.DataFrame) -> dict[str, str | None]:
         return {"start": None, "end": None}
     timestamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
     return {
-        "start": _format_timestamp(timestamps.min()),
-        "end": _format_timestamp(timestamps.max()),
+        "start": format_timestamp(timestamps.min()),
+        "end": format_timestamp(timestamps.max()),
     }
 
 
@@ -299,15 +300,6 @@ def _channels_by_source(frame: pd.DataFrame) -> dict[str, int]:
 
 def _value_counts(series: pd.Series) -> dict[str, int]:
     return {str(key): int(value) for key, value in series.value_counts(dropna=False).items()}
-
-
-def _format_timestamp(value: pd.Timestamp) -> str:
-    timestamp = pd.Timestamp(value)
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.tz_localize("UTC")
-    else:
-        timestamp = timestamp.tz_convert("UTC")
-    return timestamp.isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":

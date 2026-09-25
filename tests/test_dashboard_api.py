@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
+import yaml
 from fastapi.testclient import TestClient
 
 from src.alerts.event_logger import AnomalyEventLogger
@@ -23,60 +25,30 @@ from src.dashboard.api import (
 )
 from src.dashboard.status import compact_status, gather_status_sources
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
+from tests.configs import isolated_config
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-def _config_yaml(storage_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {storage_path}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  isolation_forest:
-    enabled: true
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: true
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
+def _config(tmp_path: Path, storage: Path, **overrides: Any) -> CanaryConfig:
+    """Both detectors declared (no artifacts under tmp_path), one idle mode."""
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        storage=storage,
+        models={"isolation_forest": {"enabled": True}, "lstm_autoencoder": {"enabled": True}},
+        dashboard={"port": 8000},
+        **overrides,
+    )
 
 
 @pytest.fixture
 def config(tmp_path: Path) -> CanaryConfig:
     storage = tmp_path / "storage"
     storage.mkdir()
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
-    return CanaryConfig.from_yaml(cfg_path)
+    return _config(tmp_path, storage)
 
 
 @pytest.fixture
@@ -1324,9 +1296,7 @@ def test_get_session_digest_route_updates_the_catalog(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     storage.mkdir()
     catalog_db = tmp_path / "catalog.db"
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage) + f"daemon:\n  catalog_db: {catalog_db}\n")
-    config = CanaryConfig.from_yaml(cfg_path)
+    config = _config(tmp_path, storage, daemon={"catalog_db": catalog_db})
 
     session_id = "2026-07-19T120000"
     session = storage / session_id
@@ -1392,13 +1362,8 @@ dids:
 
 
 def _config_with_dids(tmp_path: Path, storage: Path, dids: str) -> CanaryConfig:
-    cfg_path = tmp_path / "canary-dids.yaml"
-    cfg_path.write_text(
-        _config_yaml(storage).replace(
-            "  obd_poll_rate_hz: 1", f"  obd_poll_rate_hz: 1\n  obd_dids: [{dids}]"
-        )
-    )
-    return CanaryConfig.from_yaml(cfg_path)
+    # Parsed as YAML, as a config file would be: a bare 0x1219 is an int.
+    return _config(tmp_path, storage, collection={"obd_dids": yaml.safe_load(f"[{dids}]")})
 
 
 def test_dids_endpoint_reports_which_dids_are_polled(anomalies_dir: Path, tmp_path: Path) -> None:

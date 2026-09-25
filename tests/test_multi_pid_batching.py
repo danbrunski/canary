@@ -8,6 +8,8 @@ plausible numbers off the wrong channel.
 
 from __future__ import annotations
 
+from typing import Any
+
 import can
 import pytest
 
@@ -18,6 +20,7 @@ from src.collection.isotp import (
     build_batched_request_payload,
     split_batched_response,
 )
+from tests.fakes import CannedResponseBus
 
 # Widths for the PIDs used below, matching the SAE J1979 payload sizes.
 WIDTHS = {0x0C: 2, 0x0D: 1, 0x04: 1, 0x11: 1, 0x0E: 1, 0x10: 2, 0x05: 1}
@@ -136,25 +139,6 @@ def test_split_of_empty_payload_is_clean_and_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
-class _ScriptedBus:
-    """Replays a canned ISO-TP response to whatever is sent."""
-
-    def __init__(self, frames: list[bytes]) -> None:
-        self.sent: list[can.Message] = []
-        self._frames = list(frames)
-
-    def send(self, msg: can.Message, timeout: float | None = None) -> None:
-        self.sent.append(msg)
-
-    def recv(self, timeout: float | None = None) -> can.Message | None:
-        if not self._frames:
-            return None
-        return can.Message(arbitration_id=0x7E8, data=self._frames.pop(0), is_extended_id=False)
-
-    def shutdown(self) -> None:  # pragma: no cover - interface completeness
-        pass
-
-
 def test_client_batch_reassembles_a_multi_frame_response() -> None:
     """A 6-PID response is 15 bytes, so it arrives as first-frame plus
     consecutive frames and exercises the flow-control path."""
@@ -162,7 +146,7 @@ def test_client_batch_reassembles_a_multi_frame_response() -> None:
     first = bytes([0x10, 0x0F, 0x41, 0x0C, 0x00, 0x00, 0x0D, 0x00])
     cf1 = bytes([0x21, 0x04, 0x00, 0x11, 0x13, 0x0E, 0xFF, 0x10])
     cf2 = bytes([0x22, 0x00, 0x76, 0x00, 0x00, 0x00, 0x00, 0x00])
-    bus = _ScriptedBus([first, cf1, cf2])
+    bus = CannedResponseBus([first, cf1, cf2])
     client = CanObdClient(bus, timeout_seconds=0.5)  # type: ignore[arg-type]
 
     got = client.query_mode_01_batch(
@@ -181,21 +165,21 @@ def test_client_batch_returns_none_on_negative_response() -> None:
     """Phase 1.4. A 7F 01 <nrc> applies to the whole batch. The caller must be
     able to tell that apart from a successful read, so it falls back rather
     than crediting six channels that never answered."""
-    bus = _ScriptedBus([bytes([0x03, 0x7F, 0x01, 0x12, 0x00, 0x00, 0x00, 0x00])])
+    bus = CannedResponseBus([bytes([0x03, 0x7F, 0x01, 0x12, 0x00, 0x00, 0x00, 0x00])])
     client = CanObdClient(bus, timeout_seconds=0.3)  # type: ignore[arg-type]
 
     assert client.query_mode_01_batch([0x0C, 0x0D], byte_length_for=width_for) is None
 
 
 def test_client_batch_returns_none_on_timeout() -> None:
-    client = CanObdClient(_ScriptedBus([]), timeout_seconds=0.1)  # type: ignore[arg-type]
+    client = CanObdClient(CannedResponseBus([]), timeout_seconds=0.1)  # type: ignore[arg-type]
 
     assert client.query_mode_01_batch([0x0C], byte_length_for=width_for) is None
 
 
 def test_client_batch_transmits_nothing_in_passive_mode() -> None:
     """Passive mode is a safety gate; batching must not sneak past it."""
-    bus = _ScriptedBus([])
+    bus = CannedResponseBus([])
     client = CanObdClient(bus, timeout_seconds=0.1)  # type: ignore[arg-type]
     tx_gate.set_passive(True, source="test")
     try:
@@ -210,14 +194,12 @@ def test_client_batch_transmits_nothing_in_passive_mode() -> None:
 # ---------------------------------------------------------------------------
 
 import threading  # noqa: E402
-import time  # noqa: E402
 
 from src.collection.can_obd_collector import (  # noqa: E402
     MAX_CONSECUTIVE_BATCH_FAILURES,
     run_can_obd_loop,
 )
 from src.collection.obd_scheduler import (  # noqa: E402
-    AUTO_MISS_BACKOFF_SECONDS,
     CanObdSpec,
     _initial_request_states,
     build_poll_requests,
@@ -225,82 +207,89 @@ from src.collection.obd_scheduler import (  # noqa: E402
     select_batch_companions,
 )
 from src.config import CanBusConfig  # noqa: E402
-from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock  # noqa: E402
-from tests.waits import StopWhen, hang_guard_deadline  # noqa: E402
+from tests.capture_round_fakes import (  # noqa: E402
+    BATCH_REFUSAL_WINDOW_SECONDS,  # noqa: E402
+    DEFAULT_VALUES,
+    FakeClock,
+    ScriptedEcu,
+    install_clock,
+)
+from tests.waits import StopWhen  # noqa: E402
+
+#: Mode 01 payloads the batching tests answer with: ``DEFAULT_VALUES`` without
+#: the fuel trims. 0x2F is absent, so the "ECU omits an unsupported PID" path
+#: gets exercised; 0x05/0x0F/0x10 give more than the six-PID ceiling, so a
+#: selection can span two requests — the case a capture round has to hold
+#: together.
+BATCHING_VALUES = {pid: v for pid, v in DEFAULT_VALUES.items() if pid not in (0x06, 0x07)}
+#: The fuel-pw-research-2 members that desynced: baro answers with the one
+#: byte J1979 gives it, the way the Xterra ECM does.
+_BARO_VALUES = {**BATCHING_VALUES, 0x33: b"\x51", 0x44: b"\x80\x00"}
+#: ``build_poll_requests`` asks discovery only for ``auto``; these specs name PIDs.
+_NO_DISCOVERY = object()
 
 
-class _BatchingEcu:
-    """Answers Mode 01 requests, single or batched, from a fixed value table.
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    """A :class:`FakeClock` bound as every collection module's ``time`` (T01.8)."""
+    fake = FakeClock()
+    install_clock(monkeypatch, fake)
+    return fake
 
-    Answers are instant. With ``clock`` (a :class:`FakeClock` the test has
-    installed), a receive with nothing pending costs its timeout in simulated
-    time, as :class:`ScriptedEcu`'s does, so a run bounded by a
-    ``clock.monotonic()`` deadline is the same run however loaded the machine
-    is (T01.8). Without one it returns at once and the loop spins on the real
-    clock until its request deadline.
+
+def _batching_ecu(clock: FakeClock, **kwargs: Any) -> ScriptedEcu:
+    """Answers Mode 01, single or batched, from :data:`BATCHING_VALUES`."""
+    kwargs.setdefault("values", BATCHING_VALUES)
+    return ScriptedEcu(clock, **kwargs)
+
+
+def _mode01_sizes(bus: ScriptedEcu) -> list[int]:
+    return [len(pids) for pids in bus.mode01_requests()]
+
+
+def _batch_orders(bus: ScriptedEcu) -> list[tuple[int, ...]]:
+    return [pids for pids in bus.mode01_requests() if len(pids) > 1]
+
+
+def _single_pids(bus: ScriptedEcu) -> list[int]:
+    return [pids[0] for pids in bus.mode01_requests() if len(pids) == 1]
+
+
+def _sleepy_ecu(clock: FakeClock, wake_after: int) -> ScriptedEcu:
+    """Silent to every request until ``wake_after`` sends, then a healthy
+    batching ECU — the Pi booting with the key off, then the engine starting."""
+    ecu = _batching_ecu(clock, silent=True)
+
+    def wake(_msg: can.Message) -> None:
+        if len(ecu.sent) > wake_after:  # this send is already recorded
+            ecu.silent = False
+
+    ecu.on_send.append(wake)
+    return ecu
+
+
+def _one_bank_ecu(clock: FakeClock, *, silent_after_desync: bool = False) -> ScriptedEcu:
+    """An ECU answering 0x06 with two bytes (bank 1, bank 3 — the layout J1979
+    gives 0x55-0x58) where the registry says one. Any batch holding 0x06
+    desyncs on it: the walk lands on the second byte as if it were a PID.
+
+    ``silent_after_desync``: the key goes off right after the ECU answered the
+    desyncing batch.
     """
+    ecu = _batching_ecu(clock, values={**_BARO_VALUES, 0x06: b"\x90\x80"})
+    answered_the_desync = False
 
-    #: pid -> payload the fake ECU returns. 0x2F is deliberately absent so
-    #: the "ECU omits an unsupported PID" path gets exercised.
-    #: 0x05/0x0F/0x10 give more than the six-PID ceiling, so a selection can
-    #: span two requests — the case a capture round has to hold together.
-    VALUES = {
-        0x0C: b"\x0b\xb8",
-        0x0D: b"\x32",
-        0x04: b"\x40",
-        0x11: b"\x19",
-        0x0E: b"\x50",
-        0x05: b"\x5a",
-        0x0F: b"\x46",
-        0x10: b"\x01\x00",
-    }
-
-    def __init__(self, *, answer_batches: bool = True, clock: FakeClock | None = None) -> None:
-        self.sent: list[can.Message] = []
-        self._pending: list[bytes] = []
-        self.answer_batches = answer_batches
-        self.batch_requests = 0
-        self.clock = clock
-
-    def send(self, msg: can.Message, timeout: float | None = None) -> None:
-        self.sent.append(msg)
+    def key_off(msg: can.Message) -> None:
+        nonlocal answered_the_desync
+        if answered_the_desync:
+            ecu.silent = True
         data = bytes(msg.data)
-        length, service = data[0], data[1]
-        if service != 0x01:
-            return
-        pids = list(data[2 : 1 + length])
-        if len(pids) > 1:
-            self.batch_requests += 1
-            if not self.answer_batches:
-                return  # silence, exactly like an ECU that dislikes batching
-        body = bytearray([0x41])
-        for pid in pids:
-            if pid in self.VALUES:
-                body += bytes([pid]) + self.VALUES[pid]
-        self._pending.extend(_isotp_frames(bytes(body)))
+        pids = data[2 : 1 + data[0]] if data[0] < 0x10 and data[1] == 0x01 else b""
+        answered_the_desync = answered_the_desync or (len(pids) > 1 and 0x06 in pids)
 
-    def recv(self, timeout: float | None = None) -> can.Message | None:
-        if not self._pending:
-            if self.clock is not None and timeout:
-                self.clock.advance(timeout)
-            return None
-        return can.Message(arbitration_id=0x7E8, data=self._pending.pop(0), is_extended_id=False)
-
-    def shutdown(self) -> None:  # pragma: no cover - interface completeness
-        pass
-
-
-def _isotp_frames(body: bytes) -> list[bytes]:
-    """Wrap a service body in single- or multi-frame ISO-TP."""
-    if len(body) <= 7:
-        return [bytes([len(body)]) + body + bytes(7 - len(body))]
-    frames = [bytes([0x10 | (len(body) >> 8), len(body) & 0xFF]) + body[:6]]
-    rest, seq = body[6:], 1
-    while rest:
-        chunk, rest = rest[:7], rest[7:]
-        frames.append(bytes([0x20 | (seq & 0x0F)]) + chunk + bytes(7 - len(chunk)))
-        seq += 1
-    return frames
+    if silent_after_desync:
+        ecu.on_send.append(key_off)
+    return ecu
 
 
 def _spec(**kw) -> CanObdSpec:
@@ -317,7 +306,7 @@ def test_companion_selection_respects_poll_tier() -> None:
     """A slow-tier PID in a fast-tier batch would either be dragged to fast
     cadence or hold the fast one back. Both waste the budget it is buying."""
     spec = _spec(pids=("RPM", "FUEL_LEVEL"))  # RPM is fast, FUEL_LEVEL slow
-    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
     for state in states:
         state.next_due_at = 0.0
@@ -334,7 +323,7 @@ def test_companion_selection_respects_poll_tier() -> None:
 
 def test_companion_selection_is_a_noop_when_batching_disabled() -> None:
     spec = _spec(pids=("RPM", "SPEED"))
-    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
 
     assert select_batch_companions(
@@ -348,7 +337,7 @@ def test_active_profile_batch_groups_partition_companions() -> None:
 
     channels = ("RPM", "COMMANDED_EQUIV_RATIO", "ENGINE_LOAD", "O2_WR_LAMBDA_S1", "MAF")
     spec = _spec(pids=channels)
-    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
     for state in states:
         state.next_due_at = 0.0
@@ -394,16 +383,16 @@ def test_active_profile_batch_groups_partition_companions() -> None:
 
 def test_only_plain_mode01_pids_are_batchable() -> None:
     spec = _spec(pids=("RPM",), dids=("1225",))
-    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
 
     by_kind = {r.kind: r for r in requests}
     assert is_batchable(by_kind["pid"]) is True
     assert is_batchable(by_kind["did"]) is False
 
 
-def test_loop_batches_and_emits_one_reading_per_channel() -> None:
+def test_loop_batches_and_emits_one_reading_per_channel(clock: FakeClock) -> None:
     """The payoff: fewer round trips, same per-channel readings downstream."""
-    bus = _BatchingEcu()
+    bus = _batching_ecu(clock)
     readings: list = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -411,7 +400,7 @@ def test_loop_batches_and_emits_one_reading_per_channel() -> None:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
     assert bus.batch_requests > 0, "expected batched requests"
@@ -435,7 +424,7 @@ def test_batching_beats_single_pid_on_round_trips(monkeypatch: pytest.MonkeyPatc
     install_clock(monkeypatch, clock)
 
     def run(batch_max: int) -> tuple[int, int]:
-        bus = _BatchingEcu(clock=clock)
+        bus = _batching_ecu(clock)
         got: list = []
         run_can_obd_loop(
             bus,  # type: ignore[arg-type]
@@ -455,17 +444,6 @@ def test_batching_beats_single_pid_on_round_trips(monkeypatch: pytest.MonkeyPatc
     assert (batch_readings / batch_requests) > (single_readings / single_requests)
 
 
-#: Simulated seconds the two batch-refusal tests below run for. Giving up on
-#: batching costs ten whole-batch timeouts (3 at each of sizes 6/4/2, 0.05 s
-#: each) plus the RPM reads between them: the first single SPEED read lands at
-#: 0.755 s of simulated time. The tests used to run 0.8 s of *wall* clock, so
-#: 45 ms of scheduling delay anywhere failed them (T01.4, 2026-09-23). On the
-#: fake clock that delay does not exist, and a channel wrongly backed off would
-#: stay silent for AUTO_MISS_BACKOFF_SECONDS, far past this window.
-_BATCH_REFUSAL_WINDOW_SECONDS = 2.0
-assert _BATCH_REFUSAL_WINDOW_SECONDS < AUTO_MISS_BACKOFF_SECONDS
-
-
 def _run_against_a_batch_refusing_ecu(monkeypatch: pytest.MonkeyPatch) -> tuple:
     """RPM/SPEED/ENGINE_LOAD against an ECU that ignores every batch, on a fake clock."""
     clock = FakeClock()
@@ -478,7 +456,7 @@ def _run_against_a_batch_refusing_ecu(monkeypatch: pytest.MonkeyPatch) -> tuple:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=clock.monotonic() + _BATCH_REFUSAL_WINDOW_SECONDS,
+        deadline_monotonic=clock.monotonic() + BATCH_REFUSAL_WINDOW_SECONDS,
     )
     return ecu, readings, stats
 
@@ -495,38 +473,14 @@ def test_loop_falls_back_when_the_ecu_refuses_batches(monkeypatch: pytest.Monkey
     )
 
 
-class _SizeLimitedEcu(_BatchingEcu):
-    """Answers batches only up to ``max_accepted`` PIDs, ignoring larger ones.
-
-    Models the realistic middle case the step-down exists for: an ECU that
-    supports batching but not the full J1979 six.
-    """
-
-    def __init__(self, max_accepted: int) -> None:
-        super().__init__()
-        self.max_accepted = max_accepted
-        self.rejected_sizes: list[int] = []
-
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
-        data = bytes(msg.data)
-        length, service = data[0], data[1]
-        pids = list(data[2 : 1 + length])
-        if service == 0x01 and len(pids) > self.max_accepted:
-            self.sent.append(msg)
-            self.batch_requests += 1
-            self.rejected_sizes.append(len(pids))
-            return  # silence
-        super().send(msg, timeout)
-
-
-def test_batch_size_steps_down_instead_of_giving_up() -> None:
+def test_batch_size_steps_down_instead_of_giving_up(clock: FakeClock) -> None:
     """An ECU that takes 4 PIDs but refuses 6 should end up batching at 4, not
     fall back to single-PID. 'Supports batching' is not binary."""
     from src.collection.can_obd_collector import _next_batch_size
 
     assert [_next_batch_size(n) for n in (6, 4, 2)] == [4, 2, 1]
 
-    bus = _SizeLimitedEcu(max_accepted=4)
+    bus = _batching_ecu(clock, max_batch_pids=4)  # batches, just not the J1979 six
     # Stops once every asserted channel has been read (T01): a 0.8 s wall-clock
     # deadline had to cover three batch timeouts before the step-down.
     sink: StopWhen = StopWhen(lambda got: {r.pid for r in got} >= {"RPM", "SPEED", "ENGINE_LOAD"})
@@ -539,12 +493,12 @@ def test_batch_size_steps_down_instead_of_giving_up() -> None:
         on_frame=lambda _m: None,
         on_reading=sink,
         stop_event=sink.stop,
-        deadline_monotonic=hang_guard_deadline(),
+        deadline_monotonic=clock.monotonic() + 30.0,
     )
     readings = sink.items
 
-    assert bus.rejected_sizes, "should have tried a too-large batch first"
-    assert max(bus.rejected_sizes) > 4
+    assert bus.rejected_batch_sizes, "should have tried a too-large batch first"
+    assert max(bus.rejected_batch_sizes) > 4
     # Having narrowed, it must still be batching (not single-PID) and still
     # producing every channel.
     assert {r.pid for r in readings} >= {"RPM", "SPEED", "ENGINE_LOAD"}
@@ -563,7 +517,7 @@ def test_healthy_channels_are_not_backed_off_by_a_failed_batch(
     assert all(n > 0 for n in counts.values()), f"a channel went silent: {counts}"
 
 
-def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
+def test_every_pid_in_a_batch_lands_on_one_timestamp(clock: FakeClock) -> None:
     """A batch is one ECU sampling operation, so it is one instant.
 
     Each PID used to take its own clock read while the shared payload was
@@ -571,7 +525,7 @@ def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
     is what forced consumers to re-group readings by proximity instead of
     reading a batch as one row.
     """
-    bus = _BatchingEcu()
+    bus = _batching_ecu(clock)
     readings: list = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -579,7 +533,7 @@ def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
     assert bus.batch_requests > 0, "expected batched requests"
@@ -593,7 +547,7 @@ def test_every_pid_in_a_batch_lands_on_one_timestamp() -> None:
     ), f"no timestamp carried the whole batch: {by_stamp}"
 
 
-def test_a_capture_round_puts_every_channel_on_one_row() -> None:
+def test_a_capture_round_puts_every_channel_on_one_row(clock: FakeClock) -> None:
     """More channels than the 6-PID ceiling still reads as a single sample.
 
     capture-profiles.md 5.b: the operator's unit is a round, not a request.
@@ -627,12 +581,12 @@ def test_a_capture_round_puts_every_channel_on_one_row() -> None:
             source="test",
         )
         run_can_obd_loop(
-            _BatchingEcu(),  # type: ignore[arg-type]
+            _batching_ecu(clock),  # type: ignore[arg-type]
             _spec(pids=channels, batch_max_pids=6),
             on_frame=lambda _m: None,
             on_reading=readings.append,
             stop_event=threading.Event(),
-            deadline_monotonic=time.monotonic() + 0.5,
+            deadline_monotonic=clock.monotonic() + 0.5,
         )
     finally:
         tuning_profile.set_active(False, source="test")
@@ -662,7 +616,7 @@ def test_companions_come_from_the_rounds_members_and_the_tuple_fills_first() -> 
     however due it is. The required tuple takes the batch's slots first."""
     pids = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "TIMING_ADVANCE", "MAF")
     spec = _spec(pids=pids)
-    requests = build_poll_requests(_BatchingEcu(), spec)  # type: ignore[arg-type]
+    requests = build_poll_requests(_NO_DISCOVERY, spec)  # type: ignore[arg-type]
     states = _initial_request_states(requests, spec, 0.0)
     index = {r.channel: i for i, r in enumerate(requests)}
     for state in states:
@@ -687,10 +641,12 @@ def test_companions_come_from_the_rounds_members_and_the_tuple_fills_first() -> 
     ) == [index["RPM"]]
 
 
-def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicity() -> None:
+def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicity(
+    clock: FakeClock,
+) -> None:
     """Every PID in one batched response carries the same ``acquired_at`` —
     the payload's receipt — and the same round. That is all it says."""
-    bus = _BatchingEcu()
+    bus = _batching_ecu(clock)
     readings: list = []
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -698,7 +654,7 @@ def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicit
         on_frame=lambda _m: None,
         on_reading=readings.append,
         stop_event=threading.Event(),
-        deadline_monotonic=time.monotonic() + 0.3,
+        deadline_monotonic=clock.monotonic() + 0.3,
     )
     assert bus.batch_requests > 0
     by_arrival: dict[float, set[str]] = {}
@@ -718,48 +674,6 @@ def test_batch_readings_share_receipt_time_and_round_but_not_a_claim_of_atomicit
 _SIX_FAST = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "TIMING_ADVANCE", "MAF")
 
 
-class _SleepyEcu(_BatchingEcu):
-    """Silent to every request until ``wake_after`` sends, then a healthy
-    batching ECU — the Pi booting with the key off, then the engine starting."""
-
-    def __init__(self, wake_after: int, *, clock: FakeClock | None = None) -> None:
-        super().__init__(clock=clock)
-        self.wake_after = wake_after
-        self.sends = 0
-        self.awake_batch_sizes: list[int] = []
-
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
-        self.sends += 1
-        data = bytes(msg.data)
-        pids = list(data[2 : 1 + data[0]])
-        if self.sends <= self.wake_after:
-            self.sent.append(msg)
-            if len(pids) > 1:
-                self.batch_requests += 1
-            return
-        if data[1] == 0x01 and len(pids) > 1:
-            self.awake_batch_sizes.append(len(pids))
-        super().send(msg, timeout)
-
-
-class _NrcBatchEcu(_BatchingEcu):
-    """Answers singles; refuses every batch with a negative response."""
-
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
-        data = bytes(msg.data)
-        pids = list(data[2 : 1 + data[0]])
-        if data[1] == 0x01 and len(pids) > 1:
-            self.sent.append(msg)
-            self.batch_requests += 1
-            self._pending.append(bytes([0x03, 0x7F, 0x01, 0x12, 0, 0, 0, 0]))
-            return
-        super().send(msg, timeout)
-
-
-def _mode01_sizes(bus: _BatchingEcu) -> list[int]:
-    return [len(bytes(m.data)[2 : 1 + m.data[0]]) for m in bus.sent if bytes(m.data)[1] == 0x01]
-
-
 def test_batch_silence_from_a_sleeping_ecu_does_not_narrow(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -771,7 +685,8 @@ def test_batch_silence_from_a_sleeping_ecu_does_not_narrow(
     """
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _SleepyEcu(wake_after=3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2, clock=clock)
+    wake_after = 3 * MAX_CONSECUTIVE_BATCH_FAILURES * 2 + 2
+    bus = _sleepy_ecu(clock, wake_after)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -785,8 +700,9 @@ def test_batch_silence_from_a_sleeping_ecu_does_not_narrow(
     assert stats.batch_failures >= 3 * MAX_CONSECUTIVE_BATCH_FAILURES
     assert stats.batch_failures_ecu_silent == stats.batch_failures
     assert stats.batch_size_narrowings == 0
-    assert bus.awake_batch_sizes, "batching must survive the ECU waking up"
-    assert max(bus.awake_batch_sizes) == 6, "and at the full configured size"
+    awake_batch_sizes = [len(pids) for pids in bus.mode01_requests()[wake_after:] if len(pids) > 1]
+    assert awake_batch_sizes, "batching must survive the ECU waking up"
+    assert max(awake_batch_sizes) == 6, "and at the full configured size"
     assert {r.pid for r in readings} >= set(_SIX_FAST)
 
 
@@ -801,7 +717,7 @@ def test_an_awake_ecu_that_ignores_batches_still_disables_batching(
     """
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _BatchingEcu(answer_batches=False, clock=clock)
+    bus = _batching_ecu(clock, answer_batches=False)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -831,7 +747,7 @@ def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless(
     """
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _NrcBatchEcu(clock=clock)
+    bus = _batching_ecu(clock, batch_nrc=0x12)
     readings: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
@@ -856,24 +772,6 @@ def test_an_ecu_that_refuses_batches_with_an_nrc_narrows_regardless(
 # ---------------------------------------------------------------------------
 
 
-class _BaroEcu(_BatchingEcu):
-    """The fuel-pw-research-2 members that desynced: baro answers with the one
-    byte J1979 gives it, the way the Xterra ECM does."""
-
-    VALUES = {**_BatchingEcu.VALUES, 0x33: b"\x51", 0x44: b"\x80\x00"}
-
-    def __init__(self, *, clock: FakeClock | None = None) -> None:
-        super().__init__(clock=clock)
-        self.batch_orders: list[tuple[int, ...]] = []
-
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
-        data = bytes(msg.data)
-        pids = tuple(data[2 : 1 + data[0]])
-        if data[1] == 0x01 and len(pids) > 1:
-            self.batch_orders.append(pids)
-        super().send(msg, timeout)
-
-
 @pytest.mark.parametrize(
     ("channels", "leader", "expected_order"),
     # The priority lane picks the leader; companions follow request order.
@@ -889,7 +787,7 @@ class _BaroEcu(_BatchingEcu):
     ids=["baro-first", "baro-middle", "baro-last"],
 )
 def test_a_capture_round_with_baro_walks_every_member(
-    channels: tuple[str, ...], leader: str, expected_order: tuple[int, ...]
+    channels: tuple[str, ...], leader: str, expected_order: tuple[int, ...], clock: FakeClock
 ) -> None:
     """PID 0x33 was registered 2 bytes wide; J1979 and the ECM send 1. In a
     batch the walk then swallowed the next PID's id byte and desynced, and
@@ -899,7 +797,7 @@ def test_a_capture_round_with_baro_walks_every_member(
     from src.collection import tuning_profile
     from src.collection.capture_profiles import CaptureProfile
 
-    bus = _BaroEcu()
+    bus = _batching_ecu(clock, values=_BARO_VALUES)
     readings: list = []
     try:
         tuning_profile.activate(
@@ -919,15 +817,15 @@ def test_a_capture_round_with_baro_walks_every_member(
             on_frame=lambda _m: None,
             on_reading=readings.append,
             stop_event=threading.Event(),
-            deadline_monotonic=time.monotonic() + 0.5,
+            deadline_monotonic=clock.monotonic() + 0.5,
         )
     finally:
         tuning_profile.set_active(False, source="test")
 
-    assert bus.batch_orders, "the round never batched — the regression is not exercised"
-    assert bus.batch_orders[0] == expected_order, bus.batch_orders[0]
+    assert _batch_orders(bus), "the round never batched — the regression is not exercised"
+    assert _batch_orders(bus)[0] == expected_order, _batch_orders(bus)[0]
     assert stats.batch_desyncs == 0, "the walk lost the payload boundary after baro"
-    assert set(bus.batch_orders) == {expected_order}, bus.batch_orders
+    assert set(_batch_orders(bus)) == {expected_order}, _batch_orders(bus)
     by_channel: dict[str, list[float]] = {}
     for reading in readings:
         by_channel.setdefault(reading.pid, []).append(reading.value)
@@ -947,35 +845,7 @@ def test_a_capture_round_with_baro_walks_every_member(
 # ---------------------------------------------------------------------------
 
 
-class _OneBankEcu(_BaroEcu):
-    """An ECU answering 0x06 with two bytes (bank 1, bank 3 — the layout J1979
-    gives 0x55-0x58) where the registry says one. Any batch holding 0x06
-    desyncs on it: the walk lands on the second byte as if it were a PID."""
-
-    VALUES = {**_BaroEcu.VALUES, 0x06: b"\x90\x80"}
-
-    def __init__(
-        self, *, silent_after_desync: bool = False, clock: FakeClock | None = None
-    ) -> None:
-        super().__init__(clock=clock)
-        self.silent_after_desync = silent_after_desync
-        self.silent = False
-        self.single_pids: list[int] = []
-
-    def send(self, msg, timeout=None):  # type: ignore[no-untyped-def]
-        data = bytes(msg.data)
-        pids = tuple(data[2 : 1 + data[0]])
-        if data[1] == 0x01 and len(pids) == 1:
-            self.single_pids.append(pids[0])
-        if self.silent:
-            self.sent.append(msg)
-            return
-        super().send(msg, timeout)
-        # The key goes off right after the ECU answered the desyncing batch.
-        self.silent = self.silent_after_desync and len(pids) > 1 and 0x06 in pids
-
-
-def _run_capture(bus: _BatchingEcu, channels: tuple[str, ...], seconds: float):  # type: ignore[no-untyped-def]
+def _run_capture(bus: ScriptedEcu, channels: tuple[str, ...], seconds: float):  # type: ignore[no-untyped-def]
     """Run ``bus`` for ``seconds`` of its fake clock under a capture round.
 
     Simulated time (T01.8): the mismatch tests need three unanswered DTC polls,
@@ -1033,20 +903,20 @@ def test_a_pid_whose_measured_width_contradicts_the_registry_leaves_batches(
 
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _OneBankEcu(clock=clock)
+    bus = _one_bank_ecu(clock)
     with caplog.at_level(logging.WARNING, logger="src.collection.obd_scheduler"):
         spec, stats, readings = _run_capture(bus, channels, 1.0)
 
-    holding = [i for i, order in enumerate(bus.batch_orders) if 0x06 in order]
-    assert holding, f"0x06 never batched: {bus.batch_orders}"
+    holding = [i for i, order in enumerate(_batch_orders(bus)) if 0x06 in order]
+    assert holding, f"0x06 never batched: {_batch_orders(bus)}"
     assert stats.batch_desyncs == 1, "the desync must not recur once 0x06 is measured"
-    assert len(holding) == 1, f"0x06 batched again after the desync: {bus.batch_orders}"
+    assert len(holding) == 1, f"0x06 batched again after the desync: {_batch_orders(bus)}"
     # The correct-width members keep batching after the desync.
-    after = bus.batch_orders[holding[0] + 1 :]
-    assert any(set(order) == {0x0C, 0x0D, 0x04} for order in after), bus.batch_orders
-    assert 0x06 in bus.single_pids
+    after = _batch_orders(bus)[holding[0] + 1 :]
+    assert any(set(order) == {0x0C, 0x0D, 0x04} for order in after), _batch_orders(bus)
+    assert 0x06 in _single_pids(bus)
     # The fake answers only Mode 01, so the DTC polls are the only timeouts.
-    other_services = sum(1 for m in bus.sent if m.data[0] < 0x10 and m.data[1] != 0x01)
+    other_services = sum(1 for m in bus.messages if m.data[0] < 0x10 and m.data[1] != 0x01)
     assert stats.request_timeouts == other_services, "unparsed members were charged a timeout"
     by_channel: dict[str, set[float]] = {}
     for reading in readings:
@@ -1071,13 +941,13 @@ def test_a_desync_followed_by_silence_does_not_storm(monkeypatch: pytest.MonkeyP
     channels = ("RPM", "SHORT_FUEL_TRIM_1", "SPEED", "ENGINE_LOAD")
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _OneBankEcu(silent_after_desync=True, clock=clock)
+    bus = _one_bank_ecu(clock, silent_after_desync=True)
     _spec_, stats, _readings = _run_capture(bus, channels, 0.8)
 
     assert stats.batch_desyncs == 1
     assert stats.rounds_started >= 2
     assert len(bus.sent) <= stats.rounds_started * len(channels)
-    assert bus.single_pids.count(0x06) <= stats.rounds_started
+    assert _single_pids(bus).count(0x06) <= stats.rounds_started
     # A silent single measures nothing: the re-measure stays owed.
     assert 0x06 in stats.mode01_widths.remeasure
     assert not stats.mode01_widths.mismatches
@@ -1131,7 +1001,7 @@ def test_exit_snapshot_reports_the_narrowed_batch_size(monkeypatch: pytest.Monke
     the *configured* six after batching had been disabled."""
     clock = FakeClock()
     install_clock(monkeypatch, clock)
-    bus = _BatchingEcu(answer_batches=False, clock=clock)
+    bus = _batching_ecu(clock, answer_batches=False)
     snapshots: list = []
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]

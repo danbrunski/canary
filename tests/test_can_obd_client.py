@@ -36,6 +36,7 @@ from src.collection.can_obd_client import (
     read_pids,
 )
 from src.collection.isotp import split_batched_did_response
+from src.validation.scripted_ecu import FakeClock, ScriptedEcu, single_frame_reply, support_bits
 
 # ---------------------------------------------------------------------------
 # Pure decoder tests — fast, no bus
@@ -296,24 +297,6 @@ def _make_pair():
     return tester, ecu
 
 
-def _single_frame_reply(
-    *, responder_id: int, service: int, pid: int | None, body: bytes
-) -> can.Message:
-    """Construct a single-frame ISO-TP reply with the given service payload."""
-    if pid is None:
-        payload = bytes([service]) + body
-    elif 0 <= pid <= 0xFF:
-        payload = bytes([service, pid]) + body
-    else:
-        payload = bytes([service, (pid >> 8) & 0xFF, pid & 0xFF]) + body
-    if len(payload) > 7:
-        raise ValueError("payload too big for single-frame; use multi-frame helper")
-    pci = len(payload)  # single-frame PCI byte = length, high nibble = 0
-    frame = bytes([pci]) + payload
-    frame += bytes(8 - len(frame))
-    return can.Message(arbitration_id=responder_id, data=frame, is_extended_id=False)
-
-
 def _fake_ecu_loop(
     ecu_bus: can.BusABC,
     responses: dict[tuple[int, int | None], bytes],
@@ -343,7 +326,7 @@ def _fake_ecu_loop(
         if canned is None:
             continue
         ecu_bus.send(
-            _single_frame_reply(
+            single_frame_reply(
                 responder_id=responder_id,
                 service=0x40 | service,
                 pid=pid,
@@ -578,57 +561,20 @@ def test_discover_supported_mode06_mids_walks_bitmasks() -> None:
 
 def test_discover_supported_pids_merges_multiple_responders() -> None:
     """Functional supported-PID probes must not trust only the first ECU."""
-
-    class _MultiResponderSupportedBus:
-        def __init__(self) -> None:
-            self.sent: list[can.Message] = []
-            self._responses: list[can.Message] = []
-
-        def send(self, msg: can.Message) -> None:
-            self.sent.append(msg)
-            data = bytes(msg.data)
-            if data[:3] == bytes([0x02, 0x01, 0x00]):
-                transmission_bits = 0x01  # continuation to 0x20 only
-                engine_bits = (1 << 20) | (1 << 19)  # RPM + SPEED
-                self._responses.extend(
-                    [
-                        _single_frame_reply(
-                            responder_id=0x7E9,
-                            service=0x41,
-                            pid=0x00,
-                            body=transmission_bits.to_bytes(4, "big"),
-                        ),
-                        _single_frame_reply(
-                            responder_id=0x7E8,
-                            service=0x41,
-                            pid=0x00,
-                            body=engine_bits.to_bytes(4, "big"),
-                        ),
-                    ]
-                )
-            elif data[:3] == bytes([0x02, 0x01, 0x20]):
-                transmission_bits = (1 << 18) | (1 << 17)  # EVAPORATIVE_PURGE + FUEL_LEVEL
-                self._responses.append(
-                    _single_frame_reply(
-                        responder_id=0x7E9,
-                        service=0x41,
-                        pid=0x20,
-                        body=transmission_bits.to_bytes(4, "big"),
-                    )
-                )
-
-        def recv(self, timeout: float = 0.0) -> can.Message | None:
-            if self._responses:
-                return self._responses.pop(0)
-            if timeout:
-                time.sleep(min(timeout, 0.005))
-            return None
-
-    bus = _MultiResponderSupportedBus()
-    client = CanObdClient(bus, timeout_seconds=0.2)  # type: ignore[arg-type]
+    clock = FakeClock()
+    bus = ScriptedEcu(
+        clock,
+        # Engine: RPM + SPEED in group 0x00, silent on 0x20.
+        mode01_support={0x00: support_bits(0x0C, 0x0D)},
+        # Transmission: a continuation to 0x20 only, then EVAP purge + fuel level.
+        support_responders={
+            0x7E9: {0x00: support_bits(more=True), 0x20: support_bits(0x2E, 0x2F, base=0x20)}
+        },
+    )
+    client = CanObdClient(bus, timeout_seconds=0.2, time_fn=clock.monotonic)  # type: ignore[arg-type]
 
     assert client.query_supported_mode_01_pids() == (0x0C, 0x0D, 0x2E, 0x2F)
-    assert [bytes(msg.data)[2] for msg in bus.sent] == [0x00, 0x20]
+    assert [bytes(msg.data)[2] for msg in bus.messages] == [0x00, 0x20]
 
 
 def test_read_pids_sequential() -> None:
@@ -873,7 +819,7 @@ def test_query_mode_22_single_frame_with_physical_request_id() -> None:
             if data[:4] != bytes([0x03, 0x22, 0x11, 0x01]):
                 continue
             ecu.send(
-                _single_frame_reply(
+                single_frame_reply(
                     responder_id=DEFAULT_RESPONSE_ID_MIN,
                     service=0x62,
                     pid=0x1101,

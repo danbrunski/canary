@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -421,14 +422,15 @@ def test_window_flag_uses_global_error_not_channel_union() -> None:
         def reconstruction_error(
             self, value: object, mask: object, delta: object, *, reduction: str
         ) -> object:
+            # R04.1: the benchmark reads the masked cell error in one pass and
+            # applies the served rule to it.
+            assert reduction == "none", reduction
             batch = int(value.shape[0])  # type: ignore[attr-defined]
-            if reduction == "sample":
-                return torch.full((batch,), 0.1)  # under the global threshold (0.5)
-            if reduction == "channel":
-                out = torch.zeros((batch, n_features))
-                out[:, 0] = 9.0  # channel 0 blows past its band (0.2) every window
-                return out
-            raise AssertionError(reduction)
+            out = torch.zeros((batch, seq_len, n_features))
+            # Channel 0 blows past its band (0.2) every window; the global mean
+            # over both channels (0.45) stays under the global threshold (0.5).
+            out[:, :, 0] = 0.9
+            return out
 
     class _StubDataset:
         def __init__(self) -> None:
@@ -474,3 +476,66 @@ def test_window_flag_uses_global_error_not_channel_union() -> None:
     assert report.flagged_windows == 0
     assert report.false_positive_rate == 0.0
     assert report.global_exceedances == 0
+
+
+# ---------------------------------------------------------------- R04.1
+
+
+def _noisy_frame(session: str, *, rows: int, start: str, noise: float, seed: int) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    frame = _frame(session, rows=rows, start=start)
+    frame["noisy"] = rng.normal(0.0, noise, rows)
+    return frame
+
+
+def test_benchmark_scores_the_served_rule_with_a_suppressed_noisy_channel() -> None:
+    """R04.1: a model with one suppressed, noisy channel flags the same windows
+    in the benchmark as ``SequenceInferenceEngine.score_window`` over the same
+    windows. The benchmark used to average every channel (the suppressed one
+    included) and skip the family path, so it graded a detector the daemon
+    does not run."""
+    _torch()
+    from src.models.inference import SequenceInferenceEngine
+    from src.preprocessing.normalization import ZScoreScaler
+
+    columns = ["rpm", "speed", "noisy"]
+    train = _noisy_frame("train", rows=40, start="2026-05-12T00:00:00Z", noise=1.0, seed=1)
+    trained = train_lstm_autoencoder(
+        SequenceWindowDataset(train, sequence_length=4, feature_columns=columns),
+        _config(threshold_k=2.0),
+        trained_at="2026-05-12T12:00:00Z",
+        model_version="fp-suppressed",
+        allow_in_sample_calibration=True,
+    )
+    # Held out: the suppressed channel is far noisier than anything calibrated.
+    raw = _noisy_frame("holdout", rows=40, start="2026-05-12T01:00:00Z", noise=40.0, seed=2)
+    scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
+    held_out = SequenceWindowDataset(
+        scaler.transform(raw), sequence_length=4, feature_columns=columns
+    )
+
+    report = benchmark_false_positives(trained, held_out, suppress_channels=("noisy",))
+
+    engine = SequenceInferenceEngine(trained, suppress_channels=("noisy",))
+    values = raw.loc[:, columns].to_numpy(dtype=np.float32)
+    served = 0
+    for window in held_out.windows:
+        rows = slice(window.start_row, window.end_row)
+        result = engine.score_window(
+            values[rows],
+            mask=held_out._mask[rows],
+            delta=held_out._delta[rows],
+            timestamp=window.end_timestamp,
+            session=window.session,
+            window_start_timestamp=window.start_timestamp,
+            window_end_timestamp=window.end_timestamp,
+        )
+        served += int(result.is_anomaly)
+
+    assert report.excluded_columns == ("noisy",)
+    assert report.window_count == len(held_out.windows)
+    assert report.flagged_windows == served
+    # Unsuppressed, the noisy channel dominates the all-channel mean: the
+    # suppression is what the count above depends on, not a coincidence.
+    unsuppressed = benchmark_false_positives(trained, held_out)
+    assert unsuppressed.flagged_windows > report.flagged_windows

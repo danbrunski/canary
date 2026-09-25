@@ -43,6 +43,8 @@ from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 BINDINGS = Path("data/bindings.yaml")
+#: The dev vehicle's mode01_wot.rpm_bands (profile data since R05.13).
+RPM_BANDS = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 9, 18, 12, 0, 0, tzinfo=UTC)
 PHI = AfrCalibration(commanded_equiv_ratio_convention="phi")
@@ -60,6 +62,7 @@ INPUTS = WorkbenchInputs(
     calibration=PHI,
     noise_floor=FLOOR,
     idle_spec={"rpm_min": 400.0, "rpm_max": 900.0, "speed_max": 0.0},
+    afr_stoich=14.7,
 )
 
 
@@ -178,7 +181,9 @@ def test_frame_carries_tags_and_revision_boundary(tmp_path: Path) -> None:
             TuneRevision(revision="B", flashed_at=T0 + timedelta(seconds=5)),
         ]
     )
-    inputs = WorkbenchInputs(bindings_path=BINDINGS, dids_path=DIDS, registry=registry)
+    inputs = WorkbenchInputs(
+        bindings_path=BINDINGS, dids_path=DIDS, registry=registry, afr_stoich=14.7
+    )
     frame = session_frame(session, ["obd:RPM"], inputs=inputs)
     assert frame["tags"][0]["label"] == "pull_start"
     assert frame["revision"]["revision"] == "A"
@@ -205,7 +210,9 @@ def test_pooled_delivery_error_pools_and_names_not_captured(tmp_path: Path) -> N
     a = _write(tmp_path, "2026-09-18T120000", [_enrich(3200)] * 4)
     b = _write(tmp_path, "2026-09-18T130000", [_enrich(4200)] * 3)
     no_mode01 = _write(tmp_path, "2026-09-18T140000", [{"RPM": 3000.0}] * 3)
-    result = pooled_delivery_error([a, b, no_mode01], inputs=INPUTS, min_load=85.0)
+    result = pooled_delivery_error(
+        [a, b, no_mode01], inputs=INPUTS, min_load=85.0, rpm_bands=RPM_BANDS
+    )
     assert result["available"] is True
     assert result["n"] == 7
     assert [s["n"] for s in result["per_session"]] == [4, 3]
@@ -221,7 +228,7 @@ def test_pooled_delivery_error_pools_and_names_not_captured(tmp_path: Path) -> N
 def test_pooled_delivery_error_gates_removed_everything_is_its_own_kind(tmp_path: Path) -> None:
     cut = {**_enrich(), "COMMANDED_EQUIV_RATIO": 0.0}
     session = _write(tmp_path, "2026-09-18T120000", [cut] * 4)
-    result = pooled_delivery_error([session], inputs=INPUTS)
+    result = pooled_delivery_error([session], inputs=INPUTS, rpm_bands=RPM_BANDS)
     assert result["available"] is False
     assert result["unavailable_kind"] == "gates_removed_everything"
     assert result["gates"]["filtered"] == {"fuel_cut": 4}
@@ -229,7 +236,7 @@ def test_pooled_delivery_error_gates_removed_everything_is_its_own_kind(tmp_path
 
 def test_pooled_delivery_error_all_not_captured(tmp_path: Path) -> None:
     session = _write(tmp_path, "2026-09-18T120000", [{"RPM": 3000.0}] * 3)
-    result = pooled_delivery_error([session], inputs=INPUTS)
+    result = pooled_delivery_error([session], inputs=INPUTS, rpm_bands=RPM_BANDS)
     assert result["available"] is False
     assert result["unavailable_kind"] == "not_captured"
 
@@ -238,7 +245,11 @@ def test_semantic_measured_source_refuses_a_load_floor(tmp_path: Path) -> None:
     session = _write(tmp_path, "2026-09-18T120000", [_enrich()] * 3)
     with pytest.raises(GateError, match="load"):
         pooled_delivery_error(
-            [session], inputs=INPUTS, measured="semantic:measured_afr_b1", min_load=85.0
+            [session],
+            inputs=INPUTS,
+            measured="semantic:measured_afr_b1",
+            min_load=85.0,
+            rpm_bands=RPM_BANDS,
         )
 
 
@@ -297,8 +308,40 @@ def test_pull_comparison_flags_a_drop_where_timing_was_advanced(tmp_path: Path) 
     cell = result["cells"][0]
     assert cell["delta"] == pytest.approx(-4.0)
     assert cell["dropped"] is True
-    assert cell["delta_sigma"] == pytest.approx(-8.0)
+    # R05.2: the cells span every regime; the timing floor was measured under
+    # "WOT", so it is refused rather than quoted ~16x too tight.
+    assert cell["delta_sigma"] is None
+    assert result["significance"]["kind"] == "conditions_mismatch"
+    assert result["significance"]["floor_conditions"] == "WOT"
     assert result["noise_floor"]["conditions"] == "WOT"
+
+
+def test_pull_comparison_quotes_a_floor_measured_under_its_own_conditions(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from src.analysis.workbench import ALL_CONDITIONS
+
+    floor = NoiseFloor(
+        channels={
+            "timing_advance_deg": ChannelFloor(
+                unit="deg", conditions=ALL_CONDITIONS, sd=0.5, n_cells=5
+            )
+        }
+    )
+    a = _write(tmp_path, "2026-09-18T120000", [_closed()] * 6)
+    b = _write(tmp_path, "2026-09-19T120000", [{**_closed(), "TIMING_ADVANCE": 26.0}] * 6)
+    result = pull_comparison(
+        [a],
+        [b],
+        revision_a="A",
+        revision_b="B",
+        inputs=replace(INPUTS, noise_floor=floor),
+        floor_channel="timing_advance_deg",
+    )
+    assert result["cells"][0]["delta_sigma"] == pytest.approx(-8.0)
+    assert result["significance"]["available"] is True
 
 
 # --------------------------------------------------------------------------- browser
@@ -509,7 +552,9 @@ def test_frame_fuel_cut_comes_from_the_sentinel_channel(tmp_path: Path) -> None:
             )
         ]
     )
-    inputs = WorkbenchInputs(bindings_path=BINDINGS, dids_path=DIDS, providers=providers)
+    inputs = WorkbenchInputs(
+        bindings_path=BINDINGS, dids_path=DIDS, providers=providers, afr_stoich=14.7
+    )
     cut = session_frame(session, ["obd:RPM"], inputs=inputs, regime="fuel_cut")
     rich = session_frame(session, ["obd:RPM"], inputs=inputs, regime="enrichment")
     assert cut["rows_total"] == 2

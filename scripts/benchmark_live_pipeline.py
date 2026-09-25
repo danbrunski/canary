@@ -70,16 +70,21 @@ from typing import Any
 import numpy as np
 
 try:
-    from _cli import load_config
+    from _cli import (
+        add_bindings_arg,
+        load_config,
+    )
 except ImportError:
-    from scripts._cli import load_config  # type: ignore[no-redef]
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
+        load_config,
+    )
 
 from src.collection.can_obd_client import PID_DECODERS
 from src.config import CanaryConfig
 from src.dashboard.version import _git_sha
 from src.decode.bindings import Bindings, load_bindings
 from src.models.artifact_hash import sha256_file_or_none
-from src.paths import BINDINGS_YAML
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 
@@ -698,12 +703,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config", type=Path, default=Path("canary.example.yaml"), help="Path to canary.yaml."
     )
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=BINDINGS_YAML,
-        help="Path to bindings.yaml (optional). A missing path skips CAN decode.",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--profile",
         choices=sorted(WORKLOAD_PROFILES),

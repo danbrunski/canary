@@ -531,6 +531,13 @@ This checklist builds the yardstick.
     2026-08-03 --baseline-fit-sessions 8 --injections-per-drive 2
     --cache-only`.
 
+  **Superseded scope (R04.6, 2026-09-25).** This table scored tuning
+  captures as evaluation rows: 8 of its 16 drives include capture sessions
+  and 6 are captures alone. The operator decision of 2026-09-24 takes tuning
+  logs out of the detectors, and `evaluate_detectors` now scores
+  default-profile rows only. Read the numbers below as the pre-R04.6
+  baseline; the regenerated table is owed (R04.6's remainder).
+
   False alarms per engine-hour, in-era drives, drive-bootstrap 95 %:
 
   | Detector | FA/eh | Rows withheld |

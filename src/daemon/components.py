@@ -30,11 +30,11 @@ from src.control.monitor_state import (
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
+from src.daemon.health import HealthMonitor
 from src.daemon.idle_shutdown import IdleShutdownMonitor
 from src.daemon.inference_metrics import InferenceTimingRecorder
 from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.broadcast import Broadcaster
-from src.models.health import HealthMonitor
 from src.models.manager import ModelManager, manager_for_artifact
 from src.models.role_gate import DetectorRoleGate
 from src.models.sequence_registry import resolve_sequence_backend

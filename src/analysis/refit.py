@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -401,6 +401,137 @@ Recipe = Surface1DRecipe | Surface2DRecipe
 # ---------------------------------------------------------------------------
 
 
+#: Catalog family defaults (R05.7). Applied *under* each recipe's own
+#: fields, so a value a recipe declares wins. Until 2026-09 a trailing loop in
+#: :func:`default_recipes` ``replace``-d these over every recipe instead,
+#: silently discarding any per-recipe minimum.
+CATALOG_1D_DEFAULTS: Mapping[str, Any] = {"min_sessions": 3}
+CATALOG_2D_DEFAULTS: Mapping[str, Any] = {
+    "min_sessions": 3,
+    "min_cell_sessions": 2,
+    "min_cell_dwell_seconds": 10.0,
+}
+
+#: The cold-start transient family: warmup mode, sessions with a cold start
+#: from <= 40 degC and a contiguous run-time clock, engine running (KOEO rows
+#: have RUN_TIME=0 — not warmup data), and a binned lookup (warmup is
+#: sigmoid-ish; polynomials overshoot). Without these gates a fit to "all
+#: data" reverts to the R²=0.41 May 2026 surface that flooded the dashboard
+#: with warmup-storm anomalies.
+WARMUP_1D_FIELDS: Mapping[str, Any] = {
+    "operating_mode": "warmup",
+    "require_session_events": ("cold_start",),
+    "max_initial_coolant_c": 40.0,
+    "require_contiguous_runtime": True,
+    "min_rpm": ENGINE_RUNNING_MIN_RPM,
+    "fit_method": "binned_lookup",
+    "min_samples": 120,
+}
+
+#: The rpm x calculated-load grid shared by the Mode 01 2D surfaces, running
+#: engine only (KOEO timing reads ~63°, trims are frozen zeros, and there is
+#: no fill to measure).
+RPM_LOAD_2D_FIELDS: Mapping[str, Any] = {
+    "x_column": "obd:RPM",
+    "y_column": "obd:ENGINE_LOAD",
+    "x_axis_name": "rpm",
+    "y_axis_name": "engine_load",
+    "x_axis_unit": "rpm",
+    "y_axis_unit": "%",
+    "min_samples": 500,
+    "min_rpm": ENGINE_RUNNING_MIN_RPM,
+}
+
+#: Operating modes the bank-balance baselines are conditioned on.
+BANK_BALANCE_MODES: tuple[str, ...] = ("idle", "city", "highway")
+
+_BANK_BALANCE_NOTES: Mapping[str, str] = {
+    "stft": (
+        "Mode-conditioned robust median/MAD bank-balance baseline. "
+        "A flat healthy signal is valuable and is not gated on R²."
+    ),
+    "ltft": "Mode-conditioned robust median/MAD long-term bank-balance baseline.",
+}
+
+
+def _surface_1d(**fields: Any) -> Surface1DRecipe:
+    return Surface1DRecipe(**{**CATALOG_1D_DEFAULTS, **fields})
+
+
+def _surface_2d(**fields: Any) -> Surface2DRecipe:
+    return Surface2DRecipe(**{**CATALOG_2D_DEFAULTS, **fields})
+
+
+def _warmup_1d(**fields: Any) -> Surface1DRecipe:
+    return _surface_1d(**{**WARMUP_1D_FIELDS, **fields})
+
+
+def _rpm_load_2d(**fields: Any) -> Surface2DRecipe:
+    return _surface_2d(**{**RPM_LOAD_2D_FIELDS, **fields})
+
+
+def _sigma(
+    sigma_floor: float, *, warning_band: float = 3.0, critical_band: float = 6.0
+) -> DeviationConfig:
+    """The catalog's usual sigma band (3 / 6); ``sigma_floor`` is the output's LSB."""
+    return DeviationConfig(
+        kind="sigma",
+        warning_band=warning_band,
+        critical_band=critical_band,
+        sigma_floor=sigma_floor,
+    )
+
+
+def _bank_balance(kind: Literal["stft", "ltft"], mode: str) -> Surface1DRecipe:
+    """Mode-conditioned robust bank-balance baseline, closed loop only."""
+    channel = f"derived:{kind.upper()}_BANK_BALANCE"
+    return _surface_1d(
+        name=f"{kind}_bank_balance_{mode}",
+        output=channel,
+        output_unit="%",
+        x_column=channel,
+        operating_mode=mode,
+        fit_method="robust_baseline",
+        min_samples=150,
+        min_r_squared=None,
+        min_rpm=ENGINE_RUNNING_MIN_RPM,
+        closed_loop_only=True,
+        deviation=_sigma(0.8),
+        notes=_BANK_BALANCE_NOTES[kind],
+    )
+
+
+def _cam_tracking_2d(role: Literal["primary", "secondary"], *, output: str) -> Surface2DRecipe:
+    """Measured cam angle against its command and DID rpm, steady state only."""
+    return _surface_2d(
+        name=f"cam_{role}_vs_command_rpm_did",
+        output=output,
+        output_unit="deg",
+        x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
+        y_column="did:ECM_RPM",
+        x_axis_name="commanded_cam",
+        y_axis_name="rpm",
+        x_axis_unit="deg",
+        y_axis_unit="rpm",
+        min_samples=500,
+        max_validation_warning_rate=0.03,
+        max_abs_rate_of_change={
+            "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
+            "did:ECM_RPM": 75.0,
+        },
+        deviation=_sigma(0.5),
+        notes=(
+            f"Neutral {role} measured-cam tracking surface; physical bank "
+            "assignment remains intentionally unspecified. Evaluates only "
+            "while commanded angle and RPM satisfy the persisted steady-state gates."
+        ),
+        diagnostic_capabilities=("cam command/position relationship drift",),
+        diagnostic_limitations=(
+            "does not identify the physical bank and does not evaluate command transitions",
+        ),
+    )
+
+
 def default_recipes() -> list[Recipe]:
     """The catalog the daemon refits by default.
 
@@ -414,26 +545,15 @@ def default_recipes() -> list[Recipe]:
     panel (5.12) will key off these names — keep them stable.
     """
     recipes: list[Recipe] = [
-        Surface1DRecipe(
+        _warmup_1d(
             name="coolant_warmup",
             output="obd:COOLANT_TEMP",
             output_unit="degC",
             x_column="obd:RUN_TIME",
             x_axis_name="time_since_start",
             x_axis_unit="s",
-            # Surface only describes the cold-to-warm transient — restrict to
-            # ``warmup`` operating mode AND require sessions that actually
-            # contain a cold_start event. Without these gates the model fit
-            # to "all data" reverts to the R²=0.41 May 2026 surface that
-            # flooded the dashboard with warmup-storm anomalies.
-            operating_mode="warmup",
-            require_session_events=("cold_start",),
-            max_initial_coolant_c=40.0,
-            require_contiguous_runtime=True,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO rows have RUN_TIME=0 — not warmup data
-            fit_method="binned_lookup",  # warmup is sigmoid-ish, polys overshoot
+            # WARMUP_1D_FIELDS carries the cold-to-warm transient gates.
             n_knots=12,
-            min_samples=120,
             # 4.6: widened from (5.0, 15.0) — the corpus doesn't have enough
             # usable cold-start sessions to add a load/IAT context axis (see
             # WARMUP_CONTEXT_SESSION_FLOOR above), so the band absorbs
@@ -444,7 +564,7 @@ def default_recipes() -> list[Recipe]:
                 "flatter / delayed curve."
             ),
         ),
-        Surface1DRecipe(
+        _surface_1d(
             name="warm_idle_rpm_baseline",
             output="obd:RPM",
             output_unit="rpm",
@@ -456,9 +576,7 @@ def default_recipes() -> list[Recipe]:
             min_samples=200,
             max_abs_rate_of_change=WARM_IDLE_STEADY_RATES,
             local_ranges=WARM_IDLE_LOCAL_RANGES,
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=25.0
-            ),
+            deviation=_sigma(25.0),
             notes=(
                 "Warm stabilized idle baseline. Accessory-load state is not available, "
                 "so robust bands absorb ordinary A/C/electrical-load steps. Graded only "
@@ -472,21 +590,14 @@ def default_recipes() -> list[Recipe]:
                 "does not detect elevated idle in general, nor identify its cause",
             ),
         ),
-        Surface1DRecipe(
+        _warmup_1d(
             name="cold_start_idle_rpm_vs_coolant",
             output="obd:RPM",
             output_unit="rpm",
             x_column="obd:COOLANT_TEMP",
             x_axis_name="coolant_temp",
             x_axis_unit="degC",
-            operating_mode="warmup",
-            require_session_events=("cold_start",),
-            max_initial_coolant_c=40.0,
-            require_contiguous_runtime=True,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            fit_method="binned_lookup",
             n_knots=8,
-            min_samples=120,
             deviation=DeviationConfig(kind="absolute", warning_band=150.0, critical_band=300.0),
             notes="Cold-start fast-idle curve, isolated from warm accessory-loaded idle.",
         ),
@@ -496,23 +607,13 @@ def default_recipes() -> list[Recipe]:
         # on every normal cruise (~39°): 292 false alarms vs 6 for the 2D
         # version on a known-good drive. The load-conditioned surface below
         # supersedes it.
-        Surface2DRecipe(
+        _rpm_load_2d(
             name="timing_advance_vs_rpm_load",
             output="obd:TIMING_ADVANCE",
             output_unit="degBTDC",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # KOEO timing reads ~63°; see ENGINE_RUNNING_MIN_RPM
             # sigma_floor = one LSB of PID 0x0E (0.5°/bit): a cell fit on a
             # quantization-flat idle stretch can't alert on single-bit flicker.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
+            deviation=_sigma(0.5),
             notes=(
                 "Ignition surface. A sustained drop versus the learned cell is an "
                 "unexpected timing change; knock-control retard is one possible "
@@ -525,7 +626,7 @@ def default_recipes() -> list[Recipe]:
                 "load and RPM only: IAT/coolant compensation is unmodelled context",
             ),
         ),
-        Surface2DRecipe(
+        _surface_2d(
             name="timing_advance_vs_rpm_iat",
             output="obd:TIMING_ADVANCE",
             output_unit="degBTDC",
@@ -540,9 +641,7 @@ def default_recipes() -> list[Recipe]:
             # Same band shape as the load-axis sibling — timing magnitudes and
             # cell-spread are the same; what differs is what we're trying to
             # catch. sigma_floor = one LSB of PID 0x0E.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
+            deviation=_sigma(0.5),
             notes=(
                 "Thermal-compensation surface for ignition. Cold dense charge "
                 "lets the ECU advance more; hot charge gets retarded to keep "
@@ -570,44 +669,24 @@ def default_recipes() -> list[Recipe]:
                 "does not identify knock retard; RPM/IAT alone omits load",
             ),
         ),
-        Surface2DRecipe(
+        _rpm_load_2d(
             name="fuel_trim_vs_rpm_load",
             output="obd:SHORT_FUEL_TRIM_1",
             output_unit="%",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fueling KOEO — trims are frozen zeros there
             # sigma_floor = one LSB of the trim PIDs (100/128 ≈ 0.78 %).
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
-            ),
+            deviation=_sigma(100.0 / 128.0),
             notes=(
                 "STFT B1 surface. Vacuum leaks / injector wear / fuel-quality "
                 "drift shift cells off zero."
             ),
         ),
         # ----- Phase 1: derived-signal surfaces (no DIDs required) --------
-        Surface2DRecipe(
+        _rpm_load_2d(
             name="air_mass_per_cycle_vs_rpm_load",
             output="derived:AIR_MASS_PER_CYCLE",
             output_unit="g/cycle",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
             # sigma_floor ≈ one MAF LSB (0.01 g/s) translated to g/cycle at idle.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.002
-            ),
+            deviation=_sigma(0.002),
             notes=(
                 "Measured air mass per four-stroke cycle (MAF x 120 / RPM), the raw "
                 "quantity behind both VE channels, kept for inspection. Not "
@@ -625,18 +704,10 @@ def default_recipes() -> list[Recipe]:
         # ``derived:VE_PERCENT`` (baro-referenced on a vehicle without MAP);
         # its output no longer matches this recipe, so a carry-over is flagged
         # ``contract_changed:recipe`` rather than served as either definition.
-        Surface2DRecipe(
+        _rpm_load_2d(
             name="ve_vs_rpm_load",
             output=VE_AMBIENT_CHANNEL,
             output_unit="%",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,  # no fill KOEO — VE is a frozen/meaningless value there
             # The channel exists only with measured baro AND measured IAT
             # (no 25 degC default), and its gap marks either stale, so no
             # separate context requirement is needed for them.
@@ -644,9 +715,7 @@ def default_recipes() -> list[Recipe]:
             # (0.002 g/cycle) expressed as a percent of a representative idle-cell
             # 100%-VE fill (~0.4 g/cycle for this displacement class) — approximate,
             # like every other LSB-derived floor in this catalog, not exact.
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
+            deviation=_sigma(0.5),
             notes=(
                 "Ambient-referenced volumetric efficiency: measured air mass per "
                 "cycle (MAF/RPM) over the ideal-gas fill at measured barometric "
@@ -662,21 +731,11 @@ def default_recipes() -> list[Recipe]:
                 "the two are not independent confirmation",
             ),
         ),
-        Surface2DRecipe(
+        _rpm_load_2d(
             name="ve_manifold_vs_rpm_load",
             output=VE_MANIFOLD_CHANNEL,
             output_unit="%",
-            x_column="obd:RPM",
-            y_column="obd:ENGINE_LOAD",
-            x_axis_name="rpm",
-            y_axis_name="engine_load",
-            x_axis_unit="rpm",
-            y_axis_unit="%",
-            min_samples=500,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
+            deviation=_sigma(0.5),
             notes=(
                 "Manifold-referenced volumetric efficiency: measured air mass per "
                 "cycle over the ideal-gas fill at measured MAP and measured IAT "
@@ -698,27 +757,17 @@ def default_recipes() -> list[Recipe]:
         # at steady RPM/load (TOTAL_TRIM_STEADY_RATES). All persisted on the
         # contract, so fit and serve apply the same rows.
         *[
-            Surface2DRecipe(
+            _rpm_load_2d(
                 name=f"total_trim_vs_rpm_load_b{bank}",
                 output=f"derived:TOTAL_TRIM_B{bank}",
                 output_unit=TOTAL_TRIM_UNIT,
-                x_column="obd:RPM",
-                y_column="obd:ENGINE_LOAD",
-                x_axis_name="rpm",
-                y_axis_name="engine_load",
-                x_axis_unit="rpm",
-                y_axis_unit="%",
-                min_samples=500,
-                min_rpm=ENGINE_RUNNING_MIN_RPM,
                 closed_loop_only=True,
                 excluded_operating_modes=("warmup",),
                 max_abs_rate_of_change=TOTAL_TRIM_STEADY_RATES,
                 # Same trim-PID LSB floor as fuel_trim_vs_rpm_load (100/128 ≈
                 # 0.78 %); TOTAL_TRIM sums two channels sharing that LSB, so
                 # this is a lower bound on the achievable resolution.
-                deviation=DeviationConfig(
-                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=100.0 / 128.0
-                ),
+                deviation=_sigma(100.0 / 128.0),
                 notes=(
                     f"Total fuel trim, bank {bank}: STFT + LTFT as an additive "
                     "percentage-point index (not a calibrated fuel multiplier). "
@@ -742,48 +791,9 @@ def default_recipes() -> list[Recipe]:
             )
             for bank in (1, 2)
         ],
-        *[
-            Surface1DRecipe(
-                name=f"stft_bank_balance_{mode}",
-                output="derived:STFT_BANK_BALANCE",
-                output_unit="%",
-                x_column="derived:STFT_BANK_BALANCE",
-                operating_mode=mode,
-                fit_method="robust_baseline",
-                min_samples=150,
-                min_r_squared=None,
-                min_rpm=ENGINE_RUNNING_MIN_RPM,
-                closed_loop_only=True,
-                deviation=DeviationConfig(
-                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.8
-                ),
-                notes=(
-                    "Mode-conditioned robust median/MAD bank-balance baseline. "
-                    "A flat healthy signal is valuable and is not gated on R²."
-                ),
-            )
-            for mode in ("idle", "city", "highway")
-        ],
-        *[
-            Surface1DRecipe(
-                name=f"ltft_bank_balance_{mode}",
-                output="derived:LTFT_BANK_BALANCE",
-                output_unit="%",
-                x_column="derived:LTFT_BANK_BALANCE",
-                operating_mode=mode,
-                fit_method="robust_baseline",
-                min_samples=150,
-                min_r_squared=None,
-                min_rpm=ENGINE_RUNNING_MIN_RPM,
-                closed_loop_only=True,
-                deviation=DeviationConfig(
-                    kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.8
-                ),
-                notes="Mode-conditioned robust median/MAD long-term bank-balance baseline.",
-            )
-            for mode in ("idle", "city", "highway")
-        ],
-        Surface1DRecipe(
+        *(_bank_balance("stft", mode) for mode in BANK_BALANCE_MODES),
+        *(_bank_balance("ltft", mode) for mode in BANK_BALANCE_MODES),
+        _warmup_1d(
             name="cat_warmup",
             output="obd:CATALYST_TEMP_B1S1",
             output_unit="degC",
@@ -793,14 +803,7 @@ def default_recipes() -> list[Recipe]:
             # Cat light-off mirrors coolant warmup — gate on warmup + cold_start
             # for the same reasons (the surface only describes cold-start
             # transients; warm-restart and steady-state shouldn't fit it).
-            operating_mode="warmup",
-            require_session_events=("cold_start",),
-            max_initial_coolant_c=40.0,
-            require_contiguous_runtime=True,
-            min_rpm=ENGINE_RUNNING_MIN_RPM,
-            fit_method="binned_lookup",
             n_knots=12,
-            min_samples=120,
             # 4.6: widened from (30.0, 80.0) — same corpus/rationale as
             # coolant_warmup above (WARMUP_CONTEXT_SESSION_FLOOR).
             deviation=DeviationConfig(kind="absolute", warning_band=45.0, critical_band=115.0),
@@ -811,7 +814,7 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
         # ----- Phase 2: DID-dependent surfaces (skip until DIDs are polled) --
-        Surface2DRecipe(
+        _surface_2d(
             name="air_charge_vs_rpm_throttle_did",
             output="did:ECM_AIR_CHARGE",
             output_unit="raw",  # scale not yet locked; raw counts are stable for anomaly detection
@@ -823,9 +826,7 @@ def default_recipes() -> list[Recipe]:
             y_axis_unit="V",
             min_samples=500,
             # sigma_floor = 1 raw count (scale constant not yet pinned).
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=1.0
-            ),
+            deviation=_sigma(1.0),
             notes=(
                 "Mode-22-synchronous air-charge surface. Detects a change in the "
                 "ECM's air charge per intake event at the same DID RPM and throttle "
@@ -838,65 +839,9 @@ def default_recipes() -> list[Recipe]:
                 "or cam-phasing change; not a fuelling surface",
             ),
         ),
-        Surface2DRecipe(
-            name="cam_primary_vs_command_rpm_did",
-            output="did:ECM_INTAKE_CAM_ANGLE_MEASURED",
-            output_unit="deg",
-            x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
-            y_column="did:ECM_RPM",
-            x_axis_name="commanded_cam",
-            y_axis_name="rpm",
-            x_axis_unit="deg",
-            y_axis_unit="rpm",
-            min_samples=500,
-            max_validation_warning_rate=0.03,
-            max_abs_rate_of_change={
-                "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
-                "did:ECM_RPM": 75.0,
-            },
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
-            notes=(
-                "Neutral primary measured-cam tracking surface; physical bank "
-                "assignment remains intentionally unspecified. Evaluates only "
-                "while commanded angle and RPM satisfy the persisted steady-state gates."
-            ),
-            diagnostic_capabilities=("cam command/position relationship drift",),
-            diagnostic_limitations=(
-                "does not identify the physical bank and does not evaluate command transitions",
-            ),
-        ),
-        Surface2DRecipe(
-            name="cam_secondary_vs_command_rpm_did",
-            output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B",
-            output_unit="deg",
-            x_column="did:ECM_INTAKE_CAM_ANGLE_COMMANDED",
-            y_column="did:ECM_RPM",
-            x_axis_name="commanded_cam",
-            y_axis_name="rpm",
-            x_axis_unit="deg",
-            y_axis_unit="rpm",
-            min_samples=500,
-            max_validation_warning_rate=0.03,
-            max_abs_rate_of_change={
-                "did:ECM_INTAKE_CAM_ANGLE_COMMANDED": 0.25,
-                "did:ECM_RPM": 75.0,
-            },
-            deviation=DeviationConfig(
-                kind="sigma", warning_band=3.0, critical_band=6.0, sigma_floor=0.5
-            ),
-            notes=(
-                "Neutral secondary measured-cam tracking surface; physical bank "
-                "assignment remains intentionally unspecified. Evaluates only "
-                "while commanded angle and RPM satisfy the persisted steady-state gates."
-            ),
-            diagnostic_capabilities=("cam command/position relationship drift",),
-            diagnostic_limitations=(
-                "does not identify the physical bank and does not evaluate command transitions",
-            ),
-        ),
-        Surface1DRecipe(
+        _cam_tracking_2d("primary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED"),
+        _cam_tracking_2d("secondary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B"),
+        _surface_1d(
             name="afr_bank_balance_robust",
             output="derived:AFR_BANK_BALANCE",
             output_unit="V",
@@ -913,7 +858,7 @@ def default_recipes() -> list[Recipe]:
                 "available once AF sensor DIDs are polling."
             ),
         ),
-        Surface2DRecipe(
+        _surface_2d(
             name="afr_voltage_vs_rpm_throttle_did",
             output="did:ECM_AF_SENSOR_V_B1",
             output_unit="V",
@@ -933,7 +878,7 @@ def default_recipes() -> list[Recipe]:
                 "oscillation amplitude drift."
             ),
         ),
-        Surface1DRecipe(
+        _surface_1d(
             name="tps_sensor_1_vs_sensor_2_did",
             output="did:ECM_THROTTLE_POS_SENSOR_1",
             output_unit="V",
@@ -961,20 +906,7 @@ def default_recipes() -> list[Recipe]:
             ),
         ),
     ]
-    catalog: list[Recipe] = []
-    for recipe in recipes:
-        if isinstance(recipe, Surface2DRecipe):
-            catalog.append(
-                replace(
-                    recipe,
-                    min_sessions=3,
-                    min_cell_sessions=2,
-                    min_cell_dwell_seconds=10.0,
-                )
-            )
-        else:
-            catalog.append(replace(recipe, min_sessions=3))
-    return catalog
+    return recipes
 
 
 # ---------------------------------------------------------------------------
@@ -1059,6 +991,327 @@ class RecipeResult:
         return self.model is not None
 
 
+class _RecipeSkipError(Exception):
+    """A phase of :func:`fit_recipe` refused; caught once and turned into a
+    skipped :class:`RecipeResult` carrying ``reason`` (and a ``candidate``
+    when a fit exists but failed held-out validation)."""
+
+    def __init__(
+        self, reason: str, *, candidate: BehaviorModel1D | BehaviorModel2D | None = None
+    ) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.candidate = candidate
+
+
+def _require_sessions(frame: pd.DataFrame, reason: str) -> None:
+    """The one session-id precondition; each phase names why it needs them."""
+    if SESSION_COLUMN not in frame.columns:
+        raise _RecipeSkipError(reason)
+
+
+def _authorize_captures(
+    recipe: Recipe,
+    frame: pd.DataFrame,
+    allowlists: Mapping[str, Collection[str]] | None,
+) -> pd.DataFrame:
+    """0. Capture evidence is authorized per recipe.
+
+    General sessions are unrestricted here; isolated captures are present in
+    ``allowlists`` only when their manifest explicitly names the recipes they
+    may inform.
+    """
+    if not allowlists:
+        return frame
+    _require_sessions(
+        frame,
+        f"no {SESSION_COLUMN} column in frame; can't enforce capture behavior-model allowlists",
+    )
+    disallowed = {
+        session_id
+        for session_id, allowed_recipes in allowlists.items()
+        if recipe.name not in allowed_recipes
+    }
+    sub = frame[~frame[SESSION_COLUMN].astype(str).isin(disallowed)]
+    if sub.empty:
+        raise _RecipeSkipError("no rows from sessions authorized for this behavior-model recipe")
+    return sub
+
+
+def _refuse_unenforceable_contract(
+    recipe: Recipe, sub: pd.DataFrame, eligibility: ServingEligibility
+) -> None:
+    """0a. Refuse when a contract column is absent from the whole frame —
+    silently fitting without an enforceable gate would re-introduce the
+    contamination it exists to prevent (KOEO timing, open-loop trims)."""
+    if eligibility.engine_state.state == "engine_running" and RPM_COLUMN not in sub.columns:
+        raise _RecipeSkipError(f"no {RPM_COLUMN} column in frame; can't enforce min_rpm gate")
+    if recipe.operating_mode is not None and MODE_COLUMN not in sub.columns:
+        raise _RecipeSkipError(f"no {MODE_COLUMN} column in frame")
+
+
+def _select_event_sessions(
+    recipe: Recipe, sub: pd.DataFrame, session_events: Mapping[str, set[str]] | None
+) -> pd.DataFrame:
+    """1b. Training-only selection: drop rows from sessions that don't carry
+    every event kind in ``recipe.require_session_events``.
+
+    Only applies when ``session_events`` is provided; otherwise a no-op so
+    callers that haven't wired up the classifier still work. Recorded in
+    ``TrainingSelection``; never a serve-time rule.
+    """
+    if not recipe.require_session_events or session_events is None:
+        return sub
+    _require_sessions(sub, f"no {SESSION_COLUMN} column in frame; can't enforce event gate")
+    required_events = set(recipe.require_session_events)
+    eligible_sessions = {
+        session_id
+        for session_id, events in session_events.items()
+        if required_events.issubset(events)
+    }
+    if not eligible_sessions:
+        raise _RecipeSkipError(
+            f"no session in corpus carries every required event "
+            f"{sorted(required_events)!r} (have {len(session_events)} classified)"
+        )
+    sub = sub[sub[SESSION_COLUMN].isin(eligible_sessions)]
+    if sub.empty:
+        raise _RecipeSkipError(
+            f"no rows in operating_mode={recipe.operating_mode!r} from sessions "
+            f"that contain required events {sorted(required_events)!r}"
+        )
+    return sub
+
+
+def _refuse_missing_columns(
+    recipe: Recipe,
+    sub: pd.DataFrame,
+    eligibility: ServingEligibility,
+    conditions: Sequence[RateOfChangeCondition],
+) -> list[str]:
+    """1c/1d/2. Fuel-status, rate-gate and fitted columns must all exist.
+
+    Steady-state conditions are a model contract, not merely a corpus
+    cleanup: refuse if a derivative cannot be enforced. Returns the recipe's
+    required columns.
+    """
+    if eligibility.fuel_control is not None and eligibility.fuel_control.channel not in sub.columns:
+        raise _RecipeSkipError(
+            f"no {eligibility.fuel_control.channel} column; can't enforce closed-loop-only fit"
+        )
+    for condition in conditions:
+        if condition.channel not in sub.columns:
+            raise _RecipeSkipError(
+                f"missing {condition.channel}; can't enforce steady-state rate gate"
+            )
+    required = _recipe_columns(recipe)
+    missing = [c for c in required if c not in sub.columns]
+    if missing:
+        raise _RecipeSkipError(f"missing columns {missing}")
+    return required
+
+
+def _append_contexts(sub: pd.DataFrame, eligibility: ServingEligibility) -> pd.DataFrame:
+    """2a/2a'. Context the serving contract reads, built from whole sessions.
+
+    Cold-start context is the same engine-start fold the live source and
+    batch featurizer run, derived here when the frame was built without a
+    model that needed it; B07.6 local-range context is built as serving
+    builds it from the live window. Both run before any row-level selection,
+    while ``sub`` still holds whole sessions (only session-level selections
+    ran so far), so each fold sees the pre-start rows.
+    """
+    if eligibility.cold_start is not None:
+        observed_col, coolant_col = start_context_columns(eligibility.cold_start)
+        if observed_col not in sub.columns or coolant_col not in sub.columns:
+            _require_sessions(sub, "cold-start eligibility requires session ids")
+            sub = append_start_context(
+                sub, [StartContextSpec.from_requirement(eligibility.cold_start)]
+            )
+    missing_ranges = [
+        condition
+        for condition in eligibility.local_ranges
+        if local_range_column(condition) not in sub.columns
+    ]
+    if missing_ranges:
+        absent = [c.channel for c in missing_ranges if c.channel not in sub.columns]
+        if absent:
+            raise _RecipeSkipError(f"missing {absent}; can't enforce local-range steady gate")
+        sub = append_local_ranges(sub, missing_ranges)
+    return sub
+
+
+def _select_contiguous_runtime(recipe: Recipe, sub: pd.DataFrame) -> pd.DataFrame:
+    """2b. Training-only: whole sessions with a broken run-time clock are
+    poor warmup evidence (provenance in ``TrainingSelection``)."""
+    if not recipe.require_contiguous_runtime:
+        return sub
+    _require_sessions(sub, "runtime-continuity selection requires session ids")
+    contiguous: list[str] = []
+    for session_id, rows in sub.groupby(SESSION_COLUMN, sort=False):
+        ordered = rows.sort_values("timestamp") if "timestamp" in rows else rows
+        if "obd:RUN_TIME" not in ordered:
+            continue
+        runtime = pd.to_numeric(ordered["obd:RUN_TIME"], errors="coerce").dropna()
+        if len(runtime) < 2 or bool((runtime.diff().dropna() < 0).any()):
+            continue
+        if "obd:RUN_TIME__gap" in ordered and bool(ordered["obd:RUN_TIME__gap"].astype(bool).any()):
+            continue
+        contiguous.append(str(session_id))
+    sub = sub[sub[SESSION_COLUMN].astype(str).isin(contiguous)]
+    if sub.empty:
+        raise _RecipeSkipError("no session satisfies the run-time continuity selection")
+    return sub
+
+
+def _eligible_rows(
+    recipe: Recipe, sub: pd.DataFrame, spec: ServingSpec, required: Sequence[str]
+) -> pd.DataFrame:
+    """3. The per-row serving contract (engine state, fuel control,
+    cold-start context, required context, fresh inputs and actual, rate
+    gates) — the *same* evaluator the decoder, daemon and replay use, so the
+    fit cannot learn from rows its model would refuse to grade."""
+    reasons = eligibility_reasons(sub, spec, include_actual=True)
+    eligible_rows = eligible_mask(reasons)
+    if not eligible_rows.any():
+        codes = {reason_code(str(reason)) for reason in reasons if reason is not None}
+        if codes == {"operating_mode_mismatch"}:
+            detail = f"no rows in operating_mode={recipe.operating_mode!r}"
+        elif codes == {"engine_not_running"}:
+            detail = f"no rows with {RPM_COLUMN} >= {recipe.min_rpm} (engine-running gate)"
+        else:
+            detail = f"no rows satisfy the serving contract: {summarize_reasons(reasons)}"
+        raise _RecipeSkipError(detail)
+    clean = sub.loc[eligible_rows]
+    if any(column.startswith("did:") for column in required):
+        gap_columns = [f"{column}__gap" for column in required if column.startswith("did:")]
+        if any(column not in clean.columns for column in gap_columns):
+            raise _RecipeSkipError(
+                "DID surface lacks per-channel freshness flags for synchronous fitting"
+            )
+    if len(clean) < recipe.min_samples:
+        raise _RecipeSkipError(f"{len(clean)} clean samples < min_samples={recipe.min_samples}")
+    return clean
+
+
+@dataclass(frozen=True)
+class FoldPlan:
+    """3b's outcome: the training rows and, when held out, the other folds."""
+
+    clean: pd.DataFrame
+    clean_sessions: tuple[str, ...]
+    split: DriveSplit | None
+    test_rows: pd.DataFrame
+    calibration_rows: pd.DataFrame
+
+
+def _plan_folds(
+    recipe: Recipe,
+    sub: pd.DataFrame,
+    clean: pd.DataFrame,
+    *,
+    sessions: Sequence[str],
+    validation: ValidationContext,
+    prior_model: BehaviorModel1D | BehaviorModel2D | None,
+    regrid: bool,
+) -> FoldPlan:
+    """3b. B02.3 — grouped folds by independent physical drive, ordered by
+    parsed time. Pieces of one drive (captures, ``#segment`` splits) never
+    cross folds; bin edges, bands and the baseline come from train only."""
+    clean_sessions: tuple[str, ...] = tuple(sessions)
+    split: DriveSplit | None = None
+    test_rows = sub.iloc[0:0]
+    calibration_rows = sub.iloc[0:0]
+    wants_holdout = recipe.min_sessions > 1 or recipe.validation is not None
+    if SESSION_COLUMN in clean.columns and not wants_holdout:
+        # One drive is enough and nothing is held out: no ordering needed.
+        # Recorded chronologically where a stamp parses (never by name alone).
+        clean_sessions = tuple(
+            sorted(
+                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
+                key=_piece_time_key,
+            )
+        )
+    elif SESSION_COLUMN in clean.columns:
+        try:
+            drives = group_drives(
+                piece_time_ranges(sub), join_gap_seconds=validation.join_gap_seconds
+            )
+        except UnorderedSessionsError as exc:
+            raise _RecipeSkipError(str(exc)) from exc
+        clean_counts = clean[SESSION_COLUMN].astype(str).value_counts()
+        qualifying = [
+            drive
+            for drive in drives
+            if int(sum(clean_counts.get(piece, 0) for piece in drive.pieces))
+            >= recipe.min_session_samples
+        ]
+        if len(qualifying) < recipe.min_sessions:
+            raise _RecipeSkipError(
+                f"{len(qualifying)} independent drives with >= "
+                f"{recipe.min_session_samples} samples < min_sessions={recipe.min_sessions}"
+            )
+        by_time = {piece: i for i, drive in enumerate(drives) for piece in drive.pieces}
+        if wants_holdout and len(qualifying) > 1:
+            criteria = recipe.validation
+            n_calibration = criteria.calibration_drives if criteria is not None else 0
+            n_test = criteria.min_validation_drives if criteria is not None else 1
+            # Never train on nothing: shrink the held-out folds to leave one
+            # training drive; the evidence then records too few test drives.
+            n_calibration = min(n_calibration, len(qualifying) - 2)
+            n_test = max(1, min(n_test, len(qualifying) - 1 - max(0, n_calibration)))
+            split = chronological_split(
+                qualifying,
+                n_test=n_test,
+                n_calibration=max(0, n_calibration),
+                join_gap_seconds=validation.join_gap_seconds,
+                excluded=[drive for drive in drives if drive not in qualifying],
+            )
+            pieces = sub[SESSION_COLUMN].astype(str)
+            test_rows = sub[pieces.isin(split.pieces("test"))]
+            calibration_rows = sub[pieces.isin(split.pieces("calibration"))]
+            clean = clean[clean[SESSION_COLUMN].astype(str).isin(split.pieces("train"))]
+            if len(clean) < recipe.min_samples:
+                raise _RecipeSkipError(
+                    f"{len(clean)} training samples after holding out "
+                    f"{len(split.test)} test drive(s) < min_samples={recipe.min_samples}"
+                )
+            leaked = _prior_grid_leak(prior_model, split, regrid=regrid, recipe=recipe)
+            if leaked:
+                raise _RecipeSkipError(
+                    "prior grid edges were fitted on test drive piece(s) "
+                    f"{', '.join(leaked)}; re-grid (--regrid) so test drives cannot "
+                    "choose the bins"
+                )
+        clean_sessions = tuple(
+            sorted(
+                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
+                key=lambda piece: (by_time.get(piece, len(by_time)), piece),
+            )
+        )
+    return FoldPlan(clean, clean_sessions, split, test_rows, calibration_rows)
+
+
+def _keep_prior_version(
+    model: BehaviorModel1D | BehaviorModel2D,
+    prior_model: BehaviorModel1D | BehaviorModel2D | None,
+) -> BehaviorModel1D | BehaviorModel2D:
+    """6. No-op-refit version suppression (4.5) — identical training rows
+    (same hash) means an identical fit; don't churn the version just because
+    the refit job ran again."""
+    if (
+        prior_model is not None
+        and model.fit.training_data_hash
+        and model.fit.training_data_hash == prior_model.fit.training_data_hash
+        and model.conditions == prior_model.conditions
+        and model.eligibility == prior_model.eligibility
+        and model.fit.tune_revision == prior_model.fit.tune_revision
+        and _same_evidence_context(model, prior_model)
+    ):
+        return model.model_copy(update={"version": prior_model.version})
+    return model
+
+
 def fit_recipe(
     recipe: Recipe,
     frame: pd.DataFrame,
@@ -1102,332 +1355,84 @@ def fit_recipe(
     """
     version = (next_version_for or {}).get(recipe.name, 1)
     validation = validation_context or ValidationContext()
+    try:
+        return RecipeResult(
+            recipe.name,
+            _fit_recipe_phases(
+                recipe,
+                frame,
+                version=version,
+                validation=validation,
+                sessions=sessions,
+                session_events=session_events,
+                prior_model=prior_model,
+                regrid=regrid,
+                tune_revision=tune_revision,
+                capture_recipe_allowlists=capture_recipe_allowlists,
+            ),
+        )
+    except _RecipeSkipError as skip:
+        return RecipeResult(
+            recipe.name, None, skipped=True, reason=skip.reason, candidate=skip.candidate
+        )
 
-    # 0. Capture evidence is authorized per recipe.  General sessions are
-    # unrestricted here; isolated captures are present in this mapping only
-    # when their manifest explicitly names the recipes they may inform.
-    sub = frame
-    if capture_recipe_allowlists:
-        if SESSION_COLUMN not in sub.columns:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=(
-                    f"no {SESSION_COLUMN} column in frame; can't enforce capture "
-                    "behavior-model allowlists"
-                ),
-            )
-        disallowed = {
-            session_id
-            for session_id, allowed_recipes in capture_recipe_allowlists.items()
-            if recipe.name not in allowed_recipes
-        }
-        sub = sub[~sub[SESSION_COLUMN].astype(str).isin(disallowed)]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason="no rows from sessions authorized for this behavior-model recipe",
-            )
 
-    # B01.3/B01.4 — the serving contract this recipe will persist. Training
-    # rows pass through the *same* evaluator the decoder, daemon and replay
-    # use, so the fit cannot learn from rows its model would refuse to grade.
+def _fit_recipe_phases(
+    recipe: Recipe,
+    frame: pd.DataFrame,
+    *,
+    version: int,
+    validation: ValidationContext,
+    sessions: Sequence[str],
+    session_events: Mapping[str, set[str]] | None,
+    prior_model: BehaviorModel1D | BehaviorModel2D | None,
+    regrid: bool,
+    tune_revision: str | None,
+    capture_recipe_allowlists: Mapping[str, Collection[str]] | None,
+) -> BehaviorModel1D | BehaviorModel2D:
+    """:func:`fit_recipe`'s phases, in order; any of them raises :class:`_RecipeSkipError`."""
+    sub = _authorize_captures(recipe, frame, capture_recipe_allowlists)
+    # B01.3/B01.4 — the serving contract this recipe will persist.
     spec = recipe_serving_spec(recipe)
     eligibility = recipe.serving_eligibility()
     conditions = list(spec.conditions)
-
-    # 0a. Refuse when a contract column is absent from the whole frame —
-    # silently fitting without an enforceable gate would re-introduce the
-    # contamination it exists to prevent (KOEO timing, open-loop trims).
-    if eligibility.engine_state.state == "engine_running" and RPM_COLUMN not in sub.columns:
-        return RecipeResult(
-            recipe.name,
-            None,
-            skipped=True,
-            reason=f"no {RPM_COLUMN} column in frame; can't enforce min_rpm gate",
-        )
-    if recipe.operating_mode is not None and MODE_COLUMN not in sub.columns:
-        return RecipeResult(
-            recipe.name, None, skipped=True, reason=f"no {MODE_COLUMN} column in frame"
-        )
-
-    # 1b. Training-only selection: require_session_events filter — drop rows
-    # from sessions that don't carry every event kind in
-    # ``recipe.require_session_events``. Only applies when ``session_events``
-    # is provided; otherwise no-op so callers that haven't wired up the
-    # classifier still work. Recorded in ``TrainingSelection``; never a
-    # serve-time rule.
-    if recipe.require_session_events and session_events is not None:
-        if SESSION_COLUMN not in sub.columns:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"no {SESSION_COLUMN} column in frame; can't enforce event gate",
-            )
-        required_events = set(recipe.require_session_events)
-        eligible_sessions = {
-            session_id
-            for session_id, events in session_events.items()
-            if required_events.issubset(events)
-        }
-        if not eligible_sessions:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=(
-                    f"no session in corpus carries every required event "
-                    f"{sorted(required_events)!r} (have {len(session_events)} classified)"
-                ),
-            )
-        sub = sub[sub[SESSION_COLUMN].isin(eligible_sessions)]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=(
-                    f"no rows in operating_mode={recipe.operating_mode!r} from sessions "
-                    f"that contain required events {sorted(required_events)!r}"
-                ),
-            )
-
-    if eligibility.fuel_control is not None and eligibility.fuel_control.channel not in sub.columns:
-        return RecipeResult(
-            recipe.name,
-            None,
-            skipped=True,
-            reason=(
-                f"no {eligibility.fuel_control.channel} column; can't enforce closed-loop-only fit"
-            ),
-        )
-
-    # 1d. Steady-state conditions are a model contract, not merely a corpus
-    # cleanup: refuse if a derivative cannot be enforced.
-    for condition in conditions:
-        if condition.channel not in sub.columns:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"missing {condition.channel}; can't enforce steady-state rate gate",
-            )
-
-    # 2. required columns present?
-    required = _recipe_columns(recipe)
-    missing = [c for c in required if c not in sub.columns]
-    if missing:
-        return RecipeResult(recipe.name, None, skipped=True, reason=f"missing columns {missing}")
-
-    # 2a. Cold-start context: the same engine-start fold the live source and
-    # batch featurizer run, derived here when the frame was built without a
-    # model that needed it.
-    if eligibility.cold_start is not None:
-        observed_col, coolant_col = start_context_columns(eligibility.cold_start)
-        if observed_col not in sub.columns or coolant_col not in sub.columns:
-            if SESSION_COLUMN not in sub.columns:
-                return RecipeResult(
-                    recipe.name,
-                    None,
-                    skipped=True,
-                    reason="cold-start eligibility requires session ids",
-                )
-            # ``sub`` still holds whole sessions (only session-level
-            # selections ran so far), so each fold sees the pre-start rows.
-            sub = append_start_context(
-                sub, [StartContextSpec.from_requirement(eligibility.cold_start)]
-            )
-
-    # 2a'. B07.6 local-range context, from whole sessions (as serving builds
-    # it from the live window), before any row-level selection.
-    missing_ranges = [
-        condition
-        for condition in eligibility.local_ranges
-        if local_range_column(condition) not in sub.columns
-    ]
-    if missing_ranges:
-        absent = [c.channel for c in missing_ranges if c.channel not in sub.columns]
-        if absent:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=f"missing {absent}; can't enforce local-range steady gate",
-            )
-        sub = append_local_ranges(sub, missing_ranges)
-
-    # 2b. Training-only: whole sessions with a broken run-time clock are
-    # poor warmup evidence (provenance in ``TrainingSelection``).
-    if recipe.require_contiguous_runtime:
-        if SESSION_COLUMN not in sub.columns:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason="runtime-continuity selection requires session ids",
-            )
-        contiguous: list[str] = []
-        for session_id, rows in sub.groupby(SESSION_COLUMN, sort=False):
-            ordered = rows.sort_values("timestamp") if "timestamp" in rows else rows
-            if "obd:RUN_TIME" not in ordered:
-                continue
-            runtime = pd.to_numeric(ordered["obd:RUN_TIME"], errors="coerce").dropna()
-            if len(runtime) < 2 or bool((runtime.diff().dropna() < 0).any()):
-                continue
-            if "obd:RUN_TIME__gap" in ordered and bool(
-                ordered["obd:RUN_TIME__gap"].astype(bool).any()
-            ):
-                continue
-            contiguous.append(str(session_id))
-        sub = sub[sub[SESSION_COLUMN].astype(str).isin(contiguous)]
-        if sub.empty:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason="no session satisfies the run-time continuity selection",
-            )
-
-    # 3. Per-row serving contract (engine state, fuel control, cold-start
-    # context, required context, fresh inputs and actual, rate gates).
-    reasons = eligibility_reasons(sub, spec, include_actual=True)
-    eligible_rows = eligible_mask(reasons)
-    if not eligible_rows.any():
-        codes = {reason_code(str(reason)) for reason in reasons if reason is not None}
-        if codes == {"operating_mode_mismatch"}:
-            detail = f"no rows in operating_mode={recipe.operating_mode!r}"
-        elif codes == {"engine_not_running"}:
-            detail = f"no rows with {RPM_COLUMN} >= {recipe.min_rpm} (engine-running gate)"
-        else:
-            detail = f"no rows satisfy the serving contract: {summarize_reasons(reasons)}"
-        return RecipeResult(recipe.name, None, skipped=True, reason=detail)
-    clean = sub.loc[eligible_rows]
-    if any(column.startswith("did:") for column in required):
-        gap_columns = [f"{column}__gap" for column in required if column.startswith("did:")]
-        if any(column not in clean.columns for column in gap_columns):
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason="DID surface lacks per-channel freshness flags for synchronous fitting",
-            )
-    if len(clean) < recipe.min_samples:
-        return RecipeResult(
-            recipe.name,
-            None,
-            skipped=True,
-            reason=f"{len(clean)} clean samples < min_samples={recipe.min_samples}",
-        )
-    # 3b. B02.3 — grouped folds by independent physical drive, ordered by
-    # parsed time. Pieces of one drive (captures, ``#segment`` splits) never
-    # cross folds; bin edges, bands and the baseline come from train only.
-    clean_sessions: tuple[str, ...] = tuple(sessions)
-    split: DriveSplit | None = None
-    test_rows = sub.iloc[0:0]
-    calibration_rows = sub.iloc[0:0]
-    wants_holdout = recipe.min_sessions > 1 or recipe.validation is not None
-    if SESSION_COLUMN in clean.columns and not wants_holdout:
-        # One drive is enough and nothing is held out: no ordering needed.
-        # Recorded chronologically where a stamp parses (never by name alone).
-        clean_sessions = tuple(
-            sorted(
-                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
-                key=_piece_time_key,
-            )
-        )
-    elif SESSION_COLUMN in clean.columns:
-        try:
-            drives = group_drives(
-                piece_time_ranges(sub), join_gap_seconds=validation.join_gap_seconds
-            )
-        except UnorderedSessionsError as exc:
-            return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
-        clean_counts = clean[SESSION_COLUMN].astype(str).value_counts()
-        qualifying = [
-            drive
-            for drive in drives
-            if int(sum(clean_counts.get(piece, 0) for piece in drive.pieces))
-            >= recipe.min_session_samples
-        ]
-        if len(qualifying) < recipe.min_sessions:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=(
-                    f"{len(qualifying)} independent drives with >= "
-                    f"{recipe.min_session_samples} samples < min_sessions={recipe.min_sessions}"
-                ),
-            )
-        by_time = {piece: i for i, drive in enumerate(drives) for piece in drive.pieces}
-        if wants_holdout and len(qualifying) > 1:
-            criteria = recipe.validation
-            n_calibration = criteria.calibration_drives if criteria is not None else 0
-            n_test = criteria.min_validation_drives if criteria is not None else 1
-            # Never train on nothing: shrink the held-out folds to leave one
-            # training drive; the evidence then records too few test drives.
-            n_calibration = min(n_calibration, len(qualifying) - 2)
-            n_test = max(1, min(n_test, len(qualifying) - 1 - max(0, n_calibration)))
-            split = chronological_split(
-                qualifying,
-                n_test=n_test,
-                n_calibration=max(0, n_calibration),
-                join_gap_seconds=validation.join_gap_seconds,
-                excluded=[drive for drive in drives if drive not in qualifying],
-            )
-            pieces = sub[SESSION_COLUMN].astype(str)
-            test_rows = sub[pieces.isin(split.pieces("test"))]
-            calibration_rows = sub[pieces.isin(split.pieces("calibration"))]
-            clean = clean[clean[SESSION_COLUMN].astype(str).isin(split.pieces("train"))]
-            if len(clean) < recipe.min_samples:
-                return RecipeResult(
-                    recipe.name,
-                    None,
-                    skipped=True,
-                    reason=(
-                        f"{len(clean)} training samples after holding out "
-                        f"{len(split.test)} test drive(s) < min_samples={recipe.min_samples}"
-                    ),
-                )
-            leaked = _prior_grid_leak(prior_model, split, regrid=regrid, recipe=recipe)
-            if leaked:
-                return RecipeResult(
-                    recipe.name,
-                    None,
-                    skipped=True,
-                    reason=(
-                        "prior grid edges were fitted on test drive piece(s) "
-                        f"{', '.join(leaked)}; re-grid (--regrid) so test drives cannot "
-                        "choose the bins"
-                    ),
-                )
-        clean_sessions = tuple(
-            sorted(
-                {str(piece) for piece in clean[SESSION_COLUMN].astype(str).unique()},
-                key=lambda piece: (by_time.get(piece, len(by_time)), piece),
-            )
-        )
+    _refuse_unenforceable_contract(recipe, sub, eligibility)
+    sub = _select_event_sessions(recipe, sub, session_events)
+    required = _refuse_missing_columns(recipe, sub, eligibility, conditions)
+    sub = _append_contexts(sub, eligibility)
+    sub = _select_contiguous_runtime(recipe, sub)
+    clean = _eligible_rows(recipe, sub, spec, required)
+    plan = _plan_folds(
+        recipe,
+        sub,
+        clean,
+        sessions=sessions,
+        validation=validation,
+        prior_model=prior_model,
+        regrid=regrid,
+    )
 
     # 4. dispatch
     try:
         if isinstance(recipe, Surface1DRecipe):
             model: BehaviorModel1D | BehaviorModel2D = _fit_1d(
-                recipe, clean, clean_sessions, version
+                recipe, plan.clean, plan.clean_sessions, version
             )
         else:
             model = _fit_2d(
-                recipe, clean, clean_sessions, version, prior_model=prior_model, regrid=regrid
+                recipe,
+                plan.clean,
+                plan.clean_sessions,
+                version,
+                prior_model=prior_model,
+                regrid=regrid,
             )
     except Exception as exc:  # noqa: BLE001 — log + skip; one bad recipe shouldn't kill a batch
         log.warning(
             "recipe failed to fit",
             extra={"recipe": recipe.name, "error": f"{type(exc).__name__}: {exc}"},
         )
-        return RecipeResult(recipe.name, None, skipped=True, reason=str(exc))
+        raise _RecipeSkipError(str(exc)) from exc
 
     model = model.model_copy(
         update={
@@ -1437,26 +1442,20 @@ def fit_recipe(
         }
     )
 
-    if split is not None:
+    if plan.split is not None:
         validation_reason, model = _validate_held_out(
             recipe,
             model,
-            split=split,
-            test_rows=test_rows,
-            calibration_rows=calibration_rows,
-            training_rows=clean,
+            split=plan.split,
+            test_rows=plan.test_rows,
+            calibration_rows=plan.calibration_rows,
+            training_rows=plan.clean,
             spec=spec,
             context=validation,
             tune_revision=tune_revision,
         )
         if validation_reason is not None:
-            return RecipeResult(
-                recipe.name,
-                None,
-                skipped=True,
-                reason=validation_reason,
-                candidate=model,
-            )
+            raise _RecipeSkipError(validation_reason, candidate=model)
 
     # 5. publish gate (4.1) — a fit that succeeded numerically but is too
     # poor / too sparse to trust is refused the same way a missing-column or
@@ -1468,23 +1467,9 @@ def fit_recipe(
             "recipe fit but failed the publish gate",
             extra={"recipe": recipe.name, "reason": gate_reason},
         )
-        return RecipeResult(recipe.name, None, skipped=True, reason=gate_reason)
+        raise _RecipeSkipError(gate_reason)
 
-    # 6. no-op-refit version suppression (4.5) — identical training rows
-    # (same hash) means an identical fit; don't churn the version just
-    # because the refit job ran again.
-    if (
-        prior_model is not None
-        and model.fit.training_data_hash
-        and model.fit.training_data_hash == prior_model.fit.training_data_hash
-        and model.conditions == prior_model.conditions
-        and model.eligibility == prior_model.eligibility
-        and model.fit.tune_revision == prior_model.fit.tune_revision
-        and _same_evidence_context(model, prior_model)
-    ):
-        model = model.model_copy(update={"version": prior_model.version})
-
-    return RecipeResult(recipe.name, model)
+    return _keep_prior_version(model, prior_model)
 
 
 def recipe_serving_spec(recipe: Recipe) -> ServingSpec:

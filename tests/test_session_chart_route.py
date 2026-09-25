@@ -7,34 +7,10 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
-
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008, vin: ""}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: false, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 30
-    latent_dim: 8
-    threshold_k: 3.0
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
+from tests.configs import isolated_config
 
 _SESSION_ID = "2026-05-17T120000"
 
@@ -53,9 +29,9 @@ def _client_and_session(tmp_path: Path) -> tuple[TestClient, Path]:
         records.append(TelemetryRecord.gps(t, "altitude", 100.0 + i, "m"))
     write_records_to_parquet(records, session_dir, max_rows=10_000)
 
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_CONFIG_YAML.format(storage=storage))
-    config = CanaryConfig.from_yaml(cfg_path)
+    config = isolated_config(
+        tmp_path, storage=storage, models={"isolation_forest": {"enabled": False}}
+    )
     app = create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")
     return TestClient(app), session_dir
 

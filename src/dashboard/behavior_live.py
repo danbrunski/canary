@@ -6,7 +6,7 @@ relative to those surfaces?" — the per-tick expected / actual / deviation /
 severity the daemon already computes via :mod:`src.decode.behavior_decoder`,
 plus a short rolling trail so the UI can draw a trajectory and a Δ sparkline.
 
-Design mirrors :class:`src.models.health.HealthMonitor`: a single-writer
+Design mirrors :class:`src.daemon.health.HealthMonitor`: a single-writer
 in-memory accumulator (the daemon's live-inference task is the only writer,
 exactly like the emitter / health monitor), bounded deques, and a JSON-safe
 :meth:`snapshot` the FastAPI process reads on the same event loop. No locking

@@ -1,6 +1,6 @@
-"""A paced synthetic bus for the C10 harness (``tests/capture_round_fakes``).
+"""A paced synthetic bus for the C10 harness (``src/validation/scripted_ecu``).
 
-:class:`SyntheticEcu` extends the fake-clock :class:`~tests.capture_round_fakes.ScriptedEcu`
+:class:`SyntheticEcu` extends the fake-clock :class:`~src.validation.scripted_ecu.ScriptedEcu`
 so the same scripted ECU that pins the C02/C04/C06 tests also runs on the
 **real** clock: ``recv`` sleeps until the next due frame instead of advancing
 a fake clock, so the actual collector thread, the asyncio fanout and the
@@ -42,7 +42,7 @@ import yaml
 from src.collection.obd_registry import lookup
 from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
-from tests.capture_round_fakes import (
+from src.validation.scripted_ecu import (
     DEFAULT_VALUES,
     ENGINE_ECU,
     NRC_SERVICE_NOT_SUPPORTED_IN_SESSION,

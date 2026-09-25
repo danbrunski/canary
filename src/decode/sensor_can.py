@@ -16,6 +16,8 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.decode.slices import in_range, slice_raw
+
 
 class SensorCanSignal(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -90,12 +92,13 @@ def decode_frame(
     for signal in catalog.signals:
         if signal.arbitration_id != arbitration_id or signal.extended != extended:
             continue
-        end = signal.byte_start + signal.byte_length
-        if len(data) < end:
+        raw = slice_raw(
+            data, signal.byte_start, signal.byte_length, signal.endianness, signed=signal.signed
+        )
+        if raw is None:
             continue
-        raw = int.from_bytes(data[signal.byte_start : end], signal.endianness, signed=signal.signed)
         value = raw * signal.scale + signal.offset
-        if signal.valid_min <= value <= signal.valid_max:
+        if in_range(value, signal.valid_min, signal.valid_max):
             readings.append(SensorReading(signal.name, value, signal.unit))
     return readings
 

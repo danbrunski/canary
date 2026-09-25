@@ -29,15 +29,23 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_config
+    from _cli import (
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 except ImportError:  # loaded as `scripts.analyze_session` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+    from scripts._cli import (  # type: ignore[no-redef]
+        add_common_args,
+        add_log_level_arg,
+        load_config,
+    )
 
 from src.analysis.session_deviations import (
     SessionComparisonReport,
     SessionDeviationReport,
     analyze_session,
-    compare_sessions,
+    compare_session_deviations,
 )
 from src.control.sessions import resolve_session
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
@@ -74,9 +82,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Override behavior_models.yaml path (default: the profile-scoped daemon path).",
     )
-    parser.add_argument(
-        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
-    )
+    add_log_level_arg(parser, default="WARNING")
     return parser.parse_args(argv)
 
 
@@ -147,23 +153,21 @@ def print_comparison(comparison: SessionComparisonReport, *, mode_filter: str | 
         print(f"mode filter: {mode_filter} ({len(surfaces)}/{len(comparison.surfaces)} surfaces)")
     print()
 
-    header = (
-        f"{'surface':<32} {'kind':<11} {'mode':<10} "
-        f"{'actual Δ':>10} {'expected Δ':>10} {'deviation Δ':>12}"
-    )
+    # R05.6: no whole-session mean deltas — they move with the drives'
+    # operating mix. The surface figure is the mean over matched cells only.
+    header = f"{'surface':<32} {'kind':<11} {'mode':<10} {'matched cells':>13} {'deviation Δ':>12}"
     print(header)
     print("-" * len(header))
     for s in sorted(surfaces, key=lambda s: s.name):
         print(
             f"{s.name:<32} {s.kind:<11} {s.operating_mode or '—':<10} "
-            f"{_fmt(s.mean_actual_delta):>10} {_fmt(s.mean_expected_delta):>10} "
-            f"{_fmt(s.mean_deviation_delta):>12}"
+            f"{s.n_matched_cells:>13} {_fmt(s.matched_deviation_delta):>12}"
         )
 
     moved = [s for s in surfaces if s.cells and any(c["delta"] is not None for c in s.cells)]
     if moved:
         print()
-        print("per-cell deviation delta (b - a), surface_2d only:")
+        print("per-cell deviation delta (b - a), cells with >= min_n rows on both sides:")
         for s in moved:
             print(f"  {s.name}:")
             for cell in s.cells:
@@ -202,7 +206,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         except FileNotFoundError as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
-        comparison = compare_sessions(session_dir, against_dir, config, models)
+        comparison = compare_session_deviations(session_dir, against_dir, config, models)
         print_comparison(comparison, mode_filter=args.mode)
         return 0
 

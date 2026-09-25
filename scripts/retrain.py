@@ -54,6 +54,7 @@ import train_lstm as lstm_trainer  # noqa: E402
 import train_tcn as tcn_trainer  # noqa: E402
 from _cli import (  # noqa: E402
     add_common_args,
+    add_override_reason_arg,
     add_profile_arg,
     load_config,
     parse_since_argument,
@@ -447,10 +448,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "Default: the newest healthy drives left after calibration, grouped by "
         "physical drive.",
     )
-    parser.add_argument(
+    add_override_reason_arg(
+        parser,
         "--accept-thin-calibration",
-        default=None,
-        metavar="REASON",
         help="Publish a sequence model whose calibration does not cover what it will "
         "score (fewer than three drives, a scored mode without its own band, a "
         "channel never observed), or an IF mode whose threshold rests on fewer than "
@@ -567,11 +567,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip the post-retrain detector-benchmark regression gate (Task 2.6).",
     )
-    parser.add_argument(
+    add_override_reason_arg(
+        parser,
         "--accept-alert-budget",
-        type=_stated_reason,
-        default=None,
-        metavar="REASON",
         help=(
             "Publish an alert-role artifact that failed the alert-budget gate (A06.5: "
             "at most 1 alert per engine-hour, upper bound, on the evaluation drives). "

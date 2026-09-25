@@ -22,6 +22,7 @@ from src.models.lstm_training import load_lstm_autoencoder_model
 from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.builders import write_obd_session
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -66,25 +67,9 @@ def _no_bindings(tmp_path: Path) -> Path:
     return tmp_path / "no-bindings.yaml"
 
 
-def _write_obd_session(root: Path, name: str, *, rows: int, start_epoch: float) -> Path:
-    session = root / name
-    records: list[TelemetryRecord] = []
-    for i in range(rows):
-        t = start_epoch + i
-        records.extend(
-            [
-                TelemetryRecord.obd(t, "RPM", 780.0 + (i % 4), "rpm"),
-                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
-                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
-            ]
-        )
-    write_records_to_parquet(records, session, max_rows=10_000)
-    return session
-
-
 def test_build_dataset_discovers_feature_columns(tmp_path: Path) -> None:
     config = _config(tmp_path)
-    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
 
     dataset = build_dataset([session], config, bindings_path=_no_bindings(tmp_path))
 
@@ -109,7 +94,7 @@ def test_build_dataset_rejects_sessions_without_numeric_columns(tmp_path: Path) 
 def test_train_writes_checkpoint_and_manifest(tmp_path: Path) -> None:
     _torch()
     config = _config(tmp_path)
-    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     out_dir = tmp_path / "models" / "lstm"
 
     trained = train([session], config, out_dir, bindings_path=_no_bindings(tmp_path))
@@ -137,7 +122,7 @@ def test_train_records_the_suppress_list_it_ran_with(tmp_path: Path) -> None:
     so the daemon can name a serve-time list that differs."""
     _torch()
     config = _config(tmp_path, suppress_channels=["obd:THROTTLE_POS"])
-    session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     out_dir = tmp_path / "models" / "lstm"
 
     trained = train([session], config, out_dir, bindings_path=_no_bindings(tmp_path))
@@ -162,8 +147,8 @@ def test_evaluate_runs_false_positive_benchmark(
 ) -> None:
     _torch()
     config = _config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     trained = train([train_session], config, tmp_path / "m", bindings_path=_no_bindings(tmp_path))
 
     report = evaluate(trained, [held_out], config, bindings_path=_no_bindings(tmp_path))
@@ -179,8 +164,8 @@ def test_evaluate_runs_false_positive_benchmark(
 def test_evaluate_returns_none_when_held_out_too_short(tmp_path: Path) -> None:
     _torch()
     config = _config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    short = _write_obd_session(tmp_path, "short", rows=4, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    short = write_obd_session(tmp_path, "short", rows=4, start_epoch=1_778_600_000.0)
     trained = train([train_session], config, tmp_path / "m", bindings_path=_no_bindings(tmp_path))
 
     assert evaluate(trained, [short], config, bindings_path=_no_bindings(tmp_path)) is None
@@ -189,8 +174,8 @@ def test_evaluate_returns_none_when_held_out_too_short(tmp_path: Path) -> None:
 def test_main_trains_and_evaluates(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _torch()
     config_path = _write_config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     out_dir = tmp_path / "models" / "lstm"
 
     exit_code = main(
@@ -224,8 +209,8 @@ def test_main_errors_when_no_sessions(tmp_path: Path, capsys: pytest.CaptureFixt
 def test_resolve_training_sessions_excludes_evaluate_sessions(tmp_path: Path) -> None:
     root = tmp_path / "sessions"
     root.mkdir()
-    _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
 
     resolved = _resolve_training_sessions(
         SimpleNamespace(
@@ -243,9 +228,9 @@ def test_resolve_training_sessions_excludes_calibration_sessions(tmp_path: Path)
     its thresholds will be calibrated against."""
     root = tmp_path / "sessions"
     root.mkdir()
-    _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
-    calib = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
-    held_out = _write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
+    write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    calib = write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    held_out = write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
 
     resolved = _resolve_training_sessions(
         SimpleNamespace(
@@ -266,9 +251,9 @@ def test_train_calibrates_on_the_pooled_multi_session_holdout_frame(tmp_path: Pa
     _torch()
     config = _config(tmp_path)
     no_bindings = _no_bindings(tmp_path)
-    training = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    training = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     holdouts = [
-        _write_obd_session(tmp_path, f"held-{i}", rows=40, start_epoch=1_778_600_000.0 + 1000 * i)
+        write_obd_session(tmp_path, f"held-{i}", rows=40, start_epoch=1_778_600_000.0 + 1000 * i)
         for i in range(3)
     ]
     pooled = build_feature_frame(holdouts, config, bindings_path=no_bindings)
@@ -300,8 +285,8 @@ def test_train_refuses_a_single_holdout_unless_the_override_is_stamped(tmp_path:
     _torch()
     config = _config(tmp_path)
     no_bindings = _no_bindings(tmp_path)
-    training = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held = _write_obd_session(tmp_path, "held", rows=40, start_epoch=1_778_600_000.0)
+    training = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held = write_obd_session(tmp_path, "held", rows=40, start_epoch=1_778_600_000.0)
 
     with pytest.raises(CalibrationCoverageError, match="1 physical drive"):
         train(
@@ -339,10 +324,10 @@ def test_calibration_and_evaluate_sessions_take_their_whole_drive(tmp_path: Path
 
     root = tmp_path / "sessions"
     root.mkdir()
-    train_session = _write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
-    calib = _write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
-    restart = _write_obd_session(root, "b2", rows=10, start_epoch=1_778_600_060.0)
-    held_out = _write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
+    train_session = write_obd_session(root, "a", rows=10, start_epoch=1_778_500_000.0)
+    calib = write_obd_session(root, "b", rows=10, start_epoch=1_778_600_000.0)
+    restart = write_obd_session(root, "b2", rows=10, start_epoch=1_778_600_060.0)
+    held_out = write_obd_session(root, "c", rows=10, start_epoch=1_778_700_000.0)
 
     holdout = _resolve_holdout(
         SimpleNamespace(
@@ -527,8 +512,8 @@ def test_main_refuses_when_every_explicit_session_is_held_out(
     an empty remainder is refused with the cause — not trained, and not
     reported as "none found"."""
     config_path = _write_config(tmp_path)
-    only = _write_obd_session(tmp_path, "only", rows=20, start_epoch=1_778_500_000.0)
-    restart = _write_obd_session(tmp_path, "restart", rows=20, start_epoch=1_778_500_060.0)
+    only = write_obd_session(tmp_path, "only", rows=20, start_epoch=1_778_500_000.0)
+    restart = write_obd_session(tmp_path, "restart", rows=20, start_epoch=1_778_500_060.0)
 
     exit_code = main(
         [

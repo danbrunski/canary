@@ -47,6 +47,7 @@ from src.models.spec_producibility import (
     manifest_behavior_fingerprints,
     manifest_feature_columns,
 )
+from src.profiles import active_registry_path
 
 INVENTORY_VERSION = 1
 
@@ -138,7 +139,10 @@ def build_inventory(
     artifact_path = config.daemon.behavior_models
     models = load_behavior_models(artifact_path) if artifact_path.exists() else None
     policy_path = behavior_policy_path(artifact_path)
-    registry = load_tune_revisions(artifact_path.parent / "tune_revisions.yaml")
+    # R05.1: the live flash registry — the operational copy once a flash was
+    # recorded from the dashboard — not the tracked file beside the artifact.
+    registry_path = active_registry_path(config)
+    registry = load_tune_revisions(registry_path)
     current = registry.at(now or datetime.now(UTC)) if registry is not None else None
     baselines = load_accepted_baselines(config.daemon.accepted_baselines)
     manifests = sorted(config.daemon.models_dir.glob("**/model.manifest.json"))
@@ -167,7 +171,8 @@ def build_inventory(
             "sha256": file_sha256(validation_document_path(artifact_path)),
         },
         "calibration": {
-            "registry_sha256": file_sha256(artifact_path.parent / "tune_revisions.yaml"),
+            "registry_path": str(registry_path),
+            "registry_sha256": file_sha256(registry_path),
             "current_revision": current.revision if current is not None else None,
             "flashed_at": current.flashed_at.isoformat() if current is not None else None,
         },

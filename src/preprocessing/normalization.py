@@ -120,10 +120,32 @@ class ZScoreScaler:
 
         out = df.copy()
         for col in self.columns:
-            std = self.stds[col]
-            denom = std if std >= self.std_floor else 1.0
-            out[col] = (df[col] - self.means[col]) / denom
+            out[col] = (df[col] - self.means[col]) / self.denominator(col)
         return out
+
+    def denominator(self, column: str) -> float:
+        """The divisor for ``column``: its std, or 1.0 when the std is below
+        ``std_floor`` (a constant channel is centred, never blown up).
+
+        The one statement of the rule (R04.15); :meth:`transform`,
+        :meth:`vectors` and every scorer read it from here.
+        """
+        std = self.stds[column]
+        return std if std >= self.std_floor else 1.0
+
+    def vectors(
+        self, columns: Iterable[str]
+    ) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
+        """``(means, denominators)`` as float64 arrays in ``columns`` order.
+
+        For callers that z-score a numpy block -- serve's per-tick window, the
+        batched scorer, the IF fit -- so they apply the same denominator rule
+        as :meth:`transform` instead of re-deriving it.
+        """
+        ordered = list(columns)
+        means = np.array([self.means[column] for column in ordered], dtype=np.float64)
+        denominators = np.array([self.denominator(column) for column in ordered], dtype=np.float64)
+        return means, denominators
 
     def fit_transform(
         self,

@@ -32,10 +32,19 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from _cli import add_common_args, add_profile_arg, load_config, resolve_sessions
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_profile_arg,
+        load_config,
+        resolve_sessions,
+    )
 except ImportError:  # loaded as `scripts.disposition_report` — repo root on path, not scripts/
     from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
         add_common_args,
+        add_log_level_arg,
         add_profile_arg,
         load_config,
         resolve_sessions,
@@ -55,7 +64,6 @@ from src.log import configure_logging  # noqa: E402
 from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
 from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
 from src.preprocessing.feature_pipeline import (  # noqa: E402
-    DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
     _decode_session_to_wide,
     candidate_feature_columns,
@@ -104,12 +112,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_common_args(parser)
     add_profile_arg(parser)
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=DEFAULT_BINDINGS_PATH,
-        help="Path to bindings.yaml for CAN-signal decode.",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--out",
         type=Path,
@@ -138,11 +141,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_TRAINING_LEDGER_PATH,
         help="Training ledger path -- where --golden-model-type's frozen baselines sidecar lives.",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

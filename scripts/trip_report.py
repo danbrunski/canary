@@ -23,6 +23,7 @@ from pathlib import Path
 
 from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
     add_common_args,
+    add_log_level_arg,
     load_config,
 )
 
@@ -79,9 +80,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         action="store_true",
         help="Recompute even when a cached trip_summary.json already exists.",
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

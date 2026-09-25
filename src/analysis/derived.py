@@ -24,6 +24,7 @@ field is ``None``, never a fake zero.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -157,128 +158,6 @@ def _append_dependency_gap(
     if arrived is not None:
         frame[arrived_column(output)] = arrived & ~stale
 
-
-#: Inputs each derived channel needs, as the ordered fallback groups
-#: :func:`_append_dependency_gap` consumes (one group = "any one of these").
-#: Declared here so callers that must reason about a derived channel without
-#: computing it — capture-profile validation resolving a `derived:` model
-#: input down to pollable channels — share one source of truth with the
-#: computation itself.
-#:
-#: H01.1 — it covers **every** ``derived:`` channel the feature pipeline and
-#: the live tick can emit (``tests/test_trainability.py`` featurizes a frame
-#: carrying every input and fails on an undeclared output), because it is
-#: also what makes a derived channel trainable: :mod:`src.trainability`
-#: admits one only when every input named here (and in
-#: :data:`DERIVED_CHANNEL_OPTIONAL_INPUTS`) is itself trainable, and treats an
-#: undeclared derived channel as not trainable. Declaring inputs is how a new
-#: derived channel becomes a feature.
-DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
-    "derived:AIR_MASS_PER_CYCLE": (
-        ("obd:MAF",),
-        ("obd:RPM", "decoded:ECM_RPM"),
-    ),
-    # Legacy: the reference pressure depends on what the session polled
-    # (MAP when present, else baro) — two physical quantities under one name.
-    # Kept bit-identical only because tracked IF/LSTM manifests consume it;
-    # no behavior recipe targets it (B04.5). See LEGACY_VE_CHANNEL.
-    "derived:VE_PERCENT": (
-        ("derived:AIR_MASS_PER_CYCLE",),
-        ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
-        ("obd:INTAKE_TEMP", "decoded:IAT"),
-    ),
-    # B04.5 — one physical reference per channel, no fallback between them
-    # and no default temperature: absent MAP / baro / IAT means no value.
-    "derived:VE_MANIFOLD_PERCENT": (
-        ("derived:AIR_MASS_PER_CYCLE",),
-        ("obd:INTAKE_PRESSURE", "decoded:MAP"),
-        ("obd:INTAKE_TEMP", "decoded:IAT"),
-    ),
-    "derived:VE_AMBIENT_PERCENT": (
-        ("derived:AIR_MASS_PER_CYCLE",),
-        ("obd:BAROMETRIC_PRESSURE",),
-        ("obd:INTAKE_TEMP", "decoded:IAT"),
-    ),
-    # --- compute_anomaly_signals: physical residuals -------------------------
-    "derived:STFT_BANK_BALANCE": (("obd:SHORT_FUEL_TRIM_1",), ("obd:SHORT_FUEL_TRIM_2",)),
-    "derived:LTFT_BANK_BALANCE": (("obd:LONG_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_2",)),
-    "derived:TOTAL_TRIM_B1": (("obd:SHORT_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_1",)),
-    "derived:TOTAL_TRIM_B2": (("obd:SHORT_FUEL_TRIM_2",), ("obd:LONG_FUEL_TRIM_2",)),
-    "derived:CAT_EFFICIENCY_B1": (("obd:O2_B1S1",), ("obd:O2_B1S2",)),
-    "derived:CAT_EFFICIENCY_B2": (("obd:O2_B2S1",), ("obd:O2_B2S2",)),
-    "derived:AFR_BANK_BALANCE": (("did:ECM_AF_SENSOR_V_B1",), ("did:ECM_AF_SENSOR_V_B2",)),
-    "derived:TPS_VOLTAGE_PER_PCT": (("did:ECM_THROTTLE_POS_SENSOR_1",), ("obd:THROTTLE_POS",)),
-    # --- src.analysis.afr.append_afr_channels ------------------------------
-    # Measured AFR: the wideband lambda PID, else the AF-sensor voltage DID
-    # through the profile's transfer (only when a calibration is loaded).
-    **{
-        f"derived:AFR_{kind}B{bank}": (
-            (f"obd:O2_WR_LAMBDA_S{bank}", f"did:ECM_AF_SENSOR_V_B{bank}"),
-        )
-        for bank in (1, 2)
-        for kind in ("", "CENSORED_")
-    },
-    "derived:TARGET_AFR": (("obd:RPM",), ("obd:ENGINE_LOAD",)),
-    **{
-        f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))
-        for bank in (1, 2)
-    },
-    # --- compute_instantaneous_channels: performance channels ----------------
-    # Fuel rate has three alternative methods (fuel-rate PID; MAF; speed-density
-    # from RPM and MAP), so its groups are the conjunctive form of "any one
-    # method": each group is necessary, and together they are sufficient.
-    # Refinements read only when present are in DERIVED_CHANNEL_OPTIONAL_INPUTS.
-    "derived:FUEL_RATE_LPH": (
-        (
-            "obd:ENGINE_FUEL_RATE",
-            "decoded:ENGINE_FUEL_RATE",
-            "obd:MAF",
-            "decoded:MAF",
-            "obd:RPM",
-            "decoded:ECM_RPM",
-        ),
-        (
-            "obd:ENGINE_FUEL_RATE",
-            "decoded:ENGINE_FUEL_RATE",
-            "obd:MAF",
-            "decoded:MAF",
-            "obd:INTAKE_PRESSURE",
-            "decoded:MAP",
-        ),
-    ),
-    "derived:INSTANT_ECONOMY_L_PER_100KM": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
-    "derived:INSTANT_ECONOMY_MPG": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
-    "derived:BOOST_VACUUM_KPA": (
-        ("obd:INTAKE_PRESSURE", "decoded:MAP"),
-        ("obd:BAROMETRIC_PRESSURE",),
-    ),
-    # Torque PIDs (actual % x reference, at rpm), else the fuel-energy estimate.
-    "derived:ESTIMATED_POWER_HP": (
-        ("obd:RPM", "decoded:ECM_RPM", "derived:FUEL_RATE_LPH"),
-        ("obd:ACTUAL_ENGINE_TORQUE", "derived:FUEL_RATE_LPH"),
-        ("obd:ENGINE_REFERENCE_TORQUE", "derived:FUEL_RATE_LPH"),
-    ),
-    "derived:ESTIMATED_TORQUE_NM": (
-        ("derived:ESTIMATED_POWER_HP",),
-        ("obd:RPM", "decoded:ECM_RPM"),
-    ),
-    "derived:GEAR_ESTIMATE": (("obd:SPEED",), ("obd:RPM", "decoded:ECM_RPM")),
-    # --- compute_derived_channels / the live session accumulators ------------
-    "derived:FUEL_USED_L": (("derived:FUEL_RATE_LPH",),),
-    "derived:CO2_KG": (("derived:FUEL_USED_L",),),
-    "derived:TRIP_DISTANCE_KM": (("obd:SPEED",),),
-    "derived:AVG_ECONOMY_L_PER_100KM": (("derived:FUEL_USED_L",), ("derived:TRIP_DISTANCE_KM",)),
-    "derived:IDLE_TIME_S": (("obd:RPM", "decoded:ECM_RPM"), ("obd:SPEED",)),
-    # --- src.analysis.committees: divergence residuals -----------------------
-    # Any ``min_members`` of the members, on rows where every gate holds.
-    **{
-        committee.output: (
-            committee.members,
-            *((gate.channel,) for gate in committee.gates),
-        )
-        for committee in COMMITTEES
-    },
-}
 
 #: Columns a derived channel reads *when present* but does not need: the
 #: fuel-rate lambda / commanded-equivalence-ratio refinement of the MAF method
@@ -860,6 +739,297 @@ def _switch_count_rolling(wide: pd.DataFrame, voltage: pd.Series, seconds: float
     return _session_time_rolling(wide, transitions, seconds, how="sum")
 
 
+@dataclass(frozen=True)
+class SignalInputs:
+    """What one :class:`DerivedSignal` computes from.
+
+    ``series`` holds one entry per input group, resolved exactly as
+    :func:`_series` resolves it (``None`` when the group has no usable
+    column). ``computed`` holds the signals already produced earlier in the
+    table this call, for signals built on another signal's *value* rather
+    than on its column (VE reads the air mass even when it is all-NaN).
+    """
+
+    frame: pd.DataFrame
+    vehicle: VehicleParameters | None
+    series: tuple[pd.Series | None, ...]
+    computed: Mapping[str, pd.Series]
+
+    @property
+    def complete(self) -> bool:
+        return all(value is not None for value in self.series)
+
+
+@dataclass(frozen=True)
+class DerivedSignal:
+    """One ``derived:`` anomaly signal: its name, its inputs, its formula.
+
+    ``input_groups`` is the only declaration of what the signal reads — the
+    freshness gap, :data:`DERIVED_CHANNEL_INPUTS` (capture-profile warnings,
+    trainability) and the computation all use it, so they cannot disagree.
+    ``compute`` returns ``None`` to skip the signal on this frame.
+    """
+
+    name: str
+    input_groups: tuple[tuple[str, ...], ...]
+    compute: Callable[[SignalInputs], pd.Series | None]
+
+
+def _float(values: pd.Series) -> pd.Series:
+    return values.astype(float)
+
+
+def _air_mass_signal(inputs: SignalInputs) -> pd.Series | None:
+    return _air_mass_per_cycle_g(inputs.frame)
+
+
+def _legacy_ve_signal(inputs: SignalInputs) -> pd.Series | None:
+    air = inputs.computed.get("derived:AIR_MASS_PER_CYCLE")
+    if air is None or inputs.vehicle is None:
+        return None
+    theoretical = _theoretical_air_mass_per_cycle_g(inputs.frame, inputs.vehicle)
+    if theoretical is None:
+        return None
+    return _float(air / theoretical.where(theoretical > 0) * 100.0)
+
+
+def _referenced_ve_signal(output: str) -> Callable[[SignalInputs], pd.Series | None]:
+    def compute(inputs: SignalInputs) -> pd.Series | None:
+        air = inputs.computed.get("derived:AIR_MASS_PER_CYCLE")
+        if air is None or inputs.vehicle is None:
+            return None
+        return _referenced_ve_percent(inputs.frame, air, output, inputs.vehicle)
+
+    return compute
+
+
+def _both(
+    formula: Callable[[pd.DataFrame, pd.Series, pd.Series], pd.Series],
+) -> Callable[[SignalInputs], pd.Series | None]:
+    """The common shape: both input groups resolve, then ``formula(frame, a, b)``."""
+
+    def compute(inputs: SignalInputs) -> pd.Series | None:
+        if not inputs.complete:
+            return None
+        a, b = inputs.series
+        assert a is not None and b is not None
+        return _float(formula(inputs.frame, a, b))
+
+    return compute
+
+
+def _smoothed_difference(frame: pd.DataFrame, a: pd.Series, b: pd.Series) -> pd.Series:
+    # Time-smooth the difference (linear, so == difference of smoothed banks)
+    # to reject sampling-skew transients; see
+    # STFT_BANK_BALANCE_SMOOTHING_SECONDS. The raw per-bank STFT columns are
+    # left instantaneous — only the *asymmetry* signal is corrupted by
+    # asynchronous polling, not the per-bank trims themselves.
+    return _session_time_smooth(frame, a - b, STFT_BANK_BALANCE_SMOOTHING_SECONDS)
+
+
+def _difference(_frame: pd.DataFrame, a: pd.Series, b: pd.Series) -> pd.Series:
+    return a - b
+
+
+def _total(_frame: pd.DataFrame, a: pd.Series, b: pd.Series) -> pd.Series:
+    return a + b
+
+
+def _cat_efficiency(frame: pd.DataFrame, upstream: pd.Series, downstream: pd.Series) -> pd.Series:
+    up_switches = _switch_count_rolling(frame, upstream, CAT_EFFICIENCY_WINDOW_SECONDS)
+    down_switches = _switch_count_rolling(frame, downstream, CAT_EFFICIENCY_WINDOW_SECONDS)
+    ratio = (down_switches / up_switches.where(up_switches > 0)).clip(upper=1.0)
+    return 1.0 - ratio
+
+
+def _voltage_per_pct(_frame: pd.DataFrame, volts: pd.Series, pct: pd.Series) -> pd.Series:
+    # Guard against div-by-zero at closed throttle (pct = 0); the metric is
+    # meaningful only when the pedal is being pressed.
+    return volts / pct.where(pct > 1.0)
+
+
+#: Every physical-residual signal :func:`compute_anomaly_signals` appends, in
+#: output order (IF/LSTM manifests consume these names and their ``__gap``
+#: columns, so order and formulae are pinned bit-identical — R05.4).
+#:
+#: The ``did:ECM_*`` inputs are Nissan DID names in shared code; moving them
+#: to the vehicle profile is the open part of R05.4 (see the roadmap item).
+ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
+    DerivedSignal(
+        "derived:AIR_MASS_PER_CYCLE",
+        (("obd:MAF",), ("obd:RPM", "decoded:ECM_RPM")),
+        _air_mass_signal,
+    ),
+    # Legacy: the reference pressure depends on what the session polled
+    # (MAP when present, else baro) — two physical quantities under one name.
+    # Kept bit-identical only because tracked IF/LSTM manifests consume it;
+    # no behavior recipe targets it (B04.5). See LEGACY_VE_CHANNEL.
+    DerivedSignal(
+        LEGACY_VE_CHANNEL,
+        (
+            ("derived:AIR_MASS_PER_CYCLE",),
+            ("obd:INTAKE_PRESSURE", "decoded:MAP", "obd:BAROMETRIC_PRESSURE"),
+            ("obd:INTAKE_TEMP", "decoded:IAT"),
+        ),
+        _legacy_ve_signal,
+    ),
+    # B04.5 — one physical reference per channel, no fallback between them
+    # and no default temperature: absent MAP / baro / IAT means no value.
+    DerivedSignal(
+        VE_MANIFOLD_CHANNEL,
+        (
+            ("derived:AIR_MASS_PER_CYCLE",),
+            ("obd:INTAKE_PRESSURE", "decoded:MAP"),
+            ("obd:INTAKE_TEMP", "decoded:IAT"),
+        ),
+        _referenced_ve_signal(VE_MANIFOLD_CHANNEL),
+    ),
+    DerivedSignal(
+        VE_AMBIENT_CHANNEL,
+        (
+            ("derived:AIR_MASS_PER_CYCLE",),
+            ("obd:BAROMETRIC_PRESSURE",),
+            ("obd:INTAKE_TEMP", "decoded:IAT"),
+        ),
+        _referenced_ve_signal(VE_AMBIENT_CHANNEL),
+    ),
+    DerivedSignal(
+        "derived:STFT_BANK_BALANCE",
+        (("obd:SHORT_FUEL_TRIM_1",), ("obd:SHORT_FUEL_TRIM_2",)),
+        _both(_smoothed_difference),
+    ),
+    DerivedSignal(
+        "derived:LTFT_BANK_BALANCE",
+        (("obd:LONG_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_2",)),
+        _both(_difference),
+    ),
+    DerivedSignal(
+        "derived:TOTAL_TRIM_B1",
+        (("obd:SHORT_FUEL_TRIM_1",), ("obd:LONG_FUEL_TRIM_1",)),
+        _both(_total),
+    ),
+    DerivedSignal(
+        "derived:TOTAL_TRIM_B2",
+        (("obd:SHORT_FUEL_TRIM_2",), ("obd:LONG_FUEL_TRIM_2",)),
+        _both(_total),
+    ),
+    DerivedSignal(
+        "derived:CAT_EFFICIENCY_B1",
+        (("obd:O2_B1S1",), ("obd:O2_B1S2",)),
+        _both(_cat_efficiency),
+    ),
+    DerivedSignal(
+        "derived:CAT_EFFICIENCY_B2",
+        (("obd:O2_B2S1",), ("obd:O2_B2S2",)),
+        _both(_cat_efficiency),
+    ),
+    DerivedSignal(
+        "derived:AFR_BANK_BALANCE",
+        (("did:ECM_AF_SENSOR_V_B1",), ("did:ECM_AF_SENSOR_V_B2",)),
+        _both(_difference),
+    ),
+    # Inputs span different units (V vs %) so the ratio is the useful
+    # invariant — a TPS that's drifted to a different voltage range produces
+    # a different ratio.
+    DerivedSignal(
+        "derived:TPS_VOLTAGE_PER_PCT",
+        (("did:ECM_THROTTLE_POS_SENSOR_1",), ("obd:THROTTLE_POS",)),
+        _both(_voltage_per_pct),
+    ),
+)
+
+
+#: Inputs each derived channel needs, as the ordered fallback groups
+#: :func:`_append_dependency_gap` consumes (one group = "any one of these").
+#: Declared here so callers that must reason about a derived channel without
+#: computing it — capture-profile validation resolving a `derived:` model
+#: input down to pollable channels — share one source of truth with the
+#: computation itself.
+#:
+#: H01.1 — it covers **every** ``derived:`` channel the feature pipeline and
+#: the live tick can emit (``tests/test_trainability.py`` featurizes a frame
+#: carrying every input and fails on an undeclared output), because it is
+#: also what makes a derived channel trainable: :mod:`src.trainability`
+#: admits one only when every input named here (and in
+#: :data:`DERIVED_CHANNEL_OPTIONAL_INPUTS`) is itself trainable, and treats an
+#: undeclared derived channel as not trainable. Declaring inputs is how a new
+#: derived channel becomes a feature.
+DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
+    # --- compute_anomaly_signals: declared once, in ANOMALY_SIGNALS (R05.4) --
+    **{signal.name: signal.input_groups for signal in ANOMALY_SIGNALS},
+    # --- src.analysis.afr.append_afr_channels ------------------------------
+    # Measured AFR: the wideband lambda PID, else the AF-sensor voltage DID
+    # through the profile's transfer (only when a calibration is loaded).
+    **{
+        f"derived:AFR_{kind}B{bank}": (
+            (f"obd:O2_WR_LAMBDA_S{bank}", f"did:ECM_AF_SENSOR_V_B{bank}"),
+        )
+        for bank in (1, 2)
+        for kind in ("", "CENSORED_")
+    },
+    "derived:TARGET_AFR": (("obd:RPM",), ("obd:ENGINE_LOAD",)),
+    **{
+        f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))
+        for bank in (1, 2)
+    },
+    # --- compute_instantaneous_channels: performance channels ----------------
+    # Fuel rate has three alternative methods (fuel-rate PID; MAF; speed-density
+    # from RPM and MAP), so its groups are the conjunctive form of "any one
+    # method": each group is necessary, and together they are sufficient.
+    # Refinements read only when present are in DERIVED_CHANNEL_OPTIONAL_INPUTS.
+    "derived:FUEL_RATE_LPH": (
+        (
+            "obd:ENGINE_FUEL_RATE",
+            "decoded:ENGINE_FUEL_RATE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:RPM",
+            "decoded:ECM_RPM",
+        ),
+        (
+            "obd:ENGINE_FUEL_RATE",
+            "decoded:ENGINE_FUEL_RATE",
+            "obd:MAF",
+            "decoded:MAF",
+            "obd:INTAKE_PRESSURE",
+            "decoded:MAP",
+        ),
+    ),
+    "derived:INSTANT_ECONOMY_L_PER_100KM": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
+    "derived:INSTANT_ECONOMY_MPG": (("derived:FUEL_RATE_LPH",), ("obd:SPEED",)),
+    "derived:BOOST_VACUUM_KPA": (
+        ("obd:INTAKE_PRESSURE", "decoded:MAP"),
+        ("obd:BAROMETRIC_PRESSURE",),
+    ),
+    # Torque PIDs (actual % x reference, at rpm), else the fuel-energy estimate.
+    "derived:ESTIMATED_POWER_HP": (
+        ("obd:RPM", "decoded:ECM_RPM", "derived:FUEL_RATE_LPH"),
+        ("obd:ACTUAL_ENGINE_TORQUE", "derived:FUEL_RATE_LPH"),
+        ("obd:ENGINE_REFERENCE_TORQUE", "derived:FUEL_RATE_LPH"),
+    ),
+    "derived:ESTIMATED_TORQUE_NM": (
+        ("derived:ESTIMATED_POWER_HP",),
+        ("obd:RPM", "decoded:ECM_RPM"),
+    ),
+    "derived:GEAR_ESTIMATE": (("obd:SPEED",), ("obd:RPM", "decoded:ECM_RPM")),
+    # --- compute_derived_channels / the live session accumulators ------------
+    "derived:FUEL_USED_L": (("derived:FUEL_RATE_LPH",),),
+    "derived:CO2_KG": (("derived:FUEL_USED_L",),),
+    "derived:TRIP_DISTANCE_KM": (("obd:SPEED",),),
+    "derived:AVG_ECONOMY_L_PER_100KM": (("derived:FUEL_USED_L",), ("derived:TRIP_DISTANCE_KM",)),
+    "derived:IDLE_TIME_S": (("obd:RPM", "decoded:ECM_RPM"), ("obd:SPEED",)),
+    # --- src.analysis.committees: divergence residuals -----------------------
+    # Any ``min_members`` of the members, on rows where every gate holds.
+    **{
+        committee.output: (
+            committee.members,
+            *((gate.channel,) for gate in committee.gates),
+        )
+        for committee in COMMITTEES
+    },
+}
+
+
 def compute_anomaly_signals(
     wide: pd.DataFrame, vehicle: VehicleParameters | None = None
 ) -> pd.DataFrame:
@@ -967,134 +1137,20 @@ def compute_anomaly_signals(
     if wide.empty:
         return wide.copy()
     out = wide.copy()
-
-    # Air mass per cycle (g/cycle) — see _air_mass_per_cycle_g.
-    air_mass_measured = _air_mass_per_cycle_g(out)
-    if air_mass_measured is not None:
-        out["derived:AIR_MASS_PER_CYCLE"] = air_mass_measured
-        _append_dependency_gap(
-            out,
-            "derived:AIR_MASS_PER_CYCLE",
-            *DERIVED_CHANNEL_INPUTS["derived:AIR_MASS_PER_CYCLE"],
+    computed: dict[str, pd.Series] = {}
+    for signal in ANOMALY_SIGNALS:
+        inputs = SignalInputs(
+            frame=out,
+            vehicle=vehicle,
+            series=tuple(_series(out, *group) for group in signal.input_groups),
+            computed=computed,
         )
-
-        # True VE (Task 4.1): same measured mass, normalized against the
-        # theoretical 100%-VE fill. Needs the vehicle config for
-        # displacement, so it's additionally gated on `vehicle` being
-        # supplied (see docstring).
-        if vehicle is not None:
-            theoretical = _theoretical_air_mass_per_cycle_g(out, vehicle)
-            if theoretical is not None:
-                theo_safe = theoretical.where(theoretical > 0)
-                out["derived:VE_PERCENT"] = (air_mass_measured / theo_safe * 100.0).astype(float)
-                _append_dependency_gap(
-                    out,
-                    "derived:VE_PERCENT",
-                    *DERIVED_CHANNEL_INPUTS["derived:VE_PERCENT"],
-                )
-            # B04.5 — one reference per channel. A vehicle without MAP gets
-            # only the ambient-referenced value; nothing is relabelled.
-            for channel in (VE_MANIFOLD_CHANNEL, VE_AMBIENT_CHANNEL):
-                referenced = _referenced_ve_percent(out, air_mass_measured, channel, vehicle)
-                if referenced is None:
-                    continue
-                out[channel] = referenced
-                _append_dependency_gap(out, channel, *DERIVED_CHANNEL_INPUTS[channel])
-
-    # Per-bank fuel trim asymmetry. Both STFT and LTFT versions, since
-    # they characterize fast (closed-loop) and slow (drift) bias paths.
-    stft_b1 = _series(out, "obd:SHORT_FUEL_TRIM_1")
-    stft_b2 = _series(out, "obd:SHORT_FUEL_TRIM_2")
-    if stft_b1 is not None and stft_b2 is not None:
-        # Time-smooth the difference (linear, so == difference of smoothed
-        # banks) to reject sampling-skew transients; see
-        # STFT_BANK_BALANCE_SMOOTHING_SECONDS. The raw per-bank STFT columns
-        # are left instantaneous — only the *asymmetry* signal is corrupted by
-        # asynchronous polling, not the per-bank trims themselves.
-        out["derived:STFT_BANK_BALANCE"] = _session_time_smooth(
-            out, stft_b1 - stft_b2, STFT_BANK_BALANCE_SMOOTHING_SECONDS
-        ).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:STFT_BANK_BALANCE",
-            *DERIVED_CHANNEL_INPUTS["derived:STFT_BANK_BALANCE"],
-        )
-    ltft_b1 = _series(out, "obd:LONG_FUEL_TRIM_1")
-    ltft_b2 = _series(out, "obd:LONG_FUEL_TRIM_2")
-    if ltft_b1 is not None and ltft_b2 is not None:
-        out["derived:LTFT_BANK_BALANCE"] = (ltft_b1 - ltft_b2).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:LTFT_BANK_BALANCE",
-            *DERIVED_CHANNEL_INPUTS["derived:LTFT_BANK_BALANCE"],
-        )
-
-    # Total trim per bank (Task 4.3): LTFT + STFT, reusing the per-bank
-    # series already fetched above rather than re-resolving them.
-    if stft_b1 is not None and ltft_b1 is not None:
-        out["derived:TOTAL_TRIM_B1"] = (stft_b1 + ltft_b1).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:TOTAL_TRIM_B1",
-            *DERIVED_CHANNEL_INPUTS["derived:TOTAL_TRIM_B1"],
-        )
-    if stft_b2 is not None and ltft_b2 is not None:
-        out["derived:TOTAL_TRIM_B2"] = (stft_b2 + ltft_b2).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:TOTAL_TRIM_B2",
-            *DERIVED_CHANNEL_INPUTS["derived:TOTAL_TRIM_B2"],
-        )
-
-    # Catalyst efficiency index (Task 4.4) — see docstring for the
-    # switch-count-ratio formula and its explicit "heuristic index, not a
-    # literal efficiency" framing.
-    for bank, upstream_col, downstream_col in (
-        (1, "obd:O2_B1S1", "obd:O2_B1S2"),
-        (2, "obd:O2_B2S1", "obd:O2_B2S2"),
-    ):
-        upstream_v = _series(out, upstream_col)
-        downstream_v = _series(out, downstream_col)
-        if upstream_v is None or downstream_v is None:
+        values = signal.compute(inputs)
+        if values is None:
             continue
-        up_switches = _switch_count_rolling(out, upstream_v, CAT_EFFICIENCY_WINDOW_SECONDS)
-        down_switches = _switch_count_rolling(out, downstream_v, CAT_EFFICIENCY_WINDOW_SECONDS)
-        up_safe = up_switches.where(up_switches > 0)
-        ratio = (down_switches / up_safe).clip(upper=1.0)
-        out[f"derived:CAT_EFFICIENCY_B{bank}"] = (1.0 - ratio).astype(float)
-        _append_dependency_gap(
-            out,
-            f"derived:CAT_EFFICIENCY_B{bank}",
-            *DERIVED_CHANNEL_INPUTS[f"derived:CAT_EFFICIENCY_B{bank}"],
-        )
-
-    # Wideband AFR voltage asymmetry (DID-dependent).
-    afr_b1 = _series(out, "did:ECM_AF_SENSOR_V_B1")
-    afr_b2 = _series(out, "did:ECM_AF_SENSOR_V_B2")
-    if afr_b1 is not None and afr_b2 is not None:
-        out["derived:AFR_BANK_BALANCE"] = (afr_b1 - afr_b2).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:AFR_BANK_BALANCE",
-            *DERIVED_CHANNEL_INPUTS["derived:AFR_BANK_BALANCE"],
-        )
-
-    # TPS voltage vs calculated throttle %. Inputs span different units
-    # (V vs %) so the ratio is the useful invariant — a TPS that's drifted
-    # to a different voltage range produces a different ratio.
-    tps_v = _series(out, "did:ECM_THROTTLE_POS_SENSOR_1")
-    tps_pct = _series(out, "obd:THROTTLE_POS")
-    if tps_v is not None and tps_pct is not None:
-        # Guard against div-by-zero at closed throttle (pct = 0); the metric
-        # is meaningful only when the pedal is being pressed.
-        pct_safe = tps_pct.where(tps_pct > 1.0)
-        out["derived:TPS_VOLTAGE_PER_PCT"] = (tps_v / pct_safe).astype(float)
-        _append_dependency_gap(
-            out,
-            "derived:TPS_VOLTAGE_PER_PCT",
-            *DERIVED_CHANNEL_INPUTS["derived:TPS_VOLTAGE_PER_PCT"],
-        )
-
+        computed[signal.name] = values
+        out[signal.name] = values
+        _append_dependency_gap(out, signal.name, *signal.input_groups)
     return out
 
 

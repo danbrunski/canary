@@ -18,7 +18,6 @@ import os
 import resource
 import shutil
 import signal
-import time
 from collections.abc import Callable
 from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
@@ -54,8 +53,8 @@ from src.control.trip_end import (
     limit_address_space,
 )
 from src.preprocessing.loader import count_session_rows
-from tests.test_digest import SESSION_END, _config
-from tests.test_fingerprint import _write_rich_session
+from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
+from tests.fakes import slow_digest
 
 _MIB = 1024 * 1024
 
@@ -65,7 +64,7 @@ def _budgeted(config: CanaryConfig, **daemon: Any) -> CanaryConfig:
 
 
 def _session(tmp_path: Path, name: str = "2026-05-20T180000") -> Path:
-    return _write_rich_session(tmp_path, name=name)
+    return write_rich_session(tmp_path, name=name)
 
 
 class _RefusingExecutor(Executor):
@@ -91,30 +90,6 @@ class _MemoryErrorExecutor(Executor):
         future: Future[Any] = Future()
         future.set_exception(MemoryError())
         return future
-
-
-def _slow_digest(seconds: float, calls: list[bool]) -> Callable[..., SessionDigest]:
-    def fake(session_dir: Path, config: CanaryConfig, **_: Any) -> SessionDigest:
-        try:
-            asyncio.get_running_loop()
-            calls.append(True)
-        except RuntimeError:
-            calls.append(False)
-        time.sleep(seconds)
-        return SessionDigest(
-            schema_version=1,
-            computed_at="2026-05-20T18:05:00+00:00",
-            session_id=session_dir.name,
-            duration_seconds=1.0,
-            mode_seconds={},
-            anomaly_counts_by_source={},
-            top_behavior_deviations=[],
-            fingerprint_top_movers=[],
-            new_dtcs=[],
-            new_ledger_events=[],
-        )
-
-    return fake
 
 
 async def _ticks_during(awaitable: Any) -> tuple[Any, int]:
@@ -144,10 +119,10 @@ async def test_trip_end_digest_keeps_the_loop_running_while_it_computes(
 ) -> None:
     session = _session(tmp_path)
     calls: list[bool] = []
-    monkeypatch.setattr(trip_end, "compute_digest_under_limit", _slow_digest(1.0, calls))
+    monkeypatch.setattr(trip_end, "compute_digest_under_limit", slow_digest(1.0, calls))
     with ThreadPoolExecutor(max_workers=1) as pool:
         payload, ticks = await _ticks_during(
-            handle_trip_end_off_loop(session, _config(tmp_path), executor=pool)
+            handle_trip_end_off_loop(session, digest_config(tmp_path), executor=pool)
         )
     assert payload is not None
     assert payload["session_id"] == session.name
@@ -162,11 +137,11 @@ async def test_concurrent_trip_end_requests_share_the_running_digest(
 ) -> None:
     session = _session(tmp_path)
     calls: list[bool] = []
-    monkeypatch.setattr(trip_end, "compute_digest_under_limit", _slow_digest(0.1, calls))
+    monkeypatch.setattr(trip_end, "compute_digest_under_limit", slow_digest(0.1, calls))
     with ThreadPoolExecutor(max_workers=2) as pool:
         owner, follower = await asyncio.gather(
-            handle_trip_end_off_loop(session, _config(tmp_path), executor=pool),
-            handle_trip_end_off_loop(session, _config(tmp_path), executor=pool),
+            handle_trip_end_off_loop(session, digest_config(tmp_path), executor=pool),
+            handle_trip_end_off_loop(session, digest_config(tmp_path), executor=pool),
         )
     assert sum(result is not None for result in (owner, follower)) == 1
     assert calls == [False]
@@ -182,7 +157,7 @@ async def test_a_session_over_the_row_budget_is_refused_and_no_child_starts(
     session = _session(tmp_path)
     rows = count_session_rows(session)
     assert rows is not None and rows > 10
-    config = _budgeted(_config(tmp_path), digest_row_budget=10)
+    config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
     pool = _RefusingExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
@@ -206,7 +181,7 @@ async def test_a_replay_directory_is_refused_by_the_shared_function(tmp_path: Pa
     the trip-end hook bypassed it and digested 5.9 M replayed rows."""
     session = _session(tmp_path, name="_replay-2026-05-20T180000")
     result = await handle_trip_end_off_loop(
-        session, _config(tmp_path), executor=_RefusingExecutor()
+        session, digest_config(tmp_path), executor=_RefusingExecutor()
     )
     assert result is None
     skipped = read_digest_skipped(session)
@@ -220,16 +195,16 @@ def test_the_in_process_path_is_gated_by_the_same_budget(tmp_path: Path) -> None
     (HTTP route, MCP tool, scripts) — the budget lives there, not in the
     daemon wiring, so no caller can forget it."""
     session = _session(tmp_path)
-    config = _budgeted(_config(tmp_path), digest_row_budget=10)
-    assert get_or_compute_digest(session, config, now=SESSION_END) is None
+    config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
+    assert get_or_compute_digest(session, config, now=RICH_SESSION_END) is None
     assert not (session / DIGEST_FILENAME).exists()
     assert (read_digest_skipped(session) or {})["reason"] == REASON_OVER_ROW_BUDGET
 
 
 def test_a_zero_budget_disables_the_row_check(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    config = _budgeted(_config(tmp_path), digest_row_budget=0)
-    assert get_or_compute_digest(session, config, now=SESSION_END) is not None
+    config = _budgeted(digest_config(tmp_path), digest_row_budget=0)
+    assert get_or_compute_digest(session, config, now=RICH_SESSION_END) is not None
     assert read_digest_skipped(session) is None
 
 
@@ -270,19 +245,19 @@ def test_compute_digest_under_limit_caps_before_reading_anything(
 
     monkeypatch.setattr(trip_end, "compute_digest", spy)
     digest = compute_digest_under_limit(
-        session, _config(tmp_path), now=SESSION_END, address_space_bytes=1234 * _MIB
+        session, digest_config(tmp_path), now=RICH_SESSION_END, address_space_bytes=1234 * _MIB
     )
     assert order == [f"limit:{1234 * _MIB}", "compute"]
     assert digest.session_id == session.name
 
 
 def test_the_ceiling_comes_from_config_when_set(tmp_path: Path) -> None:
-    config = _budgeted(_config(tmp_path), digest_address_space_mb=1500)
+    config = _budgeted(digest_config(tmp_path), digest_address_space_mb=1500)
     assert digest_address_space_bytes(config) == 1500 * _MIB
 
 
 def test_the_derived_ceiling_is_bounded_and_below_total_ram(tmp_path: Path) -> None:
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
     assert config.daemon.digest_address_space_mb is None
     derived = digest_address_space_bytes(config)
     total = int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
@@ -305,7 +280,7 @@ def test_limit_address_space_never_widens_an_existing_hard_limit() -> None:
 
 async def test_a_child_memory_error_is_recorded_and_never_raised(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
 
     result = await handle_trip_end_off_loop(session, config, executor=_MemoryErrorExecutor())
 
@@ -345,7 +320,7 @@ async def test_a_wedged_child_times_out_is_terminated_and_recorded(
             await asyncio.sleep(0.001)
 
     watcher = asyncio.create_task(watch())
-    result = await handle_trip_end_off_loop(session, _config(tmp_path), timeout=0.05)
+    result = await handle_trip_end_off_loop(session, digest_config(tmp_path), timeout=0.05)
     watcher.cancel()
 
     assert result is None
@@ -378,9 +353,11 @@ async def test_a_dead_child_is_reported_not_hung(tmp_path: Path) -> None:
 
     session = _session(tmp_path)
     with pytest.raises(TripEndDigestUnavailableError, match="failed"):
-        await compute_digest_off_loop(session, _config(tmp_path), executor=_Broken())
+        await compute_digest_off_loop(session, digest_config(tmp_path), executor=_Broken())
     # The hook turns it into a recorded refusal, never an exception.
-    assert await handle_trip_end_off_loop(session, _config(tmp_path), executor=_Broken()) is None
+    assert (
+        await handle_trip_end_off_loop(session, digest_config(tmp_path), executor=_Broken()) is None
+    )
     assert (read_digest_skipped(session) or {})["reason"] == REASON_CHILD_FAILED
 
 
@@ -398,8 +375,8 @@ async def test_the_real_child_digest_is_byte_identical_to_the_in_process_one(
     shutil.copytree(inline, child_root / inline.name)
     child = child_root / inline.name
 
-    get_or_compute_digest(inline, _config(tmp_path), now=SESSION_END)
-    await handle_trip_end_off_loop(child, _config(tmp_path), now=SESSION_END)
+    get_or_compute_digest(inline, digest_config(tmp_path), now=RICH_SESSION_END)
+    await handle_trip_end_off_loop(child, digest_config(tmp_path), now=RICH_SESSION_END)
 
     assert (child / DIGEST_FILENAME).read_text() == (inline / DIGEST_FILENAME).read_text()
     assert read_digest_skipped(child) is None
@@ -432,7 +409,7 @@ async def test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted(
     compute the digest, because the sidecar is not a permanent refusal.
     """
     session = _session(tmp_path)
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
     pool = _HangingExecutor()
     trip_end._INTERRUPTED.discard(session)
     # The closing thread-pool step would otherwise apply the child's
@@ -468,18 +445,23 @@ async def test_a_digest_cancelled_at_shutdown_is_recorded_and_not_restarted(
     # A fresh process has no memory of the interruption and computes normally.
     trip_end._INTERRUPTED.discard(session)
     with ThreadPoolExecutor(max_workers=1) as fresh:
-        digest = await handle_trip_end_off_loop(session, config, now=SESSION_END, executor=fresh)
+        digest = await handle_trip_end_off_loop(
+            session, config, now=RICH_SESSION_END, executor=fresh
+        )
     assert digest is not None
     assert read_digest_skipped(session) is None, "a landed digest clears the sidecar"
 
 
 async def test_an_earlier_refusal_is_cleared_once_a_digest_lands(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    tight = _budgeted(_config(tmp_path), digest_row_budget=10)
+    tight = _budgeted(digest_config(tmp_path), digest_row_budget=10)
     assert await handle_trip_end_off_loop(session, tight) is None
     assert (session / DIGEST_SKIPPED_FILENAME).exists()
 
-    assert await handle_trip_end_off_loop(session, _config(tmp_path), now=SESSION_END) is not None
+    assert (
+        await handle_trip_end_off_loop(session, digest_config(tmp_path), now=RICH_SESSION_END)
+        is not None
+    )
     assert read_digest(session) is not None
     assert not (session / DIGEST_SKIPPED_FILENAME).exists(), (
         "a session cannot be both computed and refused"
@@ -488,10 +470,13 @@ async def test_an_earlier_refusal_is_cleared_once_a_digest_lands(tmp_path: Path)
 
 async def test_an_already_digested_session_is_not_recomputed(tmp_path: Path) -> None:
     session = _session(tmp_path)
-    assert await handle_trip_end_off_loop(session, _config(tmp_path), now=SESSION_END) is not None
+    assert (
+        await handle_trip_end_off_loop(session, digest_config(tmp_path), now=RICH_SESSION_END)
+        is not None
+    )
     assert (
         await handle_trip_end_off_loop(
-            session, _config(tmp_path), now=SESSION_END, executor=_RefusingExecutor()
+            session, digest_config(tmp_path), now=RICH_SESSION_END, executor=_RefusingExecutor()
         )
         is None
     )
@@ -505,8 +490,8 @@ def test_the_catalog_tells_refused_apart_from_never_attempted(tmp_path: Path) ->
 
     refused = _session(tmp_path, name="2026-05-20T180000")
     untouched = _session(tmp_path, name="2026-05-21T180000")
-    tight = _budgeted(_config(tmp_path), digest_row_budget=10)
-    get_or_compute_digest(refused, tight, now=SESSION_END)
+    tight = _budgeted(digest_config(tmp_path), digest_row_budget=10)
+    get_or_compute_digest(refused, tight, now=RICH_SESSION_END)
 
     with SessionCatalog(tmp_path / "catalog.db") as catalog:
         refused_row = catalog.record_session(refused)
@@ -523,9 +508,9 @@ def test_the_catalog_drops_the_refusal_once_a_digest_exists(tmp_path: Path) -> N
     from src.storage.catalog import SessionCatalog
 
     session = _session(tmp_path)
-    get_or_compute_digest(session, _budgeted(_config(tmp_path), digest_row_budget=10))
+    get_or_compute_digest(session, _budgeted(digest_config(tmp_path), digest_row_budget=10))
     # Simulate a refusal sidecar left behind by an older build.
-    get_or_compute_digest(session, _config(tmp_path), now=SESSION_END)
+    get_or_compute_digest(session, digest_config(tmp_path), now=RICH_SESSION_END)
     (session / DIGEST_SKIPPED_FILENAME).write_text(json.dumps({"reason": "stale"}) + "\n")
 
     with SessionCatalog(tmp_path / "catalog.db") as catalog:
@@ -544,7 +529,9 @@ def test_the_row_budget_is_derived_from_the_address_space_ceiling(tmp_path: Path
     fits". Deriving one from the other leaves a single number to change when
     the pivot moves after the resample.
     """
-    capped = _budgeted(_config(tmp_path), digest_row_budget=None, digest_address_space_mb=4096)
+    capped = _budgeted(
+        digest_config(tmp_path), digest_row_budget=None, digest_address_space_mb=4096
+    )
     expected = 4096 * 1024 * 1024 // DIGEST_PEAK_BYTES_PER_ROW
     assert digest_row_budget(capped) == expected
     # Halving the ceiling halves the budget: they move together, by construction.
@@ -555,7 +542,7 @@ def test_the_row_budget_is_derived_from_the_address_space_ceiling(tmp_path: Path
 def test_an_explicit_row_budget_still_wins(tmp_path: Path) -> None:
     """The derivation is a default, not a policy: an operator who has measured
     their own machine can say so."""
-    config = _config(tmp_path)
+    config = digest_config(tmp_path)
     explicit = _budgeted(config, digest_row_budget=123_456)
     assert digest_row_budget(explicit) == 123_456
     disabled = _budgeted(config, digest_row_budget=0)

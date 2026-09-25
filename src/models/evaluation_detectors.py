@@ -38,19 +38,21 @@ from src.alerts.fusion import FusionScorer
 from src.config import CanaryConfig
 from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import SCORE_COLUMN, TrainedIsolationForest
+from src.models.sequence_calibration import SequenceThresholdCalibration
 from src.models.sequence_dataset import (
     MASK_ARRIVED_SAMPLE,
     arrival_column_for,
     observation_mask_from_schema,
 )
 from src.models.sequence_protocol import TrainedSequenceModel
-from src.models.sequence_training import SequenceThresholdCalibration
+from src.models.sequence_scoring import SequenceScoringRule
 from src.models.synthetic_fault_eval import (
     _fused_anomalous,
     _if_anomalous,
     fusion_withheld_reason,
 )
 from src.preprocessing.feature_pipeline import align_features_to_schema, expand_suppress_channels
+from src.preprocessing.features import base_channel
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -119,13 +121,6 @@ class SequenceScores:
         return out
 
 
-def _base_channel(column: str) -> str:
-    for suffix in ("__mean", "__std", "__roc"):
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
-
-
 class BatchedSequenceScorer:
     """``SequenceInferenceEngine.score_window``'s verdict rule over many windows.
 
@@ -158,11 +153,7 @@ class BatchedSequenceScorer:
         self.use_family_path = use_family_path
         # The engine's own exclusions: suppressed, uncalibrated, and (A03.2)
         # the context inputs an engine_response artifact never scores.
-        excluded = (
-            set(self.engine.suppressed_channels)
-            | set(self.engine.uncalibrated_channels)
-            | set(getattr(self.engine, "context_columns", ()))
-        )
+        excluded = self.engine._score_excluded
         # A03.1: the observation mask the artifact was trained with.
         self.mask_rule, self._freshness_fallback = observation_mask_from_schema(
             trained.manifest.schema
@@ -173,12 +164,7 @@ class BatchedSequenceScorer:
         if scaler_block is None:
             raise ValueError("sequence artifact has no scaler; it cannot be scored")
         scaler = ZScoreScaler.from_dict(dict(scaler_block))
-        self._means = np.array([scaler.means[c] for c in self.feature_columns], dtype=np.float64)
-        stds = np.array([scaler.stds[c] for c in self.feature_columns], dtype=np.float64)
-        self._stds = np.where(stds >= scaler.std_floor, stds, 1.0)
-        self._families: dict[str, list[int]] = {}
-        for index, column in enumerate(self.feature_columns):
-            self._families.setdefault(_base_channel(column), []).append(index)
+        self._means, self._stds = scaler.vectors(self.feature_columns)
         self._torch = importlib.import_module("torch")
 
     def _windows(
@@ -223,7 +209,7 @@ class BatchedSequenceScorer:
                 else:
                     mask[:, index] = 0.0
                 continue
-            gap = f"{_base_channel(column)}{GAP_SUFFIX}"
+            gap = f"{base_channel(column)}{GAP_SUFFIX}"
             if gap in aligned.columns:
                 raw = aligned[gap]
                 stale = raw.isna().to_numpy() | raw.fillna(True).astype(bool).to_numpy()
@@ -283,21 +269,11 @@ class BatchedSequenceScorer:
         is_anomaly = np.full(n, None, dtype=object)
         is_anomaly_global = np.full(n, None, dtype=object)
         rows, values, masks, deltas, modes = self._windows(features)
-        calibration = self.calibration
-        per_mode = calibration.per_mode_errors or {}
-        family_threshold = (
-            calibration.family_max_score.threshold
-            if self.use_family_path and calibration.family_errors and calibration.family_max_score
-            else None
+        # R04.2: the engine's own rule object, so the verdict cannot drift
+        # from serve; ``use_family_path=False`` is the A02.3 ablation.
+        rule = SequenceScoringRule(
+            self.calibration, self.feature_columns, use_family_path=self.use_family_path
         )
-        # Families the engine scores: a band with a positive threshold.
-        scored_families = [
-            (idx, dist.threshold)
-            for family, idx in self._families.items()
-            if (dist := (calibration.family_errors or {}).get(family)) is not None
-            and dist.threshold > 0
-        ]
-        eps = np.finfo(np.float64).eps
         torch = self._torch
         model: Any = self.trained.model
         model.to(torch.device(self.device))
@@ -313,45 +289,22 @@ class BatchedSequenceScorer:
             with torch.no_grad():
                 value_t = torch.as_tensor(scaled)
                 recon = model.forward(value_t, torch.as_tensor(mask), torch.as_tensor(deltas[take]))
-                error = ((recon - value_t).abs() * torch.as_tensor(score_mask)).numpy()
-            error = error.astype(np.float64)
-            cells = score_mask.sum(axis=(1, 2)).astype(np.float64)
-            batch_global = np.divide(
-                error.sum(axis=(1, 2)), cells, out=np.zeros_like(cells), where=cells > 0
-            )
-            counts = score_mask.sum(axis=1).astype(np.float64)
-            channel = np.divide(
-                error.sum(axis=1), counts, out=np.zeros_like(counts), where=counts > 0
-            )
+                error = (recon - value_t).abs().numpy()
             batch_rows = rows[start:stop]
-            batch_modes = modes[start:stop]
-            thresholds = np.array(
-                [
-                    band.threshold
-                    if mode is not None and (band := per_mode.get(mode)) is not None
-                    else calibration.global_error.threshold
-                    for mode in batch_modes
-                ]
-            )
-            global_anomaly = batch_global > thresholds
-            family_anomaly = np.zeros(len(batch_rows), dtype=bool)
-            if family_threshold is not None and scored_families:
-                normalized = np.column_stack(
-                    [channel[:, idx].max(axis=1) / max(t, eps) for idx, t in scored_families]
-                )
-                worst = normalized.max(axis=1)
-                family_max[batch_rows] = worst
-                family_anomaly = worst > family_threshold
-            global_score[batch_rows] = batch_global
-            global_threshold[batch_rows] = thresholds
+            scores = rule.score_batch(error, score_mask, modes[start:stop])
+            if scores.family_names:
+                family_max[batch_rows] = scores.family_max
+            global_score[batch_rows] = scores.global_score
+            global_threshold[batch_rows] = scores.global_threshold
+            verdict = scores.verdict
             for offset, row in enumerate(batch_rows):
-                is_anomaly_global[row] = bool(global_anomaly[offset])
-                is_anomaly[row] = bool(global_anomaly[offset] or family_anomaly[offset])
+                is_anomaly_global[row] = bool(scores.global_anomaly[offset])
+                is_anomaly[row] = bool(verdict[offset])
         return SequenceScores(
             global_score=global_score,
             global_threshold=global_threshold,
             family_max=family_max,
-            family_threshold=family_threshold,
+            family_threshold=rule.family_threshold,
             is_anomaly=is_anomaly,
             is_anomaly_global=is_anomaly_global,
         )
@@ -1025,7 +978,7 @@ def detector_roles(config: CanaryConfig, names: Sequence[str]) -> dict[str, str]
 
 def raw_channels(columns: Sequence[str]) -> tuple[str, ...]:
     """The raw channels among model columns (rolling siblings dropped)."""
-    return tuple(dict.fromkeys(c for c in columns if _base_channel(c) == c))
+    return tuple(dict.fromkeys(c for c in columns if base_channel(c) == c))
 
 
 def suppressed_for(trained: TrainedSequenceModel, config: CanaryConfig) -> tuple[str, ...]:

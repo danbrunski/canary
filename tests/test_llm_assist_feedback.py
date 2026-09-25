@@ -15,13 +15,13 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from src.alerts.feedback import AnomalyFeedback, FeedbackLabel, FeedbackStore, anomaly_key
-from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.models.retraining_policy import (
     apply_retraining_feedback_policy,
     build_retraining_feedback_report,
 )
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from tests.configs import isolated_config
 
 _EVENT = {
     "timestamp": "2026-07-20T10:00:00+00:00",
@@ -190,37 +190,10 @@ def test_apply_policy_report_is_ledger_ready() -> None:
 # ---------------------------------------------------------------------------
 
 
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 30
-    latent_dim: 8
-    threshold_k: 3.0
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
-
-
 def _client(tmp_path: Path) -> tuple[TestClient, FeedbackStore]:
     storage = tmp_path / "storage"
     (storage / "2026-07-20T100000").mkdir(parents=True)
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_CONFIG_YAML.format(storage=storage))
-    config = CanaryConfig.from_yaml(cfg)
+    config = isolated_config(tmp_path, storage=storage)
     store = FeedbackStore(tmp_path / "fb.jsonl")
     anomalies = tmp_path / "anomalies"
     anomalies.mkdir()

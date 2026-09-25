@@ -22,7 +22,6 @@ from src.dashboard.ups import (
     read_watchdog_status,
 )
 from src.models.feature_spec_health import load_audit_snapshot, structural_blindness_snapshot
-from src.models.health import HealthMonitor
 from src.storage.monitor import free_space_mb
 from src.storage.sidecar import read_json_object
 
@@ -42,6 +41,8 @@ from src.vehicle_state import (
 )
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports the dashboard
+    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
+    from src.daemon.health import HealthMonitor
     from src.daemon.inference_metrics import InferenceTimingRecorder
 
 #: Private aliases of the one definition in :mod:`src.vehicle_state` (R03.1).

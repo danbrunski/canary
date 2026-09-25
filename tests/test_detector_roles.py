@@ -24,6 +24,9 @@ from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import FusionScorer, isolation_forest_source, lstm_source
 from src.config import CanaryConfig, DetectorRolesConfig, FusionConfig
+from src.models.inference import SequenceInferenceResult
+from tests.configs import isolated_from_yaml
+from tests.fakes import lstm_result
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,25 +35,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # ---------------------------------------------------------------------------
 
 
-class _FakeLSTMResult:
-    """Attribute surface ``AnomalyEvent.from_lstm_result`` reads."""
-
-    def __init__(self, *, timestamp: str = "2026-09-23T12:00:00+00:00") -> None:
-        self.is_anomaly = True
-        self.timestamp = timestamp
-        self.model_version = "lstm_v1"
-        self.global_score = 5.0
-        self.global_threshold = 3.0
-        self.anomalous_channels = ("obd:RPM",)
-        self.channel_scores = {"obd:RPM": 5.0}
-        self.channel_thresholds = {"obd:RPM": 3.0}
-        self.session = "2026-09-23T120000"
-        self.window_start_timestamp = "2026-09-23T11:59:30+00:00"
-        self.window_end_timestamp = timestamp
-        self.latency_ms = 3.0
-        self.top_channels = ()
-        self.reconstruction_series: dict[str, Any] = {}
-        self.reconstruction_overlays: dict[str, Any] = {}
+def _lstm(*, timestamp: str = "2026-09-23T12:00:00+00:00") -> SequenceInferenceResult:
+    """A flagged sequence window ending at ``timestamp``."""
+    return lstm_result(
+        timestamp=timestamp,
+        session="2026-09-23T120000",
+        window_start_timestamp="2026-09-23T11:59:30+00:00",
+        window_end_timestamp=timestamp,
+        latency_ms=3.0,
+    )
 
 
 class _FakeNotifier:
@@ -135,7 +128,7 @@ def test_unknown_role_or_detector_is_refused() -> None:
 def test_default_role_events_are_alerts_and_push(tmp_path: Path) -> None:
     notifier = _FakeNotifier()
     emitter = _emitter(tmp_path, None, notifier)
-    event = emitter.emit_lstm(_FakeLSTMResult())
+    event = emitter.emit_lstm(_lstm())
     assert event is not None and event.role == "alert"
     assert emitter.counters.emitted == 1
     assert emitter.counters.emitted_evidence == 0
@@ -146,7 +139,7 @@ def test_default_role_events_are_alerts_and_push(tmp_path: Path) -> None:
 def test_evidence_role_event_is_stored_flagged_and_never_pushed(tmp_path: Path) -> None:
     notifier = _FakeNotifier()
     emitter = _emitter(tmp_path, {"lstm_autoencoder": "evidence"}, notifier)
-    event = emitter.emit_lstm(_FakeLSTMResult())
+    event = emitter.emit_lstm(_lstm())
     assert event is not None
     assert event.role == "evidence"
     assert notifier.calls == []  # an evidence event can never reach ntfy
@@ -163,7 +156,7 @@ def test_evidence_role_is_per_detector(tmp_path: Path) -> None:
     if_event = emitter.emit_isolation_forest_row(
         _if_row(), model_version="if_v1", timestamp="2026-09-23T12:00:00+00:00"
     )
-    lstm_event = emitter.emit_lstm(_FakeLSTMResult(timestamp="2026-09-23T12:00:01+00:00"))
+    lstm_event = emitter.emit_lstm(_lstm(timestamp="2026-09-23T12:00:01+00:00"))
     assert if_event is not None and if_event.role == "evidence"
     assert lstm_event is not None and lstm_event.role == "alert"
     assert [title for title, _ in notifier.calls] == ["CANary: lstm_autoencoder anomaly"]
@@ -175,14 +168,14 @@ def test_an_event_already_marked_evidence_is_never_promoted(tmp_path: Path) -> N
     """The stricter of the event's own role and the configured one wins."""
     notifier = _FakeNotifier()
     emitter = _emitter(tmp_path, None, notifier)
-    event = AnomalyEvent.from_lstm_result(_FakeLSTMResult()).model_copy(update={"role": "evidence"})
+    event = AnomalyEvent.from_lstm_result(_lstm()).model_copy(update={"role": "evidence"})
     emitted = emitter._emit(event)
     assert emitted is not None and emitted.role == "evidence"
     assert notifier.calls == []
 
 
 def test_event_role_round_trips_and_old_records_load_as_alert() -> None:
-    event = AnomalyEvent.from_lstm_result(_FakeLSTMResult()).model_copy(update={"role": "evidence"})
+    event = AnomalyEvent.from_lstm_result(_lstm()).model_copy(update={"role": "evidence"})
     assert AnomalyEvent.from_dict(event.to_dict()).role == "evidence"
     legacy = event.to_dict()
     del legacy["role"]  # a record written before A06.5
@@ -331,9 +324,9 @@ daemon:
 
 
 def _daemon_config(tmp_path: Path, *, sequence_role: str) -> CanaryConfig:
-    path = tmp_path / "canary.yaml"
-    path.write_text(_daemon_yaml(tmp_path, sequence_role=sequence_role))
-    return CanaryConfig.from_yaml(path)
+    # Every writable path the YAML leaves at a repo default goes under
+    # tmp_path too (trip_state, audit log, ...): R07.2.
+    return isolated_from_yaml(tmp_path, _daemon_yaml(tmp_path, sequence_role=sequence_role))
 
 
 async def test_daemon_sequence_in_evidence_role_stores_but_fused_needs_an_alert_source(
@@ -354,7 +347,7 @@ async def test_daemon_sequence_in_evidence_role_stores_but_fused_needs_an_alert_
     )
 
     # Per-source path: the sequence event is stored, flagged, not an alert.
-    sources = SequenceDetector(components).apply(_FakeLSTMResult(), ctx)
+    sources = SequenceDetector(components).apply(_lstm(), ctx)
     stored = read_events_dir(anomalies_dir)
     assert [(e.source, e.role) for e in stored] == [("lstm_autoencoder", "evidence")]
     assert components.emitter.counters.emitted == 0

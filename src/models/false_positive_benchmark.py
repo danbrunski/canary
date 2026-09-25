@@ -6,22 +6,29 @@ number is the false-positive rate (FPR): the fraction of evaluated windows
 flagged anomalous. Because the windows are clean, every flag is by definition a
 false positive.
 
-The window flag **mirrors the live emit policy** (``SequenceInference`` in
-``src.models.inference``): a window fires when its *global* (masked-mean)
-reconstruction error exceeds the threshold for the window's **operating mode**
-(``per_mode_errors[mode].threshold``), falling back to the single global
-threshold when the mode has no calibrated band. It deliberately does **not**
-OR in per-channel exceedances: the per-channel thresholds run far too tight
-live (with a few hundred channels at idle/warmup at least one is essentially
-always over its band, so a union flag saturates to ~100% even in-sample), which
-is exactly why the daemon dropped its ``or bool(anomalous_channels)`` clause.
-Per-channel exceedances are still computed and reported as drill-down
-diagnostics (``channel_summaries``), never as the firing trigger.
+The window flag **is the served rule** (R04.1): windows are scored by the same
+:class:`~src.models.sequence_scoring.SequenceScoringRule` the live
+``SequenceInferenceEngine.score_window`` runs -- the masked global error over
+the *scored* channels (configured ``suppress_channels``, uncalibrated channels
+and context inputs removed, exactly as serve resolves them) against the
+window's operating-mode band with the global fallback, OR the worst
+normalized family error against the family band. Until 2026-09-24 this
+benchmark averaged over *every* channel and skipped the family path, so it
+published an FPR for a detector the daemon did not run. It deliberately does
+**not** OR in per-channel exceedances: the per-channel thresholds run far too
+tight live (with a few hundred channels at idle/warmup at least one is
+essentially always over its band, so a union flag saturates to ~100% even
+in-sample), which is exactly why the daemon dropped its ``or
+bool(anomalous_channels)`` clause. Per-channel exceedances are still computed
+and reported as drill-down diagnostics (``channel_summaries``), never as the
+firing trigger.
 
-The report also sweeps a grid of ``k`` multipliers, recomputing thresholds as
-``mean + k * std`` from the *training* error distribution stored in the
-manifest, so an operator can pick a ``k`` that meets the v1 done-definition
-budget (<= 1 alert / hour) without retraining. ``alerts_per_hour`` is derived
+The report also sweeps a grid of ``k`` multipliers, recomputing the *global*
+bands as ``mean + k * std`` from the *training* error distribution stored in
+the manifest, so an operator can pick a ``k`` that meets the v1
+done-definition budget (<= 1 alert / hour) without retraining. The family path
+is not parameterized by ``k``; each sweep point ORs it in at its calibrated
+band, as serve would. ``alerts_per_hour`` is derived
 from the wall-clock span of the held-out windows, which matches how the live
 1 Hz inference loop would emit alerts.
 """
@@ -37,14 +44,16 @@ import numpy as np
 import pandas as pd
 
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
-from src.models.sequence_protocol import TrainedSequenceModel
-from src.models.sequence_training import (
+from src.models.sequence_calibration import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
-    dataloader_kwargs_for_device,
+    error_distribution,
+    window_modes,
 )
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.models.sequence_dataset import SequenceWindow, SequenceWindowDataset
+from src.models.sequence_device import dataloader_kwargs_for_device
+from src.models.sequence_protocol import TrainedSequenceModel
+from src.models.sequence_scoring import SequenceScoringRule, score_exclusions
 
 #: Default ``k`` multipliers swept by the benchmark. The calibrated ``k`` from
 #: the manifest is always merged in so the as-shipped point is visible.
@@ -165,6 +174,10 @@ class FalsePositiveBenchmarkReport:
     channel_summaries: tuple[ChannelFalsePositiveSummary, ...]
     session_summaries: tuple[SessionFalsePositiveSummary, ...]
     k_sweep: tuple[KSweepPoint, ...]
+    #: Windows the family path flagged (some also over the global band).
+    family_flagged_windows: int = 0
+    #: Columns kept out of the score, as serve keeps them (R04.1).
+    excluded_columns: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -189,31 +202,22 @@ class FalsePositiveBenchmarkReport:
             "channel_exceedances": [summary.to_dict() for summary in self.channel_summaries],
             "per_session": [summary.to_dict() for summary in self.session_summaries],
             "k_sweep": [point.to_dict() for point in self.k_sweep],
+            "family_flagged_windows": self.family_flagged_windows,
+            "excluded_columns": list(self.excluded_columns),
         }
 
 
 def _window_modes(dataset: SequenceWindowDataset) -> list[str | None]:
-    """Operating mode for each window, taken from its *last* row.
+    """Operating mode per window, from its *last* row (``None`` without one).
 
-    Mirrors the live path, which scores a window under ``buffer.last_mode`` —
-    the mode of the most recently appended row (``inference.py``). Returns
-    ``None`` per window when the frame carries no mode column (e.g. raw test
-    frames that skip segmentation), so the caller falls back to the global
-    threshold.
+    Mirrors the live path, which scores a window under ``buffer.last_mode``.
+    A view of :func:`~src.models.sequence_calibration.window_modes`, the
+    grouping calibration uses.
     """
-    frame = dataset.frame
-    if MODE_COLUMN not in frame.columns:
-        return [None] * len(dataset.windows)
-    modes = frame[MODE_COLUMN].to_numpy()
-    row_count = len(modes)
-    resolved: list[str | None] = []
-    for window in dataset.windows:
-        last_row = window.end_row - 1
-        if 0 <= last_row < row_count and modes[last_row] is not None:
-            value = modes[last_row]
-            resolved.append(None if pd.isna(value) else str(value))
-        else:
-            resolved.append(None)
+    resolved: list[str | None] = [None] * len(dataset.windows)
+    for mode, indexes in window_modes(dataset).items():
+        for index in indexes:
+            resolved[index] = mode
     return resolved
 
 
@@ -264,10 +268,15 @@ def _per_window_thresholds(
     if k is not None and quantile is not None:
         raise ValueError("k and quantile are mutually exclusive sweep parameterizations")
 
+    if k is None and quantile is None:
+        # The as-shipped bands: exactly serve's lookup.
+        return np.array([calibration.threshold_for_mode(m) for m in modes], dtype=np.float64)
+
     def band(distribution: ReconstructionErrorDistribution) -> float:
         if quantile is not None:
             return _quantile_band(distribution, quantile, calibration.threshold_quantile)
-        return distribution.threshold if k is None else distribution.mean + k * distribution.std
+        assert k is not None
+        return distribution.mean + k * distribution.std
 
     global_threshold = band(calibration.global_error)
     per_mode = calibration.per_mode_errors or {}
@@ -288,12 +297,15 @@ def benchmark_false_positives(
     k_grid: Sequence[float] | None = None,
     batch_size: int = 64,
     device: str = "cpu",
+    suppress_channels: Sequence[str] = (),
 ) -> FalsePositiveBenchmarkReport:
-    """Score held-out clean windows and report the false-positive rate.
+    """Score held-out clean windows with the served rule and report the FPR.
 
     The caller is responsible for passing only clean-baseline sessions in
     ``dataset`` (held out from training). ``dataset`` must use the same feature
-    columns and sequence length as ``trained``.
+    columns and sequence length as ``trained``. ``suppress_channels`` is the
+    serving config's list for this backbone (``models.<type>.suppress_channels``);
+    it is resolved against the columns exactly as the daemon resolves it.
     """
     if trained.manifest.thresholds is None:
         raise ValueError("trained LSTM manifest has no calibrated thresholds")
@@ -309,8 +321,19 @@ def benchmark_false_positives(
 
     calibration = SequenceThresholdCalibration.from_dict(trained.manifest.thresholds)
     feature_columns = tuple(dataset.feature_columns)
-    global_errors, channel_errors = _reconstruction_errors(
-        trained, dataset, batch_size=batch_size, device=device
+    exclusions = score_exclusions(
+        feature_columns, calibration, trained.manifest.schema, suppress_channels
+    )
+    rule = SequenceScoringRule(calibration, feature_columns)
+    window_modes = _window_modes(dataset)
+    global_errors, channel_errors, family_flag, verdict = _served_scores(
+        trained,
+        dataset,
+        rule=rule,
+        keep=exclusions.keep_mask(feature_columns),
+        window_modes=window_modes,
+        batch_size=batch_size,
+        device=device,
     )
 
     global_threshold = calibration.global_error.threshold
@@ -318,13 +341,11 @@ def benchmark_false_positives(
         [calibration.channel_errors[column].threshold for column in feature_columns],
         dtype=np.float64,
     )
-    # Fire on the global error vs the window's operating-mode threshold, exactly
-    # as the live emitter does. The per-channel exceedances below are diagnostics
-    # only — never part of the flag (a union over hundreds of tight per-channel
-    # bands saturates to ~100%, the flood the daemon already removed).
-    window_modes = _window_modes(dataset)
-    per_window_threshold = _per_window_thresholds(window_modes, calibration)
-    flagged = global_errors > per_window_threshold
+    # The served verdict: global error vs the window's mode band, OR the family
+    # path. The per-channel exceedances below are diagnostics only -- never part
+    # of the flag (a union over hundreds of tight per-channel bands saturates to
+    # ~100%, the flood the daemon already removed).
+    flagged = verdict
     # Mode-agnostic single-threshold view, reported alongside as a reference.
     global_exceed = global_errors > global_threshold
     channel_exceed = channel_errors > channel_thresholds
@@ -339,6 +360,7 @@ def benchmark_false_positives(
     session_summaries = _session_summaries(dataset.windows, flagged, durations)
     k_sweep = _k_sweep(
         global_errors=global_errors,
+        family_flag=family_flag,
         window_modes=window_modes,
         calibration=calibration,
         total_duration_seconds=total_duration,
@@ -366,20 +388,37 @@ def benchmark_false_positives(
         global_threshold=global_threshold,
         global_exceedances=int(global_exceed.sum()),
         global_false_positive_rate=int(global_exceed.sum()) / window_count,
-        global_error_distribution=_error_distribution(global_errors, calibration.threshold_k),
+        global_error_distribution=error_distribution(
+            global_errors, threshold_k=calibration.threshold_k
+        ),
         channel_summaries=channel_summaries,
         session_summaries=session_summaries,
         k_sweep=k_sweep,
+        family_flagged_windows=int(family_flag.sum()),
+        excluded_columns=tuple(c for c in feature_columns if c in exclusions.columns),
     )
 
 
-def _reconstruction_errors(
+def _served_scores(
     trained: TrainedSequenceModel,
     dataset: SequenceWindowDataset,
     *,
+    rule: SequenceScoringRule,
+    keep: np.ndarray[Any, np.dtype[np.float32]],
+    window_modes: Sequence[str | None],
     batch_size: int,
     device: str,
-) -> tuple[np.ndarray[Any, np.dtype[np.float64]], np.ndarray[Any, np.dtype[np.float64]]]:
+) -> tuple[
+    np.ndarray[Any, np.dtype[np.float64]],
+    np.ndarray[Any, np.dtype[np.float64]],
+    np.ndarray[Any, np.dtype[np.bool_]],
+    np.ndarray[Any, np.dtype[np.bool_]],
+]:
+    """One forward pass per batch, scored by the served rule.
+
+    Returns per window: the global score, the per-channel scores, the family
+    flag and the served verdict.
+    """
     torch = _torch_module()
     data = importlib.import_module("torch.utils.data")
     device_obj = torch.device(device)
@@ -389,24 +428,37 @@ def _reconstruction_errors(
         shuffle=False,
         **dataloader_kwargs_for_device(device),
     )
-    # ``reconstruction_error`` isn't on the SequenceAutoencoder protocol (only
-    # forward/to/eval are); both backbones implement it, so reach it via Any.
-    model: Any = trained.model
+    model = trained.model
     model.to(device_obj)
     model.eval()
 
     global_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
     channel_chunks: list[np.ndarray[Any, np.dtype[np.float64]]] = []
+    family_chunks: list[np.ndarray[Any, np.dtype[np.bool_]]] = []
+    verdict_chunks: list[np.ndarray[Any, np.dtype[np.bool_]]] = []
+    offset = 0
     with torch.no_grad():
         for value, mask, delta in loader:
             value = value.to(device_obj)
             mask = mask.to(device_obj)
             delta = delta.to(device_obj)
-            global_errors = model.reconstruction_error(value, mask, delta, reduction="sample")
-            channel_errors = model.reconstruction_error(value, mask, delta, reduction="channel")
-            global_chunks.append(global_errors.detach().cpu().numpy().astype(np.float64))
-            channel_chunks.append(channel_errors.detach().cpu().numpy().astype(np.float64))
-    return np.concatenate(global_chunks), np.concatenate(channel_chunks, axis=0)
+            # ``reduction="none"``: the masked cell error, one forward pass.
+            cells = model.reconstruction_error(value, mask, delta, reduction="none")
+            error = cells.detach().cpu().numpy()
+            mask_np = mask.detach().cpu().numpy()
+            batch = error.shape[0]
+            scores = rule.score_batch(error, mask_np * keep, window_modes[offset : offset + batch])
+            offset += batch
+            global_chunks.append(scores.global_score)
+            channel_chunks.append(scores.channel)
+            family_chunks.append(scores.family_anomaly)
+            verdict_chunks.append(scores.verdict)
+    return (
+        np.concatenate(global_chunks),
+        np.concatenate(channel_chunks, axis=0),
+        np.concatenate(family_chunks),
+        np.concatenate(verdict_chunks),
+    )
 
 
 def _channel_summaries(
@@ -461,6 +513,7 @@ def _session_summaries(
 def _k_sweep(
     *,
     global_errors: np.ndarray[Any, np.dtype[np.float64]],
+    family_flag: np.ndarray[Any, np.dtype[np.bool_]],
     window_modes: Sequence[str | None],
     calibration: SequenceThresholdCalibration,
     total_duration_seconds: float,
@@ -478,6 +531,7 @@ def _k_sweep(
     if calibration.threshold_quantile is not None:
         return _quantile_sweep(
             global_errors=global_errors,
+            family_flag=family_flag,
             window_modes=window_modes,
             calibration=calibration,
             total_duration_seconds=total_duration_seconds,
@@ -489,7 +543,7 @@ def _k_sweep(
         # vs the window's per-mode band recomputed at mean + k * std.
         per_window_threshold = _per_window_thresholds(window_modes, calibration, k=k)
         global_threshold = calibration.global_error.mean + k * calibration.global_error.std
-        flagged = global_errors > per_window_threshold
+        flagged = (global_errors > per_window_threshold) | family_flag
         flagged_count = int(flagged.sum())
         alerts_per_hour = _alerts_per_hour(flagged_count, total_duration_seconds)
         points.append(
@@ -508,6 +562,7 @@ def _k_sweep(
 def _quantile_sweep(
     *,
     global_errors: np.ndarray[Any, np.dtype[np.float64]],
+    family_flag: np.ndarray[Any, np.dtype[np.bool_]],
     window_modes: Sequence[str | None],
     calibration: SequenceThresholdCalibration,
     total_duration_seconds: float,
@@ -526,7 +581,7 @@ def _quantile_sweep(
     for q in quantiles:
         per_window_threshold = _per_window_thresholds(window_modes, calibration, quantile=q)
         global_threshold = _quantile_band(calibration.global_error, q, calibrated_quantile)
-        flagged = global_errors > per_window_threshold
+        flagged = (global_errors > per_window_threshold) | family_flag
         flagged_count = int(flagged.sum())
         alerts_per_hour = _alerts_per_hour(flagged_count, total_duration_seconds)
         points.append(
@@ -570,30 +625,6 @@ def _alerts_per_hour(flagged: int, duration_seconds: float) -> float:
     if duration_seconds <= 0.0:
         return 0.0
     return flagged / (duration_seconds / SECONDS_PER_HOUR)
-
-
-def _error_distribution(
-    values: np.ndarray[Any, np.dtype[np.float64]],
-    threshold_k: float,
-) -> ReconstructionErrorDistribution:
-    finite = values[np.isfinite(values)]
-    if finite.size == 0:
-        raise ValueError("cannot summarize a held-out distribution with no finite errors")
-    mean = float(np.mean(finite))
-    std = float(np.std(finite, ddof=0))
-    p50, p90, p95, p99 = np.quantile(finite, [0.5, 0.9, 0.95, 0.99])
-    return ReconstructionErrorDistribution(
-        count=int(finite.size),
-        mean=mean,
-        std=std,
-        minimum=float(np.min(finite)),
-        maximum=float(np.max(finite)),
-        p50=float(p50),
-        p90=float(p90),
-        p95=float(p95),
-        p99=float(p99),
-        threshold=float(mean + threshold_k * std),
-    )
 
 
 def _torch_module() -> Any:

@@ -11,80 +11,40 @@ import pytest
 
 from src.analysis.did_scan import DidSnapshot
 from src.decode.dids import DidAccess
-from tools import did_sweep
-
-
-def _config_yaml(channel: str) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: {channel}
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {{storage}}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
+from tests.configs import write_isolated_config
+from tools import _bus_tool, did_sweep
 
 
 def _write_config(tmp_path: Path, channel: str) -> Path:
     storage = tmp_path / "storage"
     storage.mkdir(parents=True, exist_ok=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(channel).format(storage=storage))
-    return cfg_path
+    return write_isolated_config(
+        tmp_path, "daemon", storage=storage, hardware={"can": {"channel": channel}}
+    )
 
 
 # ---------------------------------------------------------------------------
-# _resolve_session
+# resolve_session (shared with every bus tool since R06.1)
 # ---------------------------------------------------------------------------
 
 
 def test_resolve_session_none_disables_gating() -> None:
-    assert did_sweep._resolve_session("none") is None
+    assert _bus_tool.resolve_session("none") is None
 
 
 def test_resolve_session_explicit_hex() -> None:
-    assert did_sweep._resolve_session("C0") == 0xC0
+    assert _bus_tool.resolve_session("C0") == 0xC0
 
 
 def test_resolve_session_auto_delegates_to_did_access(monkeypatch: pytest.MonkeyPatch) -> None:
     access = DidAccess(ecu_request_id=0x7E0, ecu_response_id=0x7E8, session=0xC0)
-    monkeypatch.setattr(did_sweep, "did_access", lambda: access)
-    assert did_sweep._resolve_session("auto") == 0xC0
+    monkeypatch.setattr(_bus_tool, "did_access", lambda: access)
+    assert _bus_tool.resolve_session("auto") == 0xC0
 
 
 def test_resolve_session_auto_with_no_access_block(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(did_sweep, "did_access", lambda: None)
-    assert did_sweep._resolve_session("auto") is None
+    monkeypatch.setattr(_bus_tool, "did_access", lambda: None)
+    assert _bus_tool.resolve_session("auto") is None
 
 
 # ---------------------------------------------------------------------------

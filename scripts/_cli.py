@@ -26,6 +26,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.config import CanaryConfig  # noqa: E402
 from src.control.sessions import session_started_at  # noqa: E402
+from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
@@ -48,6 +49,48 @@ def add_profile_arg(parser: argparse.ArgumentParser) -> None:
         help="Vehicle profile slug to scope output paths to (see profiles.yaml). "
         "Default: the vehicle: block's profile. No VIN probe is performed.",
     )
+
+
+#: The log levels every script's ``--log-level`` accepts.
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+
+
+def add_log_level_arg(parser: argparse.ArgumentParser, *, default: str = "INFO") -> None:
+    """Add ``--log-level`` (one choice set; the default stays per script)."""
+    if default not in LOG_LEVELS:
+        raise ValueError(f"--log-level default must be one of {LOG_LEVELS}, got {default!r}")
+    parser.add_argument("--log-level", default=default, choices=LOG_LEVELS)
+
+
+def add_bindings_arg(parser: argparse.ArgumentParser) -> None:
+    """Add ``--bindings``, defaulting to the repo-rooted ``data/bindings.yaml`` (R01.2)."""
+    parser.add_argument(
+        "--bindings",
+        type=Path,
+        default=BINDINGS_YAML,
+        help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml).",
+    )
+
+
+def override_reason(value: str) -> str:
+    """argparse ``type`` for an ``--accept-*`` override: a stated reason, stripped.
+
+    Blank or whitespace-only is refused at parse time. The IF path checked
+    ``if calibration_override:``, so ``"  "`` passed the A04.4 refusal there
+    while the sequence path stripped it and refused (R06.2).
+    """
+    reason = value.strip()
+    if not reason:
+        raise argparse.ArgumentTypeError("an override needs a stated reason, not blank text")
+    return reason
+
+
+def add_override_reason_arg(parser: argparse.ArgumentParser, flag: str, *, help: str) -> None:
+    """Add an ``--accept-*`` override flag. Every one goes through here, so none
+    can be added without :func:`override_reason`'s refusal of a blank reason."""
+    if not flag.startswith("--accept-"):
+        raise ValueError(f"override flags are named --accept-*, got {flag!r}")
+    parser.add_argument(flag, type=override_reason, default=None, metavar="REASON", help=help)
 
 
 def scoped_models_dir(config: CanaryConfig, profile_slug: str | None) -> Path:
@@ -171,8 +214,13 @@ def resolve_sessions(args: argparse.Namespace, sessions_root: Path) -> list[Path
 
 
 __all__ = [
+    "LOG_LEVELS",
+    "add_bindings_arg",
     "add_common_args",
+    "add_log_level_arg",
+    "add_override_reason_arg",
     "add_profile_arg",
+    "override_reason",
     "scoped_models_dir",
     "load_config",
     "discover_live_session_dirs",

@@ -31,6 +31,8 @@ from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
+from tests.configs import daemon_test_config
+from tests.fakes import StubModelManager, fake_if_model
 from tests.waits import settle, wait_until
 
 #: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
@@ -41,61 +43,10 @@ pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
 # ---------------------------------------------------------------------------
 
 
-def _config_yaml(tmp_path: Path) -> str:
-    """Minimal canary.yaml content pointing every dir at tmp_path."""
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {tmp_path / "storage"}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  out_of_process_feature_build: false
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 0
-daemon:
-  anomalies_dir: {tmp_path / "anomalies"}
-  models_dir: {tmp_path / "models"}
-  model_poll_seconds: 0.05
-  retention_sweep_seconds: 0.05
-  broadcaster_queue_size: 16
-  catalog_db: {tmp_path / "control" / "catalog.db"}
-"""
-
-
 @pytest.fixture
-def config(tmp_path: Path) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    return CanaryConfig.from_yaml(cfg_path)
+def config(daemon_config: CanaryConfig) -> CanaryConfig:
+    """``tests/conftest.py``'s isolated daemon config: every path under tmp_path."""
+    return daemon_config
 
 
 def _stage_reached(components: Any, stage: str) -> bool:
@@ -169,13 +120,7 @@ def test_build_components_skips_managers_when_models_disabled(
 def test_build_components_constructs_if_manager_when_enabled(
     tmp_path: Path,
 ) -> None:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(
-        _config_yaml(tmp_path).replace(
-            "  isolation_forest:\n    enabled: false", "  isolation_forest:\n    enabled: true"
-        )
-    )
-    config = CanaryConfig.from_yaml(cfg_path)
+    config = daemon_test_config(tmp_path, models={"isolation_forest": {"enabled": True}})
     components = build_components(config)
     assert "isolation_forest" in components.model_managers
     # Without an artifact on disk, current is None — the manager keeps polling.
@@ -1544,23 +1489,10 @@ async def test_score_and_emit_uncalibrated_mode_never_emits(
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
-    class _FakeTrained:
-        feature_columns = ("obd:RPM",)
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_uncalibrated"})()
-
-        def score(self, frame: Any) -> Any:
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1  # sklearn says "anomaly"
-            out["isolation_forest_model_mode"] = "idle"
-            out["isolation_forest_missing_features"] = False
-            # No calibrated_threshold/calibrated_anomaly columns at all —
-            # this mode never accumulated a calibration holdout.
-            return out
-
     loaded = LoadedModel(
-        artifact=_FakeTrained(),
+        artifact=fake_if_model(
+            model_mode="idle", calibrated=False, model_version="fake_if_uncalibrated"
+        ),
         manifest=ModelManifestCommon(
             artifact_format_version=1,
             model_type="isolation_forest",
@@ -1614,23 +1546,8 @@ async def test_score_and_emit_calibrated_mode_still_emits(
     from src.models.manager import LoadedModel
     from src.models.manifest import ModelManifestCommon
 
-    class _FakeTrained:
-        feature_columns = ("obd:RPM",)
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_calibrated"})()
-
-        def score(self, frame: Any) -> Any:
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1
-            out["isolation_forest_model_mode"] = "idle"
-            out["isolation_forest_missing_features"] = False
-            out["isolation_forest_calibrated_threshold"] = 0.5
-            out["isolation_forest_calibrated_anomaly"] = True
-            return out
-
     loaded = LoadedModel(
-        artifact=_FakeTrained(),
+        artifact=fake_if_model(model_mode="idle", model_version="fake_if_calibrated"),
         manifest=ModelManifestCommon(
             artifact_format_version=1,
             model_type="isolation_forest",
@@ -1911,50 +1828,14 @@ async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig)
     broadcaster message and a JSONL line on disk."""
     from src.alerts.emitter import IsolationForestInferenceEngine
     from src.daemon import build_live_feature_source, run_live_inference
-    from src.models.manager import LoadedModel
-    from src.models.manifest import ModelManifestCommon
 
     components = build_components(config)
 
     # Inject a stub IF manager + loaded fake model that always labels rows -1.
-    class _FakeTrained:
-        feature_columns = ("obd:RPM", "obd:SPEED")
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_v1"})()
 
-        def score(self, frame):
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1
-            out["isolation_forest_model_mode"] = "idle"
-            out["isolation_forest_missing_features"] = False
-            # 2.3: uncalibrated modes are non-emitting at serve.
-            out["isolation_forest_calibrated_threshold"] = 0.5
-            out["isolation_forest_calibrated_anomaly"] = True
-            return out
-
-    class _StubManager:
-        @property
-        def current(self):
-            return LoadedModel(
-                artifact=_FakeTrained(),
-                manifest=ModelManifestCommon(
-                    artifact_format_version=1,
-                    model_type="isolation_forest",
-                    model_version="fake_if_v1",
-                    created_at="now",
-                    training_data_hash="h",
-                    input_rows=1,
-                ),
-                artifact_path=Path("/tmp/x"),
-                manifest_path=Path("/tmp/x.manifest.json"),
-                manifest_mtime=0.0,
-            )
-
-        def poll(self):
-            return None
-
-    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+    components.model_managers["isolation_forest"] = StubModelManager(
+        fake_if_model(feature_columns=("obd:RPM", "obd:SPEED"), model_mode="idle")
+    )  # type: ignore[assignment]
 
     # Pump a record into the live source so tick() has something to emit.
     source = build_live_feature_source(components)
@@ -2139,46 +2020,12 @@ async def test_run_live_inference_skips_if_scoring_when_engine_off(config: Canar
     engine_running/replay — here RPM=0 with fresh OBD classifies as
     ignition_only, which IF/LSTM don't score."""
     from src.daemon import build_live_feature_source, run_live_inference
-    from src.models.manager import LoadedModel
-    from src.models.manifest import ModelManifestCommon
 
     components = build_components(config)
 
-    class _FakeTrained:
-        feature_columns = ("obd:RPM",)
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_v1"})()
-
-        def score(self, frame):
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1
-            out["isolation_forest_model_mode"] = "idle"
-            out["isolation_forest_missing_features"] = False
-            return out
-
-    class _StubManager:
-        @property
-        def current(self):
-            return LoadedModel(
-                artifact=_FakeTrained(),
-                manifest=ModelManifestCommon(
-                    artifact_format_version=1,
-                    model_type="isolation_forest",
-                    model_version="fake_if_v1",
-                    created_at="now",
-                    training_data_hash="h",
-                    input_rows=1,
-                ),
-                artifact_path=Path("/tmp/x"),
-                manifest_path=Path("/tmp/x.manifest.json"),
-                manifest_mtime=0.0,
-            )
-
-        def poll(self):
-            return None
-
-    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+    components.model_managers["isolation_forest"] = StubModelManager(
+        fake_if_model(model_mode="idle", calibrated=False)
+    )  # type: ignore[assignment]
 
     # RPM == 0 with a fresh OBD observation → ignition_only, not scorable.
     source = build_live_feature_source(components)
@@ -2207,49 +2054,12 @@ async def test_run_live_inference_scores_during_replay_despite_engine_off_readin
     re-emits real running-vehicle data, so IF must still score it."""
     from src.control.replay_control import ReplayStatus
     from src.daemon import build_live_feature_source, run_live_inference
-    from src.models.manager import LoadedModel
-    from src.models.manifest import ModelManifestCommon
 
     components = build_components(config)
 
-    class _FakeTrained:
-        feature_columns = ("obd:RPM",)
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_v1"})()
-
-        def score(self, frame):
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1
-            out["isolation_forest_model_mode"] = "idle"
-            out["isolation_forest_missing_features"] = False
-            # 2.3: uncalibrated modes are non-emitting at serve.
-            out["isolation_forest_calibrated_threshold"] = 0.5
-            out["isolation_forest_calibrated_anomaly"] = True
-            return out
-
-    class _StubManager:
-        @property
-        def current(self):
-            return LoadedModel(
-                artifact=_FakeTrained(),
-                manifest=ModelManifestCommon(
-                    artifact_format_version=1,
-                    model_type="isolation_forest",
-                    model_version="fake_if_v1",
-                    created_at="now",
-                    training_data_hash="h",
-                    input_rows=1,
-                ),
-                artifact_path=Path("/tmp/x"),
-                manifest_path=Path("/tmp/x.manifest.json"),
-                manifest_mtime=0.0,
-            )
-
-        def poll(self):
-            return None
-
-    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+    components.model_managers["isolation_forest"] = StubModelManager(
+        fake_if_model(model_mode="idle")
+    )  # type: ignore[assignment]
 
     class _StubReplayController:
         def status(self) -> ReplayStatus:
@@ -2418,49 +2228,10 @@ async def test_run_daemon_end_to_end_inference_emits_anomaly(config: CanaryConfi
     anomalies broadcaster + JSONL. Uses a stub IF model that labels every row.
     """
     from src.daemon import run_daemon
-    from src.models.manager import LoadedModel, SwapAttempt
-    from src.models.manifest import ModelManifestCommon
 
     components = build_components(config)
 
-    class _FakeTrained:
-        feature_columns = ("obd:RPM",)
-        mode_column = "operating_mode"
-        manifest = type("M", (), {"model_version": "fake_if_v1"})()
-
-        def score(self, frame: Any) -> Any:
-            out = frame.copy()
-            out["isolation_forest_score"] = 0.9
-            out["isolation_forest_label"] = -1
-            out["isolation_forest_model_mode"] = "all"
-            out["isolation_forest_missing_features"] = False
-            # 2.3: uncalibrated modes are non-emitting at serve.
-            out["isolation_forest_calibrated_threshold"] = 0.5
-            out["isolation_forest_calibrated_anomaly"] = True
-            return out
-
-    class _StubManager:
-        @property
-        def current(self) -> Any:
-            return LoadedModel(
-                artifact=_FakeTrained(),
-                manifest=ModelManifestCommon(
-                    artifact_format_version=1,
-                    model_type="isolation_forest",
-                    model_version="fake_if_v1",
-                    created_at="now",
-                    training_data_hash="h",
-                    input_rows=1,
-                ),
-                artifact_path=Path("/tmp/x"),
-                manifest_path=Path("/tmp/x.manifest.json"),
-                manifest_mtime=0.0,
-            )
-
-        def poll(self) -> SwapAttempt:
-            return SwapAttempt(kind="no_change")
-
-    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+    components.model_managers["isolation_forest"] = StubModelManager(fake_if_model())  # type: ignore[assignment]
 
     async def _producer_collector(
         queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event

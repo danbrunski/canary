@@ -38,10 +38,19 @@ from typing import Any
 import pandas as pd
 
 try:
-    from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
+    from _cli import (
+        add_bindings_arg,
+        add_common_args,
+        add_log_level_arg,
+        add_profile_arg,
+        load_config,
+        scoped_models_dir,
+    )
 except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on path, not scripts/
     from scripts._cli import (  # type: ignore[no-redef]
+        add_bindings_arg,
         add_common_args,
+        add_log_level_arg,
         add_profile_arg,
         load_config,
         scoped_models_dir,
@@ -330,12 +339,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     add_common_args(parser)
     add_profile_arg(parser)
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=DEFAULT_BINDINGS_PATH,
-        help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml).",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--out",
         type=Path,
@@ -354,11 +358,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Channel to inject anomalies into during --evaluate (default: first decoded:*).",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

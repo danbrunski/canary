@@ -22,24 +22,18 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.decode.slices import ByteSlice, Evidence, LinearScale, PlausibleRange
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
-
-class Evidence(_Strict):
-    """One piece of evidence backing a signal binding."""
-
-    session: str
-    method: str
-    finding: str
 
 
 #: Engineering unit each declarable :attr:`Signal.quantity` is read in.
 QUANTITY_UNITS: dict[str, str] = {"road_speed": "km/h"}
 
 
-class Signal(_Strict):
+class Signal(ByteSlice, LinearScale, PlausibleRange, _Strict):
     """A signal binding: where in a CAN frame the value lives + how to decode it.
 
     `byte_order` is "big" for MSB-first (the OBD-II/UDS convention used across
@@ -245,13 +239,10 @@ def decode_raw(signal: Signal, data: bytes) -> int | None:
 
     Returns `None` when the frame is too short to contain the signal — that
     happens when an ID's DLC varies across frames, or when a signal's byte
-    range overshoots the canonical DLC for its CAN ID.
+    range overshoots the canonical DLC for its CAN ID. The slice arithmetic
+    is :func:`src.decode.slices.slice_raw`, shared with every catalog.
     """
-    end = signal.byte_start + signal.byte_length
-    if len(data) < end:
-        return None
-    chunk = data[signal.byte_start : end]
-    return int.from_bytes(chunk, byteorder=signal.byte_order)
+    return signal.raw_from(data)
 
 
 def scaling_factors(signal: Signal) -> tuple[float, float] | None:
@@ -262,9 +253,7 @@ def scaling_factors(signal: Signal) -> tuple[float, float] | None:
     so a raw column and a raw scalar can never be scaled two different ways.
     An unset `offset` means zero.
     """
-    if signal.scale is None:
-        return None
-    return signal.scale, (signal.offset if signal.offset is not None else 0.0)
+    return signal.scaling_factors()
 
 
 def apply_scaling(signal: Signal, raw: float) -> float | None:
@@ -275,11 +264,7 @@ def apply_scaling(signal: Signal, raw: float) -> float | None:
     raw extraction is still useful for variability tracking, just not for
     "this signal reads 23.5 °C".
     """
-    factors = scaling_factors(signal)
-    if factors is None:
-        return None
-    scale, offset = factors
-    return raw * scale + offset
+    return signal.scaled(raw)
 
 
 def is_plausible(signal: Signal, decoded: float) -> bool | None:
@@ -294,10 +279,4 @@ def is_plausible(signal: Signal, decoded: float) -> bool | None:
     a max-only bound means "must be at most X". Only fully-unset signals
     skip the check.
     """
-    if signal.plausible_min is None and signal.plausible_max is None:
-        return None
-    if signal.plausible_min is not None and decoded < signal.plausible_min:
-        return False
-    if signal.plausible_max is not None and decoded > signal.plausible_max:
-        return False
-    return True
+    return signal.plausible(decoded)

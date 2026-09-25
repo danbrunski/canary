@@ -24,7 +24,6 @@ from src.dashboard.status import compact_status, gather_status_sources
 from src.startup import STAGES, StartupTimeline, process_age_seconds
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
-from tests.test_daemon import config  # noqa: F401 — the shared fixture
 from tests.waits import HANG_GUARD_SECONDS, settle, wait_until
 
 #: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
@@ -33,6 +32,12 @@ pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
 # ---------------------------------------------------------------------------
 # The timeline itself
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def config(daemon_config: CanaryConfig) -> CanaryConfig:
+    """``tests/conftest.py``'s isolated daemon config (was ``tests.test_daemon.config``)."""
+    return daemon_config
 
 
 class _Clock:
@@ -144,7 +149,7 @@ class _GatedWriter(ParquetTelemetryWriter):
 
 
 async def test_run_daemon_reports_every_stage_in_order(
-    config: CanaryConfig,  # noqa: F811
+    config: CanaryConfig,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     from src.daemon import run_daemon
@@ -215,7 +220,7 @@ async def test_run_daemon_reports_every_stage_in_order(
 
 
 async def test_status_serves_the_startup_block_in_both_views(
-    config: CanaryConfig,  # noqa: F811
+    config: CanaryConfig,
 ) -> None:
     components = build_components(config, load_models=False)
     components.health_monitor.startup.mark("main_entered")

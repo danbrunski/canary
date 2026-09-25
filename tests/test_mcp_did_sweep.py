@@ -14,17 +14,8 @@ from typing import Any
 import httpx
 import pytest
 
-from src.mcp_server.client import DaemonClient
 from src.mcp_server.tools import did_sweep as did_sweep_tool
-
-
-async def _client_with_handler(handler: Any) -> DaemonClient:
-    client = DaemonClient("http://daemon")
-    await client._client.aclose()
-    client._client = httpx.AsyncClient(
-        base_url="http://daemon", transport=httpx.MockTransport(handler)
-    )
-    return client
+from tests.fakes import daemon_client_with_handler
 
 
 def _job(
@@ -64,7 +55,7 @@ async def test_diff_reports_varying_constant_and_intermittent(tmp_path: Path) ->
         job_id = request.url.path.rsplit("/", 1)[-1]
         return httpx.Response(200, json={"job": _job(job_id, jobs_dir)})
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     result = await did_sweep_tool.diff_did_snapshots(client, job_a="job-a", job_b="job-b")
 
     assert result["a"] == {"job_id": "job-a", "label": "control"}
@@ -85,7 +76,7 @@ async def test_diff_rejects_a_non_did_sweep_job(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"job": _job("job-a", jobs_dir, kind="corpus_report")})
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     with pytest.raises(ValueError, match="not a did_sweep job"):
         await did_sweep_tool.diff_did_snapshots(client, job_a="job-a", job_b="job-b")
 
@@ -97,7 +88,7 @@ async def test_diff_rejects_an_unfinished_job(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"job": _job("job-a", jobs_dir, status="running")})
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     with pytest.raises(ValueError, match="has not succeeded"):
         await did_sweep_tool.diff_did_snapshots(client, job_a="job-a", job_b="job-b")
 
@@ -109,6 +100,6 @@ async def test_diff_rejects_a_missing_snapshot_file(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"job": _job("job-a", jobs_dir)})
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     with pytest.raises(ValueError, match="result not found"):
         await did_sweep_tool.diff_did_snapshots(client, job_a="job-a", job_b="job-b")

@@ -18,6 +18,7 @@ from src.collection.lsm6dsox import FifoBatch, ImuSample, TemperatureSample
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanaryConfig, ImuConfig
 from src.telemetry import TelemetryRecord
+from tests.fakes import FakeLsmBus, lsm_fifo_instants
 
 REPO = Path(__file__).resolve().parents[1]
 HAT_IMU = ImuConfig(source="lsm6dsox", sample_rate_hz=104.0, fifo_poll_seconds=0.01)
@@ -107,15 +108,13 @@ async def test_the_device_is_powered_down_even_when_reading_fails() -> None:
 
 
 async def test_from_config_reconnects_after_a_missing_device() -> None:
-    from tests.test_lsm6dsox import FakeBus, _instants
-
     attempts: list[int] = []
 
-    def factory(config: ImuConfig) -> FakeBus:
+    def factory(config: ImuConfig) -> FakeLsmBus:
         attempts.append(1)
         if len(attempts) == 1:
             raise OSError("no such device")
-        return FakeBus(_instants(0, 60, ticks0=0, ticks_per=384.0))
+        return FakeLsmBus(lsm_fifo_instants(0, 60, ticks0=0, ticks_per=384.0))
 
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()

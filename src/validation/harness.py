@@ -60,7 +60,7 @@ from src.collection.obd_scheduler import (
 from src.collection.queueing import CollectorHandoffStats
 from src.collection.reconnect import ReconnectPolicy
 from src.collection.replay import ReplayEmissionStats, replay_session
-from src.config import CanaryConfig
+from src.config import CanaryConfig, rebase_state_paths
 from src.control.capture_finalize import StartEpoch, finalize_capture, record_capture_start
 from src.daemon.components import DaemonComponents, build_components
 from src.daemon.drain import drain_queue_with_broadcast
@@ -98,20 +98,18 @@ REAL_BINDINGS = BINDINGS_YAML
 DRIVE_SLICE = Path("tests/fixtures/ground_truth/drive-slice")
 HEARTBEAT_INTERVAL_S = 0.01
 RECONNECT_POLICY = ReconnectPolicy(initial_delay_seconds=0.5, max_delay_seconds=1.0)
-_SCRATCH_DAEMON_PATHS: dict[str, str] = {
-    "anomalies_dir": "anomalies",
-    "jobs_dir": "jobs",
-    "audit_log": "control/audit.jsonl",
-    "feedback_log": "control/anomaly_feedback.jsonl",
-    "vehicle_ledger": "control/vehicle_ledger.jsonl",
-    "reference_epoch": "control/reference_epoch.json",
-    "training_ledger": "control/training_runs.jsonl",
-    "tuning_config": "control/tuning.yaml",
-    "tuning_audit": "control/tuning_audit.jsonl",
-    "trip_state": "control/trip_odometer.json",
-    "trend_alert_state": "control/trend_alert_state.json",
-    "catalog_db": "control/catalog.db",
-}
+#: Daemon paths the harness reads from the real tree: detector artifacts and
+#: the per-vehicle inputs. Every other ``Path`` field of ``DaemonConfig`` --
+#: including any added later -- is rebased under the scratch dir by
+#: :func:`src.config.rebase_state_paths` (R07.2).
+_REAL_TREE_DAEMON_INPUTS: tuple[str, ...] = (
+    "models_dir",
+    "behavior_models",
+    "accepted_baselines",
+    "custom_pids",
+    "afr_calibration",
+    "kline_profile",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -257,13 +255,7 @@ def harness_config(
             update={"daemon": config.daemon.model_copy(update={"models_dir": models_dir})}
         )
     config = scope_config(config, resolve_profile_for_tooling(config, None))
-    known = set(type(config.daemon).model_fields)
-    daemon_update = {
-        name: scratch / relative
-        for name, relative in _SCRATCH_DAEMON_PATHS.items()
-        if name in known
-    }
-    daemon = config.daemon.model_copy(update=daemon_update)
+    daemon = rebase_state_paths(config, scratch, keep=_REAL_TREE_DAEMON_INPUTS).daemon
     collection = config.collection.model_copy(
         update={"storage_path": scratch / "storage", "replay_session": None}
     )

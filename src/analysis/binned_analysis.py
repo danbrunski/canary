@@ -28,6 +28,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
+from src.decode.surface_eval import bin_indices
 from src.preprocessing.loader import to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 
@@ -98,13 +99,6 @@ def _cell(values: np.ndarray, agg: Aggregation) -> dict[str, float | int]:
         "std": float(np.std(values, ddof=0)),
         "count": int(values.size),
     }
-
-
-def _bin_index(value: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    """Same half-open/closed-last-bin convention as ``surface_2d._bin_index``."""
-    bins = np.digitize(value, edges) - 1
-    clipped: np.ndarray = np.clip(bins, 0, len(edges) - 2)
-    return clipped
 
 
 def rows_to_resampled_frame(
@@ -191,7 +185,7 @@ def compute_binned_analysis(
     x_edges = np.asarray(_quantile_edges(x, x_bins), dtype=float)
 
     if y_channel is None:
-        x_idx = _bin_index(x, x_edges)
+        x_idx = bin_indices(x, x_edges)
         cells = []
         for i in range(len(x_edges) - 1):
             mask = x_idx == i
@@ -212,8 +206,8 @@ def compute_binned_analysis(
 
     y = subset[y_channel].to_numpy(dtype=float)
     y_edges = np.asarray(_quantile_edges(y, y_bins or x_bins), dtype=float)
-    x_idx = _bin_index(x, x_edges)
-    y_idx = _bin_index(y, y_edges)
+    x_idx = bin_indices(x, x_edges)
+    y_idx = bin_indices(y, y_edges)
     n_x, n_y = len(x_edges) - 1, len(y_edges) - 1
     cells = []
     for i in range(n_x):
@@ -239,9 +233,12 @@ def compute_binned_analysis(
     }
 
 
+#: ``bin_indices`` is the one bin rule (:mod:`src.decode.surface_eval`, R05.10),
+#: re-exported for analysis callers.
 __all__ = [
     "DEFAULT_BIN_COUNT",
     "Aggregation",
+    "bin_indices",
     "compute_binned_analysis",
     "rows_to_resampled_frame",
 ]

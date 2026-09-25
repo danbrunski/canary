@@ -5,8 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Sequence
 from pathlib import Path
 
 from src.analysis.memory_verification import (
@@ -16,58 +15,35 @@ from src.analysis.memory_verification import (
     restamp,
     verify_channel,
 )
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient
-from src.config import CanaryConfig
 from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
-from tools.did_log import (
-    PASSIVE_REASON,
-    _passive_problem,
-    _resolve_session,
-    _resolve_token,
-    http_passive_checker,
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    PassiveRefusedError,
+    add_bus_tool_args,
+    open_client,
+    parse_header,
+    require_passive,
+    resolve_session,
 )
-
-
-@contextmanager
-def _open_client(
-    config_path: Path, *, request_id: int, read_timeout: float
-) -> Iterator[CanObdClient]:
-    config = CanaryConfig.from_yaml(config_path)
-    bus = bus_factory(config.hardware.can)
-    try:
-        yield CanObdClient(
-            bus,
-            request_id=request_id,
-            timeout_seconds=read_timeout,
-        )
-    finally:
-        bus.shutdown()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_bus_tool_args(parser, passive_check_seconds=30.0)
     parser.add_argument("--dids", type=Path, default=DIDS_YAML)
-    parser.add_argument("--header", default="7E0", help="Request CAN id (hex).")
-    parser.add_argument("--session", default="auto")
     parser.add_argument("--samples", type=int, default=20)
-    parser.add_argument("--read-timeout", type=float, default=1.0)
     parser.add_argument("--channel", action="append", default=[])
     parser.add_argument("--record-revision", default=None)
     parser.add_argument("--carry-unverifiable", default=None, metavar="REASON")
-    parser.add_argument("--daemon-url", default="http://localhost:8000")
-    parser.add_argument("--passive-check-seconds", type=float, default=30.0)
-    parser.add_argument("--no-daemon", action="store_true")
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        request_id = int(args.header, 16)
-        session = _resolve_session(args.session)
+        request_id = parse_header(args.header)
+        session = resolve_session(args.session)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -86,19 +62,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not channels:
         print(f"error: {args.dids} declares no memory channels", file=sys.stderr)
         return 1
-    if not args.no_daemon:
-        problem = _passive_problem(
-            http_passive_checker(args.daemon_url, _resolve_token())(),
-            args.passive_check_seconds,
-        )
-        if problem is not None:
-            print(
-                f"refusing: daemon passive mode is not usable ({problem}); {PASSIVE_REASON}",
-                file=sys.stderr,
-            )
-            return 2
+    try:
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
     verdicts: list[ChannelVerdict] = []
-    with _open_client(args.config, request_id=request_id, read_timeout=args.read_timeout) as client:
+    with open_client(args, passive) as client:
         for channel in channels:
             verdicts.append(
                 verify_channel(

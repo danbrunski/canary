@@ -416,3 +416,77 @@ def test_read_session_decoded_against_real_bindings_file():
     # Should run without error and produce some decoded rows for bound IDs.
     # (Not asserting count — depends on which session and what's bound.)
     assert "source" in out.columns
+
+
+# ---------------------------------------------------------------------------
+# R04.14 — one bounded reader across channel-spelling eras
+# ---------------------------------------------------------------------------
+
+
+def _spelled_session(root: Path, spelling: str) -> Path:
+    """A session whose raw CAN rows spell id 0x551 as ``spelling``, plus an
+    unrelated id and an OBD row."""
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    session = root / spelling.replace("0x", "hex-")
+    records = []
+    for i in range(5):
+        t = 1_778_500_000.0 + i
+        records.append(TelemetryRecord.can(t, 0x551, bytes([40 + i, 0]), channel=spelling))
+        records.append(TelemetryRecord.can(t, 0x6F7, bytes([1, 2, 3])))
+        records.append(TelemetryRecord.obd(t, "RPM", 700.0 + i, "rpm"))
+    write_records_to_parquet(records, session, max_rows=10_000)
+    return session
+
+
+@pytest.mark.parametrize("spelling", ["0x551", "551", "0x0551", "0X551", "0551"])
+def test_read_session_decoded_subset_reads_every_channel_spelling(
+    tmp_path: Path, spelling: str
+) -> None:
+    from src.plausibility.offline import session_long
+    from src.preprocessing.decode import read_session_decoded_subset
+
+    bindings = _bindings(_sig(name="COOLANT", can_id=0x551), _sig(name="OTHER", can_id=0x6F7))
+    session = _spelled_session(tmp_path, spelling)
+
+    long, subset = read_session_decoded_subset(session, bindings=bindings, decoded={"COOLANT"})
+    assert subset is not None and [s.name for s in subset.signals] == ["COOLANT"]
+    can = long[long["source"] == "can"]
+    # Only the wanted id's raw frames, under whatever spelling the era used.
+    assert can["channel"].astype(str).unique().tolist() == [spelling]
+    assert len(can) == 5
+    assert (long["source"] == "obd").sum() == 5
+
+    decoded = session_long(session, bindings=bindings, did_map=None, decoded={"COOLANT"})
+    rows = decoded[decoded["source"] == "decoded"]
+    assert rows["channel"].unique().tolist() == ["COOLANT"]
+    assert rows["value_number"].tolist() == [40.0, 41.0, 42.0, 43.0, 44.0]
+    assert "can" not in set(decoded["source"])
+
+
+def test_read_session_decoded_subset_without_wanted_signals_reads_no_can(tmp_path: Path) -> None:
+    from src.preprocessing.decode import read_session_decoded_subset
+
+    session = _spelled_session(tmp_path, "0x551")
+    long, subset = read_session_decoded_subset(session, bindings=None, decoded={"COOLANT"})
+    assert subset is None
+    assert "can" not in set(long["source"])
+
+
+# ---------------------------------------------------------------------------
+# R04.4 — one byte-slice rule
+# ---------------------------------------------------------------------------
+
+
+def test_decode_signal_column_matches_decode_raw() -> None:
+    from src.decode.bindings import decode_raw
+    from src.preprocessing.decode import decode_signal_column
+
+    signal = _sig(byte_start=1, byte_length=2, byte_order="little")
+    payloads = pd.Series([bytes([0, 1, 2]), bytearray([9, 255, 1]), bytes([0, 1]), None])
+    out = decode_signal_column(payloads, signal)
+    assert out.dtype == np.float64
+    assert out[0] == decode_raw(signal, bytes([0, 1, 2])) == 0x0201
+    assert out[1] == 0x01FF
+    assert np.isnan(out[2]) and np.isnan(out[3])

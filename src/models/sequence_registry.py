@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.coerce import optional_str as _optional_str
-from src.models.sequence_training import EpochLoss
+from src.models.sequence_calibration import EpochLoss
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig

@@ -25,7 +25,7 @@ def test_every_default_home_re_exports_the_same_file() -> None:
     from src.dashboard import paths as dashboard_paths
     from src.decode import dbc, engineering
     from src.models import spec_producibility
-    from src.preprocessing import decode, feature_cache
+    from src.preprocessing import decode, feature_cache, feature_pipeline
 
     assert dashboard_paths.DEFAULT_BINDINGS_PATH == paths.BINDINGS_YAML
     assert dashboard_paths.DEFAULT_DIDS_PATH == paths.DIDS_YAML
@@ -33,6 +33,8 @@ def test_every_default_home_re_exports_the_same_file() -> None:
     assert decode.DEFAULT_BINDINGS_PATH == paths.BINDINGS_YAML
     assert feature_cache.DEFAULT_BINDINGS_PATH == paths.BINDINGS_YAML
     assert feature_cache.DEFAULT_DIDS_PATH == paths.DIDS_YAML
+    assert feature_pipeline.DEFAULT_BINDINGS_PATH == paths.BINDINGS_YAML
+    assert feature_pipeline.DEFAULT_DIDS_PATH == paths.DIDS_YAML
     assert spec_producibility.DEFAULT_DIDS_PATH == paths.DIDS_YAML
     assert spec_producibility.DEFAULT_DBC_DIR == paths.DBC_DIR
     assert dbc.DEFAULT_DBC_DIR == paths.DBC_DIR
@@ -72,15 +74,6 @@ def _did_session(root: Path) -> Path:
     return session
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "R01.2 remainder: build_feature_frame still loads "
-        "feature_pipeline.DEFAULT_DIDS_PATH (working-directory-relative) and has no "
-        "dids_path parameter; src/preprocessing/feature_pipeline.py is held by the "
-        "concurrent H01 agent"
-    ),
-)
 def test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -102,3 +95,25 @@ def test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory(
     assert from_repo, "the fixture must produce did: columns from the repo root"
     assert from_elsewhere == from_repo
     assert "dids_path" in inspect.signature(build_feature_frame).parameters
+
+
+def test_build_feature_frame_cache_key_hashes_the_dids_file_it_loads(tmp_path: Path) -> None:
+    """R01.2: ``dids_path`` is threaded into the cache key, so a build against
+    another DID catalog cannot be served the repo catalog's cached frame."""
+    import json
+
+    from src.preprocessing.feature_pipeline import build_feature_frame
+
+    config = CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
+    session = _did_session(tmp_path / "sessions")
+    other = tmp_path / "dids.yaml"
+    other.write_text(paths.DIDS_YAML.read_text())
+
+    cache = tmp_path / "cache"
+    build_feature_frame([session], config, cache_dir=cache, max_workers=1)
+    build_feature_frame([session], config, cache_dir=cache, max_workers=1, dids_path=other)
+
+    sidecars = [json.loads(p.read_text()) for p in sorted(cache.glob("*.json"))]
+    assert sorted(entry["dids"]["path"] for entry in sidecars) == sorted(
+        [str(paths.DIDS_YAML), str(other.resolve())]
+    )

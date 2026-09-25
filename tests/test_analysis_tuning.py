@@ -13,20 +13,28 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from src.analysis.afr import AfrCalibration
-from src.analysis.noise_floor import NoiseFloor, annotate, record_null_run
+from src.analysis.noise_floor import (
+    FloorRefusal,
+    NoiseFloor,
+    Significance,
+    record_null_run,
+    significance,
+)
 from src.analysis.tuning import (
     GateError,
     compare_sessions,
     delivery_error,
     delivery_error_from_semantic_frame,
-    scale_stability,
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
 BINDINGS = Path("data/bindings.yaml")
+#: The dev vehicle's mode01_wot.rpm_bands (profile data since R05.13).
+RPM_BANDS = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
 DIDS = Path("data/dids.yaml")
 T0 = datetime(2026, 8, 5, 12, 0, 0, tzinfo=UTC)
 PHI = AfrCalibration(commanded_equiv_ratio_convention="phi")
@@ -68,7 +76,15 @@ def test_closed_loop_samples_are_excluded_and_the_count_is_reported(tmp_path: Pa
         [(3000, 90, 2, 1.0, 1.0)] * 20  # closed loop, stoich
         + [(3000, 90, 4, 1.2, 0.83)] * 5,  # open loop enrichment
     )
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert result.n == 5
     assert result.gates["filtered"]["closed_loop"] == 20
 
@@ -85,7 +101,15 @@ def test_decel_fuel_cut_is_excluded_structurally(tmp_path: Path) -> None:
         [(3000, 90, 4, 1.2, 0.83)] * 4  # enrichment: commanded ~12.25 AFR
         + [(3000, 90, 4, 0.5, 1.9)] * 6,  # DFCO: commanded ~29 AFR, way lean
     )
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert result.n == 4
     assert result.gates["filtered"]["not_enrichment"] == 6
 
@@ -102,7 +126,15 @@ def test_delivery_error_reports_band_average_and_pooled_separately(tmp_path: Pat
         # 10 samples in one band, 2 in another: pooled is dominated by the first.
         [(2600, 90, 4, 1.2, 0.90)] * 10 + [(4600, 90, 4, 1.2, 0.80)] * 2,
     )
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert len(result.bands) == 2
     assert result.pooled_pct != pytest.approx(result.band_averaged_pct)
     # Band-averaging weights the sparse high-rpm band equally, so it must sit
@@ -114,7 +146,15 @@ def test_delivery_error_reports_band_average_and_pooled_separately(tmp_path: Pat
 def test_measured_source_is_carried_in_the_result(tmp_path: Path) -> None:
     """The lambda path and the voltage path disagree 3.8 %; neither is default truth."""
     session = _rows(tmp_path, [(3000, 90, 4, 1.2, 0.83)] * 4)
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert result.measured_spec == "obd:O2_WR_LAMBDA_S1"
 
 
@@ -134,6 +174,8 @@ def test_semantic_delivery_adapter_excludes_censored_samples_without_mode01() ->
     result = delivery_error_from_semantic_frame(
         frame,
         measured_spec="did:ECM_AF_SENSOR_V_B1 (voltage_afr)",
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
     )
 
     assert result.n == 2
@@ -158,6 +200,7 @@ def test_compare_sessions_refuses_load_as_an_axis(tmp_path: Path) -> None:
                 axes=("obd:RPM", axis),
                 bindings_path=BINDINGS,
                 dids_path=DIDS,
+                afr_stoich=14.7,
             )
 
 
@@ -173,6 +216,7 @@ def test_unsafe_axes_is_an_explicit_escape_hatch(tmp_path: Path) -> None:
         unsafe_axes=True,
         bindings_path=BINDINGS,
         dids_path=DIDS,
+        afr_stoich=14.7,
     )
     # Same session against itself: every matched cell delta is exactly zero.
     assert result.n_cells > 0
@@ -191,11 +235,16 @@ def test_comparison_without_a_floor_says_unavailable_rather_than_guessing(
         axes=("obd:RPM",),
         bindings_path=BINDINGS,
         dids_path=DIDS,
+        afr_stoich=14.7,
     )
     assert result.cells["delta_sigma"].isna().all()
 
 
-def test_floor_annotation_calls_small_deltas_indistinguishable() -> None:
+WOT = "WOT: throttle>=85, 3000-5000 rpm"
+IDLE = "idle: 600-800 rpm, closed loop"
+
+
+def test_floor_significance_calls_small_deltas_indistinguishable() -> None:
     """The phrasing that was missing from the retracted spark claims.
 
     Those quoted per-cell deltas of -1.57, -1.01 and -0.74 deg against a
@@ -206,18 +255,94 @@ def test_floor_annotation_calls_small_deltas_indistinguishable() -> None:
     The gate's job is to surface that arithmetic, not to make it vanish.
     """
     floor = NoiseFloor(
-        channels={"timing_advance_deg": {"unit": "deg", "sd": 0.64, "mean": 0.01, "n_cells": 5}}
+        channels={
+            "timing_advance_deg": {
+                "unit": "deg",
+                "sd": 0.64,
+                "mean": 0.01,
+                "n_cells": 5,
+                "conditions": WOT,
+            }
+        }
     )
-    out = annotate(pd.Series([-1.57, -1.01, -0.74, 3.0]), floor, "timing_advance_deg")
-    assert out["delta_sigma"].iloc[0] == pytest.approx(-2.45, abs=0.01)
-    assert list(out["distinguishable"][1:3]) == [False, False]
-    assert bool(out["distinguishable"].iloc[3])
+    out = floor.significance(
+        "timing_advance_deg", pd.Series([-1.57, -1.01, -0.74, 3.0]), conditions=WOT
+    )
+    assert isinstance(out, Significance)
+    assert out.delta_sigma.iloc[0] == pytest.approx(-2.45, abs=0.01)
+    assert list(out.distinguishable[1:3]) == [False, False]
+    assert bool(out.distinguishable.iloc[3])
 
 
-def test_missing_floor_degrades_to_unavailable() -> None:
-    out = annotate(pd.Series([1.0, 2.0]), None, "timing_advance_deg")
-    assert out.attrs["floor"] == "unavailable"
-    assert out["delta_sigma"].isna().all()
+def test_an_idle_comparison_against_the_wot_floor_refuses() -> None:
+    """R05.2: a WOT floor quoted against idle cells understates noise ~16x."""
+    floor = NoiseFloor(
+        channels={
+            "timing_advance_deg": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}
+        }
+    )
+    out = floor.significance("timing_advance_deg", pd.Series([1.0, 2.0]), conditions=IDLE)
+    assert isinstance(out, FloorRefusal)
+    assert out.kind == "conditions_mismatch"
+    # The refusal names both regimes.
+    assert WOT in out.reason and IDLE in out.reason
+    assert out.as_dict()["floor_conditions"] == WOT
+    assert out.as_dict()["requested_conditions"] == IDLE
+
+
+def test_missing_floor_refuses_as_no_floor() -> None:
+    out = significance(None, "timing_advance_deg", pd.Series([1.0, 2.0]), conditions=WOT)
+    assert isinstance(out, FloorRefusal) and out.kind == "no_floor"
+    empty = NoiseFloor(channels={})
+    out = empty.significance("timing_advance_deg", pd.Series([1.0]), conditions=WOT)
+    assert isinstance(out, FloorRefusal) and out.kind == "no_floor"
+
+
+def test_a_floor_without_its_conditions_is_not_representable() -> None:
+    with pytest.raises(ValidationError, match="conditions"):
+        NoiseFloor(channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5}})
+
+
+def test_an_idle_session_comparison_against_the_wot_floor_refuses(tmp_path: Path) -> None:
+    floor = NoiseFloor(
+        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}}
+    )
+    session = _rows(tmp_path, [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)])
+    result = compare_sessions(
+        session,
+        session,
+        value="obd:O2_WR_LAMBDA_S1",
+        axes=("obd:RPM",),
+        noise_floor=floor,
+        floor_channel="spark",
+        conditions=IDLE,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+    )
+    assert result.cells["delta_sigma"].isna().all()
+    assert result.floor_refusal is not None
+    assert result.floor_refusal["kind"] == "conditions_mismatch"
+    assert result.as_dict()["floor_refusal"]["floor_conditions"] == WOT
+
+
+def test_a_floor_without_comparison_conditions_is_refused(tmp_path: Path) -> None:
+    floor = NoiseFloor(
+        channels={"spark": {"unit": "deg", "sd": 0.48, "n_cells": 5, "conditions": WOT}}
+    )
+    session = _rows(tmp_path, [(2000 + 100 * i, 90, 4, 1.2, 0.83) for i in range(30)])
+    with pytest.raises(GateError, match="without conditions"):
+        compare_sessions(
+            session,
+            session,
+            value="obd:RPM",
+            axes=("obd:RPM",),
+            noise_floor=floor,
+            floor_channel="spark",
+            bindings_path=BINDINGS,
+            dids_path=DIDS,
+            afr_stoich=14.7,
+        )
 
 
 def test_record_null_run_needs_more_than_one_cell() -> None:
@@ -228,44 +353,6 @@ def test_record_null_run_needs_more_than_one_cell() -> None:
             units={"x": "deg"},
             conditions="WOT",
         )
-
-
-def test_scale_stability_reproduces_the_0x23d_verdicts() -> None:
-    """Regression against the measured binding outcomes (commit c341570).
-
-    Pedal position held its scale to +0.24 % across independent windows and
-    was promoted to `confirmed`; the best airflow candidate correlated at
-    r = 0.98 but drifted -6.5 % and was deliberately left unpinned. Correlation
-    could not tell those apart — scale stability could.
-    """
-    rng = np.random.default_rng(0)
-    x_a = rng.uniform(0, 255, 200)
-
-    # Pedal: same map in both windows, small noise.
-    stable = scale_stability(
-        x_a,
-        0.01485 * x_a + 0.795 + rng.normal(0, 0.002, 200),
-        x_b := rng.uniform(0, 255, 200),
-        0.01485 * x_b + 0.795 + rng.normal(0, 0.002, 200),
-    )
-    assert stable.verdict == "stable"
-    assert abs(stable.drift_pct) < 1.5
-    assert stable.oos_r2 > 0.99
-
-    # Airflow: strongly correlated, but the scale moves 6.5 % between windows.
-    unstable = scale_stability(
-        x_a,
-        6.88 * x_a + 5.57 + rng.normal(0, 1.0, 200),
-        x_b,
-        6.88 * 0.935 * x_b + 6.92 + rng.normal(0, 1.0, 200),
-    )
-    assert unstable.verdict == "unstable"
-    assert unstable.drift_pct < -3.0
-
-
-def test_scale_stability_refuses_degenerate_windows() -> None:
-    with pytest.raises(GateError, match="non-zero variance"):
-        scale_stability([1.0] * 5, [2.0] * 5, [1.0, 2.0, 3.0], [1.0, 2.0, 3.0])
 
 
 def test_the_shipped_noise_floor_is_wot_scoped() -> None:
@@ -383,6 +470,7 @@ def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) ->
         revisions=registry,
         bindings_path=BINDINGS,
         dids_path=DIDS,
+        afr_stoich=14.7,
     )
     payload = result.as_dict()
     assert payload["tune_revisions"] == ["ZS44A-k105", "ZS44A-k106"]
@@ -419,9 +507,13 @@ def test_floor_conditions_travel_with_the_sigma_figures(tmp_path: Path) -> None:
         axes=("obd:RPM",),
         noise_floor=floor,
         floor_channel="spark",
+        conditions="WOT: throttle>=85, 3000-5000 rpm",
         bindings_path=BINDINGS,
         dids_path=DIDS,
+        afr_stoich=14.7,
     )
+    assert result.floor_refusal is None
+    assert result.cells["delta_sigma"].notna().all()
     assert result.floor_conditions == "WOT: throttle>=85, 3000-5000 rpm"
     assert result.as_dict()["floor_conditions"] == "WOT: throttle>=85, 3000-5000 rpm"
 
@@ -443,6 +535,7 @@ def test_a_floor_object_without_a_named_channel_is_refused(tmp_path: Path) -> No
             noise_floor=floor,
             bindings_path=BINDINGS,
             dids_path=DIDS,
+            afr_stoich=14.7,
         )
 
 
@@ -473,6 +566,9 @@ def test_delivery_error_refuses_a_voltage_channel_as_the_measurement() -> None:
             measured_spec="did:ECM_AF_SENSOR_V_B1",
             measured_is_lambda=False,
             dids_path=Path("data/dids.yaml"),
+            afr_stoich=14.7,
+            rpm_bands=RPM_BANDS,
+            min_load=85.0,
         )
 
 
@@ -490,7 +586,15 @@ def test_fuel_cut_samples_are_gated_not_fatal(tmp_path: Path) -> None:
         + [(3000, 90, 4, 1.2, 0.83)] * 4  # enrichment
         + [(3000, 20, 4, 0.0, 5.0)] * 2,  # and cuts again
     )
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert result.n == 4
     assert result.gates["filtered"]["fuel_cut"] == 5
     assert result.gates["started"] == 9
@@ -499,7 +603,15 @@ def test_fuel_cut_samples_are_gated_not_fatal(tmp_path: Path) -> None:
 def test_an_all_fuel_cut_session_is_gates_removed_everything(tmp_path: Path) -> None:
     """Every sample in fuel cut is an answer about the drive, not missing inputs."""
     session = _rows(tmp_path, [(3000, 20, 4, 0.0, 5.0)] * 5)
-    result = delivery_error(session, calibration=PHI, bindings_path=BINDINGS, dids_path=DIDS)
+    result = delivery_error(
+        session,
+        calibration=PHI,
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+        rpm_bands=RPM_BANDS,
+        min_load=85.0,
+    )
     assert result.n == 0
     assert result.gates == {"started": 5, "filtered": {"fuel_cut": 5}, "remaining": 0}
 
@@ -509,3 +621,85 @@ def test_commanded_afr_series_maps_fuel_cut_to_nan() -> None:
     out = PHI.commanded_afr_series(pd.Series([0.0, 1.2, -1.0]), afr_stoich=14.7)
     assert np.isnan(out.iloc[0]) and np.isnan(out.iloc[2])
     assert out.iloc[1] == pytest.approx(14.7 / 1.2)
+
+
+def test_auto_edges_keep_the_minimum_sample(tmp_path: Path) -> None:
+    """R05.10: ``linspace(lo, hi, 7)`` edges with right-closed ``pd.cut`` put
+    the minimum on no bin's inside, so every sample at the lowest rpm was
+    silently dropped from the comparison."""
+    rows = [(1000, 50, 4, 1.2, 0.83)] * 5 + [(4000, 50, 4, 1.2, 0.83)] * 5
+    a = _rows(tmp_path / "a", rows)
+    b = _rows(tmp_path / "b", rows)
+    result = compare_sessions(
+        a,
+        b,
+        value="obd:O2_WR_LAMBDA_S1",
+        axes=("obd:RPM",),
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+    )
+    assert result.n_cells == 2
+    assert sorted(result.cells["n_a"].tolist()) == [5, 5]
+
+
+def test_explicit_edges_still_exclude_out_of_range_samples(tmp_path: Path) -> None:
+    rows = [(500, 50, 4, 1.2, 0.83)] * 5 + [(1500, 50, 4, 1.2, 0.83)] * 5
+    a = _rows(tmp_path / "a", rows)
+    b = _rows(tmp_path / "b", rows)
+    result = compare_sessions(
+        a,
+        b,
+        value="obd:O2_WR_LAMBDA_S1",
+        axes=("obd:RPM",),
+        bins=((1000.0, 2000.0),),
+        bindings_path=BINDINGS,
+        dids_path=DIDS,
+        afr_stoich=14.7,
+    )
+    assert result.n_cells == 1
+    assert result.cells["n_a"].tolist() == [5]
+
+
+def test_uncaptured_inputs_raise_a_structured_refusal(tmp_path: Path) -> None:
+    """R05.11: callers read ``kind`` and ``missing``, never the message."""
+    import json
+
+    from src.analysis.tuning import InputsNotCapturedError
+
+    records = [
+        TelemetryRecord(
+            timestamp=T0 + timedelta(seconds=i), source="obd", channel="RPM", value=3000
+        )
+        for i in range(5)
+    ]
+    session = tmp_path / "_capture-tuning-did-2026-08-05T120000"
+    write_records_to_parquet(records, session)
+    (session / "capture_profile.json").write_text(
+        json.dumps(
+            {
+                "profile": "tuning-did",
+                "started_at": T0.isoformat(),
+                "profile_snapshot": {"mode01_enabled": False, "did_continuous": True},
+            }
+        )
+    )
+    with pytest.raises(InputsNotCapturedError) as caught:
+        delivery_error(
+            session,
+            calibration=PHI,
+            bindings_path=BINDINGS,
+            dids_path=DIDS,
+            afr_stoich=14.7,
+            mode01_exclusion_note="VEHICLE-NOTE",
+            rpm_bands=RPM_BANDS,
+            min_load=85.0,
+        )
+    err = caught.value
+    assert err.kind == "not_captured"
+    assert "obd:COMMANDED_EQUIV_RATIO" in err.missing
+    assert "obd:RPM" not in err.missing
+    # The vehicle's own sentence comes from profile data; shared code carries
+    # no ECM-specific claim.
+    assert "VEHICLE-NOTE" in str(err)
+    assert "this ECM" not in str(err)

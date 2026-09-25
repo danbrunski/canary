@@ -36,20 +36,26 @@ up to 63 bytes (``access.max_memory_read_length``), which is what
 
 Read-only throughout. Sends 0x10 (session), 0xAC/0x2C (define a read list),
 0x21 (read it), 0x22 and 0x23 (the baselines it checks against). Nothing
-here writes non-volatile memory.
+here writes non-volatile memory. It holds a diagnostic session, so it refuses
+to open the bus unless the daemon reports passive mode armed (``--no-daemon``
+on a bench with no daemon).
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Iterator, Sequence
-from contextlib import contextmanager
-from pathlib import Path
+from collections.abc import Sequence
 
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient
-from src.config import CanaryConfig
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    PassiveRefusedError,
+    add_bus_tool_args,
+    open_client,
+    parse_header,
+    require_passive,
+    resolve_session,
+)
 
 DEFINE_SERVICE = 0xAC
 READ_LOCAL_SERVICE = 0x21
@@ -75,40 +81,31 @@ def _render(reply: object) -> str:
     return payload.hex() or "<empty>"
 
 
-@contextmanager
-def _open_client(config_path: Path, *, request_id: int, timeout: float) -> Iterator[CanObdClient]:
-    config = CanaryConfig.from_yaml(config_path)
-    bus = bus_factory(config.hardware.can)
-    try:
-        yield CanObdClient(
-            bus,
-            request_id=request_id,
-            response_id_min=request_id + 8,
-            response_id_max=request_id + 8,
-            timeout_seconds=timeout,
-        )
-    finally:
-        bus.shutdown()
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
-    parser.add_argument("--header", default="7E0")
-    parser.add_argument("--session", default="C0")
+    add_bus_tool_args(parser, session_default="C0", timeout_alias=True)
     parser.add_argument("--local-id", default="81")
-    parser.add_argument("--timeout", type=float, default=1.0)
     args = parser.parse_args(argv)
 
-    request_id = int(args.header, 16)
-    session = int(args.session, 16)
-    local = int(args.local_id, 16)
+    try:
+        request_id = parse_header(args.header)
+        session = resolve_session(args.session)
+        local = int(args.local_id, 16)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    try:
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
 
-    with _open_client(args.config, request_id=request_id, timeout=args.timeout) as client:
-        if not client.enter_diagnostic_session(session, request_id=request_id):
-            print(f"session 0x{session:02X} refused", file=sys.stderr)
-            return 2
-        print(f"session 0x{session:02X} entered")
+    with open_client(args, passive) as client:
+        if session is not None:
+            if not client.enter_diagnostic_session(session, request_id=request_id):
+                print(f"session 0x{session:02X} refused", file=sys.stderr)
+                return 2
+            print(f"session 0x{session:02X} entered")
 
         baseline = client.query_mode_22(0x1101, request_id=request_id)
         print(f"\nbaseline  Mode 22 DID 0x1101 -> {_render(baseline)}")

@@ -111,6 +111,26 @@ export interface NoiseFloor {
   conditions?: string;
 }
 
+/** Whether a noise floor may grade a comparison (R05.2). A floor is valid
+ *  only under the conditions it was measured in; a mismatch is refused, and
+ *  the refusal names both regimes. */
+export type Significance =
+  | {
+      available: true;
+      channel: string;
+      sd: number;
+      conditions: string;
+      sigma_threshold: number;
+    }
+  | {
+      available: false;
+      channel: string;
+      kind: "no_floor" | "conditions_mismatch";
+      reason: string;
+      floor_conditions: string | null;
+      requested_conditions: string;
+    };
+
 export type UnavailableKind =
   "not_captured" | "refused" | "over_budget" | "gates_removed_everything" | "no_sessions" | null;
 
@@ -209,6 +229,8 @@ export interface PullComparisonResponse extends AnalysisBase {
   cells: ComparedCell[];
   n_cells: number;
   noise_floor: NoiseFloor | null;
+  /** ``null`` when no floor channel was asked for. */
+  significance?: Significance | null;
 }
 
 export interface SessionChoice {

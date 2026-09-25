@@ -36,6 +36,7 @@ from typing import Any, Literal
 
 import yaml
 
+from src.preprocessing.features import ROC_SUFFIX, split_rolling
 from src.trainability import non_trainable_inputs, source_exclusion_reason
 
 FEATURE_SET_SCHEMA_KEY = "sequence_feature_set"
@@ -56,7 +57,7 @@ ROLES: tuple[str, ...] = ("input", "target")
 #: must show detection value before one comes back. Inputs keep ``__roc``, the
 #: transient the engine is responding to (tip-in, a stop), which the raw value
 #: of one row cannot show.
-ROLLING_KEPT: dict[str, tuple[str, ...]] = {"input": ("__roc",), "target": ()}
+ROLLING_KEPT: dict[str, tuple[str, ...]] = {"input": (ROC_SUFFIX,), "target": ()}
 ROLLING_WHY: dict[str, str] = {
     "input": "__roc kept: the transient the engine responds to; __mean/__std restate it",
     "target": (
@@ -64,7 +65,6 @@ ROLLING_WHY: dict[str, str] = {
         "__mean/__roc restate the raw target; re-add only on an A02-protocol ablation"
     ),
 }
-_ROLLING_SUFFIXES: tuple[str, ...] = ("__mean", "__std", "__roc")
 
 
 @dataclass(frozen=True)
@@ -217,13 +217,6 @@ class FeatureSetResolution:
     record: Mapping[str, Any]
 
 
-def _split_rolling(column: str) -> tuple[str, str]:
-    for suffix in _ROLLING_SUFFIXES:
-        if column.endswith(suffix):
-            return column[: -len(suffix)], suffix
-    return column, ""
-
-
 def resolve_feature_set(
     name: str,
     candidate_columns: Sequence[str],
@@ -257,13 +250,13 @@ def resolve_feature_set(
         )
     vehicle = vehicle_roles or VehicleSequenceRoles()
     roles: dict[str, ChannelRole] = {**J1979_ROLES, **DERIVED_ROLES, **vehicle.channels}
-    present_bases = {_split_rolling(column)[0] for column in columns}
+    present_bases = {split_rolling(column)[0] for column in columns}
     dropped: dict[str, str] = {}
     unassigned: set[str] = set()
     kept: list[str] = []
     context: list[str] = []
     for column in columns:
-        base, suffix = _split_rolling(column)
+        base, suffix = split_rolling(column)
         if column in source_refused:
             dropped[column] = source_refused[column]
             continue
@@ -292,7 +285,7 @@ def resolve_feature_set(
             context.append(column)
     by_quantity: dict[str, list[str]] = {}
     for column in kept:
-        base = _split_rolling(column)[0]
+        base = split_rolling(column)[0]
         by_quantity.setdefault(roles[base].quantity, []).append(base)
     duplicated = {
         quantity: sorted(set(bases))
@@ -308,8 +301,8 @@ def resolve_feature_set(
         "name": name,
         "version": FEATURE_SET_VERSION,
         "roles_source": vehicle.source,
-        "inputs": sorted({_split_rolling(c)[0] for c in context}),
-        "targets": sorted({_split_rolling(c)[0] for c in targets}),
+        "inputs": sorted({split_rolling(c)[0] for c in context}),
+        "targets": sorted({split_rolling(c)[0] for c in targets}),
         "context_columns": context,
         "rolling": {role: list(suffixes) for role, suffixes in ROLLING_KEPT.items()},
         "rolling_why": dict(ROLLING_WHY),

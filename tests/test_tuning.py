@@ -21,6 +21,9 @@ from src.alerts.tuning import (
 )
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
+from src.models.inference import SequenceInferenceResult
+from tests.configs import isolated_config
+from tests.fakes import lstm_result
 
 
 def _event(**over: object) -> dict[str, object]:
@@ -195,20 +198,16 @@ def test_save_load_and_revert(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-class _FakeLSTMResult:
-    def __init__(self, score: float) -> None:
-        self.is_anomaly = True
-        self.timestamp = "2026-05-16T10:00:00+00:00"
-        self.model_version = "lstm_v1"
-        self.global_score = score
-        self.global_threshold = 3.0
-        self.anomalous_channels = ("obd:RPM",)
-        self.channel_scores = {"obd:RPM": score}
-        self.channel_thresholds = {"obd:RPM": 3.0}
-        self.session = "2026-05-16T100000"
-        self.window_start_timestamp = "2026-05-16T09:59:50+00:00"
-        self.window_end_timestamp = "2026-05-16T10:00:00+00:00"
-        self.latency_ms = 4.5
+def _lstm(score: float) -> SequenceInferenceResult:
+    """A flagged window scoring ``score`` on ``obd:RPM`` (threshold 3.0)."""
+    return lstm_result(
+        timestamp="2026-05-16T10:00:00+00:00",
+        session="2026-05-16T100000",
+        window_start_timestamp="2026-05-16T09:59:50+00:00",
+        window_end_timestamp="2026-05-16T10:00:00+00:00",
+        global_score=score,
+        channel_scores={"obd:RPM": score},
+    )
 
 
 def test_emitter_applies_tuner(tmp_path: Path) -> None:
@@ -220,11 +219,11 @@ def test_emitter_applies_tuner(tmp_path: Path) -> None:
     )
     emitter = AnomalyEventEmitter(logger, min_seconds_between_events=0, tuner=tuner)
     # threshold 3 × 2 = 6; score 5 → suppressed by tuning
-    assert emitter.emit_lstm(_FakeLSTMResult(5.0)) is None
+    assert emitter.emit_lstm(_lstm(5.0)) is None
     assert emitter.counters.suppressed_tuning == 1
     assert emitter.counters.emitted == 0
     # score 7 ≥ 6 → emitted
-    assert emitter.emit_lstm(_FakeLSTMResult(7.0)) is not None
+    assert emitter.emit_lstm(_lstm(7.0)) is not None
     assert emitter.counters.emitted == 1
     assert emitter.counters.to_dict()["suppressed_tuning"] == 1
 
@@ -233,42 +232,18 @@ def test_emitter_applies_tuner(tmp_path: Path) -> None:
 # API
 # ---------------------------------------------------------------------------
 
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
-dashboard: {{host: 127.0.0.1, port: 8000}}
-daemon:
-  tuning_config: {tuning}
-  tuning_audit: {audit}
-"""
-
 
 def _client(tmp_path: Path) -> tuple[TestClient, AlertTuner, CanaryConfig]:
     storage = tmp_path / "storage"
     (storage / "2026-05-17T120000").mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(
-        _CONFIG_YAML.format(
-            storage=storage,
-            tuning=tmp_path / "tuning.yaml",
-            audit=tmp_path / "tuning_audit.jsonl",
-        )
+    config = isolated_config(
+        tmp_path,
+        storage=storage,
+        daemon={
+            "tuning_config": tmp_path / "tuning.yaml",
+            "tuning_audit": tmp_path / "tuning_audit.jsonl",
+        },
     )
-    config = CanaryConfig.from_yaml(cfg_path)
     tuner = AlertTuner(TuningConfig())
     app = create_app(
         config,
@@ -346,11 +321,11 @@ def test_tuning_estimate_and_revert(tmp_path: Path) -> None:
 def test_tuning_503_when_unconfigured(tmp_path: Path) -> None:
     storage = tmp_path / "s"
     (storage / "x").mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(
-        _CONFIG_YAML.format(storage=storage, tuning=tmp_path / "t.yaml", audit=tmp_path / "a.jsonl")
+    config = isolated_config(
+        tmp_path,
+        storage=storage,
+        daemon={"tuning_config": tmp_path / "t.yaml", "tuning_audit": tmp_path / "a.jsonl"},
     )
-    config = CanaryConfig.from_yaml(cfg_path)
     app = create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")
     resp = TestClient(app).get("/control/tuning", headers=_auth())
     assert resp.status_code == 503

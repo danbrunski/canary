@@ -33,7 +33,7 @@ import pandas as pd
 
 from src.config import CanaryConfig
 from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.features import _FEATURE_SUFFIXES, FeatureConfig, compute_features
+from src.preprocessing.features import FeatureConfig, base_channel, compute_features
 from src.preprocessing.loader import TelemetryValueKind, resample_and_segment
 from src.preprocessing.resampler import (
     ARRIVED_SUFFIX,
@@ -542,10 +542,7 @@ def resolve_gap_columns(
 def _channel_base(column: str) -> str:
     """Strip a rolling-feature suffix (``__mean``/``__std``/``__roc``) to the raw
     channel, so a feature and its derivatives map to one ``<channel>__gap``."""
-    for suffix in _FEATURE_SUFFIXES:
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
+    return base_channel(column)
 
 
 def _ordered_frame(frame: pd.DataFrame) -> pd.DataFrame:

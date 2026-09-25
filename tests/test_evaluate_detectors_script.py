@@ -4,7 +4,6 @@ reporting, summaries, and an end-to-end run on fixture sessions."""
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,6 +25,7 @@ from src.analysis.labelled_events import LabelledEvent  # noqa: E402
 from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
+from tests.builders import IFConfig
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
@@ -103,17 +103,6 @@ def test_only_fault_labels_take_episodes_out_of_the_false_alarms() -> None:
     assert record.detectors["x"]["false_alarm_episodes"] == 1
 
 
-@dataclass(frozen=True)
-class _IFConfig:
-    enabled: bool = True
-    n_estimators: int = 40
-    contamination: float = 0.02
-    per_mode_contamination: dict[str, float] = field(default_factory=dict)
-    random_state: int = 7
-    calibration_holdout_fraction: float = 0.2
-    target_flag_rate: float = 0.05
-
-
 def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
     return [
         "--config",
@@ -161,7 +150,7 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     features = featurize_wide_frame(load_resampled_session(seen, config), config).features
     trained = fit_isolation_forest(
         features,
-        _IFConfig(),
+        IFConfig(n_estimators=40),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
     )

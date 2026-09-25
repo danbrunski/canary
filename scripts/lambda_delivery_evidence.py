@@ -39,6 +39,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from src.analysis.afr import AfrCalibration, load_afr_calibration  # noqa: E402
 from src.analysis.channels import read_channels  # noqa: E402
+from src.analysis.derived import FUEL_PROPERTIES  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
     LambdaDeliveryDeclaration,
     check_target_convention,
@@ -234,6 +235,7 @@ def state_counts(
     *,
     calibration: AfrCalibration | None,
     noise_floor_path: Path | None,
+    afr_stoich: float,
 ) -> dict[str, Any]:
     floor = load_noise_floor(noise_floor_path) if noise_floor_path else None
     out: dict[str, Any] = {}
@@ -260,6 +262,7 @@ def state_counts(
                 target_source=target.name,
                 measured_source=instrument.name,
                 calibration=calibration,
+                afr_stoich=afr_stoich,
             )
             per[instrument.name] = samples.summary(floor, declaration)
         out[target.name] = per
@@ -275,7 +278,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--calibration", type=Path, default=None)
     parser.add_argument("--noise-floor", type=Path, default=None)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--fuel-type",
+        choices=sorted(FUEL_PROPERTIES),
+        default="gasoline",
+        help="Fuel the vehicle runs; sets stoichiometry for AFR-quantity instruments.",
+    )
     args = parser.parse_args(argv)
+    stoich = FUEL_PROPERTIES[args.fuel_type].afr_stoich
     profile_dir = args.declaration.parent
     providers = args.providers or profile_dir / "tuning_providers.yaml"
     calibration_path = args.calibration or profile_dir / "afr_calibration.yaml"
@@ -348,7 +358,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             session, ram.spec, pid.spec, max_separation_s=tol
         )
         entry["delivery_samples"] = state_counts(
-            session, declaration, calibration=calibration, noise_floor_path=noise_path
+            session,
+            declaration,
+            calibration=calibration,
+            noise_floor_path=noise_path,
+            afr_stoich=stoich,
         )
         report["sessions"][session_dir.name] = entry
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -17,13 +17,13 @@ from scripts.sequence_bakeoff import (
     run_bakeoff,
 )
 from src.config import CanaryConfig
-from src.storage.parquet_writer import write_records_to_parquet
-from src.telemetry import TelemetryRecord
 
 # Same module object scripts/sequence_bakeoff.py's bare `import retrain` binds —
 # needed to monkeypatch its byte-size gate (matches test_retrain_script.py).
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import retrain  # noqa: E402
+
+from tests.builders import write_obd_session
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -88,27 +88,11 @@ def _no_bindings(tmp_path: Path) -> Path:
     return tmp_path / "no-bindings.yaml"
 
 
-def _write_obd_session(root: Path, name: str, *, rows: int, start_epoch: float) -> Path:
-    session = root / name
-    records: list[TelemetryRecord] = []
-    for i in range(rows):
-        t = start_epoch + i
-        records.extend(
-            [
-                TelemetryRecord.obd(t, "RPM", 780.0 + (i % 4), "rpm"),
-                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
-                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
-            ]
-        )
-    write_records_to_parquet(records, session, max_rows=10_000)
-    return session
-
-
 def test_run_bakeoff_compares_both_backbones(tmp_path: Path) -> None:
     _torch()
     config = CanaryConfig.from_yaml(_write_config(tmp_path))
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
 
     results = run_bakeoff(
         [train_session],
@@ -138,9 +122,9 @@ def test_run_bakeoff_compares_both_backbones(tmp_path: Path) -> None:
 def test_main_writes_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _torch()
     config_path = _write_config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    calib_session = _write_obd_session(tmp_path, "calib", rows=120, start_epoch=1_778_550_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    calib_session = write_obd_session(tmp_path, "calib", rows=120, start_epoch=1_778_550_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
     out_json = tmp_path / "bakeoff.json"
 
     exit_code = main(
@@ -182,8 +166,8 @@ def test_main_errors_without_calibration_sessions_and_too_few_to_auto_carve(
     silently calibrate in-sample."""
     _torch()
     config_path = _write_config(tmp_path)
-    train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
 
     exit_code = main(
         [
@@ -214,10 +198,10 @@ def test_main_auto_carves_calibration_sessions_when_corpus_is_large_enough(
     monkeypatch.setattr(retrain, "_session_parquet_bytes", lambda _p: 5_000_000)
     config_path = _write_config(tmp_path)
     sessions = [
-        _write_obd_session(tmp_path, f"train{i}", rows=40, start_epoch=1_778_500_000.0 + i * 1000)
+        write_obd_session(tmp_path, f"train{i}", rows=40, start_epoch=1_778_500_000.0 + i * 1000)
         for i in range(4)
     ]
-    held_out = _write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
+    held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
 
     exit_code = main(
         [
@@ -255,10 +239,10 @@ def test_bakeoff_holdouts_take_their_whole_drive(tmp_path: Path) -> None:
 
     root = tmp_path / "sessions"
     root.mkdir()
-    calib = _write_obd_session(root, "calib", rows=40, start_epoch=1_778_600_000.0)
-    restart = _write_obd_session(root, "calib-restart", rows=40, start_epoch=1_778_600_060.0)
-    train = _write_obd_session(root, "train", rows=40, start_epoch=1_778_500_000.0)
-    held_out = _write_obd_session(root, "holdout", rows=40, start_epoch=1_778_700_000.0)
+    calib = write_obd_session(root, "calib", rows=40, start_epoch=1_778_600_000.0)
+    restart = write_obd_session(root, "calib-restart", rows=40, start_epoch=1_778_600_060.0)
+    train = write_obd_session(root, "train", rows=40, start_epoch=1_778_500_000.0)
+    held_out = write_obd_session(root, "holdout", rows=40, start_epoch=1_778_700_000.0)
 
     args = Namespace(
         sessions=[train, calib, restart],

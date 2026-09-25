@@ -46,7 +46,7 @@ def test_log_memory_stamps_and_preserves_positive_and_negative_reads() -> None:
         ]
     )
     out = io.StringIO()
-    wall = iter([100.0, 100.01, 100.02, 100.03, 100.1, 100.11, 100.12, 100.13])
+    wall = iter([99.0, 100.0, 100.01, 100.02, 100.03, 100.1, 100.11, 100.12, 100.13])
     ticks = iter([0.0, 0.0, 0.01, 0.1, 0.11, 0.2])
 
     summary = log_memory(
@@ -64,9 +64,12 @@ def test_log_memory_stamps_and_preserves_positive_and_negative_reads() -> None:
     )
 
     rows = [json.loads(line) for line in out.getvalue().splitlines()]
+    # One record shape across bus-tool logs (R06.1): "kind", epoch started_at.
+    assert rows[0]["kind"] == "header" and rows[0]["tool"] == "can_memory_log"
+    assert rows[0]["started_at"] == 99.0
     assert rows[0]["form"] == "kwp32"
     assert rows[1]["payload_hex"] == "4000"
-    assert rows[2]["type"] == "did"
+    assert rows[2]["kind"] == "did"
     assert rows[2]["did"] == "0x1206"
     assert rows[2]["payload_hex"] == "0123"
     assert rows[3]["nrc"] == "0x31"
@@ -83,7 +86,7 @@ def test_log_memory_stamps_and_preserves_positive_and_negative_reads() -> None:
 
 
 def test_log_memory_stops_when_passive_is_not_usable() -> None:
-    from tools.did_log import PassiveStatus
+    from src.control.passive_client import PassiveStatus
 
     client = _Client([RawReply(sent=True, payload=b"\x00")])
     out = io.StringIO()

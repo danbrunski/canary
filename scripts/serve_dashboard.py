@@ -28,7 +28,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 import uvicorn
-from _cli import add_common_args, load_config
+from _cli import (
+    add_common_args,
+    add_log_level_arg,
+    load_config,
+)
 
 from src.dashboard.api import create_app
 from src.log import configure_logging
@@ -90,11 +94,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "Don't enable in production."
         ),
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 

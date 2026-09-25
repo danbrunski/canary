@@ -26,11 +26,13 @@ from pathlib import Path
 
 from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
     add_common_args,
+    add_log_level_arg,
     load_config,
 )
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.preprocessing.loader import has_telemetry  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.storage.catalog import SessionCatalog, rebuild_catalog  # noqa: E402
 
@@ -48,10 +50,6 @@ log = logging.getLogger(__name__)
 _ARCHIVE_DIRNAME = "_archive"
 
 
-def _has_telemetry(session_dir: Path) -> bool:
-    return any(f.stat().st_size > 0 for f in session_dir.glob("telemetry-*.parquet"))
-
-
 def _discover_catalog_dirs(root: Path) -> list[Path]:
     if not root.exists():
         return []
@@ -61,10 +59,10 @@ def _discover_catalog_dirs(root: Path) -> list[Path]:
             continue
         if child.name == _ARCHIVE_DIRNAME:
             dirs.extend(
-                sub for sub in sorted(child.iterdir()) if sub.is_dir() and _has_telemetry(sub)
+                sub for sub in sorted(child.iterdir()) if sub.is_dir() and has_telemetry(sub)
             )
             continue
-        if _has_telemetry(child):
+        if has_telemetry(child):
             dirs.append(child)
     return dirs
 
@@ -94,9 +92,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=None,
         help="Override catalog DB path. Defaults to (profile-scoped) daemon.catalog_db.",
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
-    )
+    add_log_level_arg(parser)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("rebuild", help="Re-index every session directory on disk from its sidecars.")
     sub.add_parser("status", help="Print row count, session span, disposition breakdown.")

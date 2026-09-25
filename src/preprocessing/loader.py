@@ -39,6 +39,17 @@ INDEX_COLUMNS = ["session", "timestamp"]
 TelemetryValueKind = Literal["value", "value_number", "value_text", "value_bool", "payload"]
 
 
+def has_telemetry(session_dir: Path) -> bool:
+    """True when ``session_dir`` holds at least one non-empty telemetry chunk.
+
+    The one "does this session have data?" predicate (R06.6). Scripts had
+    drifted: some counted any chunk, some only non-empty ones. A directory
+    exists from the moment the writer rotates into it, before its first chunk
+    flushes, and a zero-byte chunk is not data.
+    """
+    return any(f.stat().st_size > 0 for f in session_dir.glob(PARQUET_PATTERN))
+
+
 def discover_sessions(root: Path) -> list[Path]:
     """Return session directories under root that contain telemetry Parquet chunks.
 
@@ -51,9 +62,7 @@ def discover_sessions(root: Path) -> list[Path]:
     return sorted(
         child
         for child in root.iterdir()
-        if child.is_dir()
-        and not child.name.startswith("_")
-        and any(f.stat().st_size > 0 for f in child.glob(PARQUET_PATTERN))
+        if child.is_dir() and not child.name.startswith("_") and has_telemetry(child)
     )
 
 

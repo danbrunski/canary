@@ -10,13 +10,7 @@ from typing import Any
 import pytest
 
 from src.mcp_server.tools import logs as logs_tool
-
-
-class _FakeProc:
-    def __init__(self, stdout: str = "", stderr: str = "", returncode: int = 0) -> None:
-        self.stdout = stdout
-        self.stderr = stderr
-        self.returncode = returncode
+from tests.fakes import completed_process
 
 
 def test_tail_uses_journal_when_available(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -26,10 +20,10 @@ def test_tail_uses_journal_when_available(monkeypatch: pytest.MonkeyPatch, tmp_p
         json.dumps({"MESSAGE": f"line {i}", "_SYSTEMD_UNIT": "canary.service"}) for i in range(3)
     )
 
-    def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeProc:
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         assert cmd[0] == "journalctl"
         assert "--unit" in cmd
-        return _FakeProc(stdout=journal_lines)
+        return completed_process(stdout=journal_lines)
 
     monkeypatch.setattr(logs_tool.subprocess, "run", fake_run)
     out = logs_tool.tail_daemon_log(n=10)
@@ -44,7 +38,7 @@ def test_tail_reports_journal_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         logs_tool.subprocess,
         "run",
-        lambda cmd, **_: _FakeProc(stderr="no such unit", returncode=1),
+        lambda cmd, **_: completed_process(stderr="no such unit", returncode=1),
     )
     out = logs_tool.tail_daemon_log(n=5)
     assert out["source"] == "journal"
@@ -83,9 +77,9 @@ def test_tail_clamps_n(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
     monkeypatch.setattr(logs_tool.shutil, "which", lambda _: "/usr/bin/journalctl")
 
-    def fake_run(cmd: list[str], **_kwargs: Any) -> _FakeProc:
+    def fake_run(cmd: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["cmd"] = cmd
-        return _FakeProc(stdout="")
+        return completed_process(stdout="")
 
     monkeypatch.setattr(logs_tool.subprocess, "run", fake_run)
     logs_tool.tail_daemon_log(n=10_000)
@@ -99,9 +93,9 @@ def test_tail_can_use_subprocess_timeoutexpired(monkeypatch: pytest.MonkeyPatch)
     captured: dict[str, Any] = {}
     monkeypatch.setattr(logs_tool.shutil, "which", lambda _: "/usr/bin/journalctl")
 
-    def fake_run(cmd: list[str], **kwargs: Any) -> _FakeProc:
+    def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         captured["timeout"] = kwargs.get("timeout")
-        return _FakeProc(stdout="")
+        return completed_process(stdout="")
 
     monkeypatch.setattr(logs_tool.subprocess, "run", fake_run)
     logs_tool.tail_daemon_log(n=5)

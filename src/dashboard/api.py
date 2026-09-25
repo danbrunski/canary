@@ -74,11 +74,12 @@ from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
 )
-from src.models.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
+    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
     from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
+    from src.daemon.health import HealthMonitor
     from src.daemon.inference_metrics import InferenceTimingRecorder
 
 log = logging.getLogger(__name__)

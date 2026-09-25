@@ -176,10 +176,17 @@ named.
   `test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory`
   is committed as a strict xfail: run with `--runxfail` it fails exactly on the
   bug (`[] == ['did:ECM_RPM', ...]` from a `tmp_path` cwd).
-  **Remaining:** (1) `src/preprocessing/feature_pipeline.py` (held by the
-  concurrent H01 agent): repo-root `DEFAULT_DIDS_PATH`/`DEFAULT_BINDINGS_PATH`,
-  add `build_feature_frame(dids_path=...)` and pass it to
-  `_feature_frame_cache_metadata`, then drop the xfail marker. (2) Moving the
+  *Feature-pipeline part done 2026-09-25 (with R04.14):*
+  `feature_pipeline.DEFAULT_DIDS_PATH`/`DEFAULT_BINDINGS_PATH` are
+  `src.paths.DIDS_YAML`/`BINDINGS_YAML`; `build_feature_frame(dids_path=...)`
+  loads that file and threads it into `_feature_frame_cache_metadata`. The
+  strict xfail is gone and
+  `test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory`
+  passes; `test_build_feature_frame_cache_key_hashes_the_dids_file_it_loads`
+  shows two catalogs give two cache entries naming their own `dids` path;
+  `test_every_default_home_re_exports_the_same_file` now covers
+  `feature_pipeline` (`tests/test_paths.py`: 5 pass).
+  **Remaining:** (1) done, see above. (2) Moving the
   DID-catalog accessors into `src/decode/dids.py` (held by another session's
   uncommitted work); they stay in `obd_scheduler` for now. (3)
   `src/analysis/channels.py` (same session): three dids/bindings defaults.

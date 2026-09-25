@@ -31,7 +31,11 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from _cli import load_config
+from _cli import (
+    add_bindings_arg,
+    add_log_level_arg,
+    load_config,
+)
 
 from src.analysis.behavior_input_inventory import (
     fuel_system_state_agreement,
@@ -53,9 +57,9 @@ from src.analysis.refit import default_recipes
 from src.analysis.tune_revisions import load_tune_revisions
 from src.decode.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.log import configure_logging
-from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
-from src.profiles import resolve_profile_for_tooling, scope_config
+from src.preprocessing.loader import has_telemetry
+from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 
@@ -66,12 +70,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", type=Path, required=True, help="Preprocessing config.")
     parser.add_argument("--profile", required=True, help="Vehicle profile slug.")
     parser.add_argument("--recipe", action="append", default=None, help="Limit to recipe(s).")
-    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
+    add_bindings_arg(parser)
     parser.add_argument("--dids", type=Path, default=DEFAULT_DIDS_PATH)
     parser.add_argument("--out", type=Path, required=True, help="Report JSON path.")
-    parser.add_argument(
-        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
-    )
+    add_log_level_arg(parser, default="WARNING")
     return parser.parse_args(argv)
 
 
@@ -81,7 +83,7 @@ def _unique_sessions(paths: Sequence[Path]) -> tuple[list[Path], list[str]]:
     duplicates: list[str] = []
     for path in paths:
         path = path.expanduser()
-        if not path.is_dir() or not any(path.glob("telemetry-*.parquet")):
+        if not path.is_dir() or not has_telemetry(path):
             continue
         if path.name in seen:
             duplicates.append(str(path))
@@ -104,7 +106,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         recipes = [r for r in recipes if r.name in set(args.recipe)]
     document = load_validation_document(validation_document_path(scoped.daemon.behavior_models))
     join_gap = document.drive_join_gap_seconds if document is not None else 600.0
-    registry = load_tune_revisions(scoped.daemon.behavior_models.parent / "tune_revisions.yaml")
+    registry = load_tune_revisions(active_registry_path(scoped))
     sessions, duplicates = _unique_sessions(args.sessions)
     empty = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[])
 

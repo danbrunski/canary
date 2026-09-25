@@ -41,23 +41,21 @@ import argparse
 import json
 import sys
 import time
-from collections.abc import Callable, Iterator, Sequence
-from contextlib import contextmanager
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient, RawReply
-from src.config import CanaryConfig
-from tools.did_log import (
-    PASSIVE_REASON,
-    PassiveChecker,
-    _passive_problem,
-    _resolve_session,
-    _resolve_token,
-    http_passive_checker,
+from src.collection.can_obd_client import RawReply
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    PassiveRefusedError,
+    add_bus_tool_args,
+    open_client,
+    parse_header,
+    require_passive,
+    resolve_session,
 )
 
 #: NRCs that mean "this service/form does not exist here".
@@ -402,14 +400,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="batch_probe",
         description="Probe an ECM for a same-instant multi-value read service (0x21/0x23/0x2A).",
     )
-    parser.add_argument("--config", type=Path, default=Path("canary.yaml"))
+    add_bus_tool_args(parser, passive_check_seconds=30.0)
     parser.add_argument("--out", type=Path, required=True, help="JSON snapshot path.")
-    parser.add_argument("--header", default="7E0", help="ECU request CAN ID, hex.")
-    parser.add_argument(
-        "--session",
-        default="auto",
-        help="Diagnostic session sub-function (hex), 'auto' from data/dids.yaml, or 'none'.",
-    )
     parser.add_argument(
         "--lid-start", type=lambda s: int(s, 0), default=0x00, help="First 0x21 local ID."
     )
@@ -429,36 +421,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Comma-separated probes to skip, from 0x21,0x23,0x27,0x2A.",
     )
     parser.add_argument("--delay-seconds", type=float, default=0.0)
-    parser.add_argument("--read-timeout", type=float, default=1.0)
-    parser.add_argument("--daemon-url", default="http://127.0.0.1:8000")
-    parser.add_argument("--no-daemon", action="store_true", help="Skip the passive check.")
     return parser.parse_args(argv)
-
-
-@contextmanager
-def _open_client(
-    config_path: Path, *, request_id: int, read_timeout: float
-) -> Iterator[CanObdClient]:
-    config = CanaryConfig.from_yaml(config_path)
-    bus = bus_factory(config.hardware.can)
-    try:
-        yield CanObdClient(
-            bus,
-            request_id=request_id,
-            response_id_min=request_id + 8,
-            response_id_max=request_id + 8,
-            timeout_seconds=read_timeout,
-        )
-    finally:
-        bus.shutdown()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        request_id = int(args.header, 16)
-    except ValueError:
-        print(f"error: --header must be hex, got {args.header!r}", file=sys.stderr)
+        request_id = parse_header(args.header)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     if not 0 <= args.lid_start <= args.lid_end <= 0xFF:
         print("error: local identifiers must satisfy 0 <= start <= end <= 0xFF", file=sys.stderr)
@@ -472,27 +443,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: unknown --skip entries {sorted(unknown)}", file=sys.stderr)
         return 1
     try:
-        session = _resolve_session(args.session)
-    except ValueError:
-        print(
-            f"error: --session must be hex, 'auto', or 'none', got {args.session!r}",
-            file=sys.stderr,
-        )
+        session = resolve_session(args.session)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if not args.no_daemon:
-        checker: PassiveChecker = http_passive_checker(args.daemon_url, _resolve_token())
-        problem = _passive_problem(checker(), 30.0)
-        if problem is not None:
-            print(
-                f"refusing: daemon passive mode is not usable ({problem}). It must be armed "
-                f"for the run because {PASSIVE_REASON}. Arm it with POST /control/passive "
-                '{"enabled": true, "ttl_seconds": 600}, or pass --no-daemon with no daemon.',
-                file=sys.stderr,
-            )
-            return 2
+    try:
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
 
-    with _open_client(args.config, request_id=request_id, read_timeout=args.read_timeout) as client:
+    with open_client(args, passive) as client:
         snapshot = run(
             client,
             request_id=request_id,

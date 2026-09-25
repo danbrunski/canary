@@ -1,0 +1,7217 @@
+{
+  "analyze_session.py": {
+    "options": {
+      "--against": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "against",
+        "nargs": null,
+        "option_strings": [
+          "--against"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--behavior-models": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "behavior_models",
+        "nargs": null,
+        "option_strings": [
+          "--behavior-models"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--mode": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "mode",
+        "nargs": null,
+        "option_strings": [
+          "--mode"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": true,
+        "type": null
+      }
+    }
+  },
+  "autotag.py": {
+    "options": {
+      "--all": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "all",
+        "nargs": 0,
+        "option_strings": [
+          "--all"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "benchmark_live_pipeline.py": {
+    "options": {
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--can-frames-per-tick": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 20,
+        "dest": "can_frames_per_tick",
+        "nargs": null,
+        "option_strings": [
+          "--can-frames-per-tick"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--channels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 16,
+        "dest": "channels",
+        "nargs": null,
+        "option_strings": [
+          "--channels"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.example.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--include-ticks": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "include_ticks",
+        "nargs": 0,
+        "option_strings": [
+          "--include-ticks"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--observation-epoch-offset-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 0.0,
+        "dest": "observation_epoch_offset_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--observation-epoch-offset-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": [
+          "smoke",
+          "steady"
+        ],
+        "default": "smoke",
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--report": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "report",
+        "nargs": null,
+        "option_strings": [
+          "--report"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--seed": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 0,
+        "dest": "seed",
+        "nargs": null,
+        "option_strings": [
+          "--seed"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--ticks": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "ticks",
+        "nargs": null,
+        "option_strings": [
+          "--ticks"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--warmup-ticks": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "warmup_ticks",
+        "nargs": null,
+        "option_strings": [
+          "--warmup-ticks"
+        ],
+        "required": false,
+        "type": "int"
+      }
+    }
+  },
+  "canary_companion.py": {
+    "options": {
+      "--allow-origin": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "allow_origin",
+        "nargs": null,
+        "option_strings": [
+          "--allow-origin"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--dev-cors": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dev_cors",
+        "nargs": 0,
+        "option_strings": [
+          "--dev-cors"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--host": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "127.0.0.1",
+        "dest": "host",
+        "nargs": null,
+        "option_strings": [
+          "--host"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--library-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<home>/.canary/library)",
+        "dest": "library_root",
+        "nargs": null,
+        "option_strings": [
+          "--library-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-static": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_static",
+        "nargs": 0,
+        "option_strings": [
+          "--no-static"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--pi-host": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "pi_host",
+        "nargs": null,
+        "option_strings": [
+          "--pi-host"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--pi-token": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "pi_token",
+        "nargs": null,
+        "option_strings": [
+          "--pi-token"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--port": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 8765,
+        "dest": "port",
+        "nargs": null,
+        "option_strings": [
+          "--port"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--token": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "token",
+        "nargs": null,
+        "option_strings": [
+          "--token"
+        ],
+        "required": false,
+        "type": null
+      }
+    }
+  },
+  "canaryctl.py": {
+    "options": {
+      "--host": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "host",
+        "nargs": null,
+        "option_strings": [
+          "--host"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--token": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "token",
+        "nargs": null,
+        "option_strings": [
+          "--token"
+        ],
+        "required": false,
+        "type": null
+      }
+    },
+    "subcommands": {
+      "capture": {
+        "options": {},
+        "subcommands": {
+          "current": {
+            "options": {}
+          },
+          "start": {
+            "options": {
+              "--field": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "field",
+                "nargs": null,
+                "option_strings": [
+                  "--field"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--protocol": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "protocol",
+                "nargs": null,
+                "option_strings": [
+                  "--protocol"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--purpose": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "purpose",
+                "nargs": null,
+                "option_strings": [
+                  "--purpose"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--vehicle-state": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "vehicle_state",
+                "nargs": null,
+                "option_strings": [
+                  "--vehicle-state"
+                ],
+                "required": false,
+                "type": null
+              }
+            }
+          },
+          "stop": {
+            "options": {
+              "--field": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "field",
+                "nargs": null,
+                "option_strings": [
+                  "--field"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--reason": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "reason",
+                "nargs": null,
+                "option_strings": [
+                  "--reason"
+                ],
+                "required": false,
+                "type": null
+              }
+            }
+          }
+        }
+      },
+      "jobs": {
+        "options": {},
+        "subcommands": {
+          "cancel": {
+            "options": {
+              "job_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "job_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "list": {
+            "options": {}
+          },
+          "logs": {
+            "options": {
+              "job_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "job_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "show": {
+            "options": {
+              "job_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "job_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "start": {
+            "options": {
+              "--all": {
+                "action": "_StoreTrueAction",
+                "choices": null,
+                "default": false,
+                "dest": "use_all_sessions",
+                "nargs": 0,
+                "option_strings": [
+                  "--all"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--days": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "days",
+                "nargs": null,
+                "option_strings": [
+                  "--days"
+                ],
+                "required": false,
+                "type": "int"
+              },
+              "--device": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "device",
+                "nargs": null,
+                "option_strings": [
+                  "--device"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--dry-run": {
+                "action": "_StoreTrueAction",
+                "choices": null,
+                "default": false,
+                "dest": "dry_run",
+                "nargs": 0,
+                "option_strings": [
+                  "--dry-run"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--param": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "param",
+                "nargs": null,
+                "option_strings": [
+                  "--param"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--recipe": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "recipe",
+                "nargs": null,
+                "option_strings": [
+                  "--recipe"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--session-id": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [
+                  "--session-id"
+                ],
+                "required": false,
+                "type": null
+              },
+              "kind": {
+                "action": "_StoreAction",
+                "choices": [
+                  "retrain_if",
+                  "retrain_lstm",
+                  "retrain_all",
+                  "refit_behavior_models",
+                  "corpus_report"
+                ],
+                "default": null,
+                "dest": "kind",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          }
+        }
+      },
+      "models": {
+        "options": {},
+        "subcommands": {
+          "upload": {
+            "options": {
+              "--artifact": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "artifact",
+                "nargs": null,
+                "option_strings": [
+                  "--artifact"
+                ],
+                "required": true,
+                "type": null
+              },
+              "--manifest": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "manifest",
+                "nargs": null,
+                "option_strings": [
+                  "--manifest"
+                ],
+                "required": true,
+                "type": null
+              },
+              "model_type": {
+                "action": "_StoreAction",
+                "choices": [
+                  "isolation_forest",
+                  "lstm_autoencoder"
+                ],
+                "default": null,
+                "dest": "model_type",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          }
+        }
+      },
+      "preflight": {
+        "options": {}
+      },
+      "sessions": {
+        "options": {},
+        "subcommands": {
+          "delete": {
+            "options": {
+              "--force": {
+                "action": "_StoreTrueAction",
+                "choices": null,
+                "default": false,
+                "dest": "force",
+                "nargs": 0,
+                "option_strings": [
+                  "--force"
+                ],
+                "required": false,
+                "type": null
+              },
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "export": {
+            "options": {
+              "--out": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "out",
+                "nargs": null,
+                "option_strings": [
+                  "--out"
+                ],
+                "required": false,
+                "type": null
+              },
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "list": {
+            "options": {}
+          },
+          "metadata": {
+            "options": {
+              "--field": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "field",
+                "nargs": null,
+                "option_strings": [
+                  "--field"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--replace": {
+                "action": "_StoreTrueAction",
+                "choices": null,
+                "default": false,
+                "dest": "replace",
+                "nargs": 0,
+                "option_strings": [
+                  "--replace"
+                ],
+                "required": false,
+                "type": null
+              },
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "pin": {
+            "options": {
+              "--field": {
+                "action": "_AppendAction",
+                "choices": null,
+                "default": [],
+                "dest": "field",
+                "nargs": null,
+                "option_strings": [
+                  "--field"
+                ],
+                "required": false,
+                "type": null
+              },
+              "--reason": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "reason",
+                "nargs": null,
+                "option_strings": [
+                  "--reason"
+                ],
+                "required": false,
+                "type": null
+              },
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "show": {
+            "options": {
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          },
+          "unpin": {
+            "options": {
+              "session_id": {
+                "action": "_StoreAction",
+                "choices": null,
+                "default": null,
+                "dest": "session_id",
+                "nargs": null,
+                "option_strings": [],
+                "required": true,
+                "type": null
+              }
+            }
+          }
+        }
+      },
+      "status": {
+        "options": {
+          "--compact": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "compact",
+            "nargs": 0,
+            "option_strings": [
+              "--compact"
+            ],
+            "required": false,
+            "type": null
+          }
+        }
+      },
+      "tag": {
+        "options": {
+          "--field": {
+            "action": "_AppendAction",
+            "choices": null,
+            "default": [],
+            "dest": "field",
+            "nargs": null,
+            "option_strings": [
+              "--field"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--kind": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "event",
+            "dest": "kind",
+            "nargs": null,
+            "option_strings": [
+              "--kind"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--timestamp": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "timestamp",
+            "nargs": null,
+            "option_strings": [
+              "--timestamp"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "label": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "label",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "version": {
+        "options": {}
+      }
+    }
+  },
+  "catalog.py": {
+    "options": {
+      "--catalog-db": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "catalog_db",
+        "nargs": null,
+        "option_strings": [
+          "--catalog-db"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    },
+    "subcommands": {
+      "rebuild": {
+        "options": {}
+      },
+      "status": {
+        "options": {}
+      }
+    }
+  },
+  "classify_sessions.py": {
+    "options": {
+      "--apply": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "apply",
+        "nargs": 0,
+        "option_strings": [
+          "--apply"
+        ],
+        "required": false,
+        "type": null
+      },
+      "root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "root",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "correct_tag.py": {
+    "options": {
+      "--at": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "at",
+        "nargs": null,
+        "option_strings": [
+          "--at"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--invalidate": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "invalidate",
+        "nargs": null,
+        "option_strings": [
+          "--invalidate"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--list": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "list",
+        "nargs": 0,
+        "option_strings": [
+          "--list"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--reason": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "reason",
+        "nargs": null,
+        "option_strings": [
+          "--reason"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "dataset_health.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--json": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "json",
+        "nargs": 0,
+        "option_strings": [
+          "--json"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--min-rows": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1000,
+        "dest": "min_rows",
+        "nargs": null,
+        "option_strings": [
+          "--min-rows"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--min-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 3,
+        "dest": "min_sessions",
+        "nargs": null,
+        "option_strings": [
+          "--min-sessions"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "decode_flash.py": {
+    "options": {
+      "--extract-image": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "extract_image",
+        "nargs": null,
+        "option_strings": [
+          "--extract-image"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--max-lines": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 400,
+        "dest": "max_lines",
+        "nargs": null,
+        "option_strings": [
+          "--max-lines"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "log": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "log",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "detector_benchmark.py": {
+    "options": {
+      "--baseline": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "baseline",
+        "nargs": null,
+        "option_strings": [
+          "--baseline"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--channels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [
+          "obd:RPM",
+          "obd:SPEED",
+          "obd:COOLANT_TEMP",
+          "obd:THROTTLE_POS",
+          "obd:ENGINE_LOAD"
+        ],
+        "dest": "channels",
+        "nargs": "+",
+        "option_strings": [
+          "--channels"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--fault-kinds": {
+        "action": "_StoreAction",
+        "choices": [
+          "drift",
+          "dropout",
+          "intermittent",
+          "scale",
+          "spike",
+          "stuck"
+        ],
+        "default": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "dest": "fault_kinds",
+        "nargs": "+",
+        "option_strings": [
+          "--fault-kinds"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--if-model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "if_model",
+        "nargs": null,
+        "option_strings": [
+          "--if-model"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--n-injections": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 5,
+        "dest": "n_injections",
+        "nargs": null,
+        "option_strings": [
+          "--n-injections"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--no-sequence": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_sequence",
+        "nargs": 0,
+        "option_strings": [
+          "--no-sequence"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--seed": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 42,
+        "dest": "seed",
+        "nargs": null,
+        "option_strings": [
+          "--seed"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sequence-model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_model",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-model"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--timestamp": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "timestamp",
+        "nargs": null,
+        "option_strings": [
+          "--timestamp"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--tolerance": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 0.15,
+        "dest": "tolerance",
+        "nargs": null,
+        "option_strings": [
+          "--tolerance"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "disposition_report.py": {
+    "options": {
+      "--all": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "use_all_sessions",
+        "nargs": 0,
+        "option_strings": [
+          "--all"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--days": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 30,
+        "dest": "days",
+        "nargs": null,
+        "option_strings": [
+          "--days"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--golden-model-type": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "golden_model_type",
+        "nargs": null,
+        "option_strings": [
+          "--golden-model-type"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--ledger": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/control/training_runs.jsonl)",
+        "dest": "ledger",
+        "nargs": null,
+        "option_strings": [
+          "--ledger"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--timestamp": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "timestamp",
+        "nargs": null,
+        "option_strings": [
+          "--timestamp"
+        ],
+        "required": false,
+        "type": null
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "evaluate_behavior_models.py": {
+    "options": {
+      "--artifact": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "artifact",
+        "nargs": null,
+        "option_strings": [
+          "--artifact"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--corpus-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "corpus_root",
+        "nargs": null,
+        "option_strings": [
+          "--corpus-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--decode-can": {
+        "action": "_StoreAction",
+        "choices": [
+          "none",
+          "mode-inputs"
+        ],
+        "default": null,
+        "dest": "decode_can",
+        "nargs": null,
+        "option_strings": [
+          "--decode-can"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--dids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/dids.yaml)",
+        "dest": "dids",
+        "nargs": null,
+        "option_strings": [
+          "--dids"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--export-rows": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "export_rows",
+        "nargs": null,
+        "option_strings": [
+          "--export-rows"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--manifest": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "manifest",
+        "nargs": null,
+        "option_strings": [
+          "--manifest"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--mode": {
+        "action": "_StoreAction",
+        "choices": [
+          "historical",
+          "corrected"
+        ],
+        "default": null,
+        "dest": "mode",
+        "nargs": null,
+        "option_strings": [
+          "--mode"
+        ],
+        "required": true,
+        "type": null
+      },
+      "--model": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "model",
+        "nargs": null,
+        "option_strings": [
+          "--model"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": true,
+        "type": null
+      },
+      "--tune-revisions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "tune_revisions",
+        "nargs": null,
+        "option_strings": [
+          "--tune-revisions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--validation": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "validation",
+        "nargs": null,
+        "option_strings": [
+          "--validation"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "evaluate_detectors.py": {
+    "options": {
+      "--baseline-fit-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 12,
+        "dest": "baseline_fit_sessions",
+        "nargs": null,
+        "option_strings": [
+          "--baseline-fit-sessions"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--baselines": {
+        "action": "_StoreAction",
+        "choices": [
+          "robust_z",
+          "pca",
+          "untrained_autoencoder",
+          "plausibility",
+          "robust_z_curated",
+          "mahalanobis_curated"
+        ],
+        "default": [
+          "robust_z",
+          "pca",
+          "untrained_autoencoder",
+          "plausibility"
+        ],
+        "dest": "baselines",
+        "nargs": "*",
+        "option_strings": [
+          "--baselines"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--budget": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1.0,
+        "dest": "budget",
+        "nargs": null,
+        "option_strings": [
+          "--budget"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--cache-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/cache/evaluation_frames)",
+        "dest": "cache_dir",
+        "nargs": null,
+        "option_strings": [
+          "--cache-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--cache-only": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "cache_only",
+        "nargs": 0,
+        "option_strings": [
+          "--cache-only"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--curated-channels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "curated_channels",
+        "nargs": null,
+        "option_strings": [
+          "--curated-channels"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--fault-roles": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "fault_roles",
+        "nargs": null,
+        "option_strings": [
+          "--fault-roles"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--faults": {
+        "action": "_StoreAction",
+        "choices": [
+          "maf_gain",
+          "lazy_o2",
+          "thermostat",
+          "bank_imbalance",
+          "idle_air_leak"
+        ],
+        "default": [
+          "maf_gain",
+          "lazy_o2",
+          "thermostat",
+          "bank_imbalance",
+          "idle_air_leak"
+        ],
+        "dest": "faults",
+        "nargs": "*",
+        "option_strings": [
+          "--faults"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--grace-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 60.0,
+        "dest": "grace_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--grace-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--if-model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "if_model",
+        "nargs": null,
+        "option_strings": [
+          "--if-model"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--injections-per-drive": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2,
+        "dest": "injections_per_drive",
+        "nargs": null,
+        "option_strings": [
+          "--injections-per-drive"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--labels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "labels",
+        "nargs": null,
+        "option_strings": [
+          "--labels"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--lead-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 240.0,
+        "dest": "lead_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--lead-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--markdown": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "markdown",
+        "nargs": null,
+        "option_strings": [
+          "--markdown"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--no-sequence": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_sequence",
+        "nargs": 0,
+        "option_strings": [
+          "--no-sequence"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-shift-test": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_shift_test",
+        "nargs": 0,
+        "option_strings": [
+          "--no-shift-test"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--parity-rows": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 200,
+        "dest": "parity_rows",
+        "nargs": null,
+        "option_strings": [
+          "--parity-rows"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--plan": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "plan",
+        "nargs": 0,
+        "option_strings": [
+          "--plan"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--seed": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 42,
+        "dest": "seed",
+        "nargs": null,
+        "option_strings": [
+          "--seed"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sequence-model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_model",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-model"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--shift-rows": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 900,
+        "dest": "shift_rows",
+        "nargs": null,
+        "option_strings": [
+          "--shift-rows"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--since": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "since",
+        "nargs": null,
+        "option_strings": [
+          "--since"
+        ],
+        "required": false,
+        "type": "_utc_date"
+      },
+      "--tune-revisions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "tune_revisions",
+        "nargs": null,
+        "option_strings": [
+          "--tune-revisions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--until": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "until",
+        "nargs": null,
+        "option_strings": [
+          "--until"
+        ],
+        "required": false,
+        "type": "_utc_date"
+      },
+      "--window-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 240.0,
+        "dest": "window_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--window-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--workers": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2,
+        "dest": "workers",
+        "nargs": null,
+        "option_strings": [
+          "--workers"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "evaluate_plausibility.py": {
+    "options": {
+      "--cache-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "cache_dir",
+        "nargs": null,
+        "option_strings": [
+          "--cache-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--clean": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [],
+        "dest": "clean",
+        "nargs": "*",
+        "option_strings": [
+          "--clean"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--fault-channels": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [
+          "obd:COOLANT_TEMP",
+          "obd:ENGINE_LOAD",
+          "obd:RPM",
+          "obd:SPEED",
+          "obd:THROTTLE_POS"
+        ],
+        "dest": "fault_channels",
+        "nargs": "*",
+        "option_strings": [
+          "--fault-channels"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--fault-kinds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [
+          "spike",
+          "drift",
+          "dropout",
+          "stuck",
+          "scale"
+        ],
+        "dest": "fault_kinds",
+        "nargs": "*",
+        "option_strings": [
+          "--fault-kinds"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--fault-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": [],
+        "dest": "fault_sessions",
+        "nargs": "*",
+        "option_strings": [
+          "--fault-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--grace-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 60.0,
+        "dest": "grace_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--grace-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--lead-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 240.0,
+        "dest": "lead_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--lead-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--n-injections": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 5,
+        "dest": "n_injections",
+        "nargs": null,
+        "option_strings": [
+          "--n-injections"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--realistic": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "realistic",
+        "nargs": 0,
+        "option_strings": [
+          "--realistic"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--realistic-reps": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2,
+        "dest": "realistic_reps",
+        "nargs": null,
+        "option_strings": [
+          "--realistic-reps"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--seed": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 42,
+        "dest": "seed",
+        "nargs": null,
+        "option_strings": [
+          "--seed"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--window-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 240.0,
+        "dest": "window_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--window-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--workers": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2,
+        "dest": "workers",
+        "nargs": null,
+        "option_strings": [
+          "--workers"
+        ],
+        "required": false,
+        "type": "int"
+      }
+    }
+  },
+  "export_dataset.py": {
+    "options": {
+      "--channel": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "channels",
+        "nargs": null,
+        "option_strings": [
+          "--channel"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--exclude-tag": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "exclude_tags",
+        "nargs": null,
+        "option_strings": [
+          "--exclude-tag"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--format": {
+        "action": "_AppendAction",
+        "choices": [
+          "csv",
+          "jsonl",
+          "parquet",
+          "feature_matrix"
+        ],
+        "default": null,
+        "dest": "formats",
+        "nargs": null,
+        "option_strings": [
+          "--format"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--include-tag": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "include_tags",
+        "nargs": null,
+        "option_strings": [
+          "--include-tag"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--mark-candidate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "mark_candidate",
+        "nargs": null,
+        "option_strings": [
+          "--mark-candidate"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--name": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "name",
+        "nargs": null,
+        "option_strings": [
+          "--name"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-zip": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_zip",
+        "nargs": 0,
+        "option_strings": [
+          "--no-zip"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/datasets)",
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--purpose": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "",
+        "dest": "purpose",
+        "nargs": null,
+        "option_strings": [
+          "--purpose"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--resample-hz": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "resample_hz",
+        "nargs": null,
+        "option_strings": [
+          "--resample-hz"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--session": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "sessions",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "fingerprint.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    },
+    "subcommands": {
+      "backfill": {
+        "options": {
+          "--all": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "all",
+            "nargs": 0,
+            "option_strings": [
+              "--all"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--dry-run": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "dry_run",
+            "nargs": 0,
+            "option_strings": [
+              "--dry-run"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--rebuild": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "rebuild",
+            "nargs": 0,
+            "option_strings": [
+              "--rebuild"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--session": {
+            "action": "_AppendAction",
+            "choices": null,
+            "default": [],
+            "dest": "session",
+            "nargs": null,
+            "option_strings": [
+              "--session"
+            ],
+            "required": false,
+            "type": null
+          }
+        }
+      },
+      "freeze": {
+        "options": {
+          "--notes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "",
+            "dest": "notes",
+            "nargs": null,
+            "option_strings": [
+              "--notes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--out": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "out",
+            "nargs": null,
+            "option_strings": [
+              "--out"
+            ],
+            "required": false,
+            "type": "Path"
+          }
+        }
+      },
+      "trends": {
+        "options": {}
+      }
+    }
+  },
+  "fp_benchmark.py": {
+    "options": {
+      "--batch-size": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 64,
+        "dest": "batch_size",
+        "nargs": null,
+        "option_strings": [
+          "--batch-size"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--k": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "k",
+        "nargs": "+",
+        "option_strings": [
+          "--k"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "model",
+        "nargs": null,
+        "option_strings": [
+          "--model"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--pretty": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "pretty",
+        "nargs": 0,
+        "option_strings": [
+          "--pretty"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--stride": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1,
+        "dest": "stride",
+        "nargs": null,
+        "option_strings": [
+          "--stride"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "session_dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session_dir",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "guided_session.py": {
+    "options": {
+      "--profiles-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/test_profiles)",
+        "dest": "profiles_dir",
+        "nargs": null,
+        "option_strings": [
+          "--profiles-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--protocol": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "rev",
+        "dest": "protocol",
+        "nargs": null,
+        "option_strings": [
+          "--protocol"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "install_deps.py": {
+    "options": {
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--extras": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "dev",
+        "dest": "extras",
+        "nargs": null,
+        "option_strings": [
+          "--extras"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-pip-check": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_pip_check",
+        "nargs": 0,
+        "option_strings": [
+          "--no-pip-check"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-pip-upgrade": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_pip_upgrade",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-pip-upgrade"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--torch": {
+        "action": "_StoreAction",
+        "choices": [
+          "auto",
+          "none",
+          "cu130",
+          "cu128",
+          "cu126",
+          "cu118",
+          "cpu"
+        ],
+        "default": "auto",
+        "dest": "torch",
+        "nargs": null,
+        "option_strings": [
+          "--torch"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--torch-package": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "torch",
+        "dest": "torch_package",
+        "nargs": null,
+        "option_strings": [
+          "--torch-package"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--venv": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(.venv)",
+        "dest": "venv",
+        "nargs": null,
+        "option_strings": [
+          "--venv"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "inventory_behavior_inputs.py": {
+    "options": {
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--dids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/dids.yaml)",
+        "dest": "dids",
+        "nargs": null,
+        "option_strings": [
+          "--dids"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": true,
+        "type": null
+      },
+      "--recipe": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "recipe",
+        "nargs": null,
+        "option_strings": [
+          "--recipe"
+        ],
+        "required": false,
+        "type": null
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "inventory_cold_starts.py": {
+    "options": {
+      "--max-initial-coolant": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "max_initial_coolant",
+        "nargs": null,
+        "option_strings": [
+          "--max-initial-coolant"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "root",
+        "nargs": null,
+        "option_strings": [
+          "--root"
+        ],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "label_sessions.py": {
+    "options": {
+      "--all": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "all",
+        "nargs": 0,
+        "option_strings": [
+          "--all"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--catalog-db": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "catalog_db",
+        "nargs": null,
+        "option_strings": [
+          "--catalog-db"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--rebuild": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "rebuild",
+        "nargs": 0,
+        "option_strings": [
+          "--rebuild"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "lambda_delivery_evidence.py": {
+    "options": {
+      "--calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration",
+        "nargs": null,
+        "option_strings": [
+          "--calibration"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--declaration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "declaration",
+        "nargs": null,
+        "option_strings": [
+          "--declaration"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--dids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/dids.yaml)",
+        "dest": "dids",
+        "nargs": null,
+        "option_strings": [
+          "--dids"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--fuel-type": {
+        "action": "_StoreAction",
+        "choices": [
+          "diesel",
+          "e85",
+          "gasoline"
+        ],
+        "default": "gasoline",
+        "dest": "fuel_type",
+        "nargs": null,
+        "option_strings": [
+          "--fuel-type"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--noise-floor": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "noise_floor",
+        "nargs": null,
+        "option_strings": [
+          "--noise-floor"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--providers": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "providers",
+        "nargs": null,
+        "option_strings": [
+          "--providers"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "ledger.py": {
+    "options": {
+      "--ledger": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/control/training_runs.jsonl)",
+        "dest": "ledger",
+        "nargs": null,
+        "option_strings": [
+          "--ledger"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    },
+    "subcommands": {
+      "golden": {
+        "options": {
+          "--bindings": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "Path(<repo>/data/bindings.yaml)",
+            "dest": "bindings",
+            "nargs": null,
+            "option_strings": [
+              "--bindings"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--config": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "Path(canary.yaml)",
+            "dest": "config",
+            "nargs": null,
+            "option_strings": [
+              "--config"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--no-freeze-baselines": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "no_freeze_baselines",
+            "nargs": 0,
+            "option_strings": [
+              "--no-freeze-baselines"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--notes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "notes",
+            "nargs": null,
+            "option_strings": [
+              "--notes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "run_id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "run_id",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "golden-status": {
+        "options": {
+          "--current-run-id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "current_run_id",
+            "nargs": null,
+            "option_strings": [
+              "--current-run-id"
+            ],
+            "required": false,
+            "type": null
+          },
+          "model_type": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "model_type",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "ingest": {
+        "options": {
+          "--fp-benchmark": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "fp_benchmark",
+            "nargs": null,
+            "option_strings": [
+              "--fp-benchmark"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--job-id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "job_id",
+            "nargs": null,
+            "option_strings": [
+              "--job-id"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--notes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "notes",
+            "nargs": null,
+            "option_strings": [
+              "--notes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "manifest": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "manifest",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": "Path"
+          }
+        }
+      },
+      "list": {
+        "options": {}
+      },
+      "promote": {
+        "options": {
+          "--agreement-tolerance": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 0.5,
+            "dest": "agreement_tolerance",
+            "nargs": null,
+            "option_strings": [
+              "--agreement-tolerance"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--fp-budget-per-hour": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 5.0,
+            "dest": "fp_budget_per_hour",
+            "nargs": null,
+            "option_strings": [
+              "--fp-budget-per-hour"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--golden-run-id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "golden_run_id",
+            "nargs": null,
+            "option_strings": [
+              "--golden-run-id"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--max-quarantine-relative-rise": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 0.5,
+            "dest": "max_quarantine_relative_rise",
+            "nargs": null,
+            "option_strings": [
+              "--max-quarantine-relative-rise"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--max-reject-fraction": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 0.5,
+            "dest": "max_reject_fraction",
+            "nargs": null,
+            "option_strings": [
+              "--max-reject-fraction"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--notes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "notes",
+            "nargs": null,
+            "option_strings": [
+              "--notes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--quarantine-trend-window": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 5,
+            "dest": "quarantine_trend_window",
+            "nargs": null,
+            "option_strings": [
+              "--quarantine-trend-window"
+            ],
+            "required": false,
+            "type": "int"
+          },
+          "--recall-tolerance": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 0.15,
+            "dest": "recall_tolerance",
+            "nargs": null,
+            "option_strings": [
+              "--recall-tolerance"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "run_id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "run_id",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "publish": {
+        "options": {
+          "--notes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "notes",
+            "nargs": null,
+            "option_strings": [
+              "--notes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--status": {
+            "action": "_StoreAction",
+            "choices": [
+              "unpublished",
+              "published",
+              "active",
+              "rolled_back"
+            ],
+            "default": "active",
+            "dest": "status",
+            "nargs": null,
+            "option_strings": [
+              "--status"
+            ],
+            "required": false,
+            "type": null
+          },
+          "run_id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "run_id",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "show": {
+        "options": {
+          "run_id": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "run_id",
+            "nargs": null,
+            "option_strings": [],
+            "required": true,
+            "type": null
+          }
+        }
+      }
+    }
+  },
+  "mark_slow_tests.py": {
+    "options": {
+      "--threshold": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2.0,
+        "dest": "threshold",
+        "nargs": null,
+        "option_strings": [
+          "--threshold"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "report": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "report",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "migrate_to_profiles.py": {
+    "options": {
+      "--apply": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "apply",
+        "nargs": 0,
+        "option_strings": [
+          "--apply"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--name": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "name",
+        "nargs": null,
+        "option_strings": [
+          "--name"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--slug": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "",
+        "dest": "slug",
+        "nargs": null,
+        "option_strings": [
+          "--slug"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--vin": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "vin",
+        "nargs": null,
+        "option_strings": [
+          "--vin"
+        ],
+        "required": false,
+        "type": "str"
+      }
+    }
+  },
+  "preflight.py": {
+    "options": {
+      "--bring-up": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "bring_up",
+        "nargs": 0,
+        "option_strings": [
+          "--bring-up"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--frames-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 5.0,
+        "dest": "frames_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--frames-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--json": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "json",
+        "nargs": 0,
+        "option_strings": [
+          "--json"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--min-frames": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 20,
+        "dest": "min_frames",
+        "nargs": null,
+        "option_strings": [
+          "--min-frames"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--min-free-mb": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 500,
+        "dest": "min_free_mb",
+        "nargs": null,
+        "option_strings": [
+          "--min-free-mb"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--obd-timeout": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1.0,
+        "dest": "obd_timeout",
+        "nargs": null,
+        "option_strings": [
+          "--obd-timeout"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--out-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "out_dir",
+        "nargs": null,
+        "option_strings": [
+          "--out-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--skip-obd": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_obd",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-obd"
+        ],
+        "required": false,
+        "type": null
+      }
+    }
+  },
+  "record.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--max-reconnects": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 10,
+        "dest": "max_reconnects",
+        "nargs": null,
+        "option_strings": [
+          "--max-reconnects"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--min-free-mb": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 200,
+        "dest": "min_free_mb",
+        "nargs": null,
+        "option_strings": [
+          "--min-free-mb"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--no-reconnect": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_reconnect",
+        "nargs": 0,
+        "option_strings": [
+          "--no-reconnect"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--obd-baud": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 38400,
+        "dest": "obd_baud",
+        "nargs": null,
+        "option_strings": [
+          "--obd-baud"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--obd-did-header": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "obd_did_header",
+        "nargs": null,
+        "option_strings": [
+          "--obd-did-header"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--obd-dids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "obd_dids",
+        "nargs": null,
+        "option_strings": [
+          "--obd-dids"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--obd-pids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "obd_pids",
+        "nargs": null,
+        "option_strings": [
+          "--obd-pids"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--obd-port": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "obd_port",
+        "nargs": null,
+        "option_strings": [
+          "--obd-port"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--obd-source": {
+        "action": "_StoreAction",
+        "choices": [
+          "off",
+          "canable",
+          "elm327"
+        ],
+        "default": null,
+        "dest": "obd_source",
+        "nargs": null,
+        "option_strings": [
+          "--obd-source"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "out_dir",
+        "nargs": null,
+        "option_strings": [
+          "--out-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "seconds",
+        "nargs": null,
+        "option_strings": [
+          "--seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--vehicle-state": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "vehicle_state",
+        "nargs": null,
+        "option_strings": [
+          "--vehicle-state"
+        ],
+        "required": false,
+        "type": null
+      }
+    }
+  },
+  "refit_behavior_models.py": {
+    "options": {
+      "--all": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "use_all_sessions",
+        "nargs": 0,
+        "option_strings": [
+          "--all"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--days": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 30,
+        "dest": "days",
+        "nargs": null,
+        "option_strings": [
+          "--days"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--recipe": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "recipe",
+        "nargs": null,
+        "option_strings": [
+          "--recipe"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--regrid": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "regrid",
+        "nargs": null,
+        "option_strings": [
+          "--regrid"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--report-json": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "report_json",
+        "nargs": null,
+        "option_strings": [
+          "--report-json"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--since-boundary": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "since_boundary",
+        "nargs": 0,
+        "option_strings": [
+          "--since-boundary"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--validation": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "validation",
+        "nargs": null,
+        "option_strings": [
+          "--validation"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "replay.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--model": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "model",
+        "nargs": null,
+        "option_strings": [
+          "--model"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--pretty": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "pretty",
+        "nargs": 0,
+        "option_strings": [
+          "--pretty"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--value": {
+        "action": "_StoreAction",
+        "choices": [
+          "value_number",
+          "value_bool"
+        ],
+        "default": "value_number",
+        "dest": "value",
+        "nargs": null,
+        "option_strings": [
+          "--value"
+        ],
+        "required": false,
+        "type": null
+      },
+      "session_dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session_dir",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "retrain.py": {
+    "options": {
+      "--accept-alert-budget": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_alert_budget",
+        "nargs": null,
+        "option_strings": [
+          "--accept-alert-budget"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--accept-thin-calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_thin_calibration",
+        "nargs": null,
+        "option_strings": [
+          "--accept-thin-calibration"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--all": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "use_all_sessions",
+        "nargs": 0,
+        "option_strings": [
+          "--all"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--analyses-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/analyses)",
+        "dest": "analyses_dir",
+        "nargs": null,
+        "option_strings": [
+          "--analyses-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--benchmark-baseline": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "benchmark_baseline",
+        "nargs": null,
+        "option_strings": [
+          "--benchmark-baseline"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--benchmark-tolerance": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 0.15,
+        "dest": "benchmark_tolerance",
+        "nargs": null,
+        "option_strings": [
+          "--benchmark-tolerance"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--calibration-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--calibration-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--compute-target": {
+        "action": "_StoreAction",
+        "choices": [
+          "laptop",
+          "pi"
+        ],
+        "default": null,
+        "dest": "compute_target",
+        "nargs": null,
+        "option_strings": [
+          "--compute-target"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--days": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 30,
+        "dest": "days",
+        "nargs": null,
+        "option_strings": [
+          "--days"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--evaluation-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluation_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluation-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--feature-cache": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/cache/feature_frames)",
+        "dest": "feature_cache",
+        "nargs": null,
+        "option_strings": [
+          "--feature-cache"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--feedback": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/control/anomaly_feedback.jsonl)",
+        "dest": "feedback",
+        "nargs": null,
+        "option_strings": [
+          "--feedback"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--feedback-window-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 30.0,
+        "dest": "feedback_window_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--feedback-window-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--if-out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "if_out",
+        "nargs": null,
+        "option_strings": [
+          "--if-out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--job-id": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "job_id",
+        "nargs": null,
+        "option_strings": [
+          "--job-id"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--ledger": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/control/training_runs.jsonl)",
+        "dest": "ledger",
+        "nargs": null,
+        "option_strings": [
+          "--ledger"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-calibration-holdout": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_calibration_holdout",
+        "nargs": 0,
+        "option_strings": [
+          "--no-calibration-holdout"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-feature-cache": {
+        "action": "_StoreConstAction",
+        "choices": null,
+        "default": null,
+        "dest": "feature_cache",
+        "nargs": 0,
+        "option_strings": [
+          "--no-feature-cache"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-feedback-policy": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_feedback_policy",
+        "nargs": 0,
+        "option_strings": [
+          "--no-feedback-policy"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-ledger": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_ledger",
+        "nargs": 0,
+        "option_strings": [
+          "--no-ledger"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--rebuild-feature-cache": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "rebuild_feature_cache",
+        "nargs": 0,
+        "option_strings": [
+          "--rebuild-feature-cache"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sequence-model": {
+        "action": "_StoreAction",
+        "choices": [
+          "lstm",
+          "tcn"
+        ],
+        "default": null,
+        "dest": "sequence_model",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-model"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sequence-out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_out",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--since": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "since",
+        "nargs": null,
+        "option_strings": [
+          "--since"
+        ],
+        "required": false,
+        "type": "parse_since_argument"
+      },
+      "--since-boundary": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "since_boundary",
+        "nargs": 0,
+        "option_strings": [
+          "--since-boundary"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-benchmark": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_benchmark",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-benchmark"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-disposition-summary": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_disposition_summary",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-disposition-summary"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-if": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_if",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-if"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-quarantine-exclusion": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_quarantine_exclusion",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-quarantine-exclusion"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--skip-sequence": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "skip_sequence",
+        "nargs": 0,
+        "option_strings": [
+          "--skip-sequence"
+        ],
+        "required": false,
+        "type": null
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "rom_targets.py": {
+    "options": {
+      "--definition": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "definition",
+        "nargs": null,
+        "option_strings": [
+          "--definition"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--expect-rom": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "expect_rom",
+        "nargs": null,
+        "option_strings": [
+          "--expect-rom"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--output-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "output_dir",
+        "nargs": null,
+        "option_strings": [
+          "--output-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--patch": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "patch",
+        "nargs": null,
+        "option_strings": [
+          "--patch"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "action": {
+        "action": "_StoreAction",
+        "choices": [
+          "export",
+          "apply"
+        ],
+        "default": null,
+        "dest": "action",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": null
+      },
+      "rom": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "rom",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "sequence_bakeoff.py": {
+    "options": {
+      "--accept-thin-calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_thin_calibration",
+        "nargs": null,
+        "option_strings": [
+          "--accept-thin-calibration"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--backbones": {
+        "action": "_StoreAction",
+        "choices": [
+          "lstm",
+          "tcn"
+        ],
+        "default": [
+          "lstm",
+          "tcn"
+        ],
+        "dest": "backbones",
+        "nargs": "+",
+        "option_strings": [
+          "--backbones"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--calibration-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--calibration-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--evaluate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--evaluate-k": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate_k",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate-k"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--json": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "json",
+        "nargs": null,
+        "option_strings": [
+          "--json"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(models/_bakeoff)",
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "serve_dashboard.py": {
+    "options": {
+      "--anomalies-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/anomalies)",
+        "dest": "anomalies_dir",
+        "nargs": null,
+        "option_strings": [
+          "--anomalies-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--dev-cors": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dev_cors",
+        "nargs": 0,
+        "option_strings": [
+          "--dev-cors"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--host": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "host",
+        "nargs": null,
+        "option_strings": [
+          "--host"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--models-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(models)",
+        "dest": "models_dir",
+        "nargs": null,
+        "option_strings": [
+          "--models-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--port": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "port",
+        "nargs": null,
+        "option_strings": [
+          "--port"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--static-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "static_dir",
+        "nargs": null,
+        "option_strings": [
+          "--static-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
+  "stop_recording.py": {
+    "options": {
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--timeout": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 30.0,
+        "dest": "timeout",
+        "nargs": null,
+        "option_strings": [
+          "--timeout"
+        ],
+        "required": false,
+        "type": "float"
+      }
+    }
+  },
+  "sustained_validation.py": {
+    "options": {},
+    "subcommands": {
+      "list": {
+        "options": {}
+      },
+      "run": {
+        "options": {
+          "--inference-tick-s": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "inference_tick_s",
+            "nargs": null,
+            "option_strings": [
+              "--inference-tick-s"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--label": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "label",
+            "nargs": null,
+            "option_strings": [
+              "--label"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--models-dir": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "models_dir",
+            "nargs": null,
+            "option_strings": [
+              "--models-dir"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--no-inference": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "no_inference",
+            "nargs": 0,
+            "option_strings": [
+              "--no-inference"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--out": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "out",
+            "nargs": null,
+            "option_strings": [
+              "--out"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--scenario": {
+            "action": "_AppendAction",
+            "choices": null,
+            "default": null,
+            "dest": "scenario",
+            "nargs": null,
+            "option_strings": [
+              "--scenario"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--scratch": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "scratch",
+            "nargs": null,
+            "option_strings": [
+              "--scratch"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--sessions-root": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "Path(data/_validation)",
+            "dest": "sessions_root",
+            "nargs": null,
+            "option_strings": [
+              "--sessions-root"
+            ],
+            "required": false,
+            "type": "Path"
+          }
+        }
+      },
+      "summarize": {
+        "options": {
+          "--after": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "after",
+            "nargs": null,
+            "option_strings": [
+              "--after"
+            ],
+            "required": true,
+            "type": "Path"
+          },
+          "--before": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "before",
+            "nargs": null,
+            "option_strings": [
+              "--before"
+            ],
+            "required": true,
+            "type": "Path"
+          },
+          "--out": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "out",
+            "nargs": null,
+            "option_strings": [
+              "--out"
+            ],
+            "required": false,
+            "type": "Path"
+          }
+        }
+      },
+      "sweep": {
+        "options": {
+          "--budgets": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "budgets",
+            "nargs": null,
+            "option_strings": [
+              "--budgets"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--label": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "label",
+            "nargs": null,
+            "option_strings": [
+              "--label"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--no-inference": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "no_inference",
+            "nargs": 0,
+            "option_strings": [
+              "--no-inference"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--out": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "out",
+            "nargs": null,
+            "option_strings": [
+              "--out"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--scenario": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "fuel-map",
+            "dest": "scenario",
+            "nargs": null,
+            "option_strings": [
+              "--scenario"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--scratch": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "scratch",
+            "nargs": null,
+            "option_strings": [
+              "--scratch"
+            ],
+            "required": false,
+            "type": "Path"
+          },
+          "--sessions-root": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "Path(data/_validation)",
+            "dest": "sessions_root",
+            "nargs": null,
+            "option_strings": [
+              "--sessions-root"
+            ],
+            "required": false,
+            "type": "Path"
+          }
+        }
+      }
+    }
+  },
+  "tag.py": {
+    "options": {
+      "--field": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "field",
+        "nargs": null,
+        "option_strings": [
+          "--field"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--kind": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "event",
+        "dest": "kind",
+        "nargs": null,
+        "option_strings": [
+          "--kind"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--offset": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "offset",
+        "nargs": null,
+        "option_strings": [
+          "--offset"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [
+          "--session"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--timestamp": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "timestamp",
+        "nargs": null,
+        "option_strings": [
+          "--timestamp"
+        ],
+        "required": false,
+        "type": null
+      },
+      "label": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "label",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": null
+      }
+    }
+  },
+  "timing_compare.py": {
+    "options": {
+      "--after-csv": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "after_csv",
+        "nargs": null,
+        "option_strings": [
+          "--after-csv"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--after-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "after_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--after-sessions"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--before-csv": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "before_csv",
+        "nargs": null,
+        "option_strings": [
+          "--before-csv"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--before-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "before_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--before-sessions"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--commanded": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "commanded",
+        "nargs": null,
+        "option_strings": [
+          "--commanded"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--iat-tolerance": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 8.0,
+        "dest": "iat_tolerance",
+        "nargs": null,
+        "option_strings": [
+          "--iat-tolerance"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--load-floor": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 15.0,
+        "dest": "load_floor",
+        "nargs": null,
+        "option_strings": [
+          "--load-floor"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--max-join-age": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 3.0,
+        "dest": "max_join_age",
+        "nargs": null,
+        "option_strings": [
+          "--max-join-age"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--min-delta": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1.5,
+        "dest": "min_delta",
+        "nargs": null,
+        "option_strings": [
+          "--min-delta"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "/data/canary/sessions/nissan-xterra-2008",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sigma": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2.0,
+        "dest": "sigma",
+        "nargs": null,
+        "option_strings": [
+          "--sigma"
+        ],
+        "required": false,
+        "type": "float"
+      }
+    }
+  },
+  "train_anomaly_model.py": {
+    "options": {
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--evaluate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate",
+        "nargs": null,
+        "option_strings": [
+          "--evaluate"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--evaluate-channel": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate_channel",
+        "nargs": null,
+        "option_strings": [
+          "--evaluate-channel"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "train_lstm.py": {
+    "options": {
+      "--accept-thin-calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_thin_calibration",
+        "nargs": null,
+        "option_strings": [
+          "--accept-thin-calibration"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--calibration-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--calibration-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--evaluate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--evaluate-k": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate_k",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate-k"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--feature-set": {
+        "action": "_StoreAction",
+        "choices": [
+          "all_channels",
+          "engine_response"
+        ],
+        "default": "all_channels",
+        "dest": "feature_set",
+        "nargs": null,
+        "option_strings": [
+          "--feature-set"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--model-version": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "model_version",
+        "nargs": null,
+        "option_strings": [
+          "--model-version"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sequence-length": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_length",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-length"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--stride": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "stride",
+        "nargs": null,
+        "option_strings": [
+          "--stride"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "train_sequence.py": {
+    "options": {
+      "--accept-thin-calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_thin_calibration",
+        "nargs": null,
+        "option_strings": [
+          "--accept-thin-calibration"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--calibration-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--calibration-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--evaluate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--evaluate-k": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate_k",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate-k"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--feature-set": {
+        "action": "_StoreAction",
+        "choices": [
+          "all_channels",
+          "engine_response"
+        ],
+        "default": "all_channels",
+        "dest": "feature_set",
+        "nargs": null,
+        "option_strings": [
+          "--feature-set"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--model-version": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "model_version",
+        "nargs": null,
+        "option_strings": [
+          "--model-version"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sequence-length": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_length",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-length"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--stride": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "stride",
+        "nargs": null,
+        "option_strings": [
+          "--stride"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "train_tcn.py": {
+    "options": {
+      "--accept-thin-calibration": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "accept_thin_calibration",
+        "nargs": null,
+        "option_strings": [
+          "--accept-thin-calibration"
+        ],
+        "required": false,
+        "type": "override_reason"
+      },
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--calibration-sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "calibration_sessions",
+        "nargs": "+",
+        "option_strings": [
+          "--calibration-sessions"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--device": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "<machine>",
+        "dest": "device",
+        "nargs": null,
+        "option_strings": [
+          "--device"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--evaluate": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--evaluate-k": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "evaluate_k",
+        "nargs": "+",
+        "option_strings": [
+          "--evaluate-k"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--feature-set": {
+        "action": "_StoreAction",
+        "choices": [
+          "all_channels",
+          "engine_response"
+        ],
+        "default": "all_channels",
+        "dest": "feature_set",
+        "nargs": null,
+        "option_strings": [
+          "--feature-set"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--model-version": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "model_version",
+        "nargs": null,
+        "option_strings": [
+          "--model-version"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sequence-length": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sequence_length",
+        "nargs": null,
+        "option_strings": [
+          "--sequence-length"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(data/sessions)",
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--stride": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "stride",
+        "nargs": null,
+        "option_strings": [
+          "--stride"
+        ],
+        "required": false,
+        "type": "int"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "trip_report.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": "str"
+      },
+      "--rebuild": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "rebuild",
+        "nargs": 0,
+        "option_strings": [
+          "--rebuild"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "session": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "session",
+        "nargs": null,
+        "option_strings": [],
+        "required": true,
+        "type": null
+      }
+    }
+  },
+  "tuning_report.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": null
+      }
+    },
+    "subcommands": {
+      "compare": {
+        "options": {
+          "--against": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "against",
+            "nargs": null,
+            "option_strings": [
+              "--against"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--axes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": [
+              "obd:RPM",
+              "obd:MAF"
+            ],
+            "dest": "axes",
+            "nargs": "+",
+            "option_strings": [
+              "--axes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--conditions": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "conditions",
+            "nargs": null,
+            "option_strings": [
+              "--conditions"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--floor-channel": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "floor_channel",
+            "nargs": null,
+            "option_strings": [
+              "--floor-channel"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--floor-file": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "floor_file",
+            "nargs": null,
+            "option_strings": [
+              "--floor-file"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--session": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "session",
+            "nargs": null,
+            "option_strings": [
+              "--session"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--unsafe-axes": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "unsafe_axes",
+            "nargs": 0,
+            "option_strings": [
+              "--unsafe-axes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--value": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "value",
+            "nargs": null,
+            "option_strings": [
+              "--value"
+            ],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "delivery-error": {
+        "options": {
+          "--cell-agg": {
+            "action": "_StoreAction",
+            "choices": [
+              "last",
+              "mean"
+            ],
+            "default": "last",
+            "dest": "cell_agg",
+            "nargs": null,
+            "option_strings": [
+              "--cell-agg"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--measured": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "obd:O2_WR_LAMBDA_S1",
+            "dest": "measured",
+            "nargs": null,
+            "option_strings": [
+              "--measured"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--min-load": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": 85.0,
+            "dest": "min_load",
+            "nargs": null,
+            "option_strings": [
+              "--min-load"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--session": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "session",
+            "nargs": null,
+            "option_strings": [
+              "--session"
+            ],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "null-run": {
+        "options": {
+          "--against": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "against",
+            "nargs": null,
+            "option_strings": [
+              "--against"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--axes": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": [
+              "obd:RPM",
+              "obd:MAF"
+            ],
+            "dest": "axes",
+            "nargs": "+",
+            "option_strings": [
+              "--axes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--channel": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "channel",
+            "nargs": null,
+            "option_strings": [
+              "--channel"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--conditions": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "conditions",
+            "nargs": null,
+            "option_strings": [
+              "--conditions"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--note": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "",
+            "dest": "note",
+            "nargs": null,
+            "option_strings": [
+              "--note"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--out": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "out",
+            "nargs": null,
+            "option_strings": [
+              "--out"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--session": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "session",
+            "nargs": null,
+            "option_strings": [
+              "--session"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--unit": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "unknown",
+            "dest": "unit",
+            "nargs": null,
+            "option_strings": [
+              "--unit"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--unsafe-axes": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "unsafe_axes",
+            "nargs": 0,
+            "option_strings": [
+              "--unsafe-axes"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--value": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "value",
+            "nargs": null,
+            "option_strings": [
+              "--value"
+            ],
+            "required": true,
+            "type": null
+          }
+        }
+      }
+    }
+  },
+  "validate_command_pairing.py": {
+    "options": {
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--command": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "command",
+        "nargs": null,
+        "option_strings": [
+          "--command"
+        ],
+        "required": true,
+        "type": null
+      },
+      "--dids": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/dids.yaml)",
+        "dest": "dids",
+        "nargs": null,
+        "option_strings": [
+          "--dids"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--hold-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 5.0,
+        "dest": "hold_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--hold-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--known-answer": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "known_answer",
+        "nargs": null,
+        "option_strings": [
+          "--known-answer"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--max-rpm-range": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 200.0,
+        "dest": "max_rpm_range",
+        "nargs": null,
+        "option_strings": [
+          "--max-rpm-range"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--measured": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": null,
+        "dest": "measured",
+        "nargs": null,
+        "option_strings": [
+          "--measured"
+        ],
+        "required": true,
+        "type": null
+      },
+      "--negative-control": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "negative_control",
+        "nargs": null,
+        "option_strings": [
+          "--negative-control"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--out": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "out",
+        "nargs": null,
+        "option_strings": [
+          "--out"
+        ],
+        "required": true,
+        "type": "Path"
+      },
+      "--rpm-spec": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "did:ECM_RPM",
+        "dest": "rpm_spec",
+        "nargs": null,
+        "option_strings": [
+          "--rpm-spec"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--tolerance": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "50ms",
+        "dest": "tolerance",
+        "nargs": null,
+        "option_strings": [
+          "--tolerance"
+        ],
+        "required": false,
+        "type": null
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
+  "vehicle_log.py": {
+    "options": {
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--ledger": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "ledger",
+        "nargs": null,
+        "option_strings": [
+          "--ledger"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--profile": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "profile",
+        "nargs": null,
+        "option_strings": [
+          "--profile"
+        ],
+        "required": false,
+        "type": "str"
+      }
+    },
+    "subcommands": {
+      "add": {
+        "options": {
+          "--boundary": {
+            "action": "_StoreTrueAction",
+            "choices": null,
+            "default": false,
+            "dest": "boundary",
+            "nargs": 0,
+            "option_strings": [
+              "--boundary"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--channel": {
+            "action": "_AppendAction",
+            "choices": null,
+            "default": null,
+            "dest": "channels",
+            "nargs": null,
+            "option_strings": [
+              "--channel"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--details": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": "",
+            "dest": "details",
+            "nargs": null,
+            "option_strings": [
+              "--details"
+            ],
+            "required": false,
+            "type": null
+          },
+          "--kind": {
+            "action": "_StoreAction",
+            "choices": [
+              "dtc",
+              "maintenance",
+              "mod",
+              "observation",
+              "repair"
+            ],
+            "default": null,
+            "dest": "kind",
+            "nargs": null,
+            "option_strings": [
+              "--kind"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--occurred": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "occurred",
+            "nargs": null,
+            "option_strings": [
+              "--occurred"
+            ],
+            "required": true,
+            "type": null
+          },
+          "--odometer": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "odometer",
+            "nargs": null,
+            "option_strings": [
+              "--odometer"
+            ],
+            "required": false,
+            "type": "float"
+          },
+          "--title": {
+            "action": "_StoreAction",
+            "choices": null,
+            "default": null,
+            "dest": "title",
+            "nargs": null,
+            "option_strings": [
+              "--title"
+            ],
+            "required": true,
+            "type": null
+          }
+        }
+      },
+      "list": {
+        "options": {}
+      }
+    }
+  },
+  "verify_artifacts.py": {
+    "options": {
+      "--compare-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "compare_dir",
+        "nargs": null,
+        "option_strings": [
+          "--compare-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--models-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(models)",
+        "dest": "models_dir",
+        "nargs": null,
+        "option_strings": [
+          "--models-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--remote": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "remote",
+        "nargs": null,
+        "option_strings": [
+          "--remote"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--remote-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "/data/canary/models",
+        "dest": "remote_dir",
+        "nargs": null,
+        "option_strings": [
+          "--remote-dir"
+        ],
+        "required": false,
+        "type": null
+      }
+    }
+  }
+}

@@ -26,8 +26,8 @@ from src.daemon.detectors.common import (
     gate_and_collect,
     log,
 )
+from src.daemon.health import HealthMonitor
 from src.dashboard.broadcast import Broadcaster
-from src.models.health import HealthMonitor
 from src.models.inference import IsolationForestInferenceEngine
 from src.preprocessing.feature_pipeline import (
     FeatureSpecReconciliation,

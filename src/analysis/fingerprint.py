@@ -12,12 +12,13 @@ session looks anomalous enough to flag.
 :func:`compute_fingerprint` reuses the exact same ``read → wide → resample →
 segment`` loading path as :func:`~src.analysis.session_classifier.classify_session`
 (:func:`~src.preprocessing.loader.resample_and_segment`) rather than
-re-reading the session, then layers on the same derived-signal appenders the
-offline feature pipeline uses (:func:`~src.analysis.derived.compute_anomaly_signals`,
-:func:`~src.analysis.committees.append_committee_residuals`,
-:func:`~src.decode.behavior_decoder.append_deviation_columns`) so the
-bank-balance / committee / behavior-deviation stats are simple aggregations
-over columns already computed elsewhere, not new physics.
+re-reading the session, then runs the models' own featurization
+(:func:`~src.preprocessing.feature_pipeline.featurize_wide_frame`, whose
+``operating_frame`` is what IF, the sequence detector and the behavior
+surfaces serve on) so the bank-balance / committee / behavior-deviation
+stats are simple aggregations over columns already computed elsewhere, not
+new physics — and not a hand-chained subset of that pipeline, which is what
+this used before R05.5.
 
 Every stat is *omitted* (not zeroed or NaN'd) when its precondition doesn't
 hold for a session — e.g. a session with no captured cold start has no
@@ -36,14 +37,14 @@ from typing import Any
 
 import pandas as pd
 
-from src.analysis.committees import COMMITTEES, append_committee_residuals
-from src.analysis.derived import compute_anomaly_signals
+from src.analysis.committees import COMMITTEES
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_column
-from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX, append_deviation_columns
-from src.decode.behavior_models import load_behavior_models
+from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX
+from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.loader import resample_and_segment
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
@@ -55,7 +56,12 @@ FINGERPRINT_FILENAME = "fingerprint.json"
 #: Increment when the stat set / semantics change, so a corpus-wide backfill
 #: can detect and re-skip already-current sidecars (mirrors
 #: ``session_classifier.CLASSIFIER_VERSION``).
-FINGERPRINT_VERSION = "0.1.0"
+#:
+#: 0.2.0 (R05.5): stats come from ``featurize_wide_frame(...).operating_frame``
+#: — the frame the models serve on — instead of a hand-chained subset of it.
+#: A reference epoch frozen from 0.1.0 fingerprints is not comparable; trend
+#: evaluation refuses the mix until the epoch is re-frozen.
+FINGERPRINT_VERSION = "0.2.0"
 
 SCHEMA_VERSION = 1
 
@@ -154,9 +160,21 @@ def compute_fingerprint(
         return {}
     frame = frame.reset_index(drop=True)
 
-    frame = compute_anomaly_signals(frame, config.vehicle.parameters)
-    frame = append_committee_residuals(frame)
-    frame = _append_behavior_deviations(frame, config)
+    # R05.5: the models' own featurization — segmentation, AFR channels,
+    # anomaly signals, instantaneous channels, committee residuals and
+    # behavior deviations, in the order the serve path runs them — so the
+    # deviation statistics describe the frame the models actually score.
+    featurized = featurize_wide_frame(
+        frame, config, behavior_models=_behavior_models(config)
+    ).operating_frame
+    # The idle/cruise stats keep the session's *classification* modes (the
+    # ones classification.json and the digest's mode_seconds report). The
+    # models' segmenter falls back to one constant mode when an input such as
+    # throttle is missing, where the classifier still labels idle; a
+    # fingerprint must not lose its idle stats to that disagreement.
+    if MODE_COLUMN in frame.columns and featurized.index.equals(frame.index):
+        featurized[MODE_COLUMN] = frame[MODE_COLUMN]
+    frame = featurized
 
     stats: dict[str, float] = {}
     _add_warmup_stat(frame, stats)
@@ -215,8 +233,8 @@ def is_stale(fingerprint: SessionFingerprint | None) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _append_behavior_deviations(frame: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
-    """Append ``deviation:*`` columns when a behavior-model file exists.
+def _behavior_models(config: CanaryConfig) -> BehaviorModels | None:
+    """The vehicle's behavior models, or ``None`` when absent or unreadable.
 
     Best-effort: a missing or unparseable ``behavior_models.yaml`` simply
     means the behavior-deviation stats are omitted, not a hard failure of
@@ -224,16 +242,12 @@ def _append_behavior_deviations(frame: pd.DataFrame, config: CanaryConfig) -> pd
     """
     models_path = config.daemon.behavior_models
     if not models_path.exists():
-        return frame
+        return None
     try:
         models = load_behavior_models(models_path)
     except Exception:  # noqa: BLE001 — a broken models file must not block fingerprinting
-        return frame
-    if not models.models:
-        return frame
-    return append_deviation_columns(
-        frame, models, rate_window_seconds=config.preprocessing.rolling_window_seconds
-    )
+        return None
+    return models if models.models else None
 
 
 # --------------------------------------------------------------------------- #

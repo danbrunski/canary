@@ -55,79 +55,29 @@ from src.dashboard.status import build_status
 from src.models.manager import LoadedModel
 from src.models.manifest import ModelManifestCommon
 from src.telemetry import TelemetryRecord
+from tests.configs import isolated_config
 
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
 
-def _config_yaml(tmp_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {tmp_path / "storage"}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    warmup:
-      rpm_min: 400
-      speed_max: 0
-      coolant_temp_max: 70
-    idle:
-      rpm_min: 400
-      rpm_max: 900
-      speed_max: 0
-      coolant_temp_min: 70
-    city:
-      rpm_min: 400
-      speed_min: 1
-      speed_max: 60
-    highway:
-      rpm_min: 400
-      speed_min: 60
-models:
-  out_of_process_feature_build: false
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 0
-daemon:
-  anomalies_dir: {tmp_path / "anomalies"}
-  models_dir: {tmp_path / "models"}
-  model_poll_seconds: 0.05
-  retention_sweep_seconds: 0.05
-  broadcaster_queue_size: 64
-  catalog_db: {tmp_path / "control" / "catalog.db"}
-"""
-
-
 @pytest.fixture
 def config(tmp_path: Path) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    return CanaryConfig.from_yaml(cfg_path)
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        preprocessing={
+            "operating_modes": {
+                "warmup": {"rpm_min": 400, "speed_max": 0, "coolant_temp_max": 70},
+                "idle": {"rpm_min": 400, "coolant_temp_min": 70},
+                "city": {"rpm_min": 400, "speed_min": 1, "speed_max": 60},
+                "highway": {"rpm_min": 400, "speed_min": 60},
+            }
+        },
+        models={"out_of_process_feature_build": False},
+        daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 64},
+    )
 
 
 class FakeClock:

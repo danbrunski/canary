@@ -21,6 +21,9 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
+
+from tests.configs import daemon_test_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -65,20 +68,13 @@ def recording_path_modules(tmp_path_factory: pytest.TempPathFactory) -> set[str]
     # import check proves nothing. CI does not install the `ml` extra; this
     # errored all 18 dependent tests there on 2026-09-23.
     pytest.importorskip("torch")
-    from tests.test_daemon import _config_yaml
-
     tmp = tmp_path_factory.mktemp("cold_start")
-    text = _config_yaml(tmp)
     # Both detectors on: their managers are what used to import the IF loader.
-    text = text.replace(
-        "  isolation_forest:\n    enabled: false", "  isolation_forest:\n    enabled: true"
+    config = daemon_test_config(
+        tmp, models={"isolation_forest": {"enabled": True}, "lstm_autoencoder": {"enabled": True}}
     )
-    text = text.replace(
-        "  lstm_autoencoder:\n    enabled: false", "  lstm_autoencoder:\n    enabled: true"
-    )
-    assert text.count("enabled: true") >= 2
     config_path = tmp / "canary.yaml"
-    config_path.write_text(text)
+    config_path.write_text(yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False))
     return _modules_loaded_by(_RECORDING_PATH_IMPORTS.format(config=str(config_path)))
 
 

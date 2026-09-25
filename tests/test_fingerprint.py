@@ -27,6 +27,7 @@ from src.decode.behavior_models import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.builders import write_rich_session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -34,91 +35,6 @@ EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 def _config() -> CanaryConfig:
     return CanaryConfig.from_yaml(EXAMPLE_YAML)
-
-
-def _write_rich_session(root: Path, *, name: str = "2026-05-20T120000") -> Path:
-    """A session with a captured cold start, a warm-idle stretch, and a
-    highway stretch — enough to exercise every stat category at once.
-
-    Phase layout (1 sample/second, matching resample_hz: 1):
-      * i in [0, 5): cranking — RPM below running threshold, cold coolant,
-        low module voltage.
-      * i in [5, 47): warmup ramp — coolant climbs 20C -> ~88C (crosses the
-        70C idle-mode gate and the 80C warmup-stat target inside this
-        window), RPM/speed already at idle levels.
-      * i in [47, 87): steady warm idle — coolant pinned at 90C, well clear
-        of the 70C gate, RPM/speed/MAF/load/trims constant.
-      * i in [87, 147): highway cruise — speed/rpm up, different MAF/load/
-        trim constants, GPS speed present (for the committee stat).
-
-    The operating-mode segmenter's dwell hysteresis
-    (``mode_dwell_ticks: 3``) means a couple of rows at the idle->highway
-    boundary land on the "wrong" side of the label; the steady-idle window
-    is long enough that per-stat tests tolerate that bleed with a loose
-    relative tolerance rather than asserting exact contamination-free means.
-    """
-    session = root / name
-    records: list[TelemetryRecord] = []
-    base = 1_779_300_000.0
-    for i in range(147):
-        t = base + i
-        if i < 5:
-            rpm, speed, coolant, voltage = 150.0, 0.0, 20.0, 10.5
-        elif i < 47:
-            rpm, speed, coolant, voltage = 800.0, 0.0, 20.0 + 1.667 * (i - 5), 14.2
-        elif i < 87:
-            rpm, speed, coolant, voltage = 800.0, 0.0, 90.0, 14.2
-        else:
-            rpm, speed, coolant, voltage = 2200.0, 90.0, 90.0, 14.2
-
-        records.extend(
-            [
-                TelemetryRecord.obd(t, "RPM", rpm, "rpm"),
-                TelemetryRecord.obd(t, "SPEED", speed, "km/h"),
-                TelemetryRecord.obd(t, "THROTTLE_POS", 10.0, "%"),
-                TelemetryRecord.obd(t, "COOLANT_TEMP", coolant, "C"),
-                TelemetryRecord.obd(t, "RUN_TIME", float(max(i - 4, 0)), "s"),
-                TelemetryRecord.obd(t, "CONTROL_MODULE_VOLTAGE", voltage, "V"),
-            ]
-        )
-        if i >= 5:
-            # Idle-phase constants (i in [5, 87)) vs. cruise-phase constants
-            # (i in [87, 147)) — deliberately different so idle/cruise means
-            # are distinguishable in assertions.
-            if i < 87:
-                maf, load, stft1, stft2, ltft1, ltft2 = 3.0, 25.0, 2.0, -1.0, 3.0, -2.0
-            else:
-                maf, load, stft1, stft2, ltft1, ltft2 = 15.0, 45.0, 1.0, 0.5, 4.0, -1.0
-            records.extend(
-                [
-                    TelemetryRecord.obd(t, "MAF", maf, "g/s"),
-                    TelemetryRecord.obd(t, "ENGINE_LOAD", load, "%"),
-                    TelemetryRecord.obd(t, "SHORT_FUEL_TRIM_1", stft1, "%"),
-                    TelemetryRecord.obd(t, "SHORT_FUEL_TRIM_2", stft2, "%"),
-                    TelemetryRecord.obd(t, "LONG_FUEL_TRIM_1", ltft1, "%"),
-                    TelemetryRecord.obd(t, "LONG_FUEL_TRIM_2", ltft2, "%"),
-                ]
-            )
-        if i >= 87:
-            # GPS speed diverges from OBD speed by a constant 5 km/h, with a
-            # trustworthy fix, so the speed committee actually scores.
-            records.extend(
-                [
-                    TelemetryRecord.gps(t, "speed", speed + 5.0, "km/h"),
-                    TelemetryRecord.gps(t, "num_satellites", 8.0),
-                    TelemetryRecord.gps(t, "hdop", 1.0),
-                ]
-            )
-        # Task 3.2 — a growing cylinder-1 misfire count over the drive (Mode
-        # 06 counters are cumulative within a session); no cylinder-2
-        # reading at all this session, proving the stat is per-cylinder
-        # (only cylinders actually polled get a stat key).
-        if i == 10:
-            records.append(TelemetryRecord.obd(t, "MISFIRE_COUNT_CYL1", 1.0, "count"))
-        elif i == 100:
-            records.append(TelemetryRecord.obd(t, "MISFIRE_COUNT_CYL1", 5.0, "count"))
-    write_records_to_parquet(records, session, max_rows=10_000)
-    return session
 
 
 def _write_warm_start_session(root: Path, *, name: str = "2026-05-20T130000") -> Path:
@@ -142,7 +58,7 @@ def _write_warm_start_session(root: Path, *, name: str = "2026-05-20T130000") ->
 
 @pytest.fixture
 def rich_session(tmp_path: Path) -> Path:
-    return _write_rich_session(tmp_path)
+    return write_rich_session(tmp_path)
 
 
 def test_warmup_time_constant(rich_session: Path) -> None:

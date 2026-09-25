@@ -35,7 +35,7 @@ from src.control.capture_finalize import (
     recompute_quality_off_loop,
 )
 from src.storage.parquet_writer import write_records_to_parquet
-from tests.test_capture_coverage import T0, _rounds, _session
+from tests.builders import CAPTURE_T0, capture_rounds, write_capture_session
 
 
 class _Health:
@@ -43,7 +43,9 @@ class _Health:
         return SimpleNamespace(lifetime=None, scheduler={}, loss_epoch=self.loss_epoch())
 
     def loss_epoch(self, *, now: float | None = None) -> LossEpoch:
-        return LossEpoch(taken_at_monotonic=1.0, taken_at_wall=T0, counters={"obd.dropped": 0})
+        return LossEpoch(
+            taken_at_monotonic=1.0, taken_at_wall=CAPTURE_T0, counters={"obd.dropped": 0}
+        )
 
     async def wait_for_queues_idle(self, names: Any = None, *, timeout: float) -> dict[str, Any]:
         return {"drained": [], "timed_out": [], "unobserved": []}
@@ -189,24 +191,24 @@ async def test_distinct_recomputes_do_not_compete_for_memory(
 
 
 async def test_the_recompute_refuses_to_run_inline_on_a_loop(tmp_path: Path) -> None:
-    session = _session(tmp_path, _rounds(8))
+    session = write_capture_session(tmp_path, capture_rounds(8))
     with pytest.raises(RuntimeError, match="must not run on an event loop"):
         capture_coverage.recompute_capture_quality(session)
 
 
 async def test_the_real_child_process_scores_like_the_inline_recompute(tmp_path: Path) -> None:
-    session = _session(tmp_path, _rounds(240))
+    session = write_capture_session(tmp_path, capture_rounds(240))
     expected = await asyncio.to_thread(
-        capture_coverage.recompute_capture_quality, session, ended_at=T0 + 60
+        capture_coverage.recompute_capture_quality, session, ended_at=CAPTURE_T0 + 60
     )
-    quality = await recompute_quality_off_loop(session, ended_at=T0 + 60)
+    quality = await recompute_quality_off_loop(session, ended_at=CAPTURE_T0 + 60)
     assert quality.to_dict() == expected.to_dict()
     assert quality.tuples["complete"] == 240
     assert quality.verdict == expected.verdict and quality.failures == expected.failures
 
 
 async def test_finalize_through_the_real_child_writes_the_sidecar(tmp_path: Path) -> None:
-    session = _session(tmp_path, _rounds(240))
+    session = write_capture_session(tmp_path, capture_rounds(240))
     payload = await finalize_capture(session, health=_Health(), writer=_Writer(), start=None)
     assert payload is not None
     assert payload["scope"] == "stop"
@@ -218,7 +220,7 @@ async def test_finalize_through_the_real_child_writes_the_sidecar(tmp_path: Path
 
 async def test_the_recompute_refusal_crosses_the_process_boundary(tmp_path: Path) -> None:
     plain = tmp_path / "2026-08-05T142720"
-    write_records_to_parquet(_rounds(4), plain)
+    write_records_to_parquet(capture_rounds(4), plain)
     with pytest.raises(ValueError, match="not a capture session"):
         await recompute_quality_off_loop(plain)
 
@@ -238,7 +240,7 @@ async def test_a_dead_child_is_reported_not_hung(tmp_path: Path) -> None:
 async def test_a_wedged_child_times_out_and_is_terminated(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = _session(tmp_path, _rounds(240))
+    session = write_capture_session(tmp_path, capture_rounds(240))
     pools: list[ProcessPoolExecutor] = []
     spawn = capture_finalize._spawn_pool
 

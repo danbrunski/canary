@@ -8,8 +8,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
+
+from tests.builders import sequence_training_frame
 
 torch = pytest.importorskip("torch")
 
@@ -26,7 +27,7 @@ from src.models.tcn_training import (  # noqa: E402
     train_tcn_autoencoder,
 )
 from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
+from src.preprocessing.resampler import SESSION_COLUMN  # noqa: E402
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -52,19 +53,8 @@ class _Cfg:
     threshold_k: float = 2.0
 
 
-def _frame(rows: int = 14) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            SESSION_COLUMN: ["clean"] * rows,
-            TIMESTAMP_COLUMN: pd.date_range("2026-05-12T00:00:00Z", periods=rows, freq="s"),
-            "rpm": [700.0 + (idx % 4) for idx in range(rows)],
-            "speed": [float(idx % 5) for idx in range(rows)],
-        }
-    )
-
-
 def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
-    frame = _frame(rows)
+    frame = sequence_training_frame(rows)
     scaler = ZScoreScaler.fit(frame, columns=["rpm", "speed"])
     return SequenceWindowDataset(
         scaler.transform(frame),
@@ -201,9 +191,9 @@ def test_train_tcn_autoencoder_calibrates_on_held_out_dataset_when_given() -> No
     # Different-sized held-out dataset so we can tell from window_count which
     # one the calibration ran on. Same scaler (fit on training) for parity with
     # the real CLI flow.
-    held_out_frame = _frame(rows=8)
+    held_out_frame = sequence_training_frame(rows=8)
     held_out_frame.loc[:, [SESSION_COLUMN]] = "calib"
-    scaler = ZScoreScaler.fit(_frame(14), columns=["rpm", "speed"])
+    scaler = ZScoreScaler.fit(sequence_training_frame(14), columns=["rpm", "speed"])
     calib_ds = SequenceWindowDataset(
         scaler.transform(held_out_frame),
         sequence_length=4,

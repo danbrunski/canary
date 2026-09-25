@@ -13,10 +13,14 @@ import pytest
 
 from src.alerts.feedback import FeedbackStore
 from src.config import CanaryConfig
+from tests.configs import retrain_argv
+from tests.repo_guard import RepoTreeGuard
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import _cli  # noqa: E402
 import retrain  # noqa: E402
+
+from tests.builders import write_fixture_session
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
@@ -48,7 +52,8 @@ def test_retrain_calls_both_trainers(
     monkeypatch.setattr(retrain.lstm_trainer, "train", _lstm_train)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -62,7 +67,7 @@ def test_retrain_calls_both_trainers(
             # data/control/anomaly_feedback.jsonl (the feedback path is
             # covered by test_retrain_applies_feedback_policy_for_single_trainer).
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     assert calls == ["build", "if", "lstm"]
@@ -122,16 +127,16 @@ def test_retrain_applies_feedback_policy_for_single_trainer(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
             "--skip-sequence",
-            "--feedback",
-            str(feedback_path),
-        ]
+            feedback=feedback_path,
+        )
     )
 
     assert rc == 0
@@ -149,7 +154,8 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -160,7 +166,7 @@ def test_retrain_skip_if(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
             # Trainer dispatch only: these sessions are empty directories, and
             # the quarantine screen needs a real frame.
             "--skip-quarantine-exclusion",
-        ]
+        )
     )
     assert rc == 0
     assert calls == ["lstm"]
@@ -176,7 +182,8 @@ def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: calls.append("lstm"))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -187,7 +194,7 @@ def test_retrain_skip_sequence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
             # Trainer dispatch only: these sessions are empty directories, and
             # the quarantine screen needs a real frame.
             "--skip-quarantine-exclusion",
-        ]
+        )
     )
     assert rc == 0
     assert calls == ["if"]
@@ -214,7 +221,8 @@ def test_retrain_sequence_model_tcn(
     monkeypatch.setattr(retrain.tcn_trainer, "train", lambda *a, **k: calls.append("tcn"))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             str(cfg_path),
             "--sessions-root",
@@ -227,7 +235,7 @@ def test_retrain_sequence_model_tcn(
             # Trainer dispatch only: these sessions are empty directories, and
             # the quarantine screen needs a real frame.
             "--skip-quarantine-exclusion",
-        ]
+        )
     )
     assert rc == 0
     assert calls == ["tcn"]
@@ -268,7 +276,8 @@ def test_retrain_since_boundary_excludes_older_sessions(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             str(cfg_path),
             "--sessions-root",
@@ -280,7 +289,7 @@ def test_retrain_since_boundary_excludes_older_sessions(
             # Trainer dispatch only: these sessions are empty directories, and
             # the quarantine screen needs a real frame.
             "--skip-quarantine-exclusion",
-        ]
+        )
     )
     assert rc == 0
     assert seen["sessions"] == [new_session]
@@ -317,7 +326,8 @@ def test_retrain_since_selects_only_sessions_at_or_after_cutoff(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -330,7 +340,7 @@ def test_retrain_since_selects_only_sessions_at_or_after_cutoff(
             str(tmp_path / "lstm"),
             "--no-feedback-policy",
             "--skip-disposition-summary",
-        ]
+        )
     )
     assert rc == 0
     # 2026-05-01 dropped by --since; of the remaining three, the auto
@@ -353,7 +363,8 @@ def test_retrain_since_window_too_small_for_holdout_refuses(
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: list(sessions))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -364,7 +375,7 @@ def test_retrain_since_window_too_small_for_holdout_refuses(
             str(tmp_path / "if"),
             "--sequence-out",
             str(tmp_path / "lstm"),
-        ]
+        )
     )
     assert rc == retrain.WINDOW_TOO_SMALL_FOR_HOLDOUT
     assert "too small to reserve a calibration holdout" in capsys.readouterr().err
@@ -386,7 +397,8 @@ def test_retrain_since_with_no_calibration_holdout_does_not_refuse(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -400,7 +412,7 @@ def test_retrain_since_with_no_calibration_holdout_does_not_refuse(
             str(tmp_path / "lstm"),
             "--no-feedback-policy",
             "--skip-disposition-summary",
-        ]
+        )
     )
     assert rc == 0
 
@@ -408,7 +420,8 @@ def test_retrain_since_with_no_calibration_holdout_does_not_refuse(
 def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [tmp_path])
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -416,7 +429,7 @@ def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.Mon
             "--all",
             "--skip-if",
             "--skip-sequence",
-        ]
+        )
     )
     assert rc == 1
 
@@ -424,12 +437,13 @@ def test_retrain_both_skip_returns_error(tmp_path: Path, monkeypatch: pytest.Mon
 def test_retrain_no_sessions_returns_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(_cli, "discover_sessions", lambda _root: [])
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
-        ]
+        )
     )
     assert rc == 1
 
@@ -455,14 +469,15 @@ def test_retrain_continues_after_first_trainer_fails(
     monkeypatch.setattr(retrain.lstm_trainer, "train", _ok_lstm)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
             "--no-feedback-policy",
-        ]
+        )
     )
     # One trainer failed, but the other still ran; partial success exits zero so
     # sync-train can continue with independent behavior-model refits.
@@ -488,13 +503,14 @@ def test_retrain_returns_error_when_all_requested_trainers_fail(
     monkeypatch.setattr(retrain.lstm_trainer, "train", _broken)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
-        ]
+        )
     )
     assert rc == 1
 
@@ -515,7 +531,8 @@ def test_retrain_skip_benchmark_flag_prevents_gate_call(
     monkeypatch.setattr(retrain, "_run_benchmark_gate", _boom)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -523,7 +540,7 @@ def test_retrain_skip_benchmark_flag_prevents_gate_call(
             "--all",
             "--no-feedback-policy",
             "--skip-benchmark",
-        ]
+        )
     )
     assert rc == 0
 
@@ -549,14 +566,15 @@ def test_retrain_calls_benchmark_gate_with_calibration_sessions(
     monkeypatch.setattr(retrain, "_run_benchmark_gate", _fake_gate)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     assert len(calls) == 1
@@ -584,14 +602,15 @@ def test_retrain_returns_error_when_benchmark_gate_regressed(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 1
     out = capsys.readouterr().out
@@ -616,14 +635,15 @@ def test_retrain_ok_benchmark_does_not_fail_run(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
             str(tmp_path / "sessions"),
             "--all",
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     out = capsys.readouterr().out
@@ -663,10 +683,8 @@ def test_run_benchmark_gate_skips_cleanly_with_no_evaluation_sessions(
 def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from tests.test_detector_benchmark import _write_fixture_session
-
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000")
+    session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000")
     args = retrain.parse_args(
         [
             "--config",
@@ -694,7 +712,6 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     given explicitly here), and returns a real report/diff pair."""
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame
-    from tests.test_detector_benchmark import _write_fixture_session
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     # The gate always attempts to load the configured sequence backend (Task
@@ -711,7 +728,7 @@ def test_run_benchmark_gate_runs_real_grid_and_discovers_prior_baseline(
     config.models.isolation_forest.min_training_drives_per_mode = 1
     config.models.isolation_forest.min_calibration_drives_per_mode = 1
 
-    session = _write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
+    session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     long = retrain.detector_benchmark.load_resampled_session(session, config)
     features = featurize_wide_frame(long, config).features
     trained = fit_isolation_forest(
@@ -796,7 +813,8 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
     monkeypatch.setattr(retrain.lstm_trainer, "train", _seq_train)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -807,7 +825,7 @@ def test_retrain_auto_holds_out_most_recent_session_for_calibration(
             "--sequence-out",
             str(tmp_path / "lstm"),
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     # Most-recent session held out for calibration; trainer sees the other two.
@@ -849,7 +867,8 @@ def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -860,7 +879,7 @@ def test_retrain_skips_tiny_sessions_when_picking_calibration_holdout(
             "--sequence-out",
             str(tmp_path / "lstm"),
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     # The tiny tail session is skipped; the previous substantial one is held
@@ -913,7 +932,8 @@ def test_retrain_no_calibration_holdout_keeps_full_training_set(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -925,7 +945,7 @@ def test_retrain_no_calibration_holdout_keeps_full_training_set(
             str(tmp_path / "lstm"),
             "--no-feedback-policy",
             "--no-calibration-holdout",
-        ]
+        )
     )
     assert rc == 0
     assert seen["calibration_sessions"] is None
@@ -1044,7 +1064,8 @@ def test_retrain_gives_both_detectors_the_same_pooled_holdout_frame(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1057,7 +1078,7 @@ def test_retrain_gives_both_detectors_the_same_pooled_holdout_frame(
             "--no-feedback-policy",
             "--no-ledger",
             "--skip-benchmark",
-        ]
+        )
     )
     assert rc == 0
     held = seen["if"]["calibration_sessions"]
@@ -1121,7 +1142,8 @@ def test_stubbed_trainer_does_not_re_ingest_the_previous_runs_manifest(
     ledger_path = tmp_path / "training_runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1134,7 +1156,7 @@ def test_stubbed_trainer_does_not_re_ingest_the_previous_runs_manifest(
             "--ledger",
             str(ledger_path),
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     assert not ledger_path.exists() or ledger_path.read_text() == ""
@@ -1162,7 +1184,8 @@ def test_a_manifest_written_by_this_run_is_ingested_with_its_benchmark_path(
     ledger_path = tmp_path / "training_runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1174,7 +1197,7 @@ def test_a_manifest_written_by_this_run_is_ingested_with_its_benchmark_path(
             "--ledger",
             str(ledger_path),
             "--no-feedback-policy",
-        ]
+        )
     )
     assert rc == 0
     (row,) = [json.loads(line) for line in ledger_path.read_text().splitlines()]
@@ -1183,30 +1206,35 @@ def test_a_manifest_written_by_this_run_is_ingested_with_its_benchmark_path(
 
 
 def test_default_cli_paths_cannot_append_to_the_real_training_ledger(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_write_guard: RepoTreeGuard
 ) -> None:
-    """The conftest guard: even a trainer that DOES write a fresh manifest
-    cannot land a test row in data/control/training_runs.jsonl."""
+    """The conftest guard (R07.2): even a trainer that DOES write a fresh
+    manifest cannot land a test row in data/control/training_runs.jsonl."""
     from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH
-    from tests.conftest import _REAL_TRAINING_LEDGER
 
-    # The guard spells the path out to keep torch out of conftest; pin it.
     repo_root = Path(__file__).resolve().parents[1]
-    assert (repo_root / DEFAULT_TRAINING_LEDGER_PATH).resolve() == _REAL_TRAINING_LEDGER
+    real_ledger = (repo_root / DEFAULT_TRAINING_LEDGER_PATH).resolve()
+    assert real_ledger.is_relative_to(repo_root / "data")
     assert retrain.parse_args([]).ledger == DEFAULT_TRAINING_LEDGER_PATH
 
     _write_manifest(tmp_path / "if", "isolation_forest_NEW")
-    before = _REAL_TRAINING_LEDGER.stat().st_size if _REAL_TRAINING_LEDGER.exists() else None
+    before = real_ledger.stat() if real_ledger.exists() else None
     monkeypatch.chdir(repo_root)
-    with pytest.raises(AssertionError, match="real training ledger"):
+    # _ingest_ledger logs and swallows an OSError; the guard still refused it.
+    with repo_write_guard.expect() as refused:
         retrain._ingest_ledger(
             retrain.TrainingLedger(DEFAULT_TRAINING_LEDGER_PATH),
             tmp_path / "if",
             "succeeded",
             None,
         )
-    after = _REAL_TRAINING_LEDGER.stat().st_size if _REAL_TRAINING_LEDGER.exists() else None
-    assert before == after
+    # The ledger itself, or -- on a checkout with no data/control yet, since it
+    # is gitignored -- the mkdir of its directory; either is the same refusal.
+    assert any(str(real_ledger.parent) in what for what in refused), refused
+    after = real_ledger.stat() if real_ledger.exists() else None
+    assert (before and (before.st_size, before.st_mtime_ns)) == (
+        after and (after.st_size, after.st_mtime_ns)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1234,7 +1262,8 @@ def test_a_session_in_both_holdouts_is_refused(
     )
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1246,7 +1275,7 @@ def test_a_session_in_both_holdouts_is_refused(
             str(sessions[4]),
             "--evaluation-sessions",
             str(sessions[4]),
-        ]
+        )
     )
 
     assert rc == 2
@@ -1281,7 +1310,8 @@ def test_gate_scores_evaluation_drives_disjoint_from_calibration(
     monkeypatch.setattr(retrain, "_run_benchmark_gate", _gate)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1294,7 +1324,7 @@ def test_gate_scores_evaluation_drives_disjoint_from_calibration(
             str(tmp_path / "lstm"),
             "--accept-thin-calibration",
             "test fixture",
-        ]
+        )
     )
 
     assert rc == 0
@@ -1402,7 +1432,8 @@ def test_retrain_hands_the_if_trainer_its_calibration_policy_and_override(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1415,7 +1446,7 @@ def test_retrain_hands_the_if_trainer_its_calibration_policy_and_override(
             "--no-feedback-policy",
             "--accept-thin-calibration",
             "bench only",
-        ]
+        )
     )
     assert rc == 0
     assert seen["calibration_override"] == "bench only"
@@ -1450,7 +1481,8 @@ def test_quarantine_exclusion_applies_whichever_trainers_run(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.update(seq=k))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1465,7 +1497,7 @@ def test_quarantine_exclusion_applies_whichever_trainers_run(
             "--skip-benchmark",
             "--skip-disposition-summary",
             skip,
-        ]
+        )
     )
     assert rc == 0
     (kwargs,) = seen.values()
@@ -1521,7 +1553,8 @@ def test_feedback_filtered_calibration_frame_goes_to_the_if_only(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: seen.__setitem__("seq", k))
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1533,7 +1566,9 @@ def test_feedback_filtered_calibration_frame_goes_to_the_if_only(
             str(tmp_path / "lstm"),
             "--no-ledger",
             "--skip-benchmark",
-        ]
+            # FeedbackStore is stubbed; the path only has to turn the policy on.
+            feedback=tmp_path / "feedback.jsonl",
+        )
     )
     assert rc == 0
     calibration = built[1]  # training frame first, then the holdout frame

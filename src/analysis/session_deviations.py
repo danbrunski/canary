@@ -27,6 +27,7 @@ from typing import Any, cast
 import numpy as np
 import pandas as pd
 
+from src.analysis.noise_floor import FloorRefusal, NoiseFloor, Significance
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import deviation as evaluate_deviation
 from src.decode.behavior_models import (
@@ -39,6 +40,7 @@ from src.decode.behavior_models import (
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
+from src.decode.surface_eval import bin_index
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
@@ -141,11 +143,6 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def _bin_index(value: float, edges: np.ndarray) -> int:
-    """Same half-open/closed-last-bin rule as ``surface_2d._bin_index``."""
-    return int(np.clip(np.digitize([value], edges)[0] - 1, 0, len(edges) - 2))
-
-
 def _bin_2d_deviations(
     model: BehaviorModel2D,
     xs: list[float],
@@ -165,8 +162,8 @@ def _bin_2d_deviations(
     y_edges = np.asarray(y_axis.bin_edges, dtype=float)
     buckets: dict[tuple[int, int], list[float]] = {}
     for x, y, dev in zip(xs, ys, deviations, strict=True):
-        i = _bin_index(x, x_edges)
-        j = _bin_index(y, y_edges)
+        i = bin_index(x, x_edges)
+        j = bin_index(y, y_edges)
         buckets.setdefault((i, j), []).append(dev)
     cells: list[dict[str, Any]] = []
     for (i, j), devs in sorted(buckets.items()):
@@ -183,6 +180,33 @@ def _bin_2d_deviations(
             }
         )
     return cells
+
+
+#: Equal-width cells a 1D surface's domain is split into for cell-matched
+#: comparison. A 1D surface has no fitted bin grid of its own; ten cells over
+#: its validity domain are fine enough that a composition shift (a colder or
+#: longer warm-up) moves weight *between* cells, not a cell's own mean.
+ONE_D_COMPARISON_CELLS = 10
+
+
+def _bin_1d_deviations(
+    model: BehaviorModel1D, xs: list[float], deviations: list[float]
+) -> list[dict[str, Any]]:
+    """Mean deviation per equal-width cell of a 1D surface's axis domain."""
+    lo, hi = model.axis.domain
+    edges = np.linspace(lo, hi, ONE_D_COMPARISON_CELLS + 1)
+    buckets: dict[int, list[float]] = {}
+    for x, dev in zip(xs, deviations, strict=True):
+        buckets.setdefault(bin_index(x, edges), []).append(dev)
+    return [
+        {
+            "x_bin": [float(edges[i]), float(edges[i + 1])],
+            "y_bin": None,
+            "n": len(devs),
+            "mean_deviation": _mean(devs),
+        }
+        for i, devs in sorted(buckets.items())
+    ]
 
 
 def _summarize_surface(
@@ -223,6 +247,10 @@ def _summarize_surface(
                     if x is not None and y is not None:
                         xs.append(float(x))
                         ys.append(float(y))
+                else:
+                    # A 1D surface's axis value is always in-domain here: the
+                    # model returns no expectation outside it.
+                    xs.append(float(row[model.axis.channel]))
 
     warning_fraction = (
         sum(1 for s in severities if s in ("warning", "critical")) / len(severities)
@@ -232,11 +260,10 @@ def _summarize_surface(
     critical_fraction = (
         sum(1 for s in severities if s == "critical") / len(severities) if severities else None
     )
-    cells = (
-        _bin_2d_deviations(model, xs, ys, deviations)
-        if isinstance(model, BehaviorModel2D) and xs
-        else []
-    )
+    if isinstance(model, BehaviorModel2D):
+        cells = _bin_2d_deviations(model, xs, ys, deviations) if xs else []
+    else:
+        cells = _bin_1d_deviations(model, xs, deviations) if xs else []
 
     return SurfaceDeviationSummary(
         name=model.name,
@@ -255,11 +282,25 @@ def _summarize_surface(
     )
 
 
+#: A cell contributes to a comparison only with at least this many in-domain
+#: rows on *each* side; below it the cell is reported ``sparse`` with no delta.
+DEFAULT_MIN_CELL_N = 5
+
+
 @dataclass(frozen=True)
 class SurfaceComparison:
     """One surface's before/after delta between two sessions (Task 5.4) —
     the mod-effect question asked directly, session-to-session, instead of
-    each session graded independently against the model."""
+    each session graded independently against the model.
+
+    R05.6: there is no whole-session mean delta. A session-wide mean of
+    actual, expected or deviation depends on *where* each drive spent its
+    time — two drives with identical per-cell behaviour and a different rpm
+    mix report different means (the retracted "K responds 1:1" shape). The
+    surface-level figure is ``matched_deviation_delta``: the unweighted mean
+    of per-cell deltas over the cells both sessions visited at least
+    ``min_n`` times, so composition cannot enter it.
+    """
 
     name: str
     kind: str
@@ -268,24 +309,24 @@ class SurfaceComparison:
     n_observed_b: int
     n_in_domain_a: int
     n_in_domain_b: int
-    mean_actual_a: float | None
-    mean_actual_b: float | None
-    mean_actual_delta: float | None
-    mean_expected_a: float | None
-    mean_expected_b: float | None
-    mean_expected_delta: float | None
-    mean_deviation_a: float | None
-    mean_deviation_b: float | None
-    mean_deviation_delta: float | None
+    min_n: int
+    #: Cells with >= ``min_n`` rows on both sides.
+    n_matched_cells: int
+    #: Mean over matched cells of ``b - a`` per-cell mean deviation; ``None``
+    #: when no cell matched (the two drives shared no operating point).
+    matched_deviation_delta: float | None
     warning_fraction_a: float | None
     warning_fraction_b: float | None
     critical_fraction_a: float | None
     critical_fraction_b: float | None
-    #: Per-(x_bin, y_bin) delta, reusing the surface's own grid (the same
-    #: bins Task 5.1's ad-hoc binning would produce for this x/y pair, since
-    #: both sessions are graded against the identical fitted model) —
-    #: surface_2d only, empty for surface_1d.
+    #: Per-cell delta on the surface's own grid (2D), or on
+    #: :data:`ONE_D_COMPARISON_CELLS` equal cells of the domain (1D).
     cells: list[dict[str, Any]] = field(default_factory=list)
+    #: The noise-floor verdict when one was requested
+    #: (:meth:`~src.analysis.noise_floor.NoiseFloor.significance`): ``None``
+    #: when not requested, a refusal naming both regimes when the floor does
+    #: not apply.
+    significance: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -296,20 +337,15 @@ class SurfaceComparison:
             "n_observed_b": self.n_observed_b,
             "n_in_domain_a": self.n_in_domain_a,
             "n_in_domain_b": self.n_in_domain_b,
-            "mean_actual_a": self.mean_actual_a,
-            "mean_actual_b": self.mean_actual_b,
-            "mean_actual_delta": self.mean_actual_delta,
-            "mean_expected_a": self.mean_expected_a,
-            "mean_expected_b": self.mean_expected_b,
-            "mean_expected_delta": self.mean_expected_delta,
-            "mean_deviation_a": self.mean_deviation_a,
-            "mean_deviation_b": self.mean_deviation_b,
-            "mean_deviation_delta": self.mean_deviation_delta,
+            "min_n": self.min_n,
+            "n_matched_cells": self.n_matched_cells,
+            "matched_deviation_delta": self.matched_deviation_delta,
             "warning_fraction_a": self.warning_fraction_a,
             "warning_fraction_b": self.warning_fraction_b,
             "critical_fraction_a": self.critical_fraction_a,
             "critical_fraction_b": self.critical_fraction_b,
             "cells": self.cells,
+            "significance": self.significance,
         }
 
 
@@ -335,29 +371,56 @@ class SessionComparisonReport:
         }
 
 
-def _delta(a: float | None, b: float | None) -> float | None:
-    return None if a is None or b is None else b - a
+def _cell_key(cell: dict[str, Any]) -> tuple[tuple[float, ...], tuple[float, ...] | None]:
+    y_bin = cell["y_bin"]
+    return tuple(cell["x_bin"]), None if y_bin is None else tuple(y_bin)
 
 
-def _compare_surface(a: SurfaceDeviationSummary, b: SurfaceDeviationSummary) -> SurfaceComparison:
-    cells_a = {(tuple(c["x_bin"]), tuple(c["y_bin"])): c for c in a.cells}
-    cells_b = {(tuple(c["x_bin"]), tuple(c["y_bin"])): c for c in b.cells}
+def _compare_surface(
+    a: SurfaceDeviationSummary,
+    b: SurfaceDeviationSummary,
+    *,
+    min_n: int,
+    noise_floor: NoiseFloor | None,
+    conditions: str | None,
+) -> SurfaceComparison:
+    cells_a = {_cell_key(c): c for c in a.cells}
+    cells_b = {_cell_key(c): c for c in b.cells}
     cells: list[dict[str, Any]] = []
-    for key in sorted(set(cells_a) | set(cells_b)):
+    for key in sorted(set(cells_a) | set(cells_b), key=lambda k: (k[0], k[1] or ())):
         ca, cb = cells_a.get(key), cells_b.get(key)
+        n_a = ca["n"] if ca else 0
+        n_b = cb["n"] if cb else 0
         dev_a = ca["mean_deviation"] if ca else None
         dev_b = cb["mean_deviation"] if cb else None
+        delta = (
+            dev_b - dev_a
+            if n_a >= min_n and n_b >= min_n and dev_a is not None and dev_b is not None
+            else None
+        )
         cells.append(
             {
                 "x_bin": list(key[0]),
-                "y_bin": list(key[1]),
-                "n_a": ca["n"] if ca else 0,
-                "n_b": cb["n"] if cb else 0,
+                "y_bin": None if key[1] is None else list(key[1]),
+                "n_a": n_a,
+                "n_b": n_b,
                 "mean_deviation_a": dev_a,
                 "mean_deviation_b": dev_b,
-                "delta": _delta(dev_a, dev_b),
+                "sparse": delta is None and n_a > 0 and n_b > 0,
+                "delta": delta,
+                "delta_sigma": None,
             }
         )
+    deltas = [c["delta"] for c in cells if c["delta"] is not None]
+    verdict: Significance | FloorRefusal | None = None
+    if noise_floor is not None and conditions is not None and deltas:
+        # The surface's floor is keyed by the surface name, in the same
+        # units as its deviation.
+        verdict = noise_floor.significance(a.name, pd.Series(deltas), conditions=conditions)
+        if isinstance(verdict, Significance):
+            matched_cells = [c for c in cells if c["delta"] is not None]
+            for cell, sigma in zip(matched_cells, verdict.delta_sigma, strict=True):
+                cell["delta_sigma"] = float(sigma)
     return SurfaceComparison(
         name=a.name,
         kind=a.kind,
@@ -366,29 +429,27 @@ def _compare_surface(a: SurfaceDeviationSummary, b: SurfaceDeviationSummary) -> 
         n_observed_b=b.n_observed,
         n_in_domain_a=a.n_in_domain,
         n_in_domain_b=b.n_in_domain,
-        mean_actual_a=a.mean_actual,
-        mean_actual_b=b.mean_actual,
-        mean_actual_delta=_delta(a.mean_actual, b.mean_actual),
-        mean_expected_a=a.mean_expected,
-        mean_expected_b=b.mean_expected,
-        mean_expected_delta=_delta(a.mean_expected, b.mean_expected),
-        mean_deviation_a=a.mean_deviation,
-        mean_deviation_b=b.mean_deviation,
-        mean_deviation_delta=_delta(a.mean_deviation, b.mean_deviation),
+        min_n=min_n,
+        n_matched_cells=len(deltas),
+        matched_deviation_delta=_mean(deltas),
         warning_fraction_a=a.warning_fraction,
         warning_fraction_b=b.warning_fraction,
         critical_fraction_a=a.critical_fraction,
         critical_fraction_b=b.critical_fraction,
         cells=cells,
+        significance=None if verdict is None else verdict.as_dict(),
     )
 
 
-def compare_sessions(
+def compare_session_deviations(
     session_a_dir: Path,
     session_b_dir: Path,
     config: CanaryConfig,
     models: BehaviorModels,
     *,
+    min_n: int = DEFAULT_MIN_CELL_N,
+    noise_floor: NoiseFloor | None = None,
+    conditions: str | None = None,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     dbc_dir: Path = DEFAULT_DBC_DIR,
     dids_path: Path = DEFAULT_DIDS_PATH,
@@ -396,9 +457,15 @@ def compare_sessions(
     """A/B session comparison (Task 5.4): run :func:`analyze_session`
     independently for ``session_a_dir`` (before) and ``session_b_dir``
     (after) against the identical ``models``, then diff the two reports
-    surface-by-surface (and cell-by-cell for ``surface_2d``) — "did the mod
-    move behavior?" answered session-to-session instead of each session
-    graded independently against the model.
+    cell-by-cell — "did the mod move behavior?" answered session-to-session
+    instead of each session graded independently against the model.
+
+    Only cells with ``min_n`` rows on both sides are compared, and the
+    surface-level figure is built from those cells alone (see
+    :class:`SurfaceComparison`). ``noise_floor`` with ``conditions`` quotes
+    each matched delta in sigma of the floor measured for that surface, or
+    records the refusal. Renamed from ``compare_sessions`` (R05.6): that name
+    belongs to :func:`src.analysis.tuning.compare_sessions`, which gates.
     """
     report_a = analyze_session(
         session_a_dir,
@@ -418,7 +485,11 @@ def compare_sessions(
     )
     by_name_b = {s.name: s for s in report_b.surfaces}
     surfaces = [
-        _compare_surface(sa, by_name_b[sa.name]) for sa in report_a.surfaces if sa.name in by_name_b
+        _compare_surface(
+            sa, by_name_b[sa.name], min_n=min_n, noise_floor=noise_floor, conditions=conditions
+        )
+        for sa in report_a.surfaces
+        if sa.name in by_name_b
     ]
     return SessionComparisonReport(
         session_a=report_a.session_dir, session_b=report_b.session_dir, surfaces=surfaces
@@ -478,6 +549,8 @@ __all__ = [
     "SessionDeviationReport",
     "SurfaceComparison",
     "SurfaceDeviationSummary",
+    "DEFAULT_MIN_CELL_N",
+    "ONE_D_COMPARISON_CELLS",
     "analyze_session",
-    "compare_sessions",
+    "compare_session_deviations",
 ]

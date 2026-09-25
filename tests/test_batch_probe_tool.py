@@ -16,9 +16,9 @@ from typing import Any
 import pytest
 
 from src.collection.can_obd_client import RAW_QUERY_SERVICES, RawReply
-from tools import batch_probe
+from src.control.passive_client import PassiveStatus
+from tools import _bus_tool, batch_probe
 from tools.batch_probe import ANSWERED, GATED, SILENT, UNSUPPORTED, WORKS, classify, run
-from tools.did_log import PassiveStatus
 
 
 class FakeEcm:
@@ -232,7 +232,7 @@ def test_main_refuses_when_passive_is_not_armed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setattr(
-        batch_probe,
+        _bus_tool,
         "http_passive_checker",
         lambda *a, **k: lambda: PassiveStatus(False, None, "passive mode is off"),
     )
@@ -240,7 +240,7 @@ def test_main_refuses_when_passive_is_not_armed(
     def _never(*_a, **_k):  # pragma: no cover
         raise AssertionError("the bus was opened despite the refusal")
 
-    monkeypatch.setattr(batch_probe, "_open_client", _never)
+    monkeypatch.setattr(batch_probe, "open_client", _never)
     rc = batch_probe.main(["--out", str(tmp_path / "p.json"), "--config", "x.yaml"])
     assert rc == 2
     assert "refusing" in capsys.readouterr().err

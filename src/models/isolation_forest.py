@@ -32,8 +32,9 @@ from src.models.manifest import (
     validate_model_feature_spec,
     write_artifact,
 )
-from src.models.sequence_training import coerce_timestamp
+from src.models.sequence_calibration import coerce_timestamp
 from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.features import base_channel
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.preprocessing.segmenter import MODE_COLUMN, UNKNOWN_MODE
@@ -802,13 +803,6 @@ def _drive_count(rows: pd.DataFrame, *, timestamp_column: str, session_column: s
     return count_drives(rows, session_column=session_column, timestamp_column=timestamp_column)
 
 
-def _base_channel(column: str) -> str:
-    for suffix in ("__mean", "__std", "__roc"):
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
-
-
 def _session_covered_features(
     group: pd.DataFrame, candidates: Sequence[str], *, session_column: str
 ) -> list[str]:
@@ -1080,7 +1074,103 @@ def fit_isolation_forest(
     unless ``calibration_override`` names why that is accepted.
     ``calibration_policy`` is what the calibration rows went through (feedback
     labels, quarantine), recorded in the manifest.
+
+    Phases (R04.9): :func:`_resolve_fit_settings` validates and resolves the
+    spec; :func:`_plan_modes` decides each mode's features and split against
+    the raw frame; :func:`_fit_scaler` fits the scaler on exactly the rows the
+    forests train on; :func:`_fit_mode` fits, calibrates and summarizes one
+    mode; :func:`_build_manifest` applies the dropped-fraction gate and writes
+    the manifest.
     """
+    settings = _resolve_fit_settings(
+        frame,
+        config,
+        feature_columns=feature_columns,
+        feature_spec=feature_spec,
+        mode_column=mode_column,
+        timestamp_column=timestamp_column,
+        session_column=session_column,
+        random_state=random_state,
+        external_calibration=calibration_frame is not None,
+    )
+    mode_plans, skipped_modes = _plan_modes(
+        frame,
+        config,
+        settings,
+        calibration_frame=calibration_frame,
+        quarantined_cells=quarantined_cells,
+        calibration_override=calibration_override,
+    )
+    scaler = _fit_scaler(frame, mode_plans, settings.selected_features)
+    isolation_forest_cls = _isolation_forest_cls()
+    models: dict[str, Any] = {}
+    mode_feature_medians: dict[str, dict[str, float]] = {}
+    modes: list[ModeTrainingSummary] = []
+    for mode, plan in mode_plans.items():
+        models[mode], mode_feature_medians[mode], summary = _fit_mode(
+            frame,
+            mode,
+            plan,
+            scaler,
+            config,
+            settings,
+            calibration_frame=calibration_frame,
+            isolation_forest_cls=isolation_forest_cls,
+        )
+        modes.append(summary)
+    manifest = _build_manifest(
+        frame,
+        config,
+        settings,
+        mode_plans=mode_plans,
+        modes=modes,
+        skipped_modes=skipped_modes,
+        mode_feature_medians=mode_feature_medians,
+        scaler=scaler,
+        calibration_frame=calibration_frame,
+        calibration_policy=calibration_policy,
+        calibration_override=calibration_override,
+        model_version=model_version,
+        fitted_at=fitted_at,
+    )
+    return TrainedIsolationForest(models=models, scaler=scaler, manifest=manifest)
+
+
+@dataclass(frozen=True)
+class _FitSettings:
+    """The validated, resolved inputs every phase of the IF fit reads."""
+
+    selected_features: tuple[str, ...]
+    schema: dict[str, Any]
+    mode_column: str
+    timestamp_column: str
+    session_column: str
+    seed: int
+    holdout_fraction: float
+    effective_holdout_fraction: float
+    target_flag_rate: float
+    min_samples_per_mode: int
+    min_training_drives: int
+    min_calibration_drives: int
+    stability_seeds: int
+    episode_gap: float
+    minimum_complete_fraction: float
+    n_jobs: int
+
+
+def _resolve_fit_settings(
+    frame: pd.DataFrame,
+    config: IsolationForestConfigLike,
+    *,
+    feature_columns: Iterable[str] | None,
+    feature_spec: Mapping[str, Any] | None,
+    mode_column: str,
+    timestamp_column: str,
+    session_column: str,
+    random_state: int | None,
+    external_calibration: bool,
+) -> _FitSettings:
+    """Phase 1: validate the config and frame, resolve features and the spec."""
     _validate_config(config)
     _require_columns(frame, [mode_column, timestamp_column, session_column])
     selected_features = _resolve_feature_columns(frame, feature_columns, mode_column)
@@ -1091,25 +1181,47 @@ def fit_isolation_forest(
         else build_feature_spec(frame, selected_features)
     )
     validate_model_feature_spec(schema, context="IsolationForest training feature spec")
-
-    seed = config.random_state if random_state is None else random_state
     holdout_fraction, target_flag_rate = _calibration_params(config)
-    min_samples_per_mode = _min_samples_per_mode(config)
-    min_training_drives = int(getattr(config, "min_training_drives_per_mode", 0))
-    min_calibration_drives = int(getattr(config, "min_calibration_drives_per_mode", 0))
-    stability_seeds = int(getattr(config, "stability_seeds", 0))
-    episode_gap = _episode_gap_seconds(schema)
-    effective_holdout_fraction = 0.0 if calibration_frame is not None else holdout_fraction
+    return _FitSettings(
+        selected_features=selected_features,
+        schema=schema,
+        mode_column=mode_column,
+        timestamp_column=timestamp_column,
+        session_column=session_column,
+        seed=config.random_state if random_state is None else random_state,
+        holdout_fraction=holdout_fraction,
+        effective_holdout_fraction=0.0 if external_calibration else holdout_fraction,
+        target_flag_rate=target_flag_rate,
+        min_samples_per_mode=_min_samples_per_mode(config),
+        min_training_drives=int(getattr(config, "min_training_drives_per_mode", 0)),
+        min_calibration_drives=int(getattr(config, "min_calibration_drives_per_mode", 0)),
+        stability_seeds=int(getattr(config, "stability_seeds", 0)),
+        episode_gap=_episode_gap_seconds(schema),
+        minimum_complete_fraction=1.0 - float(getattr(config, "max_dropped_row_fraction", 1.0)),
+        n_jobs=int(getattr(config, "n_jobs", 1)),
+    )
 
-    # First pass, against the *raw* (unscaled) frame: work out each mode's
-    # feature subset and time-ordered fit/calibration-holdout split. NaN
-    # positions don't depend on scaling, so this can run before the scaler
-    # exists — which is exactly what Task 2.4 needs: the scaler is fit below
-    # on the union of these ``fit_index`` rows only, not the calibration
-    # holdout tail (the previous leak) and not modes 2.2 goes on to skip.
+
+def _plan_modes(
+    frame: pd.DataFrame,
+    config: IsolationForestConfigLike,
+    settings: _FitSettings,
+    *,
+    calibration_frame: pd.DataFrame | None,
+    quarantined_cells: Mapping[str, pd.Index] | None,
+    calibration_override: str | None,
+) -> tuple[dict[str, _ModeFitPlan], list[SkippedModeSummary]]:
+    """Phase 2: each mode's feature subset and time-ordered fit/holdout split.
+
+    Runs against the *raw* (unscaled) frame. NaN positions don't depend on
+    scaling, so this can run before the scaler exists — which is exactly what
+    Task 2.4 needs: the scaler is fit on the union of these ``fit_index`` rows
+    only, not the calibration holdout tail (the previous leak) and not modes
+    2.2 goes on to skip. Raises when no mode earns a model.
+    """
+    mode_column = settings.mode_column
     mode_plans: dict[str, _ModeFitPlan] = {}
     skipped_modes: list[SkippedModeSummary] = []
-    minimum_complete_fraction = 1.0 - float(getattr(config, "max_dropped_row_fraction", 1.0))
     present_modes = {str(value) for value in frame[mode_column].unique()}
     unknown_is_the_whole_corpus = (
         # ``is not False``: config-likes predating the knob keep their old
@@ -1126,7 +1238,7 @@ def fit_isolation_forest(
                 SkippedModeSummary(
                     mode=mode,
                     fit_rows=len(group),
-                    min_samples_required=min_samples_per_mode,
+                    min_samples_required=settings.min_samples_per_mode,
                     reason=SKIP_UNCLASSIFIED_MODE,
                 )
             )
@@ -1137,196 +1249,19 @@ def fit_isolation_forest(
                 len(group),
             )
             continue
-        # Per-mode feature set: only the columns densely populated in this
-        # mode. A deviation surface gated to a *different* operating_mode is
-        # all-NaN here, so it's excluded — rather than dropping every row of
-        # this mode (the global dropna that silently blanked the detector,
-        # because each mode-gated surface is NaN outside its own mode).
-        # ``.any()`` is too permissive, though: a foreign-mode deviation leaks
-        # into a handful of this mode's rows through the rolling window at a
-        # mode boundary (its 30 s mean/std carries a few rows past the
-        # transition). That sparse non-NaN qualified the column, then the
-        # ``dropna`` below emptied the whole mode on it (e.g. warmup deviations,
-        # ~3 % populated in idle, zeroed the idle model entirely). Require a real
-        # coverage fraction so only genuinely-present features count — and
-        # (A04.5) require it in most of the mode's *sessions*, so a column one
-        # polling profile never produces cannot blind the mode wherever that
-        # profile runs.
-        eligible_feats = _session_covered_features(
-            group,
-            [
-                c
-                for c in selected_features
-                if float(group[c].notna().mean()) >= _MIN_MODE_FEATURE_COVERAGE
-            ],
-            session_column=session_column,
-        )
-        calibration_group = None
-        if calibration_frame is not None and mode_column in calibration_frame.columns:
-            calibration_group = calibration_frame[
-                calibration_frame[mode_column].astype(str) == mode
-            ]
-        mode_feats = _jointly_complete_feature_set(
-            group,
-            eligible_feats,
-            minimum_complete_fraction=minimum_complete_fraction,
-            calibration_group=calibration_group,
-            minimum_calibration_rows=_MIN_CALIBRATION_SAMPLES,
-        )
-        if not mode_feats:
-            continue
-        mode_complete = group.dropna(subset=mode_feats)
-        if mode_complete.empty:
-            continue
-        row_accounting = _row_accounting(group, mode_feats, len(mode_complete), quarantined_cells)
-        if row_accounting.get("lost_to_quarantine", 0):
-            log.warning(
-                "IsolationForest mode %r: quarantined cells removed %d of %d otherwise-complete "
-                "training rows (a row with any NaN feature is not fit on)",
-                mode,
-                row_accounting["lost_to_quarantine"],
-                row_accounting["complete_without_quarantine"],
-                extra={"mode": mode, "row_accounting": dict(row_accounting)},
-            )
-
-        fit_index, holdout_index, n_holdout, calibrate = _calibration_split(
+        outcome = _plan_mode(
             frame,
-            mode_complete.index,
-            timestamp_column=timestamp_column,
-            holdout_fraction=effective_holdout_fraction,
+            mode,
+            group,
+            settings,
+            calibration_frame=calibration_frame,
+            quarantined_cells=quarantined_cells,
+            calibration_override=calibration_override,
         )
-
-        if len(fit_index) == 0:
-            continue
-
-        # Task 2.2: a forest fit on a handful of rows is a meaningless model
-        # that still emits with full sklearn-default confidence. Skip it
-        # (no model persisted) instead, and record why in the manifest.
-        if len(fit_index) < min_samples_per_mode:
-            skipped_modes.append(
-                SkippedModeSummary(
-                    mode=mode,
-                    fit_rows=len(fit_index),
-                    min_samples_required=min_samples_per_mode,
-                )
-            )
-            continue
-
-        # A04.4: per-mode provenance, enforced. Joint-completeness selection
-        # keeps only the sessions that polled every selected channel, so a
-        # mode can quietly narrow to one day's drives while the header still
-        # names 19 sessions.
-        training_drives = _drive_count(
-            frame.loc[fit_index],
-            timestamp_column=timestamp_column,
-            session_column=session_column,
-        )
-        if training_drives < min_training_drives:
-            skipped_modes.append(
-                SkippedModeSummary(
-                    mode=mode,
-                    fit_rows=len(fit_index),
-                    min_samples_required=min_samples_per_mode,
-                    reason=SKIP_TOO_FEW_TRAINING_DRIVES,
-                    detail=f"{training_drives} drive(s); {min_training_drives} required",
-                )
-            )
-            log.warning(
-                "IsolationForest mode %r refused: fit rows come from %d physical drive(s), "
-                "min_training_drives_per_mode is %d",
-                mode,
-                training_drives,
-                min_training_drives,
-            )
-            continue
-
-        external_index: pd.Index | None = None
-        if calibration_frame is not None:
-            candidate = (
-                calibration_group if calibration_group is not None else calibration_frame.iloc[0:0]
-            )
-            # Calibration must mirror serve-time scoring. Production tolerates
-            # a small missing-feature fraction and imputes those cells;
-            # calibrating only on fully complete rows made the threshold too
-            # optimistic for the majority round-robin OBD rows.
-            if len(candidate):
-                missing_fraction = candidate[mode_feats].isna().mean(axis=1)
-                external_index = candidate.index[
-                    (missing_fraction <= MAX_MISSING_FEATURE_FRACTION).to_numpy()
-                ]
-            else:
-                external_index = candidate.index
-            if len(external_index) < _MIN_CALIBRATION_SAMPLES:
-                raise ValueError(
-                    f"held-out calibration session has only {len(external_index)} scoreable "
-                    f"rows for mode {mode!r}; need at least {_MIN_CALIBRATION_SAMPLES}"
-                )
-            calibrate = True
-        calibration_drives: int | None = None
-        override: str | None = None
-        if calibrate:
-            if external_index is not None and calibration_frame is not None:
-                rows = calibration_frame.loc[external_index]
-            else:
-                rows = frame.loc[holdout_index]
-            calibration_drives = (
-                _drive_count(rows, timestamp_column=timestamp_column, session_column=session_column)
-                if session_column in rows.columns
-                else 0
-            )
-            if calibration_drives < min_calibration_drives:
-                if calibration_override:
-                    override = calibration_override
-                    log.warning(
-                        "IsolationForest mode %r calibrates on %d drive(s) (< %d); published "
-                        "anyway: %s",
-                        mode,
-                        calibration_drives,
-                        min_calibration_drives,
-                        calibration_override,
-                    )
-                else:
-                    skipped_modes.append(
-                        SkippedModeSummary(
-                            mode=mode,
-                            fit_rows=len(fit_index),
-                            min_samples_required=min_samples_per_mode,
-                            reason=SKIP_TOO_FEW_CALIBRATION_DRIVES,
-                            detail=(
-                                f"{calibration_drives} calibration drive(s); "
-                                f"{min_calibration_drives} required"
-                            ),
-                        )
-                    )
-                    log.warning(
-                        "IsolationForest mode %r refused: its threshold would rest on %d "
-                        "physical drive(s); %d are required per mode "
-                        "(--accept-thin-calibration REASON overrides)",
-                        mode,
-                        calibration_drives,
-                        min_calibration_drives,
-                    )
-                    continue
-
-        mode_plans[mode] = _ModeFitPlan(
-            feats=mode_feats,
-            complete_index=mode_complete.index,
-            fit_index=fit_index,
-            holdout_index=holdout_index,
-            n_holdout=n_holdout,
-            calibrate=calibrate,
-            external_index=external_index,
-            training_drives=training_drives,
-            calibration_drives=calibration_drives,
-            calibration_override=override,
-            row_accounting={
-                **row_accounting,
-                "fit_rows": len(fit_index),
-                "calibration_rows": (
-                    len(external_index) if external_index is not None else int(n_holdout)
-                ),
-            },
-        )
+        if isinstance(outcome, SkippedModeSummary):
+            skipped_modes.append(outcome)
+        elif outcome is not None:
+            mode_plans[mode] = outcome
 
     if not mode_plans and present_modes == {UNKNOWN_MODE}:
         raise ValueError(
@@ -1339,25 +1274,226 @@ def fit_isolation_forest(
             "no per-mode IsolationForest models were trained"
             + (f" (skipped {', '.join(reasons)})" if reasons else "")
         )
+    return mode_plans, skipped_modes
 
-    # 2.4: fit the scaler on exactly the rows the forests below train on —
-    # every kept mode's fit rows, none of their calibration-holdout rows, and
-    # none of a skipped mode's rows. Still NaN-aware per column, so a
-    # deviation surface gated to one mode gets its stats from that mode's
-    # own fit rows same as before.
+
+def _plan_mode(
+    frame: pd.DataFrame,
+    mode: str,
+    group: pd.DataFrame,
+    settings: _FitSettings,
+    *,
+    calibration_frame: pd.DataFrame | None,
+    quarantined_cells: Mapping[str, pd.Index] | None,
+    calibration_override: str | None,
+) -> _ModeFitPlan | SkippedModeSummary | None:
+    """One mode's plan, the recorded reason it is skipped, or ``None`` when it
+    silently has nothing to fit (no jointly complete features or rows)."""
+    mode_column = settings.mode_column
+    timestamp_column = settings.timestamp_column
+    session_column = settings.session_column
+    min_samples_per_mode = settings.min_samples_per_mode
+    # Per-mode feature set: only the columns densely populated in this
+    # mode. A deviation surface gated to a *different* operating_mode is
+    # all-NaN here, so it's excluded — rather than dropping every row of
+    # this mode (the global dropna that silently blanked the detector,
+    # because each mode-gated surface is NaN outside its own mode).
+    # ``.any()`` is too permissive, though: a foreign-mode deviation leaks
+    # into a handful of this mode's rows through the rolling window at a
+    # mode boundary (its 30 s mean/std carries a few rows past the
+    # transition). That sparse non-NaN qualified the column, then the
+    # ``dropna`` below emptied the whole mode on it (e.g. warmup deviations,
+    # ~3 % populated in idle, zeroed the idle model entirely). Require a real
+    # coverage fraction so only genuinely-present features count — and
+    # (A04.5) require it in most of the mode's *sessions*, so a column one
+    # polling profile never produces cannot blind the mode wherever that
+    # profile runs.
+    eligible_feats = _session_covered_features(
+        group,
+        [
+            c
+            for c in settings.selected_features
+            if float(group[c].notna().mean()) >= _MIN_MODE_FEATURE_COVERAGE
+        ],
+        session_column=session_column,
+    )
+    calibration_group = None
+    if calibration_frame is not None and mode_column in calibration_frame.columns:
+        calibration_group = calibration_frame[calibration_frame[mode_column].astype(str) == mode]
+    mode_feats = _jointly_complete_feature_set(
+        group,
+        eligible_feats,
+        minimum_complete_fraction=settings.minimum_complete_fraction,
+        calibration_group=calibration_group,
+        minimum_calibration_rows=_MIN_CALIBRATION_SAMPLES,
+    )
+    if not mode_feats:
+        return None
+    mode_complete = group.dropna(subset=mode_feats)
+    if mode_complete.empty:
+        return None
+    row_accounting = _row_accounting(group, mode_feats, len(mode_complete), quarantined_cells)
+    if row_accounting.get("lost_to_quarantine", 0):
+        log.warning(
+            "IsolationForest mode %r: quarantined cells removed %d of %d otherwise-complete "
+            "training rows (a row with any NaN feature is not fit on)",
+            mode,
+            row_accounting["lost_to_quarantine"],
+            row_accounting["complete_without_quarantine"],
+            extra={"mode": mode, "row_accounting": dict(row_accounting)},
+        )
+
+    fit_index, holdout_index, n_holdout, calibrate = _calibration_split(
+        frame,
+        mode_complete.index,
+        timestamp_column=timestamp_column,
+        holdout_fraction=settings.effective_holdout_fraction,
+    )
+
+    if len(fit_index) == 0:
+        return None
+
+    # Task 2.2: a forest fit on a handful of rows is a meaningless model
+    # that still emits with full sklearn-default confidence. Skip it
+    # (no model persisted) instead, and record why in the manifest.
+    if len(fit_index) < min_samples_per_mode:
+        return SkippedModeSummary(
+            mode=mode,
+            fit_rows=len(fit_index),
+            min_samples_required=min_samples_per_mode,
+        )
+
+    # A04.4: per-mode provenance, enforced. Joint-completeness selection
+    # keeps only the sessions that polled every selected channel, so a
+    # mode can quietly narrow to one day's drives while the header still
+    # names 19 sessions.
+    training_drives = _drive_count(
+        frame.loc[fit_index],
+        timestamp_column=timestamp_column,
+        session_column=session_column,
+    )
+    if training_drives < settings.min_training_drives:
+        log.warning(
+            "IsolationForest mode %r refused: fit rows come from %d physical drive(s), "
+            "min_training_drives_per_mode is %d",
+            mode,
+            training_drives,
+            settings.min_training_drives,
+        )
+        return SkippedModeSummary(
+            mode=mode,
+            fit_rows=len(fit_index),
+            min_samples_required=min_samples_per_mode,
+            reason=SKIP_TOO_FEW_TRAINING_DRIVES,
+            detail=f"{training_drives} drive(s); {settings.min_training_drives} required",
+        )
+
+    external_index: pd.Index | None = None
+    if calibration_frame is not None:
+        candidate = (
+            calibration_group if calibration_group is not None else calibration_frame.iloc[0:0]
+        )
+        # Calibration must mirror serve-time scoring. Production tolerates
+        # a small missing-feature fraction and imputes those cells;
+        # calibrating only on fully complete rows made the threshold too
+        # optimistic for the majority round-robin OBD rows.
+        if len(candidate):
+            missing_fraction = candidate[mode_feats].isna().mean(axis=1)
+            external_index = candidate.index[
+                (missing_fraction <= MAX_MISSING_FEATURE_FRACTION).to_numpy()
+            ]
+        else:
+            external_index = candidate.index
+        if len(external_index) < _MIN_CALIBRATION_SAMPLES:
+            raise ValueError(
+                f"held-out calibration session has only {len(external_index)} scoreable "
+                f"rows for mode {mode!r}; need at least {_MIN_CALIBRATION_SAMPLES}"
+            )
+        calibrate = True
+    calibration_drives: int | None = None
+    override: str | None = None
+    if calibrate:
+        if external_index is not None and calibration_frame is not None:
+            rows = calibration_frame.loc[external_index]
+        else:
+            rows = frame.loc[holdout_index]
+        calibration_drives = (
+            _drive_count(rows, timestamp_column=timestamp_column, session_column=session_column)
+            if session_column in rows.columns
+            else 0
+        )
+        if calibration_drives < settings.min_calibration_drives:
+            if not calibration_override:
+                log.warning(
+                    "IsolationForest mode %r refused: its threshold would rest on %d "
+                    "physical drive(s); %d are required per mode "
+                    "(--accept-thin-calibration REASON overrides)",
+                    mode,
+                    calibration_drives,
+                    settings.min_calibration_drives,
+                )
+                return SkippedModeSummary(
+                    mode=mode,
+                    fit_rows=len(fit_index),
+                    min_samples_required=min_samples_per_mode,
+                    reason=SKIP_TOO_FEW_CALIBRATION_DRIVES,
+                    detail=(
+                        f"{calibration_drives} calibration drive(s); "
+                        f"{settings.min_calibration_drives} required"
+                    ),
+                )
+            override = calibration_override
+            log.warning(
+                "IsolationForest mode %r calibrates on %d drive(s) (< %d); published anyway: %s",
+                mode,
+                calibration_drives,
+                settings.min_calibration_drives,
+                calibration_override,
+            )
+
+    return _ModeFitPlan(
+        feats=mode_feats,
+        complete_index=mode_complete.index,
+        fit_index=fit_index,
+        holdout_index=holdout_index,
+        n_holdout=n_holdout,
+        calibrate=calibrate,
+        external_index=external_index,
+        training_drives=training_drives,
+        calibration_drives=calibration_drives,
+        calibration_override=override,
+        row_accounting={
+            **row_accounting,
+            "fit_rows": len(fit_index),
+            "calibration_rows": (
+                len(external_index) if external_index is not None else int(n_holdout)
+            ),
+        },
+    )
+
+
+def _fit_scaler(
+    frame: pd.DataFrame, mode_plans: Mapping[str, _ModeFitPlan], selected_features: Sequence[str]
+) -> ZScoreScaler:
+    """Phase 3 (Task 2.4): the scaler, fit on exactly the rows the forests
+    train on — every kept mode's fit rows, none of their calibration-holdout
+    rows, and none of a skipped mode's rows.
+
+    Still NaN-aware per column, so a deviation surface gated to one mode gets
+    its stats from that mode's own fit rows. A feature column exclusive to a
+    mode 2.2's floor skips entirely (e.g. a ``deviation:*`` surface mode-gated
+    to that one mode — see ``feature_pipeline``'s mode-gated-feature
+    docstrings) is NaN across the *whole* surviving-mode row union: no
+    surviving mode's ``plan.feats`` lists it, so it never has real values
+    outside the now-skipped mode. Fitting over ``selected_features``
+    unconditionally used to crash on that column (``ZScoreScaler.fit`` rejects
+    all-NaN columns) even though no surviving model ever reads it. Fit only on
+    columns some surviving mode actually uses, then backfill identity
+    placeholder stats (mean 0 / std 1) for the rest — dead parameters no model
+    consults, kept only so ``scaler.columns`` still matches the manifest's full
+    ``feature_columns`` schema.
+    """
     scaler_fit_rows = sorted({idx for plan in mode_plans.values() for idx in plan.fit_index})
-    # A feature column exclusive to a mode 2.2's floor skips entirely (e.g. a
-    # ``deviation:*`` surface mode-gated to that one mode — see
-    # ``feature_pipeline``'s mode-gated-feature docstrings) is NaN across the
-    # *whole* surviving-mode row union: no surviving mode's ``plan.feats``
-    # lists it, so it never has real values outside the now-skipped mode.
-    # Fitting the scaler over ``selected_features`` unconditionally used to
-    # crash on that column (``ZScoreScaler.fit`` rejects all-NaN columns)
-    # even though no surviving model ever reads it. Fit only on columns some
-    # surviving mode actually uses, then backfill identity placeholder stats
-    # (mean 0 / std 1) for the rest — dead parameters no model consults, kept
-    # only so ``scaler.columns`` still matches the manifest's full
-    # ``feature_columns`` schema, exactly as before.
     used_columns = [
         column
         for column in selected_features
@@ -1372,145 +1508,167 @@ def fit_isolation_forest(
             columns=tuple(selected_features),
             std_floor=scaler.std_floor,
         )
-    isolation_forest_cls = _isolation_forest_cls()
-    models: dict[str, Any] = {}
-    mode_feature_columns: dict[str, list[str]] = {}
-    mode_feature_medians: dict[str, dict[str, float]] = {}
-    modes: list[ModeTrainingSummary] = []
-    used_index: list[Any] = []
-    n_jobs = int(getattr(config, "n_jobs", 1))
+    return scaler
 
-    for mode, plan in mode_plans.items():
-        contamination = _contamination_for_mode(config, mode)
-        x = _scaled_array(frame.loc[plan.fit_index, plan.feats], scaler, plan.feats)
-        model = isolation_forest_cls(
-            n_estimators=config.n_estimators,
-            contamination=contamination,
-            random_state=seed,
-            n_jobs=n_jobs,
+
+def _fit_mode(
+    frame: pd.DataFrame,
+    mode: str,
+    plan: _ModeFitPlan,
+    scaler: ZScoreScaler,
+    config: IsolationForestConfigLike,
+    settings: _FitSettings,
+    *,
+    calibration_frame: pd.DataFrame | None,
+    isolation_forest_cls: Any,
+) -> tuple[Any, dict[str, float], ModeTrainingSummary]:
+    """Phase 4: one mode's forest, its imputation medians, holdout
+    calibration, optional seed agreement, and its manifest summary."""
+    timestamp_column = settings.timestamp_column
+    session_column = settings.session_column
+    target_flag_rate = settings.target_flag_rate
+    contamination = _contamination_for_mode(config, mode)
+    x = _scaled_array(frame.loc[plan.fit_index, plan.feats], scaler, plan.feats)
+    model = isolation_forest_cls(
+        n_estimators=config.n_estimators,
+        contamination=contamination,
+        random_state=settings.seed,
+        n_jobs=settings.n_jobs,
+    )
+    model.fit(x)
+    # A04.7: the value a tolerated missing cell is imputed to at serve.
+    medians = frame.loc[plan.fit_index, plan.feats].median()
+    feature_medians = {c: float(medians[c]) for c in plan.feats}
+
+    calibration_rows: pd.DataFrame | None = None
+    if plan.calibrate:
+        calibration_rows = (
+            calibration_frame.loc[plan.external_index]
+            if plan.external_index is not None and calibration_frame is not None
+            else frame.loc[plan.holdout_index]
         )
-        model.fit(x)
-        models[mode] = model
-        mode_feature_columns[mode] = plan.feats
-        # A04.7: the value a tolerated missing cell is imputed to at serve.
-        medians = frame.loc[plan.fit_index, plan.feats].median()
-        mode_feature_medians[mode] = {c: float(medians[c]) for c in plan.feats}
-        used_index.extend(plan.complete_index.tolist())
-
-        calibration_rows: pd.DataFrame | None = None
-        if plan.calibrate:
-            calibration_rows = (
-                calibration_frame.loc[plan.external_index]
-                if plan.external_index is not None and calibration_frame is not None
-                else frame.loc[plan.holdout_index]
+    calibration_count = 0 if calibration_rows is None else len(calibration_rows)
+    resolvable = resolvable_flag_rate(calibration_count)
+    calibration: _Calibration | None = None
+    agreement: dict[str, Any] | None = None
+    if calibration_rows is not None:
+        holdout_x = _impute_scaled(
+            _scaled_array(calibration_rows.loc[:, plan.feats], scaler, plan.feats),
+            _scaled_medians(scaler, plan.feats, feature_medians),
+        )
+        calibration = _calibrate_holdout_threshold(
+            model,
+            holdout_x,
+            requested_flag_rate=target_flag_rate,
+            timestamps=calibration_rows[timestamp_column],
+            sessions=(
+                calibration_rows[session_column]
+                if session_column in calibration_rows.columns
+                else pd.Series([""] * len(calibration_rows))
+            ),
+            gap_seconds=settings.episode_gap,
+        )
+        if calibration.unresolvable:
+            log.warning(
+                "IsolationForest mode %r: target_flag_rate %.4g is not resolvable on %d "
+                "held-out rows (finest estimable ~%.4g = %d/n, and %d clustered "
+                "exceedance episode(s) are needed); calibrating at %.4g with %d episode(s)%s",
+                mode,
+                target_flag_rate,
+                calibration_count,
+                resolvable,
+                MIN_CALIBRATION_EXCEEDANCES,
+                MIN_CALIBRATION_EXCEEDANCES,
+                calibration.used_flag_rate,
+                calibration.episodes,
+                " — still fewer episodes than required; it needs more held-out drives"
+                if calibration.episodes < MIN_CALIBRATION_EXCEEDANCES
+                else "",
+                extra={
+                    "mode": mode,
+                    "holdout_samples": calibration_count,
+                    "requested_flag_rate": target_flag_rate,
+                    "used_flag_rate": calibration.used_flag_rate,
+                    "resolvable_flag_rate": resolvable,
+                    "exceedance_episodes": calibration.episodes,
+                },
             )
-        calibration_count = 0 if calibration_rows is None else len(calibration_rows)
-        resolvable = resolvable_flag_rate(calibration_count)
-        calibration: _Calibration | None = None
-        agreement: dict[str, Any] | None = None
-        if calibration_rows is not None:
-            holdout_x = _impute_scaled(
-                _scaled_array(calibration_rows.loc[:, plan.feats], scaler, plan.feats),
-                _scaled_medians(scaler, plan.feats, mode_feature_medians[mode]),
-            )
-            calibration = _calibrate_holdout_threshold(
-                model,
+        if settings.stability_seeds > 0:
+            agreement = _seed_agreement(
+                isolation_forest_cls,
+                x,
                 holdout_x,
-                requested_flag_rate=target_flag_rate,
-                timestamps=calibration_rows[timestamp_column],
-                sessions=(
-                    calibration_rows[session_column]
-                    if session_column in calibration_rows.columns
-                    else pd.Series([""] * len(calibration_rows))
-                ),
-                gap_seconds=episode_gap,
-            )
-            if calibration.unresolvable:
-                log.warning(
-                    "IsolationForest mode %r: target_flag_rate %.4g is not resolvable on %d "
-                    "held-out rows (finest estimable ~%.4g = %d/n, and %d clustered "
-                    "exceedance episode(s) are needed); calibrating at %.4g with %d episode(s)%s",
-                    mode,
-                    target_flag_rate,
-                    calibration_count,
-                    resolvable,
-                    MIN_CALIBRATION_EXCEEDANCES,
-                    MIN_CALIBRATION_EXCEEDANCES,
-                    calibration.used_flag_rate,
-                    calibration.episodes,
-                    " — still fewer episodes than required; it needs more held-out drives"
-                    if calibration.episodes < MIN_CALIBRATION_EXCEEDANCES
-                    else "",
-                    extra={
-                        "mode": mode,
-                        "holdout_samples": calibration_count,
-                        "requested_flag_rate": target_flag_rate,
-                        "used_flag_rate": calibration.used_flag_rate,
-                        "resolvable_flag_rate": resolvable,
-                        "exceedance_episodes": calibration.episodes,
-                    },
-                )
-            if stability_seeds > 0:
-                agreement = _seed_agreement(
-                    isolation_forest_cls,
-                    x,
-                    holdout_x,
-                    primary_scores=calibration.scores,
-                    flag_rate=calibration.achieved_flag_rate,
-                    seeds=[seed + offset for offset in range(1, stability_seeds + 1)],
-                    n_estimators=config.n_estimators,
-                    contamination=contamination,
-                    n_jobs=n_jobs,
-                )
-
-        calibrated_on = (
-            calibration_rows
-            if calibration_rows is not None and session_column in calibration_rows.columns
-            else None
-        )
-        modes.append(
-            _mode_summary(
-                mode=mode,
+                primary_scores=calibration.scores,
+                flag_rate=calibration.achieved_flag_rate,
+                seeds=[settings.seed + offset for offset in range(1, settings.stability_seeds + 1)],
+                n_estimators=config.n_estimators,
                 contamination=contamination,
-                frame=frame.loc[plan.complete_index],
-                session_column=session_column,
-                timestamp_column=timestamp_column,
-                score_threshold=None if calibration is None else calibration.threshold,
-                score_scale=None if calibration is None else calibration.scale,
-                holdout_samples=calibration_count,
-                target_flag_rate=None if calibration is None else calibration.used_flag_rate,
-                achieved_flag_rate=None if calibration is None else calibration.achieved_flag_rate,
-                requested_flag_rate=None if calibration is None else target_flag_rate,
-                target_unresolvable=None if calibration is None else calibration.unresolvable,
-                resolvable_flag_rate=None if calibration is None else resolvable,
-                training_drives=plan.training_drives,
-                calibration_sessions=(
-                    () if calibrated_on is None else _unique_strings(calibrated_on[session_column])
-                ),
-                calibration_start_timestamp=(
-                    None
-                    if calibrated_on is None
-                    else _min_timestamp(calibrated_on[timestamp_column])
-                ),
-                calibration_end_timestamp=(
-                    None
-                    if calibrated_on is None
-                    else _max_timestamp(calibrated_on[timestamp_column])
-                ),
-                calibration_drives=plan.calibration_drives,
-                calibration_override=plan.calibration_override,
-                exceedance_episodes=None if calibration is None else calibration.episodes,
-                achieved_episodes_per_hour=(
-                    None if calibration is None else calibration.episodes_per_hour
-                ),
-                row_accounting=plan.row_accounting,
-                required_channels=tuple(dict.fromkeys(_base_channel(c) for c in plan.feats)),
-                seed_agreement=agreement,
+                n_jobs=settings.n_jobs,
             )
-        )
 
+    calibrated_on = (
+        calibration_rows
+        if calibration_rows is not None and session_column in calibration_rows.columns
+        else None
+    )
+    summary = _mode_summary(
+        mode=mode,
+        contamination=contamination,
+        frame=frame.loc[plan.complete_index],
+        session_column=session_column,
+        timestamp_column=timestamp_column,
+        score_threshold=None if calibration is None else calibration.threshold,
+        score_scale=None if calibration is None else calibration.scale,
+        holdout_samples=calibration_count,
+        target_flag_rate=None if calibration is None else calibration.used_flag_rate,
+        achieved_flag_rate=None if calibration is None else calibration.achieved_flag_rate,
+        requested_flag_rate=None if calibration is None else target_flag_rate,
+        target_unresolvable=None if calibration is None else calibration.unresolvable,
+        resolvable_flag_rate=None if calibration is None else resolvable,
+        training_drives=plan.training_drives,
+        calibration_sessions=(
+            () if calibrated_on is None else _unique_strings(calibrated_on[session_column])
+        ),
+        calibration_start_timestamp=(
+            None if calibrated_on is None else _min_timestamp(calibrated_on[timestamp_column])
+        ),
+        calibration_end_timestamp=(
+            None if calibrated_on is None else _max_timestamp(calibrated_on[timestamp_column])
+        ),
+        calibration_drives=plan.calibration_drives,
+        calibration_override=plan.calibration_override,
+        exceedance_episodes=None if calibration is None else calibration.episodes,
+        achieved_episodes_per_hour=(None if calibration is None else calibration.episodes_per_hour),
+        row_accounting=plan.row_accounting,
+        required_channels=tuple(dict.fromkeys(base_channel(c) for c in plan.feats)),
+        seed_agreement=agreement,
+    )
+    return model, feature_medians, summary
+
+
+def _build_manifest(
+    frame: pd.DataFrame,
+    config: IsolationForestConfigLike,
+    settings: _FitSettings,
+    *,
+    mode_plans: Mapping[str, _ModeFitPlan],
+    modes: Sequence[ModeTrainingSummary],
+    skipped_modes: Sequence[SkippedModeSummary],
+    mode_feature_medians: Mapping[str, dict[str, float]],
+    scaler: ZScoreScaler,
+    calibration_frame: pd.DataFrame | None,
+    calibration_policy: Mapping[str, Any] | None,
+    calibration_override: str | None,
+    model_version: str | None,
+    fitted_at: datetime | pd.Timestamp | str | None,
+) -> IsolationForestManifest:
+    """Phase 5: the dropped-fraction gate, then the manifest."""
+    mode_column = settings.mode_column
+    session_column = settings.session_column
+    timestamp_column = settings.timestamp_column
     # The rows actually used across all per-mode models (disjoint by mode) —
     # for the manifest's data hash, span, sessions, and complete-row count.
+    used_index = [idx for plan in mode_plans.values() for idx in plan.complete_index.tolist()]
     complete = frame.loc[sorted(set(used_index))]
     # Missing-row safety is evaluated only within modes that earned a model.
     # Rows belonging to a mode below ``min_samples_per_mode`` are deliberately
@@ -1535,14 +1693,14 @@ def fit_isolation_forest(
     )
     created_at = _format_timestamp(coerce_timestamp(fitted_at))
     version = model_version or f"isolation_forest_{created_at.replace(':', '')}"
-    manifest = IsolationForestManifest(
+    return IsolationForestManifest(
         artifact_format_version=ARTIFACT_FORMAT_VERSION,
         model_type=MODEL_TYPE,
         model_version=version,
         created_at=created_at,
         training_data_hash=_training_data_hash(
             complete,
-            feature_columns=selected_features,
+            feature_columns=settings.selected_features,
             mode_column=mode_column,
             session_column=session_column,
             timestamp_column=timestamp_column,
@@ -1557,23 +1715,23 @@ def fit_isolation_forest(
             "n_estimators": config.n_estimators,
             "contamination": config.contamination,
             "per_mode_contamination": _per_mode_contamination(config),
-            "random_state": seed,
+            "random_state": settings.seed,
             # A04.12: the fraction actually held out (0 when external
             # calibration sessions replaced the tail split), beside the knob.
-            "calibration_holdout_fraction": effective_holdout_fraction,
-            "configured_calibration_holdout_fraction": holdout_fraction,
-            "target_flag_rate": target_flag_rate,
-            "min_samples_per_mode": min_samples_per_mode,
-            "min_training_drives_per_mode": min_training_drives,
-            "min_calibration_drives_per_mode": min_calibration_drives,
-            "stability_seeds": stability_seeds,
-            "n_jobs": n_jobs,
+            "calibration_holdout_fraction": settings.effective_holdout_fraction,
+            "configured_calibration_holdout_fraction": settings.holdout_fraction,
+            "target_flag_rate": settings.target_flag_rate,
+            "min_samples_per_mode": settings.min_samples_per_mode,
+            "min_training_drives_per_mode": settings.min_training_drives,
+            "min_calibration_drives_per_mode": settings.min_calibration_drives,
+            "stability_seeds": settings.stability_seeds,
+            "n_jobs": settings.n_jobs,
         },
         scaler=scaler.to_dict(),
         schema={
-            **schema,
+            **settings.schema,
             "mode_column": mode_column,
-            "mode_feature_columns": mode_feature_columns,
+            "mode_feature_columns": {mode: plan.feats for mode, plan in mode_plans.items()},
             "timestamp_column": timestamp_column,
             "session_column": session_column,
             "score_column": SCORE_COLUMN,
@@ -1586,21 +1744,20 @@ def fit_isolation_forest(
             if calibration_frame is None or session_column not in calibration_frame.columns
             else _unique_strings(calibration_frame[session_column])
         ),
-        mode_feature_medians=mode_feature_medians,
+        mode_feature_medians=dict(mode_feature_medians),
         calibration={
             "source": calibration_source,
-            "holdout_fraction": effective_holdout_fraction,
-            "configured_holdout_fraction": holdout_fraction,
-            "episode_gap_seconds": episode_gap,
+            "holdout_fraction": settings.effective_holdout_fraction,
+            "configured_holdout_fraction": settings.holdout_fraction,
+            "episode_gap_seconds": settings.episode_gap,
             "min_exceedance_episodes": MIN_CALIBRATION_EXCEEDANCES,
-            "min_calibration_drives_per_mode": min_calibration_drives,
+            "min_calibration_drives_per_mode": settings.min_calibration_drives,
             "override": calibration_override,
             "policy": dict(calibration_policy)
             if calibration_policy is not None
             else {"note": "not recorded by the caller"},
         },
     )
-    return TrainedIsolationForest(models=models, scaler=scaler, manifest=manifest)
 
 
 def _episode_gap_seconds(schema: Mapping[str, Any]) -> float:
@@ -1646,8 +1803,7 @@ def _scaled_medians(
         median = medians.get(column)
         if median is None or not np.isfinite(median):
             continue
-        std = scaler.stds[column]
-        out[index] = (median - scaler.means[column]) / (std if std >= scaler.std_floor else 1.0)
+        out[index] = (median - scaler.means[column]) / scaler.denominator(column)
     return out
 
 
@@ -1666,16 +1822,12 @@ def _scaled_array(
 ) -> np.ndarray[Any, np.dtype[np.float32]]:
     """Scale only the matrix a mode consumes, avoiding a full-frame copy."""
     values = frame.loc[:, list(columns)].to_numpy(dtype=np.float32, copy=True)
-    means = np.asarray([scaler.means[column] for column in columns], dtype=np.float32)
-    denoms = np.asarray(
-        [
-            scaler.stds[column] if scaler.stds[column] >= scaler.std_floor else 1.0
-            for column in columns
-        ],
-        dtype=np.float32,
-    )
-    values -= means
-    values /= denoms
+    means, denoms = scaler.vectors(columns)
+    # float32 arithmetic, as the forests were always fit: the fit matrix is the
+    # dominant training allocation. Serve scales in float64 (``transform``);
+    # both use the scaler's one denominator rule (R04.15).
+    values -= means.astype(np.float32)
+    values /= denoms.astype(np.float32)
     return values
 
 
@@ -1809,7 +1961,7 @@ def feature_policy_violations(feature_columns: Sequence[str], policy: Any) -> di
     """
     out: dict[str, str] = {}
     for column in feature_columns:
-        reason = policy.exclusion_reason(_base_channel(str(column)))
+        reason = policy.exclusion_reason(base_channel(str(column)))
         if reason is not None:
             out[str(column)] = str(reason)
     return out

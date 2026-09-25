@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.models.sequence_calibration import SequenceThresholdCalibration
 from src.models.sequence_dataset import (
     MASK_ARRIVED_SAMPLE,
     MASK_FRESH_WITHIN_MAX_GAP,
@@ -27,7 +28,8 @@ from src.models.sequence_dataset import (
     observation_mask_from_schema,
 )
 from src.models.sequence_protocol import TrainedSequenceModel
-from src.models.sequence_training import SequenceThresholdCalibration
+from src.models.sequence_scoring import SequenceScoringRule, score_exclusions
+from src.preprocessing.features import base_channel
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
@@ -227,7 +229,7 @@ ENVELOPE_NOT_COMPARED = "not_compared"
 ENVELOPE_QUANTITY_NOT_TRAINED = "not_trained"
 ENVELOPE_QUANTITY_NO_DATA = "no_data"
 #: Units for the envelope sentence, keyed by the quantity names A03.8 records
-#: (``sequence_training.ENVELOPE_QUANTITIES``). An unknown name prints bare.
+#: (``sequence_envelope.ENVELOPE_QUANTITIES``). An unknown name prints bare.
 ENVELOPE_UNITS: dict[str, str] = {"baro_kpa": "kPa", "iat_c": "°C", "speed_kph": "km/h"}
 
 
@@ -340,14 +342,6 @@ class TrainingEnvelope:
         }
 
 
-def _base_channel(column: str) -> str:
-    """Strip a rolling-feature suffix to the raw channel for ``__gap`` lookup."""
-    for suffix in ("__mean", "__std", "__roc"):
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
-
-
 class SequenceWindowBuffer:
     """Fixed-length buffer for sequence-detector feature rows (value + mask + Δt).
 
@@ -389,7 +383,7 @@ class SequenceWindowBuffer:
         #: builder splits on the same value.
         self.max_gap_seconds = float(max_gap_seconds)
         self._gap_columns = tuple(
-            f"{_base_channel(column)}{GAP_SUFFIX}" for column in feature_columns
+            f"{base_channel(column)}{GAP_SUFFIX}" for column in feature_columns
         )
         #: A03.1 — the mask the artifact was trained on. Under the arrival rule
         #: a column reads its ``__arrived`` flag (absent ⇒ not arrived), except
@@ -655,14 +649,19 @@ class SequenceInferenceEngine:
             condition_columns=self.condition_columns,
         )
         # Resolve suppress_channels (config-driven; base names auto-expand to
-        # rolling-derivative siblings) into integer indices into
-        # ``feature_columns`` once. ``score_window`` then just zeros the mask
-        # at those indices per call. Channels missing from the trained
-        # schema drop out — a config typo or a renamed channel is a no-op,
-        # not a serve crash.
-        from src.preprocessing.feature_pipeline import expand_suppress_channels
-
-        suppressed = expand_suppress_channels(tuple(suppress_channels), self.feature_columns)
+        # rolling-derivative siblings), the A02.12 uncalibrated channels and the
+        # A03.2 context inputs into the columns kept out of the score, once
+        # (R04.2: the same resolution the benchmark and the batched scorer use).
+        # ``score_window`` then just zeros the score mask at those indices.
+        # Channels missing from the trained schema drop out -- a config typo or
+        # a renamed channel is a no-op, not a serve crash.
+        exclusions = score_exclusions(
+            self.feature_columns,
+            self.calibration,
+            trained.manifest.schema,
+            tuple(suppress_channels),
+        )
+        suppressed = exclusions.suppressed
         self.suppressed_channels: tuple[str, ...] = suppressed
         #: A01.5 — serving's suppress list against the one training ran with.
         #: Surfaced on ``/status`` (``health.sequence_suppression``).
@@ -686,14 +685,7 @@ class SequenceInferenceEngine:
         # A03.2: an ``engine_response`` artifact conditions on context inputs
         # (rpm, baro, speed, ...) that it was never trained to reconstruct or
         # calibrated on. They reach the encoder and never the score.
-        from src.models.sequence_feature_set import context_columns_from_schema
-
-        self.context_columns: tuple[str, ...] = tuple(
-            column
-            for column in context_columns_from_schema(trained.manifest.schema)
-            if column in column_index
-        )
-        context = set(self.context_columns)
+        self.context_columns: tuple[str, ...] = exclusions.context
         # A02.12: a channel whose calibrated threshold is not positive was
         # masked in every calibration window — never observed — so the global,
         # per-mode and family thresholds were all computed without it. Score it
@@ -701,11 +693,7 @@ class SequenceInferenceEngine:
         # evidence, until a calibration covers it. Before this, a threshold of
         # 0.0 flagged it on any nonzero error (ECM_INJECTOR_PULSE_1/2 in the
         # 2026-09-20 artifact, once those DIDs joined the default profile).
-        self.uncalibrated_channels: tuple[str, ...] = tuple(
-            column
-            for column in self.feature_columns
-            if column not in context and not self.calibration.channel_errors[column].threshold > 0
-        )
+        self.uncalibrated_channels: tuple[str, ...] = exclusions.uncalibrated
         if self.uncalibrated_channels:
             log.warning(
                 "sequence model %s: %d channel(s) were never observed in calibration "
@@ -714,14 +702,16 @@ class SequenceInferenceEngine:
                 len(self.uncalibrated_channels),
                 ", ".join(self.uncalibrated_channels),
             )
-        excluded = set(suppressed) | set(self.uncalibrated_channels) | context
+        excluded = exclusions.columns
         #: Columns kept out of the score, family path and evidence (suppressed
         #: by config or uncalibrated). The encoder still receives them.
-        self._score_excluded: frozenset[str] = frozenset(excluded)
+        self._score_excluded: frozenset[str] = excluded
         self._score_excluded_indices: np.ndarray[Any, np.dtype[np.intp]] = np.array(
             sorted(column_index[col] for col in excluded if col in column_index),
             dtype=np.intp,
         )
+        #: R04.2 — the verdict rule, shared with the benchmark and the harness.
+        self.scoring_rule = SequenceScoringRule(self.calibration, self.feature_columns)
         self._torch = _torch_module()
         self._device = self._torch.device(device)
         self.trained.model.to(device=self._device, dtype=getattr(self._torch, dtype))
@@ -738,11 +728,9 @@ class SequenceInferenceEngine:
             from src.preprocessing.normalization import ZScoreScaler
 
             scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
-            self._scaler_means = np.array(
-                [scaler.means[col] for col in self.feature_columns], dtype=np.float64
-            )
-            stds = np.array([scaler.stds[col] for col in self.feature_columns], dtype=np.float64)
-            self._scaler_stds = np.where(stds >= scaler.std_floor, stds, 1.0)
+            # R04.15: the scaler's own denominator rule (std, or 1.0 under the
+            # floor), never a re-derivation of it.
+            self._scaler_means, self._scaler_stds = scaler.vectors(self.feature_columns)
         else:
             self._scaler_means = None
             self._scaler_stds = None
@@ -846,34 +834,23 @@ class SequenceInferenceEngine:
             self._torch.as_tensor(scaled_window, dtype=torch_dtype).unsqueeze(0).to(self._device)
         )
         mask_t = self._torch.as_tensor(mask, dtype=torch_dtype).unsqueeze(0).to(self._device)
-        score_mask_t = (
-            mask_t
-            if score_mask is mask
-            else self._torch.as_tensor(score_mask, dtype=torch_dtype).unsqueeze(0).to(self._device)
-        )
         delta_t = self._torch.as_tensor(delta, dtype=torch_dtype).unsqueeze(0).to(self._device)
         with self._torch.no_grad():
-            # Phase 7.2a: one forward → all reductions + the actual/recon
-            # arrays the dashboard overlay needs. The error is **masked** so a
-            # forward-filled (stale) cell never inflates the score, matching the
-            # masked thresholds calibrated at training time.
+            # Phase 7.2a: one forward → the error the rule scores + the
+            # actual/recon arrays the dashboard overlay needs.
             reconstructed = self.trained.model.forward(value_t, mask_t, delta_t)
-            error_tensor = (reconstructed - value_t).abs() * score_mask_t
-            denom = float(score_mask_t.sum().item())
-            global_score = float(error_tensor.sum().item() / denom) if denom > 0 else 0.0
-            mask_per_channel = (
-                score_mask_t.sum(dim=1).detach().cpu().numpy()[0].astype(float)
-            )  # (F,)
-            channel_sums = error_tensor.sum(dim=1).detach().cpu().numpy()[0].astype(float)  # (F,)
-            channel_values = np.divide(
-                channel_sums,
-                mask_per_channel,
-                out=np.zeros_like(channel_sums),
-                where=mask_per_channel > 0,
-            )
-            timestep_error_np = error_tensor.detach().cpu().numpy()[0].astype(float)  # (T, F)
-            actual_np = value_t.detach().cpu().numpy()[0].astype(float)  # (T, F)
-            reconstructed_np = reconstructed.detach().cpu().numpy()[0].astype(float)  # (T, F)
+            actual_np = value_t.detach().cpu().numpy()[0]  # (T, F)
+            reconstructed_np = reconstructed.detach().cpu().numpy()[0]  # (T, F)
+        # R04.2: the served rule, shared with the benchmark and the harness. The
+        # error is **masked** so a forward-filled (stale) cell never inflates
+        # the score, matching the masked thresholds calibrated at training time.
+        abs_error = np.abs(reconstructed_np - actual_np)
+        scores = self.scoring_rule.score_batch(
+            abs_error[None, ...], score_mask[None, ...], [operating_mode]
+        )
+        global_score = float(scores.global_score[0])
+        channel_values = scores.channel[0]
+        timestep_error_np = abs_error * score_mask  # (T, F)
         latency_ms = (self.time_fn() - started) * 1000.0
 
         channel_scores = {
@@ -914,45 +891,20 @@ class SequenceInferenceEngine:
             }
             for column in top_channels
         }
-        # Phase 7.5 per-mode threshold: prefer the mode's held-out
-        # reconstruction-error band when calibration carries one; fall back
-        # to the single global threshold otherwise (back-compat with
-        # pre-7.5 manifests where ``per_mode_errors`` is absent).
-        per_mode = self.calibration.per_mode_errors or {}
-        mode_distribution = per_mode.get(operating_mode) if operating_mode is not None else None
-        global_threshold = (
-            mode_distribution.threshold
-            if mode_distribution is not None
-            else self.calibration.global_error.threshold
-        )
-        family_scores: dict[str, float] = {}
-        family_threshold: float | None = None
-        if self.calibration.family_errors and self.calibration.family_max_score:
-            family_channels: dict[str, list[str]] = {}
-            for column in self.feature_columns:
-                family_channels.setdefault(_base_channel(column), []).append(column)
-            for family, columns in family_channels.items():
-                distribution = self.calibration.family_errors.get(family)
-                if distribution is None or not distribution.threshold > 0:
-                    # Never observed in calibration (A02.12): no band to compare.
-                    continue
-                raw_score = max(channel_scores[column] for column in columns)
-                family_scores[family] = raw_score / max(
-                    distribution.threshold, np.finfo(np.float64).eps
-                )
-            family_threshold = self.calibration.family_max_score.threshold
-        # Gate the emit on the *global* reconstruction error only. The
-        # per-channel thresholds are calibrated from training data and run far
-        # too tight live: with ~90 channels at idle/warmup at least one is
-        # essentially always over its band, so an `or bool(anomalous_channels)`
-        # clause fired every tick and flooded /ws/anomalies with globally-
-        # normal "anomalies". `anomalous_channels` / `channel_scores` /
-        # `channel_thresholds` are still computed and carried in the event
-        # detail so a genuine (global) anomaly stays fully drillable.
-        family_anomaly = bool(family_scores) and max(family_scores.values()) > (
-            family_threshold if family_threshold is not None else float("inf")
-        )
-        is_anomaly = global_score > global_threshold or family_anomaly
+        # Phase 7.5 per-mode band with the global fallback, and the family
+        # path, both from the shared rule (R04.2). Gate the emit on the
+        # *global* error and the family path only: the per-channel thresholds
+        # run far too tight live (with ~90 channels at least one is always over
+        # its band), so an ``or bool(anomalous_channels)`` clause flooded
+        # /ws/anomalies. ``anomalous_channels`` / ``channel_scores`` stay in the
+        # event detail so a genuine anomaly is fully drillable.
+        global_threshold = float(scores.global_threshold[0])
+        family_scores = {
+            family: float(value)
+            for family, value in zip(scores.family_names, scores.family_scores[0], strict=True)
+        }
+        family_threshold = scores.family_threshold
+        is_anomaly = bool(scores.verdict[0])
         return SequenceInferenceResult(
             model_version=trained_version(self.trained),
             timestamp=timestamp,

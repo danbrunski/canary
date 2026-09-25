@@ -57,7 +57,11 @@ Findings to carry forward, not re-derive:
   - A02's `evaluate_detectors`, which includes captures as evaluation drives
     ([R04.6](R04-models-and-preprocessing.md)).
 
-  Both are open. The A02.11 baseline is regenerated when R04.6 lands.
+  Both are closed: R03.12 (93bf6ef) keeps live scoring off
+  non-corpus-eligible captures, and R04.6 (2026-09-25) scores only
+  default-profile rows in `evaluate_detectors` — captures still group drives,
+  their rows reach no metric, and a capture-only drive is skipped by name.
+  The A02.11 baseline still has to be re-run under R04.6 (see R04.6).
 
 ## Shared acceptance rules
 

@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from src.collection import bus_budget, tx_gate
 from src.config import CanaryConfig
+from src.daemon.health import HealthMonitor
 from src.decode.behavior_models import (
     behavior_policy_path,
     diagnostic_only_models,
     load_behavior_models,
     unknown_operating_modes,
 )
-from src.models.health import HealthMonitor
 from src.models.manager import ModelManager
 
 if TYPE_CHECKING:

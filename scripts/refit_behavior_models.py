@@ -34,7 +34,14 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-from _cli import add_common_args, filter_sessions_by_age, load_config, resolve_sessions
+from _cli import (
+    add_bindings_arg,
+    add_common_args,
+    add_log_level_arg,
+    filter_sessions_by_age,
+    load_config,
+    resolve_sessions,
+)
 
 from src.analysis.behavior_validation import (
     BehaviorValidationDocument,
@@ -68,10 +75,10 @@ from src.decode.behavior_models import (
 )
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.log import configure_logging
-from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
-from src.profiles import resolve_profile_for_tooling, scope_config
-from src.session import format_session_timestamp
+from src.preprocessing.loader import has_telemetry
+from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
+from src.session import format_session_timestamp, session_sort_key
 
 log = logging.getLogger(__name__)
 
@@ -134,12 +141,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         ),
     )
     add_common_args(parser, help="Path to canary.yaml (preprocessing config).")
-    parser.add_argument(
-        "--bindings",
-        type=Path,
-        default=BINDINGS_YAML,
-        help="Path to bindings.yaml for CAN-signal decode (default data/bindings.yaml).",
-    )
+    add_bindings_arg(parser)
     parser.add_argument(
         "--out",
         type=Path,
@@ -187,11 +189,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Machine-readable bake-off report (default: <out>.report.json).",
     )
-    parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-    )
+    add_log_level_arg(parser)
     return parser.parse_args(argv)
 
 
@@ -246,9 +244,9 @@ def _discover_behavior_capture_sessions(
         manifest = read_capture_manifest(child)
         if manifest is None or not recipe_names.intersection(manifest.behavior_model_recipes):
             continue
-        if any(path.stat().st_size > 0 for path in child.glob("telemetry-*.parquet")):
+        if has_telemetry(child):
             sessions.append(child)
-    return sorted(sessions)
+    return sorted(sessions, key=session_sort_key)
 
 
 def _consistent_tune_revision(
@@ -455,9 +453,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not sessions:
         print("error: every session is excluded by a provenance resolution", file=sys.stderr)
         return 1
-    revision_registry = load_tune_revisions(
-        scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
-    )
+    revision_registry = load_tune_revisions(active_registry_path(scoped))
     try:
         tune_revision = _consistent_tune_revision(sessions, revision_registry, validation_document)
     except ValueError as exc:

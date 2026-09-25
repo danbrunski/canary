@@ -76,6 +76,16 @@ class ComparisonRefusedError(ValueError):
     """
 
 
+class InputNotCapturedError(ComparisonRefusedError):
+    """One side has no observations at all: an unavailable input, not a
+    clock or coverage problem. ``spec`` names the side (R05.3 — callers
+    branch on this type, never on the message)."""
+
+    def __init__(self, message: str, *, spec: str) -> None:
+        super().__init__(message)
+        self.spec = spec
+
+
 @dataclass(frozen=True)
 class PairingPolicy:
     """How two streams may be paired. Required at every comparison call site.
@@ -348,6 +358,7 @@ def match_ordered(
 __all__ = [
     "UNKNOWN_BASIS_FLOOR_S",
     "ComparisonRefusedError",
+    "InputNotCapturedError",
     "MatchedSamples",
     "PairingPolicy",
     "ReferenceSide",

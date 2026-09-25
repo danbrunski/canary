@@ -53,13 +53,19 @@ DEFAULT_TUNING_CHANNELS: frozenset[str] = frozenset(
     }
 )
 
+
+def _startup_profile() -> CaptureProfile:
+    """The built-in ``default`` profile the module starts with."""
+    return CaptureProfile(
+        name="default",
+        description="Normal collection",
+        mode01={name: 1.0 for name in DEFAULT_TUNING_CHANNELS},
+        corpus_eligible=True,
+    )
+
+
 _lock = threading.Lock()
-_profile = CaptureProfile(
-    name="default",
-    description="Normal collection",
-    mode01={name: 1.0 for name in DEFAULT_TUNING_CHANNELS},
-    corpus_eligible=True,
-)
+_profile = _startup_profile()
 _started_at: str | None = None
 _started_monotonic: float | None = None
 _session_dir: str | None = None
@@ -102,6 +108,33 @@ def configure_default(profile: CaptureProfile) -> None:
 def is_configured() -> bool:
     with _lock:
         return _configured
+
+
+def _reset_for_tests() -> None:
+    """Every module global back to its import-time value (R07.4).
+
+    Only :func:`src.collection.process_state.reset_process_state_for_tests`
+    calls this; the daemon resets through :func:`configure_default`.
+    """
+    global _profile, _started_at, _started_monotonic, _session_dir, _source, _did_channels
+    global _configured, _running_tune_revision, _ecu_calibration_id, _ecu_calibration_read_at
+    global _ecu_calibration_changed, _registry_calibration_id, _ecu_calibration_mismatch_logged
+    global _paused
+    with _lock:
+        _profile = _startup_profile()
+        _started_at = None
+        _started_monotonic = None
+        _session_dir = None
+        _source = "default"
+        _did_channels = {}
+        _configured = False
+        _running_tune_revision = None
+        _ecu_calibration_id = None
+        _ecu_calibration_read_at = None
+        _ecu_calibration_changed = False
+        _registry_calibration_id = None
+        _ecu_calibration_mismatch_logged = None
+        _paused = False
 
 
 def configure_running_tune_revision(

@@ -293,3 +293,39 @@ def test_resample_long_emits_the_same_arrival_flags_as_resample_wide() -> None:
     from_wide = resample_wide(wide, config=config)[arrived_column("obd:RPM")].tolist()
 
     assert from_long == from_wide == [True, False, True, False, True, False, True]
+
+
+def test_max_gap_for_follows_explicit_fast_channels() -> None:
+    """R04.7: ``max_gap_for`` is the one fast/slow rule. With a non-default
+    ``fast_channels`` a default-slow channel (coolant) gets the grid ceiling and
+    a default-fast one not listed gets the slow ceiling -- and the resampler's
+    own ``__gap`` flags follow the same rule."""
+    config = ResampleConfig(
+        hz=1.0,
+        max_gap_factor=2.0,
+        fast_channels=frozenset({"obd:COOLANT_TEMP"}),
+        slow_channel_max_gap_seconds=30.0,
+    )
+    assert config.max_gap_seconds_for("obd:COOLANT_TEMP") == 2.0
+    assert config.max_gap_seconds_for("obd:RPM") == 30.0
+    default = ResampleConfig(hz=1.0, max_gap_factor=2.0, slow_channel_max_gap_seconds=30.0)
+    assert default.max_gap_seconds_for("obd:COOLANT_TEMP") == 30.0
+    assert default.max_gap_seconds_for("obd:RPM") == 2.0
+
+    wide = pd.DataFrame(
+        [
+            {"session": "s1", "timestamp": _ts(0), "obd:COOLANT_TEMP": 80.0, "obd:RPM": 700.0},
+            {"session": "s1", "timestamp": _ts(5), "obd:COOLANT_TEMP": 81.0, "obd:RPM": 710.0},
+        ]
+    )
+    result = resample_wide(wide, config=config)
+    # Coolant (explicitly fast) goes stale past 2 s; RPM (now slow) does not.
+    assert result[gap_column("obd:COOLANT_TEMP")].tolist() == [
+        False,
+        False,
+        False,
+        True,
+        True,
+        False,
+    ]
+    assert result[gap_column("obd:RPM")].tolist() == [False] * 6

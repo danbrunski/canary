@@ -59,7 +59,11 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import yaml
-from _cli import load_config
+from _cli import (
+    add_bindings_arg,
+    add_log_level_arg,
+    load_config,
+)
 
 from src.analysis.behavior_validation import (
     EVALUATOR_VERSION,
@@ -98,12 +102,11 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.log import configure_logging
-from src.paths import BINDINGS_YAML
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.preprocessing.features import ROC_SUFFIX
 from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
-from src.profiles import resolve_profile_for_tooling, scope_config
+from src.profiles import active_registry_path, resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 
@@ -170,9 +173,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--tune-revisions",
         type=Path,
         default=None,
-        help="tune_revisions.yaml for the calibration stratum (default: next to the artifact).",
+        help=(
+            "tune_revisions.yaml for the calibration stratum (default: the profile's "
+            "active flash registry)."
+        ),
     )
-    parser.add_argument("--bindings", type=Path, default=BINDINGS_YAML)
+    add_bindings_arg(parser)
     parser.add_argument("--dids", type=Path, default=DEFAULT_DIDS_PATH)
     parser.add_argument("--mode", choices=["historical", "corrected"], required=True)
     parser.add_argument(
@@ -189,9 +195,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Write the evaluated columns per session (parquet) + a hash manifest here.",
     )
-    parser.add_argument(
-        "--log-level", default="WARNING", choices=["DEBUG", "INFO", "WARNING", "ERROR"]
-    )
+    add_log_level_arg(parser, default="WARNING")
     return parser.parse_args(argv)
 
 
@@ -640,9 +644,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "none" if args.mode == "historical" else "mode-inputs"
     )
     policy = EventPolicy.from_config(scoped, document)
-    revisions_path: Path = args.tune_revisions or (
-        scoped.daemon.behavior_models.parent / "tune_revisions.yaml"
-    )
+    revisions_path: Path = args.tune_revisions or active_registry_path(scoped)
     revisions = load_tune_revisions(revisions_path)
 
     frame = build_evaluation_frame(

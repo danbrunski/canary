@@ -27,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from src.collection import bus_budget, tuning_profile
 from src.collection.capture_profiles import CaptureProfileStore
@@ -40,10 +40,13 @@ from src.control.capture_finalize import (
     record_capture_start,
 )
 from src.control.capture_manifest import read_capture_manifest, stamp_capture_end
-from src.models.health import HealthMonitor
 from src.session import format_session_timestamp
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle_state import ReplayStatusSource, derive_from_live_source
+
+if TYPE_CHECKING:
+    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
+    from src.daemon.health import HealthMonitor
 
 log = logging.getLogger(__name__)
 

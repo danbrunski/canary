@@ -45,7 +45,13 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from _cli import add_common_args, add_profile_arg, load_config, scoped_models_dir
+from _cli import (
+    add_common_args,
+    add_override_reason_arg,
+    add_profile_arg,
+    load_config,
+    scoped_models_dir,
+)
 
 from src.analysis.drives import DRIVE_COLUMN, drop_rows_without_drive
 from src.config import CanaryConfig
@@ -717,10 +723,9 @@ def _build_arg_parser(backend: SequenceTrainingBackend, *, prog: str) -> argpars
         "thresholds are calibrated on the training windows themselves, which "
         "underestimates real cross-session error and inflates false positives.",
     )
-    parser.add_argument(
+    add_override_reason_arg(
+        parser,
         "--accept-thin-calibration",
-        default=None,
-        metavar="REASON",
         help="Publish even though the calibration sessions do not cover what the model "
         "will score (fewer than three drives, a scored mode without its own band, a "
         "channel never observed). Refused without this (A02.2); the reason and the "

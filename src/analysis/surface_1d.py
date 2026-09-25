@@ -24,14 +24,13 @@ project into an extra dependency.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
 
+from src.analysis.fit_provenance import fitted_now, training_data_hash
 from src.decode.behavior_models import (
     Axis1D,
     BehaviorModel1D,
@@ -40,6 +39,7 @@ from src.decode.behavior_models import (
     PolynomialFit,
     RobustBaselineFit,
 )
+from src.decode.surface_eval import bin_indices, evaluate_1d
 
 log = logging.getLogger(__name__)
 
@@ -95,8 +95,8 @@ def fit_polynomial(
         sample_count=int(len(x)),
         r_squared=r_squared,
         sessions=list(sessions),
-        fitted_at=_now_iso() if fitted_at is None else fitted_at,
-        training_data_hash=_hash_xy(x, y),
+        fitted_at=fitted_now() if fitted_at is None else fitted_at,
+        training_data_hash=training_data_hash(x, y),
     )
     return BehaviorModel1D(
         name=name,
@@ -172,9 +172,8 @@ def fit_binned_lookup(
             f"{name}: x={x_column} has too few distinct values for a {n_knots}-knot fit"
         )
 
-    # bin assignment; subtract 1 so bins are 0..len(edges)-2, clip the right
-    # endpoint so x.max() lands in the last bin instead of overflowing.
-    bins = np.clip(np.digitize(x, edges) - 1, 0, len(edges) - 2)
+    # bin assignment: the one bin rule, so x.max() lands in the last bin.
+    bins = bin_indices(x, edges)
     x_knots: list[float] = []
     y_knots: list[float] = []
     for b in range(len(edges) - 1):
@@ -198,8 +197,8 @@ def fit_binned_lookup(
         sample_count=int(len(x)),
         r_squared=r_squared,
         sessions=list(sessions),
-        fitted_at=_now_iso() if fitted_at is None else fitted_at,
-        training_data_hash=_hash_xy(x, y),
+        fitted_at=fitted_now() if fitted_at is None else fitted_at,
+        training_data_hash=training_data_hash(x, y),
     )
     return BehaviorModel1D(
         name=name,
@@ -257,8 +256,8 @@ def fit_robust_baseline(
         sample_count=len(values),
         r_squared=None,
         sessions=list(sessions),
-        fitted_at=_now_iso() if fitted_at is None else fitted_at,
-        training_data_hash=_hash_xy(np.arange(len(values), dtype=float), values),
+        fitted_at=fitted_now() if fitted_at is None else fitted_at,
+        training_data_hash=training_data_hash(np.arange(len(values), dtype=float), values),
     )
     return BehaviorModel1D(
         name=name,
@@ -285,26 +284,6 @@ def fit_robust_baseline(
 # Evaluators — the inverse of the fitters; the decoder layer (4.E.6) wraps
 # these into the public expected_value / deviation API.
 # ---------------------------------------------------------------------------
-
-
-def evaluate_1d(model: BehaviorModel1D, x: float) -> float | None:
-    """Evaluate a 1D model at ``x``. Returns ``None`` outside the fit domain.
-
-    The domain check is *strict* on purpose — extrapolating a polynomial
-    out of its fit range is one of the easiest ways to create plausible-
-    looking nonsense (especially for warmup curves that look monotonic
-    until you fall off the fitted region and the cubic term explodes).
-    """
-    fit = model.fit
-    if isinstance(fit, RobustBaselineFit):
-        return fit.median
-    lo, hi = model.axis.domain
-    if not lo <= x <= hi:
-        return None
-    if isinstance(fit, PolynomialFit):
-        return float(np.polynomial.polynomial.polyval(x, fit.coefficients))
-    # LookupTableFit
-    return float(np.interp(x, fit.x_knots, fit.y_knots))
 
 
 def _fill_relative_reference_std(
@@ -364,13 +343,6 @@ def _coefficient_of_determination(actual: np.ndarray, predicted: np.ndarray) -> 
     return 1.0 - ss_res / ss_tot
 
 
-def _hash_xy(x: np.ndarray, y: np.ndarray) -> str:
-    """Stable hash of the training rows so refits-with-same-data have the same hash."""
-    h = hashlib.sha256()
-    h.update(x.tobytes())
-    h.update(y.tobytes())
-    return f"sha256:{h.hexdigest()[:16]}"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+#: :func:`evaluate_1d` lives in :mod:`src.decode.surface_eval` (R05.10);
+#: re-exported so analysis callers keep one import for a surface family.
+__all__ = ["evaluate_1d", "fit_binned_lookup", "fit_polynomial", "fit_robust_baseline"]

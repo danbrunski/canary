@@ -10,54 +10,13 @@ import pandas as pd
 import pytest
 
 from src.mcp_server.parquet_query import TelemetryQuery
+from tests.configs import write_isolated_config
 from tools import import_uprev_log as importer
-
-
-def _config_yaml(storage_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {storage_path}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
 
 
 def _write_config(tmp_path: Path) -> tuple[Path, Path]:
     storage = tmp_path / "storage"
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = write_isolated_config(tmp_path, "daemon", storage=storage)
     return cfg_path, storage
 
 

@@ -29,9 +29,10 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 2.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import numpy as np
 import pandas as pd
@@ -39,10 +40,11 @@ import pandas as pd
 from src.analysis.afr import AfrCalibration
 from src.analysis.channels import read_aligned, read_channels
 from src.analysis.lambda_delivery import residual_pct
-from src.analysis.noise_floor import NoiseFloor
+from src.analysis.noise_floor import FloorRefusal, NoiseFloor
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.control.capture_manifest import read_capture_manifest
+from src.decode.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.storage.sidecar import read_json_object
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
 #: from BFS, so it moves when fuelling moves; see the module docstring.
@@ -50,10 +52,9 @@ FORBIDDEN_AXES: frozenset[str] = frozenset(
     {"ENGINE_LOAD", "CAL/LD", "CAL/LD VALUE", "CALCULATED_LOAD", "ABSOLUTE_LOAD", "LOAD"}
 )
 
-#: Default rpm band edges for band-averaging. Wide enough that a WOT pull
-#: lands several samples per band, narrow enough that delivery error's rpm
-#: dependence does not hide inside one bucket.
-DEFAULT_RPM_BANDS: tuple[float, ...] = (2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0)
+# rpm band edges for band-averaging are a vehicle fact (the top edge is the
+# engine's redline): every caller passes ``rpm_bands`` from the profile's
+# ``tuning_providers.yaml`` ``mode01_wot`` (R05.13). There is no default.
 
 #: `FUEL_STATUS` bit for "open loop". Covers enrichment *and* decel fuel cut,
 #: which is why it is never used alone.
@@ -62,6 +63,27 @@ OPEN_LOOP = 4.0
 
 class GateError(ValueError):
     """A caller asked for an analysis a gate refuses to perform."""
+
+
+class InputsNotCapturedError(GateError):
+    """The session never held what the analysis needs — not a gate verdict.
+
+    Structured so a caller can tell the kinds apart without parsing the
+    message (R05.11): ``kind`` is ``"not_captured"`` when named inputs are
+    empty in the session, ``"not_co_observed"`` when every input is present
+    but no two overlapped in time; ``missing`` names the empty inputs.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: Literal["not_captured", "not_co_observed"],
+        missing: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.missing = missing
 
 
 @dataclass
@@ -145,7 +167,8 @@ def _refuse_missing_inputs(
     bindings_path: Path,
     dids_path: Path,
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float,
+    mode01_exclusion_note: str | None = None,
 ) -> NoReturn:
     """Say *why* there is nothing to analyse instead of reporting zero bands.
 
@@ -159,12 +182,17 @@ def _refuse_missing_inputs(
 
     Measured 2026-08-06: a clean 25-minute all-DID capture, 18k samples per
     channel at 14.93 Hz, returned ``started: 0``. That reads as "the gates
-    rejected everything". In fact the ``tuning-did`` profile sets
-    ``mode01_enabled: false`` — it must, because Mode 01 and Mode 22 are
-    mutually exclusive on this ECM — and commanded AFR exists only as Mode 01
-    PID 0x44. The question was unanswerable before the truck moved.
+    rejected everything". In fact the ``tuning-did`` profile disables Mode 01
+    (on that vehicle Mode 01 and Mode 22 are mutually exclusive), and
+    commanded AFR existed only as a Mode 01 PID. The question was unanswerable
+    before the truck moved.
+
+    Raises :class:`InputsNotCapturedError`. Why a vehicle's all-DID captures
+    lack Mode 01 is a vehicle fact, so it is ``mode01_exclusion_note`` from
+    the profile's ``tuning_providers.yaml``, never a sentence in shared code.
     """
     missing: list[str] = []
+    unresolvable: list[str] = []
     for spec in specs:
         try:
             rows = read_channels(
@@ -176,38 +204,39 @@ def _refuse_missing_inputs(
                 afr_stoich=afr_stoich,
             )
         except Exception as exc:  # unresolvable spec is itself a missing input
-            missing.append(f"{spec} ({type(exc).__name__}: {exc})")
+            missing.append(spec)
+            unresolvable.append(f"{spec} ({type(exc).__name__}: {exc})")
             continue
         if rows.empty:
             missing.append(spec)
+            unresolvable.append(spec)
 
     detail = ""
     if isinstance(session, Path):
-        profile = read_json_object(session / "capture_profile.json")
-        if profile is not None:
-            snapshot = profile.get("profile_snapshot")
-            if not isinstance(snapshot, dict):
-                snapshot = profile
-            if snapshot.get("mode01_enabled") is False:
-                detail = (
-                    f" This session was captured with profile "
-                    f"{profile.get('profile')!r}, which disables Mode 01 — and Mode 01 "
-                    "cannot run alongside Mode 22 on this ECM. Commanded AFR (PID 0x44) "
-                    "is therefore absent by construction, not by chance."
-                )
+        manifest = read_capture_manifest(session)
+        if manifest is not None and manifest.profile_snapshot.get("mode01_enabled") is False:
+            detail = (
+                f" This session was captured with profile {manifest.profile!r}, which "
+                "disables Mode 01, so its Mode 01 channels are absent by construction, "
+                "not by chance."
+            )
+            if mode01_exclusion_note:
+                detail += f" {mode01_exclusion_note.strip()}"
 
-    raise GateError(
+    raise InputsNotCapturedError(
         "this session cannot answer delivery error — its inputs were never "
         "captured, which is not the same as the gates rejecting every sample. "
         + (
-            "Empty in this session: " + ", ".join(missing)
+            "Empty in this session: " + ", ".join(unresolvable)
             if missing
             else "No two required channels overlapped in time."
         )
         + detail
         + " Use a Mode 01 capture for commanded-vs-measured fuelling, or feed a"
         " semantic frame to delivery_error_from_semantic_frame() once a Mode 22"
-        " provider for commanded AFR exists."
+        " provider for commanded AFR exists.",
+        kind="not_captured" if missing else "not_co_observed",
+        missing=tuple(missing),
     )
 
 
@@ -254,12 +283,13 @@ def delivery_semantic_frame(
     calibration: AfrCalibration,
     measured_spec: str = "obd:O2_WR_LAMBDA_S1",
     measured_is_lambda: bool = True,
-    afr_stoich: float = 14.7,
-    min_load: float | None = 85.0,
+    afr_stoich: float,
+    min_load: float | None,
     grid: str = "1s",
     cell_agg: str = "last",
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
+    mode01_exclusion_note: str | None = None,
 ) -> pd.DataFrame:
     """The Mode-01 delivery inputs of one session as semantic roles.
 
@@ -298,6 +328,7 @@ def delivery_semantic_frame(
             dids_path=dids_path,
             calibration=calibration,
             afr_stoich=afr_stoich,
+            mode01_exclusion_note=mode01_exclusion_note,
         )
     measured = frame[measured_spec].astype(float)
     ratio = frame[EQUIV_RATIO_SPEC].astype(float)
@@ -322,14 +353,15 @@ def delivery_error(
     calibration: AfrCalibration,
     measured_spec: str = "obd:O2_WR_LAMBDA_S1",
     measured_is_lambda: bool = True,
-    afr_stoich: float = 14.7,
-    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
-    min_load: float | None = 85.0,
+    afr_stoich: float,
+    rpm_bands: tuple[float, ...],
+    min_load: float | None,
     grid: str = "1s",
     cell_agg: str = "last",
     revisions: TuneRevisionRegistry | None = None,
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
+    mode01_exclusion_note: str | None = None,
 ) -> DeliveryError:
     """Delivery error at enrichment, with every gate applied.
 
@@ -357,6 +389,7 @@ def delivery_error(
         cell_agg=cell_agg,
         bindings_path=bindings_path,
         dids_path=dids_path,
+        mode01_exclusion_note=mode01_exclusion_note,
     )
 
     revision = None
@@ -380,8 +413,8 @@ def delivery_error_from_semantic_frame(
     frame: pd.DataFrame,
     *,
     measured_spec: str,
-    afr_stoich: float = 14.7,
-    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
+    afr_stoich: float,
+    rpm_bands: tuple[float, ...],
     min_load: float | None = None,
     grid: str = "1s",
     fueling_gate_name: str = "fueling_inactive",
@@ -423,8 +456,8 @@ def delivery_error_from_semantic_frame(
 def gate_delivery_samples(
     frame: pd.DataFrame,
     *,
-    afr_stoich: float = 14.7,
-    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
+    afr_stoich: float,
+    rpm_bands: tuple[float, ...],
     min_load: float | None = None,
     grid: str = "1s",
     fueling_gate_name: str = "fueling_inactive",
@@ -515,7 +548,7 @@ def delivery_error_from_gated(
     report: GateReport,
     *,
     measured_spec: str,
-    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
+    rpm_bands: tuple[float, ...],
     tune_revision: str | None = None,
     tune_revision_source: str = "semantic_frame",
 ) -> DeliveryError:
@@ -585,6 +618,11 @@ class SessionComparison:
     #: WOT and 7.7 deg across all conditions — so this travels with the sigma
     #: figures rather than being assumed to match.
     floor_conditions: str | None = None
+    #: The regime the caller declared this comparison was made under.
+    comparison_conditions: str | None = None
+    #: Why the cells carry no sigma, when a floor was asked for and refused
+    #: (:class:`~src.analysis.noise_floor.FloorRefusal`), else ``None``.
+    floor_refusal: dict[str, Any] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -592,6 +630,8 @@ class SessionComparison:
             "tune_revision_sources": list(self.tune_revision_sources),
             "tune_revision_conflicts": list(self.tune_revision_conflicts),
             "floor_conditions": self.floor_conditions,
+            "comparison_conditions": self.comparison_conditions,
+            "floor_refusal": self.floor_refusal,
             "same_revision": (
                 self.tune_revisions[0] == self.tune_revisions[1]
                 if self.tune_revisions[0] is not None and self.tune_revisions[1] is not None
@@ -605,6 +645,27 @@ class SessionComparison:
         }
 
 
+def _cell_labels(values: pd.Series, edges: Sequence[float]) -> pd.Series:
+    """Each value's cell under the one bin rule (:func:`src.decode.surface_eval.bin_indices`).
+
+    Labels read ``[lo, hi)`` (the last cell ``[lo, hi]``). Values outside the
+    edges get no cell. R05.10: this used right-closed ``pd.cut``, under which
+    the minimum of auto-computed ``linspace`` edges fell in no cell and every
+    sample at the lowest operating point was silently dropped.
+    """
+    edge_array = np.asarray(edges, dtype=float)
+    numeric = pd.to_numeric(values, errors="coerce").to_numpy(dtype=float)
+    inside = np.isfinite(numeric) & (numeric >= edge_array[0]) & (numeric <= edge_array[-1])
+    index = bin_indices(np.where(inside, numeric, edge_array[0]), edge_array)
+    last = len(edge_array) - 2
+    names = [
+        str(pd.Interval(edge_array[i], edge_array[i + 1], closed="both" if i == last else "left"))
+        for i in range(last + 1)
+    ]
+    labels = [names[i] if ok else None for i, ok in zip(index, inside, strict=True)]
+    return pd.Series(labels, index=values.index, dtype=object)
+
+
 def compare_sessions(
     a: Path | pd.DataFrame,
     b: Path | pd.DataFrame,
@@ -616,22 +677,25 @@ def compare_sessions(
     unsafe_axes: bool = False,
     grid: str = "1s",
     calibration: AfrCalibration | None = None,
-    afr_stoich: float = 14.7,
+    afr_stoich: float,
     bindings_path: Path = BINDINGS_YAML,
     dids_path: Path = DIDS_YAML,
-    noise_floor: NoiseFloor | float | None = None,
+    noise_floor: NoiseFloor | None = None,
     floor_channel: str | None = None,
+    conditions: str | None = None,
     revisions: TuneRevisionRegistry | None = None,
 ) -> SessionComparison:
     """A-vs-B on a matched grid, refusing load as an axis.
 
-    ``noise_floor`` is either a :class:`~src.analysis.noise_floor.NoiseFloor`
-    (with ``floor_channel``) or a bare per-cell sd. Prefer the object: it
-    carries the regime the floor was measured in, and that regime is part of
-    the measurement — the same null pair gives 0.48 deg of spark spread at WOT
-    and 7.7 deg across all conditions, so quoting one against the other
-    understates noise by ~16x. Without any floor the sigma columns read
-    ``unavailable`` rather than an invented significance.
+    ``noise_floor`` (with ``floor_channel``) gates the deltas through
+    :meth:`~src.analysis.noise_floor.NoiseFloor.significance`, which needs the
+    regime this comparison was made under as ``conditions``. The floor carries
+    the regime it was measured in, and that regime is part of the measurement
+    — the same null pair gives 0.48 deg of spark spread at WOT and 7.7 deg
+    across all conditions, so quoting one against the other understates noise
+    by ~16x. A mismatch is refused and reported in ``floor_refusal``; without
+    any floor the sigma columns read ``unavailable`` rather than an invented
+    significance. (A bare float floor is no longer accepted: it has no regime.)
     """
     for axis in axes:
         _assert_axis_allowed(axis, unsafe=unsafe_axes)
@@ -640,6 +704,13 @@ def compare_sessions(
             "a NoiseFloor was given without floor_channel — name the channel whose "
             "spread should gate these deltas. Picking one silently would also pick "
             "the regime it was measured in, and a floor is only valid for its own."
+        )
+    if noise_floor is not None and conditions is None:
+        raise GateError(
+            "a NoiseFloor was given without conditions — state the regime this "
+            "comparison was made under. The floor is refused unless it was measured "
+            "under the same one (R05.2); a WOT floor quoted against idle cells "
+            "understates noise ~16x."
         )
 
     specs = [value, *axes]
@@ -677,9 +748,10 @@ def compare_sessions(
         bins = tuple(edges)
 
     def cell_frame(frame: pd.DataFrame) -> pd.DataFrame:
-        keys = []
-        for axis, edges in zip(axes, bins, strict=True):
-            keys.append(pd.cut(frame[axis], list(edges)).astype(str).rename(axis))
+        keys = [
+            _cell_labels(frame[axis], edges).rename(axis)
+            for axis, edges in zip(axes, bins, strict=True)
+        ]
         return frame.groupby(keys, observed=True).agg(n=(value, "size"), mean=(value, "mean"))
 
     cells_a, cells_b = cell_frame(frame_a), cell_frame(frame_b)
@@ -687,21 +759,19 @@ def compare_sessions(
     joined = joined[(joined["n_a"] >= min_cell_samples) & (joined["n_b"] >= min_cell_samples)]
     joined = joined.assign(delta=joined["mean_b"] - joined["mean_a"])
 
-    floor_sd: float | None = None
     floor_conditions: str | None = None
-    if isinstance(noise_floor, NoiseFloor) and floor_channel is not None:
-        floor_sd = noise_floor.sd_for(floor_channel)
+    floor_refusal: dict[str, Any] | None = None
+    joined["delta_sigma"] = np.nan
+    joined["distinguishable"] = pd.NA
+    if noise_floor is not None and floor_channel is not None and conditions is not None:
         entry = noise_floor.channels.get(floor_channel)
         floor_conditions = entry.conditions if entry is not None else None
-    elif isinstance(noise_floor, (int, float)):
-        floor_sd = float(noise_floor)
-
-    if floor_sd is not None and floor_sd > 0:
-        joined["delta_sigma"] = joined["delta"] / floor_sd
-        joined["distinguishable"] = joined["delta_sigma"].abs() >= 2.0
-    else:
-        joined["delta_sigma"] = np.nan
-        joined["distinguishable"] = pd.NA
+        verdict = noise_floor.significance(floor_channel, joined["delta"], conditions=conditions)
+        if isinstance(verdict, FloorRefusal):
+            floor_refusal = verdict.as_dict()
+        else:
+            joined["delta_sigma"] = verdict.delta_sigma
+            joined["distinguishable"] = verdict.distinguishable
 
     def _revision(session: Path | pd.DataFrame) -> tuple[str | None, str, bool]:
         if not isinstance(session, Path):
@@ -716,6 +786,8 @@ def compare_sessions(
         tune_revision_sources=(revision_a[1], revision_b[1]),
         tune_revision_conflicts=(revision_a[2], revision_b[2]),
         floor_conditions=floor_conditions,
+        comparison_conditions=conditions,
+        floor_refusal=floor_refusal,
         cells=joined.reset_index(),
         mean_delta=float(joined["delta"].mean()) if len(joined) else float("nan"),
         n_cells=int(len(joined)),
@@ -724,90 +796,11 @@ def compare_sessions(
     )
 
 
-@dataclass
-class ScaleStability:
-    """Does one linear map survive on data it was not fitted to?"""
-
-    scale_a: float
-    offset_a: float
-    scale_b: float
-    drift_pct: float
-    oos_r2: float
-    verdict: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "scale_a": self.scale_a,
-            "offset_a": self.offset_a,
-            "scale_b": self.scale_b,
-            "drift_pct": self.drift_pct,
-            "oos_r2": self.oos_r2,
-            "verdict": self.verdict,
-        }
-
-
-#: Drift thresholds, calibrated against the ECM_RPM control (0.10 %) and the
-#: 0x23D outcomes: pedal/throttle held 0.24 %/0.16 % and were promoted to
-#: `confirmed`; the best airflow candidate drifted -6.5 % and was deliberately
-#: left unpinned. See commit c341570.
-STABLE_DRIFT_PCT = 1.5
-UNSTABLE_DRIFT_PCT = 3.0
-
-
-def scale_stability(
-    x_a: np.ndarray | pd.Series,
-    y_a: np.ndarray | pd.Series,
-    x_b: np.ndarray | pd.Series,
-    y_b: np.ndarray | pd.Series,
-) -> ScaleStability:
-    """Fit ``y = m·x + c`` on window A, then test it on window B.
-
-    Correlation alone picks the wrong byte whenever the true signal drives
-    whatever you regressed against — that is how one binding was mislabelled
-    twice (RPM, then airflow, when it was pedal position). What separates a
-    real binding from a correlated one is whether the *same* linear map holds
-    on independent data.
-    """
-    xa = np.asarray(x_a, dtype=float)
-    ya = np.asarray(y_a, dtype=float)
-    xb = np.asarray(x_b, dtype=float)
-    yb = np.asarray(y_b, dtype=float)
-    for name, arr in (("A", xa), ("B", xb)):
-        if len(arr) < 3 or float(np.std(arr)) == 0.0:
-            raise GateError(f"window {name} needs >=3 samples with non-zero variance")
-
-    m_a, c_a = np.polyfit(xa, ya, 1)
-    m_b, _ = np.polyfit(xb, yb, 1)
-    predicted = m_a * xb + c_a
-    ss_res = float(np.sum((yb - predicted) ** 2))
-    ss_tot = float(np.sum((yb - yb.mean()) ** 2))
-    oos_r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    drift = 100.0 * (m_b - m_a) / m_a if m_a else float("nan")
-
-    magnitude = abs(drift)
-    if magnitude <= STABLE_DRIFT_PCT:
-        verdict = "stable"
-    elif magnitude >= UNSTABLE_DRIFT_PCT:
-        verdict = "unstable"
-    else:
-        verdict = "indeterminate"
-
-    return ScaleStability(
-        scale_a=float(m_a),
-        offset_a=float(c_a),
-        scale_b=float(m_b),
-        drift_pct=float(drift),
-        oos_r2=float(oos_r2),
-        verdict=verdict,
-    )
-
-
 __all__ = [
-    "DEFAULT_RPM_BANDS",
     "FORBIDDEN_AXES",
     "DeliveryError",
     "GateError",
-    "ScaleStability",
+    "InputsNotCapturedError",
     "SessionComparison",
     "compare_sessions",
     "EQUIV_RATIO_SPEC",
@@ -817,5 +810,4 @@ __all__ = [
     "delivery_error_from_semantic_frame",
     "gate_delivery_samples",
     "delivery_semantic_frame",
-    "scale_stability",
 ]

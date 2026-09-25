@@ -13,26 +13,26 @@ from src.analysis.fingerprint import write_fingerprint
 from src.analysis.reference_epoch import ReferenceEpoch, StatSummary, write_reference_epoch
 from src.config import CanaryConfig
 from src.control.trends import corpus_trend_summary, evaluate_and_alert_trends
+from tests.configs import READ_ONLY_INPUTS, isolated_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
 def _config(tmp_path: Path) -> CanaryConfig:
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    return config.model_copy(
-        update={
-            "collection": config.collection.model_copy(
-                update={"storage_path": tmp_path / "storage"}
-            ),
-            "daemon": config.daemon.model_copy(
-                update={
-                    "reference_epoch": tmp_path / "reference_epoch.json",
-                    "trend_alert_state": tmp_path / "trend_alert_state.json",
-                    "anomalies_dir": tmp_path / "anomalies",
-                }
-            ),
-        }
+    # Every writable path under tmp_path, the session catalog included: the
+    # summary opens ``daemon.catalog_db``, which defaulted to the repo's real
+    # data/control/catalog.db (R07.2).
+    return isolated_config(
+        tmp_path,
+        "example",
+        keep=READ_ONLY_INPUTS,
+        storage=tmp_path / "storage",
+        daemon={
+            "reference_epoch": tmp_path / "reference_epoch.json",
+            "trend_alert_state": tmp_path / "trend_alert_state.json",
+            "anomalies_dir": tmp_path / "anomalies",
+        },
     )
 
 

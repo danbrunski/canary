@@ -600,12 +600,15 @@ def _register_read_tools(
             axes: list[str] | None = None,
             floor_channel: str | None = None,
             unsafe_axes: bool = False,
+            conditions: str | None = None,
         ) -> dict[str, Any]:
             """A/B two stored sessions on a matched grid (local). Refuses
             calculated load as an axis — it is derived from BFS, so it moves
             when fuelling moves; grid on rpm x MAF or rpm x BFS. Pass
-            ``floor_channel`` to quote each delta against the measured
-            same-tune noise floor, below which nothing is distinguishable."""
+            ``floor_channel`` with ``conditions`` (the regime this comparison
+            was made under) to quote each delta against the measured same-tune
+            noise floor, below which nothing is distinguishable; a floor
+            measured under other conditions is refused, not quoted."""
             return tuning_analysis_tool.compare_tuning_sessions(
                 config_path,
                 session=session,
@@ -614,6 +617,7 @@ def _register_read_tools(
                 axes=tuple(axes) if axes else ("obd:RPM", "obd:MAF"),
                 floor_channel=floor_channel,
                 unsafe_axes=unsafe_axes,
+                conditions=conditions,
             )
     else:
         logger.info(

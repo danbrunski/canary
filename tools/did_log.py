@@ -58,13 +58,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import signal
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -72,18 +69,21 @@ from pathlib import Path
 from typing import Any, Protocol, TextIO
 
 from src.analysis.did_scan import BatchRead, CanableMode22Transport, sweep_dids
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
-from src.collection.obd_scheduler import did_access
-from src.config import CanaryConfig
-
-DEFAULT_TOKEN_PATH = Path("/etc/canary/control.token")
-
-#: Why passive mode is mandatory — quoted in every refusal and stop message.
-PASSIVE_REASON = (
-    "the daemon's OBD scheduler sends 10 81 and exits the diagnostic session this "
-    "logger holds, and this logger's session blacks out the daemon's Mode 01 polling"
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    RECORD_KEY,
+    PassiveChecker,
+    PassiveRefusedError,
+    PassiveVerdict,
+    add_bus_tool_args,
+    header_record,
+    load_widths,
+    open_client,
+    parse_header,
+    passive_problem,
+    require_passive,
+    resolve_session,
 )
 
 
@@ -93,16 +93,6 @@ class LogTransport(Protocol):
     def read_dids(
         self, dids: Sequence[int], byte_length_for: Callable[[int], int | None]
     ) -> BatchRead: ...
-
-
-@dataclass(frozen=True)
-class PassiveStatus:
-    armed: bool
-    ttl_remaining_seconds: float | None
-    detail: str
-
-
-PassiveChecker = Callable[[], PassiveStatus]
 
 
 def _did_key(did: int) -> str:
@@ -124,9 +114,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="did_log",
         description="Continuous, per-request-timestamped Mode 22 DID logger (JSONL).",
     )
-    parser.add_argument(
-        "--config", type=Path, default=Path("canary.yaml"), help="canary.yaml path."
-    )
+    add_bus_tool_args(parser)
     parser.add_argument(
         "--start", type=lambda s: int(s, 0), default=0x1100, help="First DID (default 0x1100)."
     )
@@ -139,24 +127,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--label", default="", help="Free-form tag written into the header.")
     parser.add_argument("--out", type=Path, required=True, help="JSONL output path.")
     parser.add_argument(
-        "--header", default="7E0", help="ECU request CAN ID, hex (default 7E0 = engine)."
-    )
-    parser.add_argument(
-        "--session",
-        default="auto",
-        help=(
-            "UDS diagnostic-session sub-function (hex). 'auto' (default) resolves from "
-            "data/dids.yaml's access block; 'none' forces bare polling."
-        ),
-    )
-    parser.add_argument(
         "--keepalive", type=float, default=2.0, help="Re-enter --session every N s (default 2.0)."
     )
     parser.add_argument(
         "--delay-seconds", type=float, default=0.0, help="Pause between requests, seconds."
-    )
-    parser.add_argument(
-        "--read-timeout", type=float, default=1.0, help="Per-request read timeout (default 1.0)."
     )
     parser.add_argument(
         "--batch",
@@ -176,106 +150,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
             "JSON or a previous did_log JSONL (its header line)."
         ),
     )
-    parser.add_argument(
-        "--daemon-url",
-        default="http://127.0.0.1:8000",
-        help="Daemon base URL for the passive-mode check (default http://127.0.0.1:8000).",
-    )
-    parser.add_argument(
-        "--passive-check-seconds",
-        type=float,
-        default=5.0,
-        help="Re-check daemon passive mode every N s (default 5).",
-    )
-    parser.add_argument(
-        "--no-daemon",
-        action="store_true",
-        help="Skip the passive-mode check (bench use with no daemon running).",
-    )
     return parser.parse_args(argv)
-
-
-def _resolve_session(raw: str) -> int | None:
-    normalized = raw.strip().lower()
-    if normalized == "none":
-        return None
-    if normalized == "auto":
-        access = did_access()
-        return access.session if access is not None else None
-    return int(raw, 16)
-
-
-def _resolve_token() -> str | None:
-    token = os.environ.get("CANARY_CONTROL_TOKEN")
-    if token:
-        return token.strip()
-    try:
-        return DEFAULT_TOKEN_PATH.read_text().strip() or None
-    except OSError:
-        return None
-
-
-def http_passive_checker(
-    base_url: str, token: str | None, *, timeout: float = 2.0
-) -> PassiveChecker:
-    """``GET {base_url}/control/passive`` → :class:`PassiveStatus`.
-
-    Any failure (unreachable, auth refused, unexpected shape) reads as NOT
-    armed: a daemon we cannot see may have restarted, and a restart comes
-    back with passive off and its scheduler polling.
-    """
-    url = base_url.rstrip("/") + "/control/passive"
-
-    def _check() -> PassiveStatus:
-        request = urllib.request.Request(url, method="GET")
-        if token:
-            request.add_header("Authorization", f"Bearer {token}")
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                body = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return PassiveStatus(False, None, f"GET {url} -> HTTP {exc.code}")
-        except (urllib.error.URLError, OSError, ValueError) as exc:
-            return PassiveStatus(False, None, f"GET {url} failed: {exc}")
-        passive = body.get("passive") if isinstance(body, dict) else None
-        if not isinstance(passive, dict) or "enabled" not in passive:
-            return PassiveStatus(False, None, f"GET {url}: unexpected response {body!r}")
-        ttl = passive.get("ttl_remaining_seconds")
-        ttl_value = float(ttl) if isinstance(ttl, int | float) else None
-        armed = passive["enabled"] is True
-        return PassiveStatus(armed, ttl_value, "armed" if armed else "passive mode is off")
-
-    return _check
-
-
-def _passive_problem(status: PassiveStatus, check_seconds: float) -> str | None:
-    """Why the run must not (continue to) transmit, or None if it may."""
-    if not status.armed:
-        return status.detail
-    ttl = status.ttl_remaining_seconds
-    if ttl is not None and ttl < check_seconds:
-        return (
-            f"passive TTL {ttl:.1f}s remaining is below the {check_seconds:g}s check "
-            "interval; the daemon will resume polling"
-        )
-    return None
-
-
-def load_widths(path: Path) -> dict[int, int]:
-    """Measured payload widths from a did_sweep snapshot or a did_log JSONL header."""
-    text = path.read_text()
-    try:
-        raw: Any = json.loads(text)
-    except json.JSONDecodeError:
-        first = next((line for line in text.splitlines() if line.strip()), "")
-        raw = json.loads(first)
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
-    if raw.get("kind") == "header" and isinstance(raw.get("widths"), dict):
-        return {int(key, 16): int(width) for key, width in raw["widths"].items()}
-    if isinstance(raw.get("values"), dict):
-        return {int(key, 16): len(hexvalue) // 2 for key, hexvalue in raw["values"].items()}
-    raise ValueError(f"{path}: not a did_sweep snapshot or did_log header")
 
 
 def discover_widths(
@@ -397,18 +272,17 @@ def run(
         return width if width is not None and width > 0 else None
 
     writer.write(
-        {
-            "kind": "header",
-            "tool": "did_log",
-            "started_at": wall_clock(),
-            "request_id": f"0x{request_id:X}",
-            "session": f"0x{session:X}" if session is not None else None,
-            "range": [_did_key(did_range[0]), _did_key(did_range[1])],
-            "batch": batch,
-            "widths": {_did_key(d): widths[d] for d in dids},
-            "label": label,
-            "daemon_checked": passive_checker is not None,
-        }
+        header_record(
+            "did_log",
+            started_at=wall_clock(),
+            request_id=f"0x{request_id:X}",
+            session=f"0x{session:X}" if session is not None else None,
+            range=[_did_key(did_range[0]), _did_key(did_range[1])],
+            batch=batch,
+            widths={_did_key(d): widths[d] for d in dids},
+            label=label,
+            daemon_checked=passive_checker is not None,
+        )
     )
 
     counts = {
@@ -441,7 +315,7 @@ def run(
             last_check is None or now - last_check >= passive_check_seconds
         ):
             last_check = now
-            problem = _passive_problem(passive_checker(), passive_check_seconds)
+            problem = passive_problem(passive_checker(), passive_check_seconds)
             if problem is not None:
                 reason, detail = "passive_disarmed", problem
                 return True
@@ -458,7 +332,7 @@ def run(
             counts["reads_ok"] += 1
         writer.write(
             {
-                "kind": "read",
+                RECORD_KEY: "read",
                 "t_send": t_send,
                 "t_recv": t_recv,
                 "batch": False,
@@ -494,7 +368,7 @@ def run(
                     last_nrc = result.negative_response_code
                 writer.write(
                     {
-                        "kind": "read",
+                        RECORD_KEY: "read",
                         "t_send": t_send,
                         "t_recv": t_recv,
                         "batch": True,
@@ -511,7 +385,7 @@ def run(
                     batching = False
                     writer.write(
                         {
-                            "kind": "batch_rejected",
+                            RECORD_KEY: "batch_rejected",
                             "t": wall_clock(),
                             "dids": [_did_key(d) for d in group],
                             "nrc": _nrc_hex(result.negative_response_code),
@@ -535,7 +409,7 @@ def run(
             counts["batch_gaps"] += len(gaps)
             writer.write(
                 {
-                    "kind": "read",
+                    RECORD_KEY: "read",
                     "t_send": t_send,
                     "t_recv": t_recv,
                     "batch": True,
@@ -553,7 +427,7 @@ def run(
             counts["passes"] += 1
             writer.write(
                 {
-                    "kind": "pass",
+                    RECORD_KEY: "pass",
                     "n": counts["passes"],
                     "t_start": pass_start,
                     "t_end": wall_clock(),
@@ -561,7 +435,7 @@ def run(
             )
 
     summary: dict[str, Any] = {
-        "kind": "summary",
+        RECORD_KEY: "summary",
         "reason": reason,
         **counts,
         "batch_requested": batch,
@@ -577,28 +451,15 @@ def run(
 
 @contextmanager
 def _open_transport(
-    config_path: Path,
-    *,
-    request_id: int,
-    session: int | None,
-    keepalive: float,
-    read_timeout: float,
+    args: argparse.Namespace, passive: PassiveVerdict, *, session: int | None
 ) -> Iterator[LogTransport]:
-    config = CanaryConfig.from_yaml(config_path)
-    bus = bus_factory(config.hardware.can)
-    try:
-        client = CanObdClient(
-            bus,
-            request_id=request_id,
-            response_id_min=request_id + 8,
-            response_id_max=request_id + 8,
-            timeout_seconds=read_timeout,
-        )
+    with open_client(args, passive) as client:
         yield CanableMode22Transport(
-            client, request_id=request_id, session=session, keepalive_seconds=keepalive
+            client,
+            request_id=parse_header(args.header),
+            session=session,
+            keepalive_seconds=args.keepalive,
         )
-    finally:
-        bus.shutdown()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -607,12 +468,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: DID range must satisfy 0 <= start <= end <= 0xFFFF", file=sys.stderr)
         return 1
     try:
-        request_id = int(args.header, 16)
-    except ValueError:
-        print(f"error: --header must be hex (e.g. 7E0), got {args.header!r}", file=sys.stderr)
-        return 1
-    if not 0 <= request_id <= 0x7FF:
-        print(f"error: --header out of 11-bit CAN range: 0x{request_id:X}", file=sys.stderr)
+        request_id = parse_header(args.header)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
     if not 1 <= args.batch <= MAX_BATCHED_DIDS:
         print(f"error: --batch must be 1-{MAX_BATCHED_DIDS}, got {args.batch}", file=sys.stderr)
@@ -621,12 +479,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: --duration and --passive-check-seconds must be > 0", file=sys.stderr)
         return 1
     try:
-        session = _resolve_session(args.session)
-    except ValueError:
-        print(
-            f"error: --session must be hex, 'auto', or 'none', got {args.session!r}",
-            file=sys.stderr,
-        )
+        session = resolve_session(args.session)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
     widths: dict[int, int] | None = None
@@ -638,19 +493,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
         widths = {d: w for d, w in loaded.items() if args.start <= d <= args.end}
 
-    checker: PassiveChecker | None = None
-    if not args.no_daemon:
-        checker = http_passive_checker(args.daemon_url, _resolve_token())
-        problem = _passive_problem(checker(), args.passive_check_seconds)
-        if problem is not None:
-            print(
-                f"refusing: daemon passive mode is not usable ({problem}). It must stay "
-                f"armed for the whole run because {PASSIVE_REASON}. Arm it with "
-                'POST /control/passive {"enabled": true, "ttl_seconds": ...}, or pass '
-                "--no-daemon when no daemon is running.",
-                file=sys.stderr,
-            )
-            return 2
+    try:
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
 
     stop_event = threading.Event()
     previous_handlers = {
@@ -658,13 +505,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         for sig in (signal.SIGINT, signal.SIGTERM)
     }
     try:
-        with _open_transport(
-            args.config,
-            request_id=request_id,
-            session=session,
-            keepalive=args.keepalive,
-            read_timeout=args.read_timeout,
-        ) as transport:
+        with _open_transport(args, passive, session=session) as transport:
             session_desc = f"0x{session:X}" if session is not None else "none"
             if widths is None:
                 print(
@@ -705,7 +546,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     session=session,
                     did_range=(args.start, args.end),
                     label=args.label,
-                    passive_checker=checker,
+                    passive_checker=passive.checker,
                     passive_check_seconds=args.passive_check_seconds,
                     delay_seconds=args.delay_seconds,
                     stop_event=stop_event,

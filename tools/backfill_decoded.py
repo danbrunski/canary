@@ -42,6 +42,7 @@ from src.can_ids import parse_can_channel
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import Signal, load_bindings
+from src.preprocessing.decode import decode_signal_column
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 
 # Same Any-alias pattern as src/storage/parquet_writer.py — pyarrow ships
@@ -128,22 +129,13 @@ def decode_session_frame(can_rows: pd.DataFrame, signals: list[Signal]) -> pd.Da
             continue
         payloads = group["payload"]
         for sig in by_can_id[can_id]:
-            end = sig.byte_start + sig.byte_length
             meta = json.dumps(
                 {"can_id": can_id, "binding_confidence": sig.confidence}, sort_keys=True
             )
-
-            def _extract(
-                p: object,
-                _start: int = sig.byte_start,
-                _end: int = end,
-                _order: str = sig.byte_order,
-            ) -> float:
-                if not isinstance(p, (bytes, bytearray)) or len(p) < _end:
-                    return float("nan")
-                return float(int.from_bytes(bytes(p[_start:_end]), byteorder=_order))  # type: ignore[arg-type]
-
-            values = payloads.map(_extract)
+            # R04.4: the preprocessing decode path's own extraction, so the
+            # stored rows ("stored rows win" in decode_can_rows) are the same
+            # values a re-decode would produce.
+            values = pd.Series(decode_signal_column(payloads, sig), index=group.index)
             frame = pd.DataFrame(
                 {
                     "timestamp": group["timestamp"],

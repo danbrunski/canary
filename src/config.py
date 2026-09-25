@@ -6,8 +6,9 @@ silently dropped, so typos in config don't become silent drift at runtime.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, get_args
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -1216,3 +1217,68 @@ class CanaryConfig(_Strict):
         with path.open("r") as f:
             data = yaml.safe_load(f)
         return cls.model_validate(data)
+
+
+def _daemon_path_fields() -> tuple[str, ...]:
+    """Every ``Path`` or ``Path | None`` :class:`DaemonConfig` field, read off
+    the model.
+
+    Any other annotation that contains ``Path`` (``list[Path]``, a dict of
+    them, ...) is refused rather than skipped: :func:`rebase_state_paths`
+    would otherwise leave those paths pointing wherever they were, silently.
+    """
+    fields: list[str] = []
+    for name, field in DaemonConfig.model_fields.items():
+        annotation = field.annotation
+        if annotation is Path:
+            fields.append(name)
+            continue
+        args = get_args(annotation)
+        if args and set(args) == {Path, type(None)}:
+            fields.append(name)
+        elif _mentions_path(annotation):
+            raise TypeError(
+                f"DaemonConfig.{name}: {annotation!r} holds paths rebase_state_paths "
+                "cannot rebase; use Path or Path | None, or teach it this shape"
+            )
+    return tuple(fields)
+
+
+def _mentions_path(annotation: Any) -> bool:
+    return annotation is Path or any(_mentions_path(arg) for arg in get_args(annotation))
+
+
+def rebase_state_paths(
+    config: CanaryConfig, root: Path, *, keep: Iterable[str] = ()
+) -> CanaryConfig:
+    """``config`` with every daemon file/directory path moved under ``root``.
+
+    The field list is derived from :class:`DaemonConfig`'s ``Path``-typed
+    fields, so a path added there later is rebased without anyone remembering
+    to list it (R07.2: a hand-kept 12-entry copy in the validation harness had
+    already missed ``capture_profiles``). A relative path keeps its shape under
+    ``root`` (``data/control/audit.jsonl`` -> ``root/data/control/audit.jsonl``);
+    an absolute one is re-rooted the same way, so two fields never collide.
+
+    ``keep`` names fields left where they are -- read-only inputs such as
+    ``behavior_models`` that the caller wants to read from the real tree. A
+    name that is not a ``Path`` field of :class:`DaemonConfig` is refused, so
+    a typo cannot silently leave a writable path pointing at the repo.
+    """
+    fields = _daemon_path_fields()
+    kept = frozenset(keep)
+    unknown = kept - set(fields)
+    if unknown:
+        raise ValueError(
+            f"rebase_state_paths: {sorted(unknown)} are not Path fields of DaemonConfig "
+            f"(known: {sorted(fields)})"
+        )
+    update: dict[str, Path] = {}
+    for name in fields:
+        if name in kept:
+            continue
+        path: Path | None = getattr(config.daemon, name)
+        if path is None:
+            continue
+        update[name] = root / (path.relative_to(path.anchor) if path.is_absolute() else path)
+    return config.model_copy(update={"daemon": config.daemon.model_copy(update=update)})

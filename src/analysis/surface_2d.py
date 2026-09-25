@@ -19,20 +19,25 @@ index).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from collections.abc import Sequence
-from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
 
+from src.analysis.fit_provenance import fitted_now, training_data_hash
 from src.decode.behavior_models import (
     Axis2D,
     BehaviorModel2D,
     DeviationConfig,
     GridBinnedMeanFit,
     GridCell,
+)
+from src.decode.surface_eval import (
+    bin_indices,
+    containing_cell_indices,
+    evaluate_2d,
+    trusted_cell_mask,
 )
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
@@ -108,8 +113,8 @@ def fit_grid_binned_mean(
             extra={"surface_name": name, "x_column": x_column, "y_column": y_column},
         )
 
-    x_bins = _digitize_into_bins(x, x_edges_arr)
-    y_bins = _digitize_into_bins(y, y_edges_arr)
+    x_bins = bin_indices(x, x_edges_arr)
+    y_bins = bin_indices(y, y_edges_arr)
 
     n_x = len(x_edges_arr) - 1
     n_y = len(y_edges_arr) - 1
@@ -144,8 +149,8 @@ def fit_grid_binned_mean(
         sample_count=int(len(x)),
         r_squared=None,  # not meaningful for empirical per-cell means
         sessions=list(sessions),
-        fitted_at=_now_iso() if fitted_at is None else fitted_at,
-        training_data_hash=_hash_xyz(x, y, z),
+        fitted_at=fitted_now() if fitted_at is None else fitted_at,
+        training_data_hash=training_data_hash(x, y, z),
     )
     return BehaviorModel2D(
         name=name,
@@ -202,161 +207,8 @@ def _effective_dwell_seconds(frame: pd.DataFrame) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Evaluator
-# ---------------------------------------------------------------------------
-
-
-def evaluate_2d(model: BehaviorModel2D, x: float, y: float) -> GridCell | None:
-    """Evaluate the surface at ``(x, y)`` — bilinear-interpolated (4.4) over
-    the up-to-4 populated cells whose *centers* bracket the point, falling
-    back to the containing cell alone when a full quad isn't available
-    (grid edge, or a neighbor cell that's off-map/sparse). Returns ``None``
-    when:
-
-    * ``(x, y)`` is outside the grid extent, OR
-    * neither interpolation nor the containing cell has a trustworthy
-      expectation (``count < model.min_cell_count``, i.e. the operating
-      point was never observed during fit, or too rarely to trust).
-
-    Interpolating kills severity flips from operating-point drift across a
-    bin edge — nearest-cell-only serving made two readings a fraction of a
-    unit apart (one on either side of an edge) grade against two
-    independently-fit cell means. Returning a whole (possibly blended)
-    ``GridCell`` — not just ``mean`` — lets the decoder layer compute
-    relative deviations off ``std``, which is why we persist it.
-    """
-    x_axis, y_axis = model.axes
-    if not x_axis.bin_edges[0] <= x <= x_axis.bin_edges[-1]:
-        return None
-    if not y_axis.bin_edges[0] <= y <= y_axis.bin_edges[-1]:
-        return None
-    x_edges = np.asarray(x_axis.bin_edges, dtype=float)
-    y_edges = np.asarray(y_axis.bin_edges, dtype=float)
-    i = _bin_index(x, x_edges)
-    j = _bin_index(y, y_edges)
-    min_count = max(1, model.min_cell_count)
-
-    interpolated = _bilinear_cell(model, x, y, x_edges, y_edges, i, j, min_count)
-    if interpolated is not None:
-        return interpolated
-
-    cell = model.fit.cells[i * y_axis.bin_count + j]
-    if not _cell_eligible(model, cell):
-        return None
-    return cell
-
-
-def _bilinear_cell(
-    model: BehaviorModel2D,
-    x: float,
-    y: float,
-    x_edges: np.ndarray,
-    y_edges: np.ndarray,
-    i: int,
-    j: int,
-    min_count: int,
-) -> GridCell | None:
-    """Blend the 2×2 populated-cell quad around ``(x, y)`` by bin-center
-    distance, or ``None`` if no full populated quad exists (grid too
-    narrow near this edge, or any corner is off-map/sparse) — the caller
-    falls back to the single containing cell in that case."""
-    n_x, n_y = model.axes[0].bin_count, model.axes[1].bin_count
-    x_centers = (x_edges[:-1] + x_edges[1:]) / 2.0
-    y_centers = (y_edges[:-1] + y_edges[1:]) / 2.0
-
-    i0 = i if x >= x_centers[i] else i - 1
-    j0 = j if y >= y_centers[j] else j - 1
-    if i0 < 0 or i0 + 1 >= n_x or j0 < 0 or j0 + 1 >= n_y:
-        return None  # no full quad this close to the grid edge
-
-    cells = model.fit.cells
-
-    def cell_at(ii: int, jj: int) -> GridCell:
-        return cells[ii * n_y + jj]
-
-    c00, c10 = cell_at(i0, j0), cell_at(i0 + 1, j0)
-    c01, c11 = cell_at(i0, j0 + 1), cell_at(i0 + 1, j0 + 1)
-    if any(not _cell_eligible(model, c) for c in (c00, c10, c01, c11)):
-        return None
-
-    wx = min(max((x - x_centers[i0]) / (x_centers[i0 + 1] - x_centers[i0]), 0.0), 1.0)
-    wy = min(max((y - y_centers[j0]) / (y_centers[j0 + 1] - y_centers[j0]), 0.0), 1.0)
-
-    def blend(a00: float, a10: float, a01: float, a11: float) -> float:
-        return float(
-            a00 * (1 - wx) * (1 - wy) + a10 * wx * (1 - wy) + a01 * (1 - wx) * wy + a11 * wx * wy
-        )
-
-    return GridCell(
-        mean=blend(c00.mean, c10.mean, c01.mean, c11.mean),
-        # Variances combine linearly under a weighted mixture; interpolating
-        # standard deviations directly systematically understates uncertainty.
-        std=float(
-            np.sqrt(
-                max(
-                    0.0,
-                    blend(c00.std**2, c10.std**2, c01.std**2, c11.std**2),
-                )
-            )
-        ),
-        count=min(c00.count, c10.count, c01.count, c11.count),
-    )
-
-
-def _cell_eligible(model: BehaviorModel2D, cell: GridCell) -> bool:
-    return (
-        cell.count >= model.min_cell_count
-        and cell.session_count >= model.min_cell_sessions
-        and cell.dwell_seconds >= model.min_cell_dwell_seconds
-    )
-
-
-def trusted_cell_mask(model: BehaviorModel2D) -> np.ndarray:
-    """Row-major mask of cells the evaluator will serve (count, sessions, dwell)."""
-    return np.asarray([_cell_eligible(model, cell) for cell in model.fit.cells], dtype=bool)
-
-
-def containing_cell_indices(model: BehaviorModel2D, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-    """Flat row-major index of the cell containing each ``(x, y)``; ``-1`` off-grid.
-
-    Uses the same bin rule as :func:`evaluate_2d` (closed on the right end),
-    so envelope-coverage accounting (B02.4) counts the cells serving uses.
-    """
-    x_axis, y_axis = model.axes
-    x_edges = np.asarray(x_axis.bin_edges, dtype=float)
-    y_edges = np.asarray(y_axis.bin_edges, dtype=float)
-    xv = np.asarray(x, dtype=float)
-    yv = np.asarray(y, dtype=float)
-    inside = (
-        np.isfinite(xv)
-        & np.isfinite(yv)
-        & (xv >= x_edges[0])
-        & (xv <= x_edges[-1])
-        & (yv >= y_edges[0])
-        & (yv <= y_edges[-1])
-    )
-    out = np.full(len(xv), -1, dtype=int)
-    if inside.any():
-        i = _digitize_into_bins(xv[inside], x_edges)
-        j = _digitize_into_bins(yv[inside], y_edges)
-        out[inside] = i * y_axis.bin_count + j
-    return out
-
-
-# ---------------------------------------------------------------------------
 # helpers
 # ---------------------------------------------------------------------------
-
-
-def _digitize_into_bins(values: np.ndarray, edges: np.ndarray) -> np.ndarray:
-    """Place each value into ``[0, n_bins-1]`` — closed on the right end."""
-    bins = np.digitize(values, edges) - 1
-    clipped: np.ndarray = np.clip(bins, 0, len(edges) - 2)
-    return clipped
-
-
-def _bin_index(value: float, edges: np.ndarray) -> int:
-    return int(np.clip(np.digitize([value], edges)[0] - 1, 0, len(edges) - 2))
 
 
 def _validate_edges(edges: np.ndarray, label: str) -> None:
@@ -383,13 +235,11 @@ def _clean_xyz(
     )
 
 
-def _hash_xyz(x: np.ndarray, y: np.ndarray, z: np.ndarray) -> str:
-    h = hashlib.sha256()
-    h.update(x.tobytes())
-    h.update(y.tobytes())
-    h.update(z.tobytes())
-    return f"sha256:{h.hexdigest()[:16]}"
-
-
-def _now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+#: The serve-path evaluators live in :mod:`src.decode.surface_eval` (R05.10);
+#: re-exported so analysis callers keep one import for a surface family.
+__all__ = [
+    "containing_cell_indices",
+    "evaluate_2d",
+    "fit_grid_binned_mean",
+    "trusted_cell_mask",
+]

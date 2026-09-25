@@ -42,11 +42,16 @@ from src.analysis.did_scan import (
     sweep_dids,
     sweep_dids_batched,
 )
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient
 from src.collection.isotp import MAX_BATCHED_DIDS, nrc_name
-from src.collection.obd_scheduler import did_access
 from src.config import CanaryConfig
+from tools._bus_tool import (
+    PassiveVerdict,
+    add_bus_tool_args,
+    load_widths,
+    open_client,
+    parse_header,
+    resolve_session,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -54,9 +59,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         prog="did_sweep",
         description="One Mode 22 DID sweep pass; writes a labeled JSON snapshot.",
     )
-    parser.add_argument(
-        "--config", type=Path, default=Path("canary.yaml"), help="canary.yaml path."
-    )
+    # No daemon options: the JobController launches this, and the passive
+    # question belongs to whoever started the job (see main()).
+    add_bus_tool_args(parser, passive=False)
     parser.add_argument(
         "--start", type=lambda s: int(s, 0), required=True, help="First DID (hex ok, e.g. 0x1100)."
     )
@@ -67,26 +72,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--label", required=True, help="Tag for this snapshot (e.g. 'control', 'wot')."
     )
     parser.add_argument(
-        "--header", default="7E0", help="ECU request CAN ID, hex (default 7E0 = engine)."
-    )
-    parser.add_argument(
-        "--session",
-        default="auto",
-        help=(
-            "UDS diagnostic-session sub-function (hex) to enter + keep alive before "
-            "0x22 reads. 'auto' (default) resolves from data/dids.yaml's access "
-            "block; 'none' forces bare polling (ECUs that answer 0x22 in the "
-            "default session)."
-        ),
-    )
-    parser.add_argument(
         "--keepalive", type=float, default=2.0, help="Re-enter --session every N s (default 2.0)."
     )
     parser.add_argument(
         "--delay-seconds", type=float, default=0.0, help="Pause between DID reads, seconds."
-    )
-    parser.add_argument(
-        "--read-timeout", type=float, default=1.0, help="Per-request read timeout (default 1.0)."
     )
     parser.add_argument("--out", type=Path, required=True, help="Write the snapshot JSON here.")
     parser.add_argument(
@@ -116,34 +105,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _width_lookup(snapshot_path: Path | None) -> Callable[[int], int | None]:
-    """Build ``did -> payload width`` from a previously MEASURED snapshot.
+    """``did -> payload width`` from a previously MEASURED snapshot.
 
-    Deliberately NOT sourced from data/dids.yaml. A catalog entry's
-    ``byte_length`` is the width of the decoded value *within* the payload and
-    pairs with a ``byte_start`` that may be non-zero — it is not the payload
-    length, and using it as one would walk the batched response to the wrong
-    boundary and misattribute every later DID. A snapshot records what the ECU
-    actually returned, so its length is the payload length by construction.
-
-    An unknown DID returns None rather than a guess, which makes
-    ``sweep_dids_batched`` read it individually instead of desyncing.
+    Deliberately NOT sourced from data/dids.yaml: a catalog entry's
+    ``byte_length`` is the width of the decoded value *within* the payload, not
+    the payload length, and walking a batched response by it misattributes
+    every later DID. An unknown DID returns None rather than a guess, which
+    makes ``sweep_dids_batched`` read it individually instead of desyncing.
     """
-    widths: dict[int, int] = {}
-    if snapshot_path is not None:
-        raw = json.loads(snapshot_path.read_text())
-        for key, hexvalue in (raw.get("values") or {}).items():
-            widths[int(key, 16)] = len(hexvalue) // 2
+    widths = load_widths(snapshot_path) if snapshot_path is not None else {}
     return lambda did: widths.get(did)
-
-
-def _resolve_session(raw: str) -> int | None:
-    normalized = raw.strip().lower()
-    if normalized == "none":
-        return None
-    if normalized == "auto":
-        access = did_access()
-        return access.session if access is not None else None
-    return int(raw, 16)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -152,20 +123,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: DID range must satisfy 0 <= start <= end <= 0xFFFF", file=sys.stderr)
         return 1
     try:
-        request_id = int(args.header, 16)
-    except ValueError:
-        print(f"error: --header must be hex (e.g. 7E0), got {args.header!r}", file=sys.stderr)
-        return 1
-    if not 0 <= request_id <= 0x7FF:
-        print(f"error: --header out of 11-bit CAN range: 0x{request_id:X}", file=sys.stderr)
-        return 1
-    try:
-        session = _resolve_session(args.session)
-    except ValueError:
-        print(
-            f"error: --session must be hex, 'auto', or 'none', got {args.session!r}",
-            file=sys.stderr,
-        )
+        request_id = parse_header(args.header)
+        session = resolve_session(args.session)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
     if not 1 <= args.batch <= MAX_BATCHED_DIDS:
@@ -190,20 +151,23 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.widths_from is not None and not args.widths_from.is_file():
         print(f"error: --widths-from not found: {args.widths_from}", file=sys.stderr)
         return 1
+    try:
+        width_for = _width_lookup(args.widths_from)
+    except (OSError, ValueError) as exc:
+        print(f"error: --widths-from unreadable: {exc}", file=sys.stderr)
+        return 1
 
     config = CanaryConfig.from_yaml(args.config)
     dids = range(args.start, args.end + 1)
-    bus = bus_factory(config.hardware.can)
     hits = 0
     t0 = time.time()
-    try:
-        # The client pins a physical request to its one responder
-        # (request + 8) itself since R02.5.
-        client = CanObdClient(
-            bus,
-            request_id=request_id,
-            timeout_seconds=args.read_timeout,
-        )
+    # The passive check is skipped DELIBERATELY, not forgotten: this runs as a
+    # JobController subprocess whose argv carries no daemon URL or token, and
+    # whether a sweep may transmit beside the scheduler is decided by whoever
+    # started the job (the start_job caller arms set_passive_mode first if it
+    # wants the scheduler quiet). PassiveVerdict.job_controller() names that
+    # choice; nothing on the start_job path arms it automatically.
+    with open_client(args, PassiveVerdict.job_controller()) as client:
         transport = CanableMode22Transport(
             client, request_id=request_id, session=session, keepalive_seconds=args.keepalive
         )
@@ -225,7 +189,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             snapshot = sweep_dids_batched(
                 transport,
                 dids,
-                _width_lookup(args.widths_from),
+                width_for,
                 batch_size=args.batch,
                 delay_seconds=args.delay_seconds,
                 label=args.label,
@@ -239,8 +203,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 label=args.label,
                 on_progress=_progress,
             )
-    finally:
-        bus.shutdown()
 
     elapsed = time.time() - t0
     print(f"did_sweep: {hits}/{len(dids)} DIDs answered in {elapsed:.1f}s", file=sys.stderr)

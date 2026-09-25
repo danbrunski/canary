@@ -16,19 +16,9 @@ import httpx
 import pytest
 
 from src.mcp_server.audit import MCPAuditLogger
-from src.mcp_server.client import DaemonClient, DaemonError
+from src.mcp_server.client import DaemonError
 from src.mcp_server.tools import replay as replay_tool
-
-
-async def _client_with_handler(handler: Any) -> DaemonClient:
-    client = DaemonClient("http://daemon")
-    await client._client.aclose()
-    client._client = httpx.AsyncClient(
-        base_url="http://daemon",
-        transport=httpx.MockTransport(handler),
-    )
-    return client
-
+from tests.fakes import daemon_client_with_handler
 
 # ---------------------------------------------------------------------------
 # Submission
@@ -53,7 +43,7 @@ async def test_submission_packs_only_supplied_params(tmp_path: Path) -> None:
             },
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     out = await replay_tool.replay_window(
         client, audit, session_id="S1", start="2026-05-17T12:00:00Z", wait=False
@@ -82,7 +72,7 @@ async def test_audit_records_submission(tmp_path: Path) -> None:
             },
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     await replay_tool.replay_window(client, audit, session_id="S2", wait=False)
     await client.aclose()
@@ -97,7 +87,7 @@ async def test_daemon_error_during_submission_is_raised(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(400, json={"detail": "unsupported job kind"})
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     with pytest.raises(DaemonError):
         await replay_tool.replay_window(client, audit, session_id="S1")
@@ -152,7 +142,7 @@ async def test_wait_until_succeeded_reads_report(tmp_path: Path) -> None:
             },
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     out = await replay_tool.replay_window(
         client, audit, session_id="S1", poll_interval=0.01, timeout=5.0
@@ -192,7 +182,7 @@ async def test_failed_job_returns_ok_false(tmp_path: Path) -> None:
             },
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     out = await replay_tool.replay_window(
         client, audit, session_id="S1", poll_interval=0.01, timeout=5.0
@@ -232,7 +222,7 @@ async def test_missing_report_file_reports_ok_false(tmp_path: Path) -> None:
             },
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     out = await replay_tool.replay_window(
         client, audit, session_id="S1", poll_interval=0.01, timeout=5.0
@@ -264,7 +254,7 @@ async def test_timeout_returns_ok_false(tmp_path: Path) -> None:
             json={"job": {"job_id": "j-2", "status": "running", "log_path": str(log_path)}},
         )
 
-    client = await _client_with_handler(handler)
+    client = await daemon_client_with_handler(handler)
     audit = MCPAuditLogger(tmp_path / "audit.jsonl")
     out = await replay_tool.replay_window(
         client, audit, session_id="S1", poll_interval=0.01, timeout=0.05

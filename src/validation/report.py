@@ -83,7 +83,7 @@ def provenance(artifacts: RunArtifacts) -> dict[str, Any]:
         "vehicle": {
             "profile_slug": slug,
             "make_model_year": f"{vehicle.make} {vehicle.model} {vehicle.year}",
-            "ecu": "ScriptedEcu (tests/capture_round_fakes) extended by SyntheticEcu",
+            "ecu": "ScriptedEcu (src/validation/scripted_ecu) extended by SyntheticEcu",
         },
         "profile_snapshot": artifacts.profile.model_dump(mode="json"),
         "profile_fields_unsupported_by_this_tree": artifacts.profile_fields_dropped,

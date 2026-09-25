@@ -20,8 +20,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pandas as pd
 import pytest
+
+from tests.builders import sequence_training_frame
 
 torch = pytest.importorskip("torch")
 
@@ -39,7 +40,6 @@ from src.models.tcn_training import (  # noqa: E402
     train_tcn_autoencoder,
 )
 from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -48,19 +48,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
-def _frame(rows: int = 14) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            SESSION_COLUMN: ["clean"] * rows,
-            TIMESTAMP_COLUMN: pd.date_range("2026-05-12T00:00:00Z", periods=rows, freq="s"),
-            "rpm": [700.0 + (idx % 4) for idx in range(rows)],
-            "speed": [float(idx % 5) for idx in range(rows)],
-        }
-    )
-
-
 def _dataset(rows: int = 14, sequence_length: int = 4) -> SequenceWindowDataset:
-    frame = _frame(rows)
+    frame = sequence_training_frame(rows)
     scaler = ZScoreScaler.fit(frame, columns=["rpm", "speed"])
     return SequenceWindowDataset(
         scaler.transform(frame),

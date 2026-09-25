@@ -15,41 +15,10 @@ import pytest
 
 from src.collection import lsm6dsox as lsm
 from src.collection.lsm6dsox import FifoDecoder, ImuSettings, Lsm6dsox, Lsm6dsoxError
+from tests.fakes import FakeLsmBus, lsm_fifo_instants, lsm_fifo_word, lsm_stamp, lsm_vec
 
 FIXTURE = Path(__file__).parent / "fixtures" / "lsm6dsox" / "fifo_at_rest.json"
 SETTINGS = ImuSettings(odr_hz=104.0, accel_range_g=8, gyro_range_dps=2000)
-
-
-def _word(tag: int, counter: int, data: bytes) -> bytes:
-    assert len(data) == 6
-    return bytes([tag << 3 | (counter & 0x3) << 1]) + data
-
-
-def _vec(x: int, y: int, z: int) -> bytes:
-    return b"".join(v.to_bytes(2, "little", signed=True) for v in (x, y, z))
-
-
-def _stamp(counter: int, ticks: int) -> bytes:
-    return _word(lsm.TAG_TIMESTAMP, counter, ticks.to_bytes(4, "little") + b"\0\0")
-
-
-def _instants(
-    first_counter: int,
-    n: int,
-    *,
-    stamp_every: int = 8,
-    ticks0: int = 1000,
-    ticks_per: float = 384.0,
-) -> bytes:
-    """``n`` instants of gyro+accel, with a timestamp word every ``stamp_every``."""
-    out = b""
-    for i in range(n):
-        counter = (first_counter + i) % 4
-        if i % stamp_every == 0:
-            out += _stamp(counter, round(ticks0 + i * ticks_per))
-        out += _word(lsm.TAG_GYRO, counter, _vec(100 + i, 0, -100))
-        out += _word(lsm.TAG_ACCEL, counter, _vec(0, 0, 4098))  # 4098 * 0.244 mg = 1.0 g
-    return out
 
 
 def _identity(ticks: float) -> float:
@@ -67,7 +36,7 @@ def test_settings_refuse_rates_and_ranges_the_chip_cannot_do() -> None:
 
 def test_decoder_groups_words_by_tag_counter_and_scales_units() -> None:
     decoder = FifoDecoder(SETTINGS)
-    batch = decoder.decode(_instants(0, 5), to_host=_identity)
+    batch = decoder.decode(lsm_fifo_instants(0, 5), to_host=_identity)
     samples = batch.samples + decoder.flush(_identity)
 
     assert batch.undated == 0 and batch.temperatures == []
@@ -81,7 +50,7 @@ def test_decoder_groups_words_by_tag_counter_and_scales_units() -> None:
 def test_instants_between_timestamps_are_spaced_by_ticks_per_instant() -> None:
     decoder = FifoDecoder(SETTINGS)
     # One timestamp word, so the spacing is the nominal one: 40000 / 104.
-    samples = decoder.decode(_instants(0, 6), to_host=_identity).samples
+    samples = decoder.decode(lsm_fifo_instants(0, 6), to_host=_identity).samples
     samples += decoder.flush(_identity)
 
     gaps = [b.timestamp - a.timestamp for a, b in zip(samples, samples[1:], strict=False)]
@@ -94,19 +63,19 @@ def test_ticks_per_instant_is_learned_from_consecutive_timestamps() -> None:
     # ~104.17 Hz, i.e. 384 ticks, not 40000/104 = 384.6.
     decoder = FifoDecoder(SETTINGS)
     assert decoder.ticks_per_instant == pytest.approx(40_000 / 104)
-    decoder.decode(_instants(0, 17, ticks_per=384.0), to_host=_identity)
+    decoder.decode(lsm_fifo_instants(0, 17, ticks_per=384.0), to_host=_identity)
     assert decoder.ticks_per_instant == pytest.approx(384.0)
 
 
 def test_a_wild_timestamp_does_not_retune_the_spacing() -> None:
     decoder = FifoDecoder(SETTINGS)
-    words = _instants(0, 8, ticks_per=384.0) + _stamp(0, 1000 + 16 * 384)  # 16, not 8
+    words = lsm_fifo_instants(0, 8, ticks_per=384.0) + lsm_stamp(0, 1000 + 16 * 384)  # 16, not 8
     decoder.decode(words, to_host=_identity)
     assert decoder.ticks_per_instant == pytest.approx(40_000 / 104)
 
 
 def test_an_instant_split_across_two_reads_decodes_the_same() -> None:
-    words = _instants(0, 10)
+    words = lsm_fifo_instants(0, 10)
     whole = FifoDecoder(SETTINGS)
     expected = whole.decode(words, to_host=_identity).samples + whole.flush(_identity)
 
@@ -119,8 +88,10 @@ def test_an_instant_split_across_two_reads_decodes_the_same() -> None:
 
 def test_instants_before_the_first_timestamp_are_counted_not_guessed() -> None:
     decoder = FifoDecoder(SETTINGS)
-    undated_words = _word(lsm.TAG_GYRO, 3, _vec(1, 2, 3)) + _word(lsm.TAG_ACCEL, 3, _vec(1, 2, 3))
-    batch = decoder.decode(undated_words + _instants(0, 3), to_host=_identity)
+    undated_words = lsm_fifo_word(lsm.TAG_GYRO, 3, lsm_vec(1, 2, 3)) + lsm_fifo_word(
+        lsm.TAG_ACCEL, 3, lsm_vec(1, 2, 3)
+    )
+    batch = decoder.decode(undated_words + lsm_fifo_instants(0, 3), to_host=_identity)
     samples = batch.samples + decoder.flush(_identity)
     assert batch.undated == 1
     assert len(samples) == 3
@@ -128,7 +99,7 @@ def test_instants_before_the_first_timestamp_are_counted_not_guessed() -> None:
 
 def test_temperature_word_is_25c_plus_256_lsb_per_degree() -> None:
     decoder = FifoDecoder(SETTINGS)
-    words = _instants(0, 1) + _word(
+    words = lsm_fifo_instants(0, 1) + lsm_fifo_word(
         lsm.TAG_TEMP, 1, (512).to_bytes(2, "little", signed=True) + b"\0" * 4
     )
     temps = decoder.decode(words, to_host=_identity).temperatures
@@ -140,49 +111,13 @@ def test_a_partial_word_is_an_error() -> None:
         FifoDecoder(SETTINGS).decode(b"\x00" * 8, to_host=_identity)
 
 
-class FakeBus:
-    """Registers as a dict, a FIFO as a byte string, and a log of writes."""
-
-    def __init__(self, fifo: bytes = b"", *, who: int = 0x6C, status2: int = 0) -> None:
-        self.regs: dict[int, int] = {lsm.WHO_AM_I: who, lsm.CTRL3_C: 0, lsm.INTERNAL_FREQ_FINE: 0}
-        self.fifo = fifo
-        self.status2 = status2
-        self.timestamp = 5000
-        self.writes: list[tuple[int, int]] = []
-        self.closed = False
-
-    def read(self, register: int, length: int) -> bytes:
-        if register == lsm.FIFO_STATUS1:
-            words = len(self.fifo) // 7
-            return bytes([words & 0xFF, (words >> 8) & 0x3 | self.status2])
-        if register == lsm.TIMESTAMP0:
-            return self.timestamp.to_bytes(4, "little")
-        if register == lsm.FIFO_DATA_OUT_TAG:
-            out, self.fifo = self.fifo[:length], self.fifo[length:]
-            return out
-        return bytes([self.regs.get(register + i, 0) for i in range(length)])
-
-    def write(self, register: int, value: int) -> None:
-        self.writes.append((register, value))
-        if register == lsm.CTRL3_C:
-            value &= ~lsm.CTRL3_SW_RESET  # reset completes immediately
-        self.regs[register] = value
-
-    def write_block(self, register: int, data: bytes) -> None:
-        for offset, value in enumerate(data):
-            self.write(register + offset, value)
-
-    def close(self) -> None:
-        self.closed = True
-
-
 def test_start_refuses_a_device_that_is_not_an_lsm6dsox() -> None:
     with pytest.raises(Lsm6dsoxError, match="WHO_AM_I 0x6a"):
-        Lsm6dsox(FakeBus(who=0x6A), SETTINGS).start()
+        Lsm6dsox(FakeLsmBus(who=0x6A), SETTINGS).start()
 
 
 def test_start_writes_the_configuration_measured_on_the_hat() -> None:
-    bus = FakeBus()
+    bus = FakeLsmBus()
     Lsm6dsox(bus, SETTINGS).start()
     config = dict(bus.writes)
     # The same values the 2026-09-23 bring-up used on the real chip.
@@ -196,7 +131,7 @@ def test_start_writes_the_configuration_measured_on_the_hat() -> None:
 
 
 def test_read_fifo_maps_chip_ticks_to_host_time() -> None:
-    bus = FakeBus(_instants(0, 3, ticks0=4000, ticks_per=384.0))
+    bus = FakeLsmBus(lsm_fifo_instants(0, 3, ticks0=4000, ticks_per=384.0))
     bus.timestamp = 5000  # 1000 ticks = 25 ms after the first instant
     device = Lsm6dsox(bus, SETTINGS, clock=lambda: 100.0)
     device.start()
@@ -208,7 +143,7 @@ def test_read_fifo_maps_chip_ticks_to_host_time() -> None:
 
 def test_samples_after_the_settling_window_map_chip_ticks_to_host_time() -> None:
     settle = int(lsm.SETTLE_SECONDS * 40_000)
-    bus = FakeBus(_instants(0, 40, ticks0=4000, ticks_per=384.0))
+    bus = FakeLsmBus(lsm_fifo_instants(0, 40, ticks0=4000, ticks_per=384.0))
     bus.timestamp = 4000 + 40 * 384 + 1000  # read after the last instant
     device = Lsm6dsox(bus, SETTINGS, clock=lambda: 100.0)
     device.start()
@@ -221,14 +156,14 @@ def test_samples_after_the_settling_window_map_chip_ticks_to_host_time() -> None
 
 
 def test_an_overrun_is_reported_and_resets_the_timeline() -> None:
-    bus = FakeBus(_instants(0, 2), status2=lsm.STATUS2_OVR_LATCHED)
+    bus = FakeLsmBus(lsm_fifo_instants(0, 2), status2=lsm.STATUS2_OVR_LATCHED)
     device = Lsm6dsox(bus, SETTINGS)
     device.start()
     assert device.read_fifo().overrun
 
 
 def test_stop_bypasses_the_fifo_and_powers_both_sensors_down() -> None:
-    bus = FakeBus()
+    bus = FakeLsmBus()
     Lsm6dsox(bus, SETTINGS).stop()
     assert bus.writes == [(lsm.FIFO_CTRL4, 0), (lsm.CTRL1_XL, 0), (lsm.CTRL2_G, 0)]
 

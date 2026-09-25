@@ -46,16 +46,13 @@ if TYPE_CHECKING:
 
 
 def segmenter_channels() -> tuple[str, ...]:
-    """Every column the live segmenter reads, derived from
-    ``feature_pipeline._SEGMENTER_SIGNAL_COLUMNS`` so offline mode labels
+    """Every column the live segmenter reads
+    (``feature_pipeline.segmenter_input_columns``), so offline mode labels
     cannot diverge from it. Imported here, not at module load: the feature
     pipeline stays off every path that only needs the evaluator."""
-    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.preprocessing.feature_pipeline import segmenter_input_columns
 
-    channels: list[str] = []
-    for value in _SEGMENTER_SIGNAL_COLUMNS.values():
-        channels.extend((value,) if isinstance(value, str) else value)
-    return tuple(dict.fromkeys(channels))
+    return segmenter_input_columns()
 
 
 def segmenter_decoded() -> tuple[str, ...]:
@@ -92,40 +89,31 @@ def session_long(
     decoded: Iterable[str],
 ) -> pd.DataFrame:
     """The session's long frame with the named broadcast signals and every
-    DID decoded, raw CAN rows dropped."""
-    from src.decode.dids import decode_did_rows
-    from src.preprocessing.decode import decode_can_rows
-    from src.preprocessing.loader import read_session
+    DID decoded, raw CAN rows dropped.
 
-    long = read_session(session_dir)
+    Reads through :func:`src.preprocessing.decode.read_session_decoded_subset`,
+    the one bounded reader: raw CAN is read only for the ids the named
+    bindings decode, under every era's channel spelling (R04.14).
+    """
+    from src.decode.dids import decode_did_rows
+    from src.preprocessing.decode import decode_can_rows, read_session_decoded_subset
+
     wanted = set(decoded)
+    long, subset = read_session_decoded_subset(session_dir, bindings=bindings, decoded=wanted)
     is_can = long["source"] == "can"
     rest = long.loc[~is_can]
     if did_map is not None:
         rest = decode_did_rows(rest, did_map)
     pieces = [rest.loc[(rest["source"] != "decoded") | rest["channel"].isin(wanted)]]
-    if bindings is not None and wanted and bool(is_can.any()):
-        subset = [s for s in bindings.signals if s.name in wanted]
+    if subset is not None and bool(is_can.any()):
+        # Stored decoded rows win (decode_can_rows would skip them anyway).
         stored = set(rest.loc[rest["source"] == "decoded", "channel"].unique())
-        subset = [s for s in subset if s.name not in stored]
-        if subset:
-            ids = {f"0x{s.can_id:X}".upper() for s in subset}
-            can_rows = long.loc[is_can]
-            can_rows = can_rows.loc[can_rows["channel"].astype(str).str.upper().isin(ids)]
-            if can_rows.empty:
-                # Channel spelling varies across eras; fall back to parsing.
-                from src.can_ids import parse_can_channel
-
-                id_set = {s.can_id for s in subset}
-                mask = long.loc[is_can, "channel"].map(
-                    lambda c: parse_can_channel(str(c)) in id_set
-                )
-                can_rows = long.loc[is_can].loc[mask.to_numpy(dtype=bool)]
-            if not can_rows.empty:
-                decoded_rows = decode_can_rows(
-                    can_rows, bindings.model_copy(update={"signals": subset})
-                )
-                pieces.append(decoded_rows.loc[decoded_rows["source"] == "decoded"])
+        signals = [s for s in subset.signals if s.name not in stored]
+        if signals:
+            decoded_rows = decode_can_rows(
+                long.loc[is_can], subset.model_copy(update={"signals": signals})
+            )
+            pieces.append(decoded_rows.loc[decoded_rows["source"] == "decoded"])
     out = pd.concat(pieces, ignore_index=True) if len(pieces) > 1 else pieces[0]
     return out.sort_values("timestamp", kind="stable").reset_index(drop=True)
 

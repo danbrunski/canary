@@ -16,8 +16,8 @@ import pytest
 
 from src.analysis.did_scan import BatchRead
 from src.collection.isotp import split_batched_did_response
-from tools import did_log
-from tools.did_log import PassiveStatus
+from src.control.passive_client import PassiveStatus, http_passive_checker
+from tools import _bus_tool, did_log
 
 ARMED = PassiveStatus(True, None, "armed")
 DISARMED = PassiveStatus(False, None, "passive mode is off")
@@ -354,7 +354,7 @@ def fake_bus(monkeypatch: pytest.MonkeyPatch) -> FakeTransport:
     opened: list[dict[str, Any]] = []
 
     @contextmanager
-    def _open(config_path: Path, **kwargs: Any) -> Iterator[FakeTransport]:
+    def _open(args: Any, passive: Any, **kwargs: Any) -> Iterator[FakeTransport]:
         opened.append(kwargs)
         yield transport
 
@@ -390,7 +390,7 @@ def test_main_refuses_when_passive_not_armed(
         return lambda: DISARMED
 
     monkeypatch.setenv("CANARY_CONTROL_TOKEN", "sekrit")
-    monkeypatch.setattr(did_log, "http_passive_checker", _checker)
+    monkeypatch.setattr(_bus_tool, "http_passive_checker", _checker)
     rc = did_log.main(_main_args(tmp_path))
     assert rc != 0
     err = capsys.readouterr().err
@@ -409,7 +409,7 @@ def test_main_no_daemon_skips_the_passive_check(
     def _boom(*_: Any, **__: Any) -> Callable[[], PassiveStatus]:
         raise AssertionError("passive check must not run with --no-daemon")
 
-    monkeypatch.setattr(did_log, "http_passive_checker", _boom)
+    monkeypatch.setattr(_bus_tool, "http_passive_checker", _boom)
     rc = did_log.main(_main_args(tmp_path, "--no-daemon", "--start", "0x1200", "--end", "0x1210"))
     assert rc == 0
     lines = _lines(io.StringIO((tmp_path / "log.jsonl").read_text()))
@@ -422,7 +422,7 @@ def test_main_no_daemon_skips_the_passive_check(
 def test_main_armed_runs_and_uses_widths_from_snapshot(
     tmp_path: Path, fake_bus: FakeTransport, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(did_log, "http_passive_checker", lambda *a, **k: lambda: ARMED)
+    monkeypatch.setattr(_bus_tool, "http_passive_checker", lambda *a, **k: lambda: ARMED)
     snap = tmp_path / "snap.json"
     snap.write_text(json.dumps({"label": "c", "captured_at": 1.0, "values": {"0x1201": "0a1b"}}))
     rc = did_log.main(_main_args(tmp_path, "--widths-from", str(snap)))
@@ -472,7 +472,7 @@ def test_http_checker_parses_control_passive_shape(monkeypatch: pytest.MonkeyPat
         return _FakeResponse(json.dumps(body).encode())
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
-    status = did_log.http_passive_checker("http://pi:8000/", "tok")()
+    status = http_passive_checker("http://pi:8000/", "tok")()
     assert status == PassiveStatus(True, 900.0, "armed")
     assert captured == {"url": "http://pi:8000/control/passive", "auth": "Bearer tok"}
 
@@ -482,7 +482,7 @@ def test_http_checker_unreachable_reads_as_not_armed(monkeypatch: pytest.MonkeyP
         raise urllib.error.URLError("connection refused")
 
     monkeypatch.setattr(urllib.request, "urlopen", _urlopen)
-    status = did_log.http_passive_checker("http://127.0.0.1:8000", None)()
+    status = http_passive_checker("http://127.0.0.1:8000", None)()
     assert status.armed is False
     assert "connection refused" in status.detail
 
@@ -607,7 +607,7 @@ def test_main_refuses_a_batched_run_on_an_ecu_that_rejects_batches(
     transport = FakeTransport(VALUES, reject_batches=True)
 
     @contextmanager
-    def _open(config_path: Path, **kwargs: Any) -> Iterator[FakeTransport]:
+    def _open(args: Any, passive: Any, **kwargs: Any) -> Iterator[FakeTransport]:
         yield transport
 
     monkeypatch.setattr(did_log, "_open_transport", _open)

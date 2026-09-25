@@ -49,8 +49,59 @@ from src.collection.obd_scheduler import (
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig
 from src.session import make_session_dir
-from tests.capture_round_fakes import FakeClock, install_clock
-from tests.waits import StopWhen, hang_guard_deadline
+from tests.capture_round_fakes import FakeClock, ScriptedEcu, install_clock
+from tests.waits import StopWhen
+
+#: RPM 700 (``0A F0``), the value these tests were written against.
+_RPM_700 = {0x0C: b"\x0a\xf0"}
+#: Mode 02 answers for the five freeze-frame PIDs (frame #0).
+_FREEZE_FRAME_VALUES = {
+    0x0C: b"\x0a\xf0",  # RPM: 700.0
+    0x0D: b"\x50",  # SPEED: 80 km/h
+    0x05: b"\x5a",  # COOLANT_TEMP: 50 C
+    0x04: b"\x80",  # ENGINE_LOAD: 128*100/255
+    0x11: b"\x40",  # THROTTLE_POS: 64*100/255
+}
+#: Simulated seconds a condition-stopped run may take before it counts as a
+#: hang. On the fake clock nothing but the loop's own waits spends it.
+_HANG_GUARD_SECONDS = 30.0
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
+    """A :class:`FakeClock` bound as every collection module's ``time`` (T01.8).
+
+    The fakes here used to sleep on the real clock; on a loaded machine that
+    sleep, not the loop, decided whether a test met its deadline.
+    """
+    fake = FakeClock()
+    install_clock(monkeypatch, fake)
+    return fake
+
+
+def _dtc_ecu(clock: FakeClock) -> ScriptedEcu:
+    """MIL on with three codes (``41 01 83``); Mode 03 stored P0420 + C0510,
+    Mode 07 pending P0123, Mode 0A no permanent codes (Task 1.3)."""
+    return ScriptedEcu(
+        clock,
+        values={0x01: b"\x83"},
+        dtc_responses={
+            0x03: bytes([0x02, 0x04, 0x20, 0x45, 0x10]),
+            0x07: bytes([0x01, 0x01, 0x23]),
+            0x0A: bytes([0x00]),
+        },
+    )
+
+
+def _session_gated_ecu(clock: FakeClock, **kwargs: Any) -> ScriptedEcu:
+    """The 2008 Nissan ECM's Mode-22 gating (Task 6.15 / risk R8).
+
+    ``22 xxxx`` outside the 0xC0 session is refused ``7F 22 80``; ``10 C0``
+    opens it; Mode 01 goes silent while it is held. S3 (0.08 s) is below the
+    tests' ``lapse_seconds`` (0.1) so the session expires during the lapse,
+    like the real ECM's does.
+    """
+    return ScriptedEcu(clock, values=_RPM_700, session_gated=True, s3_seconds=0.08, **kwargs)
 
 
 class _StaticDiscovery:
@@ -58,212 +109,7 @@ class _StaticDiscovery:
         return (0x0C, 0x05, 0x99)  # RPM + coolant + unsupported-by-decoder
 
 
-class _FakeBus:
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x0C]):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0x00, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-        elif msg.arbitration_id == 0x7E0 and data[:4] == bytes([0x03, 0x22, 0x11, 0x01]):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x05, 0x62, 0x11, 0x01, 0x12, 0x34, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-class _NegativeThenPositiveBus:
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x04]):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x03, 0x7F, 0x01, 0x12, 0x00, 0x00, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-        elif msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x0C]):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0x00, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-class _TieredPidBus:
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id != 0x7DF or data[:2] != bytes([0x02, 0x01]):
-            return
-        pid = data[2]
-        if pid == 0x0C:  # RPM, fast
-            payload = bytes([0x04, 0x41, pid, 0x0A, 0xF0, 0x00, 0x00, 0x00])
-        elif pid == 0x2F:  # FUEL_LEVEL, slow
-            payload = bytes([0x03, 0x41, pid, 0x80, 0x00, 0x00, 0x00, 0x00])
-        else:
-            return
-        self._responses.append(
-            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
-        )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.001))
-        return None
-
-
-class _DtcCapableBus:
-    """Answers Mode 01 PID 0x01 (MIL/count) plus Mode 03/07/0A (Task 1.3)."""
-
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id != 0x7DF:
-            return
-        if data[:3] == bytes([0x02, 0x01, 0x01]):
-            # MIL on (bit 7) + count=3 in bits 0-6 -> 0x83.
-            payload = bytes([0x03, 0x41, 0x01, 0x83, 0x00, 0x00, 0x00, 0x00])
-        elif data[:2] == bytes([0x01, 0x03]):
-            # Stored: P0420, C0510.
-            payload = bytes([0x06, 0x43, 0x02, 0x04, 0x20, 0x45, 0x10, 0x00])
-        elif data[:2] == bytes([0x01, 0x07]):
-            # Pending: P0123.
-            payload = bytes([0x04, 0x47, 0x01, 0x01, 0x23, 0x00, 0x00, 0x00])
-        elif data[:2] == bytes([0x01, 0x0A]):
-            # Permanent: none.
-            payload = bytes([0x02, 0x4A, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
-        else:
-            return
-        self._responses.append(
-            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
-        )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-class _FreezeFrameCapableBus:
-    """Answers Mode 02 (Task 3.3) for the five freeze-frame PIDs, frame #0."""
-
-    #: pid -> (length_byte, formula_bytes) for a `43 <pid> 00 <formula...>` reply.
-    _RESPONSES: dict[int, bytes] = {
-        0x0C: bytes([0x0A, 0xF0]),  # RPM: (0x0AF0)/4 = 700.0
-        0x0D: bytes([0x50]),  # SPEED: 80 km/h
-        0x05: bytes([0x5A]),  # COOLANT_TEMP: 90 - 40 = 50 C
-        0x04: bytes([0x80]),  # ENGINE_LOAD: 128*100/255
-        0x11: bytes([0x40]),  # THROTTLE_POS: 64*100/255
-    }
-
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id != 0x7DF or data[:2] != bytes([0x02, 0x02]):
-            return
-        pid = data[2]
-        formula = self._RESPONSES.get(pid)
-        if formula is None:
-            return
-        body = bytes([0x42, pid, 0x00]) + formula
-        payload = bytes([len(body)]) + body
-        payload = payload + bytes(8 - len(payload))
-        self._responses.append(
-            can.Message(arbitration_id=0x7E8, data=payload, is_extended_id=False)
-        )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-class _SilentBus:
-    """Never answers anything — models a stale/no_data bus."""
-
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-class _AlwaysNegativeBus:
-    """Always answers with a formal `7F 01 31` refusal — never silent."""
-
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        return can.Message(
-            arbitration_id=0x7E8,
-            data=bytes([0x03, 0x7F, 0x01, 0x31, 0x00, 0x00, 0x00, 0x00]),
-            is_extended_id=False,
-        )
-
-
-def test_query_with_tap_negative_response_is_distinct_from_timeout() -> None:
+def test_query_with_tap_negative_response_is_distinct_from_timeout(clock: FakeClock) -> None:
     """A formal 7F refusal must be visible to the caller, not just `None` —
     the exact conflation `_query_with_tap` used to have with a true timeout."""
     request = _PollRequest(
@@ -271,39 +117,39 @@ def test_query_with_tap_negative_response_is_distinct_from_timeout() -> None:
     )
     stats = CanObdLoopStats()
     result = _query_with_tap(
-        _AlwaysNegativeBus(),  # type: ignore[arg-type]
+        ScriptedEcu(clock, nrc_pids={0x0C: 0x31}),  # type: ignore[arg-type]
         request,
         timeout_seconds=0.2,
         on_frame=lambda _msg: None,
         stop_event=threading.Event(),
         stats=stats,
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
     assert result.response is None
     assert result.negative_response_code == 0x31
 
 
-def test_query_with_tap_true_timeout_has_no_negative_response_code() -> None:
+def test_query_with_tap_true_timeout_has_no_negative_response_code(clock: FakeClock) -> None:
     request = _PollRequest(
         kind="pid", service=0x01, identifier=0x0C, request_id=DEFAULT_REQUEST_ID, channel="RPM"
     )
     stats = CanObdLoopStats()
     result = _query_with_tap(
-        _SilentBus(),  # type: ignore[arg-type]
+        ScriptedEcu(clock, silent=True),  # type: ignore[arg-type]
         request,
         timeout_seconds=0.05,
         on_frame=lambda _msg: None,
         stop_event=threading.Event(),
         stats=stats,
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
     assert result.response is None
     assert result.negative_response_code is None
 
 
-def test_query_with_tap_mode06_keeps_monitor_id_on_wire() -> None:
+def test_query_with_tap_mode06_keeps_monitor_id_on_wire(clock: FakeClock) -> None:
     """Mode 06 requires a MID; MID 00 must serialize as ``02 06 00``."""
-    bus = _SilentBus()
+    bus = ScriptedEcu(clock, silent=True)
     request = _PollRequest(
         kind="service",
         service=0x06,
@@ -320,15 +166,15 @@ def test_query_with_tap_mode06_keeps_monitor_id_on_wire() -> None:
         on_frame=lambda _msg: None,
         stop_event=threading.Event(),
         stats=CanObdLoopStats(),
-        deadline_monotonic=time.monotonic() + 0.1,
+        deadline_monotonic=clock.monotonic() + 0.1,
     )
 
-    assert bytes(bus.sent[0].data) == bytes([0x02, 0x06, 0x00, 0, 0, 0, 0, 0])
+    assert bytes(bus.messages[0].data) == bytes([0x02, 0x06, 0x00, 0, 0, 0, 0, 0])
 
 
-def test_query_with_tap_dtc_services_remain_identifierless() -> None:
+def test_query_with_tap_dtc_services_remain_identifierless(clock: FakeClock) -> None:
     """Mode 03/07/0A are still one-byte service requests, unlike Mode 06."""
-    bus = _SilentBus()
+    bus = ScriptedEcu(clock, silent=True)
     request = _PollRequest(
         kind="dtc",
         service=0x03,
@@ -345,64 +191,25 @@ def test_query_with_tap_dtc_services_remain_identifierless() -> None:
         on_frame=lambda _msg: None,
         stop_event=threading.Event(),
         stats=CanObdLoopStats(),
-        deadline_monotonic=time.monotonic() + 0.1,
+        deadline_monotonic=clock.monotonic() + 0.1,
     )
 
-    assert bytes(bus.sent[0].data) == bytes([0x01, 0x03, 0, 0, 0, 0, 0, 0])
+    assert bytes(bus.messages[0].data) == bytes([0x01, 0x03, 0, 0, 0, 0, 0, 0])
 
 
-def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None:  # type: ignore[no-untyped-def]
+def test_mode06_discovery_retries_after_successful_obd_contact(caplog, clock: FakeClock) -> None:  # type: ignore[no-untyped-def]
     """Mode 06 support is silent at startup, then answers once the ECU is in
     contact. Discovery is loop-driven (C06.4): the silent probe parks the
     walk, the first Mode 01 answer re-arms it, and the next probe installs
     the MIDs — every probe on the bus, none through a side channel."""
     caplog.set_level("INFO")
-
-    class _Bus(_SilentBus):
-        def __init__(self) -> None:
-            super().__init__()
-            self.responses: list[can.Message] = []
-            self.mode01_answered = False
-            self.support_probes = 0
-
-        def send(self, msg: can.Message) -> None:
-            super().send(msg)
-            data = bytes(msg.data)
-            if data[:3] == bytes([0x02, 0x01, 0x0C]):
-                self.mode01_answered = True
-                self.responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0, 0, 0]),
-                        is_extended_id=False,
-                    )
-                )
-            elif data[:3] == bytes([0x02, 0x06, 0x00]):
-                self.support_probes += 1
-                if self.mode01_answered:
-                    bits = 1 << 31  # MID 0x01 claimed, no continuation
-                    self.responses.append(
-                        can.Message(
-                            arbitration_id=0x7E8,
-                            data=bytes([0x06, 0x46, 0x00, *bits.to_bytes(4, "big"), 0]),
-                            is_extended_id=False,
-                        )
-                    )
-            elif data[:3] == bytes([0x02, 0x06, 0x01]):
-                self.responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x03, 0x46, 0x01, 0x0C, 0, 0, 0, 0]),
-                        is_extended_id=False,
-                    )
-                )
-
-        def recv(self, timeout: float = 0.0) -> can.Message | None:
-            if self.responses:
-                return self.responses.pop(0)
-            return super().recv(timeout)
-
-    bus = _Bus()
+    bus = ScriptedEcu(
+        clock,
+        values=_RPM_700,
+        mode06_support={0x00: 1 << 31},  # MID 0x01 claimed, no continuation
+        mode06_support_after_contact=True,
+        mode06_values={0x01: b"\x0c"},
+    )
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -426,11 +233,12 @@ def test_mode06_discovery_retries_after_successful_obd_contact(caplog) -> None: 
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 2.0,
+        deadline_monotonic=clock.monotonic() + 2.0,
     )
 
-    assert bus.support_probes == 2, "the silent probe must be retried once contact is made"
-    assert any(bytes(message.data)[:3] == bytes([0x02, 0x06, 0x01]) for message in bus.sent)
+    mode06_probes = [probe for probe in bus.support_probes if probe[1] == 0x06]
+    assert len(mode06_probes) == 2, "the silent probe must be retried once contact is made"
+    assert any(bytes(message.data)[:3] == bytes([0x02, 0x06, 0x01]) for message in bus.messages)
     assert any(reading.pid == "MONITOR_RESULTS" for reading in readings)
     assert stats.discovery_requests_sent == 2
     assert stats.discovery_timeouts == 1 and stats.discovery_responses == 1
@@ -784,11 +592,11 @@ def test_build_poll_requests_dtc_poll_disabled_when_interval_non_positive() -> N
     assert not [r for r in build_poll_requests(_StaticDiscovery(), spec) if r.kind == "dtc"]
 
 
-def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo() -> None:
+def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo(clock: FakeClock) -> None:
     """Ignition-only (KOEO): the ECM answers OBD with RPM effectively 0/absent
     — nothing in the DTC poll depends on RPM, so it reads exactly like it
     would with the engine running."""
-    bus = _DtcCapableBus()
+    bus = _dtc_ecu(clock)
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -812,7 +620,7 @@ def test_dtc_poll_reads_codes_and_mil_with_engine_off_koeo() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 2.0,
+        deadline_monotonic=clock.monotonic() + 2.0,
     )
 
     by_channel = {r.pid: r for r in readings}
@@ -938,34 +746,14 @@ def test_response_to_reading_freeze_frame_strips_the_frame_number_byte() -> None
     assert readings[0].value == pytest.approx(700.0)
 
 
-class _ClockedFreezeFrameBus(_FreezeFrameCapableBus):
-    """:class:`_FreezeFrameCapableBus` on a :class:`FakeClock` (T01.8)."""
-
-    def __init__(self, clock: FakeClock) -> None:
-        super().__init__()
-        self.clock = clock
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            self.clock.advance(timeout)
-        return None
-
-
-def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_freeze_frame_trigger_is_consumed_once_then_reads_go_dormant(clock: FakeClock) -> None:
     """Task 3.3 — the trigger fires exactly one Mode 02 sweep; it doesn't
     re-poll every tick afterward (on_demand rate is 0).
 
-    On a fake clock (T01.8): the sweep starts after the unanswered RPM read's
-    0.1 s timeout, and the claim is about the rest of the second, so both the
-    sweep and the dormant window after it must fit. On a real clock a loaded
-    machine spent that window for it."""
-    clock = FakeClock()
-    install_clock(monkeypatch, clock)
-    bus = _ClockedFreezeFrameBus(clock)
+    On a fake clock (T01.8): the claim is about the rest of the second, so
+    both the sweep and the dormant window after it must fit. On a real clock
+    a loaded machine spent that window for it."""
+    bus = ScriptedEcu(clock, values=_FREEZE_FRAME_VALUES, answer_freeze_frames=True)
     stop = threading.Event()
     readings: list[Any] = []
     trigger = FreezeFrameTrigger()
@@ -1012,25 +800,7 @@ def test_force_poll_trigger_take_is_atomic_and_normalizes_case() -> None:
     assert trigger.take() == frozenset({"A", "B"})
 
 
-class _ClockedDtcBus(_DtcCapableBus):
-    """:class:`_DtcCapableBus` on a :class:`FakeClock`: a receive with nothing
-    due costs its timeout in simulated time instead of sleeping."""
-
-    def __init__(self, clock: FakeClock) -> None:
-        super().__init__()
-        self.clock = clock
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            self.clock.advance(timeout)
-        return None
-
-
-def test_force_poll_trigger_forces_a_channel_due_immediately(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_force_poll_trigger_forces_a_channel_due_immediately(clock: FakeClock) -> None:
     """trigger_poll: DTC_STORED normally waits its turn; forcing it should
     produce a reading well before it would ever fire on its own.
 
@@ -1038,9 +808,7 @@ def test_force_poll_trigger_forces_a_channel_due_immediately(
     0.1 s support-probe timeouts; unforced, the first DTC_STORED read comes
     at ~4.9 s (measured 2026-09-23). The test used to give it 0.5 s of *wall*
     clock, which a loaded machine spent before the probes were done."""
-    clock = FakeClock()
-    install_clock(monkeypatch, clock)
-    bus = _ClockedDtcBus(clock)
+    bus = _dtc_ecu(clock)
     sink: StopWhen[Any] = StopWhen(lambda got: any(r.pid == "DTC_STORED" for r in got))
     trigger = ForcePollTrigger()
     trigger.request(["dtc_stored"])  # lowercase on purpose — matching is case-insensitive
@@ -1067,9 +835,9 @@ def test_force_poll_trigger_forces_a_channel_due_immediately(
     assert sink.met, "the forced DTC_STORED read did not happen inside 0.5 s"
 
 
-def test_force_poll_trigger_ignores_unknown_channel_names() -> None:
+def test_force_poll_trigger_ignores_unknown_channel_names(clock: FakeClock) -> None:
     """An unmatched channel name is a silent no-op, not an error."""
-    bus = _DtcCapableBus()
+    bus = _dtc_ecu(clock)
     stop = threading.Event()
     trigger = ForcePollTrigger()
     trigger.request(["not_a_real_channel"])
@@ -1090,16 +858,16 @@ def test_force_poll_trigger_ignores_unknown_channel_names() -> None:
         on_frame=lambda _msg: None,
         on_reading=lambda _r: None,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 0.2,
+        deadline_monotonic=clock.monotonic() + 0.2,
     )
     # No crash, no spurious channel appearing — this test's assertion is
     # simply that the loop above completed cleanly.
 
 
-def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:
+def test_dtc_poll_skips_cleanly_when_bus_never_answers(clock: FakeClock) -> None:
     """Stale/no_data: the DTC requests just back off like any other request
     — no crash, no readings, no spurious extra polling."""
-    bus = _SilentBus()
+    bus = ScriptedEcu(clock, silent=True)
     stop = threading.Event()
 
     spec = CanObdSpec(
@@ -1116,19 +884,19 @@ def test_dtc_poll_skips_cleanly_when_bus_never_answers() -> None:
         on_frame=lambda _msg: None,
         on_reading=lambda _r: None,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 0.5,
+        deadline_monotonic=clock.monotonic() + 0.5,
     )
 
     assert stats.readings_emitted == 0
     assert stats.request_timeouts > 0
     # True bus silence (no frame at all), not a formal ECU refusal.
     assert stats.negative_responses == 0
-    dtc_service_bytes = {bytes(msg.data)[:2] for msg in bus.sent}
+    dtc_service_bytes = {bytes(msg.data)[:2] for msg in bus.messages}
     assert bytes([0x01, 0x03]) in dtc_service_bytes
 
 
-def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
-    bus = _FakeBus()
+def test_run_loop_emits_can_frames_pid_readings_and_did_readings(clock: FakeClock) -> None:
+    bus = ScriptedEcu(clock, values=_RPM_700)  # DIDs answer 12 34
     stop = threading.Event()
     frames: list[can.Message] = []
     readings: list[Any] = []
@@ -1152,7 +920,7 @@ def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
         on_frame=frames.append,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 1.0,
+        deadline_monotonic=clock.monotonic() + 1.0,
     )
 
     by_pid = {reading.pid: reading for reading in readings}
@@ -1163,7 +931,7 @@ def test_run_loop_emits_can_frames_pid_readings_and_did_readings() -> None:
     assert stats.readings_emitted >= 2
 
 
-def test_negative_pid_response_does_not_block_following_pids() -> None:
+def test_negative_pid_response_does_not_block_following_pids(clock: FakeClock) -> None:
     """ENGINE_LOAD is refused (``7F 01 12``); the RPM read *after* that refusal
     is what proves the refusal did not block the loop.
 
@@ -1174,11 +942,11 @@ def test_negative_pid_response_does_not_block_following_pids() -> None:
     first read failed it. It now stops on the RPM read that follows the
     refusal, and the DTC/Mode 06 polls (unanswered here, 1 s timeouts each)
     are off so nothing but the two PIDs is on the bus."""
-    bus = _NegativeThenPositiveBus()
+    bus = ScriptedEcu(clock, values=_RPM_700, nrc_pids={0x04})
     engine_load_request = bytes([0x02, 0x01, 0x04])
 
     def _refusal_sent() -> bool:
-        return any(bytes(msg.data)[:3] == engine_load_request for msg in bus.sent)
+        return any(bytes(msg.data)[:3] == engine_load_request for msg in bus.messages)
 
     sink: StopWhen[Any] = StopWhen(lambda got: got[-1].pid == "RPM" and _refusal_sent())
     spec = CanObdSpec(
@@ -1196,7 +964,7 @@ def test_negative_pid_response_does_not_block_following_pids() -> None:
         on_frame=lambda _msg: None,
         on_reading=sink,
         stop_event=sink.stop,
-        deadline_monotonic=hang_guard_deadline(),
+        deadline_monotonic=clock.monotonic() + _HANG_GUARD_SECONDS,
     )
 
     assert sink.met, "no RPM reading followed ENGINE_LOAD's refusal"
@@ -1207,8 +975,8 @@ def test_negative_pid_response_does_not_block_following_pids() -> None:
     assert stats.requests_sent >= 2
 
 
-def test_scheduler_polls_fast_tier_more_often_than_slow_tier() -> None:
-    bus = _TieredPidBus()
+def test_scheduler_polls_fast_tier_more_often_than_slow_tier(clock: FakeClock) -> None:
+    bus = ScriptedEcu(clock, values={**_RPM_700, 0x2F: b"\x80"})  # RPM fast, FUEL_LEVEL slow
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -1225,25 +993,23 @@ def test_scheduler_polls_fast_tier_more_often_than_slow_tier() -> None:
         request_timeout_seconds=0.02,
     )
 
-    # Stops on its condition; the deadline only turns a hang into a failure
-    # (T01.8: the condition came at 0.25 s, after four unanswered DTC/Mode 06
-    # polls, against a 1.0 s wall-clock deadline).
+    # Stops on its condition; the deadline only turns a hang into a failure.
     stats = run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=hang_guard_deadline(),
+        deadline_monotonic=clock.monotonic() + _HANG_GUARD_SECONDS,
     )
 
-    sent_pids = [bytes(msg.data)[2] for msg in bus.sent if bytes(msg.data)[:2] == b"\x02\x01"]
+    sent_pids = [pids[0] for pids in bus.mode01_requests() if len(pids) == 1]
     assert sent_pids.count(0x0C) > sent_pids.count(0x2F)
     assert stats.readings_emitted == len(readings)
 
 
-def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
-    bus = _NegativeThenPositiveBus()
+def test_scheduler_metrics_report_rates_and_backoff_state(clock: FakeClock) -> None:
+    bus = ScriptedEcu(clock, values=_RPM_700, nrc_pids={0x04})
     stop = threading.Event()
     snapshots: list[ObdSchedulerMetrics] = []
 
@@ -1264,9 +1030,8 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        # Stops on its condition (T01.8: reached at 0.06 s, after a timeout,
-        # against a 0.4 s wall-clock deadline).
-        deadline_monotonic=hang_guard_deadline(),
+        # Stops on its condition; the deadline only turns a hang into a failure.
+        deadline_monotonic=clock.monotonic() + _HANG_GUARD_SECONDS,
         on_scheduler_metrics=snapshots.append,
         scheduler_metrics_interval_seconds=0.01,
     )
@@ -1277,9 +1042,9 @@ def test_scheduler_metrics_report_rates_and_backoff_state() -> None:
     assert latest["bus_budget_requests_per_second"] > spec.poll_rate_hz
     assert latest["response_rate"] is not None
     by_channel = {row["channel"]: row for row in latest["requests"]}
-    # ENGINE_LOAD always gets a formal 7F 01 12 refusal from
-    # `_NegativeThenPositiveBus`, never a true timeout — that must land in
-    # `negative_responses`, not `timeouts` (the bug this counter fixes).
+    # ENGINE_LOAD always gets a formal 7F 01 12 refusal, never a true timeout
+    # — that must land in `negative_responses`, not `timeouts` (the bug this
+    # counter fixes).
     assert by_channel["ENGINE_LOAD"]["backed_off"] is True
     assert by_channel["ENGINE_LOAD"]["negative_responses"] >= 1
     assert by_channel["ENGINE_LOAD"]["timeouts"] == 0
@@ -1340,35 +1105,11 @@ def test_build_poll_requests_custom_pid_defaults_request_id_by_mode() -> None:
     assert by_name["B"].request_id == 0x7DF
 
 
-class _CustomPidBus:
-    """Answers a Mode 0x22 custom-PID request for DID 0x1140."""
-
-    def __init__(self) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id == 0x7E0 and data[:4] == bytes([0x03, 0x22, 0x11, 0x40]):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x05, 0x62, 0x11, 0x40, 0x03, 0xE8, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
-def test_custom_pid_response_decodes_through_evaluator_into_custom_channel() -> None:
-    bus = _CustomPidBus()
+def test_custom_pid_response_decodes_through_evaluator_into_custom_channel(
+    clock: FakeClock,
+) -> None:
+    # RPM never answers; DID 0x1140 answers 03 E8 (1000 -> 10.00 psi).
+    bus = ScriptedEcu(clock, silent_pids={0x0C}, did_values={0x1140: b"\x03\xe8"})
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -1393,15 +1134,14 @@ def test_custom_pid_response_decodes_through_evaluator_into_custom_channel() -> 
         request_timeout_seconds=0.2,
     )
 
-    # Stops on the first reading (T01.8: reached at 0.20 s, after the
-    # unanswered RPM read's 0.2 s timeout, against a 1.0 s wall-clock deadline).
+    # Stops on the first reading, after the unanswered RPM read's 0.2 s timeout.
     run_can_obd_loop(
         bus,  # type: ignore[arg-type]
         spec,
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=hang_guard_deadline(),
+        deadline_monotonic=clock.monotonic() + _HANG_GUARD_SECONDS,
     )
 
     assert len(readings) == 1
@@ -1412,73 +1152,6 @@ def test_custom_pid_response_decodes_through_evaluator_into_custom_channel() -> 
 
 
 # --- Mode 22 session windows (Task 6.15 / risk R8) --------------------------
-
-
-class _SessionGatedBus:
-    """Models the 2008 Nissan ECM's Mode-22 gating.
-
-    * ``22 xxxx`` outside the 0xC0 session → ``7F 22 80`` (refused);
-    * ``10 C0`` → ``50 C0`` and the session holds for ``session_ttl`` seconds
-      (refreshed by re-sending ``10 C0``);
-    * Mode 01 goes silent while the session is held (mutual exclusion).
-    """
-
-    def __init__(self, session_ttl: float = 0.08) -> None:
-        # ttl defaults below the tests' lapse_seconds (0.1) so the session
-        # expires during the lapse, like the real ECM's S3 timeout does.
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-        self._session_until = 0.0
-        self._ttl = session_ttl
-
-    def _in_session(self) -> bool:
-        return time.monotonic() < self._session_until
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if msg.arbitration_id == 0x7E0 and data[:3] == bytes([0x02, 0x10, 0xC0]):
-            self._session_until = time.monotonic() + self._ttl
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x02, 0x50, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-        elif msg.arbitration_id == 0x7DF and data[:3] == bytes([0x02, 0x01, 0x0C]):
-            if not self._in_session():
-                self._responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x04, 0x41, 0x0C, 0x0A, 0xF0, 0x00, 0x00, 0x00]),
-                        is_extended_id=False,
-                    )
-                )
-        elif msg.arbitration_id == 0x7E0 and data[:4] == bytes([0x03, 0x22, 0x11, 0x01]):
-            if self._in_session():
-                self._responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x05, 0x62, 0x11, 0x01, 0x12, 0x34, 0x00, 0x00]),
-                        is_extended_id=False,
-                    )
-                )
-            else:
-                self._responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x03, 0x7F, 0x22, 0x80, 0x00, 0x00, 0x00, 0x00]),
-                        is_extended_id=False,
-                    )
-                )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.002))
-        return None
 
 
 def _window_spec(**overrides: float) -> CanObdSpec:
@@ -1500,10 +1173,10 @@ def _window_spec(**overrides: float) -> CanObdSpec:
     )
 
 
-def test_did_session_windows_read_gated_dids_and_resume_mode_01() -> None:
+def test_did_session_windows_read_gated_dids_and_resume_mode_01(clock: FakeClock) -> None:
     """On a session-gated ECM, DIDs are read inside 10 C0 windows and Mode 01
     polling resumes after the lapse — neither starves the other."""
-    bus = _SessionGatedBus()
+    bus = _session_gated_ecu(clock)
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -1520,7 +1193,7 @@ def test_did_session_windows_read_gated_dids_and_resume_mode_01() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 5.0,
+        deadline_monotonic=clock.monotonic() + 5.0,
     )
 
     pids = [r.pid for r in readings]
@@ -1532,14 +1205,14 @@ def test_did_session_windows_read_gated_dids_and_resume_mode_01() -> None:
     assert by_pid["DID_1101"].value == "1234"
     assert stats.session_controls_sent >= 1
     # The 22 request must only ever follow a 10 C0 on the wire.
-    wire = [bytes(m.data)[:2] for m in bus.sent]
+    wire = [bytes(m.data)[:2] for m in bus.messages]
     first_did = wire.index(bytes([0x03, 0x22]))
     assert bytes([0x02, 0x10]) in wire[:first_did]
 
 
-def test_did_requests_stay_quiet_outside_windows() -> None:
+def test_did_requests_stay_quiet_outside_windows(clock: FakeClock) -> None:
     """Between windows no 22/10 frames are sent — Mode 01 runs undisturbed."""
-    bus = _SessionGatedBus()
+    bus = _session_gated_ecu(clock)
     stop = threading.Event()
     readings: list[Any] = []
 
@@ -1556,34 +1229,19 @@ def test_did_requests_stay_quiet_outside_windows() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 2.0,
+        deadline_monotonic=clock.monotonic() + 2.0,
     )
 
-    services = {bytes(m.data)[1] for m in bus.sent}
+    services = {bytes(m.data)[1] for m in bus.messages}
     assert 0x01 in services
     assert 0x22 not in services, "DID polled outside a session window"
     assert 0x10 not in services, "session opened before the configured interval"
 
 
-def test_failed_session_entry_skips_window_and_keeps_mode_01_alive() -> None:
+def test_failed_session_entry_skips_window_and_keeps_mode_01_alive(clock: FakeClock) -> None:
     """An ECM that refuses 10 C0 must not wedge the loop or starve Mode 01."""
-
-    class _RefusesSessionBus(_SessionGatedBus):
-        def send(self, msg: can.Message) -> None:
-            data = bytes(msg.data)
-            if msg.arbitration_id == 0x7E0 and data[:2] == bytes([0x02, 0x10]):
-                self.sent.append(msg)
-                self._responses.append(
-                    can.Message(
-                        arbitration_id=0x7E8,
-                        data=bytes([0x03, 0x7F, 0x10, 0x11, 0x00, 0x00, 0x00, 0x00]),
-                        is_extended_id=False,
-                    )
-                )
-                return
-            super().send(msg)
-
-    bus = _RefusesSessionBus()
+    # Every 10 C0 is refused 7F 10 11 (serviceNotSupported).
+    bus = _session_gated_ecu(clock, session_script={0xC0: [0x11] * 1000})
     stop = threading.Event()
     readings: list[Any] = []
     snapshots: list[ObdSchedulerMetrics] = []
@@ -1605,7 +1263,7 @@ def test_failed_session_entry_skips_window_and_keeps_mode_01_alive() -> None:
         on_frame=lambda _msg: None,
         on_reading=on_reading,
         stop_event=stop,
-        deadline_monotonic=time.monotonic() + 5.0,
+        deadline_monotonic=clock.monotonic() + 5.0,
         on_scheduler_metrics=until_failure_seen,
         scheduler_metrics_interval_seconds=0.05,
     )
@@ -1613,7 +1271,7 @@ def test_failed_session_entry_skips_window_and_keeps_mode_01_alive() -> None:
     profile = snapshots[-1].to_dict()["did_profile"]
     assert profile["session_failures"] >= 1
     assert profile["phase"] == "mode01"
-    services = {bytes(m.data)[1] for m in bus.sent}
+    services = {bytes(m.data)[1] for m in bus.messages}
     assert 0x22 not in services, "DID must not be polled when the session never opened"
     assert any(r.pid == "RPM" for r in readings)
 
@@ -2012,48 +1670,6 @@ def test_repeated_refusals_back_off_but_a_success_clears_everything() -> None:
     assert recovered["last_exit_nrc_name"] is None
 
 
-class _BusyThenAnsweringSessionBus:
-    """Answers session control with `0x78 responsePending` before the real reply.
-
-    ISO 14229's "received you, still working" — the shape of an ECU under
-    load, which is exactly when a 90 req/s hybrid capture asks it to switch
-    sessions.
-    """
-
-    def __init__(self, pending_frames: int) -> None:
-        self.sent: list[can.Message] = []
-        self._responses: list[can.Message] = []
-        self._pending_frames = pending_frames
-
-    def send(self, msg: can.Message) -> None:
-        self.sent.append(msg)
-        data = bytes(msg.data)
-        if data[:2] != bytes([0x02, 0x10]):
-            return
-        for _ in range(self._pending_frames):
-            self._responses.append(
-                can.Message(
-                    arbitration_id=0x7E8,
-                    data=bytes([0x03, 0x7F, 0x10, 0x78, 0x00, 0x00, 0x00, 0x00]),
-                    is_extended_id=False,
-                )
-            )
-        self._responses.append(
-            can.Message(
-                arbitration_id=0x7E8,
-                data=bytes([0x02, 0x50, data[2], 0x00, 0x00, 0x00, 0x00, 0x00]),
-                is_extended_id=False,
-            )
-        )
-
-    def recv(self, timeout: float = 0.0) -> can.Message | None:
-        if self._responses:
-            return self._responses.pop(0)
-        if timeout:
-            time.sleep(min(timeout, 0.005))
-        return None
-
-
 def _send_exit(bus: object, stats: CanObdLoopStats) -> SessionControlResult:
     from src.collection.can_obd_collector import _send_session_control
 
@@ -2070,14 +1686,19 @@ def _send_exit(bus: object, stats: CanObdLoopStats) -> SessionControlResult:
     )
 
 
-def test_a_busy_ecu_gets_its_answer_through_instead_of_being_called_unsupported() -> None:
+def test_a_busy_ecu_gets_its_answer_through_instead_of_being_called_unsupported(
+    clock: FakeClock,
+) -> None:
     """`0x78` must extend the wait, not score a failure.
 
     This is the trigger end of the 2026-08-07 blackout: the answer was on its
-    way, and reading the "please wait" as a refusal threw it away.
+    way, and reading the "please wait" as a refusal threw it away. The ECU is
+    ISO 14229's "received you, still working" — the shape of an ECU under
+    load, which is exactly when a 90 req/s hybrid capture asks it to switch
+    sessions.
     """
     stats = CanObdLoopStats()
-    result = _send_exit(_BusyThenAnsweringSessionBus(pending_frames=2), stats)
+    result = _send_exit(ScriptedEcu(clock, session_pending_frames=2), stats)
 
     assert result.ok is True
     assert result.negative_response_code is None
@@ -2085,11 +1706,11 @@ def test_a_busy_ecu_gets_its_answer_through_instead_of_being_called_unsupported(
     assert stats.request_timeouts == 0
 
 
-def test_an_endlessly_busy_ecu_still_gives_up_and_says_why() -> None:
+def test_an_endlessly_busy_ecu_still_gives_up_and_says_why(clock: FakeClock) -> None:
     """The wait is bounded — but the reason is reported, not silently dropped."""
     stats = CanObdLoopStats()
     result = _send_exit(
-        _BusyThenAnsweringSessionBus(pending_frames=MAX_RESPONSE_PENDING_EXTENSIONS + 1),
+        ScriptedEcu(clock, session_pending_frames=MAX_RESPONSE_PENDING_EXTENSIONS + 1),
         stats,
     )
 
@@ -2100,10 +1721,12 @@ def test_an_endlessly_busy_ecu_still_gives_up_and_says_why() -> None:
     assert stats.negative_responses == 1
 
 
-def test_a_failed_session_control_is_visible_in_the_scheduler_counters() -> None:
+def test_a_failed_session_control_is_visible_in_the_scheduler_counters(
+    clock: FakeClock,
+) -> None:
     """A silent ECU on session control used to leave no trace anywhere."""
     stats = CanObdLoopStats()
-    result = _send_exit(_SilentBus(), stats)
+    result = _send_exit(ScriptedEcu(clock, silent=True), stats)
 
     assert result.ok is False
     assert result.negative_response_code is None
@@ -2200,29 +1823,22 @@ def test_single_pid_readings_still_stamp_themselves() -> None:
     assert readings and before <= readings[0].timestamp <= time.time()
 
 
-def test_query_with_tap_records_the_frame_arrival_and_its_clock() -> None:
+def test_query_with_tap_records_the_frame_arrival_and_its_clock(clock: FakeClock) -> None:
     """C02.7: a sane bus-driver stamp is the acquisition clock; an adapter
     reporting 0.0 falls back to userspace time and says so."""
     from src.collection.can_obd_collector import KERNEL_STAMP_MAX_SKEW_SECONDS
 
-    class _StampedBus(_FakeBus):
-        def __init__(self, stamp: float) -> None:
-            super().__init__()
-            self._stamp = stamp
-
-        def recv(self, timeout: float = 0.0) -> can.Message | None:
-            msg = super().recv(timeout)
-            if msg is not None:
-                msg.timestamp = self._stamp
-            return msg
-
     request = _PollRequest(
         kind="pid", service=0x01, identifier=0x0C, request_id=0x7DF, channel="RPM"
     )
-    kernel_stamp = time.time() - 0.010
-    for stamp, expected in ((kernel_stamp, "kernel"), (0.0, "userspace")):
+    # The driver stamped the frame 10 ms before the loop handled it, so the
+    # frame's own stamp and a ``time.time()`` read at handling differ.
+    skew = -0.010
+    assert abs(skew) < KERNEL_STAMP_MAX_SKEW_SECONDS
+    for stamp_frames, expected in ((True, "kernel"), (False, "userspace")):
+        bus = ScriptedEcu(clock, values=_RPM_700, stamp_frames=stamp_frames, stamp_skew=skew)
         result = _query_with_tap(
-            _StampedBus(stamp),  # type: ignore[arg-type]
+            bus,  # type: ignore[arg-type]
             request,
             timeout_seconds=0.2,
             on_frame=lambda _m: None,
@@ -2234,9 +1850,11 @@ def test_query_with_tap_records_the_frame_arrival_and_its_clock() -> None:
         assert result.arrival.clock == expected
         assert result.response_interval_s is None, "single frame: no reassembly span"
         if expected == "kernel":
-            assert result.arrival.at == kernel_stamp
+            stamp = bus.handed_out[-1].timestamp
+            assert stamp != clock.time(), "the stamp must be distinguishable from now"
+            assert result.arrival.at == stamp
         else:
-            assert abs(result.arrival.at - time.time()) < KERNEL_STAMP_MAX_SKEW_SECONDS
+            assert result.arrival.at == clock.time()
 
 
 def test_select_next_due_request_honours_round_membership_and_the_tuple() -> None:

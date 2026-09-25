@@ -25,9 +25,13 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
-ReconstructionReduction = Literal["none", "sample", "timestep", "channel", "global"]
+from src.models.sequence_module import (
+    MaskedReconstructionMixin,
+    ReconstructionReduction,
+    module_base,
+)
 
 
 class TCNAutoencoderConfigLike(Protocol):
@@ -95,14 +99,7 @@ def receptive_field(*, kernel_size: int, num_levels: int) -> int:
     return 1 + 2 * (kernel_size - 1) * ((1 << num_levels) - 1)
 
 
-def _module_base() -> Any:
-    try:
-        return importlib.import_module("torch.nn").Module
-    except ImportError:
-        return object
-
-
-class _Chomp1d(_module_base()):  # type: ignore[misc]
+class _Chomp1d(module_base()):  # type: ignore[misc]
     """Trim the trailing ``chomp`` timesteps a same-padding conv adds, making it
     causal: output ``t`` then depends only on inputs ``≤ t``."""
 
@@ -118,7 +115,7 @@ class _Chomp1d(_module_base()):  # type: ignore[misc]
         return x[:, :, : -self.chomp].contiguous()
 
 
-class _TemporalBlock(_module_base()):  # type: ignore[misc]
+class _TemporalBlock(module_base()):  # type: ignore[misc]
     """Two dilated causal convs + residual (the standard TCN block)."""
 
     def __init__(
@@ -158,7 +155,7 @@ class _TemporalBlock(_module_base()):  # type: ignore[misc]
         return self.relu(out + residual)
 
 
-class _DeltaDecay(_module_base()):  # type: ignore[misc]
+class _DeltaDecay(module_base()):  # type: ignore[misc]
     """Per-channel freshness ``exp(-relu(w ⊙ Δt + b))`` ∈ (0, 1].
 
     The GRU-D input-decay gate, reused here as a *static* bounded transform of
@@ -189,7 +186,7 @@ class _DeltaDecay(_module_base()):  # type: ignore[misc]
         return torch.exp(-torch.relu(scaled))
 
 
-class TCNAutoencoder(_module_base()):  # type: ignore[misc]
+class TCNAutoencoder(MaskedReconstructionMixin, module_base()):  # type: ignore[misc]
     """Dilated causal TCN encoder -> latent vector -> TCN decoder autoencoder.
 
     ``forward(value, mask, delta)`` returns a reconstruction with the same
@@ -316,51 +313,6 @@ class TCNAutoencoder(_module_base()):  # type: ignore[misc]
         decoded = self.decoder(decoder_input)
         return self.output(decoded).transpose(1, 2)  # (B, T, F)
 
-    def forward(self, value: Any, mask: Any, delta: Any) -> Any:
-        """Reconstruct a batch of sequence windows from value/mask/Δt."""
-        self._validate_inputs(value, mask, delta)
-        sequence_length = int(value.shape[1])
-        return self.decode(self.encode(value, mask, delta), sequence_length=sequence_length)
-
-    def reconstruction_error(
-        self,
-        value: Any,
-        mask: Any,
-        delta: Any,
-        *,
-        reduction: ReconstructionReduction = "sample",
-    ) -> Any:
-        """Return **masked** absolute reconstruction error summaries.
-
-        Identical semantics to the LSTM-AE: only observed cells (``mask == 1``)
-        count, so a forward-filled fill never contributes and the per-window /
-        per-channel scale matches the calibrated thresholds.
-        """
-        reconstruction = self.forward(value, mask, delta)
-        masked_error = (reconstruction - value).abs() * mask
-        if reduction == "none":
-            return masked_error
-        if reduction == "sample":
-            return _masked_mean(masked_error, mask, dim=(1, 2))
-        if reduction == "timestep":
-            return _masked_mean(masked_error, mask, dim=2)
-        if reduction == "channel":
-            return _masked_mean(masked_error, mask, dim=1)
-        if reduction == "global":
-            return _masked_mean(masked_error, mask, dim=(0, 1, 2))
-        raise ValueError(f"unknown reconstruction error reduction: {reduction}")
-
-    def _validate_inputs(self, value: Any, mask: Any, delta: Any) -> None:
-        for name, tensor in (("value", value), ("mask", mask), ("delta", delta)):
-            if tensor.ndim != 3:
-                raise ValueError(f"{name} batch must have shape (batch, sequence, features)")
-            if int(tensor.shape[-1]) != self.input_size:
-                raise ValueError(
-                    f"{name} batch has {int(tensor.shape[-1])} features; expected {self.input_size}"
-                )
-        if value.shape != mask.shape or value.shape != delta.shape:
-            raise ValueError("value, mask, and delta must share the same shape")
-
 
 def build_tcn_autoencoder(
     config: TCNAutoencoderConfigLike,
@@ -398,19 +350,6 @@ def _build_temporal_blocks(
         )
         for level in range(num_levels)
     ]
-
-
-def _masked_mean(masked_error: Any, mask: Any, *, dim: tuple[int, ...] | int) -> Any:
-    """Mask-weighted mean: sum(masked_error) / sum(mask) over ``dim``.
-
-    Guards a zero denominator (a window/channel with no observed cell) so the
-    result is 0 rather than NaN.
-    """
-    numerator = masked_error.sum(dim=dim)
-    denominator = mask.sum(dim=dim)
-    safe = denominator.clamp(min=1.0)
-    result = numerator / safe
-    return result * (denominator > 0)
 
 
 def _validate_architecture(

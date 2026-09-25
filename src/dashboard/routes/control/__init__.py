@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, FastAPI
 
@@ -37,7 +37,6 @@ from src.dashboard.broadcast import Broadcaster
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
 from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
-from src.models.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 
 from . import (
@@ -55,6 +54,10 @@ from . import (
     tuning,
 )
 from .context import ControlContext, SessionDir, _require
+
+if TYPE_CHECKING:
+    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
+    from src.daemon.health import HealthMonitor
 
 #: How often the capture-autostart tick classifies the vehicle; the one
 #: definition is ``src.control.profile_capture`` (R03.5). Kept here because an

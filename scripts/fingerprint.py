@@ -37,6 +37,7 @@ from pathlib import Path
 
 from _cli import (  # noqa: E402  (bootstraps repo root onto sys.path)
     add_common_args,
+    add_log_level_arg,
     discover_live_session_dirs,
     load_config,
 )
@@ -79,9 +80,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         default=None,
         help="Storage root to scan. Defaults to (profile-scoped) collection.storage_path.",
     )
-    parser.add_argument(
-        "--log-level", default="INFO", choices=("DEBUG", "INFO", "WARNING", "ERROR")
-    )
+    add_log_level_arg(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_backfill = sub.add_parser(

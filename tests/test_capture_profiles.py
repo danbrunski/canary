@@ -311,8 +311,8 @@ def _capture_rows(
 def _capture_app(tmp_path: Path, clock: _Clock, monkeypatch: pytest.MonkeyPatch):
     """An app whose capture clocks are ``clock`` and whose can0 counters exist."""
     import src.collection.tuning_profile as tuning_profile_mod
-    import src.models.health as health_mod
-    from src.models.health import HealthMonitor
+    import src.daemon.health as health_mod
+    from src.daemon.health import HealthMonitor
 
     monkeypatch.setattr(tuning_profile_mod, "time", clock)
     monkeypatch.setattr(health_mod, "time", clock)

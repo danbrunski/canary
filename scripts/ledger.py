@@ -46,7 +46,6 @@ from src.models.training_ledger import (  # noqa: E402
     TrainingRunRecord,
     build_run_record_from_manifest,
 )
-from src.paths import BINDINGS_YAML  # noqa: E402
 
 _PUBLISH_CHOICES = ["unpublished", "published", "active", "rolled_back"]
 
@@ -108,12 +107,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     p_golden.add_argument("run_id")
     p_golden.add_argument("--notes", default=None)
     _cli.add_common_args(p_golden)
-    p_golden.add_argument(
-        "--bindings",
-        type=Path,
-        default=BINDINGS_YAML,
-        help="Path to bindings.yaml for CAN-signal decode (freezing baselines, Task 3.7).",
-    )
+    _cli.add_bindings_arg(p_golden)
     p_golden.add_argument(
         "--no-freeze-baselines",
         action="store_true",

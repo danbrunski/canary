@@ -46,6 +46,7 @@ def test_all_did_frame_uses_confirmed_semantic_roles(tmp_path: Path) -> None:
         session,
         providers_path=Path("data/nissan-xterra-2008/tuning_providers.yaml"),
         calibration=load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml")),
+        afr_stoich=14.7,
     )
 
     assert frame.capture_profile == "tuning-did"
@@ -132,6 +133,7 @@ def test_round_stamped_rows_are_placed_on_their_acquisition_clock(tmp_path: Path
         session,
         providers_path=Path("data/nissan-xterra-2008/tuning_providers.yaml"),
         calibration=load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml")),
+        afr_stoich=14.7,
     )
     values = frame.values.set_index("timestamp")
     rpm_times = values["rpm"].dropna().index
@@ -246,7 +248,9 @@ def test_bfs_now_resolves_without_opting_into_candidates(tmp_path: Path) -> None
     session = _air_charge_session(tmp_path)
     calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
 
-    frame = build_tuning_frame(session, providers_path=PROVIDERS, calibration=calibration)
+    frame = build_tuning_frame(
+        session, providers_path=PROVIDERS, calibration=calibration, afr_stoich=14.7
+    )
 
     cap = frame.capability["base_fuel_schedule"]
     assert cap["available"] is True

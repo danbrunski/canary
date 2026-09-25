@@ -21,29 +21,10 @@ from src.datasets.export import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import write_isolated_config
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import export_dataset as cli  # noqa: E402
-
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
 
 
 def _make_session(
@@ -76,9 +57,8 @@ def _make_session(
 def _config(tmp_path: Path) -> tuple[CanaryConfig, Path]:
     storage = tmp_path / "sessions"
     storage.mkdir()
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_CONFIG_YAML.format(storage=storage))
-    return CanaryConfig.from_yaml(cfg), storage
+    # The CLI tests read tmp_path/canary.yaml, so the config is written too.
+    return CanaryConfig.from_yaml(write_isolated_config(tmp_path, storage=storage)), storage
 
 
 # ---------------------------------------------------------------------------

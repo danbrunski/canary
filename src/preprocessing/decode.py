@@ -29,13 +29,15 @@ lengths we record now; revisit if multi-hour captures strain memory.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Literal
+from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.can_ids import parse_can_channel
-from src.decode.bindings import Bindings, Signal, load_bindings
+from src.decode.bindings import Bindings, Signal, decode_raw, load_bindings
 from src.paths import BINDINGS_YAML
 from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
 from src.telemetry import channel_key
@@ -46,6 +48,24 @@ DEFAULT_BINDINGS_PATH = BINDINGS_YAML
 def decoded_channel(signal_name: str) -> str:
     """Return the wide-column name a decoded signal will occupy after `to_wide`."""
     return channel_key(DECODED_SOURCE, signal_name)
+
+
+def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
+    """Raw integer value of ``signal`` in each payload, as float64 (R04.4).
+
+    NaN where a payload is not bytes or is too short for the binding's byte
+    range. Built on :func:`src.decode.bindings.decode_raw`, the one byte-slice
+    rule, so this batch path, the storage-side ``FrameDecoder`` and
+    ``tools/backfill_decoded.py`` cannot extract a signal differently.
+    """
+
+    def extract(payload: object) -> float:
+        if not isinstance(payload, (bytes, bytearray)):
+            return float("nan")
+        raw = decode_raw(signal, bytes(payload))
+        return float("nan") if raw is None else float(raw)
+
+    return np.asarray(payloads.map(extract).to_numpy(), dtype=np.float64)
 
 
 def decode_can_rows(
@@ -110,23 +130,11 @@ def decode_can_rows(
             group["session_path"].to_numpy() if "session_path" in group.columns else [None] * n
         )
         for sig in by_can_id[can_id]:
-            end = sig.byte_start + sig.byte_length
             meta = json.dumps(
                 {"can_id": can_id, "binding_confidence": sig.confidence},
                 sort_keys=True,
             )
-
-            def _extract(
-                p: object,
-                _start: int = sig.byte_start,
-                _end: int = end,
-                _order: Literal["big", "little"] = sig.byte_order,
-            ) -> float:
-                if not isinstance(p, (bytes, bytearray)) or len(p) < _end:
-                    return float("nan")
-                return float(int.from_bytes(bytes(p[_start:_end]), byteorder=_order))
-
-            values = payloads.map(_extract).to_numpy()
+            values = decode_signal_column(payloads, sig)
             decoded_frames.append(
                 pd.DataFrame(
                     {
@@ -176,3 +184,57 @@ def read_session_decoded(
         return long_frame
     bindings = load_bindings(bindings_path)
     return decode_can_rows(long_frame, bindings, confidence_levels=confidence_levels)
+
+
+def can_channel_spellings(can_ids: Iterable[int]) -> list[str]:
+    """Every spelling the ``channel`` of a raw CAN row has used for these ids.
+
+    Sessions from different recorder eras write the arbitration id as
+    ``0x551``, ``0x0551``, ``551`` and in either case; a parquet pushdown on
+    one spelling silently reads nothing from the others. Callers still match
+    rows exactly with :func:`src.can_ids.parse_can_channel` afterwards.
+    """
+    spellings: set[str] = set()
+    for can_id in can_ids:
+        for width in ("", "03", "04", "08"):
+            for case in ("X", "x"):
+                body = format(int(can_id), f"{width}{case}")
+                spellings.update((f"0x{body}", f"0X{body}", body))
+    return sorted(spellings)
+
+
+def read_session_decoded_subset(
+    session_dir: Path,
+    *,
+    bindings: Bindings | None,
+    decoded: Iterable[str],
+) -> tuple[pd.DataFrame, Bindings | None]:
+    """One bounded read of a session for a *subset* of broadcast signals (R04.14).
+
+    Returns ``(long, subset)``: the session's long frame holding every non-CAN
+    row plus only the raw CAN rows whose id one of the ``decoded`` bindings
+    reads -- pushed down to parquet over every era's channel spelling
+    (:func:`can_channel_spellings`) and matched exactly by parsed id -- and
+    ``bindings`` narrowed to those signals (``None`` when there is nothing to
+    decode). Decoding is the caller's: ``decode_can_rows(long, subset)`` or
+    the resample chain. A whole-bus read of one 42 MB drive peaked above 6 GB,
+    which is why both bounded readers (``plausibility.offline.session_long``,
+    ``analysis.behavior_validation.build_evaluation_frame``) exist at all.
+    """
+    from src.preprocessing.loader import read_session
+
+    wanted = set(decoded)
+    signals = [s for s in bindings.signals if s.name in wanted] if bindings is not None else []
+    subset = bindings.model_copy(update={"signals": signals}) if bindings and signals else None
+    filters: list[list[tuple[str, str, Any]]] = [[("source", "!=", "can")]]
+    ids = {signal.can_id for signal in signals}
+    if ids:
+        filters.append([("source", "==", "can"), ("channel", "in", can_channel_spellings(ids))])
+    long = read_session(Path(session_dir), filters=filters)
+    is_can = (long["source"] == "can").to_numpy()
+    if is_can.any():
+        parsed = long.loc[is_can, "channel"].map(lambda c: parse_can_channel(str(c)))
+        keep = np.ones(len(long), dtype=bool)
+        keep[np.flatnonzero(is_can)] = parsed.isin(ids).to_numpy(dtype=bool)
+        long = long.loc[keep].reset_index(drop=True)
+    return long, subset

@@ -29,24 +29,24 @@ from typing import Any, Literal, cast
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration
 from src.analysis.channels import (
     ChannelSpecError,
     align_long,
     parse_spec,
     read_channels,
 )
-from src.analysis.noise_floor import NoiseFloor
+from src.analysis.noise_floor import NoiseFloor, Significance, significance
 from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.analysis.tuning import (
-    DEFAULT_RPM_BANDS,
     GateError,
     GateReport,
+    InputsNotCapturedError,
     _assert_axis_allowed,
     delivery_error_from_gated,
     delivery_semantic_frame,
     gate_delivery_samples,
 )
+from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import ProviderRegistry, build_tuning_frame
 from src.control.capture_manifest import read_capture_manifest
 from src.control.sessions import session_started_at
@@ -76,6 +76,10 @@ TRIM_SPECS: dict[str, tuple[str, str]] = {
     "b1": ("obd:SHORT_FUEL_TRIM_1", "obd:LONG_FUEL_TRIM_1"),
     "b2": ("obd:SHORT_FUEL_TRIM_2", "obd:LONG_FUEL_TRIM_2"),
 }
+#: The regime a whole-drive rpm x airflow comparison is made under: every row,
+#: unfiltered. A noise floor is quoted against it only if it was measured under
+#: exactly this (R05.2).
+ALL_CONDITIONS = "all conditions: every row, binned on rpm x airflow"
 #: J1979 FUEL_STATUS value for "closed loop, using oxygen sensor feedback".
 CLOSED_LOOP = 2.0
 
@@ -104,26 +108,19 @@ DEFAULT_AIRFLOW_EDGES: tuple[float, ...] = (
 DEFAULT_MIN_CELL_N = 5
 
 
-@dataclass(frozen=True)
-class WorkbenchInputs:
+@dataclass(frozen=True, kw_only=True)
+class WorkbenchInputs(TuningContext):
     """Everything a whole-session read needs besides the sessions themselves.
 
-    Plain data so it pickles into the analysis child. Vehicle facts arrive
-    here from profile data (calibration, providers, flash registry, noise
-    floor, the ``idle`` operating mode); nothing vehicle-specific is coded.
+    The vehicle's :class:`~src.analysis.tuning_context.TuningContext` plus the
+    catalogs to decode with. Plain data so it pickles into the analysis child.
+    Vehicle facts arrive from profile data (calibration, providers, flash
+    registry, noise floor, the ``idle`` operating mode, stoichiometry from the
+    configured fuel); nothing vehicle-specific is coded.
     """
 
     bindings_path: Path = BINDINGS_YAML
     dids_path: Path = DIDS_YAML
-    calibration: AfrCalibration | None = None
-    providers: ProviderRegistry | None = None
-    providers_path: Path | None = None
-    registry: TuneRevisionRegistry | None = None
-    noise_floor: NoiseFloor | None = None
-    #: ``preprocessing.operating_modes["idle"]`` as a dict (rpm_min, rpm_max,
-    #: speed_max …), or ``None`` when this vehicle's config defines no idle.
-    idle_spec: dict[str, float | None] | None = None
-    afr_stoich: float = 14.7
 
 
 @dataclass
@@ -641,7 +638,10 @@ def _semantic_delivery_frame(
     if inputs.providers_path is None:
         return Unavailable(session.name, "refused", "no tuning_providers.yaml for this vehicle")
     frame = build_tuning_frame(
-        session, providers_path=inputs.providers_path, calibration=inputs.calibration
+        session,
+        providers_path=inputs.providers_path,
+        calibration=inputs.calibration,
+        afr_stoich=inputs.afr_stoich,
     )
     needed = ("rpm", role, "commanded_afr", "fueling_active")
     missing = [r for r in needed if not frame.capability.get(r, {}).get("available", False)]
@@ -666,14 +666,36 @@ def _semantic_delivery_frame(
     return values.loc[:, keep]
 
 
-def _missing_from_gate_error(exc: GateError) -> list[str]:
-    text = str(exc)
-    marker = "Empty in this session: "
-    if marker not in text:
-        return []
-    tail = text.split(marker, 1)[1]
-    head = tail.split(". ", 1)[0].split(" This session", 1)[0].split(" Use a Mode 01", 1)[0]
-    return [part.strip() for part in head.split(",") if part.strip()]
+def _session_delivery_frame(
+    session: Path, inputs: WorkbenchInputs, *, measured: str, min_load: float | None
+) -> pd.DataFrame | Unavailable:
+    """One session's delivery inputs as semantic roles, or which kind of unavailable.
+
+    ``semantic:<role>`` reads the A/F voltage through the calibrated transfer
+    (:func:`_semantic_delivery_frame`); anything else is the Mode 01 path.
+    A session whose inputs were never captured is ``not_captured`` with the
+    absent inputs named (R05.11 — read from the error's fields, not its
+    text); any other gate refusal is ``refused``.
+    """
+    try:
+        if measured.startswith(MEASURED_SEMANTIC_PREFIX):
+            role = measured[len(MEASURED_SEMANTIC_PREFIX) :]
+            return _semantic_delivery_frame(session, role, inputs)
+        assert inputs.calibration is not None
+        return delivery_semantic_frame(
+            session,
+            calibration=inputs.calibration,
+            measured_spec=measured,
+            min_load=min_load,
+            afr_stoich=inputs.afr_stoich,
+            bindings_path=inputs.bindings_path,
+            dids_path=inputs.dids_path,
+            mode01_exclusion_note=inputs.mode01_exclusion_note,
+        )
+    except InputsNotCapturedError as exc:
+        return Unavailable(session.name, "not_captured", str(exc), missing=list(exc.missing))
+    except ValueError as exc:  # GateError included
+        return Unavailable(session.name, "refused", str(exc))
 
 
 def pooled_delivery_error(
@@ -682,7 +704,7 @@ def pooled_delivery_error(
     inputs: WorkbenchInputs,
     measured: str = "obd:O2_WR_LAMBDA_S1",
     min_load: float | None = None,
-    rpm_bands: tuple[float, ...] = DEFAULT_RPM_BANDS,
+    rpm_bands: tuple[float, ...] | None = None,
     unavailable: list[Unavailable] | None = None,
 ) -> dict[str, Any]:
     """Delivery error by rpm band over several sessions, with every gate.
@@ -698,6 +720,12 @@ def pooled_delivery_error(
     masquerade as an effect. Each session's own n is reported beside it.
     """
     skipped = list(unavailable or [])
+    bands = rpm_bands if rpm_bands is not None else inputs.rpm_bands
+    if bands is None:
+        raise GateError(
+            "no rpm bands for this vehicle: declare mode01_wot.rpm_bands in its "
+            "tuning_providers.yaml (the top edge is the engine's redline)"
+        )
     semantic = measured.startswith(MEASURED_SEMANTIC_PREFIX)
     if semantic and min_load is not None:
         raise GateError(
@@ -711,49 +739,20 @@ def pooled_delivery_error(
     pooled_report = GateReport()
     per_session: list[dict[str, Any]] = []
     for session in sessions:
-        try:
-            if semantic:
-                role = measured[len(MEASURED_SEMANTIC_PREFIX) :]
-                built = _semantic_delivery_frame(session, role, inputs)
-                if isinstance(built, Unavailable):
-                    skipped.append(built)
-                    continue
-                frame = built
-            else:
-                assert inputs.calibration is not None
-                frame = delivery_semantic_frame(
-                    session,
-                    calibration=inputs.calibration,
-                    measured_spec=measured,
-                    min_load=min_load,
-                    afr_stoich=inputs.afr_stoich,
-                    bindings_path=inputs.bindings_path,
-                    dids_path=inputs.dids_path,
-                )
-        except GateError as exc:
-            missing = _missing_from_gate_error(exc)
-            skipped.append(
-                Unavailable(
-                    session.name,
-                    "not_captured" if "never captured" in str(exc) else "refused",
-                    str(exc),
-                    missing=missing,
-                )
-            )
-            continue
-        except ValueError as exc:
-            skipped.append(Unavailable(session.name, "refused", str(exc)))
+        frame = _session_delivery_frame(session, inputs, measured=measured, min_load=min_load)
+        if isinstance(frame, Unavailable):
+            skipped.append(frame)
             continue
         gate_name = "fueling_inactive" if semantic else "closed_loop"
         # Gate each session on its own clock, then band-average the pool once.
         gated, report = gate_delivery_samples(
             frame,
             afr_stoich=inputs.afr_stoich,
-            rpm_bands=rpm_bands,
+            rpm_bands=bands,
             min_load=min_load,
             fueling_gate_name=gate_name,
         )
-        own = delivery_error_from_gated(gated, report, measured_spec=measured, rpm_bands=rpm_bands)
+        own = delivery_error_from_gated(gated, report, measured_spec=measured, rpm_bands=bands)
         identity = session_revision(session, inputs.registry)
         per_session.append(
             {
@@ -772,7 +771,7 @@ def pooled_delivery_error(
     base: dict[str, Any] = {
         "measured": measured,
         "min_load": min_load,
-        "rpm_bands": list(rpm_bands),
+        "rpm_bands": list(bands),
         "per_session": per_session,
         "unavailable": [item.as_dict() for item in skipped],
         "noise_floor": floor,
@@ -804,7 +803,7 @@ def pooled_delivery_error(
         return base
     pooled = pd.concat(gated_parts, ignore_index=True)
     result = delivery_error_from_gated(
-        pooled, pooled_report, measured_spec=measured, rpm_bands=rpm_bands
+        pooled, pooled_report, measured_spec=measured, rpm_bands=bands
     )
     payload = result.as_dict()
     base.update(
@@ -1123,9 +1122,12 @@ def pull_comparison(
     Only cells with at least ``min_n`` samples on *both* sides are compared.
     ``delta = B - A``; a negative delta in a cell A had advanced is flagged
     ``dropped`` — the ECM's emergency retard is the only knock proxy this ECM
-    offers. When ``floor_channel`` resolves in the vehicle's noise floor, each
-    delta carries ``delta_sigma`` **and** the floor's own conditions, so a WOT
-    floor is never silently quoted against an all-conditions comparison.
+    offers. ``floor_channel`` asks for significance; the cells are binned
+    across every operating regime (:data:`ALL_CONDITIONS`), so a floor
+    measured under narrower conditions is refused and the refusal is returned
+    as ``significance`` — a WOT floor is never quoted against an
+    all-conditions comparison. The floor itself is still described in
+    ``noise_floor``.
     """
     _check_axes(rpm, airflow)
     _edges_ok(rpm_edges, "rpm")
@@ -1157,7 +1159,6 @@ def pull_comparison(
             ),
         }
     floor = noise_floor_payload(inputs.noise_floor, floor_channel) if floor_channel else None
-    sd = floor.get("sd") if floor and floor.get("available") else None
     index_b = {(c["rpm_index"], c["airflow_index"]): c for c in sides["b"]["cells"]}
     compared: list[dict[str, Any]] = []
     for cell_a in sides["a"]["cells"]:
@@ -1180,9 +1181,26 @@ def pull_comparison(
                 "mean_b": cell_b["mean"],
                 "delta": delta,
                 "dropped": delta < 0 and cell_a["mean"] > 0,
-                "delta_sigma": None if not sd else delta / float(sd),
+                "delta_sigma": None,
             }
         )
+    # R05.2: every row of both sides is binned, whatever the operating regime,
+    # so this comparison is an all-conditions one. The refusing significance
+    # quotes a floor only if it was measured under the same conditions — a WOT
+    # floor against these cells would understate noise ~16x.
+    verdict = (
+        significance(
+            inputs.noise_floor,
+            floor_channel,
+            pd.Series([c["delta"] for c in compared], dtype=float),
+            conditions=ALL_CONDITIONS,
+        )
+        if floor_channel
+        else None
+    )
+    if isinstance(verdict, Significance):
+        for cell, sigma in zip(compared, verdict.delta_sigma, strict=True):
+            cell["delta_sigma"] = _clean(sigma)
     available = bool(compared)
     if available:
         kind = None
@@ -1213,6 +1231,7 @@ def pull_comparison(
             "rule": f"cells with >= {min_n} samples on both revisions",
         },
         "noise_floor": floor,
+        "significance": None if verdict is None else verdict.as_dict(),
         "unavailable": [item.as_dict() for item in skipped],
         "conditions": conditions_block(contributing, inputs),
     }

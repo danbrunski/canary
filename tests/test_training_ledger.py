@@ -18,6 +18,7 @@ from src.models.training_ledger import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import retrain_argv
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import _cli  # noqa: E402
@@ -579,7 +580,8 @@ def test_retrain_ingests_ledger_when_manifest_present(
     )
     ledger_path = tmp_path / "runs.jsonl"
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -597,7 +599,7 @@ def test_retrain_ingests_ledger_when_manifest_present(
             str(ledger_path),
             "--compute-target",
             "laptop",
-        ]
+        )
     )
     assert rc == 0
     records = {r.run_id: r for r in TrainingLedger(ledger_path).records()}
@@ -629,7 +631,8 @@ def test_retrain_ledger_records_detector_benchmark_report_path(
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -641,7 +644,7 @@ def test_retrain_ledger_records_detector_benchmark_report_path(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
-        ]
+        )
     )
 
     assert rc == 0
@@ -682,7 +685,8 @@ def test_retrain_ledger_records_feedback_policy(
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -693,9 +697,8 @@ def test_retrain_ledger_records_feedback_policy(
             str(if_out),
             "--ledger",
             str(ledger_path),
-            "--feedback",
-            str(feedback_path),
-        ]
+            feedback=feedback_path,
+        )
     )
 
     assert rc == 0
@@ -730,7 +733,8 @@ def test_retrain_ledger_records_disposition_summary(
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -742,7 +746,7 @@ def test_retrain_ledger_records_disposition_summary(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
-        ]
+        )
     )
     assert rc == 0
     [record] = TrainingLedger(ledger_path).records()
@@ -801,7 +805,8 @@ def test_retrain_excludes_quarantine_cells_from_training_matrix(
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -814,7 +819,7 @@ def test_retrain_excludes_quarantine_cells_from_training_matrix(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
-        ]
+        )
     )
     assert rc == 0
 
@@ -861,7 +866,8 @@ def test_retrain_skip_quarantine_exclusion_flag_leaves_matrix_untouched(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -874,7 +880,7 @@ def test_retrain_skip_quarantine_exclusion_flag_leaves_matrix_untouched(
             "--no-feedback-policy",
             "--no-ledger",
             "--skip-quarantine-exclusion",
-        ]
+        )
     )
     assert rc == 0
     trained_frame = captured["feature_frame"]
@@ -939,7 +945,8 @@ def test_retrain_quarantine_exclusion_is_golden_anchored_when_declared(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -952,7 +959,7 @@ def test_retrain_quarantine_exclusion_is_golden_anchored_when_declared(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
-        ]
+        )
     )
     assert rc == 0
     trained_frame = captured["feature_frame"]
@@ -978,7 +985,8 @@ def test_retrain_skip_disposition_summary_flag_leaves_it_none(
     ledger_path = tmp_path / "runs.jsonl"
 
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -991,7 +999,7 @@ def test_retrain_skip_disposition_summary_flag_leaves_it_none(
             "--ledger",
             str(ledger_path),
             "--skip-disposition-summary",
-        ]
+        )
     )
     assert rc == 0
     [record] = TrainingLedger(ledger_path).records()
@@ -1010,7 +1018,8 @@ def test_retrain_ledger_hook_is_best_effort(
     monkeypatch.setattr(retrain.lstm_trainer, "train", lambda *a, **k: None)
     ledger_path = tmp_path / "runs.jsonl"
     rc = retrain.main(
-        [
+        retrain_argv(
+            tmp_path,
             "--config",
             "canary.example.yaml",
             "--sessions-root",
@@ -1025,7 +1034,7 @@ def test_retrain_ledger_hook_is_best_effort(
             "--no-feedback-policy",
             "--ledger",
             str(ledger_path),
-        ]
+        )
     )
     assert rc == 0
     assert not ledger_path.exists()  # nothing recorded, no stray file

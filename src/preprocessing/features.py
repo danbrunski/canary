@@ -35,7 +35,30 @@ MEAN_SUFFIX = "__mean"
 STD_SUFFIX = "__std"
 ROC_SUFFIX = "__roc"
 
-_FEATURE_SUFFIXES: tuple[str, ...] = (MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
+#: Every rolling-feature suffix this module appends. The one declaration:
+#: consumers split a column with :func:`split_rolling` / :func:`base_channel`
+#: rather than re-listing the suffixes (R04.3) -- a copy that missed a newly
+#: added rolling feature would lose its freshness mask at serve, leak around
+#: ``suppress_channels`` and misfile its calibration family, all silently.
+ROLLING_SUFFIXES: tuple[str, ...] = (MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
+
+
+def split_rolling(column: str) -> tuple[str, str]:
+    """``"<base>__roc"`` -> ``("<base>", "__roc")``; a raw column -> ``(column, "")``."""
+    for suffix in ROLLING_SUFFIXES:
+        if column.endswith(suffix):
+            return column[: -len(suffix)], suffix
+    return column, ""
+
+
+def base_channel(column: str) -> str:
+    """The channel a rolling feature summarizes (the column itself when raw).
+
+    Also the sequence detector's *family* key: a channel and its rolling
+    siblings share one calibration band.
+    """
+    return split_rolling(column)[0]
+
 
 #: Mirrors ``src.preprocessing.session_context.CONTEXT_PREFIX`` (kept local to
 #: avoid importing the behavior schema into this leaf module).
@@ -237,7 +260,7 @@ def compute_rate_of_change(
     wanted = [
         col
         for col in dict.fromkeys(columns)
-        if col in frame.columns and not col.endswith(_FEATURE_SUFFIXES)
+        if col in frame.columns and not col.endswith(ROLLING_SUFFIXES)
     ]
     out = frame.copy()
     if not wanted or frame.empty:
@@ -306,7 +329,7 @@ def _value_columns(
         # per-start bookkeeping for behavior eligibility, not telemetry.
         if col.startswith(CONTEXT_COLUMN_PREFIX):
             continue
-        if is_flag_column(col) or col.endswith(_FEATURE_SUFFIXES):
+        if is_flag_column(col) or col.endswith(ROLLING_SUFFIXES):
             continue
         if not pd.api.types.is_numeric_dtype(df[col]):
             continue

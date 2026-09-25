@@ -15,66 +15,19 @@ from src.daemon import build_components, build_live_feature_source, run_live_inf
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
+from tests.configs import isolated_config
 
 pytestmark = pytest.mark.asyncio
 
 
-def _config_yaml(tmp_path: Path, *, live_enabled: bool) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {tmp_path / "storage"}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  out_of_process_feature_build: false
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 0
-daemon:
-  anomalies_dir: {tmp_path / "anomalies"}
-  models_dir: {tmp_path / "models"}
-  model_poll_seconds: 0.05
-  retention_sweep_seconds: 0.05
-  broadcaster_queue_size: 16
-  catalog_db: {tmp_path / "control" / "catalog.db"}
-autotag:
-  live_enabled: {"true" if live_enabled else "false"}
-  stopped_speed_max_kph: 3.0
-"""
-
-
 def _config(tmp_path: Path, *, live_enabled: bool) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path, live_enabled=live_enabled))
-    return CanaryConfig.from_yaml(cfg_path)
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        models={"out_of_process_feature_build": False},
+        daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 16},
+        autotag={"live_enabled": live_enabled, "stopped_speed_max_kph": 3.0},
+    )
 
 
 async def _run_gps_stopped_session(config: CanaryConfig, tmp_path: Path) -> Path:

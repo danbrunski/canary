@@ -24,114 +24,38 @@ import pytest
 from src.config import CanaryConfig
 from src.daemon import build_components, run_daemon
 from src.telemetry import TelemetryRecord
+from tests.configs import isolated_config
+from tests.fakes import StubModelManager, fake_if_model
 from tests.waits import HANG_GUARD_SECONDS, settle, wait_until
 
 #: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
 pytestmark = [pytest.mark.integration, pytest.mark.usefixtures("no_trip_end_digest_child")]
 
 
-def _config_yaml(tmp_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 20
-  storage_path: {tmp_path / "storage"}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 20
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-alerts:
-  # Default (30s) would make live-B's post-replay emit wait far longer than
-  # this test needs to; a low-but-nonzero dedupe window still exercises the
-  # real dedupe path instead of disabling it outright.
-  min_seconds_between_events: 0.05
-models:
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 0
-daemon:
-  anomalies_dir: {tmp_path / "anomalies"}
-  models_dir: {tmp_path / "models"}
-  model_poll_seconds: 0.05
-  retention_sweep_seconds: 0.05
-  broadcaster_queue_size: 16
-"""
-
-
 @pytest.fixture
 def config(tmp_path: Path) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    return CanaryConfig.from_yaml(cfg_path)
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        # Default (30s) would make live-B's post-replay emit wait far longer
+        # than this test needs to; a low-but-nonzero dedupe window still
+        # exercises the real dedupe path instead of disabling it outright.
+        alerts={"min_seconds_between_events": 0.05},
+        daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 16},
+    )
 
 
-class _FakeTrained:
-    """Always flags the row anomalous+calibrated so IF actually fires."""
+def _emitted(components: Any) -> int:
+    """Events stored, whatever their role.
 
-    feature_columns = ("obd:RPM",)
-    mode_column = "operating_mode"
-    manifest = type("M", (), {"model_version": "fake_if_v1"})()
-
-    def score(self, frame: Any) -> Any:
-        out = frame.copy()
-        out["isolation_forest_score"] = 0.9
-        out["isolation_forest_label"] = -1
-        out["isolation_forest_model_mode"] = "all"
-        out["isolation_forest_missing_features"] = False
-        out["isolation_forest_calibrated_threshold"] = 0.5
-        out["isolation_forest_calibrated_anomaly"] = True
-        return out
-
-
-class _StubManager:
-    @property
-    def current(self) -> Any:
-        from src.models.manager import LoadedModel
-        from src.models.manifest import ModelManifestCommon
-
-        return LoadedModel(
-            artifact=_FakeTrained(),
-            manifest=ModelManifestCommon(
-                artifact_format_version=1,
-                model_type="isolation_forest",
-                model_version="fake_if_v1",
-                created_at="now",
-                training_data_hash="h",
-                input_rows=1,
-            ),
-            artifact_path=Path("/tmp/x"),
-            manifest_path=Path("/tmp/x.manifest.json"),
-            manifest_mtime=0.0,
-        )
-
-    def poll(self) -> Any:
-        from src.models.manager import SwapAttempt
-
-        return SwapAttempt(kind="no_change")
+    The IF serves as ``evidence`` by default (A06.1, 7aceaab), and the role
+    gate refuses ``alert`` for an artifact without a verified alert budget, so
+    this test's stub IF lands in ``emitted_evidence``, never ``emitted``. Both
+    counters, and the dedupe map, are snapshotted and restored across a
+    replay; this test is about that, not about the role.
+    """
+    counters = components.emitter.counters
+    return int(counters.emitted + counters.emitted_evidence)
 
 
 async def test_live_replay_live_does_not_cross_contaminate_state(
@@ -160,7 +84,8 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
     and correctly kept (it failed 2 of 5 loaded runs as ``assert 2 == 1``).
     """
     components = build_components(config)
-    components.model_managers["isolation_forest"] = _StubManager()  # type: ignore[assignment]
+    # Always flags the row anomalous + calibrated, so IF actually fires.
+    components.model_managers["isolation_forest"] = StubModelManager(fake_if_model())  # type: ignore[assignment]
 
     stop = asyncio.Event()
     live_a_enough = asyncio.Event()
@@ -207,14 +132,14 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
             source is not None
             and source.buffer_size > 0
             and components.persistence_gate.active("isolation_forest")
-            and components.emitter.counters.emitted > 0
+            and _emitted(components) > 0
         )
 
     at_replay_entry: dict[str, Any] = {}
     enter_replay_mode = components.emitter.enter_replay_mode
 
     def _capture_then_enter() -> None:
-        at_replay_entry["emitted"] = components.emitter.counters.emitted
+        at_replay_entry["emitted"] = _emitted(components)
         at_replay_entry["dedupe"] = dict(components.emitter._last_emit)
         enter_replay_mode()
 
@@ -242,7 +167,7 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
         # --- live A: real state accumulated ---
         assert live_source.buffer_size > 0
         assert components.persistence_gate.active("isolation_forest")
-        assert components.emitter.counters.emitted > 0
+        assert _emitted(components) > 0
 
         # --- enter replay: 7.1 boundary reset ---
         source_dir = config.collection.storage_path / "2020-01-01T000000"
@@ -256,7 +181,7 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
         assert live_source.buffer_size == 0
         assert live_source.known_channels == ()
         assert not components.persistence_gate.active("isolation_forest")
-        assert components.emitter.counters.emitted == 0
+        assert _emitted(components) == 0
         assert components.emitter._last_emit == {}
 
         # --- exit replay: pre-replay live state restored/cleared per 7.1 ---
@@ -265,14 +190,14 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
         assert live_source.buffer_size == 0  # live buffer restarts empty
         assert live_source.known_channels == ()
         assert not components.persistence_gate.active("isolation_forest")
-        assert components.emitter.counters.emitted == pre_replay_emitted
+        assert _emitted(components) == pre_replay_emitted
         assert components.emitter._last_emit == pre_replay_dedupe
 
         # --- live B: normal operation resumes, no replay leftovers ---
         live_b_ready.set()
         await wait_until(
             lambda: (
-                components.emitter.counters.emitted > pre_replay_emitted
+                _emitted(components) > pre_replay_emitted
                 and live_source.buffer_size > 0
                 and components.persistence_gate.active("isolation_forest")
             ),
@@ -282,7 +207,7 @@ async def test_live_replay_live_does_not_cross_contaminate_state(
 
         assert live_source.buffer_size > 0
         assert components.persistence_gate.active("isolation_forest")
-        assert components.emitter.counters.emitted > pre_replay_emitted
+        assert _emitted(components) > pre_replay_emitted
     finally:
         stop.set()
         await settle(daemon_task)

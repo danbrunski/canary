@@ -133,6 +133,31 @@ class WotCriterion(BaseModel):
         return self
 
 
+class LoadWotCriterion(BaseModel):
+    """How a Mode 01 capture recognises WOT, and the rpm bands reports use.
+
+    Vehicle facts (R05.13): the load floor is where this engine's calculated
+    load sits at wide-open throttle, the rpm floor where a pull is worth
+    counting, and the band edges end at the engine's redline. All required —
+    a plausible default would silently relabel another vehicle's part throttle
+    as WOT, or drop its top band.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    load_floor_pct: float
+    rpm_floor: float
+    #: Band edges delivery error and WOT seconds are binned into, ascending;
+    #: the last edge is the redline.
+    rpm_bands: tuple[float, ...] = Field(min_length=2)
+
+    @model_validator(mode="after")
+    def _ascending(self) -> LoadWotCriterion:
+        if any(b <= a for a, b in zip(self.rpm_bands, self.rpm_bands[1:], strict=False)):
+            raise ValueError(f"mode01_wot.rpm_bands must be strictly ascending: {self.rpm_bands}")
+        return self
+
+
 class ProviderRegistry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -141,6 +166,13 @@ class ProviderRegistry(BaseModel):
     #: Optional: a vehicle with no measured stop cannot infer WOT, and must
     #: say so rather than fall back to a guess.
     wot_criterion: WotCriterion | None = None
+    #: Why this vehicle's Mode-22-continuous captures carry no Mode 01
+    #: channels (on the dev vehicle's ECM the two services are mutually
+    #: exclusive). A vehicle fact, quoted by the "inputs were never captured"
+    #: refusal (R05.11) instead of a sentence baked into shared code.
+    mode01_exclusion_note: str | None = None
+    #: WOT recognition and rpm bands for Mode 01 captures (R05.13).
+    mode01_wot: LoadWotCriterion | None = None
 
 
 @dataclass(frozen=True)
@@ -165,7 +197,7 @@ def build_tuning_frame(
     providers_path: Path,
     calibration: AfrCalibration | None = None,
     allow_candidates: bool = False,
-    afr_stoich: float = 14.7,
+    afr_stoich: float,
     dids_path: Path = DIDS_YAML,
 ) -> TuningFrame:
     """Resolve semantic roles without embedding vehicle DID names in callers.
@@ -198,7 +230,11 @@ def build_tuning_frame(
             # the real cause is that the capture profile disabled Mode 01. A
             # misleading reason on an unavailable role is worse than none.
             series = read_channels(
-                session_dir, [provider.spec], acquired_time=True, calibration=calibration
+                session_dir,
+                [provider.spec],
+                acquired_time=True,
+                calibration=calibration,
+                afr_stoich=afr_stoich,
             )
         except ChannelSpecError as exc:
             capability[role] = {"available": False, "provider": provider.spec, "reason": str(exc)}

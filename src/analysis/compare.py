@@ -60,6 +60,7 @@ import pandas as pd
 from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_channels
 from src.analysis.pairing import (
     ComparisonRefusedError,
+    InputNotCapturedError,
     MatchedSamples,
     PairingPolicy,
     TimestampBasis,
@@ -316,10 +317,11 @@ def _refuse_if_absent(spec: str, side: pd.DataFrame) -> None:
     ``tuning-did`` shape from AGENTS.md, misattributed.
     """
     if side.empty:
-        raise ComparisonRefusedError(
+        raise InputNotCapturedError(
             f"{spec}: no observations in this session, so there is nothing to "
             "pair. The channel was never captured (or does not decode) — this is "
-            "an unavailable input, not insufficient coverage."
+            "an unavailable input, not insufficient coverage.",
+            spec=spec,
         )
 
 
@@ -542,6 +544,7 @@ __all__ = [
     "ChannelComparison",
     "ComparisonRefusedError",
     "Fit",
+    "InputNotCapturedError",
     "PairingPolicy",
     "ScaleVerdict",
     "align_pairs",

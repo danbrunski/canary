@@ -229,6 +229,16 @@ _CAN_FRAME_DROP_LOGS: dict[str, DropLogThrottle] = {}
 _CAN_FRAME_DROP_LOGS_LOCK = threading.Lock()
 
 
+def _reset_for_tests() -> None:
+    """Every module-level drop counter and throttle back to its import-time
+    state (R07.4): the unattributed queue-drop counter and the per-loop
+    parse-error throttles."""
+    global _UNATTRIBUTED_QUEUE_DROPS
+    _UNATTRIBUTED_QUEUE_DROPS = QueueDropCounter("unattributed")
+    with _CAN_FRAME_DROP_LOGS_LOCK:
+        _CAN_FRAME_DROP_LOGS.clear()
+
+
 def _can_frame_drop_log(owner: str) -> DropLogThrottle:
     with _CAN_FRAME_DROP_LOGS_LOCK:
         throttle = _CAN_FRAME_DROP_LOGS.get(owner)

@@ -18,6 +18,7 @@ from src.models.health import (
     reconstruction_error_drift,
     system_metrics,
 )
+from tests.configs import isolated_config
 
 # ---------------------------------------------------------------------------
 # Pure functions
@@ -347,33 +348,11 @@ def test_monitor_snapshots_obd_scheduler_metrics() -> None:
 # /status surfacing
 # ---------------------------------------------------------------------------
 
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
-
 
 def _config(tmp_path: Path) -> CanaryConfig:
     storage = tmp_path / "storage"
     (storage / "2026-05-17T120000").mkdir(parents=True)
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_CONFIG_YAML.format(storage=storage))
-    return CanaryConfig.from_yaml(cfg)
+    return isolated_config(tmp_path, storage=storage)
 
 
 def test_build_status_includes_health_when_monitor_present(tmp_path: Path) -> None:

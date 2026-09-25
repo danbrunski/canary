@@ -43,10 +43,8 @@ FORBIDDEN: tuple[tuple[str, str], ...] = (
 _IMPORTERS = frozenset(importer for importer, _target in FORBIDDEN)
 
 #: Temporary: removed by a named later item. (file relative to src, module).
-OWED: dict[tuple[str, str], str] = {
-    ("decode/behavior_decoder.py", "src.analysis.surface_1d"): "R05.10 moves surface eval",
-    ("decode/behavior_decoder.py", "src.analysis.surface_2d"): "R05.10 moves surface eval",
-}
+#: Empty since R05.10 moved surface evaluation into ``decode.surface_eval``.
+OWED: dict[tuple[str, str], str] = {}
 
 #: Existing daemon -> dashboard edges that R01.8 does not name. Recorded so a
 #: new edge of this kind still fails; each one wants a home decision of its own.
@@ -121,3 +119,47 @@ def test_the_edges_r01_removed_stay_removed() -> None:
     assert not any(module.startswith("src.mcp_server") for _file, module in edges)
     assert not any(module == "src.analysis.refit" for _file, module in edges)
     assert not any(module == "src.dashboard.paths" for _file, module in edges)
+
+
+def test_src_never_imports_tests() -> None:
+    """R07.1: shipped code must not depend on the test tree (or on pytest).
+
+    ``src/validation/synthetic_bus.py`` once imported its scripted ECU from
+    ``tests.capture_round_fakes``, which dragged ``pytest`` into
+    ``scripts/sustained_validation.py``. Every package under ``src`` is walked,
+    not only the :data:`FORBIDDEN` importers.
+    """
+    offenders = sorted(
+        f"{path.relative_to(SRC).as_posix()} -> {module}"
+        for path in SRC.rglob("*.py")
+        if "static" not in path.relative_to(SRC).parts
+        for module in _imported_modules(ast.parse(path.read_text(), filename=str(path)))
+        if module == "tests" or module.startswith("tests.") or module == "pytest"
+    )
+    assert not offenders, "src imports the test tree: " + ", ".join(offenders)
+
+
+def test_validation_harness_imports_without_pytest() -> None:
+    """``import src.validation.harness`` must work where pytest is not installed."""
+    import subprocess
+    import sys
+
+    probe = (
+        "import sys\n"
+        "class _Block:\n"
+        "    def find_spec(self, name, path=None, target=None):\n"
+        "        if name == 'pytest' or name.startswith(('pytest.', '_pytest', 'tests')):\n"
+        "            raise ImportError(f'blocked: {name}')\n"
+        "        return None\n"
+        "sys.meta_path.insert(0, _Block())\n"
+        "import src.validation.harness\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        cwd=SRC.parent,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr

@@ -127,6 +127,8 @@ def _config_path_with_alarm_epoch(tmp_path: Path) -> Path:
     data.setdefault("daemon", {})["reference_epoch"] = str(reference_epoch)
     data["daemon"]["anomalies_dir"] = str(tmp_path / "anomalies")
     data["daemon"]["trend_alert_state"] = str(tmp_path / "trend_alert_state.json")
+    # The trend pass opens the session catalog; keep it off data/control (R07.2).
+    data["daemon"]["catalog_db"] = str(tmp_path / "catalog.db")
     epoch = ReferenceEpoch(
         frozen_at="2026-05-01T00:00:00+00:00",
         sessions=("s0",),

@@ -21,9 +21,12 @@ from __future__ import annotations
 
 import importlib
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
-ReconstructionReduction = Literal["none", "sample", "timestep", "channel", "global"]
+from src.models.sequence_module import (
+    MaskedReconstructionMixin,
+    module_base,
+)
 
 
 class LSTMAutoencoderConfigLike(Protocol):
@@ -75,14 +78,7 @@ class LSTMAutoencoderArchitecture:
         }
 
 
-def _module_base() -> Any:
-    try:
-        return importlib.import_module("torch.nn").Module
-    except ImportError:
-        return object
-
-
-class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
+class GRUDEncoderCell(module_base()):  # type: ignore[misc]
     """One GRU-D recurrent cell with input + hidden-state decay.
 
     For per-channel input decay ``γ_x = exp(−relu(w_x ⊙ δ + b_x))`` (diagonal,
@@ -182,7 +178,7 @@ class GRUDEncoderCell(_module_base()):  # type: ignore[misc]
         return hidden_next, last_observed_next
 
 
-class LSTMAutoencoder(_module_base()):  # type: ignore[misc]
+class LSTMAutoencoder(MaskedReconstructionMixin, module_base()):  # type: ignore[misc]
     """GRU-D encoder -> latent vector -> plain decoder autoencoder.
 
     ``forward(value, mask, delta)`` returns a reconstruction with the same
@@ -300,59 +296,6 @@ class LSTMAutoencoder(_module_base()):  # type: ignore[misc]
         decoded, _state = self.decoder(decoder_input)
         return self.output(decoded)
 
-    def forward(self, value: Any, mask: Any, delta: Any) -> Any:
-        """Reconstruct a batch of sequence windows from value/mask/Δt."""
-        self._validate_inputs(value, mask, delta)
-        sequence_length = int(value.shape[1])
-        return self.decode(self.encode(value, mask, delta), sequence_length=sequence_length)
-
-    def reconstruction_error(
-        self,
-        value: Any,
-        mask: Any,
-        delta: Any,
-        *,
-        reduction: ReconstructionReduction = "sample",
-    ) -> Any:
-        """Return **masked** absolute reconstruction error summaries.
-
-        Only observed cells (``mask == 1``) count; a forward-filled fill never
-        contributes. Each reduction is a mask-weighted mean over the reduced
-        axes (sum of masked abs error / sum of mask), so the per-window /
-        per-channel scale matches the calibrated thresholds.
-
-        Reductions:
-          ``none`` -> ``(B, T, F)`` masked abs error (0 where unobserved)
-          ``sample`` -> ``(B,)``
-          ``timestep`` -> ``(B, T)``
-          ``channel`` -> ``(B, F)``
-          ``global`` -> scalar
-        """
-        reconstruction = self.forward(value, mask, delta)
-        masked_error = (reconstruction - value).abs() * mask
-        if reduction == "none":
-            return masked_error
-        if reduction == "sample":
-            return _masked_mean(masked_error, mask, dim=(1, 2))
-        if reduction == "timestep":
-            return _masked_mean(masked_error, mask, dim=2)
-        if reduction == "channel":
-            return _masked_mean(masked_error, mask, dim=1)
-        if reduction == "global":
-            return _masked_mean(masked_error, mask, dim=(0, 1, 2))
-        raise ValueError(f"unknown reconstruction error reduction: {reduction}")
-
-    def _validate_inputs(self, value: Any, mask: Any, delta: Any) -> None:
-        for name, tensor in (("value", value), ("mask", mask), ("delta", delta)):
-            if tensor.ndim != 3:
-                raise ValueError(f"{name} batch must have shape (batch, sequence, features)")
-            if int(tensor.shape[-1]) != self.input_size:
-                raise ValueError(
-                    f"{name} batch has {int(tensor.shape[-1])} features; expected {self.input_size}"
-                )
-        if value.shape != mask.shape or value.shape != delta.shape:
-            raise ValueError("value, mask, and delta must share the same shape")
-
 
 def build_lstm_autoencoder(
     config: LSTMAutoencoderConfigLike,
@@ -383,20 +326,6 @@ def build_lstm_autoencoder(
 def _cat(tensors: list[Any], *, dim: int) -> Any:
     torch, _nn = _torch_modules()
     return torch.cat(tensors, dim=dim)
-
-
-def _masked_mean(masked_error: Any, mask: Any, *, dim: tuple[int, ...] | int) -> Any:
-    """Mask-weighted mean: sum(masked_error) / sum(mask) over ``dim``.
-
-    Guards a zero denominator (a window/channel with no observed cell) so the
-    result is 0 rather than NaN — a fully-unobserved slice has no anomaly
-    signal to contribute.
-    """
-    numerator = masked_error.sum(dim=dim)
-    denominator = mask.sum(dim=dim)
-    safe = denominator.clamp(min=1.0)
-    result = numerator / safe
-    return result * (denominator > 0)
 
 
 def _validate_architecture(

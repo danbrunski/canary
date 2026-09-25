@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analysis.session_deviations import analyze_session, compare_sessions
+from src.analysis.session_deviations import analyze_session, compare_session_deviations
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
 from src.decode.behavior_models import load_behavior_models
@@ -68,9 +68,10 @@ def get_behavior_deviations(
 
     ``against`` (Task 5.4): when given, ``session`` is compared directly
     against this second session id instead of graded standalone — a
-    before-mod/after-mod A/B, per-surface and per-binned-cell deltas
-    (``mean_deviation_delta`` etc., ``b - a``), matching
-    ``scripts/analyze_session.py --against``.
+    before-mod/after-mod A/B of per-binned-cell deltas (``b - a``) over the
+    cells both drives visited, and ``matched_deviation_delta`` — their mean,
+    never a whole-session mean, which would move with the drives' operating
+    mix (R05.6) — matching ``scripts/analyze_session.py --against``.
 
     Returns ``{"ok": False, "error": ...}`` on a bad session id or a missing
     behavior_models.yaml rather than raising, matching ``query_telemetry``'s
@@ -96,7 +97,7 @@ def get_behavior_deviations(
     models = load_behavior_models(behavior_models_path)
 
     if against_dir is not None:
-        comparison = compare_sessions(session_dir, against_dir, scoped, models)
+        comparison = compare_session_deviations(session_dir, against_dir, scoped, models)
         return {"ok": True, **comparison.to_dict(mode_filter=mode)}
 
     report = analyze_session(session_dir, scoped, models)

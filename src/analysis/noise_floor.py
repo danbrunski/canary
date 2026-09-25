@@ -10,19 +10,20 @@ floor below which no comparison can claim an effect:
 That measurement existed before three confident claims were published at or
 below it ("spark fell 0.7-1.6 deg", "the +0.61 deg control cell", "K responds
 1:1"), because it lived in a commit message rather than anywhere code could
-reach. This module makes it loadable, so
-:func:`src.analysis.tuning.compare_sessions` can annotate every delta with how
-many sigma it actually is.
+reach. This module makes it loadable, and :meth:`NoiseFloor.significance` is
+the one place a delta becomes a sigma — refusing, and naming both regimes,
+when the comparison was not made under the conditions the floor was measured
+in (R05.2).
 
 A missing floor degrades to ``unavailable`` — never to an invented one.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-import numpy as np
 import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -32,6 +33,53 @@ from src.atomic_write import atomic_write_text
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+#: Below this many sigma a delta is "not distinguishable from changing
+#: nothing" — the phrasing the retracted 2026-08 claims were missing.
+SIGMA_THRESHOLD = 2.0
+
+
+@dataclass(frozen=True)
+class Significance:
+    """Per-delta sigma against a floor measured under the same conditions."""
+
+    channel: str
+    sd: float
+    conditions: str
+    sigma_threshold: float
+    delta_sigma: pd.Series = field(repr=False)
+    distinguishable: pd.Series = field(repr=False)
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "available": True,
+            "channel": self.channel,
+            "sd": self.sd,
+            "conditions": self.conditions,
+            "sigma_threshold": self.sigma_threshold,
+        }
+
+
+@dataclass(frozen=True)
+class FloorRefusal:
+    """No significance verdict, and which kind of "no" it is."""
+
+    channel: str
+    kind: Literal["no_floor", "conditions_mismatch"]
+    reason: str
+    requested_conditions: str
+    floor_conditions: str | None = None
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "available": False,
+            "channel": self.channel,
+            "kind": self.kind,
+            "reason": self.reason,
+            "floor_conditions": self.floor_conditions,
+            "requested_conditions": self.requested_conditions,
+        }
 
 
 class ChannelFloor(_Strict):
@@ -45,8 +93,10 @@ class ChannelFloor(_Strict):
     #: timing swings 17-45 deg. Quoting the WOT floor against an idle
     #: comparison would understate noise ~16x and make ordinary jitter look
     #: like a finding. Machine-readable so the mismatch can be surfaced rather
-    #: than living in a prose note nobody reads.
-    conditions: str = "unspecified"
+    #: than living in a prose note nobody reads. Required (R05.2): a floor
+    #: without its regime cannot be matched against anything, so it is not
+    #: representable.
+    conditions: str = Field(min_length=1)
     #: Per-cell standard deviation of the A-vs-B delta.
     sd: float = Field(gt=0)
     #: Mean delta; a real null run should sit near zero, and a large value is
@@ -70,6 +120,75 @@ class NoiseFloor(_Strict):
         entry = self.channels.get(channel)
         return None if entry is None else entry.sd
 
+    def significance(
+        self,
+        channel: str,
+        deltas: pd.Series,
+        *,
+        conditions: str,
+        sigma_threshold: float = SIGMA_THRESHOLD,
+    ) -> Significance | FloorRefusal:
+        """How many sigma each delta is — or a refusal naming both regimes.
+
+        ``conditions`` is the regime the *comparison* was made under. It must
+        equal the regime the floor was measured under, character for
+        character: the WOT spark floor quoted against an idle comparison
+        understates noise ~16x, and a fuzzy match is how that would slip back
+        in. Declare the matching regime in profile data (as
+        ``lambda_delivery.yaml``'s ``noise_floors`` does) rather than loosening
+        this.
+        """
+        entry = self.channels.get(channel)
+        if entry is None:
+            return FloorRefusal(
+                channel=channel,
+                kind="no_floor",
+                reason=f"no noise floor measured for {channel}",
+                requested_conditions=conditions,
+            )
+        if entry.conditions != conditions:
+            return FloorRefusal(
+                channel=channel,
+                kind="conditions_mismatch",
+                reason=(
+                    f"{channel} was measured under {entry.conditions!r}; this comparison "
+                    f"is under {conditions!r}. A floor is only valid for its own regime."
+                ),
+                floor_conditions=entry.conditions,
+                requested_conditions=conditions,
+            )
+        values = pd.to_numeric(pd.Series(deltas), errors="coerce").astype(float)
+        sigma = values / entry.sd
+        return Significance(
+            channel=channel,
+            sd=entry.sd,
+            conditions=entry.conditions,
+            sigma_threshold=sigma_threshold,
+            delta_sigma=sigma,
+            distinguishable=sigma.abs() >= sigma_threshold,
+        )
+
+
+def significance(
+    floor: NoiseFloor | None,
+    channel: str,
+    deltas: pd.Series,
+    *,
+    conditions: str,
+    sigma_threshold: float = SIGMA_THRESHOLD,
+) -> Significance | FloorRefusal:
+    """:meth:`NoiseFloor.significance`, refusing when the vehicle has no floor at all."""
+    if floor is None:
+        return FloorRefusal(
+            channel=channel,
+            kind="no_floor",
+            reason="no noise floor has been measured for this vehicle",
+            requested_conditions=conditions,
+        )
+    return floor.significance(
+        channel, deltas, conditions=conditions, sigma_threshold=sigma_threshold
+    )
+
 
 def load_noise_floor(path: Path) -> NoiseFloor | None:
     """Load a floor, or ``None`` when none has been measured for this vehicle."""
@@ -82,34 +201,6 @@ def save_noise_floor(path: Path, floor: NoiseFloor) -> None:
     atomic_write_text(
         path, yaml.safe_dump(floor.model_dump(mode="json"), sort_keys=False), mkdir=True
     )
-
-
-def annotate(
-    deltas: pd.Series,
-    floor: NoiseFloor | None,
-    channel: str,
-    *,
-    sigma_threshold: float = 2.0,
-) -> pd.DataFrame:
-    """Attach ``delta_sigma`` and ``distinguishable`` to a series of deltas.
-
-    Below ``sigma_threshold`` the honest phrasing is "not distinguishable from
-    noise", which is what was missing from the retracted claims — each of them
-    quoted a per-cell delta smaller than the per-cell spread of a null run.
-    """
-    sd = floor.sd_for(channel) if floor is not None else None
-    frame = pd.DataFrame({"delta": deltas})
-    if sd is None or sd <= 0:
-        frame["delta_sigma"] = np.nan
-        frame["distinguishable"] = pd.NA
-        frame.attrs["floor"] = "unavailable"
-        return frame
-    frame["delta_sigma"] = frame["delta"] / sd
-    frame["distinguishable"] = frame["delta_sigma"].abs() >= sigma_threshold
-    frame.attrs["floor"] = sd
-    entry = floor.channels[channel] if floor is not None else None
-    frame.attrs["floor_conditions"] = entry.conditions if entry is not None else "unspecified"
-    return frame
 
 
 def record_null_run(
@@ -153,10 +244,13 @@ def record_null_run(
 
 
 __all__ = [
+    "SIGMA_THRESHOLD",
     "ChannelFloor",
+    "FloorRefusal",
     "NoiseFloor",
-    "annotate",
+    "Significance",
     "load_noise_floor",
     "record_null_run",
     "save_noise_floor",
+    "significance",
 ]

@@ -40,6 +40,7 @@ import pandas as pd
 
 from src.config import CanaryConfig
 from src.paths import BINDINGS_YAML, DBC_DIR, DIDS_YAML
+from src.preprocessing.features import base_channel
 from src.telemetry import SOURCE_SEP
 
 if TYPE_CHECKING:
@@ -62,8 +63,6 @@ DEFAULT_DBC_DIR = DBC_DIR
 CAPTURED_NAMESPACES: tuple[str, ...] = ("decoded", "dbc", "did", "obd", "gps")
 #: Namespaces the feature transform computes from the captured ones.
 COMPUTED_NAMESPACES: tuple[str, ...] = ("derived", "deviation")
-
-_ROLLING_SUFFIXES: tuple[str, ...] = ("__mean", "__std", "__roc")
 
 #: Where each captured namespace's names come from, for the report.
 _CATALOG_OF: dict[str, str] = {
@@ -92,14 +91,6 @@ class ProducibleCatalog:
     producible: frozenset[str]
 
 
-def base_feature_name(column: str) -> str:
-    """``obd:RPM__mean`` → ``obd:RPM``; a raw column is its own base."""
-    for suffix in _ROLLING_SUFFIXES:
-        if column.endswith(suffix):
-            return column[: -len(suffix)]
-    return column
-
-
 def _namespace(column: str) -> str | None:
     source, sep, _ = column.partition(SOURCE_SEP)
     return source if sep else None
@@ -118,7 +109,7 @@ def unproducible_feature_columns(
         column = str(raw)
         if column in catalog.producible:
             continue
-        base = base_feature_name(column)
+        base = base_channel(column)
         namespace = _namespace(base)
         if namespace is not None and namespace in catalog.captured:
             if base not in catalog.captured[namespace]:
@@ -388,7 +379,7 @@ def summarize(unproducible: Mapping[str, str], feature_columns: Sequence[str]) -
     """Compact report: counts plus the offending columns grouped by base."""
     by_base: dict[str, list[str]] = {}
     for column in unproducible:
-        by_base.setdefault(base_feature_name(column), []).append(column)
+        by_base.setdefault(base_channel(column), []).append(column)
     return {
         "expected_count": len(feature_columns),
         "unproducible_count": len(unproducible),

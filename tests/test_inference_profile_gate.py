@@ -34,7 +34,6 @@ from src.dashboard.status import build_status
 from src.models.manager import LoadedModel
 from src.models.manifest import ModelManifestCommon
 from src.telemetry import TelemetryRecord
-from tests.test_daemon import _config_yaml
 from tests.waits import settle, wait_until
 
 #: The Xterra ``tuning`` shape that exposed the bug: Mode 01 RPM polled, not
@@ -49,10 +48,8 @@ _TUNING = CaptureProfile(
 
 
 @pytest.fixture
-def config(tmp_path: Path) -> CanaryConfig:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path))
-    return CanaryConfig.from_yaml(cfg_path)
+def config(daemon_config: CanaryConfig) -> CanaryConfig:
+    return daemon_config
 
 
 @pytest.fixture(autouse=True)

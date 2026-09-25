@@ -15,6 +15,7 @@ from src.control.replay_control import ReplayController
 from src.dashboard.api import create_app
 from src.storage.parquet_writer import ParquetTelemetryWriter, write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import isolated_config
 
 
 def _write_fresh_rpm(storage_path: Path, rpm: float) -> None:
@@ -31,54 +32,17 @@ def _write_fresh_rpm(storage_path: Path, rpm: float) -> None:
     )
 
 
-def _config_yaml(storage_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {storage_path}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  isolation_forest:
-    enabled: true
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: true
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
-
-
 @pytest.fixture
 def config(tmp_path: Path) -> CanaryConfig:
     storage = tmp_path / "storage"
     storage.mkdir()
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
-    return CanaryConfig.from_yaml(cfg_path)
+    return isolated_config(
+        tmp_path,
+        "daemon",
+        storage=storage,
+        models={"isolation_forest": {"enabled": True}, "lstm_autoencoder": {"enabled": True}},
+        dashboard={"port": 8000},
+    )
 
 
 @pytest.fixture

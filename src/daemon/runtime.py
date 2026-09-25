@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from src.analysis.gps_tracker import TripEnd
     from src.collection.can_collector import CanReceiveStats
     from src.collection.queueing import CollectorHandoffStats
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
     from src.preprocessing.live import LiveFeatureSource
     from src.startup import StartupTimeline
 

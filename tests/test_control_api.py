@@ -22,57 +22,25 @@ from src.control.jobs import JobController
 from src.control.sessions import filter_sessions, list_sessions
 from src.dashboard.api import create_app
 from src.dashboard.broadcast import Broadcaster
+from tests.configs import write_isolated_config
 
 
-def _config_yaml(storage_path: Path) -> str:
-    return f"""
-vehicle:
-  make: Nissan
-  model: Xterra
-  year: 2008
-  vin: ""
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can:
-    interface: virtual
-    channel: vcan0
-    bitrate: 500000
-collection:
-  obd_poll_rate_hz: 1
-  storage_path: {storage_path}
-  session_retention_days: 30
-  storage_warning_mb: 500
-daemon:
-  catalog_db: {storage_path.parent / "catalog.db"}
-preprocessing:
-  resample_hz: 1
-  rolling_window_seconds: 30
-  operating_modes:
-    idle:
-      rpm_max: 900
-      speed_max: 0
-models:
-  isolation_forest:
-    enabled: false
-    n_estimators: 100
-    contamination: 0.01
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 60
-    latent_dim: 16
-    threshold_k: 3.0
-dashboard:
-  host: 127.0.0.1
-  port: 8000
-"""
+def _write_config(tmp_path: Path, storage: Path) -> Path:
+    """Detectors off, one idle mode, the catalog beside ``storage``."""
+    return write_isolated_config(
+        tmp_path,
+        "daemon",
+        storage=storage,
+        dashboard={"port": 8000},
+        daemon={"catalog_db": storage.parent / "catalog.db"},
+    )
 
 
 def _client(tmp_path: Path) -> tuple[TestClient, Path]:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     controller = CaptureController(lambda: session)
     app = create_app(
@@ -106,8 +74,7 @@ def test_control_routes_require_configured_token(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     app = create_app(
         config,
@@ -338,8 +305,7 @@ def test_audit_log_and_control_websocket_receive_events(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     app = create_app(
         config,
@@ -386,8 +352,7 @@ def test_control_model_artifact_upload_publishes_watched_files(tmp_path: Path) -
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     config = config.model_copy(
         update={"daemon": config.daemon.model_copy(update={"models_dir": tmp_path / "models"})}
@@ -421,8 +386,7 @@ def test_control_jobs_run_restricted_background_commands(tmp_path: Path) -> None
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
 
     def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
@@ -489,8 +453,7 @@ def test_control_job_result_reads_replay_report(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -555,8 +518,7 @@ def test_control_job_result_reads_did_sweep_snapshot(tmp_path: Path) -> None:
     """`GET /control/jobs/{id}/result` also reads a `did_sweep` job's
     `<job_id>.did_sweep.json` snapshot — the same generalization that let
     `replay_window` results through (Task 4.1) covers this second kind."""
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -608,8 +570,7 @@ def test_control_job_result_reads_did_sweep_snapshot(tmp_path: Path) -> None:
 
 
 def test_retrain_job_command_passes_job_id_to_ledger(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -633,8 +594,7 @@ def test_retrain_job_command_defaults_compute_target_to_pi(tmp_path: Path) -> No
     """Task 6.36: the Pi daemon's own JobController (no override) records
     'pi'; the companion's (`_make_job_controller`) passes 'laptop' instead
     (covered by `test_companion_services`/`test_companion_api`)."""
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -655,8 +615,7 @@ def test_retrain_all_job_command_since_param_builds_since_flag(tmp_path: Path) -
     `retrain.py --since <date>` — and there is no params-level path to
     `--no-calibration-holdout` anywhere in the command builder, so a
     scheduled retrain structurally cannot disable the calibration holdout."""
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -681,8 +640,7 @@ def test_retrain_all_job_command_since_param_builds_since_flag(tmp_path: Path) -
 def test_sequence_retrain_jobs_pass_an_operator_thin_calibration_reason(tmp_path: Path) -> None:
     """A02.2: a thin calibration is refused unless the operator states a
     reason; the job API carries it through, and never adds one by itself."""
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -716,8 +674,7 @@ def test_export_dataset_job_command_shape(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     (storage / "2026-05-17T120000").mkdir(parents=True)
     (storage / "2026-05-18T090000").mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -752,8 +709,7 @@ def test_export_dataset_job_command_shape(tmp_path: Path) -> None:
 
 
 def test_export_dataset_job_requires_session_ids(tmp_path: Path) -> None:
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(tmp_path / "storage"))
+    cfg_path = _write_config(tmp_path, tmp_path / "storage")
     config = CanaryConfig.from_yaml(cfg_path)
     controller = JobController(
         config=config,
@@ -771,8 +727,7 @@ def test_control_jobs_can_cancel_running_process(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
 
     def _command_builder(_kind: str, _params: dict[str, Any]) -> list[str]:
@@ -817,8 +772,7 @@ def test_control_jobs_mark_interrupted_ledger_jobs_failed(tmp_path: Path) -> Non
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
@@ -855,8 +809,7 @@ def test_control_jobs_reject_unknown_kind(tmp_path: Path) -> None:
     storage = tmp_path / "storage"
     session = storage / "2026-05-17T120000"
     session.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     app = create_app(
         config,
@@ -964,8 +917,7 @@ def test_delete_refuses_the_session_the_writer_is_filling(tmp_path: Path) -> Non
     storage = tmp_path / "storage"
     older = storage / "2026-05-16T120000"
     older.mkdir(parents=True)
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_config_yaml(storage))
+    cfg_path = _write_config(tmp_path, storage)
     config = CanaryConfig.from_yaml(cfg_path)
     writer = AsyncParquetTelemetryWriter(ParquetTelemetryWriter(storage))
     live = writer.paths.root

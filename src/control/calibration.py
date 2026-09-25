@@ -20,23 +20,13 @@ from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
-
-
-def profile_dir(config: CanaryConfig) -> Path:
-    return config.daemon.afr_calibration.parent
-
-
-def source_registry_path(config: CanaryConfig) -> Path:
-    return profile_dir(config) / "tune_revisions.yaml"
-
-
-def operational_dir(config: CanaryConfig) -> Path:
-    """Mutable state outside tracked profile data, like capture-profile state."""
-    return config.daemon.jobs_dir.parent / "calibration"
-
-
-def operational_registry_path(config: CanaryConfig) -> Path:
-    return operational_dir(config) / "tune_revisions.yaml"
+from src.profiles import (
+    active_registry_path,
+    operational_dir,
+    operational_registry_path,
+    profile_dir,
+    source_registry_path,
+)
 
 
 def operational_memory_path(config: CanaryConfig) -> Path:
@@ -48,11 +38,6 @@ def _seed(source: Path, destination: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
     return destination
-
-
-def active_registry_path(config: CanaryConfig) -> Path:
-    override = operational_registry_path(config)
-    return override if override.exists() else source_registry_path(config)
 
 
 def active_memory_path(config: CanaryConfig, source: Path) -> Path:
@@ -236,7 +221,10 @@ __all__ = [
     "record_verify_results",
     "memory_channel_state",
     "memory_channels_payload",
+    "operational_dir",
     "operational_memory_path",
     "operational_registry_path",
+    "profile_dir",
     "seed_operational_memory",
+    "source_registry_path",
 ]

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from src.config import CanaryConfig, CanBusConfig
 from src.dashboard.api import create_app
+from src.validation.scripted_ecu import single_frame_reply
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -30,16 +31,6 @@ def _auth() -> dict[str, str]:
     return {"Authorization": "Bearer secret"}
 
 
-def _single_frame_reply(
-    *, responder_id: int, service: int, pid: int | None, body: bytes
-) -> can.Message:
-    payload = bytes([service]) if pid is None else bytes([service, pid])
-    payload += body
-    frame = bytes([len(payload)]) + payload
-    frame += bytes(8 - len(frame))
-    return can.Message(arbitration_id=responder_id, data=frame, is_extended_id=False)
-
-
 def _run_fake_ecu(
     channel: str, *, service: int, pid: int | None, body: bytes, stop: threading.Event
 ) -> None:
@@ -50,7 +41,7 @@ def _run_fake_ecu(
             if frame is None:
                 continue
             ecu.send(
-                _single_frame_reply(responder_id=0x7E8, service=0x40 | service, pid=pid, body=body)
+                single_frame_reply(responder_id=0x7E8, service=0x40 | service, pid=pid, body=body)
             )
     finally:
         ecu.shutdown()

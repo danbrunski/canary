@@ -63,10 +63,11 @@ from src.config import CanaryConfig
 from src.control.sessions import session_started_at
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
+from src.models.sequence_calibration import block_maxima as max_finite_per_block
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
-from src.session import session_sort_key
+from src.session import SessionKind, session_kind, session_sort_key
 
 #: Longest step between rows that still counts as continuous engine time when
 #: integrating engine-hours (the 1 Hz grid with a few dropped ticks).
@@ -570,6 +571,33 @@ def alert_episodes(
     return episodes
 
 
+def default_profile_exclusion(session_dir: Path) -> str | None:
+    """Why a session's rows are kept out of detector evaluation, or ``None``.
+
+    A ``_tuning-*`` session, or a capture whose manifest says it is not
+    corpus-eligible, is excluded: it still bridges its drive (drive grouping
+    keeps a drive's default parts together, so held-out stays honest), but its
+    rows reach no scored row, fault injection or metric. A capture without a
+    readable manifest is treated as the replay guard treats it (R03.12):
+    eligible.
+    """
+    from src.control.capture_manifest import read_capture_manifest
+
+    name = Path(session_dir).name
+    # Operator decision 2026-09-24: tuning logs do not represent the default
+    # profile, so the detectors are neither trained, calibrated, scored live
+    # (R03.12) nor evaluated on them. The name rule is src.session's.
+    if session_kind(name) is SessionKind.TUNING:
+        return "tuning session: not the default profile (operator decision 2026-09-24)"
+    manifest = read_capture_manifest(Path(session_dir))
+    if manifest is not None and not manifest.corpus_eligible:
+        return (
+            f"capture profile {manifest.profile!r} is not corpus-eligible "
+            "(operator decision 2026-09-24)"
+        )
+    return None
+
+
 def engine_running(frame: pd.DataFrame) -> np.ndarray[Any, np.dtype[np.bool_]]:
     """Rows with the engine running (RPM at or above the running floor).
 
@@ -715,12 +743,8 @@ def block_maxima(
         return np.zeros(0, dtype=np.float64)
     seconds = (stamps - stamps.iloc[0]).dt.total_seconds().to_numpy()
     blocks = np.floor(seconds / block_seconds).astype(np.int64)
-    values = np.asarray(scores, dtype=np.float64)
-    finite = np.isfinite(values)
-    if not finite.any():
-        return np.zeros(0, dtype=np.float64)
-    frame = pd.DataFrame({"block": blocks[finite], "score": values[finite]})
-    return frame.groupby("block")["score"].max().to_numpy(dtype=np.float64)
+    # R04.11: the "max finite per block" tail is calibration's, shared.
+    return max_finite_per_block(np.asarray(scores, dtype=np.float64), blocks)
 
 
 def _episode_rate(

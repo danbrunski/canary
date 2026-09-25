@@ -18,7 +18,10 @@ answer in every pass but never change are "constant" (calibration / config).
 
 This scanner sends only UDS service 0x22 (ReadDataByIdentifier). Whatever
 adapter is used here is request-only; don't run this alongside a broadcast
-recording on the same single-consumer device (e.g. one slcan node).
+recording on the same single-consumer device (e.g. one slcan node). Either
+link shares the bus with the daemon's OBD scheduler, so the tool refuses to
+start unless the daemon reports passive mode armed (``--no-daemon`` on a
+bench with no daemon).
 
 Usage:
   tools/scan_constant_dids.py --canable
@@ -34,6 +37,7 @@ import json
 import sys
 import time
 from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from pathlib import Path
 
 from src.analysis.did_scan import (
@@ -44,9 +48,17 @@ from src.analysis.did_scan import (
     classify_dids,
     sweep_dids,
 )
-from src.collection.can_bus import bus_factory
-from src.collection.can_obd_client import CanObdClient
-from src.config import CanaryConfig
+from tools._bus_tool import (
+    PASSIVE_REFUSED_EXIT,
+    PassiveRefusedError,
+    PassiveVerdict,
+    add_bus_tool_args,
+    open_client,
+    parse_header,
+    require_passive,
+    resolve_session,
+    responder_for,
+)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -67,29 +79,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--port",
         help="UDS 0x22 over an ELM327-class serial adapter, e.g. /dev/ttyUSB0.",
     )
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("canary.yaml"),
-        help="canary.yaml path (--canable bus config). Default: ./canary.yaml.",
-    )
+    add_bus_tool_args(parser, session_default="none")
     parser.add_argument("--baud", type=int, default=38400, help="ELM327 baud rate (default 38400).")
-    parser.add_argument(
-        "--header",
-        default="7E0",
-        help="ECU request CAN ID, hex (default 7E0 = engine; trans 7E1, ABS 7E2, …).",
-    )
-    parser.add_argument(
-        "--session",
-        default=None,
-        help=(
-            "UDS diagnostic-session sub-function (hex) to enter + keep alive "
-            "before 0x22 reads. The 2008 Nissan ECM gates Mode 22 behind "
-            "'C0' — pass --session C0. Omit for ECUs that answer 0x22 in the "
-            "default session. (--canable only.) NOTE: while a non-default "
-            "session is held this ECM stops answering standard OBD Mode 01."
-        ),
-    )
     parser.add_argument(
         "--keepalive",
         type=float,
@@ -118,7 +109,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Wait for Enter between passes (so you can change engine state).",
     )
-    parser.add_argument("--read-timeout", type=float, default=1.0, help="Per-command read timeout.")
     parser.add_argument(
         "--out", type=Path, default=None, help="Write snapshots + classification JSON."
     )
@@ -134,46 +124,38 @@ def _open_serial(port: str, baud: int):  # type: ignore[no-untyped-def]
 
 
 def _build_transport(
-    args: argparse.Namespace,
+    args: argparse.Namespace, passive: PassiveVerdict
 ) -> tuple[Mode22Transport, Callable[[], None], str]:
     """Return ``(transport, close_fn, banner)`` for the selected link.
 
+    Takes the passive verdict for both links: an ELM327 on the same OBD port
+    shares the bus with the daemon's scheduler just as the Canable does.
     Raises on a bad ``--header`` or a link-open failure; the caller turns
     that into a clean exit-1.
     """
     try:
-        request_id = int(args.header, 16)
+        request_id = parse_header(args.header)
+        session = resolve_session(args.session)
     except ValueError as exc:
-        raise RuntimeError(f"--header must be hex (e.g. 7E0), got {args.header!r}") from exc
-    if not 0 <= request_id <= 0x7FF:
-        raise RuntimeError(f"--header out of 11-bit CAN range: 0x{request_id:X}")
+        raise RuntimeError(str(exc)) from exc
 
     if args.canable:
-        config = CanaryConfig.from_yaml(args.config)
-        bus = bus_factory(config.hardware.can)
-        response_id = request_id + 8  # 0x7E0→0x7E8, 0x7E1→0x7E9, …
-        client = CanObdClient(
-            bus,
-            request_id=request_id,
-            response_id_min=response_id,
-            response_id_max=response_id,
-            timeout_seconds=args.read_timeout,
-        )
-        session = int(args.session, 16) if args.session is not None else None
+        stack = ExitStack()
+        client = stack.enter_context(open_client(args, passive))
         transport = CanableMode22Transport(
             client,
             request_id=request_id,
             session=session,
             keepalive_seconds=args.keepalive,
         )
-        banner = (
-            f"Canable {config.hardware.can.channel} (req 0x{request_id:X} → resp 0x{response_id:X}"
-        )
+        responder = responder_for(request_id)
+        banner = f"Canable {args.config} (req 0x{request_id:X}"
+        banner += f" → resp 0x{responder:X}" if responder is not None else ""
         if session is not None:
             banner += f", session 0x{session:X} keepalive {args.keepalive}s)"
         else:
             banner += ")"
-        return transport, bus.shutdown, banner
+        return transport, stack.close, banner
 
     ser = _open_serial(args.port, args.baud)
     elm = Elm327Mode22Transport(ser, header=args.header, read_timeout_seconds=args.read_timeout)
@@ -192,7 +174,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     dids = range(start, end + 1)
 
     try:
-        transport, close_fn, banner = _build_transport(args)
+        passive = require_passive(args)
+    except PassiveRefusedError as exc:
+        print(str(exc), file=sys.stderr)
+        return PASSIVE_REFUSED_EXIT
+    try:
+        transport, close_fn, banner = _build_transport(args, passive)
     except Exception as exc:  # noqa: BLE001 - surface any link-open failure cleanly
         print(f"error: could not open transport: {exc}", file=sys.stderr)
         return 1

@@ -6,43 +6,15 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.config import CanaryConfig
 from src.dashboard.api import create_app
-
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder:
-    enabled: false
-    sequence_length: 30
-    latent_dim: 8
-    threshold_k: 3.0
-dashboard: {{host: 127.0.0.1, port: 8000}}
-daemon:
-  custom_pids: {custom_pids}
-"""
+from tests.configs import isolated_config
 
 
 def _client(tmp_path: Path) -> tuple[TestClient, Path]:
     storage = tmp_path / "storage"
     (storage / "2026-05-17T120000").mkdir(parents=True)
     custom_pids_path = tmp_path / "custom_pids.yaml"
-    cfg_path = tmp_path / "canary.yaml"
-    cfg_path.write_text(_CONFIG_YAML.format(storage=storage, custom_pids=custom_pids_path))
-    config = CanaryConfig.from_yaml(cfg_path)
+    config = isolated_config(tmp_path, storage=storage, daemon={"custom_pids": custom_pids_path})
     anomalies = tmp_path / "anomalies"
     anomalies.mkdir()
     app = create_app(config, anomalies_dir=anomalies, control_token="secret")

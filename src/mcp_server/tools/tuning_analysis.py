@@ -15,10 +15,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analysis.afr import load_afr_calibration
-from src.analysis.noise_floor import load_noise_floor
-from src.analysis.tune_revisions import load_tune_revisions
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
+from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
 from src.control.sessions import resolve_session
@@ -30,16 +28,15 @@ def _scoped(config_path: Path, profile: str | None) -> CanaryConfig:
     return scope_config(config, resolve_profile_for_tooling(config, profile))
 
 
-def _capability_payload(session_dir: Path, scoped: CanaryConfig) -> dict[str, Any] | None:
-    providers_path = scoped.daemon.afr_calibration.parent / "tuning_providers.yaml"
-    if not providers_path.exists():
+def _capability_payload(session_dir: Path, context: TuningContext) -> dict[str, Any] | None:
+    if context.providers_path is None:
         return None
-    calibration = (
-        load_afr_calibration(scoped.daemon.afr_calibration)
-        if scoped.daemon.afr_calibration.exists()
-        else None
+    frame = build_tuning_frame(
+        session_dir,
+        providers_path=context.providers_path,
+        calibration=context.calibration,
+        afr_stoich=context.afr_stoich,
     )
-    frame = build_tuning_frame(session_dir, providers_path=providers_path, calibration=calibration)
     return {"roles": frame.capability, "sections": section_capabilities(frame.capability)}
 
 
@@ -77,27 +74,35 @@ def get_delivery_error(
     except FileNotFoundError as exc:
         return {"ok": False, "error": str(exc)}
 
-    calibration_path = scoped.daemon.afr_calibration
-    if not calibration_path.exists():
-        return {"ok": False, "error": f"no afr_calibration.yaml found ({calibration_path})"}
+    context = TuningContext.from_config(scoped)
+    if context.calibration is None:
+        return {
+            "ok": False,
+            "error": f"no afr_calibration.yaml found ({scoped.daemon.afr_calibration})",
+        }
+    if context.rpm_bands is None:
+        return {
+            "ok": False,
+            "error": "no mode01_wot.rpm_bands in this vehicle's tuning_providers.yaml",
+        }
 
     try:
-        revisions = load_tune_revisions(
-            scoped.daemon.afr_calibration.parent / "tune_revisions.yaml"
-        )
         result = delivery_error(
             session_dir,
-            calibration=load_afr_calibration(calibration_path),
+            calibration=context.calibration,
             measured_spec=measured_spec,
             min_load=min_load,
             cell_agg=cell_agg,
-            revisions=revisions,
+            revisions=context.registry,
+            afr_stoich=context.afr_stoich,
+            mode01_exclusion_note=context.mode01_exclusion_note,
+            rpm_bands=context.rpm_bands,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
     return {
         "ok": True,
-        "capabilities": _capability_payload(session_dir, scoped),
+        "capabilities": _capability_payload(session_dir, context),
         **result.as_dict(),
     }
 
@@ -112,6 +117,7 @@ def compare_tuning_sessions(
     floor_channel: str | None = None,
     unsafe_axes: bool = False,
     profile: str | None = None,
+    conditions: str | None = None,
 ) -> dict[str, Any]:
     """A/B two sessions on a matched grid, refusing calculated load as an axis.
 
@@ -121,10 +127,13 @@ def compare_tuning_sessions(
     null run). Grid on ``rpm × MAF`` (real airflow) or ``rpm × BFS`` (the
     actual table cell). ``unsafe_axes`` overrides, deliberately.
 
-    ``floor_channel`` names an entry in the vehicle's ``noise_floor.yaml``; when
-    it resolves, every cell carries ``delta_sigma`` and ``distinguishable``.
-    Without it those read null rather than an invented significance — a delta
-    under 2 sigma is not distinguishable from changing nothing at all.
+    ``floor_channel`` names an entry in the vehicle's ``noise_floor.yaml`` and
+    needs ``conditions``, the regime this comparison was made under. When the
+    floor was measured under exactly those conditions every cell carries
+    ``delta_sigma`` and ``distinguishable``; otherwise the floor is refused
+    (``floor_refusal`` names both regimes) and those read null rather than an
+    invented significance — a delta under 2 sigma is not distinguishable from
+    changing nothing at all.
     """
     scoped = _scoped(config_path, profile)
     try:
@@ -133,8 +142,8 @@ def compare_tuning_sessions(
     except FileNotFoundError as exc:
         return {"ok": False, "error": str(exc)}
 
-    floor = load_noise_floor(scoped.daemon.afr_calibration.parent / "noise_floor.yaml")
-    revisions = load_tune_revisions(scoped.daemon.afr_calibration.parent / "tune_revisions.yaml")
+    context = TuningContext.from_config(scoped)
+    floor = context.noise_floor
     sd = floor.sd_for(floor_channel) if (floor is not None and floor_channel) else None
 
     try:
@@ -146,7 +155,9 @@ def compare_tuning_sessions(
             unsafe_axes=unsafe_axes,
             noise_floor=floor if floor_channel else None,
             floor_channel=floor_channel,
-            revisions=revisions,
+            conditions=conditions,
+            revisions=context.registry,
+            afr_stoich=context.afr_stoich,
         )
     except (GateError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -154,10 +165,10 @@ def compare_tuning_sessions(
     payload = result.as_dict()
     payload["noise_floor"] = (
         {"channel": floor_channel, "sd": sd, "conditions": result.floor_conditions}
-        if sd is not None
+        if sd is not None and result.floor_refusal is None
         else "unavailable"
     )
-    return {"ok": True, "capabilities": _capability_payload(a, scoped), **payload}
+    return {"ok": True, "capabilities": _capability_payload(a, context), **payload}
 
 
 __all__ = ["compare_tuning_sessions", "get_delivery_error"]

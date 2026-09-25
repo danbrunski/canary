@@ -49,6 +49,8 @@ def _config_path_with_reference_epoch(tmp_path: Path, reference_epoch: Path) -> 
     ``_scoped_config`` doesn't rewrite the path under a profile slug."""
     data = yaml.safe_load(EXAMPLE_YAML.read_text())
     data.setdefault("daemon", {})["reference_epoch"] = str(reference_epoch)
+    # ``trends`` opens the session catalog; keep it off data/control (R07.2).
+    data["daemon"]["catalog_db"] = str(tmp_path / "catalog.db")
     data["profiles"] = {"enabled": False}
     out = tmp_path / "canary.yaml"
     out.write_text(yaml.dump(data))

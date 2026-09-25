@@ -95,7 +95,10 @@ def test_delivery_error_uses_the_same_residual_as_the_relationship() -> None:
         }
     )
     result = delivery_error_from_gated(
-        values, GateReport(started=2, remaining=2), measured_spec="obd:O2_WR_LAMBDA_S1"
+        values,
+        GateReport(started=2, remaining=2),
+        measured_spec="obd:O2_WR_LAMBDA_S1",
+        rpm_bands=(2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0),
     )
     expected = residual_pct(
         values["measured_afr"].to_numpy(), values["commanded_afr"].to_numpy(), quantity="afr"
@@ -151,6 +154,7 @@ def test_fuel_cut_sentinel_is_a_state_not_a_lean_delivery() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
+        afr_stoich=14.7,
     )
     frame = samples.frame
     assert samples.counts["fuel_cut"] == 1
@@ -179,6 +183,7 @@ def test_every_ineligible_state_is_named_and_carries_no_residual() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
+        afr_stoich=14.7,
     )
     states = dict(zip(samples.frame["state"], samples.frame["target_raw"], strict=True))
     counts = samples.counts
@@ -204,6 +209,7 @@ def test_post_fuel_cut_recovery_is_not_a_rich_delivery_finding() -> None:
         declaration=doc,
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
+        afr_stoich=14.7,
     )
     frame = samples.frame
     holdoff = doc.eligibility.post_fuel_cut_holdoff_s
@@ -229,6 +235,7 @@ def test_pid_0x44_is_refused_as_a_closed_loop_target() -> None:
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
         calibration=AfrCalibration(commanded_equiv_ratio_convention="phi"),
+        afr_stoich=14.7,
     )
     assert samples.counts["source_not_valid_in_regime"] > 0
     assert samples.counts[ELIGIBLE] == 0
@@ -243,6 +250,7 @@ def test_unverified_convention_refuses_rather_than_guessing() -> None:
         target_source="mode01_pid_0x44",
         measured_source="ecm_lambda_pid_0x24",
         calibration=AfrCalibration(commanded_equiv_ratio_convention="unverified"),
+        afr_stoich=14.7,
     )
     assert samples.counts["convention_unverified"] == 6
     assert samples.frame["residual_pct"].isna().all()
@@ -257,6 +265,7 @@ def test_voltage_measured_source_without_a_transfer_is_named_not_dropped() -> No
         target_source="ram_final_target",
         measured_source="af_voltage_b1",
         calibration=AfrCalibration(),
+        afr_stoich=14.7,
     )
     assert samples.counts["calibration_unknown"] == 6
 
@@ -276,6 +285,7 @@ def test_voltage_transfer_censoring_is_a_named_state() -> None:
         target_source="ram_final_target",
         measured_source="af_voltage_b1",
         calibration=calibration,
+        afr_stoich=14.7,
     )
     assert samples.counts["measured_censored"] == 6
 
@@ -314,6 +324,7 @@ def test_transport_delay_is_estimated_on_training_drives_and_frozen() -> None:
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         min_rows=10,
+        afr_stoich=14.7,
     )
     assert delay.seconds == pytest.approx(1.0)
     assert delay.fitted_on == ("driveA",)
@@ -328,6 +339,7 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
         target_source="ram_final_target",
         measured_source="ecm_lambda_pid_0x24",
         min_rows=10,
+        afr_stoich=14.7,
     )
     inputs = _lagged_drive(1.0)
     with pytest.raises(LeakedDriveError, match="may not pick its own lag"):
@@ -339,6 +351,7 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
             measured_source="ecm_lambda_pid_0x24",
             delay=delay,
             drive_id="driveA",
+            afr_stoich=14.7,
         )
     with pytest.raises(LambdaDeliveryError, match="needs the drive id"):
         delivery_samples(
@@ -348,6 +361,7 @@ def test_a_test_drive_cannot_pick_its_own_lag() -> None:
             target_source="ram_final_target",
             measured_source="ecm_lambda_pid_0x24",
             delay=delay,
+            afr_stoich=14.7,
         )
 
 
@@ -363,6 +377,7 @@ def test_drives_that_chose_the_eligibility_constants_are_not_evaluation_evidence
             measured_source="ecm_lambda_pid_0x24",
             drive_id=informing,
             evaluation=True,
+            afr_stoich=14.7,
         )
 
 
@@ -375,6 +390,7 @@ def test_transport_delay_refuses_insufficient_training_evidence() -> None:
             target_source="ram_final_target",
             measured_source="ecm_lambda_pid_0x24",
             min_rows=500,
+            afr_stoich=14.7,
         )
 
 

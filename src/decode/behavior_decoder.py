@@ -31,8 +31,6 @@ from typing import Literal, cast
 import numpy as np
 import pandas as pd
 
-from src.analysis.surface_1d import evaluate_1d
-from src.analysis.surface_2d import evaluate_2d
 from src.coerce import finite_float
 from src.decode.accepted_baselines import AcceptedBaselineOverride
 from src.decode.behavior_eligibility import (
@@ -55,6 +53,7 @@ from src.decode.behavior_models import (
     PermittedUse,
     serving_status,
 )
+from src.decode.surface_eval import evaluate_1d, evaluate_2d
 from src.preprocessing.features import ROC_SUFFIX, FeatureConfig, compute_rate_of_change
 from src.preprocessing.local_range import append_local_ranges, local_range_column
 from src.preprocessing.resampler import gap_column

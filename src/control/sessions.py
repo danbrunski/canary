@@ -6,13 +6,14 @@ import json
 import logging
 import shutil
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from src.control.capture_manifest import read_capture_manifest
-from src.preprocessing.loader import PARQUET_PATTERN
+from src.preprocessing.loader import PARQUET_PATTERN, has_telemetry
 from src.session import (
     ALL_SESSION_KINDS,
     LIVE_SESSION_KINDS,
@@ -23,6 +24,7 @@ from src.session import (
     classify_session_name,
     dir_size,
     iter_sessions,
+    session_sort_key,
 )
 from src.storage.sidecar import read_json_object, write_json_sidecar
 
@@ -66,9 +68,32 @@ def latest_session(root: Path) -> Path | None:
         # this the newest directory is briefly an empty one and every live
         # read returns nothing — the same "shows the wrong session" failure
         # in a new costume. Mirrors `discover_sessions`' own predicate.
-        if any(chunk.stat().st_size > 0 for chunk in child.glob("telemetry-*.parquet"))
+        if has_telemetry(child)
     ]
     return dated[-1] if dated else None
+
+
+def recorded_sessions(roots: Sequence[Path]) -> list[Path]:
+    """This vehicle's recorded sessions under ``roots``, captures included.
+
+    The third session question, distinct from "which may train?"
+    (:func:`src.preprocessing.loader.discover_sessions`, which excludes
+    captures) and "which is live?" (:func:`latest_session`, the newest only).
+    This is "every recording on disk that holds data", for evaluation and
+    reporting across one or more roots (e.g. a laptop mirror plus a pull).
+
+    Kinds are :data:`~src.session.RECORDED_SESSION_KINDS` (live + capture;
+    ``_tuning-*`` stays out pending the R01.1 decision). ``_archive`` and
+    ``_replay-*`` are never sessions. A name seen under two roots counts once
+    (the first root wins: the same drive is often pulled twice). Ordered by
+    parsed start time, never by name.
+    """
+    found: dict[str, Path] = {}
+    for root in roots:
+        for child in iter_sessions(root, kinds=RECORDED_SESSION_KINDS):
+            if child.name not in found and has_telemetry(child):
+                found[child.name] = child
+    return sorted(found.values(), key=session_sort_key)
 
 
 @dataclass(frozen=True)
@@ -293,6 +318,7 @@ __all__ = [
     "list_sessions",
     "pin_session",
     "read_session_metadata",
+    "recorded_sessions",
     "resolve_session",
     "summarize_session",
     "unpin_session",

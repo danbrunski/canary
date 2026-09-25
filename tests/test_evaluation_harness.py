@@ -34,6 +34,7 @@ from src.models.evaluation import (
     sustained_alerts,
     vus_pr,
 )
+from tests.builders import write_fixture_session
 
 T0 = datetime(2026, 9, 18, 12, 0, tzinfo=UTC)
 GATE = PersistenceSpec(required=3, window=5, window_seconds=8.0)
@@ -120,9 +121,7 @@ def test_one_physical_drive_cannot_sit_on_both_sides() -> None:
 
 
 def test_session_span_reads_parquet_footers(tmp_path: Path) -> None:
-    from tests.test_detector_benchmark import _write_fixture_session
-
-    session = _write_fixture_session(tmp_path, "2026-05-12T000000", seed=1, n=30)
+    session = write_fixture_session(tmp_path, "2026-05-12T000000", seed=1, n=30)
     span = session_span(session)
     assert span is not None
     assert span.name == "2026-05-12T000000"

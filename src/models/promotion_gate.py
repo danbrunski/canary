@@ -223,6 +223,247 @@ def _quarantine_fraction_trend(
     return True, None, detail
 
 
+#: One gate check's outcome: ``(ok, reason when not ok, the detail recorded
+#: under ``checks``)``.
+_CheckOutcome = tuple[bool, str | None, dict[str, Any]]
+
+
+def _check_calibration(candidate: TrainingRunRecord) -> _CheckOutcome:
+    calibration = _calibration_stamp(candidate)
+    ok = calibration != "in_sample"
+    reason = (
+        None
+        if ok
+        else "manifest is stamped calibration: in_sample — categorically ineligible for promotion"
+    )
+    return ok, reason, {"value": calibration, "ok": ok}
+
+
+def _check_contamination(
+    candidate: TrainingRunRecord, *, max_reject_fraction: float
+) -> _CheckOutcome:
+    sane, sanity_reason = _contamination_sanity(
+        candidate.dispositions, max_reject_fraction=max_reject_fraction
+    )
+    return sane, None if sane else sanity_reason, {"ok": sane, "reason": sanity_reason}
+
+
+def _check_quarantine_trend(
+    candidate: TrainingRunRecord,
+    recent_quarantine_fractions: Sequence[float],
+    *,
+    max_relative_rise: float,
+) -> _CheckOutcome:
+    ok, reason, detail = _quarantine_fraction_trend(
+        _quarantine_fraction(candidate.dispositions),
+        recent_quarantine_fractions,
+        max_relative_rise=max_relative_rise,
+    )
+    return ok, None if ok else reason, detail
+
+
+def _check_recall(
+    candidate_report: Mapping[str, Any],
+    golden_report: Mapping[str, Any],
+    *,
+    recall_tolerance: float,
+) -> _CheckOutcome:
+    """Recall non-regression per (detector, fault) cell the golden graded.
+
+    A cell the golden graded and the candidate did not -- no row (a withheld
+    detector: ``detector_benchmark`` emits none) or no recall -- **fails** and
+    is named (R04.5). It used to be skipped, so a candidate whose sequence
+    detector was withheld passed against a golden where it was graded. A cell
+    the golden never graded has nothing to regress from and is skipped.
+    """
+    candidate_table = {
+        (row["detector"], row["fault_kind"]): row for row in candidate_report.get("table", [])
+    }
+    golden_table = {
+        (row["detector"], row["fault_kind"]): row for row in golden_report.get("table", [])
+    }
+    cells: list[dict[str, Any]] = []
+    missing: list[str] = []
+    regressed_any = False
+    for (detector, fault_kind), golden_row in sorted(golden_table.items()):
+        golden_recall = golden_row.get("recall")
+        if golden_recall is None:
+            continue
+        candidate_row = candidate_table.get((detector, fault_kind))
+        candidate_recall = candidate_row.get("recall") if candidate_row is not None else None
+        floor = golden_recall * (1 - recall_tolerance)
+        if candidate_recall is None:
+            cells.append(
+                {
+                    "detector": detector,
+                    "fault_kind": fault_kind,
+                    "golden_recall": golden_recall,
+                    "candidate_recall": None,
+                    "floor": floor,
+                    "regressed": True,
+                    "missing": True,
+                }
+            )
+            missing.append(f"{detector}/{fault_kind}")
+            continue
+        regressed = candidate_recall < floor
+        cells.append(
+            {
+                "detector": detector,
+                "fault_kind": fault_kind,
+                "golden_recall": golden_recall,
+                "candidate_recall": candidate_recall,
+                "floor": floor,
+                "regressed": regressed,
+            }
+        )
+        regressed_any = regressed_any or regressed
+    ok = not regressed_any and not missing
+    reasons: list[str] = []
+    if regressed_any:
+        reasons.append(
+            "recall regressed vs golden on the fault-injection benchmark beyond tolerance"
+        )
+    if missing:
+        reasons.append(
+            "candidate has no recall where the golden was graded (detector withheld?): "
+            + ", ".join(missing)
+        )
+    return (
+        ok,
+        "; ".join(reasons) or None,
+        {"ok": ok, "tolerance": recall_tolerance, "cells": cells},
+    )
+
+
+def _per_hour(block: Mapping[str, Any] | None) -> float | None:
+    raw = None if block is None else block.get("per_hour")
+    return None if raw is None else float(raw)
+
+
+def _check_fp_budget(
+    candidate_nominal: Mapping[str, Any],
+    golden_nominal: Mapping[str, Any],
+    *,
+    fp_budget_per_hour: float,
+) -> _CheckOutcome:
+    """Every candidate detector -- and every one the golden has -- within budget.
+
+    A detector with no recorded ``per_hour`` fails (R04.5); it used to default
+    to 0.0 and pass.
+    """
+    cells: list[dict[str, Any]] = []
+    missing: list[str] = []
+    over = False
+    for detector in sorted(set(candidate_nominal) | set(golden_nominal)):
+        per_hour = _per_hour(candidate_nominal.get(detector))
+        if per_hour is None:
+            cells.append(
+                {
+                    "detector": detector,
+                    "per_hour": None,
+                    "budget": fp_budget_per_hour,
+                    "within_budget": False,
+                    "missing": True,
+                }
+            )
+            missing.append(detector)
+            continue
+        within_budget = per_hour <= fp_budget_per_hour
+        cells.append(
+            {
+                "detector": detector,
+                "per_hour": per_hour,
+                "budget": fp_budget_per_hour,
+                "within_budget": within_budget,
+            }
+        )
+        over = over or not within_budget
+    ok = not over and not missing
+    reasons: list[str] = []
+    if over:
+        reasons.append("held-out false-positive rate exceeds budget")
+    if missing:
+        reasons.append("candidate recorded no false-positive per_hour for: " + ", ".join(missing))
+    return ok, "; ".join(reasons) or None, {"ok": ok, "cells": cells}
+
+
+def _check_agreement(
+    candidate_nominal: Mapping[str, Any],
+    golden_nominal: Mapping[str, Any],
+    *,
+    agreement_tolerance: float,
+) -> _CheckOutcome:
+    """Held-out alert rate within tolerance of the golden's, per detector the
+    golden names. A missing rate on either side fails (R04.5): the candidate's
+    used to be skipped, the golden's compared as 0.0."""
+    cells: list[dict[str, Any]] = []
+    missing: list[str] = []
+    disagrees = False
+    golden_missing: list[str] = []
+    for detector, golden_block in sorted(golden_nominal.items()):
+        golden_rate = _per_hour(golden_block)
+        candidate_rate = _per_hour(candidate_nominal.get(detector))
+        if golden_rate is None:
+            # Symmetric with the candidate side: a golden that names a detector
+            # but recorded no rate cannot anchor an agreement check. It used
+            # to be compared as 0.0.
+            cells.append(
+                {
+                    "detector": detector,
+                    "golden_per_hour": None,
+                    "candidate_per_hour": candidate_rate,
+                    "agrees": False,
+                    "missing": True,
+                }
+            )
+            golden_missing.append(detector)
+            continue
+        if candidate_rate is None:
+            cells.append(
+                {
+                    "detector": detector,
+                    "golden_per_hour": golden_rate,
+                    "candidate_per_hour": None,
+                    "agrees": False,
+                    "missing": True,
+                }
+            )
+            missing.append(detector)
+            continue
+        agrees = (
+            (candidate_rate == 0)
+            if golden_rate == 0
+            else (abs(candidate_rate - golden_rate) / golden_rate <= agreement_tolerance)
+        )
+        cells.append(
+            {
+                "detector": detector,
+                "golden_per_hour": golden_rate,
+                "candidate_per_hour": candidate_rate,
+                "agrees": agrees,
+            }
+        )
+        disagrees = disagrees or not agrees
+    ok = not disagrees and not missing and not golden_missing
+    reasons: list[str] = []
+    if disagrees:
+        reasons.append("holdout score agreement with golden exceeds tolerance")
+    if missing:
+        reasons.append(
+            "candidate has no held-out per_hour where the golden has one: " + ", ".join(missing)
+        )
+    if golden_missing:
+        reasons.append(
+            "golden recorded no held-out per_hour to compare against: " + ", ".join(golden_missing)
+        )
+    return (
+        ok,
+        "; ".join(reasons) or None,
+        {"ok": ok, "tolerance": agreement_tolerance, "cells": cells},
+    )
+
+
 def evaluate_promotion_gate(
     candidate: TrainingRunRecord,
     golden: TrainingRunRecord | None,
@@ -243,33 +484,33 @@ def evaluate_promotion_gate(
     benchmark JSON directly; otherwise each is loaded from the record's own
     ``detector_benchmark_report_path``. Pure computation — never mutates the
     ledger; see :func:`promote_challenger` for the gated write.
+
+    Every check is a ``_check_*`` function returning ``(ok, reason,
+    detail)``. A candidate cell that is missing where the golden has one fails
+    and names itself (R04.5): a withheld detector never passes silently.
     """
     reasons: list[str] = []
     checks: dict[str, Any] = {}
 
-    calibration = _calibration_stamp(candidate)
-    calibration_ok = calibration != "in_sample"
-    checks["calibration"] = {"value": calibration, "ok": calibration_ok}
-    if not calibration_ok:
-        reasons.append(
-            "manifest is stamped calibration: in_sample — categorically ineligible for promotion"
-        )
+    def record(name: str, outcome: _CheckOutcome) -> None:
+        ok, reason, detail = outcome
+        checks[name] = detail
+        if not ok and reason is not None:
+            reasons.append(reason)
 
-    sane, sanity_reason = _contamination_sanity(
-        candidate.dispositions, max_reject_fraction=max_reject_fraction
+    record("calibration", _check_calibration(candidate))
+    record(
+        "contamination_sanity",
+        _check_contamination(candidate, max_reject_fraction=max_reject_fraction),
     )
-    checks["contamination_sanity"] = {"ok": sane, "reason": sanity_reason}
-    if not sane and sanity_reason is not None:
-        reasons.append(sanity_reason)
-
-    trend_ok, trend_reason, trend_detail = _quarantine_fraction_trend(
-        _quarantine_fraction(candidate.dispositions),
-        recent_quarantine_fractions,
-        max_relative_rise=max_quarantine_relative_rise,
+    record(
+        "quarantine_fraction_trend",
+        _check_quarantine_trend(
+            candidate,
+            recent_quarantine_fractions,
+            max_relative_rise=max_quarantine_relative_rise,
+        ),
     )
-    checks["quarantine_fraction_trend"] = trend_detail
-    if not trend_ok and trend_reason is not None:
-        reasons.append(trend_reason)
 
     if golden is None:
         checks["golden"] = {"ok": False, "reason": "no golden run declared for this model_type"}
@@ -296,96 +537,26 @@ def evaluate_promotion_gate(
         reasons.append("cannot evaluate recall/FP-budget without both benchmark reports")
         return PromotionGateResult(eligible=False, reasons=tuple(reasons), checks=checks)
 
-    candidate_table = {
-        (row["detector"], row["fault_kind"]): row
-        for row in resolved_candidate_report.get("table", [])
-    }
-    golden_table = {
-        (row["detector"], row["fault_kind"]): row for row in resolved_golden_report.get("table", [])
-    }
-
-    recall_ok = True
-    recall_cells: list[dict[str, Any]] = []
-    for (detector, fault_kind), golden_row in sorted(golden_table.items()):
-        candidate_row = candidate_table.get((detector, fault_kind))
-        golden_recall = golden_row.get("recall")
-        candidate_recall = candidate_row.get("recall") if candidate_row is not None else None
-        if golden_recall is None or candidate_recall is None:
-            continue
-        floor = golden_recall * (1 - recall_tolerance)
-        regressed = candidate_recall < floor
-        recall_cells.append(
-            {
-                "detector": detector,
-                "fault_kind": fault_kind,
-                "golden_recall": golden_recall,
-                "candidate_recall": candidate_recall,
-                "floor": floor,
-                "regressed": regressed,
-            }
-        )
-        recall_ok = recall_ok and not regressed
-    checks["recall_non_regression"] = {
-        "ok": recall_ok,
-        "tolerance": recall_tolerance,
-        "cells": recall_cells,
-    }
-    if not recall_ok:
-        reasons.append(
-            "recall regressed vs golden on the fault-injection benchmark beyond tolerance"
-        )
-
+    record(
+        "recall_non_regression",
+        _check_recall(
+            resolved_candidate_report,
+            resolved_golden_report,
+            recall_tolerance=recall_tolerance,
+        ),
+    )
     candidate_nominal = resolved_candidate_report.get("nominal_fp", {})
     golden_nominal = resolved_golden_report.get("nominal_fp", {})
-
-    fp_budget_ok = True
-    fp_cells: list[dict[str, Any]] = []
-    for detector, block in sorted(candidate_nominal.items()):
-        per_hour = block.get("per_hour", 0.0)
-        within_budget = per_hour <= fp_budget_per_hour
-        fp_cells.append(
-            {
-                "detector": detector,
-                "per_hour": per_hour,
-                "budget": fp_budget_per_hour,
-                "within_budget": within_budget,
-            }
-        )
-        fp_budget_ok = fp_budget_ok and within_budget
-    checks["fp_budget"] = {"ok": fp_budget_ok, "cells": fp_cells}
-    if not fp_budget_ok:
-        reasons.append("held-out false-positive rate exceeds budget")
-
-    agreement_ok = True
-    agreement_cells: list[dict[str, Any]] = []
-    for detector, golden_block in sorted(golden_nominal.items()):
-        candidate_block = candidate_nominal.get(detector)
-        if candidate_block is None:
-            continue
-        golden_rate = golden_block.get("per_hour", 0.0)
-        candidate_rate = candidate_block.get("per_hour", 0.0)
-        agrees = (
-            (candidate_rate == 0)
-            if golden_rate == 0
-            else (abs(candidate_rate - golden_rate) / golden_rate <= agreement_tolerance)
-        )
-        agreement_cells.append(
-            {
-                "detector": detector,
-                "golden_per_hour": golden_rate,
-                "candidate_per_hour": candidate_rate,
-                "agrees": agrees,
-            }
-        )
-        agreement_ok = agreement_ok and agrees
-    checks["holdout_score_agreement"] = {
-        "ok": agreement_ok,
-        "tolerance": agreement_tolerance,
-        "cells": agreement_cells,
-    }
-    if not agreement_ok:
-        reasons.append("holdout score agreement with golden exceeds tolerance")
-
+    record(
+        "fp_budget",
+        _check_fp_budget(candidate_nominal, golden_nominal, fp_budget_per_hour=fp_budget_per_hour),
+    )
+    record(
+        "holdout_score_agreement",
+        _check_agreement(
+            candidate_nominal, golden_nominal, agreement_tolerance=agreement_tolerance
+        ),
+    )
     return PromotionGateResult(eligible=not reasons, reasons=tuple(reasons), checks=checks)
 
 

@@ -8,11 +8,11 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from src.analysis.obd_coverage import build_coverage_report, channels_to_pids
-from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.decode.dtc_catalog import build_dtc_report, describe_dtc
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import isolated_config
 
 # ---------------------------------------------------------------------------
 # Coverage
@@ -99,26 +99,6 @@ def test_build_dtc_report() -> None:
 # /obd/coverage endpoint
 # ---------------------------------------------------------------------------
 
-_CONFIG_YAML = """
-vehicle: {{make: Nissan, model: Xterra, year: 2008}}
-hardware:
-  elm327_port: /dev/ttyUSB0
-  can: {{interface: virtual, channel: vcan0, bitrate: 500000}}
-collection:
-  obd_poll_rate_hz: 1.0
-  storage_path: {storage}
-  session_retention_days: 30
-  storage_warning_mb: 500
-preprocessing:
-  resample_hz: 1.0
-  rolling_window_seconds: 5
-  operating_modes: {{}}
-models:
-  isolation_forest: {{enabled: true, n_estimators: 100, contamination: 0.01}}
-  lstm_autoencoder: {{enabled: false, sequence_length: 30, latent_dim: 8, threshold_k: 3.0}}
-dashboard: {{host: 127.0.0.1, port: 8000}}
-"""
-
 
 def test_obd_coverage_endpoint_infers_from_telemetry(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
@@ -133,9 +113,7 @@ def test_obd_coverage_endpoint_infers_from_telemetry(tmp_path: Path) -> None:
         ],
         session,
     )
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_CONFIG_YAML.format(storage=storage))
-    config = CanaryConfig.from_yaml(cfg)
+    config = isolated_config(tmp_path, storage=storage)
     client = TestClient(create_app(config, anomalies_dir=tmp_path / "anomalies"))
     body = client.get("/obd/coverage").json()
     assert body["supported_count"] == 2  # RPM + COOLANT_TEMP (CAN row ignored)
@@ -147,9 +125,7 @@ def test_obd_coverage_endpoint_infers_from_telemetry(tmp_path: Path) -> None:
 def test_obd_coverage_endpoint_empty_when_no_sessions(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
     storage.mkdir()
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(_CONFIG_YAML.format(storage=storage))
-    config = CanaryConfig.from_yaml(cfg)
+    config = isolated_config(tmp_path, storage=storage)
     client = TestClient(create_app(config, anomalies_dir=tmp_path / "anomalies"))
     body = client.get("/obd/coverage").json()
     assert body["supported_count"] == 0
@@ -182,11 +158,7 @@ def test_obd_coverage_endpoint_lists_custom_pids(tmp_path: Path) -> None:
         ),
         custom_pids_path,
     )
-    cfg = tmp_path / "canary.yaml"
-    cfg.write_text(
-        _CONFIG_YAML.format(storage=storage) + f"daemon:\n  custom_pids: {custom_pids_path}\n"
-    )
-    config = CanaryConfig.from_yaml(cfg)
+    config = isolated_config(tmp_path, storage=storage, daemon={"custom_pids": custom_pids_path})
     client = TestClient(create_app(config, anomalies_dir=tmp_path / "anomalies"))
     body = client.get("/obd/coverage").json()
     assert body["custom_pids"] == [

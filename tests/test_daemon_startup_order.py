@@ -23,7 +23,6 @@ from src.daemon.polling import poll_model_managers
 from src.models.manager import SwapAttempt, manager_for_artifact
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
-from tests.test_daemon import config  # noqa: F401 — the shared fixture
 from tests.waits import HANG_GUARD_SECONDS, settle, wait_until
 
 #: run_daemon's shutdown digest is a spawned child; see the fixture (T01.1).
@@ -32,6 +31,12 @@ pytestmark = pytest.mark.usefixtures("no_trip_end_digest_child")
 # ---------------------------------------------------------------------------
 # Model managers: built empty, loaded by the poller off the loop
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def config(daemon_config: CanaryConfig) -> CanaryConfig:
+    """``tests/conftest.py``'s isolated daemon config (was ``tests.test_daemon.config``)."""
+    return daemon_config
 
 
 def test_manager_for_artifact_load_false_defers_the_initial_load(tmp_path: Path) -> None:
@@ -47,7 +52,7 @@ def test_manager_for_artifact_load_false_defers_the_initial_load(tmp_path: Path)
 
 
 def test_build_components_load_models_false_leaves_managers_empty(
-    config: CanaryConfig,  # noqa: F811
+    config: CanaryConfig,
 ) -> None:
     components = build_components(config, load_models=False)
     assert all(manager.current is None for manager in components.model_managers.values())
@@ -155,7 +160,7 @@ async def test_drain_refuses_both_live_source_forms(tmp_path: Path) -> None:
 
 
 async def test_run_daemon_records_while_the_live_source_is_still_building(
-    config: CanaryConfig,  # noqa: F811
+    config: CanaryConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from src.daemon import run_daemon, runtime
@@ -207,7 +212,7 @@ async def test_run_daemon_records_while_the_live_source_is_still_building(
 
 
 async def test_run_daemon_keeps_recording_when_the_live_source_cannot_be_built(
-    config: CanaryConfig,  # noqa: F811
+    config: CanaryConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A failed build degrades to recording without inference, not a crash loop."""

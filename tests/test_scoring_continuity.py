@@ -346,7 +346,7 @@ def test_a_recorded_suppress_list_names_what_serving_added_and_dropped() -> None
 
 def test_the_suppress_comparison_reaches_status_when_the_engine_loads(monkeypatch) -> None:
     """Named at load on ``/status``, not only in a log line."""
-    from src.models.health import HealthMonitor
+    from src.daemon.health import HealthMonitor
 
     engine = _FakeEngine()
     trained = _trained_with_schema({"feature_columns": ["rpm", "obd:FUEL_LEVEL"]})

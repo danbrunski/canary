@@ -78,6 +78,7 @@ from src.models.evaluation import (
     alert_episodes,
     band_of,
     bootstrap_ratio_ci,
+    default_profile_exclusion,
     drives_of_sessions,
     engine_hours,
     engine_running,
@@ -125,6 +126,7 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from src.profiles import active_registry_path
 from src.session import session_sort_key
 
 log = logging.getLogger(__name__)
@@ -148,8 +150,12 @@ DEFAULT_GRACE_SECONDS = 60.0
 def discover_session_dirs(roots: Sequence[Path]) -> list[Path]:
     """Every recorded session under ``roots``, captures included.
 
-    ``_archive`` (quarantine) and ``_replay-*`` (re-emitted copies) are not
-    drives. Ordered by parsed start time, never by name.
+    Captures are kept for *drive grouping* only: a capture bridges its sibling
+    recordings into one physical drive. Whether its rows are scored is
+    :func:`~src.models.evaluation.default_profile_exclusion`'s call (R04.6):
+    tuning captures are not. ``_archive`` (quarantine) and ``_replay-*``
+    (re-emitted copies) are not drives. Ordered by parsed start time, never by
+    name.
     """
     found: dict[str, Path] = {}
     for root in roots:
@@ -357,6 +363,9 @@ class DriveRecord:
     #: Recorded in a tune/hardware era none of the scored artifacts trained
     #: in: reported per drive, kept out of every summary (no fold mixes eras).
     cross_era: bool = False
+    #: Sessions of the drive kept out of every metric, and why (R04.6: tuning
+    #: captures bridge the drive but are not the default profile).
+    excluded_sessions: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -365,7 +374,10 @@ class DriveRecord:
             "sessions": self.sessions,
             # Sessions of this drive that could not be loaded: the drive was
             # scored on the rest, and says so.
-            "missing_sessions": sorted(set(self.drive.session_names) - set(self.sessions)),
+            "missing_sessions": sorted(
+                set(self.drive.session_names) - set(self.sessions) - set(self.excluded_sessions)
+            ),
+            "excluded_sessions": dict(sorted(self.excluded_sessions.items())),
             "start": self.drive.start.isoformat(),
             "end": self.drive.end.isoformat(),
             "era": self.drive.era.label if self.drive.era else None,
@@ -1320,7 +1332,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     by_name = {path.name: path for path in discover_session_dirs(roots)}
     by_name.update({path.name: path for path in args.sessions})
 
-    tune_path = args.tune_revisions or data_dir / "tune_revisions.yaml"
+    # R05.1: the profile's active flash registry (operational copy first).
+    tune_path = args.tune_revisions or active_registry_path(_scoped(config, args.profile))
     labels_path = args.labels or data_dir / LABELLED_EVENTS_FILENAME
     registry = load_labelled_events(labels_path, tune_revisions_path=tune_path)
     tune_registry = load_tune_revisions(tune_path)
@@ -1353,9 +1366,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         if (args.since is None or d.start >= args.since)
         and (args.until is None or d.start < args.until)
     ]
+    # R04.6 (operator decision 2026-09-24): only default-profile rows are
+    # scored. Captures still group drives above; their rows reach nothing below.
+    excluded: dict[str, str] = {
+        name: reason
+        for drive in drives
+        for name in drive.session_names
+        if (reason := default_profile_exclusion(by_name[name])) is not None
+    }
     for drive in drives:
         seen_by = {name: seen[name] for name in drive.session_names if name in seen}
-        if seen_by:
+        if all(name in excluded for name in drive.session_names):
+            reason = (
+                "skipped: no default-profile rows ("
+                + "; ".join(f"{name}: {excluded[name]}" for name in drive.session_names)
+                + ")"
+            )
+        elif seen_by:
             reason = "skipped: seen by " + "; ".join(
                 f"{session} ({', '.join(f'{d} {r}' for d, r in roles.items())})"
                 for session, roles in sorted(seen_by.items())
@@ -1394,7 +1421,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
     )
     needed = sorted(
-        {name for drive in evaluation for name in drive.session_names}
+        {name for drive in evaluation for name in drive.session_names if name not in excluded}
         | set(fit_names)
         | set(calibration_names)
     )
@@ -1402,7 +1429,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         for drive in evaluation:
             print(
                 f"evaluate {drive.drive_id} [{drive.era.label if drive.era else '?'}]: "
-                f"{', '.join(drive.session_names)}"
+                + ", ".join(
+                    f"{n} (not scored: {excluded[n]})" if n in excluded else n
+                    for n in drive.session_names
+                )
             )
         for entry in skipped:
             print(f"skip     {entry['drive']}: {entry['reason']}")
@@ -1526,7 +1556,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     roles = load_fault_channel_roles(args.fault_roles or data_dir / "fault_injection.yaml")
     shift_runs: list[dict[str, Any]] = []
     for drive in evaluation:
-        present = {n: frames[n] for n in drive.session_names if n in features}
+        present = {n: frames[n] for n in drive.session_names if n in features and n not in excluded}
         if not present:
             skipped.append(
                 {
@@ -1534,7 +1564,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "sessions": list(drive.session_names),
                     "reason": "skipped: "
                     + "; ".join(
-                        f"{n}: {load_errors.get(n, 'not loaded')}" for n in drive.session_names
+                        f"{n}: {load_errors.get(n, 'not loaded')}"
+                        for n in drive.session_names
+                        if n not in excluded
                     ),
                 }
             )
@@ -1547,6 +1579,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raw=[(r, streams[(r.names[0], name)]) for r in raw_detectors],
             )
         record = clean_drive_record(drive, present, scores, names, registry.events)
+        record.excluded_sessions = {n: excluded[n] for n in drive.session_names if n in excluded}
         record.cross_era = bool(training_eras) and drive.era not in training_eras
         records.append(record)
         if not args.no_shift_test and not record.cross_era:

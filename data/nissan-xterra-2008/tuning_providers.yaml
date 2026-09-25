@@ -1,4 +1,17 @@
 schema_version: 1
+# Quoted when an all-DID capture is asked a Mode 01 question (R05.11): the
+# reason is this ECM's, not a property of the analysis code.
+mode01_exclusion_note: >-
+  Mode 01 cannot run alongside Mode 22 on this ECM, so commanded AFR
+  (PID 0x44) is absent from such a capture; the RAM final target
+  (mem:ECM_TARGET_EQUIV_RATIO) is the all-DID commanded-mixture source.
+# WOT on a Mode 01 capture, and the rpm bands reports bin into (R05.13).
+# The OBD throttle percentage tops out around 89 % and understates true WOT,
+# so calculated load is the better gate. 6500 rpm is the VQ40DE redline.
+mode01_wot:
+  load_floor_pct: 85.0
+  rpm_floor: 2500.0
+  rpm_bands: [2500.0, 3000.0, 3500.0, 4000.0, 4500.0, 5000.0, 6500.0]
 providers:
   - {role: rpm, spec: 'did:ECM_RPM'}
   - {role: operator_demand, spec: 'did:ECM_THROTTLE_POS_SENSOR_1'}
