@@ -95,11 +95,32 @@ def session_long(
     the one bounded reader: raw CAN is read only for the ids the named
     bindings decode, under every era's channel spelling (R04.14).
     """
-    from src.decode.dids import decode_did_rows
-    from src.preprocessing.decode import decode_can_rows, read_session_decoded_subset
+    from src.preprocessing.decode import read_session_decoded_subset
 
     wanted = set(decoded)
     long, subset = read_session_decoded_subset(session_dir, bindings=bindings, decoded=wanted)
+    stored = set(long.loc[long["source"] == "decoded", "channel"].unique())
+    return _decode_subset(long, subset=subset, did_map=did_map, wanted=wanted, stored=stored)
+
+
+def _decode_subset(
+    long: pd.DataFrame,
+    *,
+    subset: Bindings | None,
+    did_map: DidMap | None,
+    wanted: set[str],
+    stored: set[str],
+) -> pd.DataFrame:
+    """:func:`session_long`'s decode of an already-read long frame.
+
+    ``stored`` names the broadcast signals the *session* already carries as
+    stored ``decoded:`` rows; those win and are not re-decoded. It is passed
+    in rather than read off ``long`` so a part of a session decodes exactly as
+    the whole session would.
+    """
+    from src.decode.dids import decode_did_rows
+    from src.preprocessing.decode import decode_can_rows
+
     is_can = long["source"] == "can"
     rest = long.loc[~is_can]
     if did_map is not None:
@@ -107,7 +128,6 @@ def session_long(
     pieces = [rest.loc[(rest["source"] != "decoded") | rest["channel"].isin(wanted)]]
     if subset is not None and bool(is_can.any()):
         # Stored decoded rows win (decode_can_rows would skip them anyway).
-        stored = set(rest.loc[rest["source"] == "decoded", "channel"].unique())
         signals = [s for s in subset.signals if s.name not in stored]
         if signals:
             decoded_rows = decode_can_rows(
@@ -116,6 +136,27 @@ def session_long(
             pieces.append(decoded_rows.loc[decoded_rows["source"] == "decoded"])
     out = pd.concat(pieces, ignore_index=True) if len(pieces) > 1 else pieces[0]
     return out.sort_values("timestamp", kind="stable").reset_index(drop=True)
+
+
+def _stored_decoded_channels(session_dir: Path) -> set[str]:
+    """Every broadcast signal the session stores as ``decoded:`` rows (two
+    columns, filtered, per chunk)."""
+    import pyarrow.parquet as pq
+
+    from src.preprocessing.loader import PARQUET_PATTERN
+
+    names: set[str] = set()
+    for path in sorted(session_dir.glob(PARQUET_PATTERN)):
+        if path.stat().st_size == 0:
+            continue
+        try:
+            table = pq.read_table(  # type: ignore[no-untyped-call, unused-ignore]
+                path, columns=["channel"], filters=[("source", "==", "decoded")]
+            )
+        except Exception:  # noqa: BLE001 - an unreadable chunk contributes no rows
+            continue
+        names.update(str(c) for c in table.column("channel").unique().to_pylist())
+    return names
 
 
 def samples_from_long(long: pd.DataFrame) -> pd.DataFrame:
@@ -199,12 +240,81 @@ def load_stream(
     *,
     bindings: Bindings | None,
     did_map: DidMap | None,
+    part_rows: int | None = None,
 ) -> SessionStream:
-    decoded = _checked_decoded(catalog) | set(segmenter_decoded())
-    long = session_long(session_dir, bindings=bindings, did_map=did_map, decoded=decoded)
-    samples = samples_from_long(long)
-    modes = sample_modes(long, samples, config, bindings=bindings)
+    """The session's arrived samples and modes, read part by part.
+
+    Equal to ``samples_from_long(session_long(...))`` and :func:`sample_modes`
+    over the whole session (``tests/test_plausibility.py`` asserts it), but a
+    session is read in time-disjoint parts (``loader.iter_session_parts``)
+    and only its samples and a reduced 1 Hz segmenter frame are kept. Reading
+    the 2 h ``2026-09-20T152758`` whole took the A02.11 evaluation to 13.2 GB
+    (2026-09-26).
+    """
+    from src.preprocessing.decode import decoded_subset_plan, keep_can_ids
+    from src.preprocessing.derived import grid_interval_ns, reduce_long_frames
+    from src.preprocessing.feature_pipeline import _decode_long_frame
+    from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_parts
+    from src.preprocessing.resampler import resample_config_for
+
+    wanted = _checked_decoded(catalog) | set(segmenter_decoded())
+    filters, subset, ids = decoded_subset_plan(bindings, wanted)
+    stored = _stored_decoded_channels(session_dir)
+    resample = resample_config_for(config)
+    segmenter = set(segmenter_channels())
+    sample_parts: list[pd.DataFrame] = []
+    segmenter_parts: list[pd.DataFrame] = []
+
+    for part in iter_session_parts(
+        session_dir, target_rows=part_rows or SESSION_PART_ROWS, filters=filters
+    ):
+        long = _decode_subset(
+            keep_can_ids(part, ids), subset=subset, did_map=did_map, wanted=wanted, stored=stored
+        )
+        samples = samples_from_long(long)
+        if not samples.empty:
+            sample_parts.append(samples)
+        keys = long["source"].astype(str) + ":" + long["channel"].astype(str)
+        rows = long.loc[keys.isin(segmenter).to_numpy()]
+        if not rows.empty:
+            segmenter_parts.append(_decode_long_frame(rows, None, None, None))
+
+    samples = (
+        pd.concat(sample_parts, ignore_index=True)
+        if sample_parts
+        else samples_from_long(pd.DataFrame())
+    )
+    reduced = reduce_long_frames(session_dir.name, segmenter_parts, grid_interval_ns(resample))
+    modes = _modes_on_grid(reduced, samples, config, bindings=bindings)
     return SessionStream(session_dir.name, samples, modes)
+
+
+def _modes_on_grid(
+    reduced: Any,
+    samples: pd.DataFrame,
+    config: CanaryConfig,
+    *,
+    bindings: Bindings | None,
+) -> np.ndarray[Any, np.dtype[np.object_]]:
+    """:func:`sample_modes` from a reduced segmenter frame."""
+    from src.preprocessing.derived import resample_reduced
+    from src.preprocessing.feature_pipeline import segment_or_constant
+    from src.preprocessing.resampler import TIMESTAMP_COLUMN, resample_config_for
+    from src.preprocessing.segmenter import MODE_COLUMN
+
+    modes = np.full(len(samples), None, dtype=object)
+    if reduced.cells.empty or samples.empty:
+        return modes
+    resampled = resample_reduced(reduced, resample_config_for(config))
+    if resampled.empty:
+        return modes
+    segmented, _ = segment_or_constant(resampled, config, bindings=bindings)
+    grid = epoch_seconds(segmented[TIMESTAMP_COLUMN])
+    labels = segmented[MODE_COLUMN].astype(object).to_numpy()
+    index = np.searchsorted(grid, samples["t"].to_numpy(), side="right") - 1
+    valid = index >= 0
+    modes[valid] = labels[index[valid]]
+    return modes
 
 
 def run_evaluator(

@@ -154,8 +154,10 @@ def decode_can_rows(
     # through tools/backfill_decoded.py) already carry stored decoded rows
     # with identical raw-value semantics — recomputing those signals here
     # would double every row and feed duplicate observations to `to_wide`.
-    # Stored rows win; re-run the backfill tool to refresh them after a
-    # binding definition changes.
+    # Stored rows win *when they are in the frame passed here*; re-run the
+    # backfill tool to refresh them after a binding definition changes. The
+    # batch feature chain (``feature_pipeline._decode_long_frame``) passes
+    # CAN rows only, so it recomputes every signal instead (see there).
     # A signal whose sentinel state rows alone were stored (a session the
     # sensor never woke in) counts as stored too.
     already_stored = set(long_frame.loc[long_frame["source"] == DECODED_SOURCE, "channel"].unique())
@@ -293,6 +295,18 @@ def read_session_decoded_subset(
     """
     from src.preprocessing.loader import read_session
 
+    filters, subset, ids = decoded_subset_plan(bindings, decoded)
+    long = read_session(Path(session_dir), filters=filters)
+    return keep_can_ids(long, ids), subset
+
+
+def decoded_subset_plan(
+    bindings: Bindings | None, decoded: Iterable[str]
+) -> tuple[list[list[tuple[str, str, Any]]], Bindings | None, set[int]]:
+    """``(filters, subset, ids)`` for :func:`read_session_decoded_subset`: the
+    parquet pushdown, the narrowed bindings and the CAN ids they read. Split
+    out so a part-by-part reader (``plausibility.offline.load_stream``) reads
+    exactly the rows the whole-session reader does."""
     wanted = set(decoded)
     signals = [s for s in bindings.signals if s.name in wanted] if bindings is not None else []
     subset = bindings.model_copy(update={"signals": signals}) if bindings and signals else None
@@ -300,11 +314,16 @@ def read_session_decoded_subset(
     ids = {signal.can_id for signal in signals}
     if ids:
         filters.append([("source", "==", "can"), ("channel", "in", can_channel_spellings(ids))])
-    long = read_session(Path(session_dir), filters=filters)
+    return filters, subset, ids
+
+
+def keep_can_ids(long: pd.DataFrame, ids: set[int]) -> pd.DataFrame:
+    """Drop raw CAN rows whose parsed id is not in ``ids`` (the pushdown matched
+    spellings; this matches the id exactly)."""
     is_can = (long["source"] == "can").to_numpy()
     if is_can.any():
         parsed = long.loc[is_can, "channel"].map(lambda c: parse_can_channel(str(c)))
         keep = np.ones(len(long), dtype=bool)
         keep[np.flatnonzero(is_can)] = parsed.isin(ids).to_numpy(dtype=bool)
         long = long.loc[keep].reset_index(drop=True)
-    return long, subset
+    return long

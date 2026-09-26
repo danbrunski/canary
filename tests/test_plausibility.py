@@ -898,3 +898,101 @@ def test_an_alert_sink_failure_never_costs_the_evidence() -> None:
     evaluator.observe("obd:SPEED", 300.0, 102.0, "city")
     assert [r.state for r in written] == ["pending", "confirmed"]
     assert evaluator.counters.confirmed == 1
+
+
+def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) -> None:
+    """``load_stream`` reads a session in time-disjoint parts (a 2 h drive
+    whole took the A02.11 evaluation to 13.2 GB); samples and modes must
+    equal the whole-session chain exactly, stored decoded rows included."""
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    from src.plausibility.offline import (
+        _checked_decoded,
+        load_stream,
+        sample_modes,
+        samples_from_long,
+        segmenter_decoded,
+        session_long,
+    )
+
+    config, (catalog, bindings) = _xterra_catalog()
+    did_map = load_did_map(REPO / "data" / "dids.yaml")
+    table = pq.read_table(DRIVE_SLICE / "telemetry-00000.parquet")
+    table = table.take(pc.sort_indices(table, sort_keys=[("timestamp", "ascending")]))
+    session = tmp_path / "2026-08-03T231900"
+    session.mkdir()
+    step = table.num_rows // 6
+    for i in range(6):
+        piece = table.slice(i * step, step if i < 5 else table.num_rows - i * step)
+        pq.write_table(piece, session / f"telemetry-{i:05d}.parquet")
+    # One chunk of stored decoded rows for a checked signal: they win over a
+    # re-decode in every part, not only in the part that holds them.
+    stored = next(iter(sorted(_checked_decoded(catalog))))
+    can = table.filter(pc.equal(table["source"], "can")).slice(0, 50)
+    n = can.num_rows
+    rows = can.set_column(
+        can.schema.get_field_index("source"),
+        table.schema.field("source"),
+        pa.array(["decoded"] * n, type=table.schema.field("source").type),
+    )
+    rows = rows.set_column(
+        rows.schema.get_field_index("channel"),
+        table.schema.field("channel"),
+        pa.array([stored] * n, type=table.schema.field("channel").type),
+    )
+    rows = rows.set_column(
+        rows.schema.get_field_index("value_number"),
+        table.schema.field("value_number"),
+        pa.array([float(i) for i in range(n)], type=pa.float64()),
+    )
+    pq.write_table(rows, session / "telemetry-00006.parquet")
+
+    wanted = _checked_decoded(catalog) | set(segmenter_decoded())
+    long = session_long(session, bindings=bindings, did_map=did_map, decoded=wanted)
+    samples = samples_from_long(long)
+    modes = sample_modes(long, samples, config, bindings=bindings)
+    stream = load_stream(
+        session, config, catalog, bindings=bindings, did_map=did_map, part_rows=3_000
+    )
+
+    assert (samples["channel"] == f"decoded:{stored}").sum() > 0
+    pd.testing.assert_frame_equal(samples, stream.samples, check_exact=True)
+    assert list(modes) == list(stream.modes)
+
+
+def test_the_catalog_fingerprint_is_stable_across_hash_seeds() -> None:
+    """The stream cache is keyed by it; a ``repr`` hash followed
+    PYTHONHASHSEED (the catalog holds frozensets) and never hit."""
+    import os
+    import subprocess
+    import sys
+
+    code = (
+        "from pathlib import Path\n"
+        "from src.config import CanaryConfig\n"
+        "from src.decode.bindings import load_bindings\n"
+        "from src.decode.dids import load_did_map\n"
+        "from src.plausibility.limits import load_plausibility_profile, resolve_limits\n"
+        f"profile = Path({str(XTERRA_PROFILE)!r})\n"
+        "c = CanaryConfig.from_yaml(Path('canary.example.yaml'))\n"
+        "cat = resolve_limits(load_plausibility_profile(profile),"
+        " bindings=load_bindings(Path('data/bindings.yaml')),"
+        " did_map=load_did_map(Path('data/dids.yaml')),"
+        " operating_modes=c.preprocessing.operating_modes,"
+        " priority_channels=c.collection.obd_priority_channels)\n"
+        "print(cat.fingerprint())\n"
+    )
+    prints = {
+        subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=REPO,
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
+        for seed in ("1", "2", "3")
+    }
+    assert len(prints) == 1

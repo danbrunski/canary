@@ -531,12 +531,75 @@ This checklist builds the yardstick.
     2026-08-03 --baseline-fit-sessions 8 --injections-per-drive 2
     --cache-only`.
 
+  **Regenerated on default-profile rows (R04.6, 2026-09-26):**
+  [`data/analyses/2026-09-25-a02-detector-baseline-default-profile.md`](../../../data/analyses/2026-09-25-a02-detector-baseline-default-profile.md)
+  (`.json` beside it).
+  - **Command.** `.venv/bin/python scripts/evaluate_detectors.py --config
+    canary.example.yaml --profile nissan-xterra-2008 --sessions-root
+    ~/canary-data/sessions/nissan-xterra-2008 --sessions-root
+    ~/canary-data/sessions --sessions-root ~/canary-data/sessions-0917
+    --sessions-root ~/canary-data/sessions-0918 --sessions-root
+    ~/canary-data/sessions-0920 --sessions-root ~/canary-data/sessions-0921
+    --since 2026-08-03 --baseline-fit-sessions 8 --injections-per-drive 2
+    --workers 1 --out
+    data/analyses/2026-09-25-a02-detector-baseline-default-profile.json`,
+    no `--cache-only`. Run twice: on the bounded decode (1 h 43 min), and
+    again on the P01 derived frames (`--log-level INFO` added, 19 min 40 s,
+    all 67 frames `reused`). Both reports are identical apart from
+    `generated_at` and `command`.
+  - **Scope.** 18 drives evaluated: 12 in-era, 8 of them with engine time
+    (6.70 engine-h), and 6 cross-era (reported, in no summary). 15 skipped
+    with reasons: seen in training or calibration, or `no default-profile
+    rows`. 184 injections. Every session loaded (`load_errors` empty),
+    including `2026-09-20T152758` and `2026-09-18T213818`, so the baseline
+    thresholds rest on 3 of 3 calibration sessions. Same artifacts as the
+    superseded table (IF `af1720e7…0e1d`, LSTM `c77165ad…1112`). Batched and
+    served sequence scoring agree: 0 of 171 windows differ, max score
+    difference 1.2e-7.
+  - **Roles changed since 2026-09-23.** `models.roles` now makes IF,
+    sequence and sequence_global `evidence` (not held to the alert budget),
+    so the harness gives them no bootstrap interval. Their row below is the
+    pooled rate over the 8 in-era drives with engine time (episodes ÷ 6.70
+    engine-h).
+
+  False alarms per engine-hour, in-era drives:
+
+  | Detector | Role | FA/eh | Rows withheld |
+  |---|---|---|---|
+  | `sequence` as served | evidence | 40.0 pooled (268 episodes) | 3 % |
+  | `sequence_global` (family path ablated) | evidence | 1.2 pooled (8) | 3 % |
+  | `isolation_forest` | evidence | 2.4 pooled (16) | 61 % |
+  | `fused` | alert | 0 [0, 0] | 3 % |
+  | `robust_z` | alert | 3.29 [1.71, 7.08] | 10 % |
+  | `pca` | alert | 0.15 [0, 1.01] | 11 % |
+  | `untrained_autoencoder` | alert | 0.30 [0, 0.37] | 3 % |
+  | `plausibility` (A05) | alert | 0 [0, 0] | 1 % |
+
+  (Alert rows: drive-bootstrap 95 %.)
+  - **Budget.** Among alert-role detectors, fused, PCA, the untrained
+    autoencoder and A05 stay under 1 per engine-hour; robust-z does not. The
+    budget-meeting level on these drives: robust-z 2211.2, PCA 114858, the
+    untrained AE 1.596 (each 5-6 episodes in 6.70 engine-h).
+  - **Recall at the deployed threshold.** `maf_gain` and `lazy_o2`: 0 for
+    every detector at every severity. `thermostat -15 °C`: served sequence
+    4 of 4 graded (10 masked by its own flood), `sequence_global` 0.36,
+    IF 0.17, untrained AE 0.14. `bank_imbalance 10 %`: served sequence 3 of 3
+    (5 masked), untrained AE 0.12. `idle_air_leak 0.6–1.0 g/s`: served
+    sequence 2 of 2 (6 masked); nothing else.
+  - **VUS-PR** (no skill = 0.50): sequence 0.80 on idle leak and 0.77 on
+    thermostat; IF 0.60–0.66 across faults.
+  - **Against the superseded table.** Without the tuning captures, the served
+    sequence detector's rate is 40.0 pooled (was 45.4 [24.5, 61.3]).
+    `sequence_global` is 1.2 (was 3.0), IF 2.4 (was 1.2, withheld 61 % vs
+    81 %), robust-z 3.29 (was 39.0), PCA 0.15 (was 0.4) and the untrained AE
+    0.30 (was 0.8).
+
   **Superseded scope (R04.6, 2026-09-25).** This table scored tuning
   captures as evaluation rows: 8 of its 16 drives include capture sessions
   and 6 are captures alone. The operator decision of 2026-09-24 takes tuning
   logs out of the detectors, and `evaluate_detectors` now scores
   default-profile rows only. Read the numbers below as the pre-R04.6
-  baseline; the regenerated table is owed (R04.6's remainder).
+  baseline; the regenerated table is above (R04.6, 2026-09-26).
 
   False alarms per engine-hour, in-era drives, drive-bootstrap 95 %:
 
@@ -573,18 +636,13 @@ This checklist builds the yardstick.
   *Remaining:*
   - **Pi hash check (Pi item).** Verify the two sha256s above against the
     Pi's deployed files.
-  - **Two sessions still not scored.** `2026-09-20T152758` (a 2 h drive,
-    161 MB) and `2026-09-18T213818` (an IF calibration session, so the
-    baseline thresholds rest on 2 of 3). Each decode still ran out of
-    memory, run alone, with 13 GB free (re-tried 2026-09-23).
-    `load_resampled_session` holds a whole session's decoded long frame.
-    Scoring them needs a lower-memory decode path, not a retry.
-    The archived report now says so itself: `baseline_threshold_sessions`
-    lists only the two that loaded, `213818` sits under
-    `baseline_threshold_sessions_not_loaded`, and a "Not loaded" section
-    names every load error (re-rendered from the same JSON; scores
-    unchanged; `test_a_baseline_session_that_did_not_load_is_named_not_counted`).
-    `2026-09-20T211925` did decode this time and is included.
+  - ~~Two sessions still not scored.~~ *Resolved 2026-09-26 (P01.1).*
+    `2026-09-20T152758` and `2026-09-18T213818` now load at 1.31 GB and
+    1.06 GB peak (they were OOM-killed at 12-15 GB) and both are in the
+    regenerated table above; the baseline thresholds rest on 3 of 3.
+    (Previously: `baseline_threshold_sessions_not_loaded` named `213818`;
+    `test_a_baseline_session_that_did_not_load_is_named_not_counted` keeps
+    that reporting.)
 
 - [x] **A02.12 — A family or channel with no calibration data must not
   score.** In the 2026-09-20 sequence artifact, `did:ECM_INJECTOR_PULSE_1`

@@ -293,7 +293,7 @@ about: a rule copied four times is a rule that four places can disagree on.
     plus `test_gate_ignores_a_cell_the_golden_never_graded` and the
     golden-side test above. `tests/test_promotion_gate.py`: 25 passed.
 
-- [~] **R04.6 Evaluate the detectors on default-profile data only.**
+- [x] **R04.6 Evaluate the detectors on default-profile data only.**
   *Operator decision 2026-09-24: tuning logs don't represent the default
   profile, so they are not in the anomaly detectors. See R03.12 for the live
   half.*
@@ -332,7 +332,7 @@ about: a rule copied four times is a rule that four places can disagree on.
 
   Size **S–M**.
 
-  *Code done 2026-09-25; the regenerated table is owed.*
+  *Code done 2026-09-25; table regenerated 2026-09-26 (below).*
   `src/models/evaluation.default_profile_exclusion(session_dir)` names why a
   session's rows are out: a `_tuning-*` session, or a capture whose manifest
   is not `corpus_eligible` (a capture with no readable manifest counts as
@@ -358,14 +358,29 @@ about: a rule copied four times is a rule that four places can disagree on.
   - A00's decisions list records the decision and that both halves are closed.
   - The tuning rule is `src.session.session_kind(name) is
     SessionKind.TUNING`, not a restated prefix.
-  - **Remaining (deferred compute, accepted by the orchestrator pending the
-    operator's scheduling decision):** regenerate the A02.11 table and record
-    it next to it. A `--cache-only` run found only 10 of 67 needed sessions decoded under the
-    current cache key (the catalogs changed since 09-23), and a full re-decode
-    ran at ~4 min per session at 10 GB RSS — about 4 h serially for the 57
-    left, so it was stopped. Run the A02.11 command without `--cache-only`
-    (it caches as it goes) and write
-    `data/analyses/<date>-a02-detector-baseline.{json,md}`.
+  - ~~Remaining: regenerate the A02.11 table.~~ *Done 2026-09-26.* It
+    first needed the bounded decode (P01.1): two sessions OOM-killed the
+    laptop at 12-15 GB, and now peak at 1.31 GB and 1.06 GB. The A02.11
+    command (no `--cache-only`, `--workers 1`) wrote
+    [`data/analyses/2026-09-25-a02-detector-baseline-default-profile.md`](../../../data/analyses/2026-09-25-a02-detector-baseline-default-profile.md).
+    A second run on the P01 derived frames gave an identical report. The
+    full table is in A02.11, beside the superseded one. In-era,
+    default-profile rows only, 8 drives with engine time, 6.70 engine-h:
+
+    | Detector | FA/eh (was, 2026-09-23 with captures) |
+    |---|---|
+    | `sequence` as served (evidence) | 40.0 pooled (45.4) |
+    | `sequence_global` (evidence) | 1.2 pooled (3.0) |
+    | `isolation_forest` (evidence) | 2.4 pooled (1.2) |
+    | `fused` | 0 (0) |
+    | `robust_z` | 3.29 [1.71, 7.08] (39.0) |
+    | `pca` | 0.15 [0, 1.01] (0.4) |
+    | `untrained_autoencoder` | 0.30 [0, 0.37] (0.8) |
+    | `plausibility` | 0 (0) |
+
+    Taking the tuning captures out cut robust-z's false alarms twelvefold.
+    The served sequence detector's family path still floods (40 vs 1.2
+    global-only).
 
 - [x] **R04.7 Write the fast/slow max-gap rule once.**
   - The resampler honours `ResampleConfig.fast_channels`/`slow_channels`.

@@ -92,6 +92,7 @@ def apply_quality_gate(
     wide: pd.DataFrame,
     *,
     limits: Mapping[str, PhysicalLimit] = PHYSICAL_LIMITS,
+    log_rejects: bool = True,
 ) -> tuple[pd.DataFrame, QualityGateResult]:
     """NaN out physically-impossible cells in a wide telemetry frame, per cell.
 
@@ -99,6 +100,8 @@ def apply_quality_gate(
     column (including one with no curated limit) passes through untouched.
     Returns a copy when anything was rejected — the input is never mutated in
     place — else the original frame, so a no-reject call is a cheap no-op.
+    ``log_rejects=False`` is for a caller that gates a session piece by piece
+    and logs the whole session's counts itself (the reduced session path).
     """
     out = wide
     counts: dict[str, int] = {}
@@ -114,7 +117,7 @@ def apply_quality_gate(
             out = wide.copy()
         out.loc[bad, channel] = np.nan
         counts[channel] = n
-    if counts:
+    if counts and log_rejects:
         log.info(
             "quality gate rejected physically-impossible cells",
             extra={"reject_counts": counts, "total_rejected": sum(counts.values())},

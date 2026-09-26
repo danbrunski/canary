@@ -479,9 +479,26 @@ class DidMap(_Strict):
         two catalog entries sharing one name would resolve by whichever list
         was searched first.
         """
+        # One entry per DID id: the decoder indexes the catalog by id
+        # (``did_entries_by_hex``, last entry wins), so a second entry for an
+        # id would silently replace the first. The derived-session store
+        # versions DID channels per entry; a shadowed entry made a refreshed
+        # frame disagree with a rebuilt one (P01 verification, 2026-09-26).
+        by_id: dict[int, str] = {}
+        for entry in self.dids:
+            if entry.did in by_id:
+                raise ValueError(
+                    f"DID 0x{entry.did:04X} is declared twice ({by_id[entry.did]!r} and "
+                    f"{entry.name!r}); the decoder keeps only the last, so merge them"
+                )
+            by_id[entry.did] = entry.name
         seen: dict[str, str] = {}
         for entry in self.dids:
             for name in (entry.name, *entry.aliases):
+                if name in seen:
+                    raise ValueError(
+                        f"DID channel name {name!r} is declared twice; one name, one entry"
+                    )
                 seen[name] = "did"
         clashes = [
             c.name

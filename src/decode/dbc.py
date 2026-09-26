@@ -121,8 +121,16 @@ def decode_can_rows_dbc(
         except KeyError:
             continue
         units = {sig.name: (sig.unit or "") for sig in message.signals}
-        for _, row in group.iterrows():
-            payload = row.get("payload")
+        # Column lists, not ``iterrows``: building a Series per frame was ~90 %
+        # of this function's time (~12 min on a 45-minute drive, 2026-09-25).
+        n = len(group)
+        timestamps = group["timestamp"].tolist()
+        payloads = _column_values(group, "payload", n)
+        sessions = _column_values(group, "session", n)
+        session_paths = _column_values(group, "session_path", n)
+        for timestamp, payload, session, session_path in zip(
+            timestamps, payloads, sessions, session_paths, strict=True
+        ):
             if not isinstance(payload, (bytes, bytearray)):
                 continue
             try:
@@ -140,7 +148,7 @@ def decode_can_rows_dbc(
                     continue  # named choice / enum signals — skip in numeric path
                 decoded_records.append(
                     {
-                        "timestamp": row["timestamp"],
+                        "timestamp": timestamp,
                         "source": source_label,
                         "channel": signal_name,
                         "value_number": numeric,
@@ -149,8 +157,8 @@ def decode_can_rows_dbc(
                         "unit": units.get(signal_name, ""),
                         "payload": None,
                         "metadata_json": None,
-                        "session": row.get("session"),
-                        "session_path": row.get("session_path"),
+                        "session": session,
+                        "session_path": session_path,
                         "source_channel": channel_key(source_label, signal_name),
                         "value": numeric,
                     }
@@ -164,6 +172,11 @@ def decode_can_rows_dbc(
         .sort_values(["timestamp", "source", "channel"], kind="stable")
         .reset_index(drop=True)
     )
+
+
+def _column_values(frame: pd.DataFrame, column: str, n: int) -> list[Any]:
+    """``frame[column]`` as a list, or ``None``s when absent (``row.get``'s default)."""
+    return frame[column].tolist() if column in frame.columns else [None] * n
 
 
 __all__ = [

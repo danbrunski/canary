@@ -13,8 +13,8 @@ calibrated on:
 
 The protocol lives in :mod:`src.models.evaluation`; the detectors in
 :mod:`src.models.evaluation_detectors`; the realistic faults in
-:mod:`src.models.synthetic_fault_eval`. This script loads sessions (with a
-resampled-frame cache under ``--cache-dir``), decides which drives are held
+:mod:`src.models.synthetic_fault_eval`. This script loads sessions (through
+the derived-frame store under ``--derived-dir``), decides which drives are held
 out for *every* compared detector, scores clean and injected rows, and writes
 a JSON report and a Markdown table with one row per drive.
 
@@ -39,7 +39,7 @@ import hashlib
 import json
 import logging
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -148,20 +148,23 @@ from src.models.synthetic_fault_eval import (
     load_fault_channel_roles,
 )
 from src.paths import DATA_DIR
+from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
     DEFAULT_DIDS_PATH,
+    default_decode_inputs,
     featurize_wide_frame,
     load_resampled_session,
 )
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.preprocessing.resampler import TIMESTAMP_COLUMN, resample_config_for
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.profiles import active_registry, active_registry_sources
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 
 log = logging.getLogger(__name__)
 
-#: Resampled frames are gitignored, regenerable, and keyed on every input.
+#: Detector score caches: gitignored, regenerable, keyed on every input. The
+#: resampled frames themselves live in the derived-frame store (P01.2).
 DEFAULT_CACHE_DIR = DATA_DIR / "cache" / "evaluation_frames"
 #: Clean rows before an injected window: the segmenter's lookback plus the
 #: rolling window and one sequence window, so every scorer is warm.
@@ -186,16 +189,12 @@ DEFAULT_GRACE_SECONDS = 60.0
 EVALUATION_SESSION_KINDS = RECORDED_SESSION_KINDS | {SessionKind.TUNING}
 
 
-def _load_one(args: tuple[Path, Path, str]) -> tuple[str, pd.DataFrame | None, str | None]:
-    session, cache_path, config_path = args
+def _load_one(args: tuple[Path, str | None, str]) -> tuple[str, pd.DataFrame | None, str | None]:
+    session, derived_dir, config_path = args
     try:
-        if cache_path.exists():
-            return session.name, pd.read_pickle(cache_path), None
         config = CanaryConfig.from_yaml(Path(config_path))
-        frame = load_resampled_session(session, config)
-        cache_path.parent.mkdir(parents=True, exist_ok=True)
-        frame.to_pickle(cache_path)
-        return session.name, frame, None
+        store = DerivedStore(Path(derived_dir)) if derived_dir is not None else None
+        return session.name, load_resampled_session(session, config, store=store), None
     except Exception as exc:  # noqa: BLE001 - one bad session is a skip, not a crash
         return session.name, None, f"{type(exc).__name__}: {exc}"
 
@@ -205,41 +204,47 @@ def load_resampled_sessions(
     config: CanaryConfig,
     config_path: Path,
     *,
-    cache_dir: Path,
+    derived_dir: Path | None,
     workers: int,
     cache_only: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
-    """Resampled frames by session name (the training decode chain), cached.
+    """Resampled frames by session name, through the derived-frame store (P01.2).
 
-    The cache key is the feature-frame key of that one session — session file
-    stats, preprocessing config, bindings, DBC, DID map and the cache version
-    — so a stale entry cannot be served. ``cache_only`` skips (and names)
-    every session not decoded yet instead of decoding it.
+    Each session's reduced frame is read back from ``derived_dir``, refreshed
+    for the decode units whose catalog entry changed, or built and kept
+    (:class:`~src.preprocessing.derived_store.DerivedStore`); a stale frame is
+    detected by hash and never served. ``derived_dir=None`` reduces in memory
+    and keeps nothing. ``cache_only`` skips (and names) every session whose
+    derived frame is missing or stale instead of deriving it.
     """
     jobs = [
-        (
-            session,
-            cache_dir / f"{build_feature_frame_cache_key([session], config)}-resampled.pkl",
-            str(config_path),
-        )
+        (session, str(derived_dir) if derived_dir is not None else None, str(config_path))
         for session in sessions
     ]
     frames: dict[str, pd.DataFrame] = {}
     errors: dict[str, str] = {}
     if cache_only:
-        for session, cache_path, _ in jobs:
-            if not cache_path.exists():
-                errors[session.name] = "not decoded yet (--cache-only)"
-        jobs = [job for job in jobs if job[1].exists()]
+        store = DerivedStore(derived_dir) if derived_dir is not None else None
+        decoders = default_decode_inputs()
+        resample = resample_config_for(config)
+        ready = []
+        for job in jobs:
+            reason = (
+                "no --derived-dir" if store is None else store.status(job[0], decoders, resample)
+            )
+            if reason is None:
+                ready.append(job)
+            else:
+                errors[job[0].name] = f"not derived yet (--cache-only): {reason}"
+        jobs = ready
     results: list[tuple[str, pd.DataFrame | None, str | None]] = []
     if workers > 1 and len(jobs) > 1:
         try:
             with ProcessPoolExecutor(max_workers=workers) as pool:
                 results = list(pool.map(_load_one, jobs))
         except BrokenExecutor as exc:
-            # A dense drive's decode can take several GB; a worker killed for
-            # memory breaks the pool. Finished sessions are already cached, so
-            # the serial pass below only decodes what is left.
+            # A worker killed for memory breaks the pool. Finished sessions
+            # are already derived, so the serial pass reads them back.
             log.warning("parallel session decode aborted (%s); finishing serially", exc)
             results = []
     if not results:
@@ -264,43 +269,69 @@ def _scoped(config: CanaryConfig, profile: str | None) -> CanaryConfig:
     return scope_config(config, resolve_profile_for_tooling(config, profile))
 
 
+class CachedStreams(Mapping[tuple[str, str], Any]):
+    """Arrived-sample streams by ``(detector, session)``, read from their cache
+    file on each access and never held.
+
+    Holding every session's stream at once was most of the harness's memory:
+    RSS rose from 2.3 GB to 6.0 GB while the A02.11 streams loaded (2.4 GB of
+    samples plus what the allocator kept), and each is read at most twice
+    (clean scoring, then the drive's injection sweep).
+    """
+
+    def __init__(self, paths: Mapping[tuple[str, str], Path]) -> None:
+        self._paths = dict(paths)
+
+    def __getitem__(self, key: tuple[str, str]) -> Any:
+        from src.plausibility.offline import SessionStream
+
+        frame = pd.read_parquet(self._paths[key])
+        modes = frame.pop("mode").to_numpy(dtype=object)
+        modes[modes == "None"] = None
+        return SessionStream(key[1], frame.reset_index(drop=True), modes)
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        return iter(self._paths)
+
+    def __len__(self) -> int:
+        return len(self._paths)
+
+
 def load_raw_streams(
     detectors: Sequence[RawStreamDetector],
     sessions: Sequence[Path],
     config: CanaryConfig,
     *,
     cache_dir: Path,
-) -> dict[tuple[str, str], Any]:
+) -> CachedStreams:
     """Each arrived-sample detector's stream per session, cached as parquet.
 
     The key is the session's feature-frame cache key (session file stats,
     bindings, DBC, DID map, preprocessing) plus the detector's own catalog
     fingerprint, so an edited limit or binding cannot be served a stale stream.
+    Streams are built one at a time into the cache and read back on use
+    (:class:`CachedStreams`), so only the one in use is in memory.
     """
-    from src.plausibility.offline import SessionStream
-
-    streams: dict[tuple[str, str], Any] = {}
+    paths: dict[tuple[str, str], Path] = {}
     for detector in detectors:
-        # Every resolved limit, policy and source is in the catalog's repr.
-        fingerprint = hashlib.sha256(repr(getattr(detector, "catalog", None)).encode()).hexdigest()[
-            :12
-        ]
+        # Every resolved limit, policy and source, hashed stably across
+        # processes (a repr hash followed PYTHONHASHSEED and never hit).
+        catalog = getattr(detector, "catalog", None)
+        fingerprint = (
+            catalog.fingerprint()[:12]
+            if catalog is not None
+            else hashlib.sha256(b"no catalog").hexdigest()[:12]
+        )
         for session in sessions:
             key = build_feature_frame_cache_key([session], config)
             path = cache_dir / detector.names[0] / f"{key}-{fingerprint}.parquet"
-            if path.exists():
-                frame = pd.read_parquet(path)
-                modes = frame.pop("mode").to_numpy(dtype=object)
-                modes[modes == "None"] = None
-                streams[(detector.names[0], session.name)] = SessionStream(
-                    session.name, frame.reset_index(drop=True), modes
-                )
-                continue
-            stream = detector.load(session)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            stream.samples.assign(mode=stream.modes.astype(str)).to_parquet(path)
-            streams[(detector.names[0], session.name)] = stream
-    return streams
+            if not path.exists():
+                stream = detector.load(session)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                stream.samples.assign(mode=stream.modes.astype(str)).to_parquet(path)
+                del stream
+            paths[(detector.names[0], session.name)] = path
+    return CachedStreams(paths)
 
 
 def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> None:
@@ -1257,7 +1288,26 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tune-revisions", type=Path, default=None)
     parser.add_argument("--fault-roles", type=Path, default=None)
     add_bindings_arg(parser)
-    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
+    parser.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=DEFAULT_CACHE_DIR,
+        help="Detector score caches (default data/cache/evaluation_frames).",
+    )
+    parser.add_argument(
+        "--derived-dir",
+        type=Path,
+        default=DEFAULT_DERIVED_DIR,
+        help="Derived session frames, read back or built here (P01.2; default "
+        "data/cache/derived_sessions).",
+    )
+    parser.add_argument(
+        "--no-derived-store",
+        dest="derived_dir",
+        action="store_const",
+        const=None,
+        help="Reduce every session in memory and keep nothing.",
+    )
     parser.add_argument("--workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--parity-rows", type=int, default=200)
@@ -1301,7 +1351,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--cache-only",
         action="store_true",
-        help="Score only sessions already in --cache-dir; name the rest as skipped.",
+        help="Score only sessions whose derived frame in --derived-dir is fresh; name "
+        "the rest as skipped.",
     )
     parser.add_argument(
         "--plan",
@@ -1548,7 +1599,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         [by_name[n] for n in needed],
         config,
         args.config,
-        cache_dir=args.cache_dir,
+        derived_dir=args.derived_dir,
         workers=args.workers,
         cache_only=args.cache_only,
     )

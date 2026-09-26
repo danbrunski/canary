@@ -35,6 +35,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
+@pytest.fixture(autouse=True)
+def _derived_store_in_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The CLI's derived-frame store defaults into the repo (R07.2): point it
+    at the test's tree. The frames it builds are what these tests read."""
+    monkeypatch.setattr(fingerprint_cli, "DEFAULT_DERIVED_DIR", tmp_path / "derived")
+
+
 def _config() -> CanaryConfig:
     return CanaryConfig.from_yaml(EXAMPLE_YAML)
 

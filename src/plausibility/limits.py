@@ -35,6 +35,9 @@ either ``"checked"`` or why not — a channel with no stated limit reports
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
+import json
 import math
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -375,6 +378,18 @@ class LimitsCatalog:
     #: Where the vehicle rules came from, for the status/evidence trail.
     profile_path: str | None = None
 
+    def fingerprint(self) -> str:
+        """A stable hash of every resolved limit, policy and source.
+
+        Stable across processes, which ``repr`` is not: the catalog holds
+        frozensets, whose iteration order follows ``PYTHONHASHSEED``, so a
+        ``repr`` hash keyed ``evaluate_detectors``' stream cache differently on
+        every run and the cache never hit (1 GB of orphaned streams by
+        2026-09-26).
+        """
+        text = json.dumps(_canonical(self), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(text.encode()).hexdigest()
+
     def get(self, channel: str) -> ChannelLimits:
         """Limits for ``channel``; an all-unchecked record when none are known."""
         found = self.channels.get(channel)
@@ -405,6 +420,26 @@ class LimitsCatalog:
     def coverage(self, channels: Iterable[str] | None = None) -> dict[str, dict[CheckName, str]]:
         names = sorted(self.channels) if channels is None else sorted(set(channels))
         return {name: self.get(name).coverage() for name in names}
+
+
+def _canonical(value: Any) -> Any:
+    """``value`` as JSON-ready data with every set sorted (see
+    :meth:`LimitsCatalog.fingerprint`)."""
+    if isinstance(value, BaseModel):
+        return _canonical(value.model_dump(mode="python"))
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return {f.name: _canonical(getattr(value, f.name)) for f in dataclasses.fields(value)}
+    if isinstance(value, Mapping):
+        return {str(k): _canonical(v) for k, v in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return sorted((_canonical(v) for v in value), key=repr)
+    if isinstance(value, (list, tuple)):
+        return [_canonical(v) for v in value]
+    if isinstance(value, float) and value != value:
+        return "nan"
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return repr(value)
 
 
 @dataclass

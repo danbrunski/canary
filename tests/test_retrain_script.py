@@ -850,8 +850,9 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     assert report["detectors"] == ["isolation_forest"]
     assert [d["sessions"] for d in report["drives"]] == [[session.name]]
     assert report["holdout"]["evaluation"] == [session.name]
-    # The harness's frame cache sits beside the trainers' feature cache.
-    assert list((tmp_path / "cache" / "evaluation_frames").glob("*-resampled.pkl"))
+    # The harness's derived session frames sit beside the trainers' feature
+    # cache (P01.2), in the same store the trainers read.
+    assert list((tmp_path / "cache" / "derived_sessions").glob("*/cells-*.parquet"))
     assert diff is not None  # baseline auto-discovered from the report on disk
     # A grid-era report is not a regression baseline: reported, never failed on.
     assert diff["comparable"] is False and diff["regressed"] is False

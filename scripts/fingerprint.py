@@ -64,6 +64,7 @@ from src.analysis.session_classifier import read_classification  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.control.trends import corpus_trend_summary  # noqa: E402
 from src.log import configure_logging  # noqa: E402
+from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, use_store  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -87,6 +88,20 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
         type=Path,
         default=None,
         help="Storage root to scan. Defaults to (profile-scoped) collection.storage_path.",
+    )
+    parser.add_argument(
+        "--derived-dir",
+        type=Path,
+        default=DEFAULT_DERIVED_DIR,
+        help="Derived session frames, read back or built here (P01.2; default "
+        "data/cache/derived_sessions; never used on the Pi).",
+    )
+    parser.add_argument(
+        "--no-derived-store",
+        dest="derived_dir",
+        action="store_const",
+        const=None,
+        help="Read every session from raw parquet and keep nothing.",
     )
     add_log_level_arg(parser)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -251,6 +266,13 @@ def _run_trends(config: CanaryConfig, sessions_root: Path) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
+    # compute_fingerprint reads each session through resample_and_segment,
+    # which uses the derived store while one is selected (off on the Pi).
+    with use_store(args.derived_dir):
+        return _main(args)
+
+
+def _main(args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
 
     config = _scoped_config(args)

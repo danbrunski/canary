@@ -259,16 +259,17 @@ def test_replay_script_uses_the_recipe(
 def test_evaluation_session_loader_uses_the_recipe(
     tuned: CanaryConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.preprocessing import feature_pipeline
+    from src.preprocessing import derived, feature_pipeline
 
     # evaluate_detectors (and so retrain's benchmark gate, R06.5) loads
-    # sessions with the trainers' own per-session chain
-    # (feature_pipeline.resample_long_session), so that is where it resamples.
-    seen = _spy_resample_wide(monkeypatch, feature_pipeline)
+    # sessions with the trainers' own per-session chain, which since P01.1
+    # resamples the reduced session in src.preprocessing.derived (once per
+    # channel batch).
+    seen = _spy_resample_wide(monkeypatch, derived)
     feature_pipeline.load_resampled_session(
         _write_session(tmp_path), tuned, bindings_path=tmp_path / "absent.yaml"
     )
-    assert seen == [resample_config_for(tuned)]
+    assert seen and set(seen) == {resample_config_for(tuned)}
 
 
 def test_disposition_report_uses_the_recipe(

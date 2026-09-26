@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Iterator, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass
 from functools import cached_property
@@ -46,6 +46,13 @@ from src.decode.dids import decode_did_rows, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
 from src.preprocessing.decode import decode_can_rows
+from src.preprocessing.derived import (
+    ReducedSession,
+    grid_interval_ns,
+    reduce_long_frames,
+    resample_reduced,
+)
+from src.preprocessing.derived_store import DecodeInputs, DerivedStore, active_store
 from src.preprocessing.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
 )
@@ -63,7 +70,12 @@ from src.preprocessing.features import (
     compute_features,
     split_rolling,
 )
-from src.preprocessing.loader import read_session, to_wide
+from src.preprocessing.loader import (
+    SESSION_PART_ROWS,
+    iter_session_parts,
+    read_session,
+    to_wide,
+)
 from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, is_flag_column, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
@@ -448,6 +460,17 @@ def _decode_long_frame(
     if bindings is None and dbc_database is None:
         return rest.sort_values(_LONG_SORT_COLUMNS, kind="stable")
 
+    # Every binding is recomputed from the raw frames here, including signals
+    # the daemon already stored as ``decoded:*`` rows. ``decode_can_rows``
+    # skips stored signals only when it sees them in its input, and these
+    # chunks hold CAN rows alone, so both copies reach the pivot and the
+    # recomputed row (sorted after the stored one) is the ``last`` it keeps.
+    # That is the live path's answer (``FrameDecoder`` decodes every frame
+    # with the current bindings), and on real sessions the two copies agree:
+    # 0 of 2.70M same-instant pairs differed across 2026-07-29T205841,
+    # 2026-08-07T161543, 2026-09-18T160921 and
+    # _capture-fuel-target-research-2026-09-21T195844 (2026-09-26). After a
+    # binding edit the recomputed value is the current decode, as live.
     can_rows = long.loc[is_can]
     pieces: list[pd.DataFrame] = [rest]
     for start in range(0, len(can_rows), _CAN_DECODE_CHUNK_ROWS):
@@ -499,15 +522,95 @@ def _decode_session_to_resampled(
     ``resample_wide`` — a physically-impossible cell must be NaN'd before the
     resampler's ffill/``__gap`` bookkeeping ever sees it, so a reject is
     indistinguishable from any other gap to every downstream consumer.
+
+    Runs :func:`resample_session_bounded`, so training, the evaluation loader
+    and the session-deviation analysis share one bounded chain.
     """
-    return resample_long_session(
-        read_session(session_dir),
+    return resample_session_bounded(
+        session_dir,
         bindings,
         dbc_database,
         did_map,
         resample_config,
-        session_name=session_dir.name,
     )
+
+
+def resample_session_bounded(
+    session_dir: Path,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+    *,
+    part_rows: int = SESSION_PART_ROWS,
+    store: DerivedStore | None = None,
+    channels: Collection[str] | None = None,
+) -> pd.DataFrame:
+    """decode → wide → reject gate → resample for one session, in bounded memory.
+
+    The one reader of a session's 1 Hz frame for every offline consumer
+    (P01.2): the trainers (via :func:`_decode_session_to_resampled`),
+    ``evaluate_detectors`` (via :func:`load_resampled_session`) and the
+    session-deviation analysis. Identical output to
+    ``resample_long_session(read_session(session_dir), ...)``
+    (``tests/test_bounded_session_resample.py`` asserts it exactly), but it
+    never pivots at raw resolution: :func:`reduce_session` keeps only the cells
+    the resampler reads, and :func:`src.preprocessing.derived.resample_reduced`
+    builds the wide frame from those. Reading a 2 h, 17.9M-row drive whole cost
+    ~12 GB before a single value was decoded; the A02.11 baseline was
+    OOM-killed at 15 GB on it (2026-09-25).
+
+    ``store`` (default: :func:`~src.preprocessing.derived_store.active_store`,
+    which is ``None`` unless the process asked for one) reads the reduced
+    frame back, or builds and keeps it; without one nothing is written.
+    ``channels`` projects the frame to those value columns.
+    """
+    if store is None:
+        store = active_store()
+    if store is not None:
+        reduced, _load = store.load(
+            session_dir,
+            DecodeInputs(bindings=bindings, dbc=dbc_database, did_map=did_map),
+            resample_config,
+            part_rows=part_rows,
+        )
+    else:
+        reduced = reduce_session(
+            session_dir, bindings, dbc_database, did_map, resample_config, part_rows=part_rows
+        )
+    return resample_reduced(reduced, resample_config, channels=channels)
+
+
+def reduce_session(
+    session_dir: Path,
+    bindings: Any,
+    dbc_database: Any,
+    did_map: Any,
+    resample_config: ResampleConfig,
+    *,
+    part_rows: int = SESSION_PART_ROWS,
+    filters: Any = None,
+    raw_channels: set[tuple[str, str]] | None = None,
+) -> ReducedSession:
+    """Decode a session part by part and reduce it (P01.1).
+
+    Each time-disjoint part (:func:`iter_session_parts`) is decoded on its own,
+    which is exact: decoding is row-local and no pivot cell spans two parts.
+    ``filters`` narrows the raw read (a per-channel re-derive reads only the
+    rows its decoder needs). ``raw_channels``, when given, collects every
+    recorded ``(source, channel)`` pair before decoding (the derived store
+    versions its decode units against them).
+    """
+    interval_ns = grid_interval_ns(resample_config)
+
+    def decoded() -> Iterator[pd.DataFrame]:
+        for long in iter_session_parts(session_dir, target_rows=part_rows, filters=filters):
+            if raw_channels is not None and not long.empty:
+                pairs = long[["source", "channel"]].astype(str).drop_duplicates()
+                raw_channels.update(zip(pairs["source"], pairs["channel"], strict=True))
+            yield _decode_long_frame(long, bindings, dbc_database, did_map)
+
+    return reduce_long_frames(session_dir.name, decoded(), interval_ns)
 
 
 def resample_long_session(
@@ -521,10 +624,12 @@ def resample_long_session(
 ) -> pd.DataFrame:
     """decode → wide → reject gate → resample for one session's long frame.
 
-    The body of :func:`_decode_session_to_resampled`, taking the long frame
-    instead of reading it, so a bounded reader (the behavior-validation
-    evaluator reads only the CAN ids its decoded channels need) runs the
-    identical decode/gate/resample chain rather than a copy of it.
+    Takes the long frame instead of reading it, so a filtered reader (the
+    behavior-validation evaluator reads only the CAN ids its decoded channels
+    need) runs the identical decode/gate/resample chain rather than a copy of
+    it. It holds the whole decoded session at once; a caller that reads a
+    whole session directory uses :func:`resample_session_bounded`, whose
+    output is identical and whose memory is not.
     """
     wide = to_wide(_decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
     gated, quality = apply_quality_gate(wide)
@@ -936,11 +1041,12 @@ def load_resampled_session(
     config: CanaryConfig,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
+    store: DerivedStore | None = None,
 ) -> pd.DataFrame:
     """Read + decode + wide-pivot + quality-gate + resample one session (no
     segmentation: ``featurize_wide_frame`` segments internally).
 
-    The same per-session chain the trainers run (:func:`resample_long_session`):
+    The same per-session chain the trainers run (:func:`resample_session_bounded`):
     bindings, ``.dbc`` files and the DID map all decode, and the reject gate
     NaNs impossible cells before the resampler sees them. The benchmark copy
     this replaced decoded bindings only, with no DID decode and no quality
@@ -948,19 +1054,29 @@ def load_resampled_session(
     channel absent: rows the artifact never saw that way in training or
     serving (A02). A missing bindings file or DID map is skipped, not an
     error, as in training. Used by ``scripts/evaluate_detectors.py`` (and so
-    by retrain's benchmark and alert-budget gates).
+    by retrain's benchmark and alert-budget gates), which passes its derived
+    ``store``.
     """
-    bindings = load_bindings(bindings_path) if bindings_path.exists() else None
-    did_map = load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
-    resampled = resample_long_session(
-        read_session(session_dir),
-        bindings,
-        load_dbc_dir(DEFAULT_DBC_DIR),
-        did_map,
+    decoders = default_decode_inputs(bindings_path)
+    resampled = resample_session_bounded(
+        session_dir,
+        decoders.bindings,
+        decoders.dbc,
+        decoders.did_map,
         resample_config_for(config),
-        session_name=session_dir.name,
+        store=store,
     )
     return drop_fully_stale_rows(resampled)
+
+
+def default_decode_inputs(bindings_path: Path = DEFAULT_BINDINGS_PATH) -> DecodeInputs:
+    """The catalogs :func:`load_resampled_session` decodes with: bindings,
+    ``.dbc`` files and the DID map, each skipped when absent (as in training)."""
+    return DecodeInputs(
+        bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
+        dbc=load_dbc_dir(DEFAULT_DBC_DIR),
+        did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
+    )
 
 
 def disposition_screen_frames(

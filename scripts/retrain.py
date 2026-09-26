@@ -141,6 +141,7 @@ from src.models.training_ledger import (
     TrainingLedger,
     build_run_record_from_manifest,
 )
+from src.preprocessing.derived_store import use_store
 from src.preprocessing.feature_pipeline import (
     DEFAULT_FEATURE_CACHE_DIR,
     FeaturePolicy,
@@ -506,8 +507,24 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def derived_dir_for(args: argparse.Namespace) -> Path | None:
+    """The derived session frames' directory (P01.2): beside the feature-frame
+    cache (so the defaults give ``data/cache/derived_sessions`` and a test's
+    ``--feature-cache`` keeps them in its tree); none with ``--no-feature-cache``."""
+    if args.feature_cache is None:
+        return None
+    return Path(args.feature_cache).parent / "derived_sessions"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    # The trainers read each session's 1 Hz frame through the derived store
+    # (feature_pipeline.resample_session_bounded -> active_store()).
+    with use_store(derived_dir_for(args)):
+        return _main(args)
+
+
+def _main(args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
     config = load_config(args)
@@ -1459,6 +1476,8 @@ def _evaluate_on_drives(
         # Beside the trainers' feature-frame cache (the harness's default when
         # that is the default too), so a test run's cache stays in its tree.
         argv += ["--cache-dir", str(Path(args.feature_cache).parent / "evaluation_frames")]
+    derived = derived_dir_for(args)
+    argv += ["--no-derived-store"] if derived is None else ["--derived-dir", str(derived)]
     if args.profile:
         argv += ["--profile", str(args.profile)]
     argv += (

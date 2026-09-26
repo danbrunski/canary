@@ -1305,6 +1305,109 @@
       }
     }
   },
+  "derive_sessions.py": {
+    "options": {
+      "--bindings": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/bindings.yaml)",
+        "dest": "bindings",
+        "nargs": null,
+        "option_strings": [
+          "--bindings"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--check": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "check",
+        "nargs": 0,
+        "option_strings": [
+          "--check"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--config": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(canary.yaml)",
+        "dest": "config",
+        "nargs": null,
+        "option_strings": [
+          "--config"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--derived-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/cache/derived_sessions)",
+        "dest": "derived_dir",
+        "nargs": null,
+        "option_strings": [
+          "--derived-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "WARNING",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--sessions-root": {
+        "action": "_AppendAction",
+        "choices": null,
+        "default": [],
+        "dest": "sessions_root",
+        "nargs": null,
+        "option_strings": [
+          "--sessions-root"
+        ],
+        "required": false,
+        "type": "Path"
+      },
+      "--since": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "since",
+        "nargs": null,
+        "option_strings": [
+          "--since"
+        ],
+        "required": false,
+        "type": "_utc_date"
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "*",
+        "option_strings": [],
+        "required": false,
+        "type": "Path"
+      }
+    }
+  },
   "disposition_report.py": {
     "options": {
       "--all": {
@@ -1795,6 +1898,18 @@
         "required": false,
         "type": "Path"
       },
+      "--derived-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/cache/derived_sessions)",
+        "dest": "derived_dir",
+        "nargs": null,
+        "option_strings": [
+          "--derived-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
       "--fault-roles": {
         "action": "_StoreAction",
         "choices": null,
@@ -1919,6 +2034,18 @@
         ],
         "required": false,
         "type": "Path"
+      },
+      "--no-derived-store": {
+        "action": "_StoreConstAction",
+        "choices": null,
+        "default": null,
+        "dest": "derived_dir",
+        "nargs": 0,
+        "option_strings": [
+          "--no-derived-store"
+        ],
+        "required": false,
+        "type": null
       },
       "--no-sequence": {
         "action": "_StoreTrueAction",
@@ -2528,6 +2655,18 @@
         "required": false,
         "type": "Path"
       },
+      "--derived-dir": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": "Path(<repo>/data/cache/derived_sessions)",
+        "dest": "derived_dir",
+        "nargs": null,
+        "option_strings": [
+          "--derived-dir"
+        ],
+        "required": false,
+        "type": "Path"
+      },
       "--log-level": {
         "action": "_StoreAction",
         "choices": [
@@ -2541,6 +2680,18 @@
         "nargs": null,
         "option_strings": [
           "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--no-derived-store": {
+        "action": "_StoreConstAction",
+        "choices": null,
+        "default": null,
+        "dest": "derived_dir",
+        "nargs": 0,
+        "option_strings": [
+          "--no-derived-store"
         ],
         "required": false,
         "type": null

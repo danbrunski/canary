@@ -125,6 +125,7 @@ def test_tuning_capture_rows_reach_no_metric(tmp_path: Path) -> None:
             "--labels", str(tmp_path / "no-labels.yaml"),
             "--tune-revisions", str(tmp_path / "no-revisions.yaml"),
             "--cache-dir", str(tmp_path / "cache"),
+            "--derived-dir", str(tmp_path / "derived"),
             "--workers", "1",
             "--out", str(out),
         ]

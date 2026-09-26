@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -176,14 +176,26 @@ def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
+    frames, skipped = _read_chunk_files(candidates, filters=filters)
+    _warn_skipped_chunks(session_dir, skipped)
+    if not frames:
+        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+    return _finish_long_frame(frames, session_dir)
 
-    # A daemon crash mid-write leaves trailing 0-byte or truncated chunks
-    # (the atomic writer's target appears before its content lands). One bad
-    # tail chunk must not poison the whole training corpus — skip the
-    # unreadable ones and keep going.
+
+def _read_chunk_files(
+    paths: Sequence[Path], *, filters: Any = None
+) -> tuple[list[pd.DataFrame], list[str]]:
+    """Read ``paths`` in the order given; returns the frames and skipped names.
+
+    A daemon crash mid-write leaves trailing 0-byte or truncated chunks (the
+    atomic writer's target appears before its content lands). One bad tail
+    chunk must not poison the whole training corpus — skip the unreadable
+    ones and keep going.
+    """
     frames: list[pd.DataFrame] = []
     skipped: list[str] = []
-    for path in candidates:
+    for path in paths:
         if path.stat().st_size == 0:
             skipped.append(path.name)
             continue
@@ -191,6 +203,10 @@ def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
             frames.append(pd.read_parquet(path, filters=filters))
         except (OSError, ValueError, pd.errors.ParserError):
             skipped.append(path.name)
+    return frames, skipped
+
+
+def _warn_skipped_chunks(session_dir: Path, skipped: Sequence[str]) -> None:
     if skipped:
         log.warning(
             "skipped %d unreadable chunk(s) in %s: %s",
@@ -198,8 +214,10 @@ def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
             session_dir.name,
             ", ".join(skipped),
         )
-    if not frames:
-        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+
+
+def _finish_long_frame(frames: Sequence[pd.DataFrame], session_dir: Path) -> pd.DataFrame:
+    """Concatenate chunk frames (in chunk-name order) into :func:`read_session`'s shape."""
     frame = pd.concat(frames, ignore_index=True)
     frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
     frame["session"] = session_dir.name
@@ -210,6 +228,172 @@ def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
     frame["value"] = _coalesce_value_columns(frame)
     frame = frame.sort_values(["timestamp", "source", "channel"], kind="stable")
     return frame.reset_index(drop=True)
+
+
+#: Raw rows per :func:`iter_session_parts` part. A long frame costs ~800 bytes
+#: a row once read (object ``value``, a ``source_channel`` string per row) and
+#: roughly 2.5x that after CAN decode. A 2 h drive is 17.9M rows: read whole,
+#: that alone was ~12 GB, and the A02.11 baseline was OOM-killed at 15 GB
+#: decoding it. Measured on ``2026-09-18T213818`` (10.6M rows), whole-session
+#: peak RSS of the reduced path by part size: 500k rows 2.44 GB, 200k 1.46 GB,
+#: 100k 1.04 GB, at the same wall time (2026-09-26).
+SESSION_PART_ROWS = 100_000
+
+
+def iter_session_parts(
+    session_dir: Path, *, target_rows: int = SESSION_PART_ROWS, filters: Any = None
+) -> Iterator[pd.DataFrame]:
+    """:func:`read_session`, yielded in time-disjoint parts of ~``target_rows``.
+
+    Each part is exactly the rows :func:`read_session` would return for its
+    time range, in the same order: chunks are grouped by their footer
+    ``timestamp`` statistics, a part ends only where the next chunk starts
+    strictly after every timestamp already in it, and each part's chunks are
+    concatenated in chunk-name order before the same stable sort. So no
+    timestamp is split between parts, rows tied on the sort key keep their
+    whole-session order, and concatenating the parts gives ``read_session``'s
+    frame (index aside). A readable chunk without statistics puts the whole
+    session in one part: correct, just not bounded.
+
+    Raises ``FileNotFoundError`` as :func:`read_session` does when there is no
+    readable chunk. ``filters`` is :func:`read_session`'s row filter, applied
+    to every part (grouping still uses every row's footer statistics).
+    """
+    candidates = sorted(session_dir.glob(PARQUET_PATTERN))
+    if not candidates:
+        raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
+    groups, skipped = _time_disjoint_chunk_groups(candidates, target_rows)
+    yielded = False
+    for group in groups:
+        frames, unreadable = _read_chunk_files(group, filters=filters)
+        skipped.extend(unreadable)
+        if frames:
+            yielded = True
+            yield _finish_long_frame(frames, session_dir)
+    _warn_skipped_chunks(session_dir, sorted(skipped))
+    if not yielded:
+        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+
+
+def iter_session_numeric_parts(
+    session_dir: Path, *, target_rows: int = SESSION_PART_ROWS, align_ns: int
+) -> Iterator[pd.DataFrame]:
+    """:func:`_read_session_numeric`, yielded in time-disjoint parts.
+
+    Same grouping as :func:`iter_session_parts`, but a part also ends only on
+    an ``align_ns`` bin edge (epoch-floored), so a per-tick aggregate
+    (:func:`_decimate_imu_long`) never sees half a tick. Each part's rows keep
+    their whole-session relative order for any one channel and timestamp, the
+    only order ``resample_long`` reads. Unreadable chunks are skipped silently,
+    as :func:`_read_session_numeric` skips them.
+    """
+    candidates = sorted(session_dir.glob(PARQUET_PATTERN))
+    if not candidates:
+        raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
+    groups, _skipped = _time_disjoint_chunk_groups(candidates, target_rows, align_ns=align_ns)
+    columns = ["timestamp", "source", "channel", "value_number"]
+    yielded = False
+    for group in groups:
+        frames: list[pd.DataFrame] = []
+        for path in group:
+            if path.stat().st_size == 0:
+                continue
+            try:
+                frames.append(pd.read_parquet(path, columns=columns))
+            except (OSError, ValueError, pd.errors.ParserError):
+                continue
+        if not frames:
+            continue
+        yielded = True
+        frame = pd.concat(frames, ignore_index=True)
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+        frame["session"] = session_dir.name
+        frame["source_channel"] = (
+            frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
+        )
+        frame = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
+        yield frame[["session", "timestamp", "source_channel", "value_number"]]
+    if not yielded:
+        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+
+
+def _time_disjoint_chunk_groups(
+    candidates: Sequence[Path], target_rows: int, *, align_ns: int | None = None
+) -> tuple[list[list[Path]], list[str]]:
+    """Group chunks into time-disjoint parts for :func:`iter_session_parts`.
+
+    Returns the groups (each in chunk-name order, groups in time order) and
+    the names of chunks already known unreadable (0-byte, or a footer that
+    will not parse, which ``pd.read_parquet`` cannot read either).
+    """
+    import pyarrow.parquet as pq
+
+    spans: list[tuple[pd.Timestamp, pd.Timestamp, int, Path]] = []
+    skipped: list[str] = []
+    for path in candidates:
+        if path.stat().st_size == 0:
+            skipped.append(path.name)
+            continue
+        try:
+            meta = pq.ParquetFile(path).metadata  # type: ignore[no-untyped-call, unused-ignore]
+        except Exception:  # noqa: BLE001 - unreadable footer: read_parquet fails the same way
+            skipped.append(path.name)
+            continue
+        span = _chunk_time_span(meta)
+        if span is None:
+            return [list(candidates)], []  # unordered data: one unbounded part
+        spans.append((span[0], span[1], int(meta.num_rows), path))
+
+    spans.sort(key=lambda item: (item[0], item[3].name))
+    groups: list[list[Path]] = []
+    current: list[Path] = []
+    current_hi: pd.Timestamp | None = None
+    current_rows = 0
+    for lo, hi, rows, path in spans:
+        if (
+            current
+            and current_hi is not None
+            and _starts_after(lo, current_hi, align_ns)
+            and current_rows >= target_rows
+        ):
+            groups.append(sorted(current, key=lambda p: p.name))
+            current, current_hi, current_rows = [], None, 0
+        current.append(path)
+        current_hi = hi if current_hi is None or hi > current_hi else current_hi
+        current_rows += rows
+    if current:
+        groups.append(sorted(current, key=lambda p: p.name))
+    return groups, skipped
+
+
+def _starts_after(lo: pd.Timestamp, hi: pd.Timestamp, align_ns: int | None) -> bool:
+    """``lo`` is strictly after ``hi`` (and in a later ``align_ns`` bin, if given)."""
+    if align_ns is None:
+        return bool(lo > hi)
+    return bool(lo.value // align_ns > hi.value // align_ns)
+
+
+def _chunk_time_span(meta: Any) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+    """One chunk's ``timestamp`` min/max from its footer; ``None`` when any
+    row group lacks statistics."""
+    names = list(meta.schema.names)
+    if "timestamp" not in names or meta.num_row_groups == 0:
+        return None
+    column = names.index("timestamp")
+    lo: pd.Timestamp | None = None
+    hi: pd.Timestamp | None = None
+    for group in range(meta.num_row_groups):
+        stats = meta.row_group(group).column(column).statistics
+        if stats is None or not stats.has_min_max:
+            return None
+        low, high = _footer_utc(stats.min), _footer_utc(stats.max)
+        if low is None or high is None:
+            return None
+        lo = low if lo is None or low < lo else lo
+        hi = high if hi is None or high > hi else hi
+    if lo is None or hi is None:
+        return None
+    return lo, hi
 
 
 def read_sessions(session_dirs: Iterable[Path]) -> pd.DataFrame:
@@ -343,34 +527,70 @@ def to_wide(
     wide = pivoted.reset_index().sort_values(list(index_columns), kind="stable")
 
     if coerce_numeric:
-        index_set = set(index_columns)
-        for column in wide.columns:
-            if column in index_set:
-                continue
-            col = wide[column]
-            if pd.api.types.is_numeric_dtype(col):
-                # Already numeric (rare on the object-valued read_session
-                # path; happens when to_wide is called with a numeric
-                # `value` kind). Narrow float64 → float32; leave int / bool
-                # channels untouched so their semantics don't change.
-                if col.dtype == "float64":
-                    wide[column] = col.astype("float32")
-                continue
-            converted = pd.to_numeric(col, errors="coerce")
-            # Only keep the conversion if it didn't drop any real values —
-            # i.e. every non-null original entry was numeric. A string-bearing
-            # channel (VIN) or a bool channel stays as-is.
-            original_notna = col.notna()
-            if bool((original_notna == converted.notna()).all()):
-                # Store as float32: telemetry is integer-origin sensor data
-                # (≤16-bit raw range, simple scale/offset) — exactly
-                # representable in a 24-bit mantissa, so this is lossless for
-                # the values that matter. This is the dominant pre-resample
-                # memory cost (the dense pivot); halving it is what actually
-                # keeps full-corpus feature-building off the OOM line.
-                # Scaler μ/σ still reduce in float64 (see normalization.py).
-                wide[column] = converted.astype("float32")
+        coerce_numeric_columns(wide, index_columns=index_columns)
 
+    return wide
+
+
+def non_numeric_columns(
+    wide: pd.DataFrame, *, index_columns: Sequence[str] = INDEX_COLUMNS
+) -> set[str]:
+    """Object columns :func:`coerce_numeric_columns` would leave un-coerced:
+    some non-null entry is not a number (VIN text, a bool channel)."""
+    index_set = set(index_columns)
+    out: set[str] = set()
+    for column in wide.columns:
+        if column in index_set or pd.api.types.is_numeric_dtype(wide[column]):
+            continue
+        col = wide[column]
+        converted = pd.to_numeric(col, errors="coerce")
+        if not bool((col.notna() == converted.notna()).all()):
+            out.add(str(column))
+    return out
+
+
+def coerce_numeric_columns(
+    wide: pd.DataFrame,
+    *,
+    index_columns: Sequence[str] = INDEX_COLUMNS,
+    keep_object: Iterable[str] = (),
+) -> pd.DataFrame:
+    """Cast every all-numeric value column of ``wide`` to float32, in place.
+
+    :func:`to_wide`'s ``coerce_numeric`` step, split out so the bounded
+    session loader applies the identical rule part by part. ``keep_object``
+    names columns to leave as they are: a column that is all-numeric in one
+    part but carries text elsewhere in the session stays ``object``, as the
+    whole-session pivot leaves it. Returns ``wide``.
+    """
+    index_set = set(index_columns)
+    held = set(keep_object)
+    for column in wide.columns:
+        if column in index_set or column in held:
+            continue
+        col = wide[column]
+        if pd.api.types.is_numeric_dtype(col):
+            # Already numeric (rare on the object-valued read_session
+            # path; happens when to_wide is called with a numeric
+            # `value` kind). Narrow float64 → float32; leave int / bool
+            # channels untouched so their semantics don't change.
+            if col.dtype == "float64":
+                wide[column] = col.astype("float32")
+            continue
+        converted = pd.to_numeric(col, errors="coerce")
+        # Only keep the conversion if it didn't drop any real values —
+        # i.e. every non-null original entry was numeric. A string-bearing
+        # channel (VIN) or a bool channel stays as-is.
+        original_notna = col.notna()
+        if bool((original_notna == converted.notna()).all()):
+            # Store as float32: telemetry is integer-origin sensor data
+            # (≤16-bit raw range, simple scale/offset) — exactly
+            # representable in a 24-bit mantissa, so this is lossless for
+            # the values that matter. This is the dominant pre-resample
+            # memory cost (the dense pivot); halving it is what actually
+            # keeps full-corpus feature-building off the OOM line.
+            # Scaler μ/σ still reduce in float64 (see normalization.py).
+            wide[column] = converted.astype("float32")
     return wide
 
 
@@ -414,8 +634,20 @@ def resample_and_segment(
         # Process one session at a time and concatenate only the reduced grids.
         # The previous chain pivoted millions of mostly-unique raw timestamps
         # before reducing them to 1 Hz, creating a multi-gigabyte sparse frame.
+        # With a derived store active (laptop tools, P01.2) each session's
+        # reduced cells are read back or built instead; the output is the same.
+        # The store is never active on the Pi (``active_store``), where the
+        # digest and workbench children keep this in-memory path.
+        from src.preprocessing.derived import resample_numeric_reduced
+        from src.preprocessing.derived_store import active_store
+
+        store = active_store()
         reduced = [
-            resample_long(
+            resample_numeric_reduced(
+                store.load_numeric(session, resample_config)[0], resample_config
+            )
+            if store is not None
+            else resample_long(
                 _decimate_imu_long(
                     _read_session_numeric(session), hz=config.preprocessing.resample_hz
                 ),

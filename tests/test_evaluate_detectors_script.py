@@ -143,6 +143,8 @@ def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
         str(tmp_path / "no-revisions.yaml"),
         "--cache-dir",
         str(tmp_path / "cache"),
+        "--derived-dir",
+        str(tmp_path / "derived"),
         "--workers",
         "1",
     ]
@@ -193,7 +195,9 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     assert verdict["control"]["quantity"] == "_control_all_features"
     assert verdict["verdict"] in ("withheld", "invalid")
     assert (tmp_path / "report.md").read_text().startswith("# Detector evaluation")
-    assert list((tmp_path / "cache").glob("*-resampled.pkl"))
+    # The session frame went into the derived store (P01.2), not a pickle cache.
+    assert list((tmp_path / "derived").glob("*/cells-*.parquet"))
+    assert not list((tmp_path / "cache").glob("*-resampled.pkl"))
 
     # A05's checks join on the same rows when asked for (A02.5).
     out2 = tmp_path / "with-plausibility.json"
