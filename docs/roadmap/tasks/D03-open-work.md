@@ -1129,7 +1129,7 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
 
 ## Opened 2026-09-18 on the drive
 
-- [ ] **D03.18 One request timeout stalls the whole hybrid cycle ~2.4 s, and
+- [~] **D03.18 One request timeout stalls the whole hybrid cycle ~2.4 s, and
   benches the DID for 30–48 s.** `fuel-pw-research` recorded 12 all-channel,
   both-mode gaps of 2.28–2.62 s in 34 min (≈1.5 % of the capture). It fails
   `acquisition_gap` on every long research capture. Block A tied one to exactly
@@ -1176,6 +1176,53 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   request timeout between 14:51:03 and 14:51:08Z and nothing in the journal. A
   Mode 01 batch timeout that costs ~2.5 s of Mode 01 while Mode 22 continues is
   not the session-control path fixed above. `fast_exit_failures` was not read.
+  **2026-09-26 desk: explained from the stored rows. The cause is ISO-TP
+  flow control, not session control and not the scheduler.** The capture
+  records the ECM's `0x7E8` frames as `can` rows, and these show the wire
+  exchange (`~/canary-data/scripts-0926/out/d0318_obd_rows_145057-145108.txt`,
+  scanner `isotp_scan.py`):
+  - 01.248 last DID, then 01.258 `50 81`: the fast exit was answered, so
+    the exit-retry path was not involved. At 01.320 the Mode 01 batch
+    answered with a First Frame, `10 0F 41 0C …`, and **no Consecutive
+    Frame followed**. The batch waited out `obd_request_timeout_seconds`
+    (1.0 s). It counts as a `batch_failure`, not in `request_timeouts`.
+  - 02.322 `50 C0`: by then the cycle-grid window was overdue, and session
+    control goes before Mode 01. The 8 DIDs followed at 02.334–02.411. Each
+    is a single frame, so they were unaffected; this is why Mode 22 "kept
+    its cadence" (≤1.31 s per DID).
+  - 02.422: RAM window 1 (`ECM_TARGET_EQUIV_RATIO` + `ECM_ENGINE_PERIOD`)
+    got its FF and CF1, then **CF2 never came**. This one also cost 1.0 s.
+    It is the single `request_timeouts` increment the poller saw: the count
+    went 32162 → 32163 between the 14:51:03.14 and 14:51:08.18 reads. The
+    loop publishes metrics every 5 s, and the whole episode falls inside one
+    publish interval, which also had 104 requests against the usual ~150.
+  - 03.425: RAM window 2 was answered complete. 03.435 `50 81`. 03.527
+    Mode 01 resumed. The Mode 01 gap is 01.051 → 03.527 = **2.48 s**, which
+    is two 1.0 s ISO-TP timeouts back to back plus the window between them.
+    The RAM channels were not unaffected. By `0x7E8` arrival, window 2
+    went 01.160 → 03.425 (2.27 s) and window 1 went 01.149 → 03.737
+    (2.59 s), against a 1 s cadence.
+  - **How often:** 71 of 13,383 multi-frame responses (0.53 %) in this
+    capture ended after the FF. The rate is similar elsewhere: 13 of 2,168
+    (0.60 %) in `2026-09-23T150658` (`default`) and 30 of 6,109 (0.49 %) in
+    `_capture-tuning-2026-09-23T164007`. In 70 of the 71 no CF arrived at
+    all, and for 69 of those the 100 Hz broadcast ids within 20 ms show no
+    receive loss. So
+    either our flow control (`0x7E0 30 00 00`) did not reach the ECM in
+    time, or the ECM did not honour it. Our own TX is not recorded, so the
+    stored rows cannot tell which. The 02.422 CF2 loss is different: 0x6F7
+    and 0x2DE each drop a 100 Hz frame at the same instant, which points to
+    receive-side loss.
+  - **Not explained by `56bc909`.** Its grid-anchored cadence and its
+    engine-start re-probe change when requests fall due. Neither bounds how
+    long a lost CF costs, so the same pair of FF-only replies would give the
+    same ~2.5 s gap today. The fix would be at the ISO-TP layer: bound the
+    wait for a CF after flow control (the ECM sends CFs within ~3 ms) well
+    below the 1.0 s request timeout, and maybe re-send flow control once.
+    Proposed, not implemented.
+  - **Remaining:** (truck) one live fast-exit retry, as above. Separately,
+    the FF-only failure needs a decision on whether to bound the CF wait
+    under this item or a new one.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in

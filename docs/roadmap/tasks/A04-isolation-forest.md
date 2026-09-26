@@ -472,7 +472,7 @@ confirms which artifact the Pi runs.
   configured fractions, the episode gap, the drive floor, the override and the
   calibration policy. Test:
   `test_the_calibration_actually_used_and_seed_agreement_are_recorded`.
-- [~] **A04.13 — Evaluate a replacement for the multivariate-outlier role.**
+- [x] **A04.13 — Evaluate a replacement for the multivariate-outlier role.**
   If A06.1 keeps any multivariate outlier detector, the candidate is per-mode
   robust z or Ledoit-Wolf Mahalanobis over 10–20 curated physics residuals
   and core engine channels. Calibrate it per mode on held-out drives and
@@ -519,6 +519,17 @@ confirms which artifact the Pi runs.
     (2 of 3 loaded). A per-mode, held-out-drive threshold (`ThresholdedScore`
     is single-threshold) is not built. Behaviour residuals are also absent.
     Both are for A06.1 to ask for if it keeps a multivariate detector.
+
+  *Closed 2026-09-26.* The item asked for an evaluation, and that is done:
+  the [report](../../../data/analyses/2026-09-23-a04-curated-candidates.md)
+  exists, and no candidate is adopted. A06.1's answer came on 2026-09-23:
+  the operator chose (b), evidence only.
+  `DetectorRolesConfig` defaults `isolation_forest` to `evidence`, so no
+  multivariate detector alerts. The two "Remaining" gaps above were
+  conditional: they apply only if A06.1 keeps a multivariate detector, and
+  it kept none in an alerting role. They are not owed work here. Reopen them
+  if an alerting multivariate role is ever proposed again, for example after
+  the supercharger corpus.
 
 ## Acceptance
 

@@ -107,9 +107,23 @@ training envelope". That is useful to know. It is not a diagnosis.
     `detectors.inference.sequence_envelope` over a real drive.
     *2026-09-24 16:04–16:25Z, engine running:* the meter stayed at 0 windows,
     and so did A01.7's `sequence_windows` and the lstm events, although
-    `stages.sequence` ran every tick (300 calls, median 344 ms). This is a
-    serving defect (no sequence result reaches `_apply` on the out-of-process
-    path) and is being debugged; it is not a quiet model.
+    `stages.sequence` ran every tick (300 calls, median 344 ms). It was a
+    serving defect, not a quiet model. **Fixed in `6892c2c` (2026-09-24):**
+    `run_tick` read `busy` before awaiting the snapshot. A score that
+    finished during the snapshot could then send rows to the sequence engine
+    out of order. Since `f15ec38` a backwards step clears the window, so on
+    the Pi it never passed 2 rows. The defect had been present since D01.9
+    (2026-09-11). `busy` is now judged after the snapshot, and `_dispatch`
+    refuses any tick not newer than the last one dispatched. A laptop replay
+    went from 7 to 114 scored windows out-of-process (15 to 87 in-process).
+    `tests/test_live_sequence_ordering.py` fails on the old code.
+    The Pi has run `6892c2c` since 2026-09-24 16:53:24Z
+    ([scan-tool note](../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)),
+    but CANary was passive in that session, so it says nothing about
+    scoring. **Still owed (truck):** read
+    `detectors.inference.sequence_envelope` and A01.7's `sequence_windows`
+    over an engine-running, non-passive drive on `default`. Only a nonzero
+    meter closes the box.
   - Options:
     - (a) keep alerting after A01–A03 and A02's recalibration;
     - (b) a non-alerting *novelty screen* reporting "outside the learned

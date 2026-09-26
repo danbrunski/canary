@@ -215,6 +215,43 @@ code.
     (3) **Zero confirmed on unseen drives** — re-run
     `scripts/evaluate_plausibility.py --clean` on drives recorded after this rule
     set was frozen.
+    **Met 2026-09-26: 0 confirmed on 12 unseen sessions, 1 pending**
+    ([evidence](../../../data/analyses/2026-09-26-a05-plausibility-unseen.json)).
+    - **Rules unchanged since the freeze:** `git diff 06a3188 HEAD` over
+      `src/plausibility`, `plausibility.yaml` and the catalogs' `plausible_*`
+      bounds shows only the confirmed-only `alert_sink`, the catalog
+      `fingerprint`, the decoded `display_unit` and the P01/P02.8 offline
+      reader changes. No limit, mode gate or confirmation policy moved.
+    - **Sessions** (each starts after 2026-09-23T07:09Z; none revised the
+      rules; 2.553 h in total, 1.867 h live and 0.686 h capture):
+      `2026-09-23T145645`, `150658` and `162918`;
+      `_capture-tuning-2026-09-23T142926` and `164007`; the 09-24 set in
+      `~/canary-data/kline-compare-20260924` (`160323`, `161109`, `161151`,
+      `161244`, and captures `161055`, `161137`, `161230`). Command:
+      `--config canary.example.yaml --profile nissan-xterra-2008 --clean
+      <12> --workers 4`. Every session reads `scored_quiet`.
+    - **Which kind of quiet.** Real mode labels cover 1.877 h (`150658`,
+      `162918`, `164007`, `160323`). There, every check ran, with 36–46
+      channels range-checked. The other 0.676 h carries no mode gate. In
+      `142926` the segmenter fell back to `all` because the tuning profile
+      has no `THROTTLE_POS`. `145645` is almost all `unknown`: 22 OBD rows
+      in 613 s, engine not running. The six short 09-24 sessions (183 s)
+      have no OBD rows at all, only CAN, decoded, GPS and `kline` rows, and
+      got `all` with 15 channels. In those sessions only
+      ungated range checks ran. Stuck checks and the engine-running range
+      gates did not.
+    - **The margin is thin again.**
+      `_capture-tuning-2026-09-23T164007` has one pending:
+      `obd:mem:ECM_ENGINE_PERIOD` read 32,329 counts (limit 20,000) at
+      16:52:33.100Z in `city`. RPM fell from 850 to 0 over 16:52:31–34Z, so
+      this is an engine stop while the mode label still read `city`. The
+      period counter at engine stop is the same shape the first pass
+      confirmed. A second read of 32,329 at 16:52:34.028 came 0.928 s
+      later, under `confirm.range.min_separation_seconds` (1.0 s). That is
+      the only thing that kept it from confirming. The A05.6 running-mode
+      gate does not cover the seconds before the mode label changes.
+    - Criterion (1) stays the operator's decision (Remainder (1) above), so
+      the box stays `[~]`.
 - [~] **A05.9 — Run it live and measure the cost.** Wire the evaluator into
   the live tick (or the collector's decode path for raw-sample checks).
   Measure per-tick cost on the Pi against the missed-tick budget before

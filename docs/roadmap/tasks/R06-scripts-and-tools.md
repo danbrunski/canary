@@ -444,7 +444,7 @@ have grown into library code with a CLI attached.
     Timing (IF only): grid 540-640 s per artifact uncontended; harness 430 s cold, 70-124
     s with its frame cache warm.
 
-- [~] **R06.6 Small de-duplications (batch them).**
+- [x] **R06.6 Small de-duplications (batch them).**
   - `scripts/replay.py:_format_timestamp` is identical to
     `src.timefmt.format_timestamp`.
   - The sha256 copies: see R01.6.
@@ -514,6 +514,18 @@ have grown into library code with a CLI attached.
     - `canary_companion` and `stop_recording` do not import `_cli`. They are
       deliberately light, and `_cli` pulls in pandas.
     - `tools/` cannot import `scripts/_cli`.
+  - Closed 2026-09-26. Every asked de-duplication is done or routed. The
+    "Still open" bullets are deliberate exclusions, not remaining work:
+    - The first bullet is moot. `a09dcd4` (P02.8) retired
+      `tools/backfill_decoded.py` together with its test, because decoded
+      rows are now decoded on read. `grep -rn backfill_decoded src scripts
+      tools tests` finds only a historical mention in
+      `src/preprocessing/decode.py`'s docstring. The
+      `decode_session_frame` bullet above (R04.4) went with it.
+    - `canary_companion.py` and `stop_recording.py` still do not import
+      `_cli`. They stay light on purpose, since `_cli` imports pandas.
+    - `tools/` has no `from scripts` import, and `scripts/` is not a package
+      (no `__init__.py`).
 
 ## Looked at and fine
 

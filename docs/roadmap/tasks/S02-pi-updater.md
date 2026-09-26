@@ -238,7 +238,7 @@ What 2026-09-22 showed is still rough:
   `test_docs_describe_the_same_exit_codes`, plus every refusal/rollback test
   asserting its code.
 
-- [~] **S02.8 Decide whether unenforced memory limits fail the update.**
+- [x] **S02.8 Decide whether unenforced memory limits fail the update.**
   Today they are a warning. The limits exist because the digest once wedged
   the daemon for 38 minutes (D03.6), and they went unenforced for four days
   while `systemctl show` said otherwise. **Options:** (a) keep the warning;
@@ -263,3 +263,14 @@ What 2026-09-22 showed is still rough:
   unknown) with `memory_max_bytes` and the path it read. Four tests cover
   enforced, `max`, absent and unreadable. `.claude/commands/drive.md` reads it
   in both the boot check and the per-wake-up health line.
+  **Closed (verified 2026-09-26):** decision and implementation both hold.
+  `src/daemon/health.py` `memory_limit_status()` feeds `/status`
+  `health.system` (the `snapshot()` merge, `0c753a5`). Its four tests pass
+  (`pytest tests/test_health.py -k memory_limit`: 4 passed), and so do the
+  updater's two memory tests (`tests/test_update_canary_script.py -k memory`:
+  2 passed). The Pi read `true` from its own cgroup file: D03.21 records
+  `memory_limits_enforced` = true on 2026-09-22 with
+  `/sys/fs/cgroup/system.slice/canary.service/memory.max` = 6442450944. The
+  2026-09-23 drive pollers show the same `true` and path in every compact
+  `/status` they read: 465 of 465 in `pollpi-0923.jsonl` and 163 of 163 in
+  `pollpi2-0923.jsonl` (`~/canary-data/drive-2026-09-23/`).

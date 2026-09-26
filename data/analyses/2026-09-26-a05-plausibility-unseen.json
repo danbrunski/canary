@@ -1,0 +1,531 @@
+{
+ "what": "A05.8 (3): plausibility clean pass on drives recorded after the rule set froze (06a3188, 2026-09-23T07:09Z)",
+ "code": "HEAD 294eca4; src/plausibility rules and data/nissan-xterra-2008/plausibility.yaml unchanged since 06a3188 (only alert_sink, LimitsCatalog.fingerprint, decoded display_unit, offline reader changes)",
+ "command": "scripts/evaluate_plausibility.py --config canary.example.yaml --profile nissan-xterra-2008 --clean <12 sessions> --workers 4 --out <this file>",
+ "blindness": "Held-out: every session starts after 2026-09-23T07:09Z and none was used to revise the rules.",
+ "generated_at": "2026-09-26T20:50:07.976688+00:00",
+ "config": "canary.example.yaml",
+ "profile": "nissan-xterra-2008",
+ "seed": 42,
+ "n_injections": 5,
+ "fault_channels": [
+  "obd:COOLANT_TEMP",
+  "obd:ENGINE_LOAD",
+  "obd:RPM",
+  "obd:SPEED",
+  "obd:THROTTLE_POS"
+ ],
+ "fault_kinds": [
+  "spike",
+  "drift",
+  "dropout",
+  "stuck",
+  "scale"
+ ],
+ "grace_seconds": 60.0,
+ "summary": {
+  "plumbing_by_kind": {},
+  "plumbing_by_channel_kind": {},
+  "realistic": {},
+  "clean_drives": [
+   {
+    "session": "_capture-tuning-2026-09-23T142926",
+    "started_at": "2026-09-23T14:29:26+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 1639.3,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-23T145645",
+    "started_at": "2026-09-23T14:56:45+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 613.2,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-23T150658",
+    "started_at": "2026-09-23T15:06:58+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 4940.7,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-23T162918",
+    "started_at": "2026-09-23T16:29:18+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 648.6,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "_capture-tuning-2026-09-23T164007",
+    "started_at": "2026-09-23T16:40:07+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 789.1,
+    "pending": 1,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-24T160323",
+    "started_at": "2026-09-24T16:03:23+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 378.3,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "_capture-tuning-2026-09-24T161055",
+    "started_at": "2026-09-24T16:10:55+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 14.2,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-24T161109",
+    "started_at": "2026-09-24T16:11:09+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 28.3,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "_capture-tuning-2026-09-24T161137",
+    "started_at": "2026-09-24T16:11:37+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 13.8,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-24T161151",
+    "started_at": "2026-09-24T16:11:51+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 39.2,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "_capture-tuning-2026-09-24T161230",
+    "started_at": "2026-09-24T16:12:30+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 14.3,
+    "pending": 0,
+    "confirmed": 0
+   },
+   {
+    "session": "2026-09-24T161244",
+    "started_at": "2026-09-24T16:12:44+00:00",
+    "result": "scored_quiet",
+    "reason": null,
+    "span_seconds": 73.3,
+    "pending": 0,
+    "confirmed": 0
+   }
+  ],
+  "clean_confirmed_total": 0,
+  "clean_hours": 2.553
+ },
+ "drives": [
+  {
+   "session": "/home/dan/canary-data/sessions/nissan-xterra-2008/_capture-tuning-2026-09-23T142926",
+   "name": "_capture-tuning-2026-09-23T142926",
+   "started_at": "2026-09-23T14:29:26+00:00",
+   "span_seconds": 1639.3,
+   "samples": 1936298,
+   "coverage": {
+    "observed_channels_checked": 33,
+    "observed_channels_unchecked": 17,
+    "channels_per_check": {
+     "range": 33,
+     "stuck": 2,
+     "freshness": 1,
+     "slew": 4
+    }
+   },
+   "modes": {
+    "all": 1936290,
+    "nan": 8
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/sessions/nissan-xterra-2008/2026-09-23T145645",
+   "name": "2026-09-23T145645",
+   "started_at": "2026-09-23T14:56:45+00:00",
+   "span_seconds": 613.2,
+   "samples": 8901,
+   "coverage": {
+    "observed_channels_checked": 31,
+    "observed_channels_unchecked": 22,
+    "channels_per_check": {
+     "range": 31,
+     "stuck": 3,
+     "freshness": 2,
+     "slew": 2
+    }
+   },
+   "modes": {
+    "unknown": 8894,
+    "nan": 7
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/sessions/nissan-xterra-2008/2026-09-23T150658",
+   "name": "2026-09-23T150658",
+   "started_at": "2026-09-23T15:06:58+00:00",
+   "span_seconds": 4940.7,
+   "samples": 930778,
+   "coverage": {
+    "observed_channels_checked": 46,
+    "observed_channels_unchecked": 36,
+    "channels_per_check": {
+     "range": 46,
+     "stuck": 3,
+     "freshness": 2,
+     "slew": 5
+    }
+   },
+   "modes": {
+    "city": 464342,
+    "highway": 281361,
+    "idle_transient": 149935,
+    "unknown": 24258,
+    "idle": 9088,
+    "koeo": 1794
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/sessions/nissan-xterra-2008/2026-09-23T162918",
+   "name": "2026-09-23T162918",
+   "started_at": "2026-09-23T16:29:18+00:00",
+   "span_seconds": 648.6,
+   "samples": 751177,
+   "coverage": {
+    "observed_channels_checked": 46,
+    "observed_channels_unchecked": 34,
+    "channels_per_check": {
+     "range": 46,
+     "stuck": 3,
+     "freshness": 2,
+     "slew": 5
+    }
+   },
+   "modes": {
+    "idle": 686275,
+    "warmup": 62306,
+    "unknown": 2596
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/sessions/nissan-xterra-2008/_capture-tuning-2026-09-23T164007",
+   "name": "_capture-tuning-2026-09-23T164007",
+   "started_at": "2026-09-23T16:40:07+00:00",
+   "span_seconds": 789.1,
+   "samples": 896065,
+   "coverage": {
+    "observed_channels_checked": 36,
+    "observed_channels_unchecked": 24,
+    "channels_per_check": {
+     "range": 36,
+     "stuck": 3,
+     "freshness": 2,
+     "slew": 5
+    }
+   },
+   "modes": {
+    "city": 444705,
+    "highway": 267540,
+    "idle_transient": 134706,
+    "idle": 33046,
+    "unknown": 13723,
+    "koeo": 2345
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 1,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {
+     "range": 1
+    },
+    "pending_records": [
+     {
+      "state": "pending",
+      "channel": "obd:mem:ECM_ENGINE_PERIOD",
+      "check": "range",
+      "mode": "city",
+      "detected_at": "2026-09-23T16:52:33.100186Z",
+      "text": "[pending] obd:mem:ECM_ENGINE_PERIOD read 32329 counts, above its 20000 counts limit (dids.yaml memory ECM_ENGINE_PERIOD plausible range) in city"
+     }
+    ]
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/2026-09-24T160323",
+   "name": "2026-09-24T160323",
+   "started_at": "2026-09-24T16:03:23+00:00",
+   "span_seconds": 378.3,
+   "samples": 428307,
+   "coverage": {
+    "observed_channels_checked": 46,
+    "observed_channels_unchecked": 33,
+    "channels_per_check": {
+     "range": 46,
+     "stuck": 3,
+     "freshness": 2,
+     "slew": 5
+    }
+   },
+   "modes": {
+    "warmup": 425017,
+    "unknown": 3290
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/_capture-tuning-2026-09-24T161055",
+   "name": "_capture-tuning-2026-09-24T161055",
+   "started_at": "2026-09-24T16:10:55+00:00",
+   "span_seconds": 14.2,
+   "samples": 15862,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 15862
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/2026-09-24T161109",
+   "name": "2026-09-24T161109",
+   "started_at": "2026-09-24T16:11:09+00:00",
+   "span_seconds": 28.3,
+   "samples": 31255,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 31255
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/_capture-tuning-2026-09-24T161137",
+   "name": "_capture-tuning-2026-09-24T161137",
+   "started_at": "2026-09-24T16:11:37+00:00",
+   "span_seconds": 13.8,
+   "samples": 15703,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 15703
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/2026-09-24T161151",
+   "name": "2026-09-24T161151",
+   "started_at": "2026-09-24T16:11:51+00:00",
+   "span_seconds": 39.2,
+   "samples": 43651,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 43651
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/_capture-tuning-2026-09-24T161230",
+   "name": "_capture-tuning-2026-09-24T161230",
+   "started_at": "2026-09-24T16:12:30+00:00",
+   "span_seconds": 14.3,
+   "samples": 15961,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 15961
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  },
+  {
+   "session": "/home/dan/canary-data/kline-compare-20260924/2026-09-24T161244",
+   "name": "2026-09-24T161244",
+   "started_at": "2026-09-24T16:12:44+00:00",
+   "span_seconds": 73.3,
+   "samples": 82396,
+   "coverage": {
+    "observed_channels_checked": 15,
+    "observed_channels_unchecked": 12,
+    "channels_per_check": {
+     "range": 15,
+     "stuck": 0,
+     "freshness": 0,
+     "slew": 0
+    }
+   },
+   "modes": {
+    "all": 82396
+   },
+   "result": "scored_quiet",
+   "clean": {
+    "pending": 0,
+    "confirmed": 0,
+    "confirmed_records": [],
+    "pending_by_check": {},
+    "pending_records": []
+   },
+   "plumbing": [],
+   "realistic": []
+  }
+ ]
+}

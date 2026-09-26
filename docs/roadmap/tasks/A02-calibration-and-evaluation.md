@@ -104,7 +104,7 @@ This checklist builds the yardstick.
         grouping);
       - behavior grouping;
       - the seen check.
-- [~] **A02.2 — Refuse thresholds that do not cover what they will score.**
+- [x] **A02.2 — Refuse thresholds that do not cover what they will score.**
   The deployed sequence artifact (2026-09-20) was calibrated on one session,
   `2026-09-18T134345`: city and warmup only, 71–73 kPa, 0–58 km/h. The
   retrain was asked for three; two produced no windows. `a4a58a4` now stamps
@@ -184,6 +184,31 @@ This checklist builds the yardstick.
   The same `--accept-thin-calibration` override stamps it. Test:
   `test_a_calibration_outside_the_training_envelope_is_refused`. It takes
   effect at the deferred retrain.
+
+  *Closed 2026-09-26: `[x]`, not `[~]`.* Under A00, `[~]` means named
+  validation, deployment or an operator decision still remains. None does:
+  - **All three asks are in code, under test.** The cause of the missing
+    windows is named and fixed (`a4a58a4`). The refusal replaces the
+    warning. The override is explicit and stamped. Re-run 2026-09-26:
+    `tests/test_sequence_calibration.py -k "thin_held_out or
+    explicit_override or outside_the_training_envelope"`, 3 passed; and
+    `-m ml_training tests/test_train_lstm.py -k single_holdout_unless`,
+    1 passed.
+  - **"Takes effect at the deferred retrain" has happened.** The operator
+    brought the D03.25 retrain forward: A06.3 option (a), retrained
+    2026-09-23. On that corpus the refusal fired, and the operator overrode
+    it by name. The deployed r2 LSTM manifest
+    (`models/_candidates/2026-09-23-na-r2/lstm_autoencoder/model.manifest.json`,
+    sha256 `cc034239…`, the hash A06.3 records as served since 2026-09-24
+    16:03Z) carries `calibration_holdout.override`. It holds the reason
+    "operator chose current-calibration-only corpus (post ZS44A-20260920),
+    2026-09-23" and 8 violations: scored modes with too few calibration
+    windows, six A03.8 envelope-coverage misses on IAT and speed, and 13
+    `__std` channels never seen in calibration.
+  - **What remains is not A02.2's.** The deployed thresholds really are
+    thin, and the manifest says so. Better coverage needs more post-flash
+    drives, which is corpus growth and a later retrain (A06.3's
+    "Remaining"). It is not a missing refusal.
 - [~] **A02.3 — Set thresholds from the alert budget, over independent
   windows.** Each of the 98 families is cut at its 0.999 quantile over about
   36 non-overlapping windows, which is that session's maximum. Beating the

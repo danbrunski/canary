@@ -112,6 +112,46 @@ opportunistic on any sustained climb.
     maximum-duration rule are all possible and none is on the tags.
   - **Still owed (truck):** tagged protocol coasts, in gear and one in
     neutral, so ECM refuel is separable from driver action.
+  **2026-09-26 (desk): gears assigned.** With the FS6R31A ratios in the
+  profile (`aa4da33`, H07.11), clusters A/B/C/D are **5th / 4th / 3rd /
+  2nd**. The `coasts_d042.py` re-run reproduces 84 coasts, 68 used, and
+  medians 28.6/36.7/49.9/71.4. Mapping script and output:
+  `~/canary-data/scripts-0926/gears_d042.py`, `out/gears_d042.json`.
+  - **Theory**, in rpm per *true* km/h: (1000/60) / 2.609 m × 4.08 × ratio
+    gives 113.8 / 65.6 / 45.4 / 33.4 / 26.1 / 20.0 for gears 1–6.
+  - **The 8 % correction is established; do not re-measure it.**
+    `WHEEL_SPEED_6F7_A`, the speed the clusters use, agrees with PID 0x0D to
+    0.55 %. PID 0x0D reads 8 % under true: per-row median obd/gps 0.9203,
+    distance 8.2 % under by two independent GPS measures (`bindings.yaml`
+    0x6F7 notes). Scaling each coast's rpm/(km/h) by 0.9203 lands the
+    cluster medians at 26.28 / 33.79 / 45.93 / 65.74. That is +0.85 / +1.04
+    / +1.10 / +0.16 % from 5th / 4th / 3rd / 2nd, and every coast in a
+    cluster maps to the same gear. Uncorrected, the medians run 8.8–9.9 %
+    high. The nearest gear is unchanged, but individual coasts in cluster B
+    straddle 3rd and 4th.
+  - **Same-instant check against GPS:** 64 coasts have a GPS sample within
+    0.5 s of the cut. Per coast, 6F7/GPS is 0.907 median (p10–p90
+    0.863–0.936), which agrees with the documented 0.920. rpm/GPS lands
+    within −1.3 / +1.4 / −2.0 % of theory for 5th / 4th / 3rd. 2nd reads
+    −6.4 % (k 0.867). On 2 coasts, one in B and one in C, GPS picks a
+    different gear from the corrected broadcast. Both fit GPS lag at the
+    cut, which falls in the steepest deceleration. The corrected broadcast
+    is the better gear key.
+  - **Hysteresis per gear** (rpm at cut − rpm at refuel; p10/p50/p90):
+
+    | Gear | n | all refuels | closed-throttle refuels (n) | lowest closed-throttle refuel |
+    |---|---|---|---|---|
+    | 5th | 24 | 8 / 125 / 506 | 5 / 162 / 555 (12) | 1,800 rpm at ~70 km/h true |
+    | 4th | 22 | 25 / 144 / 384 | 3 / 125 / 492 (15) | 1,338 rpm at ~50 km/h |
+    | 3rd | 13 (12 refuel) | 43 / 131 / 628 | 32 / 112 / 168 (9) | 1,888 rpm at ~41 km/h |
+    | 2nd | 9 | 128 / 262 / 1,055 | 116 / 369 / 1,070 (8) | 1,288 rpm at ~20 km/h |
+
+    True km/h is broadcast ÷ 0.9203. Two limits on these numbers. First,
+    the cut rpm is the lift rpm, so the medians say where the driver lifted,
+    not an ECM threshold. Second, 3rd's lowest refuel (1,888 rpm at 41 km/h)
+    breaks the "refuel rpm rises with gear" ordering above, so the
+    speed-indexed recovery-table reading rests on 3 of 4 gears. The tagged
+    coasts decide it, so the box stays `[~]`.
 
 ## Analyses over the D03.8 capture — needs only throttle steps and plateaus
 
