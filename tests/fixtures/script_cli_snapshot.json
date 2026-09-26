@@ -1451,7 +1451,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -1656,7 +1656,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -2119,7 +2119,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -4189,7 +4189,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -4711,7 +4711,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -4955,7 +4955,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -5690,7 +5690,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -5892,7 +5892,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -6094,7 +6094,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }
@@ -6296,7 +6296,7 @@
         "dest": "sessions",
         "nargs": "*",
         "option_strings": [],
-        "required": true,
+        "required": false,
         "type": "Path"
       }
     }

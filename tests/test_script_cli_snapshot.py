@@ -180,6 +180,19 @@ def _normalise(value: Any) -> Any:
     return f"<{type(value).__name__}>"
 
 
+def _required(action: argparse.Action) -> bool:
+    """Whether the parser demands the argument -- its effective behaviour.
+
+    A positional with ``nargs`` ``"*"`` or ``"?"`` accepts zero values, but
+    argparse's ``action.required`` for it changed between Python patch
+    releases (True on 3.12.3, False on 3.12.14), which turned CI red on an
+    unchanged CLI (2026-09-26). Record what the parser does, not the flag.
+    """
+    if not action.option_strings and action.nargs in ("*", "?"):
+        return False
+    return bool(action.required)
+
+
 def _surface(parser: argparse.ArgumentParser, *, top: bool = True) -> dict[str, Any]:
     options: dict[str, Any] = {}
     subcommands: dict[str, Any] = {}
@@ -205,7 +218,7 @@ def _surface(parser: argparse.ArgumentParser, *, top: bool = True) -> dict[str, 
             "type": _name(action.type),
             "nargs": action.nargs,
             "choices": _normalise(list(action.choices)) if action.choices is not None else None,
-            "required": action.required,
+            "required": _required(action),
         }
     surface: dict[str, Any] = {"options": options}
     if subcommands:

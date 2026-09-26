@@ -61,8 +61,8 @@ def test_existing_end_record_cannot_be_rewritten(tmp_path: Path) -> None:
 
 
 def test_latest_capture_uses_parsed_timestamp_not_prefix(tmp_path: Path) -> None:
-    lexically_later = tmp_path / "_z-2026-09-20T220000"
-    chronologically_later = tmp_path / "_a-2026-09-21T180000"
+    lexically_later = tmp_path / "_capture-zeta-2026-09-20T220000"
+    chronologically_later = tmp_path / "_capture-alpha-2026-09-21T180000"
     write_manifest(lexically_later, "old")
     write_manifest(chronologically_later, "new")
     stamp_capture_end(chronologically_later, "daemon_shutdown")
