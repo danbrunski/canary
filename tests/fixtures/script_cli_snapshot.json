@@ -4410,6 +4410,73 @@
       }
     }
   },
+  "resolve_imu_frame.py": {
+    "options": {
+      "--dry-run": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "dry_run",
+        "nargs": 0,
+        "option_strings": [
+          "--dry-run"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--log-level": {
+        "action": "_StoreAction",
+        "choices": [
+          "DEBUG",
+          "INFO",
+          "WARNING",
+          "ERROR"
+        ],
+        "default": "INFO",
+        "dest": "log_level",
+        "nargs": null,
+        "option_strings": [
+          "--log-level"
+        ],
+        "required": false,
+        "type": null
+      },
+      "--quiescent-seconds": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 2.0,
+        "dest": "quiescent_seconds",
+        "nargs": null,
+        "option_strings": [
+          "--quiescent-seconds"
+        ],
+        "required": false,
+        "type": "float"
+      },
+      "--replace": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "replace",
+        "nargs": 0,
+        "option_strings": [
+          "--replace"
+        ],
+        "required": false,
+        "type": null
+      },
+      "sessions": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": null,
+        "dest": "sessions",
+        "nargs": "+",
+        "option_strings": [],
+        "required": true,
+        "type": "Path"
+      }
+    }
+  },
   "retrain.py": {
     "options": {
       "--accept-alert-budget": {
