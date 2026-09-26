@@ -25,6 +25,11 @@ class _StopError(Exception):
     """Raised by the stand-in trainer once it has seen its arguments."""
 
 
+#: Seen only on the validation drive. It must be a PID the serving ``default``
+#: polls: one it does not poll is refused earlier, by the serving gate (D03.34).
+VALIDATION_ONLY = "CATALYST_TEMP_B2S1"
+
+
 def _session(root: Path, name: str, *, start: float, extra: bool) -> Path:
     records: list[TelemetryRecord] = []
     for i in range(90):
@@ -37,7 +42,7 @@ def _session(root: Path, name: str, *, start: float, extra: bool) -> Path:
             ]
         )
         if extra:
-            records.append(TelemetryRecord.obd(t, "FUEL_PRESSURE", 300.0 + (i % 7), "kPa"))
+            records.append(TelemetryRecord.obd(t, VALIDATION_ONLY, 400.0 + (i % 7), "degC"))
     write_records_to_parquet(records, root / name, max_rows=10_000)
     return root / name
 
@@ -82,8 +87,8 @@ def test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named(
         )
 
     dropped = list(seen["spec"]["unobserved_in_training"])
-    assert dropped and all(c.startswith("obd:FUEL_PRESSURE") for c in dropped)
-    assert not any(c.startswith("obd:FUEL_PRESSURE") for c in seen["columns"])
+    assert dropped and all(c.startswith(f"obd:{VALIDATION_ONLY}") for c in dropped)
+    assert not any(c.startswith(f"obd:{VALIDATION_ONLY}") for c in seen["columns"])
     assert "obd:RPM" in seen["columns"]
 
 
