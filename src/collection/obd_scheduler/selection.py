@@ -54,10 +54,12 @@ def _select_next_due_request(
     ``among`` restricts the choice to the open round's unattempted members
     (C02.3: one attempt per member per round). A member is due inside the
     round's window by construction, so it may be issued as soon as the round
-    is open rather than at its own due instant — a one-time phase advance of
-    under one period that lets a round's members converge onto one cadence
-    (and one batch) instead of staying staggered forever; the configured
-    rate is unchanged because the next due time is still ``issued + interval``.
+    is open rather than at its own due instant — an advance of under one
+    period that lets a round's members share one batch. The advance is not
+    carried forward: the next due time steps from the due time, not from the
+    issue instant (``_next_request_due_at``), so the configured rate holds.
+    Carried forward it recurred every cycle, and medium PIDs planned at 3.0 s
+    ran every 2.4 s under a 0.8 s round (D03.34).
     ``preferred`` — the profile's ``required_tuple`` — ranks just below the
     priority lane, so when the budget cannot serve a whole round the tuple
     completes first (C02.5); it never makes a request due, so it cannot
@@ -137,8 +139,9 @@ def select_batch_companions(  # noqa: PLR0913
     (C02.5: same-round companions travel together; a member is never issued
     twice in one round). A member is due *inside this round's window* by
     construction, so it may ride the leader's batch a little before its own
-    due instant: that is a one-time phase advance of under one period, after
-    which the batch shares one cadence — not a rate increase. ``preferred``
+    due instant: an advance of under one period that is not carried forward
+    (the next due time steps from the due time), so it is not a rate
+    increase. ``preferred``
     — the profile's ``required_tuple`` — fills the batch first, so the
     tuple's members share one response when the ceiling would otherwise
     split them across requests. ``widths`` (the loop's measured-width ledger)

@@ -23,19 +23,35 @@ profiles:
     RUN_TIME and EVAPORATIVE_PURGE poll at the slow cadence (weight 0.2 on the
     medium tier). MONITOR_STATUS stays because PID 0x01 also carries MIL_STATUS.
     A listed name is the only way in: AUTO also probed a dozen PIDs this ECM
-    never answers.'
+    never answers.
+
+
+    The core fast set polls at weight 1.5, 1.5 Hz planned (operator,
+    2026-09-26: at least 1 Hz achieved, not just planned). At weight 1.0 the
+    plan is exactly 1 Hz, and every Mode 22 window (Mode 01 is silent while
+    the session is held) takes samples away that nothing gives back: 0.985
+    Hz on the fake clock, and 0.965-0.975 Hz running on the truck on
+    2026-09-23. 1.5 leaves a third of the plan as margin. Medium, slow and DID cadences are unchanged.
+
+
+    O2_WR_LAMBDA_S5 (PID 0x28) is the bank-2 wide-band sensor under this
+    ECM''s PID 0x13 layout, polled at the bank-1 rate (operator, 2026-09-26).
+    It is untested on the truck. If the ECM never answers it, the
+    never-answered back-off holds it to one probe per 15 minutes, plus one
+    per engine start.'
   experimental: false
   mode01:
-    RPM: 1.0
-    SPEED: 1.0
-    MAF: 1.0
-    ENGINE_LOAD: 1.0
-    THROTTLE_POS: 1.0
-    TIMING_ADVANCE: 1.0
-    O2_WR_LAMBDA_S1: 1.0
-    O2_B1S2: 1.0
-    O2_B2S2: 1.0
-    CONTROL_MODULE_VOLTAGE: 1.0
+    RPM: 1.5
+    SPEED: 1.5
+    MAF: 1.5
+    ENGINE_LOAD: 1.5
+    THROTTLE_POS: 1.5
+    TIMING_ADVANCE: 1.5
+    O2_WR_LAMBDA_S1: 1.5
+    O2_WR_LAMBDA_S5: 1.5
+    O2_B1S2: 1.5
+    O2_B2S2: 1.5
+    CONTROL_MODULE_VOLTAGE: 1.5
     FUEL_STATUS: 1.0
     COOLANT_TEMP: 1.0
     INTAKE_TEMP: 1.0
@@ -78,7 +94,6 @@ profiles:
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
   requires_tune_revision: false
-  broadcast_decode: true
   corpus_eligible: true
   behavior_model_recipes: []
   storage_prefix: ''
@@ -179,7 +194,6 @@ profiles:
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
   requires_tune_revision: true
-  broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-tuning

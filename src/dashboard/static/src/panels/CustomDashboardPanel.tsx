@@ -25,7 +25,8 @@ interface PresetGroup {
 }
 
 //: One-tap channel bundles for the picker below. AFR / fueling (Task 2.8b)
-//: is the first group: the wideband λ PIDs (0x24/0x25/0x34/0x35, Task 2.1),
+//: is the first group: the wideband λ PIDs (0x24/0x25/0x34/0x35, Task 2.1;
+//: 0x28, sensor 5, is bank 2 upstream on a PID 0x13 layout ECM, D03.34),
 //: closed- and open-loop fuel trims, and the live fuel-rate/economy
 //: `derived:*` channels (Task 1.1) that stream over `/ws/telemetry`. A
 //: preset only adds the channels actually present in `numericKeys` below —
@@ -36,6 +37,7 @@ const PRESET_GROUPS: PresetGroup[] = [
     channels: [
       "obd:O2_WR_LAMBDA_S1",
       "obd:O2_WR_LAMBDA_S2",
+      "obd:O2_WR_LAMBDA_S5",
       "obd:O2_WR_CURRENT_S1",
       "obd:O2_WR_CURRENT_S2",
       "obd:COMMANDED_EQUIV_RATIO",

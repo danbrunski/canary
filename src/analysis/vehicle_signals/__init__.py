@@ -15,6 +15,11 @@ A module defines either or both of:
 * ``AF_SENSOR_VOLTAGE: Mapping[int, str]`` -- the wideband A/F sensor voltage
   channel per bank, the measured-AFR fallback when the lambda PID is absent
   (:func:`src.analysis.afr.append_afr_channels`).
+* ``WIDEBAND_LAMBDA: Mapping[int, str]`` -- the upstream wide-range O2 lambda
+  PID channel per bank. Which J1979 sensor number is bank 2 depends on the
+  ECM's O2 sensor layout (PID 0x13: sensor 5; PID 0x1D: sensor 3), so only
+  the vehicle can say. Sensor 1 is bank 1 under both layouts, so bank 1 needs
+  no declaration (:func:`wideband_lambda_columns`).
 
 The derived-channel registry is module-level (trainability and capture-profile
 validation read it without a config in hand), so it is built from **every**
@@ -86,4 +91,34 @@ def af_sensor_voltage_columns(bank: int) -> tuple[str, ...]:
     return tuple(columns)
 
 
-__all__ = ["InputGroups", "af_sensor_voltage_columns", "signal_inputs", "vehicle_modules"]
+#: The one wide-range lambda PID whose bank does not depend on the layout:
+#: J1979 sensor 1 is bank 1 sensor 1 under both PID 0x13 and PID 0x1D.
+BANK_1_WIDEBAND_LAMBDA = "obd:O2_WR_LAMBDA_S1"
+
+
+def wideband_lambda_columns(bank: int) -> tuple[str, ...]:
+    """Every vehicle's upstream wide-range lambda channel for ``bank``.
+
+    Vehicle declarations first, in module order; bank 1 always ends with
+    ``obd:O2_WR_LAMBDA_S1``. There is no generic bank-2 channel. Sensor 2
+    (``O2_WR_LAMBDA_S2``, PID 0x25) is bank 1 *sensor 2* under both layouts,
+    and it had been read as bank 2 (D03.34, 2026-09-26).
+    """
+    columns: dict[str, None] = {}
+    for module in vehicle_modules():
+        channels: Mapping[int, str] = getattr(module, "WIDEBAND_LAMBDA", {})
+        if bank in channels:
+            columns[channels[bank]] = None
+    if bank == 1:
+        columns.setdefault(BANK_1_WIDEBAND_LAMBDA, None)
+    return tuple(columns)
+
+
+__all__ = [
+    "BANK_1_WIDEBAND_LAMBDA",
+    "InputGroups",
+    "af_sensor_voltage_columns",
+    "signal_inputs",
+    "vehicle_modules",
+    "wideband_lambda_columns",
+]

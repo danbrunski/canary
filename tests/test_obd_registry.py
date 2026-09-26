@@ -112,8 +112,10 @@ def test_poll_tiers_are_valid() -> None:
 
 def test_wideband_lambda_pids_polled_at_fast_tier() -> None:
     """Task 2.1: 0x24/0x25/0x34/0x35 are now polled (via PID_DECODERS) at the
-    fast tier, and decode via the shared ``decode_wide_lambda`` formula."""
-    for pid in (0x24, 0x25, 0x34, 0x35):
+    fast tier, and decode via the shared ``decode_wide_lambda`` formula. 0x28
+    joined them (D03.34, 2026-09-26): bank 2 upstream under the PID 0x13
+    layout, polled at the bank-1 rate."""
+    for pid in (0x24, 0x25, 0x28, 0x34, 0x35):
         assert pid in PID_DECODERS, f"PID 0x{pid:02X} should be in PID_DECODERS"
         entry = MODE01_REGISTRY[pid]
         assert entry.poll_tier == "fast"
@@ -122,7 +124,7 @@ def test_wideband_lambda_pids_polled_at_fast_tier() -> None:
         assert entry.decoder(bytes([0xA0, 0x00, 0x00, 0x00])) == pytest.approx((1.25, "ratio"))
     # The remaining 0x26-0x2B / 0x36-0x3B wideband PIDs stay medium-tier
     # (documented but not actively polled — Task 2.2 probes the rest).
-    for pid in (0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B):
+    for pid in (0x26, 0x27, 0x29, 0x2A, 0x2B, 0x36, 0x37, 0x38, 0x39, 0x3A, 0x3B):
         assert pid not in PID_DECODERS
         assert MODE01_REGISTRY[pid].poll_tier == "medium"
 

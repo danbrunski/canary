@@ -969,11 +969,14 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # --- compute_anomaly_signals: declared once, in ANOMALY_SIGNALS (R05.4) --
     **{signal.name: signal.input_groups for signal in ANOMALY_SIGNALS},
     # --- src.analysis.afr.append_afr_channels ------------------------------
-    # Measured AFR: the wideband lambda PID, else the AF-sensor voltage DID
-    # through the profile's transfer (only when a calibration is loaded).
+    # Measured AFR: the bank's wideband lambda PID, else the AF-sensor voltage
+    # DID through the profile's transfer (only when a calibration is loaded).
     **{
         f"derived:AFR_{kind}B{bank}": (
-            (f"obd:O2_WR_LAMBDA_S{bank}", *vehicle_signals.af_sensor_voltage_columns(bank)),
+            (
+                *vehicle_signals.wideband_lambda_columns(bank),
+                *vehicle_signals.af_sensor_voltage_columns(bank),
+            ),
         )
         for bank in (1, 2)
         for kind in ("", "CENSORED_")

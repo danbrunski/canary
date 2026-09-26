@@ -60,6 +60,7 @@ from src.collection.obd_scheduler import (
     CanObdLoopStats,
     CanObdSpec,
     DidWindowController,
+    EngineStartLatch,
     ObdSchedulerMetrics,
     PollRequest,
     PollRequestState,
@@ -80,6 +81,7 @@ from src.collection.obd_scheduler import (
     build_poll_requests,
     is_batchable,
     mode06_requests,
+    rearm_on_engine_start,
     replan_for_generation,
     round_members,
     round_period_seconds,
@@ -353,7 +355,13 @@ class _CanObdLoop:
         self.bus = bus
         self.spec = spec
         self.on_frame = on_frame
-        self.on_reading = on_reading
+        self._deliver_reading = on_reading
+        self.on_reading = self._observe_reading
+        #: Engine starts, recognised once per real engine-off, and one not yet
+        #: acted on: back-offs earned with the engine off are lifted on the
+        #: next tick (``rearm_on_engine_start``), never mid-batch.
+        self.engine_start = EngineStartLatch()
+        self.engine_start_pending = False
         self.stop_event = stop_event
         self.deadline = deadline_monotonic
         self.on_scheduler_metrics = on_scheduler_metrics
@@ -456,6 +464,7 @@ class _CanObdLoop:
         now = time.monotonic()
         self._on_generation_change(now)
         self._apply_triggers(now)
+        self._apply_engine_start(now)
         if self.discovery.version != discovery_registry.cache_version():
             # ``reset_discovery``: every walk restarts; results already in
             # the plan stay (a re-walk only adds what it newly learns).
@@ -646,6 +655,31 @@ class _CanObdLoop:
                         # Kept until served: the matrix lifts the profile
                         # selection for it but not the phase it needs (C06.7).
                         self.forced.add(index)
+
+    def _observe_reading(self, reading: ObdReading) -> None:
+        """Watch RPM for an engine start, then hand the reading on."""
+        if (
+            reading.pid == "RPM"
+            and isinstance(reading.value, int | float)
+            and self.engine_start.observe(float(reading.value), time.monotonic())
+        ):
+            self.engine_start_pending = True
+        self._deliver_reading(reading)
+
+    def _apply_engine_start(self, now: float) -> None:
+        """An engine start re-probes every backed-off channel (see
+        ``rearm_on_engine_start``): a PID the ECM withholds with the engine off
+        must not sit out its key-on back-off once the engine runs."""
+        if not self.engine_start_pending:
+            return
+        self.engine_start_pending = False
+        moved = rearm_on_engine_start(self.requests, self.request_states, now)
+        if moved:
+            log.info(
+                "engine started: re-probing %d backed-off request(s)",
+                moved,
+                extra={"rearmed": moved},
+            )
 
     def _publish_metrics(self, now: float) -> None:
         """The one scheduler-metrics snapshot, in the loop and at its exit."""

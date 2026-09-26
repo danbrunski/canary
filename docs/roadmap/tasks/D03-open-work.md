@@ -1861,11 +1861,167 @@ live here now, so the documents could be archived
     - the achieved rates;
     - `MIL_STATUS` still arrives;
     - the dropped PIDs are gone from the session.
+  - [~] **Core fast set achieves at least 1 Hz (operator, 2026-09-26): desk
+    done, truck confirmation owed.** The core set is RPM, SPEED, MAF,
+    ENGINE_LOAD, THROTTLE_POS, TIMING_ADVANCE, O2_WR_LAMBDA_S1, O2_B1S2,
+    O2_B2S2 and CONTROL_MODULE_VOLTAGE, plus O2_WR_LAMBDA_S5 (next item).
+    - **The measured problem was mostly the denominator.** The 2026-09-20
+      figures (RPM 0.78/s, TIMING_ADVANCE 0.47/s) are counts ÷ the 8,570 s
+      CAN span of `2026-09-20T152758`. OBD polling started 18.3 minutes
+      after CAN, so 1,098 s of that span had no OBD at all. Over the 7,471 s
+      OBD span, RPM read 0.896/s with a median interval of 1.00 s.
+    - **Where the rest went on 2026-09-20.** Four RPM gaps were 60 s or more
+      (offsets from OBD start). Only the last is a key-off end:
+      - 2079 s: 61.7 s, spanning the engine start (0 → 1200 rpm);
+      - 6514 s: 61.5 s at idle;
+      - 7186 s: 61.1 s while driving at 2250 rpm;
+      - 7369 s: 101.7 s, 0 → 0 rpm, the key-off end.
+
+      The 3-60 s gaps were near-total Mode 01 blackouts *while driving* (for
+      example 51.5 s, 46.1 s and 57.5 s at ~2300 rpm, about 14 rows each),
+      not DID-window edges. With the engine running at both ends there were
+      16 gaps of 3 s or more, 509 s in total. There were also 300 s of excess
+      in 595 gaps of 1.05-3 s (103 of them hold a DID read).
+
+      These blackouts are absent from the 09-23 sessions (engine running at
+      both ends of each interval, weight-1.0 plan, `sessions/nissan-xterra-2008`):
+
+      | Session | RPM rate | Longest gap |
+      |---|---|---|
+      | `2026-09-23T002340` | 0.965 Hz | 2.3 s |
+      | `2026-09-23T150658` | 0.975 Hz | 2.2 s |
+      | `2026-09-23T162918` | 0.970 Hz | 3.4 s |
+
+      Their cause is not established here. They sit outside this item and do
+      not recur in the newer sessions.
+    - **Cause 1, TIMING_ADVANCE: the never-answered back-off outlived KOEO.**
+      The drive opened with 35 minutes of key-on-engine-off. The ECM left
+      0x0E out of every batched answer, so its back-off doubled toward
+      `MAX_MISS_BACKOFF_SECONDS` (900 s). The first running RPM row is at
+      OBD+2,141 s and the first TIMING_ADVANCE row at OBD+2,734 s: 593 s
+      apart. The start itself fell inside the preceding 61.7 s RPM gap, so
+      the true delay was 9.9-10.9 minutes. The real loop on the fake clock
+      gives 634.6 s (10.6 minutes) after the same KOEO.
+      - Fix: `rearm_on_engine_start` (`src/collection/obd_scheduler/cadence.py`)
+        lifts every miss back-off and keeps `missed_responses`, so the cost is
+        one probe per channel per engine start. First read after the start:
+        634.6 s → 1.8 s.
+      - It is called from `_CanObdLoop._apply_engine_start`
+        (`src/collection/can_obd_loop.py`) on the tick after
+        `EngineStartLatch` recognises a start. A start is a running reading
+        (RPM ≥ `ENGINE_RUNNING_MIN_RPM`) after RPM has read exactly 0 (the
+        project's `ignition_only`) for `ENGINE_OFF_HOLD_SECONDS`. That hold is
+        30 s, the first miss back-off step: a shorter engine-off cannot have
+        earned a longer back-off. Readings between 0 and the floor are
+        neither off nor running.
+      - The first version fired on every upward crossing of 400 rpm. RPM
+        flapping 390/410 probed a silent 0x28 150 times in 300 s instead of
+        4 (verifier, 2026-09-26). Test:
+        `test_rpm_flapping_across_the_running_floor_is_not_an_engine_start`,
+        at batch sizes 6 and 1. It fails on the first version: 150 and 101
+        probes against 4.
+    - **Not a cause of the core shortfall, but needed to raise it: due times
+      were anchored on the request instant** (`_next_request_due_at`,
+      non-windowed branch: `last_requested_at + interval`). At weight 1.0 the
+      3 s and 15 s intervals are whole multiples of the 1 s round, and the
+      anchoring changed nothing (verifier's A/B). Once the core set goes to
+      1.5 Hz it matters. A round member may be issued up to one period
+      early, and that advance recurred every cycle, so a slower request's
+      interval collapsed to whole round periods. With the old anchoring,
+      medium ran at 0.372 Hz instead of 0.333 under the 0.667 s round of
+      weight 1.5, and every 2.4 s instead of 3.0 s under a 0.8 s round. A
+      delayed request also
+      carried its delay into every later period. Fix: every cadence advances
+      from the due time and skips whole missed periods, as windowed DIDs
+      already did. This is what keeps medium and slow at plan. The "one-time
+      phase advance" docs were corrected in `selection.py` and
+      `docs/capture-rounds.md`.
+    - **Cause 2: a plan of exactly 1 Hz cannot achieve 1 Hz.** Mode 01 is
+      silent while a Mode 22 window holds the session. The core set at
+      weight 1.0 reads 0.985 Hz on the fake clock. On the truck, the 09-23
+      sessions at weight 1.0 read 0.965-0.975 Hz while running (table
+      above), which is the evidence for the 1.5 margin. Ruled out:
+      batching granularity (11 core PIDs in two batches, 6 + 5), the
+      priority lane (RPM and THROTTLE_POS only, and at most one slot each
+      per period), and the bus budget.
+    - **Profile change.** The core weight in
+      `data/nissan-xterra-2008/capture_profiles.yaml` goes 1.0 → 1.5, a
+      1.5 Hz plan. `target_rate_hz` was not used, because it would also pin
+      the Mode 22 members and every other listed channel. The medium, slow
+      and DID weights are unchanged.
+    - **Simulated evidence.** Real loop, fake clock, session-gated
+      `ScriptedEcu`, 10 ms latency, 600 s with 60 s warm-up, full Xterra
+      catalog, the Pi's collection settings. Every core channel reads
+      1.478 Hz, longest gap 1.75 s. Baseline at weight 1.0: 0.985 Hz, longest
+      gap 2.01 s. Medium 0.333, slow 0.067, DIDs 0.017 and Mode 06 0.004 Hz,
+      identical to the baseline. At 30 ms latency: 1.476 Hz.
+    - **Capacity.** `preview_polling_plan` goes from 2.64 → 3.91 diagnostic
+      requests/s batched and 13.3 → 19.8 decoded rows/s, against the
+      unchanged 8 req/s budget. The simulated run counted 4.01 req/s (DID
+      windows, DTC and Mode 06 included). With batching narrowed to 4 the
+      core set holds 1.475 Hz at 5.83 req/s. At 2 it is budget-bound
+      (8.00 req/s) and falls to 0.85-0.97 Hz, apart from the priority RPM.
+      Weight 1.0 also fell short at 2 (0.97 Hz).
+    - **Behaviour changes beyond the Xterra `default`.**
+      - Every AUTO profile (the generic `data/capture_profiles.yaml` default,
+        other vehicles) now polls PID 0x28 at the fast tier when the ECM
+        advertises it. It used to be undecoded and never requested.
+      - The unbatched `single_request_fallback` load in the plan rises from
+        13.3 to 19.8 req/s. That is over the 8 req/s budget if batching ever
+        fails completely; it was already over at weight 1.0.
+    - Tests: `tests/test_default_profile_core_rate.py`. Seven fast tests:
+      grid due times, medium rate under a 0.8 s round, the engine-start
+      re-probe, RPM flapping (batch 6 and 1), the start latch, and the
+      never-answered back-off on a listed PID. Each of the first four fails
+      on the code it guards: 12.5 vs 13.0; 100 vs 80 reads; no TIMING_ADVANCE
+      within 30 s of the start; 150 and 101 probes vs 4. One `slow` end-to-end test
+      runs the committed profile against its weight-1.0 baseline.
+      `tests/test_xterra_default_poll_list.py` pins the 1.5 Hz plan and the
+      unchanged cadence of everything else.
+    - **Truck (owed).** On the first drive after deploy, measure each core
+      channel's samples ÷ the OBD-active span (not the session span), and
+      the first TIMING_ADVANCE row after engine start.
+  - [~] **Bank-2 wide-band A/F from PID 0x28 (operator, 2026-09-26): desk
+    done, truck confirmation owed.**
+    - `PID_DECODERS[0x28] = ("O2_WR_LAMBDA_S5", decode_wide_lambda)`. The
+      registry entry now takes its name from `PID_DECODERS` and moves to the
+      fast tier, like 0x24. The channel name is kept: J1979 sensor 5 is
+      bank 2 sensor 1 under the PID 0x13 layout this ECM reports (its 0x15
+      answers as B1S2, 0x19 as B2S2).
+    - The Xterra `default` lists it at the bank-1 weight (1.5): 26 PIDs.
+    - Untested on the truck. If it never answers, a listed PID gets the same
+      doubling back-off as an AUTO probe: 5 probes in 500 s
+      (`test_a_listed_pid_the_ecm_never_answers_costs_a_probe_per_back_off`),
+      then one per 15 minutes, plus one per engine start.
+    - `derived:AFR_B2` read `obd:O2_WR_LAMBDA_S2`. That is PID 0x25, bank 1
+      *sensor 2* under both J1979 O2 layouts. The per-bank lambda channel is
+      now vehicle data: `WIDEBAND_LAMBDA` in
+      `src/analysis/vehicle_signals/nissan_xterra_2008.py`, resolved by
+      `wideband_lambda_columns`. Bank 1 keeps `O2_WR_LAMBDA_S1` generically.
+      `append_afr_channels` and `DERIVED_CHANNEL_INPUTS` prefer
+      `O2_WR_LAMBDA_S5`, then DID 0x1226. No model reads `AFR_B2`. Test:
+      `tests/test_afr.py::test_bank_2_lambda_is_the_vehicle_declared_sensor_not_sensor_2`.
+    - Not wired: `derived:AFR_BANK_BALANCE` is a *voltage* difference
+      (DIDs 0x1225 − 0x1226). 0x28 decodes to λ, and the J1979 CD voltage
+      bytes are not known to match the DID scale. It is a model input, so
+      the operator decides (see the report).
+    - The dashboard's "AFR / fueling" preset (`CustomDashboardPanel.tsx`)
+      now includes `obd:O2_WR_LAMBDA_S5`. The preset adds only channels that
+      are present.
+    - Not changed: `DEFAULT_TUNING_CHANNELS` (`src/collection/tuning_profile.py`,
+      the legacy `POST /control/tuning-mode` default) still lists S2 and not
+      S5. That file carries another session's uncommitted edits. It is also
+      a vehicle-generic default, where sensor 5 is bank 2 only on a PID 0x13
+      layout.
+    - **Owed known-answer check.** On the first session holding 0x28,
+      `compare_channels` of `obd:O2_WR_LAMBDA_S5` against
+      `did:ECM_AF_SENSOR_V_B2`, through the `afr_calibration.yaml` transfer,
+      should agree the way bank 1 does (0x24 vs 0x1225, +0.52 % near stoich
+      on 2026-08-07). The ground-truth suite has no bank-1 entry for this
+      (its fixture is the 2026-08-03 slice), so nothing is added there yet.
+    - **Truck (owed).** Confirm that 0x28 answers in a batch, and run the
+      check above.
   - **Not decided here:**
-    - Poll PID 0x28, bank-2 wide-band A/F. The ECM advertises it and
-      `obd_registry` decodes it as `O2_WR_LAMBDA_S5`, but it is not in
-      `PID_DECODERS`, so it is never requested. It needs a test read.
-    - Raise the core fast set from ~0.75 Hz to at least 1 Hz.
     - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
       reason to keep the dropped throttle PIDs, and it was not built.
 

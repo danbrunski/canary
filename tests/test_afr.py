@@ -139,7 +139,7 @@ def test_bank_falls_back_to_voltage_when_lambda_column_is_empty() -> None:
         {
             "obd:RPM": [2000.0, 2000.0],
             "obd:ENGINE_LOAD": [60.0, 60.0],
-            "obd:O2_WR_LAMBDA_S2": [float("nan"), float("nan")],
+            "obd:O2_WR_LAMBDA_S5": [float("nan"), float("nan")],
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
@@ -157,3 +157,26 @@ def test_transfer_rejects_a_floor_above_its_ceiling() -> None:
                 "censored_ceiling_afr": 18.0,
             }
         )
+
+
+def test_bank_2_lambda_is_the_vehicle_declared_sensor_not_sensor_2() -> None:
+    """J1979 sensor 2 (PID 0x25) is bank 1 sensor 2 under both O2 layouts.
+
+    It used to be read as bank 2. The Xterra's PID 0x13 layout makes bank 2
+    upstream sensor 5 (PID 0x28), and the PID wins over the voltage DID
+    (D03.34).
+    """
+    frame = pd.DataFrame(
+        {
+            "obd:O2_WR_LAMBDA_S2": [0.5, 0.5],
+            "obd:O2_WR_LAMBDA_S5": [1.0, 1.0],
+            "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
+        }
+    )
+    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    assert out["derived:AFR_B2"].tolist() == pytest.approx([14.7, 14.7])
+
+    without_s5 = append_afr_channels(
+        frame.drop(columns=["obd:O2_WR_LAMBDA_S5"]), VehicleParameters(), _calibration()
+    )
+    assert without_s5["derived:AFR_B2"].tolist() == pytest.approx([14.0, 14.0])

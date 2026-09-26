@@ -645,14 +645,16 @@ _MODE01_SPEC: tuple[
     ),
     (
         0x28,
-        "O2_WR_LAMBDA_S5",
+        _pd_name(0x28),
         "Wide-Range O2 λ S5",
         "o2",
         "ratio",
         4,
-        "medium",
+        # Fast, like S1 (0x24): an upstream wide-band sensor under either O2
+        # layout (bank 2 under PID 0x13, bank 3 under 0x1D).
+        "fast",
         "graph",
-        decode_wide_lambda,
+        _pd(0x28),
     ),
     (
         0x29,

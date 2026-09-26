@@ -61,10 +61,13 @@ Rules, each pinned by a test:
   per round; a miss waits for the next round it is due in (the miss backoff
   makes that explicit).
 - A member is due inside the window by construction, so it may be issued as
-  soon as the round is open rather than at its own due instant. This is a
-  one-time phase advance of under one period, after which the round's
-  members share one cadence (and one batch); the configured rate is
-  unchanged because the next due time is still `issued + interval`.
+  soon as the round is open rather than at its own due instant, which lets
+  the round's members share one batch. The advance is not carried forward:
+  the next due time steps from the due time, not from the issue instant, and
+  whole missed periods are skipped rather than caught up. Anchored on the
+  issue instant (until D03.34, 2026-09-26) the advance recurred every cycle,
+  so a slower request's interval collapsed to whole round periods: medium
+  PIDs planned at 3.0 s ran every 2.4 s under a 0.8 s round.
 - **Budget stays separate from rate.** `next_budget_at` paces requests as
   before. When the budget cannot serve every member inside the window the
   round closes **incomplete** and the counter says so.

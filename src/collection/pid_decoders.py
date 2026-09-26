@@ -200,8 +200,8 @@ def decode_wide_lambda(data: bytes) -> tuple[float, str] | None:
     Four bytes: ``AB`` = equivalence ratio λ ``(A*256+B)/32768``, ``CD`` =
     sensor voltage or current. λ is the model-relevant channel; the raw
     voltage/current goes unused. Single-sourced here (not ``obd_registry.py``)
-    because bank-1 sensor 1/2 (0x24/0x25/0x34/0x35) are now polled directly
-    via ``PID_DECODERS``; the remaining wide-lambda PIDs still import this
+    because sensors 1/2 (0x24/0x25/0x34/0x35) and sensor 5 (0x28) are polled
+    directly via ``PID_DECODERS``; the remaining wide-lambda PIDs still import this
     from here for their unpolled-but-decodable registry entries.
     """
     if not need_bytes(data, 2):
@@ -297,6 +297,11 @@ PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]]
     # ignores the raw voltage/current bytes either way).
     0x24: ("O2_WR_LAMBDA_S1", decode_wide_lambda),
     0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
+    # Sensor 5: bank 2 sensor 1 under the PID 0x13 O2 layout, bank 3 sensor 1
+    # under 0x1D. Which bank it is belongs to the vehicle
+    # (``WIDEBAND_LAMBDA`` in src.analysis.vehicle_signals). Polled since
+    # D03.34 (2026-09-26).
+    0x28: ("O2_WR_LAMBDA_S5", decode_wide_lambda),
     0x2C: ("COMMANDED_EGR", decode_egr_percent),
     0x2D: ("EGR_ERROR", decode_egr_error),
     0x2E: ("EVAPORATIVE_PURGE", decode_evap_purge),

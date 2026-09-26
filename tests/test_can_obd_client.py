@@ -179,6 +179,8 @@ def test_pid_decoders_matches_pre_refactor_golden_shape() -> None:
         0x21: "DISTANCE_W_MIL",
         0x24: ("O2_WR_LAMBDA_S1", decode_wide_lambda),
         0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
+        # Bank 2 upstream under the PID 0x13 layout (D03.34, 2026-09-26).
+        0x28: ("O2_WR_LAMBDA_S5", decode_wide_lambda),
         0x2C: "COMMANDED_EGR",
         0x2D: "EGR_ERROR",
         0x2E: "EVAPORATIVE_PURGE",

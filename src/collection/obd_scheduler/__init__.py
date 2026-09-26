@@ -12,9 +12,11 @@ from __future__ import annotations
 from src.collection.obd_scheduler.cadence import (
     AUTO_MISS_BACKOFF_SECONDS,
     CAPTURE_MISS_BACKOFF_SECONDS,
+    ENGINE_OFF_HOLD_SECONDS,
     MAX_MISS_BACKOFF_SECONDS,
     PROFILE_CADENCE_KINDS,
     TIER_RATE_FACTORS,
+    EngineStartLatch,
     _initial_request_states,
     _is_request_backed_off,
     _is_request_suppressed,
@@ -25,6 +27,7 @@ from src.collection.obd_scheduler.cadence import (
     _request_interval_seconds,
     _request_rate_hz,
     _update_response_state,
+    rearm_on_engine_start,
     replan_for_generation,
 )
 from src.collection.obd_scheduler.did_window import (
@@ -137,6 +140,8 @@ __all__ = [
     "DTC_POLL_CHANNELS",
     "DidSessionSpec",
     "DidWindowController",
+    "ENGINE_OFF_HOLD_SECONDS",
+    "EngineStartLatch",
     "FAST_EXIT_REFUSALS_BEFORE_DISABLE",
     "FAST_EXIT_RETRY_MAX_SECONDS",
     "FAST_EXIT_RETRY_MIN_SECONDS",
@@ -211,6 +216,7 @@ __all__ = [
     "preview_discovery_active",
     "preview_polling_plan",
     "profile_did_union",
+    "rearm_on_engine_start",
     "replan_for_generation",
     "resolve_did_session_spec",
     "round_members",

@@ -13,7 +13,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.derived import fuel_properties
-from src.analysis.vehicle_signals import af_sensor_voltage_columns
+from src.analysis.vehicle_signals import af_sensor_voltage_columns, wideband_lambda_columns
 from src.config import VehicleParameters
 
 
@@ -247,8 +247,11 @@ def append_afr_channels(
     ceiling = transfer.censored_ceiling_afr if transfer else 18.0
     for bank in (1, 2):
         measured: pd.Series | None = None
-        lambda_column = f"obd:O2_WR_LAMBDA_S{bank}"
-        if lambda_column in out:
+        # The bank's upstream wide-range lambda PID, which only the vehicle
+        # can name for bank 2 (its O2 sensor layout decides the sensor number).
+        for lambda_column in wideband_lambda_columns(bank):
+            if measured is not None or lambda_column not in out:
+                continue
             candidate = pd.to_numeric(out[lambda_column], errors="coerce") * stoich
             # Presence is not the same as data. Bank-2 lambda is unsupported on
             # some ECUs (it stays in poll sets because that is a fact about one

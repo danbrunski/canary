@@ -10,6 +10,7 @@ import logging
 import math
 import time
 from collections.abc import Container, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.collection import tuning_profile
@@ -23,6 +24,7 @@ from src.collection.obd_scheduler.spec import (
     CanObdSpec,
     _bus_budget_requests_per_second,
 )
+from src.operating import ENGINE_RUNNING_MIN_RPM
 
 if TYPE_CHECKING:
     from src.collection.profile_view import ProfileView
@@ -163,6 +165,94 @@ def replan_for_generation(
     return moved
 
 
+def rearm_on_engine_start(
+    requests: Sequence[PollRequest],
+    states: Sequence[PollRequestState],
+    now: float,
+) -> int:
+    """Lift every miss back-off when the engine starts; returns how many moved.
+
+    A back-off is evidence about a channel *in the state it was probed in*.
+    Some channels are state-gated: on 2026-09-20 the Xterra ECM left
+    TIMING_ADVANCE (PID 0x0E) out of every batched answer through 35 minutes
+    of key-on-engine-off. The miss back-off for a request that has never
+    answered doubles to ``MAX_MISS_BACKOFF_SECONDS``, so after the engine
+    started TIMING_ADVANCE stayed silent for another 9.9-10.9 minutes. The
+    first running RPM row came 593 s before the first TIMING_ADVANCE row, and
+    the start itself fell inside a 61.7 s gap before that. It read 0.47/s over
+    a drive whose other fast channels read 0.78/s (both counts over the whole
+    session). On the fake clock the same 35-minute KOEO left it silent
+    10.6 minutes past the start. The regression test pins a shorter case
+    (``tests/test_default_profile_core_rate.py``).
+
+    Which reading is a start is :class:`EngineStartLatch`'s decision: once per
+    real engine-off, never on RPM flapping across the running floor.
+
+    An engine start is new evidence for every backed-off channel, so each one
+    is due now. ``missed_responses`` is kept: a channel that is still silent
+    with the engine running goes straight back to the back-off it had
+    earned. The cost is one probe per channel per engine start, and a probe
+    that rides a Mode 01 batch costs nothing more than its identifier byte.
+
+    Requests parked at ``inf`` (rate zero) are not revived, and neither are
+    DTC, service or freeze-frame polls, which run on their own intervals.
+    """
+    moved = 0
+    for request, state in zip(requests, states, strict=True):
+        if request.kind not in PROFILE_CADENCE_KINDS or state.missed_at is None:
+            continue
+        if not now < state.suppressed_until < float("inf"):
+            continue
+        state.suppressed_until = now
+        state.next_due_at = min(state.next_due_at, now)
+        moved += 1
+    return moved
+
+
+#: How long the engine must read *off* before the next start counts as one.
+#: "Off" is the project's KOEO definition: RPM exactly 0 with OBD answering
+#: (``vehicle_state``'s ``ignition_only``). Readings between 0 and
+#: ``ENGINE_RUNNING_MIN_RPM`` (cranking, a stumble) are neither off nor
+#: running. The hold is the first miss back-off step: an engine-off shorter
+#: than that cannot have earned a back-off longer than it, so re-probing
+#: after it gains nothing.
+ENGINE_OFF_HOLD_SECONDS = AUTO_MISS_BACKOFF_SECONDS
+
+
+@dataclass
+class EngineStartLatch:
+    """Recognises an engine start from RPM readings, once per real engine-off.
+
+    A start is a running reading (RPM >= ``ENGINE_RUNNING_MIN_RPM``) after
+    RPM has read 0 for at least ``ENGINE_OFF_HOLD_SECONDS`` since the last
+    running reading. Without the hold, every upward crossing of the running
+    floor was a start. RPM flapping 390/410 on alternate reads re-probed a
+    never-answering PID 150 times in 300 s instead of 4. At a batch size of 1
+    the probes took RPM from 297 reads to 200 (verifier, 2026-09-26).
+
+    A loop that starts with the engine running has seen no engine-off, so its
+    first running reading is not a start.
+    """
+
+    #: First RPM == 0 reading since the last running reading, else ``None``.
+    off_since: float | None = None
+    armed: bool = False
+
+    def observe(self, rpm: float, now: float) -> bool:
+        """Feed one RPM reading; ``True`` when it is an engine start."""
+        if rpm >= ENGINE_RUNNING_MIN_RPM:
+            started = self.armed
+            self.armed = False
+            self.off_since = None
+            return started
+        if rpm == 0:
+            if self.off_since is None:
+                self.off_since = now
+            if now - self.off_since >= ENGINE_OFF_HOLD_SECONDS:
+                self.armed = True
+        return False
+
+
 def _initial_request_states(
     requests: list[PollRequest],
     spec: CanObdSpec,
@@ -261,23 +351,24 @@ def _next_request_due_at(
     if interval == float("inf"):
         return float("inf")
     now = time.monotonic()
-    windowed = spec.did_session is not None and not view.profile.did_continuous
-    if request.in_session_window and windowed:
-        # Windowed cadence is a boundary grid. Anchoring the next due time to
-        # actual receipt/request time adds the in-window offset every cycle:
-        # a 4 Hz plan then finds the DID a few milliseconds late at the next
-        # 250 ms boundary and silently skips every other window. Advance from
-        # the prior due boundary and skip whole missed periods instead.
-        anchor = state.next_due_at
-        next_due = anchor + interval
-        if next_due <= now:
-            next_due += (math.floor((now - next_due) / interval) + 1) * interval
-        return max(next_due, state.suppressed_until)
-    anchor = state.last_requested_at if state.last_requested_at is not None else now
-    next_due = anchor + interval
-    if state.suppressed_until > next_due:
-        return state.suppressed_until
-    return next_due
+    # Every cadence is a grid: advance from the due time just served and skip
+    # whole missed periods (never a catch-up burst). Anchoring on the request
+    # instant instead adds every delay to every later period, and it did so
+    # twice over (D03.34, 2026-09-26):
+    #
+    # - A windowed DID was found a few milliseconds late at each boundary, so
+    #   a 4 Hz plan silently skipped every other window.
+    # - A round member may be issued up to one period *before* its due time
+    #   (``_select_next_due_request``). Anchored on that instant, the advance
+    #   recurred every cycle, so a slower request's interval collapsed to a
+    #   whole number of round periods. Medium PIDs planned at 3.0 s ran every
+    #   2.4 s under a 0.8 s round: +22 % on the fake clock. A request delayed
+    #   instead (a DID window, a timed-out single, a busy budget slot) lost
+    #   the delay from every later period.
+    next_due = state.next_due_at + interval
+    if next_due <= now:
+        next_due += (math.floor((now - next_due) / interval) + 1) * interval
+    return max(next_due, state.suppressed_until)
 
 
 def _next_due_at(
