@@ -894,3 +894,135 @@ def test_socket_drops_still_fail_the_capture() -> None:
     )
     assert quality.verdict == "fail"
     assert PERSISTENCE_LOSS in _clauses(quality)
+
+
+# ---------------------------------------------------------------------------
+# H05.8: capture quality learns the achieved K-line rate
+# ---------------------------------------------------------------------------
+
+KLINE_ENTRIES = ["0x1201", "ECM_TARGET_EQUIV_RATIO"]
+KLINE_KEYS = ["kline:0x1201", "kline:ECM_TARGET_EQUIV_RATIO"]
+
+
+def _kline_lifetime(
+    samples: list[tuple[float, float, float]],
+    *,
+    elapsed: float = 300.0,
+    source: str | None = None,
+) -> dict[str, Any]:
+    """CANary's own K-line session holds the ECM for the whole capture (the
+    ``ecm-session-kline`` window tx_gate opens)."""
+    ledger = CaptureLedger()
+    ledger.begin(0.0, profile="kline-target", generation=1, started_wall=1_700_000_000.0)
+    ledger.mark_paused(True, reason="ecm-session-kline", now=0.0)
+    for key in KLINE_KEYS:
+        for start, stop, period in samples:
+            t = start
+            while t <= stop + 1e-9:
+                ledger.observe(key, t)
+                t += period
+    ledger.mark_paused(False, reason="ecm-session-kline", now=elapsed)
+    snap = ledger.snapshot(elapsed)
+    assert snap is not None
+    payload = snap.to_dict()
+    if source is not None:
+        payload["source"] = source
+    return payload
+
+
+def _kline_quality(lifetime: dict[str, Any]) -> Any:
+    return evaluate_capture_quality(
+        profile={"name": "kline-target", "mode01": {}, "kline": list(KLINE_ENTRIES)},
+        scheduler=_scheduler([]),
+        lifetime=lifetime,
+        losses=_verified_losses(CLEAN, CLEAN),
+    )
+
+
+def test_kline_entries_report_their_achieved_rate_from_the_ledger() -> None:
+    quality = _kline_quality(_kline_lifetime([(0.0, 300.0, 0.1)]))
+    rows = {row.channel: row for row in quality.channels}
+    assert set(rows) == set(KLINE_KEYS)
+    for row in rows.values():
+        assert row.kind == "kline"
+        assert row.requested_hz is None  # the profile names no K-line rate
+        assert row.cadence["hz"] == pytest.approx(10.0)
+        assert row.status == "ok"
+        # Its own session's window is acquisition time, not a pause.
+        assert row.coverage["eligible_s"] == pytest.approx(300.0)
+        assert row.coverage["fraction"] == pytest.approx(1.0)
+    assert quality.verdict == "pass", quality.failures
+    assert any("achieved K-line rate" in note for note in quality.notes)
+
+
+def test_a_kline_gap_inside_its_own_session_is_a_gap_not_a_pause() -> None:
+    quality = _kline_quality(_kline_lifetime([(0.0, 100.0, 0.1), (160.0, 300.0, 0.1)]))
+    assert ACQUISITION_GAP in _clauses(quality)
+    row = next(r for r in quality.channels if r.channel == KLINE_KEYS[0])
+    assert row.coverage["long_gaps"] == [[pytest.approx(100.0), 160.0, pytest.approx(60.0)]]
+
+
+def test_a_passive_pause_is_still_a_pause_for_kline() -> None:
+    """Passive armed stops K-line too; a window that is passive alone is
+    excluded by name, exactly as for a Mode 01 channel."""
+    lifetime = _kline_lifetime([(0.0, 100.0, 0.1), (160.0, 300.0, 0.1)])
+    lifetime["pause_reasons"] = [
+        {"start_s": 0.0, "end_s": 100.0, "reasons": ["ecm-session-kline"]},
+        {"start_s": 100.0, "end_s": 160.0, "reasons": ["passive"]},
+        {"start_s": 160.0, "end_s": 300.0, "reasons": ["ecm-session-kline"]},
+    ]
+    lifetime["pause_windows"] = [[0.0, 100.0], [100.0, 160.0], [160.0, 300.0]]
+    quality = _kline_quality(lifetime)
+    row = next(r for r in quality.channels if r.channel == KLINE_KEYS[0])
+    assert row.status == "ok", row.coverage
+    assert row.coverage["eligible_s"] == pytest.approx(240.0)
+    assert quality.verdict == "pass", quality.failures
+
+
+def test_a_passive_window_merged_into_the_kline_session_reports_a_gap_never_hides_one() -> None:
+    """Armed mid-session, passive joins the open ``ecm-session-kline`` window
+    (the ledger merges overlapping reasons), so its K-line part cannot be told
+    apart. It stays eligible: the limitation can report a gap, never hide one."""
+    ledger = CaptureLedger()
+    ledger.begin(0.0, profile="kline-target", generation=1, started_wall=1_700_000_000.0)
+    ledger.mark_paused(True, reason="ecm-session-kline", now=0.0)
+    for key in KLINE_KEYS:
+        for i in range(1001):
+            ledger.observe(key, i * 0.1)  # 0..100 s
+    ledger.mark_paused(True, reason="passive", now=100.0)
+    ledger.mark_paused(False, reason="ecm-session-kline", now=100.0)
+    ledger.mark_paused(False, reason="passive", now=300.0)
+    snap = ledger.snapshot(300.0)
+    assert snap is not None
+    quality = _kline_quality(snap.to_dict())
+    assert quality.interval["pause_windows"] == [[0.0, 300.0]]
+    assert ACQUISITION_GAP in _clauses(quality)
+
+
+def test_a_kline_entry_that_never_delivered_is_unanswered() -> None:
+    quality = _kline_quality(_kline_lifetime([]))
+    assert UNANSWERED_INPUT in _clauses(quality)
+    assert quality.verdict == "fail"
+
+
+def test_a_rows_rebuilt_verdict_says_it_did_not_score_kline() -> None:
+    """The row rebuild reads Mode 01/22 only: K-line is named as unscored,
+    never reported as unanswered."""
+    from src.analysis.capture_coverage import SOURCE_ROWS
+    from src.collection.capture_quality import ROWS_LIFETIME_SOURCE
+
+    assert SOURCE_ROWS == ROWS_LIFETIME_SOURCE
+    quality = _kline_quality(_kline_lifetime([], source=SOURCE_ROWS))
+    assert quality.channels == []
+    assert UNANSWERED_INPUT not in _clauses(quality)
+    assert any("K-line channel(s) not scored" in note for note in quality.notes)
+
+
+def test_kline_windows_without_reasons_fall_back_to_every_window() -> None:
+    from src.collection.capture_quality import kline_pause_windows
+
+    assert kline_pause_windows({"pause_windows": [[0.0, 5.0]]}, 10.0) is None
+    assert kline_pause_windows({"pause_windows": [], "pause_reasons": []}, 10.0) == []
+    assert kline_pause_windows(
+        {"pause_reasons": [{"start_s": 1.0, "end_s": None, "reasons": ["passive"]}]}, 10.0
+    ) == [(1.0, 10.0)]

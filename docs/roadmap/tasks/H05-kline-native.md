@@ -151,7 +151,7 @@ What exists in `src/` is coupled to the USB cable:
   validation harness resets claims. Six new tests in `tests/test_tx_gate.py`;
   the passive-control, record-arming, idle-shutdown and did_log suites pass
   unchanged (118 tests).
-- [~] **H05.7 The `kline` source.** **Do (after H05.1):** add it to
+- [x] **H05.7 The `kline` source.** **Do (after H05.1):** add it to
   `TelemetrySource`, `CAPTURED_SOURCES`, H01.1's trainability classification
   (not trainable), `channels.SpecSource`, `spec_producibility`, the live
   router and `tests/test_telemetry.py` — the sweep `f73333f` made for
@@ -171,7 +171,19 @@ What exists in `src/` is coupled to the USB cable:
   session's `feature_pipeline.py` work; until then the exposure is small,
   because a K-line session runs only under a capture profile and captures
   (`_capture-*`) are excluded from training discovery.
-- [~] **H05.8 The collector.** **Do:** `src/collection/kline_collector.py`:
+  **Done (verified 2026-09-26):** the owed classification landed with H01.1
+  in `3f73755`. `src/telemetry.py` lists `KLINE_SOURCE` in
+  `NON_TRAINABLE_SOURCES`, with the reason "not trainable until the operator
+  decides (H00 K-line defaults)". The module then calls
+  `require_trainability_classified` at import time. That call raises
+  `TypeError` for a source that is unclassified, classified twice, or not a
+  source at all, so a missing entry fails the first import. `kline` is also
+  in `channels.SpecSource` and the `_kline_series` reader, so the acceptance
+  grep holds. `pytest tests/test_telemetry.py tests/test_trainability.py`:
+  35 passed. `test_trainability.py` covers `kline:ECM:1206` and
+  `kline:ECM:MEM_ECM_TARGET_EQUIV_RATIO`, plus the refusal of an unclassified
+  source.
+- [x] **H05.8 The collector.** **Do:** `src/collection/kline_collector.py`:
   acquire ownership (H05.6), wake up, StartCommunication, define the requested
   set with `AC` (DIDs and RAM addresses from a capture profile's new `kline:`
   list), poll `21`, and emit records stamped at each exchange's midpoint with
@@ -200,6 +212,45 @@ What exists in `src/` is coupled to the USB cable:
   (the collector refuses at run time instead, logged once); capture quality
   does not yet measure the K-line rate; raw `kline:FRAME` rows are left to
   the sniffer (H06), since each collector row already carries its raw bytes.
+
+  **Done (2026-09-26):** *Save validates.* `KlineCatalog`
+  (`src/collection/kline/plan.py`: K-line profile path, DID catalog, poll
+  interval) owns the one resolution — load both, `resolve_module_plan`, the
+  P3max rule — and both the collector's `_prepare` and
+  `CaptureProfileStore.save` call `KlineCatalog.resolve`, so save refuses
+  exactly what the collector would (unknown name, DID with no width, two
+  modules, unknown module, P3max, no `kline.yaml` for the vehicle) with the
+  same message; the route answers 409. A store built without a catalog
+  refuses any profile listing `kline:` rather than skipping the check; the
+  daemon's store (`runtime.py`) and the app's fallback store (`api.py`) get
+  `KlineCatalog.from_config(config)`. Tests: 8 in `tests/test_capture_profiles.py`
+  (readable ECM and ABS lists save; 4 unreadable lists refused by name and not
+  written; P3max; no K-line profile; no catalog; 409 through an injected store
+  and through `create_app`'s own). *Capture quality learns the rate.*
+  `ModulePlan.entry_channels` maps each profile entry to its stored channel;
+  the collector observes the capture ledger once per delivered entry, keyed
+  `kline:<entry>` (`names.capture_key`); `evaluate_capture_quality` adds a
+  `kind: "kline"` row per entry for every caller, whose cadence is the
+  achieved K-line rate. No rate is requested (the profile names none), so
+  missing and gaps are judged, a shortfall never; CANary's own
+  `ecm-session-kline` window is acquisition time for these rows, not a pause.
+  A verdict rebuilt from persisted rows (no ledger) says it did not score
+  K-line instead of calling it unanswered. Tests: 7 in
+  `tests/test_capture_quality.py`, 3 in `tests/test_kline_collector.py`
+  (a fake-transport session fills the ledger for both entries and scores
+  `ok`; two ABS flags of one word both observed; no capture armed, no rows),
+  2 in `tests/test_kline_plan.py`. **Limits:** (1) *Passive armed during a
+  K-line session fails the capture.* The ledger merges overlapping pause
+  reasons into one window, so passive joins the open `ecm-session-kline`
+  window and keeps it open until passive disarms; K-line rows cannot tell its
+  parts apart and count the whole window, passive tail included, as eligible.
+  The silence after the session is then an `acquisition_gap`, a hard clause:
+  the verdict turns `fail`, or `degraded` if coverage stays at least 90 %
+  (`test_a_passive_window_merged_into_the_kline_session_reports_a_gap_never_hides_one`:
+  session 0-100 s, passive to 300 s, one window 0-300 s, 100-300 s scored as
+  a gap). The fix is per-reason window bounds in `capture_lifetime`. (2) The
+  row-rebuilt recompute does not reconstruct K-line cadence (it reads Mode
+  01/22 rows only); the live and stop-time verdicts carry it.
 
 ## Truck
 

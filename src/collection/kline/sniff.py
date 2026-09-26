@@ -80,6 +80,11 @@ class SniffedFrame:
     #: The module address this frame belongs to: the other end from the
     #: tester. ``None`` when no StartCommunication has said (see above).
     module: int | None = None
+    #: The tester's own address, for either direction: an addressed frame
+    #: names it (source of a request, target of a reply), and length-byte
+    #: frames inherit it from the StartCommunication reply, like ``module``.
+    #: ``None`` when no addressed frame of this session was seen (H06.4).
+    tester: int | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +111,7 @@ class FrameDecoder:
         self._started = 0.0
         self._in_session = False
         self._module: int | None = None
+        self._tester: int | None = None
         self._uncertainty = 0.0
         self.stats = SniffStats()
 
@@ -139,6 +145,7 @@ class FrameDecoder:
                 self.stats.wakeups += 1
                 self._in_session = False
                 self._module = None
+                self._tester = None
                 return out
             self._started = at
         self._buf.append(byte)
@@ -183,9 +190,11 @@ class FrameDecoder:
             addressed = kp.decode_addressed(raw)
             payload = addressed.payload
             is_reply = kp.is_response_sid(payload[0])
+            named_tester = addressed.target if is_reply else addressed.source
             if payload[:1] == bytes([kp.SID_START_COMMUNICATION + kp.POSITIVE_OFFSET]):
                 self._in_session = True
                 self._module = addressed.source
+                self._tester = named_tester
             return SniffedFrame(
                 self._started,
                 at,
@@ -197,14 +206,17 @@ class FrameDecoder:
                 target=addressed.target,
                 timing_uncertainty_s=self._uncertainty,
                 module=addressed.source if is_reply else addressed.target,
+                tester=named_tester,
             )
         payload = kp.decode_length_frame(raw)
         sid = payload[0]
         is_reply = kp.is_response_sid(sid)
         module = self._module
+        tester = self._tester
         if sid == kp.SID_STOP_COMMUNICATION + kp.POSITIVE_OFFSET:
             self._in_session = False
             self._module = None
+            self._tester = None
         return SniffedFrame(
             self._started,
             at,
@@ -214,6 +226,7 @@ class FrameDecoder:
             "ecu" if is_reply else "tester",
             timing_uncertainty_s=self._uncertainty,
             module=module,
+            tester=tester,
         )
 
 

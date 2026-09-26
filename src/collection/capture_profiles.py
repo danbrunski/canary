@@ -27,6 +27,7 @@ from src.decode.behavior_eligibility import required_channel_groups
 from src.decode.behavior_models import load_behavior_models
 
 if TYPE_CHECKING:
+    from src.collection.kline.plan import KlineCatalog
     from src.collection.obd_scheduler import DidSessionSpec
 
 log = logging.getLogger(__name__)
@@ -832,6 +833,7 @@ class CaptureProfileStore:
         behavior_models_path: Path,
         *,
         custom_pids_path: Path | None = None,
+        kline_catalog: KlineCatalog | None = None,
     ):
         self.path = path
         self.collection = collection
@@ -839,6 +841,10 @@ class CaptureProfileStore:
         #: The daemon's custom-PID file, so the preview's request universe
         #: matches the live one. ``None`` previews without custom PIDs.
         self.custom_pids_path = custom_pids_path
+        #: What a profile's ``kline:`` list is resolved against at save
+        #: (H05.8). ``None`` refuses to save any profile that lists K-line
+        #: channels: an unchecked list is what left the collector idle.
+        self.kline_catalog = kline_catalog
 
     def load(self) -> CaptureProfileCatalog:
         return load_capture_profiles(self.path, self.collection)
@@ -876,10 +882,33 @@ class CaptureProfileStore:
             raise ValueError("the default profile cannot be renamed")
         if any(item.name == profile.name for item in profiles):
             raise ValueError(f"capture profile already exists: {profile.name}")
+        self._check_kline(profile)
         profiles.append(profile)
         profiles.sort(key=lambda item: (item.name != DEFAULT_PROFILE_NAME, item.name))
         save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
         return model_input_warnings(profile, self.behavior_models_path)
+
+    def _check_kline(self, profile: CaptureProfile) -> None:
+        """Resolve ``profile.kline`` exactly as the K-line collector will
+        (:meth:`~src.collection.kline.plan.KlineCatalog.resolve`), or refuse.
+
+        The collector refuses an unreadable list at run time, logged once, and
+        the capture then records no K-line at all; refusing here puts the same
+        reason in front of the operator while the profile is still open.
+        """
+        if not profile.kline:
+            return
+        if self.kline_catalog is None:
+            raise ValueError(
+                f"capture profile {profile.name} lists K-line channels, but this store "
+                "has no K-line catalog to check them against"
+            )
+        try:
+            self.kline_catalog.resolve(profile.kline)
+        except (LookupError, ValueError) as exc:
+            # KlinePlanError is a ValueError; a vehicle with no K-line profile
+            # is a LookupError. Both are a refusal of this list.
+            raise ValueError(f"kline: {exc}") from exc
 
     def delete(self, name: str) -> None:
         normalized = name.strip().lower()

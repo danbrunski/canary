@@ -9,16 +9,20 @@ path instead of a convention at its callers.
 from __future__ import annotations
 
 import hashlib
+import math
+import numbers
 import re
 import secrets
 import threading
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any, Protocol, TypeVar
 
 from src.config import NonvolatileWriteConfig
 from src.control.audit import ControlAuditLogger
+from src.timefmt import parse_iso_utc
 from src.vehicle_state import VehicleState
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -35,6 +39,130 @@ class AuthorizationRefusedError(RuntimeError):
         self.detail = detail
 
 
+#: Where the vehicle's supply voltage is read from, in order of preference
+#: (H03.2). The HAT's 12 V sense (``sensor:SUPPLY_VOLTAGE``, H03.1) reads with
+#: the ECM asleep; ``obd:CONTROL_MODULE_VOLTAGE`` (Mode 01 PID 0x42) needs it
+#: awake, which it is at the only state a write may start from
+#: (``ignition_only``). The first *fresh* one wins; a stale preferred source
+#: never hides a fresh fallback, and a stale fallback never passes.
+SUPPLY_VOLTAGE_SOURCES: tuple[tuple[str, str], ...] = (
+    ("sensor", "SUPPLY_VOLTAGE"),
+    ("obd", "CONTROL_MODULE_VOLTAGE"),
+)
+
+
+@dataclass(frozen=True)
+class SupplyVoltageReading:
+    """The supply voltage a write is gated on, and where it came from.
+
+    ``volts`` is ``None`` when no source was fresh, and ``reason`` then says
+    why for each source (absent, stale by how much, no numeric value) — the
+    refusal quotes it. A bare ``float | None`` could only say "not reported",
+    which does not tell the operator whether the 12 V sense is unplugged or
+    the ECM stopped answering (H03.2). Build one with
+    :func:`supply_voltage_from_latest_rows`, or :meth:`unknown`.
+    """
+
+    volts: float | None
+    source: str | None
+    age_seconds: float | None
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        """An unknown reading names why; a known one is a finite number from a
+        named source with a finite, non-negative age. Anything else cannot be
+        built, so no caller can hand the guard a half-formed reading (the
+        guard re-checks regardless)."""
+        if self.volts is None:
+            if not self.reason:
+                raise ValueError("an unknown supply voltage must carry its reason")
+            return
+        if isinstance(self.volts, bool) or not math.isfinite(self.volts):
+            raise ValueError(f"supply voltage must be a finite number, not {self.volts!r}")
+        if not self.source:
+            raise ValueError("a supply voltage must name its source")
+        age = self.age_seconds
+        if age is None or isinstance(age, bool) or not math.isfinite(age) or age < 0:
+            raise ValueError(f"a supply voltage needs a finite age >= 0 s, not {age!r}")
+
+    @classmethod
+    def unknown(cls, reason: str) -> SupplyVoltageReading:
+        return cls(volts=None, source=None, age_seconds=None, reason=reason)
+
+    def to_audit_dict(self) -> dict[str, Any]:
+        return {
+            "volts": self.volts,
+            "source": self.source,
+            "age_seconds": None if self.age_seconds is None else round(self.age_seconds, 3),
+            "reason": self.reason,
+        }
+
+
+def _row_instant(raw: object) -> datetime | None:
+    if isinstance(raw, str):
+        try:
+            return parse_iso_utc(raw)
+        except ValueError:
+            return None
+    if isinstance(raw, datetime):
+        return raw if raw.tzinfo else raw.replace(tzinfo=UTC)
+    return None
+
+
+def supply_voltage_from_latest_rows(
+    rows: Iterable[Mapping[str, Any]], *, now: datetime, max_age_seconds: float
+) -> SupplyVoltageReading:
+    """The production supply-voltage reader for :class:`NonvolatileWriteSignals`.
+
+    ``rows`` are latest-per-channel rows (``{source, channel, value,
+    timestamp}``, what ``dashboard.readers.read_latest_per_channel`` returns
+    for the session being written — pass the writer's live directory, or a
+    capture is invisible). Tries :data:`SUPPLY_VOLTAGE_SOURCES` in order and
+    returns the first whose newest value is a finite number stamped no more
+    than ``max_age_seconds`` before ``now`` (and not after it: a reading from
+    the future is a clock fault, not a fresh one). Anything else is an
+    unknown reading naming why each source failed, which the guard refuses.
+    Pure: the read stays with the caller.
+    """
+    wanted = {(source, channel) for source, channel in SUPPLY_VOLTAGE_SOURCES}
+    newest: dict[tuple[str, str], tuple[datetime | None, object]] = {}
+    for row in rows:
+        key = (str(row.get("source")), str(row.get("channel")))
+        if key not in wanted:
+            continue
+        stamp = _row_instant(row.get("timestamp"))
+        held = newest.get(key)
+        if held is None or (stamp is not None and (held[0] is None or stamp > held[0])):
+            newest[key] = (stamp, row.get("value"))
+    why: list[str] = []
+    for source, channel in SUPPLY_VOLTAGE_SOURCES:
+        name = f"{source}:{channel}"
+        entry = newest.get((source, channel))
+        if entry is None:
+            why.append(f"{name} has no reading in the latest rows")
+            continue
+        stamp, value = entry
+        if isinstance(value, bool) or not isinstance(value, numbers.Real):
+            why.append(f"{name} has no numeric value ({value!r})")
+            continue
+        volts = float(value)
+        if not math.isfinite(volts):
+            why.append(f"{name} is {volts!r}")
+            continue
+        if stamp is None:
+            why.append(f"{name} has no readable timestamp")
+            continue
+        age = (now - stamp).total_seconds()
+        if age < 0:
+            why.append(f"{name} is stamped {-age:.1f} s in the future (clock fault)")
+            continue
+        if age > max_age_seconds:
+            why.append(f"{name} is stale ({age:.1f} s old, limit {max_age_seconds:g} s)")
+            continue
+        return SupplyVoltageReading(volts=volts, source=name, age_seconds=age)
+    return SupplyVoltageReading.unknown("no fresh supply voltage: " + "; ".join(why))
+
+
 @dataclass(frozen=True)
 class NonvolatileWriteSignals:
     """Fresh inputs sampled at an authorization/block boundary."""
@@ -42,7 +170,9 @@ class NonvolatileWriteSignals:
     vehicle_state: VehicleState
     vehicle_speed_kph: float | None
     vehicle_speed_freshness_seconds: float | None
-    battery_voltage: float | None
+    #: A reading, not a number: an unknown voltage carries its reason, and the
+    #: guard re-checks the age itself (H03.2).
+    battery_voltage: SupplyVoltageReading
     ups_soc_percent: float | None
     ups_runtime_seconds: float | None
 
@@ -51,7 +181,7 @@ class NonvolatileWriteSignals:
             "vehicle_state": self.vehicle_state.to_dict(),
             "vehicle_speed_kph": self.vehicle_speed_kph,
             "vehicle_speed_freshness_seconds": self.vehicle_speed_freshness_seconds,
-            "battery_voltage": self.battery_voltage,
+            "battery_voltage": self.battery_voltage.to_audit_dict(),
             "ups_soc_percent": self.ups_soc_percent,
             "ups_runtime_seconds": self.ups_runtime_seconds,
         }
@@ -253,12 +383,32 @@ class NonvolatileWriteGuard:
             raise AuthorizationRefusedError(
                 "vehicle_moving", f"vehicle speed is {signals.vehicle_speed_kph:.2f} km/h"
             )
-        if signals.battery_voltage is None:
-            raise AuthorizationRefusedError("battery_unknown", "battery voltage is not reported")
-        if signals.battery_voltage < self.policy.min_battery_voltage:
+        battery = signals.battery_voltage
+        if battery.volts is None or not math.isfinite(battery.volts):
+            raise AuthorizationRefusedError(
+                "battery_unknown",
+                f"battery voltage unknown: {battery.reason or 'not reported'}",
+            )
+        # Re-checked here, not trusted from the reader: whatever built the
+        # reading, a stale or undated voltage never passes.
+        age = battery.age_seconds
+        # ``not (0 <= age <= max)`` rather than two ``<``/``>`` tests: every
+        # comparison with NaN is False, so the negated form refuses it.
+        if (
+            age is None
+            or not math.isfinite(age)
+            or not (0.0 <= age <= self.policy.max_signal_age_seconds)
+        ):
+            raise AuthorizationRefusedError(
+                "battery_stale",
+                f"battery voltage from {battery.source or 'an unnamed source'} is not fresh "
+                f"(age {battery.age_seconds!r} s, limit "
+                f"{self.policy.max_signal_age_seconds:g} s)",
+            )
+        if battery.volts < self.policy.min_battery_voltage:
             raise AuthorizationRefusedError(
                 "battery_low",
-                f"battery voltage {signals.battery_voltage:.2f} V is below "
+                f"battery voltage {battery.volts:.2f} V ({battery.source}) is below "
                 f"{self.policy.min_battery_voltage:.2f} V",
             )
         if signals.ups_soc_percent is None:
@@ -346,7 +496,10 @@ __all__ = [
     "NonvolatileWriteGuard",
     "NonvolatileWriteRequest",
     "NonvolatileWriteSignals",
+    "SUPPLY_VOLTAGE_SOURCES",
+    "SupplyVoltageReading",
     "authorize_nonvolatile_write",
     "execute_authorized_blocks",
     "sha256_image",
+    "supply_voltage_from_latest_rows",
 ]

@@ -26,17 +26,22 @@ one wrong width misattributes every value after it.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING
 
-from src.collection.kline.names import MEM_PREFIX
-from src.collection.kline.profile import KlineProfile, ModuleDid
+from src.collection.kline.names import MEM_PREFIX, did_channel
+from src.collection.kline.profile import KlineProfile, ModuleDid, load_kline_profile
 from src.collection.kline.protocol import (
     DidDescriptor,
     MemoryByteDescriptor,
     ValueDescriptor,
     value_widths,
 )
-from src.decode.dids import DidMap
+from src.decode.dids import DidMap, load_did_map
+
+if TYPE_CHECKING:
+    from src.config import CanaryConfig
 
 #: A 21-reply payload is at most 255 bytes including ``61 lid``.
 MAX_REPLY_DATA = 253
@@ -162,6 +167,18 @@ class ModulePlan:
     reads: tuple[ModuleDid, ...] = ()
     #: Send TesterPresent after this long without a request (``None``: never).
     tester_present_seconds: float | None = None
+    #: Each capture-profile entry, as written, and the ``<module>:<item>``
+    #: channel its rows are stored under (two flags of one word share one).
+    #: What lets capture quality score the profile's own entries (H05.8).
+    #: Not part of equality: ``0x1201`` and ``ECM:0x1201`` are one plan.
+    entry_channels: tuple[tuple[str, str], ...] = field(default=(), compare=False)
+
+    def entries_by_channel(self) -> dict[str, tuple[str, ...]]:
+        """Stored channel -> the profile entries its rows deliver."""
+        out: dict[str, tuple[str, ...]] = {}
+        for entry, channel in self.entry_channels:
+            out[channel] = (*out.get(channel, ()), entry)
+        return out
 
 
 def split_module(entry: str) -> tuple[str | None, str]:
@@ -190,6 +207,7 @@ def resolve_module_plan(
             "K-line is one wire and holds one session at a time"
         )
     ((label, tokens),) = grouped.items()
+    stripped = tuple(entry.strip() for entry in entries)
     try:
         address = profile.module_address(label)
     except LookupError as exc:
@@ -204,12 +222,18 @@ def resolve_module_plan(
             if reader is not None and reader.max_local_id_reply_bytes is not None
             else MAX_REPLY_DATA
         )
+        local = resolve_plan(tokens, did_map, max_reply_bytes=cap)
         return ModulePlan(
             address,
             label,
             "local_id",
-            local=resolve_plan(tokens, did_map, max_reply_bytes=cap),
+            local=local,
             tester_present_seconds=reader.tester_present_seconds if reader else None,
+            # resolve_plan keeps one channel per token, in order, or refuses.
+            entry_channels=tuple(
+                (entry, f"{label}:{channel.channel}")
+                for entry, channel in zip(stripped, local.channels, strict=True)
+            ),
         )
     if module is None or module.reader is None:
         raise KlinePlanError(
@@ -219,20 +243,73 @@ def resolve_module_plan(
     if module.reader.read_service != "common_id":
         raise KlinePlanError(f"{label}: a local_id reader is built only for the ECM")
     reads: list[ModuleDid] = []
-    for token in tokens:
+    entry_channels: list[tuple[str, str]] = []
+    for entry, token in zip(stripped, tokens, strict=True):
         try:
             did_entry, _ = module.resolve(token)
         except LookupError as exc:
             raise KlinePlanError(str(exc)) from exc
         if did_entry not in reads:  # two flags of one word are one read
             reads.append(did_entry)
+        entry_channels.append((entry, did_channel(label, did_entry.did)))
     return ModulePlan(
         address,
         label,
         "common_id",
         reads=tuple(reads),
         tester_present_seconds=module.reader.tester_present_seconds,
+        entry_channels=tuple(entry_channels),
     )
+
+
+@dataclass(frozen=True)
+class KlineCatalog:
+    """What a ``kline:`` list is resolved against, and the one loader for it.
+
+    The K-line collector resolves a capture profile's list when it starts a
+    session; the capture-profile store resolves the same list when the
+    profile is saved (H05.8), so an unknown name or a DID with no recorded
+    width is refused at save, with the same message the collector would log,
+    instead of the capture sitting idle all drive. One method, so the two can
+    never disagree about what is readable.
+    """
+
+    #: The vehicle's K-line profile (``daemon.kline_profile``).
+    profile_path: Path
+    #: The DID / memory catalog (``data/dids.yaml``).
+    dids_path: Path
+    #: ``hardware.kline.poll_interval_seconds``: a pause past P3max drops a
+    #: session whose module never answered TesterPresent.
+    poll_interval_seconds: float = 0.0
+
+    @classmethod
+    def from_config(cls, config: CanaryConfig) -> KlineCatalog:
+        from src.paths import DIDS_YAML
+
+        return cls(
+            config.daemon.kline_profile,
+            DIDS_YAML,
+            config.hardware.kline.poll_interval_seconds,
+        )
+
+    def resolve(self, entries: Sequence[str]) -> tuple[KlineProfile, ModulePlan]:
+        """Load both catalogs and resolve ``entries``, or refuse.
+
+        Raises :class:`KlinePlanError` for a list that cannot be read as
+        asked, ``KlineNotConfiguredError`` (a ``LookupError``) when the
+        vehicle has no K-line profile, ``ValueError`` for an unreadable one.
+        """
+        profile = load_kline_profile(self.profile_path)
+        did_map = load_did_map(self.dids_path)
+        plan = resolve_module_plan(entries, profile, did_map)
+        pause_ms = self.poll_interval_seconds * 1000.0
+        if plan.tester_present_seconds is None and pause_ms >= profile.timing.p3_max_ms:
+            raise KlinePlanError(
+                f"poll_interval_seconds {self.poll_interval_seconds:g} outlasts "
+                f"P3max ({profile.timing.p3_max_ms:g} ms) and {plan.label} was never seen "
+                "to answer TesterPresent, so the session would drop between polls"
+            )
+        return profile, plan
 
 
 def split_reply(plan: KlinePlan, values: Sequence[bytes]) -> list[tuple[str, bytes]]:
@@ -249,6 +326,7 @@ def split_reply(plan: KlinePlan, values: Sequence[bytes]) -> list[tuple[str, byt
 
 
 __all__ = [
+    "KlineCatalog",
     "KlinePlan",
     "KlinePlanError",
     "ModulePlan",

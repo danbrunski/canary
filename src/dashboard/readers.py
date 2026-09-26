@@ -137,7 +137,17 @@ def read_latest_per_channel(
     table = decode_on_read(table, on_read_catalog())[_PER_CHANNEL_COLUMNS]
     table["timestamp"] = pd.to_datetime(table["timestamp"], utc=True)
     table = table.sort_values("timestamp", kind="stable")
-    latest_rows = table.groupby(["source", "channel"], as_index=False).last()
+    # The literal newest row per channel. ``groupby(...).last()`` takes the
+    # last *non-null* value of each column separately, so a newest row with no
+    # number (``NO DATA``, a NaN) came back wearing its own fresh timestamp
+    # and an older row's ``value_number``: a stale 12.6 V read as current,
+    # which the non-volatile write gate's voltage check would have accepted
+    # (H03.2 verification, 2026-09-26). The newest row says what it says.
+    latest_rows = (
+        table.groupby(["source", "channel"], sort=False)
+        .tail(1)
+        .sort_values(["source", "channel"], kind="stable")
+    )
     rows: list[dict[str, Any]] = []
     for record in latest_rows.to_dict(orient="records"):
         rows.append(_normalize_telemetry_row({str(k): v for k, v in record.items()}))

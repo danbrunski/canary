@@ -67,6 +67,25 @@ def test_addressed_frames_name_uprevs_tester_address() -> None:
     assert {(f.source, f.target) for f in starts} == {(0xFC, 0x10)}
 
 
+def test_every_frame_after_a_start_names_the_tester_both_ways() -> None:
+    """H06.4: length-byte frames carry no address, so the tester's comes from
+    the StartCommunication, like the module; both directions carry it."""
+    _, frames = _decode(STREAM)
+    assert {f.tester for f in frames} == {0xFC}
+    assert {f.direction for f in frames} == {"tester", "ecu"}
+
+
+def test_the_tester_is_unknown_before_a_start_and_forgotten_after_a_stop() -> None:
+    from tests.builders import abs_scan_tool_frames, kline_wire
+
+    _, frames = _decode(kline_wire(abs_scan_tool_frames(cycles=1)))
+    assert [f.tester for f in frames[:2]] == [None, None]  # attached mid-session
+    stop = next(i for i, f in enumerate(frames) if f.payload == b"\xc2")
+    assert {f.tester for f in frames[2 : stop + 1]} == {0xFC}
+    # The next session is its own StartCommunication's, which names it again.
+    assert {f.tester for f in frames[stop + 1 :]} == {0xFC}
+
+
 def test_requests_pair_with_their_replies() -> None:
     _, frames = _decode(STREAM)
     pairs = list(exchanges(frames))

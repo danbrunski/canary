@@ -85,3 +85,33 @@ def test_a_module_whose_reader_is_the_wrong_service_is_refused() -> None:
 
     with pytest.raises(KlinePlanError, match="only a local_id reader is built for the ECM"):
         resolve_module_plan(("0x1201",), _profile(ecm_by_common_id), DIDS)
+
+
+def test_each_entry_names_the_channel_its_rows_are_stored_under() -> None:
+    """H05.8: capture quality scores entries; rows are stored by channel."""
+    ecm = resolve_module_plan((" 0x1201", "ECM:ECM_TARGET_EQUIV_RATIO"), PROFILE, DIDS)
+    assert ecm.entry_channels == (
+        ("0x1201", "ECM:1201"),
+        ("ECM:ECM_TARGET_EQUIV_RATIO", "ECM:MEM_ECM_TARGET_EQUIV_RATIO"),
+    )
+    abs_plan = resolve_module_plan(
+        ("ABS:STOP_LAMP_SWITCH", "ABS:OFF_SWITCH", "ABS:ENGINE_SPEED"), PROFILE, DIDS
+    )
+    # Two flags of one word are one read and one stored channel, two entries.
+    assert abs_plan.entries_by_channel() == {
+        "ABS:1303": ("ABS:STOP_LAMP_SWITCH", "ABS:OFF_SWITCH"),
+        "ABS:1202": ("ABS:ENGINE_SPEED",),
+    }
+
+
+def test_the_collector_and_the_profile_store_share_one_resolver(tmp_path: Path) -> None:
+    from src.collection.kline.plan import KlineCatalog
+    from src.collection.kline.profile import KlineNotConfiguredError
+
+    catalog = KlineCatalog(PROFILE_PATH, Path("data/dids.yaml"))
+    profile, plan = catalog.resolve(("0x1201",))
+    assert profile.ecm_address == plan.address == 0x10
+    with pytest.raises(KlinePlanError, match="outlasts P3max"):
+        KlineCatalog(PROFILE_PATH, Path("data/dids.yaml"), 6.0).resolve(("0x1201",))
+    with pytest.raises(KlineNotConfiguredError):
+        KlineCatalog(tmp_path / "absent.yaml", Path("data/dids.yaml")).resolve(("0x1201",))

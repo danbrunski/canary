@@ -348,6 +348,29 @@ async def test_another_tester_owns_the_session_while_it_talks() -> None:
     assert tx_gate.ecm_session_owner() == "can_diagnostics"
 
 
+async def test_status_names_the_foreign_tester_and_when_it_was_last_heard() -> None:
+    """H06.4 enter / hold / release, with who held it: UpRev is tester 0xFC
+    talking to the ECM (0x10)."""
+    assert tx_gate.snapshot()["foreign_tester"] is None
+    before = time.time()
+    collector = _sniffer([()])
+    await _sniff_until_drained(collector, asyncio.Queue())
+    snap = tx_gate.snapshot()
+    assert snap["ecm_session_owner"] == "foreign"  # enter
+    heard = snap["foreign_tester"]
+    assert (heard["tester_address"], heard["module_address"]) == ("FC", "10")
+    assert heard["seconds_since_heard"] < 5.0
+    from datetime import datetime
+
+    assert datetime.fromisoformat(heard["last_heard_at"]).timestamp() >= before - 1.0
+    assert tx_gate.check_expiry() is False  # hold: inside foreign_hold_seconds
+    assert tx_gate.ecm_session_owner() == "foreign"
+    tx_gate.check_expiry(now=float("inf"))  # release
+    released = tx_gate.snapshot()
+    assert released["ecm_session_owner"] == "can_diagnostics"
+    assert released["foreign_tester"]["tester_address"] == "FC"  # still explained
+
+
 async def test_a_capture_request_waits_for_the_foreign_tester() -> None:
     from src.collection.kline.transport import Mode
 
@@ -686,6 +709,7 @@ async def test_a_scan_tool_on_the_abs_is_named_and_leaves_can_polling_alone() ->
     assert MODULE_SESSIONS.owner(0x28) == "foreign"
     # Its last frames were the ECM's, so CAN steps aside for that hold too.
     assert tx_gate.ecm_session_owner() == "foreign"
+    assert tx_gate.snapshot()["foreign_tester"]["module_address"] == "10"
 
 
 def test_another_modules_local_ids_are_laid_out_only_by_its_own_widths() -> None:
@@ -698,3 +722,61 @@ def test_another_modules_local_ids_are_laid_out_only_by_its_own_widths() -> None
     abs_widths = module_did_widths(profile, 0x28, ecm_widths)
     assert 0x1201 not in abs_widths and abs_widths[0x1202] == 2
     assert module_did_widths(profile, None, ecm_widths) == {}
+
+
+# --------------------------------------------------------------------------
+# H05.8 — capture quality learns the achieved K-line rate
+# --------------------------------------------------------------------------
+
+
+async def _ledger_after(collector: KlineCollector, records: int) -> dict[str, object]:
+    from src.collection import capture_lifetime
+
+    capture_lifetime._reset_for_tests()
+    capture_lifetime.begin(time.monotonic(), profile="kline-target", generation=1)
+    stop = asyncio.Event()
+    task, _ = await _records_until(collector, records, stop)
+    stop.set()
+    await task
+    snap = capture_lifetime.snapshot(time.monotonic())
+    capture_lifetime._reset_for_tests()
+    assert snap is not None
+    return snap.to_dict()
+
+
+async def test_each_profile_entry_is_observed_for_capture_quality() -> None:
+    from src.collection.capture_quality import evaluate_capture_quality
+
+    lifetime = await _ledger_after(_collector([ENTRIES]), 20)
+    channels = lifetime["channels"]
+    assert isinstance(channels, dict)
+    # Keyed by the entry as the profile wrote it, never by the stored channel.
+    assert set(channels) == {"kline:0x1201", "kline:ECM_TARGET_EQUIV_RATIO"}
+    assert all(row["observations"] >= 10 for row in channels.values())
+    quality = evaluate_capture_quality(
+        profile={"name": "kline-target", "mode01": {}, "kline": list(ENTRIES)},
+        lifetime=lifetime,
+    )
+    rows = {row.channel: row for row in quality.channels}
+    assert set(rows) == set(channels)
+    assert all(row.cadence["hz"] and row.cadence["hz"] > 0 for row in rows.values())
+    assert {row.status for row in rows.values()} == {"ok"}
+
+
+async def test_two_flags_of_one_abs_word_are_both_observed() -> None:
+    entries = ("ABS:STOP_LAMP_SWITCH", "ABS:OFF_SWITCH", "ABS:ENGINE_SPEED")
+    lifetime = await _ledger_after(_abs_collector([entries]), 6)
+    channels = lifetime["channels"]
+    assert isinstance(channels, dict)
+    assert set(channels) == {f"kline:{entry}" for entry in entries}
+
+
+async def test_no_capture_armed_means_no_ledger_rows() -> None:
+    from src.collection import capture_lifetime
+
+    capture_lifetime._reset_for_tests()
+    stop = asyncio.Event()
+    task, _ = await _records_until(_collector([ENTRIES]), 4, stop)
+    stop.set()
+    await task
+    assert capture_lifetime.snapshot(time.monotonic()) is None

@@ -50,6 +50,23 @@ def mem_channel(module: str, name: str) -> str:
     return f"{module}:{MEM_PREFIX}{name}"
 
 
+#: Prefix of a capture-profile ``kline:`` entry's key in the capture ledger
+#: (``capture_lifetime``) and in capture quality's channel table.
+CAPTURE_KEY_PREFIX = "kline:"
+
+
+def capture_key(entry: str) -> str:
+    """``ECM_TARGET_EQUIV_RATIO`` -> ``kline:ECM_TARGET_EQUIV_RATIO``.
+
+    Capture quality scores what the profile *asked for*, by the entry as the
+    operator wrote it; the collector, which knows which stored channel each
+    entry resolved to (``ModulePlan.entry_channels``), observes under this key
+    (H05.8). Prefixed so a K-line entry never shares a ledger row with a Mode
+    01 PID or a Mode 22 DID of the same spelling.
+    """
+    return f"{CAPTURE_KEY_PREFIX}{entry.strip()}"
+
+
 def is_legacy(channel: str) -> bool:
     """A pre-K01.1 value row: no module in its name."""
     return ":" not in channel and channel.startswith(LEGACY_PREFIXES)
@@ -81,12 +98,14 @@ def parse_channel(channel: str) -> KlineChannel | None:
 
 
 __all__ = [
+    "CAPTURE_KEY_PREFIX",
     "FRAME_CHANNEL",
     "LEGACY_DID_PREFIX",
     "LEGACY_MEM_PREFIX",
     "LEGACY_PREFIXES",
     "LEGACY_RAM_PREFIX",
     "KlineChannel",
+    "capture_key",
     "did_channel",
     "is_legacy",
     "mem_channel",

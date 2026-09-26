@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.collection import tuning_profile, tx_gate
 from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.kline.plan import KlineCatalog
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
@@ -548,6 +549,7 @@ async def run_daemon(
             config.collection,
             config.daemon.behavior_models,
             custom_pids_path=config.daemon.custom_pids,
+            kline_catalog=KlineCatalog.from_config(config),
         ),
         health_monitor=components.health_monitor,
     )

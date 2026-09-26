@@ -82,7 +82,7 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
   `kline:FRAME` rows and its `22 11 03` reads decoded (`0x99`/`0x9A`, a live
   value); its logging set stays raw until the five missing widths are known.
   `tests/test_kline_collector.py`.
-- [~] **H06.4 Foreign tester detection.** **Do:** traffic from a tester that
+- [x] **H06.4 Foreign tester detection.** **Do:** traffic from a tester that
   is not CANary moves session ownership to `foreign`, which holds until the
   line has been quiet for a configured time after that tester's
   StopCommunication or last frame. **Accept:** tests for enter, hold and
@@ -98,6 +98,25 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
   a K-line request never switches to command mode while foreign. **Owed:**
   `/status` shows the owner and the claim's remaining hold, but not yet the
   foreign tester's address or when it was last heard.
+
+  **Done (2026-09-26):** `/status.passive` (and `/control/passive`) now carry
+  `foreign_tester`: `{tester_address, module_address, last_heard_at,
+  seconds_since_heard}` (`"FC"`, `"10"`, ISO UTC, seconds), `null` until
+  another tester is heard, kept after the claim expires so a CAN pause stays
+  explained. The decoder gives every frame a `tester` address
+  (`SniffedFrame.tester`: an addressed frame's source for a request / target
+  for a reply, inherited by length-byte frames from the StartCommunication
+  reply and forgotten at StopCommunication or wake-up, like `module`); the
+  sniffer calls `tx_gate.note_foreign_tester` for each of another tester's
+  frames beside the claim it renews; `reset_ecm_session_claims` clears it.
+  `src/dashboard/status.py` unchanged: the field rides on `tx_gate.snapshot()`,
+  which both `/status` views already embed. Tests: UpRev's session names
+  tester `0xFC` on every frame and the ABS builder's mid-session frames
+  `None` (`tests/test_kline_sniff.py`); snapshot, expiry-survival and reset
+  (`tests/test_tx_gate.py`); enter / hold / release with UpRev's address
+  (`test_status_names_the_foreign_tester_and_when_it_was_last_heard`,
+  `tests/test_kline_collector.py`); full and compact `/status`
+  (`tests/test_control_passive.py`); the process-state reset covers it.
 ## Truck
 
 - [ ] **H06.5 Known answer: sniffed values equal UpRev's own log.** **Do

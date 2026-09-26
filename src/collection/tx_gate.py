@@ -76,6 +76,8 @@ import logging
 import os
 import threading
 import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -142,6 +144,42 @@ EcmSessionHolder = Literal["kline", "foreign"]
 EcmSessionOwner = Literal["can_diagnostics", "kline", "foreign"]
 #: Holder -> ``time.monotonic()`` expiry, or ``None`` for "until released".
 _claims: dict[str, float | None] = {}
+
+
+@dataclass(frozen=True)
+class ForeignTester:
+    """The last frame another tester sent, as the K-line sniffer heard it (H06.4).
+
+    ``foreign`` in ``ecm_session_owner`` says *that* someone else holds the
+    session; this says *who* — the tester's own K-line address (``F1`` for a
+    generic scan tool; UpRev uses its own) and the module it was talking to —
+    and *when*, so an operator reading ``/status`` can tell a live UpRev
+    session from one that went quiet a minute ago. Kept after the claim is
+    released: "last heard 3 min ago" is the answer to "why did CAN pause?".
+    """
+
+    tester_address: int | None
+    module_address: int | None
+    heard_monotonic: float
+    heard_wall: float
+
+    def to_dict(self, now: float) -> dict[str, Any]:
+        return {
+            "tester_address": _hex_address(self.tester_address),
+            "module_address": _hex_address(self.module_address),
+            "last_heard_at": datetime.fromtimestamp(self.heard_wall, UTC).isoformat(),
+            "seconds_since_heard": round(max(0.0, now - self.heard_monotonic), 1),
+        }
+
+
+def _hex_address(address: int | None) -> str | None:
+    # The K-line module registry's spelling (``kline.sessions``): ``10``, ``F1``.
+    return None if address is None else f"{address:02X}"
+
+
+#: The most recent foreign tester frame, or ``None`` if none was heard since
+#: start-up (or the last :func:`reset_ecm_session_claims`).
+_foreign_tester: ForeignTester | None = None
 
 
 def _owner_locked() -> EcmSessionOwner:
@@ -216,10 +254,39 @@ def release_ecm_session(holder: EcmSessionHolder, *, now: float | None = None) -
     _owner_changed(previous, current, effective_now)
 
 
+def note_foreign_tester(
+    *,
+    tester_address: int | None,
+    module_address: int | None,
+    now: float | None = None,
+    now_wall: float | None = None,
+) -> None:
+    """Record that another tester was just heard (H06.4).
+
+    Called by the K-line sniffer for every frame another tester sends, beside
+    the claim it renews; ``None`` addresses mean "not known" (the capture
+    attached mid-session, before any addressed frame). Shown in
+    :func:`snapshot` as ``foreign_tester``.
+    """
+    global _foreign_tester
+    heard = ForeignTester(
+        tester_address=tester_address,
+        module_address=module_address,
+        heard_monotonic=time.monotonic() if now is None else now,
+        heard_wall=time.time() if now_wall is None else now_wall,
+    )
+    with _lock:
+        _foreign_tester = heard
+
+
 def reset_ecm_session_claims(*, now: float | None = None) -> None:
-    """Drop every claim (test and validation-harness setup)."""
+    """Drop every claim and the last foreign tester heard (test and
+    validation-harness setup)."""
+    global _foreign_tester
     for holder in ("foreign", "kline"):
         release_ecm_session(holder, now=now)
+    with _lock:
+        _foreign_tester = None
 
 
 def _persist_locked(enabled: bool, source: str, ttl_seconds: float | None) -> None:
@@ -496,6 +563,11 @@ def snapshot(*, now: float | None = None) -> dict[str, Any]:
                 for holder, deadline in sorted(_claims.items())
             },
             "tx_suppressed": _passive or bool(_claims),
+            # H06.4: who the foreign owner is and when it last spoke; kept
+            # after its claim expires. ``None``: no other tester heard.
+            "foreign_tester": (
+                None if _foreign_tester is None else _foreign_tester.to_dict(effective_now)
+            ),
             # D03.30: whether an arm is written where the next process will
             # restore it. False while armed means a restart drops it.
             "survives_restart": _passive and _persisted,
@@ -533,6 +605,7 @@ __all__ = [
     "PASSIVE_ENV_VAR",
     "EcmSessionHolder",
     "EcmSessionOwner",
+    "ForeignTester",
     "PASSIVE_STATE_FILENAME",
     "PASSIVE_STATE_VERSION",
     "UNTRUSTED_STATE_SOURCE",
@@ -542,6 +615,7 @@ __all__ = [
     "passive_state_path",
     "ecm_session_owner",
     "is_passive",
+    "note_foreign_tester",
     "passive_armed",
     "release_ecm_session",
     "reset_ecm_session_claims",

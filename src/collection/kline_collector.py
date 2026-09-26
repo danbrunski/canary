@@ -54,18 +54,18 @@ import asyncio
 import logging
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from queue import Empty, SimpleQueue
 
-from src.collection import tuning_profile, tx_gate
+from src.collection import capture_lifetime, tuning_profile, tx_gate
 from src.collection.kline import protocol as kp
-from src.collection.kline.names import FRAME_CHANNEL, did_channel, ram_channel
+from src.collection.kline.names import FRAME_CHANNEL, capture_key, did_channel, ram_channel
 from src.collection.kline.plan import (
+    KlineCatalog,
     KlinePlan,
     KlinePlanError,
     ModulePlan,
-    resolve_module_plan,
     split_reply,
 )
 from src.collection.kline.profile import (
@@ -88,7 +88,7 @@ from src.collection.kline.transport import (
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import ReconnectPolicy, wait_for_stop_or_timeout
 from src.config import KlineConfig
-from src.decode.dids import DidMap, load_did_map
+from src.decode.dids import load_did_map
 from src.telemetry import KLINE_SOURCE, TelemetryRecord
 
 log = logging.getLogger(__name__)
@@ -165,6 +165,21 @@ def did_record(
         payload=value,
         metadata=metadata,
     )
+
+
+def _observe_for_capture(
+    by_channel: Mapping[str, tuple[str, ...]], records: Iterable[TelemetryRecord]
+) -> None:
+    """Feed the capture ledger one observation per profile entry delivered.
+
+    Keyed by the entry (:func:`~src.collection.kline.names.capture_key`), so
+    capture quality reports the achieved K-line rate of what the profile
+    asked for (H05.8). A no-op while no capture is armed.
+    """
+    now = time.monotonic()
+    for record in records:
+        for entry in by_channel.get(record.channel, ()):
+            capture_lifetime.observe(capture_key(entry), now)
 
 
 class KlineCollector:
@@ -303,18 +318,13 @@ class KlineCollector:
                 delay = self._policy.next_delay(delay)
 
     def _prepare(self, entries: tuple[str, ...]) -> tuple[KlineProfile, ModulePlan] | None:
-        """Load the vehicle profile and resolve the plan, or say why not (once)."""
+        """Load the vehicle profile and resolve the plan, or say why not (once).
+
+        The resolution is :meth:`KlineCatalog.resolve`, the same one a
+        capture-profile save runs (H05.8)."""
+        catalog = KlineCatalog(self.profile_path, self.dids_path, self.config.poll_interval_seconds)
         try:
-            profile = load_kline_profile(self.profile_path)
-            did_map: DidMap = load_did_map(self.dids_path)
-            plan = resolve_module_plan(entries, profile, did_map)
-            pause_ms = self.config.poll_interval_seconds * 1000.0
-            if plan.tester_present_seconds is None and pause_ms >= profile.timing.p3_max_ms:
-                raise KlinePlanError(
-                    f"poll_interval_seconds {self.config.poll_interval_seconds:g} outlasts "
-                    f"P3max ({profile.timing.p3_max_ms:g} ms) and {plan.label} was never seen "
-                    "to answer TesterPresent, so the session would drop between polls"
-                )
+            profile, plan = catalog.resolve(entries)
         except (KlineNotConfiguredError, KlinePlanError, ValueError) as exc:
             log.error(
                 "K-line requested by the capture profile but cannot run: %s",
@@ -388,20 +398,23 @@ class KlineCollector:
         if acknowledged[:1] != bytes([LOCAL_ID]):
             raise kp.KlineProtocolError(f"definition acknowledged as {acknowledged.hex()}")
         poll = kp.read_local_id(LOCAL_ID, profile.trailer())
+        by_channel = plan.entries_by_channel()
         while self._may_continue(entries, stop):
             started = self._clock()
             params = await asyncio.to_thread(transport.request, poll)
             finished = self._clock()
             self.replies += 1
-            for record in plan_records(
+            records = plan_records(
                 plan.local,
                 params,
                 started=started,
                 finished=finished,
                 module=plan.label,
                 address=plan.address,
-            ):
+            )
+            for record in records:
                 put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+            _observe_for_capture(by_channel, records)
             await self._pause(transport, plan, entries, stop)
 
     async def _poll_common_ids(
@@ -413,6 +426,7 @@ class KlineCollector:
         queue: asyncio.Queue[TelemetryRecord],
         stop: asyncio.Event,
     ) -> None:
+        by_channel = plan.entries_by_channel()
         while self._may_continue(entries, stop):
             for entry in plan.reads:
                 if not self._may_continue(entries, stop):
@@ -435,18 +449,16 @@ class KlineCollector:
                         f"the profile records {entry.width}"
                     )
                 self.replies += 1
-                put_nowait_or_drop(
-                    queue,
-                    did_record(
-                        entry.did,
-                        value,
-                        started=started,
-                        finished=finished,
-                        module=plan.label,
-                        address=plan.address,
-                    ),
-                    on_drop=self.drop_counter,
+                record = did_record(
+                    entry.did,
+                    value,
+                    started=started,
+                    finished=finished,
+                    module=plan.label,
+                    address=plan.address,
                 )
+                put_nowait_or_drop(queue, record, on_drop=self.drop_counter)
+                _observe_for_capture(by_channel, (record,))
             await self._pause(transport, plan, entries, stop)
 
     async def _pause(
@@ -517,6 +529,9 @@ class KlineCollector:
                             self.foreign_frames += 1
                             hold = self.config.foreign_hold_seconds
                             MODULE_SESSIONS.claim(frame.module, "foreign", ttl_seconds=hold)
+                            tx_gate.note_foreign_tester(
+                                tester_address=frame.tester, module_address=frame.module
+                            )
                             if frame.module in (None, profile.ecm_address):
                                 tx_gate.claim_ecm_session("foreign", ttl_seconds=hold)
                         for record in recorder.observe(frame, frame.finished + to_epoch):

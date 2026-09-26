@@ -24,6 +24,7 @@ from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.kline.plan import KlineCatalog
 from src.collection.obd_scheduler import ForcePollTrigger
 from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
@@ -175,6 +176,7 @@ def create_app(
         config.collection,
         behavior_models_path,
         custom_pids_path=config.daemon.custom_pids,
+        kline_catalog=KlineCatalog.from_config(config),
     )
     # Stash them on app.state so producer threads / app extensions can reach
     # the same instances after construction.

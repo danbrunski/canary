@@ -97,6 +97,24 @@ def test_status_surfaces_passive_state(tmp_path: Path) -> None:
     assert status["passive"]["enabled"] is True
 
 
+def test_status_names_a_foreign_tester_heard_on_k_line(tmp_path: Path) -> None:
+    """H06.4: /status says who holds the ECM session and when it last spoke."""
+    client = _api(tmp_path)
+    assert client.get("/status").json()["passive"]["foreign_tester"] is None
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=60.0)
+    tx_gate.note_foreign_tester(tester_address=0xFC, module_address=0x10)
+    try:
+        full = client.get("/status").json()["passive"]
+        compact = client.get("/status", params={"view": "compact"}).json()["passive"]
+    finally:
+        tx_gate.reset_ecm_session_claims()
+    assert full["ecm_session_owner"] == "foreign"
+    assert full["foreign_tester"]["tester_address"] == "FC"
+    assert full["foreign_tester"]["module_address"] == "10"
+    assert full["foreign_tester"]["last_heard_at"]
+    assert compact["foreign_tester"]["tester_address"] == "FC"
+
+
 def test_tuning_mode_routes_require_auth(tmp_path: Path) -> None:
     client = _api(tmp_path)
     assert client.get("/control/tuning-mode").status_code == 401

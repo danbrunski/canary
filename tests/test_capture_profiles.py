@@ -1499,3 +1499,134 @@ def test_capture_autostart_starts_warm_and_stops_with_the_engine(
 
         disarmed = client.delete("/control/capture/autostart", headers=headers)
         assert disarmed.json() == {"armed": False, "was_armed": True}
+
+
+# --- H05.8: a profile's kline: list is resolved against the catalog at save ---
+
+KLINE_PROFILE = REPO_ROOT / "data" / "nissan-xterra-2008" / "kline.yaml"
+DIDS_YAML = REPO_ROOT / "data" / "dids.yaml"
+
+
+def _kline_store(
+    tmp_path: Path, *, profile_path: Path = KLINE_PROFILE, poll_interval_seconds: float = 0.0
+) -> CaptureProfileStore:
+    from src.collection.kline.plan import KlineCatalog
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return CaptureProfileStore(
+        tmp_path / "vehicle" / "capture_profiles.yaml",
+        config.collection,
+        tmp_path / "missing-behavior-models.yaml",
+        kline_catalog=KlineCatalog(profile_path, DIDS_YAML, poll_interval_seconds),
+    )
+
+
+def _kline_profile(*entries: str) -> CaptureProfile:
+    return CaptureProfile(
+        name="kline-target",
+        description="K-line target AFR",
+        mode01={"RPM": 1.0},
+        kline=entries,
+        corpus_eligible=False,
+        storage_prefix="_capture-kline-target",
+    )
+
+
+def test_a_readable_kline_list_saves(tmp_path: Path) -> None:
+    store = _kline_store(tmp_path)
+    store.save(_kline_profile("0x1201", "ECM_TARGET_EQUIV_RATIO"))
+    saved = store.load().by_name("kline-target")
+    assert saved is not None and saved.kline == ("0x1201", "ECM_TARGET_EQUIV_RATIO")
+    store.save(_kline_profile("ABS:ENGINE_SPEED", "ABS:0x1102"), previous_name="kline-target")
+
+
+@pytest.mark.parametrize(
+    ("entries", "named"),
+    [
+        (("NOT_A_CHANNEL",), "neither a DID nor a memory channel"),
+        (("0x1117",), "0x1117"),  # a DID with no recorded width
+        (("ABS:1202", "0x1201"), "one wire"),
+        (("TCM:1202",), "no K-line module named 'TCM'"),
+    ],
+)
+def test_an_unreadable_kline_list_is_refused_at_save_by_name(
+    tmp_path: Path, entries: tuple[str, ...], named: str
+) -> None:
+    store = _kline_store(tmp_path)
+    with pytest.raises(ValueError, match=named):
+        store.save(_kline_profile(*entries))
+    assert store.load().by_name("kline-target") is None
+
+
+def test_save_refuses_with_the_collectors_own_message(tmp_path: Path) -> None:
+    """The same resolution as run time, not a copy: the P3max rule that only
+    the collector used to apply refuses at save too."""
+    store = _kline_store(tmp_path, poll_interval_seconds=6.0)
+    with pytest.raises(ValueError, match="outlasts P3max"):
+        store.save(_kline_profile("0x1201"))
+
+
+def test_a_vehicle_without_a_kline_profile_refuses_a_kline_list(tmp_path: Path) -> None:
+    store = _kline_store(tmp_path, profile_path=tmp_path / "no-kline.yaml")
+    with pytest.raises(ValueError, match="K-line not configured"):
+        store.save(_kline_profile("0x1201"))
+    # A profile without K-line channels never needs the K-line catalog.
+    store.save(_kline_profile().model_copy(update={"kline": ()}))
+
+
+def test_a_store_without_a_kline_catalog_refuses_rather_than_skips(tmp_path: Path) -> None:
+    store = _store(tmp_path, CanaryConfig.from_yaml(EXAMPLE_YAML))
+    with pytest.raises(ValueError, match="no K-line catalog"):
+        store.save(_kline_profile("0x1201"))
+
+
+def test_the_save_route_answers_409_naming_the_unreadable_entry(tmp_path: Path) -> None:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            capture_profile_store=_kline_store(tmp_path),
+        )
+    )
+    body = _kline_profile("NOT_A_CHANNEL").model_dump(mode="json")
+    response = client.put(
+        "/control/capture/profiles",
+        headers={"Authorization": "Bearer secret"},
+        json={"profile": body},
+    )
+    assert response.status_code == 409
+    assert "NOT_A_CHANNEL" in response.json()["detail"]
+
+
+def test_the_apps_own_store_checks_kline_against_the_configured_catalog(
+    tmp_path: Path,
+) -> None:
+    """``create_app`` without an injected store builds one from config; it must
+    carry the catalog, or a K-line profile could only ever be refused."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = config.model_copy(
+        update={
+            "daemon": config.daemon.model_copy(
+                update={
+                    "capture_profiles": tmp_path / "capture_profiles.yaml",
+                    "kline_profile": KLINE_PROFILE,
+                }
+            )
+        }
+    )
+    client = TestClient(
+        create_app(config, anomalies_dir=tmp_path / "anomalies", control_token="secret")
+    )
+    headers = {"Authorization": "Bearer secret"}
+    bad = _kline_profile("NOT_A_CHANNEL").model_dump(mode="json")
+    refused = client.put("/control/capture/profiles", headers=headers, json={"profile": bad})
+    assert refused.status_code == 409
+    assert "neither a DID nor a memory channel" in refused.json()["detail"]
+    good = _kline_profile("ECM_TARGET_EQUIV_RATIO").model_dump(mode="json")
+    saved = client.put("/control/capture/profiles", headers=headers, json={"profile": good})
+    assert saved.status_code == 200
+    # The daemon's store (runtime.py) is built the same way.
+    runtime_src = (REPO_ROOT / "src" / "daemon" / "runtime.py").read_text()
+    assert "kline_catalog=KlineCatalog.from_config(config)" in runtime_src

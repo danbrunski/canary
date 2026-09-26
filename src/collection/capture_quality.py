@@ -57,6 +57,7 @@ from src.collection.capture_losses import (
     VERIFIED,
     unknown_losses,
 )
+from src.collection.kline.names import capture_key
 from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
@@ -135,6 +136,20 @@ HARD_CLAUSES = frozenset(
 )
 
 TUPLE_CHANNEL = "__tuple__"
+
+#: ``kind`` of a capture profile's ``kline:`` entry in the channel table
+#: (H05.8). Scored on the capture ledger, which the K-line collector feeds per
+#: entry; its cadence is the achieved K-line rate.
+KLINE_KIND = "kline"
+#: The pause reason CANary's own K-line session opens (``tx_gate``: the ECM's
+#: diagnostic session moves to ``kline``, so CAN diagnostics pause). For a
+#: K-line channel that window is its own acquisition time, never a pause.
+KLINE_SESSION_PAUSE = "ecm-session-kline"
+#: ``lifetime["source"]`` when the ledger was rebuilt from persisted rows
+#: (``src.analysis.capture_coverage.SOURCE_ROWS``, pinned equal by a test).
+#: That rebuild reads Mode 01/22 rows only, so K-line entries are not scored
+#: from it rather than being reported as never answered.
+ROWS_LIFETIME_SOURCE = "persisted_rows"
 
 Windows = list[tuple[float, float]]
 
@@ -461,6 +476,59 @@ def profile_requests(
     return rows
 
 
+def kline_requests(profile: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """One request row per ``kline:`` entry of the profile, keyed as the
+    collector observes it. No ``configured_rate_hz``: the profile names no
+    K-line rate, so the achieved one is reported and never judged a
+    shortfall."""
+    rows: list[dict[str, Any]] = []
+    for entry in profile.get("kline") or ():
+        key = capture_key(str(entry))
+        rows.append(
+            {
+                "channel": key,
+                "profile_channel": key,
+                "kind": KLINE_KIND,
+                "capture_selected": True,
+            }
+        )
+    return rows
+
+
+def kline_pause_windows(lifetime: Mapping[str, Any] | None, elapsed: float) -> Windows | None:
+    """The pause windows that are pauses for a K-line channel.
+
+    Every window opened by CANary's own K-line session is K-line acquisition
+    time, so it is kept out; a window that *also* names another reason is
+    kept out too, because the ledger merges overlapping reasons into one
+    window and its K-line part cannot be told apart. **Known cost:** passive
+    armed mid-session joins the open K-line window, which then stays open
+    until passive disarms, so the whole passive tail after the session counts
+    as eligible K-line time. The silence there is an ``acquisition_gap`` — a
+    hard clause — and the capture's verdict turns ``fail`` (or ``degraded``
+    if coverage stays above ``DEGRADED_MIN_COVERAGE``). It errs toward
+    reporting a gap, never toward hiding one; the fix is per-reason window
+    bounds in ``capture_lifetime``.
+    """
+    described = [
+        window
+        for window in (lifetime or {}).get("pause_reasons") or []
+        if isinstance(window, Mapping)
+    ]
+    if not described and (lifetime or {}).get("pause_windows"):
+        # Windows without their reasons: which is K-line's own cannot be
+        # told, so every window stays a pause, as for any other channel.
+        return None
+    out: Windows = []
+    for window in described:
+        if KLINE_SESSION_PAUSE in (window.get("reasons") or ()):
+            continue
+        start = float(window.get("start_s") or 0.0)
+        end = window.get("end_s")
+        out.append((start, float(end) if end is not None else elapsed))
+    return out
+
+
 def gap_threshold_s(requested_hz: float | None, median_interarrival_s: float | None) -> float:
     """Silence longer than this is a coverage gap, not a slow rate."""
     if requested_hz:
@@ -630,9 +698,12 @@ def _build_channels(  # noqa: PLR0913
     active: float,
     windows: Windows,
     trailing_hz: Mapping[str, Any],
+    kline_windows: Windows | None = None,
 ) -> list[ChannelQuality]:
     channels: list[ChannelQuality] = []
     seen: set[str] = set()
+    kline_paused = kline_windows if kline_windows is not None else windows
+    kline_active = max(0.0, elapsed - sum(b - a for a, b in kline_paused))
     for request in requests:
         if not request.get("capture_selected", False):
             continue
@@ -649,11 +720,12 @@ def _build_channels(  # noqa: PLR0913
         requested = _requested_hz(request, upper, weights, target)
         row = lifetime_channels.get(channel) or lifetime_channels.get(channel.upper()) or {}
         cadence = cadence_from_lifetime(row)
+        is_kline = request.get("kind") == KLINE_KIND
         coverage = coverage_from_lifetime(
             row,
             elapsed_s=elapsed,
-            eligible_s=active,
-            pause_windows=windows,
+            eligible_s=kline_active if is_kline else active,
+            pause_windows=kline_paused if is_kline else windows,
             threshold_s=gap_threshold_s(requested, cadence.get("median_interarrival_s")),
         )
         channels.append(
@@ -1037,8 +1109,30 @@ def evaluate_capture_quality(  # noqa: PLR0913
     trailing_hz = scheduler.get("achieved_hz_capture") or {}
 
     plan_members = (scheduler.get("resolved_plan") or {}).get("members") or []
+    base_requests = list(
+        requests if requests is not None else plan_members or scheduler.get("requests") or []
+    )
+    # K-line entries are added here, once, for every caller (live, stop,
+    # recompute): no OBD scheduler plan or request table lists them (H05.8).
+    kline_rows = kline_requests(profile)
+    notes: list[str] = []
+    if kline_rows and (lifetime or {}).get("source") == ROWS_LIFETIME_SOURCE:
+        notes.append(
+            f"{len(kline_rows)} K-line channel(s) not scored: this verdict was rebuilt from "
+            "persisted rows, which cover Mode 01/22 only; the live and stop-time verdicts "
+            "score K-line from the capture ledger."
+        )
+        kline_rows = []
+    elif kline_rows:
+        notes.append(
+            "K-line channels are scored on the capture ledger: their cadence is the achieved "
+            "K-line rate. The profile names no K-line rate, so none is judged a shortfall; "
+            "CANary's own K-line session (ecm-session-kline) is acquisition time for them, "
+            "not a pause."
+        )
+    listed = {str(row.get("channel") or "").upper() for row in base_requests}
     channels = _build_channels(
-        list(requests if requests is not None else plan_members or scheduler.get("requests") or []),
+        base_requests + [row for row in kline_rows if row["channel"].upper() not in listed],
         lifetime_channels=lifetime_channels,
         weights=weights,
         target=target_f,
@@ -1047,6 +1141,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
         active=active,
         windows=windows,
         trailing_hz=trailing_hz,
+        kline_windows=kline_pause_windows(lifetime, elapsed),
     )
     cadence_by_profile = {
         row.channel.upper(): (None if row.status == "missing" else row.cadence.get("hz"))
@@ -1056,7 +1151,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
     max_skew = effective_max_tuple_skew_s(profile)
 
     failures = _channel_failures(channels, floor)
-    tuple_block, tuple_failures, notes = _tuple_block(
+    tuple_block, tuple_failures, tuple_notes = _tuple_block(
         tuples,
         required=required,
         max_skew_s=max_skew,
@@ -1066,6 +1161,7 @@ def evaluate_capture_quality(  # noqa: PLR0913
         windows=windows,
         floor=floor,
     )
+    notes += tuple_notes
     # A member the ECU never answered is already an unanswered_input; the
     # tuple could never complete and saying so twice adds nothing.
     missing_members = {row.channel.upper() for row in channels if row.status == "missing"}
@@ -1184,6 +1280,8 @@ __all__ = [
     "coverage_from_lifetime",
     "effective_max_tuple_skew_s",
     "evaluate_capture_quality",
+    "kline_pause_windows",
+    "kline_requests",
     "gap_threshold_s",
     "normalize_quality_payload",
     "profile_requests",

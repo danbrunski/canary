@@ -53,12 +53,53 @@ other checklist leans on.
   `hardware.supply_voltage`, not the `hardware.hat.supply_divider` sketched
   above: the HAT has no other block to share. Not enabled on the Pi until
   H01.1 keeps `sensor:` out of the detectors.
-- [ ] **H03.2 Feed the non-volatile write gate.** **Do:** supply
+- [x] **H03.2 Feed the non-volatile write gate.** **Do:** supply
   `NonvolatileWriteSignals.battery_voltage` from `sensor:SUPPLY_VOLTAGE` when
   it is fresh, else from `obd:CONTROL_MODULE_VOLTAGE`, and make an unknown
   voltage a refusal with its reason, not a pass. **Accept:** tests for fresh,
   stale and absent voltage. (No write is ever started by this; it only makes
   the existing gate able to say no.)
+  **Evidence (2026-09-26):** `src/control/nonvolatile_write.py`:
+  `supply_voltage_from_latest_rows(rows, now=, max_age_seconds=)` (pure; rows
+  are `read_latest_per_channel`'s) tries `SUPPLY_VOLTAGE_SOURCES` in order and
+  returns the first finite, dated, non-future value no older than the limit.
+  `battery_voltage` is now a `SupplyVoltageReading` (volts, source, age,
+  reason), not a `float | None`, so an unknown voltage cannot be built without
+  a reason; the guard refuses `battery_unknown` quoting it ("no fresh supply
+  voltage: sensor:SUPPLY_VOLTAGE is stale (60.0 s old, limit 5 s);
+  obd:CONTROL_MODULE_VOLTAGE has no reading in the latest rows"), and
+  re-checks the age itself (`battery_stale`) rather than trusting the reader;
+  the audit entry carries the reading. `SupplyVoltageReading.__post_init__`
+  makes a half-formed reading unconstructible (unknown without a reason; a
+  non-finite voltage; no source; an age that is missing, NaN, infinite or
+  negative), and the guard still re-checks: its age test is
+  `not (0 <= age <= max)` with an explicit finiteness check, because the
+  first version's `age < 0 or age > max` passed a NaN age (caught by the
+  2026-09-26 verification). **Row source fixed too:**
+  `dashboard.readers.read_latest_per_channel` used `groupby(...).last()`,
+  which takes each column's last *non-null* value separately, so a newest
+  `NO DATA`/NaN row came back with its fresh timestamp and an older row's
+  number — a stale 12.6 V read as current. It now takes the literal newest
+  row per channel (`groupby().tail(1)`, still sorted by source, channel);
+  `tests/test_latest_per_channel.py` (3 tests, 2 of which fail on the old
+  reader) includes the end-to-end repro reading as unknown. Its other callers
+  (`/telemetry/latest?per_channel`, the companion seed, the Parquet
+  `vehicle_state`) now show a newest row's own value: `None`/its text instead
+  of an older number, and an rpm-less newest OBD row classifies as rpm
+  missing rather than as the older rpm. Tests (`tests/test_nonvolatile_write.py`,
+  70 pass): the fresh/stale/absent 3x3 table for both sources, newest row per
+  source, NaN / text / bool / future-stamped / undated values unknown, numpy
+  scalars and pandas Timestamps read, the guard refusing unknown and low and
+  passing a fresh sensor or fresh-OBD fallback, forged readings (stale,
+  negative, NaN, ±inf ages; NaN/inf volts) refused by the guard, and ten
+  malformed readings refused at construction. **Not wired:** nothing
+  constructs `NonvolatileWriteGuard` in production (no flash transport
+  exists, and a test forbids any route that mints an authorization), so there
+  is no production `SignalReader` to hand it to yet; the future transport
+  composes `read_latest_per_channel(storage,
+  session_dir=active_session_dir(writer))` (now row-intact) with this
+  function. Until H03.1's collector is enabled on the Pi, the OBD fallback is
+  the source that answers.
 - [ ] **H03.3 PPS as a chrony refclock.** **Do:** feed the HAT's PPS to
   chrony through gpsd and a `refclock SOCK` (chrony creates the socket; gpsd
   writes pulses to it when it has them), **not** `refclock PPS`: chronyd exits

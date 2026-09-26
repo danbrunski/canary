@@ -98,6 +98,7 @@ def test_snapshot_reports_state_source_and_count() -> None:
         "ecm_session_owner": "can_diagnostics",
         "ecm_session_claims": {},
         "tx_suppressed": True,
+        "foreign_tester": None,
         "survives_restart": False,
     }
 
@@ -387,6 +388,34 @@ def test_ownership_changes_open_and_close_capture_pause_windows(
         (True, "ecm-session-kline"),
         (False, "ecm-session-kline"),
     ]
+
+
+def test_the_foreign_testers_address_and_last_heard_time_are_in_the_snapshot() -> None:
+    """H06.4: ``foreign`` says someone else holds the session; this says who
+    and when, and outlives the claim so a pause stays explained."""
+    assert tx_gate.snapshot()["foreign_tester"] is None
+    tx_gate.claim_ecm_session("foreign", ttl_seconds=10.0, now=100.0)
+    tx_gate.note_foreign_tester(
+        tester_address=0xFC, module_address=0x10, now=100.0, now_wall=1_790_000_000.0
+    )
+    heard = tx_gate.snapshot(now=103.0)["foreign_tester"]
+    assert heard == {
+        "tester_address": "FC",
+        "module_address": "10",
+        "last_heard_at": "2026-09-21T14:13:20+00:00",
+        "seconds_since_heard": 3.0,
+    }
+    # Hold expires: ownership returns, the last-heard record stays.
+    assert tx_gate.check_expiry(now=111.0) is True
+    snap = tx_gate.snapshot(now=111.0)
+    assert snap["ecm_session_owner"] == "can_diagnostics"
+    assert snap["foreign_tester"]["tester_address"] == "FC"
+    assert snap["foreign_tester"]["seconds_since_heard"] == 11.0
+    # A later frame from an unaddressed (mid-session) tester replaces it.
+    tx_gate.note_foreign_tester(tester_address=None, module_address=None, now=120.0)
+    assert tx_gate.snapshot(now=120.0)["foreign_tester"]["tester_address"] is None
+    tx_gate.reset_ecm_session_claims()
+    assert tx_gate.snapshot()["foreign_tester"] is None
 
 
 def test_passive_armed_is_the_operators_switch_not_a_session_claim() -> None:
