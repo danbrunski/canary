@@ -112,6 +112,17 @@ site.
   by comparing ids. Resolve the calibration by flash time from
   `tune_revisions.yaml`.
 
+## CAN: the BCM (0x745 → 0x765)
+
+- The BCM answers on CAN in the same Nissan `10 C0` session as the ECM
+  (`data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md`: TPMS ids via
+  `21 1F`, a data monitor via `21 32`).
+- Active tests use the ECM fan test's shape: `30 <lid> 20 01` to actuate,
+  `30 <lid> 11` to release. The ids (horn, high beams, wipers, buzzer, and two
+  unidentified) are in `data/nissan-xterra-2008/bcm-active-tests.yaml`. They
+  are volatile and reversible, and each one is a known physical action for
+  binding body frames. Confirmation is open as D03.33.
+
 ## Broadcast bus
 
 500 kbit/s, ~1640 frames/s at idle, 27 distinct IDs passively (29 when CANary

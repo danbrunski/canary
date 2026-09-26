@@ -1,0 +1,88 @@
+# BCM active tests (Nissan service 0x30, I/O control by local id) on the 2008
+# Nissan Xterra. Reference data: nothing in src/ loads this file yet.
+#
+# Same command shape as the ECM cooling-fan test on 0x7E0 (`30 33 20 01`, release
+# `30 33 11`; data/analyses/2026-05-16T225450.md), here addressed to the BCM.
+# Every actuation is volatile and reversible: releasing the id, or closing the
+# session, hands control back to the BCM. None of it writes non-volatile memory.
+schema_version: 1
+module: BCM
+request_id: 0x745
+response_id: 0x765
+evidence: >-
+  Operator-supplied list, 2026-09-26, from a probe screen that prints the local
+  id as %02X, so every lid below is hex. Not yet reproduced in a CANary capture.
+  The BCM's 0xC0 session on 0x745/0x765 was independently observed from a scan
+  tool on 2026-09-24 (data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md).
+# UDS payloads, without the ISO-TP length byte (the operator's frames were
+# `02 10 C0`, `04 30 <LID> 20 01`, `03 30 <LID> 11`, `02 10 81`).
+sequence:
+  - {step: enter_session, request: [0x10, 0xC0], expected_reply: [0x50, 0xC0]}
+  - {step: actuate_on, request: [0x30, lid, 0x20, 0x01]}
+  - {step: release, request: [0x30, lid, 0x11]}
+  - {step: exit_session, request: [0x10, 0x81], expected_reply: [0x50, 0x81]}
+# The scan tool held the same session with `3E 01` every 1.5 s (2026-09-24).
+keepalive: {request: [0x3E, 0x01], period_s: 1.5}
+# Supported-id bitmaps: the scan tool's `30 00`/`30 20`/`30 40` at BCM screen
+# load on 2026-09-24 returned 4 bytes each, read Mode 01-style (MSB of the first
+# byte = base+1; base+0x20 set = next block exists). The continuation bits 0x20
+# and 0x40 are set exactly where the tool asked for the next block, which
+# supports that reading. 0x60 is also set; no `30 60` is recorded in the note.
+supported_bitmap:
+  evidence: data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md (session 2026-09-24T165319)
+  replies:
+    0x00: [0x02, 0x2B, 0xF1, 0x81]
+    0x20: [0xE6, 0x77, 0x05, 0xEB]
+    0x40: [0xC9, 0x10, 0x10, 0x01]
+  # Decoded, continuation bits (0x20, 0x40, 0x60) excluded. Ids not in `lids`
+  # below are advertised but unnamed.
+  supported: [0x07, 0x0B, 0x0D, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x18, 0x19,
+              0x21, 0x22, 0x23, 0x26, 0x27, 0x2A, 0x2B, 0x2C, 0x2E, 0x2F, 0x30,
+              0x36, 0x38, 0x39, 0x3A, 0x3B, 0x3D, 0x3F, 0x41, 0x42, 0x45, 0x48,
+              0x4C, 0x54]
+# status: operator_observed = the operator saw or heard the named function when
+# the id was actuated; unidentified = listed (and advertised in the bitmap) but
+# what it drives has not been established.
+lids:
+  - {lid: 0x12, function: buzzer, status: operator_observed}
+  - lid: 0x18
+    function: top
+    status: unidentified
+    note: >-
+      Name from the probe list; the operator doesn't know what it drives.
+      Candidates to rule out: roof/cargo lamp, sunroof, or a "top" menu entry.
+  - lid: 0x19
+    function: interior lights
+    status: unidentified
+    note: >-
+      Listed with a question mark; the operator doesn't know what it drives.
+      Check which lamp (dome, map, cargo, footwell) lights, with the switch in
+      DOOR and in OFF.
+  - {lid: 0x22, function: horn (long), status: operator_observed}
+  - {lid: 0x23, function: high beams, status: operator_observed}
+  - {lid: 0x30, function: horn (short chirp), status: operator_observed}
+  - lid: 0x46
+    function: front wipers
+    status: operator_observed
+    note: >-
+      The only operator id NOT set in the supported bitmap (0x45 is). Either
+      the bitmap omits it or the id is off by one. Re-check which of 0x45 and
+      0x46 runs the front wipers.
+  - {lid: 0x48, function: rear wiper, status: operator_observed}
+follow_up:
+  - >-
+    Resolve 0x46 against the bitmap (see its note), and read the tail past 0x60
+    with `30 60`.
+  - >-
+    Test 0x18 and 0x19 at the truck, key on and engine off, with someone
+    watching the cabin, the cargo area and the roof. Record what moves or
+    lights, then set function and status.
+  - >-
+    Re-run every lid while CANary records the broadcast bus, one lid per tagged
+    window. Each is a known physical action for binding body frames, the way the
+    ECM fan test produced COOLING_FAN_1F9_0. High beams go against 0x60D
+    (data/analyses/2026-09-08-leaf-dbc-review.md).
+  - >-
+    Capture the BCM's replies to each on and release request. The operator's
+    list gives only the requests, so the positive-reply format (0x70 ...) and
+    any NRCs are unrecorded.

@@ -1791,6 +1791,27 @@ live here now, so the documents could be archived
     files. It stays correct, because the writer refuses a taken name rather
     than renaming it, so the directory is always `_replay-<id>`.
 
+- [ ] **D03.33 Confirm the BCM active-test ids and use them as known answers.**
+  The operator supplied eight BCM I/O-control local ids on 2026-09-26 (0x745 →
+  0x765, `10 C0`, `30 <lid> 20 01`, release `30 <lid> 11`, `10 81`), now
+  catalogued in
+  [`bcm-active-tests.yaml`](../../../data/nissan-xterra-2008/bcm-active-tests.yaml).
+  Six are named; two are not. Seven of the eight are set in the BCM's
+  supported-id bitmaps from the 2026-09-24 scan-tool capture; 0x46 (front
+  wipers) is not, but 0x45 is. Volatile and reversible, so no ECU-write
+  conditions apply. Needs the truck, key on and engine off.
+  - [ ] Resolve 0x46 against the bitmap: which of 0x45 and 0x46 runs the front
+    wipers? Read `30 60` as well; the 0x60 continuation bit is set.
+  - [ ] Identify 0x18 ("top") and 0x19 ("interior lights?"): actuate each with
+    someone watching the cabin, cargo area and roof; set `function` and
+    `status` in the catalogue.
+  - [ ] Record the BCM's reply to each on and release request (the catalogue
+    has requests only).
+  - [ ] Actuate each id in its own tagged window while the broadcast bus
+    records, and bind whatever body frame follows it (high beams against
+    `0x60D`, per the
+    [Leaf DBC review](../../../data/analyses/2026-09-08-leaf-dbc-review.md)).
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi

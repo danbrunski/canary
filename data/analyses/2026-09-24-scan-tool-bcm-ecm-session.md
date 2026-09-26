@@ -117,3 +117,12 @@ survive a restart; tracked as D03.30.
    scan tool (a known answer: inflate or deflate one tyre).
 3. **BCM as a CAN diagnostics target:** a small follow-up to K01/D03. The
    same 0xC0 session plumbing, with a separate request/response pair.
+
+*Addendum 2026-09-26:* the `30 00`/`30 20`/`30 40` replies above decode as
+supported-id bitmaps for the BCM's service-0x30 active tests (Mode 01-style;
+the 0x20 and 0x40 continuation bits are set exactly where the tool asked for
+the next block). An operator-supplied list of eight ids is catalogued with the
+decoded bitmap in
+[`bcm-active-tests.yaml`](../nissan-xterra-2008/bcm-active-tests.yaml). Seven
+are advertised. Front wipers (0x46) is not, but 0x45 is, and two ids are
+unnamed. Follow-up is D03.33.
