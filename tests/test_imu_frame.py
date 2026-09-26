@@ -10,13 +10,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.decode.bindings import load_bindings
 from src.preprocessing.imu_frame import (
+    SPEED_SOURCES,
     estimate_gravity,
     quiescent_mask,
     read_yaw_offset,
     resolve_frame,
     resolve_longitudinal_sign,
     resolve_yaw_offset,
+    select_speed,
     straight_mask,
     write_yaw_offset,
 )
@@ -271,3 +274,62 @@ def test_write_and_read_yaw_offset_roundtrip(tmp_path: Path) -> None:
 
 def test_read_yaw_offset_missing_returns_none(tmp_path: Path) -> None:
     assert read_yaw_offset(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# Speed source (H02.4)
+# ---------------------------------------------------------------------------
+
+
+def test_select_speed_prefers_0x2d1_then_obd_then_gps_and_scales_counts() -> None:
+    assert SPEED_SOURCES == ("decoded:VEHICLE_SPEED_2D1", "obd:SPEED", "gps:speed")
+    bindings = load_bindings(Path("data/bindings.yaml"))
+    frame = pd.DataFrame(
+        {
+            "decoded:VEHICLE_SPEED_2D1": [600.0, np.nan],
+            "obd:SPEED": [55.0, 56.0],
+            "gps:speed": [61.0, 62.0],
+        }
+    )
+    selected = select_speed(frame, bindings=bindings)
+    assert selected is not None
+    speed, source = selected
+    assert source == "decoded:VEHICLE_SPEED_2D1"
+    assert speed.iloc[0] == pytest.approx(60.0)  # 0.1 km/h per count, never raw
+
+    selected = select_speed(frame.drop(columns=["decoded:VEHICLE_SPEED_2D1"]))
+    assert selected is not None and selected[1] == "obd:SPEED"
+    selected = select_speed(frame[["gps:speed"]])
+    assert selected is not None and selected[1] == "gps:speed"
+    assert select_speed(pd.DataFrame({"obd:SPEED": [np.nan]})) is None
+
+
+def test_resolve_frame_without_obd_speed_steers_by_gps() -> None:
+    """The quiescent mask no longer needs obd:SPEED (tuning captures)."""
+    frame, true_yaw = _build_synthetic_session(pitch_deg=8.0, yaw_deg=20.0)
+    frame = frame.rename(columns={"obd:SPEED": "gps:speed"})
+    result = resolve_frame(frame, quiescent_window=10)
+    assert result.yaw_offset_rad is not None
+    diff = (result.yaw_offset_rad - true_yaw) % math.pi
+    assert min(diff, math.pi - diff) < math.radians(2.0)
+    accel_rows = frame.index[frame["_true_lon"] > 0.2]
+    assert result.linear_accel_lon.loc[accel_rows].mean() == pytest.approx(0.30, abs=0.05)
+
+
+def test_a_sign_flip_keeps_lateral_left_positive() -> None:
+    """LAT = up x LON: when the longitudinal sign flips, lateral flips with it."""
+    frame, _ = _build_synthetic_session(pitch_deg=5.0, yaw_deg=200.0)
+    result = resolve_frame(frame, quiescent_window=10)
+    assert result.sign_flipped is True
+    turn_rows = frame.index[frame["_true_lat"] > 0.2]
+    accel_rows = frame.index[frame["_true_lon"] > 0.2]
+    assert result.linear_accel_lat.loc[turn_rows].mean() == pytest.approx(0.25, abs=0.05)
+    assert result.linear_accel_lon.loc[accel_rows].mean() == pytest.approx(0.30, abs=0.05)
+
+
+def test_quiescent_mask_lookahead_excludes_rows_before_a_speed_change() -> None:
+    speed = pd.Series([0.0] * 20 + [10.0] * 10)
+    trailing = quiescent_mask(speed, None, window=5)
+    ahead = quiescent_mask(speed, None, window=5, lookahead=3)
+    assert bool(trailing.iloc[19]) and not bool(ahead.iloc[19])
+    assert not bool(ahead.iloc[17]) and bool(ahead.iloc[16])

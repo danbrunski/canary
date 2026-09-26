@@ -97,7 +97,7 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
   (`drain.accepts_source`) before lowering the stored rate — storage is what
   the dyno reads. **Accept:** a table of the three runs here, and the
   default justified by it.
-- [ ] **H02.4 Frame resolution with a production caller.** **Do:** give
+- [~] **H02.4 Frame resolution with a production caller.** **Do:** give
   `resolve_frame` a caller that runs per session offline (a sidecar, like
   `imu_yaw_offset.json`), producing two families:
   `imu:ACCEL_LON/LAT` (gravity removed — for tags and segmenting, as today)
@@ -109,6 +109,93 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
   broadcast `0x2D1` vehicle speed, then OBD, then GPS. **Accept:**
   synthetic tests for both families on a known tilt, known grade and known
   manoeuvre; a test that a session with no OBD speed still resolves.
+  **Evidence (2026-09-26, synthetic; H02.6 on the truck is the real known
+  answer):**
+  - **Offline caller.** `src/preprocessing/imu_session.py`
+    `resolve_session_imu_frame` (CLI `scripts/resolve_imu_frame.py`) reads
+    the session and writes `imu_frame.json`. `ACCEL_LON/LAT` come from
+    `resolve_frame` as before. `SF_*` come from the new
+    `imu_frame.resolve_specific_force`: **one constant rotation per
+    session**, whose "up" is the mean specific force over every quiescent
+    sample. Axes are ISO 8855 (LAT left positive), in g. `resolve_frame` now
+    flips LAT with LON, so LAT stays `up × LON`.
+  - **Pitch reference: recorded, not corrected.** The sidecar holds the
+    rotation, its `reference_id`, the reference gravity vector with |g| and
+    tilt, every quiescent window (times, samples, speed, gravity, angle from
+    the reference), the stationary fraction and `pitch_offset_removed:
+    false`. The grade under the reference windows stays in `SF_LON` as one
+    constant `μ ≈ −θr`, which `dyno.estimate_pitch_offset` measures.
+    `specific_force_from_sidecar` recomputes `SF_*` from the recorded
+    rotation. A re-resolution that would change a resolved reference refuses
+    unless `replace=True` (`ImuFrameOfRecordError`). `dyno.py` is unchanged.
+  - **Speed.** `imu_frame.SPEED_SOURCES` =
+    `decoded:VEHICLE_SPEED_2D1` → `obd:SPEED` → `gps:speed`, the first with
+    any value. The 2D1 raw counts are scaled through
+    `engineering.physical_series`, the same in `resolve_frame` and in the
+    live path.
+  - **Look-ahead (found while testing).** The speed at an IMU instant is
+    the newest *earlier* reading. With 1 Hz GPS, a trailing window counted
+    the first second of every pull from rest as quiescent, and put a 0.27°
+    pitch into the reference. That is ~106 N of phantom force by H07.5's
+    figure. The masks now judge `[t − window, t + 1.5 s]`
+    (`QUIESCENT_LOOKAHEAD_SECONDS`), and the live path decides its updates
+    1.5 s late. Mutation check: with the look-ahead at 0 the reference tilt
+    is 0.2747°; the test requires < 0.01°.
+  - **Live.** `src/preprocessing/imu_live.py` `LiveImuFrame`, wired into
+    `LiveFeatureSource`, publishes `imu:ACCEL_LON_MAX/ACCEL_LON_RMS/
+    ACCEL_LAT_MAX/JERK_MAX` on each tick. Its `status` names the step it is
+    waiting on. Cost: 3.5 ms per second of data on the laptop, with 208 Hz
+    IMU and 100 Hz 2D1.
+  - **Refusals, each with a named cause:** `no_telemetry`,
+    `imu_rows_missing`, `no_speed_source`, `no_heading`,
+    `no_quiescent_period`, `gravity_implausible` (m/s² rows read 9.8 g),
+    `yaw_unresolved`, `sign_unresolved`. A refusal is written to the sidecar
+    too.
+  - **Tests.** `tests/test_imu_session.py` (24):
+    - known tilt and manoeuvres at mount yaw 25° and 205° (the sign flips),
+      for both families;
+    - `SF_LON` = a + sin θ on a 4 % grade, within 2 mg;
+    - `ACCEL_LON` excludes a 5 % grade after a steady climb, within 0.01 g;
+    - a direction pair where `estimate_pitch_offset` recovers μ = −θr within
+      0.01°, and `correct_specific_force` then leaves a + g·sin θ;
+    - no OBD speed: resolves from 0x2D1, and from GPS;
+    - every refusal, the sidecar round trip, the frame-of-record guard and
+      the CLI;
+    - H01.1: `imu:SF_*`, `ACCEL_*` and `*_MAX` are `source_not_trainable`.
+
+    `tests/test_imu_live.py` (5): `LiveAutoTagHook` writes `hard_accel` and
+    `cornering` from raw IMU records through `LiveFeatureSource`.
+    `tests/test_imu_frame.py` (+4).
+
+    Suites run: imu_frame, imu_session, imu_live, imu_decimation,
+    imu_collector, autotag (3 files), segmenter, preprocessing_live and the
+    other live suites, trainability and dyno. 334 passed.
+  - **Remaining (verifier, 2026-09-26; why this is `[~]`):** the offline
+    `ACCEL_LON/LAT` family has no consumer yet.
+    - `ImuSessionFrame.rows()` has no caller, and `imu_frame.json` stores
+      only the SF rotation and the linear yaw/sign. `ACCEL_LON/LAT` itself
+      cannot be rebuilt from the sidecar, because its low-pass depends on the
+      inputs.
+    - `scripts/autotag.py` and the offline segmenter read through
+      `loader.resample_and_segment`, whose IMU decimation sees only raw
+      `imu:ACCEL_LON` rows, which no session contains.
+    - So offline decimation, the segmenter's accel modes and the offline IMU
+      auto-tags stay dormant, while live `imu:ACCEL_*_MAX` does feed the
+      live segmenter.
+    - That split matters wherever accel-gated modes are configured
+      (`launch`, `hard_brake`, `cornering` in `canary.example.yaml`). No mode
+      divergence reproduced with the example config, but it is a real
+      live/offline difference for `operating_mode`.
+    - Owed: the loader appends the resolved frame's rows, or reads a persisted
+      per-session frame (the implementer recommends a parquet under the
+      derived-store cache), inside `read_sessions` / `resample_and_segment`.
+      P02.1 has landed (`b37e713`), so the loader is free. H02.7 depends on
+      this.
+  - **Follow-on, outside this item's acceptance:** the offline segmenter
+    and `scripts/autotag.py` read through `loader.resample_and_segment`, so
+    they see `ACCEL_LON` only once the loader appends
+    `ImuSessionFrame.rows()`. `loader.py` was held by the concurrent P02.1
+    work.
 - [ ] **H02.5 Health on `/status`.** `imu` freshness, achieved sample rate,
   FIFO overruns and the drop counter, in `/status` and the MCP `get_status`
   payload, alongside the GPS fields. **Accept:** route test; the dashboard

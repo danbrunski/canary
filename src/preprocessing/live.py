@@ -70,6 +70,7 @@ from src.decode.engineering import physical_value
 from src.decode.frame_decoder import FrameDecoder
 from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
+from src.preprocessing.imu_live import IMU_FRAME_INPUTS, LiveImuFrame
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import (
     ResampleConfig,
@@ -234,6 +235,10 @@ class LiveFeatureSource:
     _start_trackers: dict[StartContextSpec, EngineStartTracker] = field(
         init=False, default_factory=dict
     )
+    #: H02.4 — raw ``imu:ACCEL_X/Y/Z`` → per-tick ``imu:ACCEL_LON_MAX``-style
+    #: aggregates (what ``LiveAutoTagHook`` and the segmenter's accel modes
+    #: read). Idle, and emitting nothing, while no IMU records arrive.
+    imu_frame: LiveImuFrame = field(init=False)
 
     #: Last wide-row operating point (raw channels + ``operating_mode`` +
     #: ``deviation:*``) from :meth:`tick`. The daemon reads this to compute
@@ -311,6 +316,7 @@ class LiveFeatureSource:
         self._frame_decoder = (
             FrameDecoder.from_bindings(self.bindings) if self.bindings is not None else None
         )
+        self.imu_frame = LiveImuFrame(bindings=self.bindings)
         # Same idea for the DBC database: frame_id → message so a per-frame
         # decode is an O(1) lookup, not a scan of every message.
         self._dbc_message_by_id = {}
@@ -354,6 +360,8 @@ class LiveFeatureSource:
         self._current_values[channel] = value
         ts = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
         self._last_observed_at[channel] = ts
+        if channel in IMU_FRAME_INPUTS:
+            self.imu_frame.observe_input(channel, value, ts)
 
     def observe(self, record: TelemetryRecord) -> None:
         """Apply one ``TelemetryRecord`` to the running current-values dict.
@@ -394,6 +402,9 @@ class LiveFeatureSource:
             value = finite_float(record.value)
             if value is not None:
                 self._set_value(channel_key(IMU_SOURCE, record.channel), value, record.timestamp)
+                # H02.4 — the frame resolver turns raw axes into the per-tick
+                # imu:ACCEL_LON_MAX/... aggregates prepare_tick publishes.
+                self.imu_frame.observe_imu(record.channel, value, record.timestamp)
             return
         # Anything else (e.g. a future source pushed directly) gets stored
         # as-is; the pipeline will surface it as a new column.
@@ -514,6 +525,11 @@ class LiveFeatureSource:
         # Every tick call closes an arrival window, emitted or not, exactly as
         # the offline grid has a row per interval before fully-stale rows drop.
         self._last_tick_at = now_utc
+        # H02.4 — this tick's decimated IMU aggregates, stamped at their
+        # newest sample so a tick without IMU samples ages them out.
+        imu_values, imu_observed_at = self.imu_frame.take_tick()
+        for channel, value in imu_values.items():
+            self._set_value(channel, value, imu_observed_at or now_utc)
         if not self._current_values:
             self.latest_operating_point = None
             return None
@@ -803,6 +819,8 @@ class LiveFeatureSource:
         self.last_segmenter_fallback = False
         # Replay entry/exit is a session boundary: no start evidence carries.
         self._start_trackers = {}
+        # Nor does a gravity/yaw estimate (H02.4).
+        self.imu_frame.reset()
         # Trip integrals are session-scoped (Task 1.3) — zero them on the
         # same boundary as everything else so a new session (or a replay
         # run) never inherits the previous session's running totals.

@@ -27,8 +27,29 @@ resolution"). Three steps, run in this order:
 3. **Sign** (:func:`resolve_longitudinal_sign`) — longitudinal is a line,
    not a direction (steps 1-2 fix the axis but not which end is
    "forward"), so the final polarity comes from correlating against the
-   OBD speed derivative — ground truth we already have with no IMU
+   speed derivative — ground truth we already have with no IMU
    involved — rather than trusting the IMU's own arbitrary axis labeling.
+
+**Speed.** Every speed this module steers by (quiescence, sign) is the best
+one the session has, :data:`SPEED_SOURCES` in order: the ~100 Hz ``0x2D1``
+broadcast, then the Mode 01 PID, then GPS (H02.4). The ``tuning`` capture
+profile does not poll ``obd:SPEED``, so a mask tied to it never found a
+quiescent window there. ``decoded:`` speed holds raw counts and is scaled
+through :func:`src.decode.engineering.physical_series`.
+
+**Axes.** Resolved axes follow ISO 8855: ``LON`` forward, ``LAT`` to the left,
+vertical up, so ``LAT = up × LON``. A sign flip of ``LON`` flips ``LAT`` with
+it; otherwise the lateral sign would depend on which way the yaw fit happened
+to land.
+
+**Two families** (H02.4): :func:`resolve_frame` gives *linear* acceleration
+(gravity removed by the quiescent low-pass — tags and segmenting), and
+:func:`resolve_specific_force` gives *specific force* (``a + g·sin θ``, gravity
+kept — the driving dyno, H07). The low-pass also removes the slowly varying
+grade, which the dyno needs, so the specific-force frame uses **one constant
+rotation per session** from a recorded reference (:class:`SpecificForceFrame`):
+the residual pitch it leaves is a single constant the dyno measures
+(``src.analysis.dyno.estimate_pitch_offset``), never a drifting one.
 
 **BNO055 bypass.** The BNO055 (the doc's recommended chip) does steps 1-2
 on-chip: it outputs gravity-removed linear acceleration and an absolute
@@ -52,9 +73,38 @@ import numpy as np
 import pandas as pd
 
 from src.atomic_write import atomic_write_text
+from src.decode.bindings import Bindings
+from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.storage.sidecar import read_json_object
 
 YAW_OFFSET_FILENAME = "imu_yaw_offset.json"
+
+#: Speeds the quiescent mask and the sign steer by, best first (H02.4): the
+#: ~100 Hz ``0x2D1`` broadcast (0.1 km/h per count, ``bindings.yaml``
+#: ``VEHICLE_SPEED_2D1``), the Mode 01 PID (~0.7 Hz, 1 km/h steps; absent under
+#: the ``tuning`` capture profile), then GPS speed-over-ground (1 Hz). The
+#: first with any value is used for the whole session, never mixed per row:
+#: the sources differ in lag and the ECU ones read ~8 % under GPS. Only
+#: steadiness and the derivative's sign are read, so that scale needs no
+#: correction here.
+SPEED_SOURCES: tuple[str, ...] = ("decoded:VEHICLE_SPEED_2D1", "obd:SPEED", "gps:speed")
+#: GPS course over ground, degrees: the only yaw reference (the recorded
+#: decision in ``imu-gps-integration.md``).
+HEADING_COLUMN = "gps:heading"
+
+#: A quiescent reference whose mean specific force is not ~1 g is not gravity:
+#: gravity-removed (fused) output, the wrong unit, or a failing part. The chip
+#: read 1.0055 g at rest on the HAT (H02.2).
+GRAVITY_MAGNITUDE_RANGE_G = (0.8, 1.2)
+
+#: How far past a sample its quiescence (and straightness) is judged, s. The
+#: speed and course at an IMU instant are the newest *earlier* reading, so for
+#: up to one reading period after a manoeuvre starts they still look steady: a
+#: trailing window alone marks the first second of every pull from rest
+#: "quiescent" and pours 0.3 g into the gravity estimate. Judging each sample
+#: over ``[t − window, t + lookahead]`` needs the lookahead to exceed the
+#: slowest speed source's period: GPS 1 Hz, Mode 01 speed ~0.7 Hz (1.43 s).
+QUIESCENT_LOOKAHEAD_SECONDS = 1.5
 
 #: Body-frame accel axis used as the initial horizontal reference when
 #: building the plane perpendicular to gravity (see ``_project_horizontal``).
@@ -99,6 +149,35 @@ def _circular_steady(heading_deg: pd.Series, window: int, std_max_deg: float) ->
     return pd.Series(circ_std_rad <= math.radians(std_max_deg), index=heading_deg.index)
 
 
+def select_speed(
+    frame: pd.DataFrame, *, bindings: Bindings | None = None
+) -> tuple[pd.Series, str] | None:
+    """The best speed column in ``frame`` (km/h) and its name, or ``None``.
+
+    :data:`SPEED_SOURCES` in order; the first present with any finite value
+    wins. A ``decoded:`` source is scaled to km/h (its rows are raw counts); one
+    the catalog cannot scale is skipped, never read as counts.
+    """
+    for column in SPEED_SOURCES:
+        if column not in frame.columns:
+            continue
+        try:
+            speed = physical_series(frame[column], column, bindings)
+        except UnscaledDecodedChannelError:
+            continue
+        if speed.notna().any():
+            return speed, column
+    return None
+
+
+def _looking_ahead(steady: pd.Series, lookahead: int) -> pd.Series:
+    """``steady`` computed over ``window + lookahead`` rows, re-indexed so row
+    ``i`` covers ``[i − window + 1, i + lookahead]``."""
+    if lookahead <= 0:
+        return steady.fillna(False).astype(bool)
+    return steady.shift(-lookahead).fillna(False).astype(bool)
+
+
 def quiescent_mask(
     speed_kph: pd.Series,
     heading_deg: pd.Series | None,
@@ -106,6 +185,7 @@ def quiescent_mask(
     window: int,
     speed_std_max_kph: float = 1.5,
     heading_std_max_deg: float = 3.0,
+    lookahead: int = 0,
 ) -> pd.Series:
     """Windows where the vehicle is neither accelerating nor turning.
 
@@ -115,12 +195,17 @@ def quiescent_mask(
     a session with no GPS heading (heading arg ``None``); heading steadiness
     additionally excludes a constant-speed turn (lateral accel, no speed
     change) once GPS course is available.
+
+    ``lookahead`` rows extend each window past the row (see
+    :data:`QUIESCENT_LOOKAHEAD_SECONDS`); ``0`` is a trailing window.
     """
-    steady_speed = _rolling_std(speed_kph, window) <= speed_std_max_kph
-    steady_speed = steady_speed.fillna(False)
+    span = window + max(lookahead, 0)
+    steady_speed = _looking_ahead(_rolling_std(speed_kph, span) <= speed_std_max_kph, lookahead)
     if heading_deg is None or pd.to_numeric(heading_deg, errors="coerce").isna().all():
         return steady_speed
-    return steady_speed & _circular_steady(heading_deg, window, heading_std_max_deg)
+    return steady_speed & straight_mask(
+        heading_deg, window=window, heading_std_max_deg=heading_std_max_deg, lookahead=lookahead
+    )
 
 
 def straight_mask(
@@ -128,15 +213,17 @@ def straight_mask(
     *,
     window: int,
     heading_std_max_deg: float = 3.0,
+    lookahead: int = 0,
 ) -> pd.Series:
     """Windows where GPS course is steady — a straight pull, at any speed.
 
     Deliberately does not gate on speed steadiness (unlike
     :func:`quiescent_mask`): a straight-line accel/brake event is exactly
     the signal :func:`resolve_yaw_offset` needs, and it necessarily changes
-    speed.
+    speed. ``lookahead`` as in :func:`quiescent_mask`.
     """
-    return _circular_steady(heading_deg, window, heading_std_max_deg)
+    span = window + max(lookahead, 0)
+    return _looking_ahead(_circular_steady(heading_deg, span, heading_std_max_deg), lookahead)
 
 
 def estimate_gravity(accel: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
@@ -256,18 +343,140 @@ def resolve_longitudinal_sign(
     fixed by the mount, so once resolved the polarity is fixed for the whole
     session too.
 
-    Returns ``(possibly-flipped lon, sign_flipped)``.
+    Returns ``(possibly-flipped lon, sign_flipped)``. No evidence at all (see
+    :func:`longitudinal_sign_votes`) keeps the sign; a caller that must know
+    reads the votes itself.
     """
-    speed = pd.to_numeric(obd_speed_kph, errors="coerce")
-    dt = pd.to_datetime(timestamps, utc=True).diff().dt.total_seconds()
-    speed_accel = speed.diff() / dt.replace(0.0, np.nan)
-    both = pd.concat([lon, speed_accel], axis=1).dropna()
-    if both.empty:
-        return lon, False
-    correlation = float((np.sign(both.iloc[:, 0]) * np.sign(both.iloc[:, 1])).sum())
-    if correlation < 0:
+    agree, disagree = longitudinal_sign_votes(lon, obd_speed_kph, timestamps)
+    if disagree > agree:
         return -lon, True
     return lon, False
+
+
+def longitudinal_sign_votes(
+    lon: pd.Series, speed_kph: pd.Series, timestamps: pd.Series
+) -> tuple[int, int]:
+    """``(agree, disagree)``: rows where ``lon`` and d(speed)/dt share / oppose a sign.
+
+    Rows where either is zero or missing vote neither way, so ``(0, 0)`` means
+    the session holds no evidence for the sign (no speed change, or no speed).
+    """
+    speed = pd.to_numeric(speed_kph, errors="coerce")
+    dt = pd.to_datetime(timestamps, utc=True).diff().dt.total_seconds()
+    speed_accel = speed.diff() / dt.replace(0.0, np.nan)
+    both = pd.concat([pd.to_numeric(lon, errors="coerce"), speed_accel], axis=1).dropna()
+    if both.empty:
+        return 0, 0
+    product = np.sign(both.iloc[:, 0].to_numpy()) * np.sign(both.iloc[:, 1].to_numpy())
+    return int(np.count_nonzero(product > 0)), int(np.count_nonzero(product < 0))
+
+
+# ---------------------------------------------------------------------------
+# Specific force: gravity kept, one constant rotation per session (H02.4)
+# ---------------------------------------------------------------------------
+
+
+def horizontal_basis(up: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Two unit vectors spanning the plane perpendicular to ``up`` (body frame).
+
+    The constant-reference counterpart of :func:`_project_horizontal`'s per-row
+    basis, built the same way (body X projected, body Y where X is nearly
+    vertical), so a yaw fitted in one basis means the same thing in the other.
+    ``e2 = up × e1``.
+    """
+    up_hat = np.asarray(up, dtype=np.float64)
+    up_hat = up_hat / np.linalg.norm(up_hat)
+    ref = _REFERENCE_AXIS if abs(float(up_hat @ _REFERENCE_AXIS)) <= 0.9 else _FALLBACK_AXIS
+    e1 = ref - float(ref @ up_hat) * up_hat
+    e1 = e1 / np.linalg.norm(e1)
+    e2 = np.cross(up_hat, e1)
+    return e1, e2
+
+
+def specific_force_rotation(
+    gravity_body_g: np.ndarray, yaw_offset_rad: float, *, sign_flipped: bool
+) -> np.ndarray:
+    """Body → vehicle rotation, rows ``(LON, LAT, UP)`` in body coordinates.
+
+    ``UP`` is the reference specific force's direction (an accelerometer at
+    rest reads +1 g *up*); ``LON`` is the yaw-rotated horizontal axis, negated
+    when the sign resolved backwards; ``LAT = UP × LON`` (ISO 8855: left). The
+    rows are orthonormal and right-handed whatever the chip's axes.
+    """
+    up = np.asarray(gravity_body_g, dtype=np.float64)
+    up = up / np.linalg.norm(up)
+    e1, e2 = horizontal_basis(up)
+    lon = math.cos(yaw_offset_rad) * e1 + math.sin(yaw_offset_rad) * e2
+    if sign_flipped:
+        lon = -lon
+    lat = np.cross(up, lon)
+    return np.vstack([lon, lat, up])
+
+
+def apply_rotation(accel_body_g: np.ndarray, rotation: np.ndarray) -> np.ndarray:
+    """``accel_body_g`` (n × 3, body frame) in the vehicle frame (n × 3: LON, LAT, UP)."""
+    rotated: np.ndarray = np.asarray(accel_body_g, dtype=np.float64) @ np.asarray(rotation).T
+    return rotated
+
+
+@dataclass(frozen=True)
+class SpecificForceResolution:
+    """The specific-force frame of one session, or why a step did not resolve.
+
+    ``rotation`` is ``None`` when the yaw or the sign did not resolve
+    (``yaw_offset_rad is None`` / ``sign_votes == (0, 0)``); nothing is then
+    rotated, because a guessed axis would put braking into ``SF_LAT``.
+    """
+
+    gravity_body_g: np.ndarray
+    yaw_offset_rad: float | None
+    sign_flipped: bool
+    sign_votes: tuple[int, int]
+    rotation: np.ndarray | None
+
+
+def resolve_specific_force(
+    accel_body_g: pd.DataFrame,
+    quiescent: pd.Series,
+    straight: pd.Series,
+    speed_kph: pd.Series,
+    timestamps: pd.Series,
+    *,
+    min_magnitude: float = 0.05,
+) -> SpecificForceResolution:
+    """One constant body → vehicle rotation for a session, gravity kept.
+
+    ``accel_body_g`` has columns ``x``/``y``/``z`` (g). The reference "up" is
+    the **mean** specific force over every ``quiescent`` row: a single
+    orientation for the whole session, never the running low-pass
+    :func:`estimate_gravity` uses, because re-estimating during a steady climb
+    would take the grade out of ``SF_LON`` and make the residual pitch vary
+    along the drive (the dyno assumes one constant offset per session). Yaw
+    comes from straight rows' linear acceleration about that reference
+    (:func:`resolve_yaw_offset`), the sign from the speed derivative.
+
+    Whatever grade the vehicle sat on over the quiescent rows stays in the
+    reference as a constant pitch offset: ``SF_LON = a·cos θr + sin(θ − θr)``
+    for a mean reference pitch ``θr``. It is recorded, not removed — see
+    ``src.preprocessing.imu_session``.
+    """
+    mask = quiescent.reindex(accel_body_g.index, fill_value=False).to_numpy(dtype=bool)
+    values = accel_body_g[["x", "y", "z"]].to_numpy(dtype=np.float64)
+    gravity = values[mask].mean(axis=0)
+    e1, e2 = horizontal_basis(gravity)
+    linear = values - gravity
+    h1 = pd.Series(linear @ e1, index=accel_body_g.index)
+    h2 = pd.Series(linear @ e2, index=accel_body_g.index)
+    yaw = resolve_yaw_offset(h1, h2, straight, min_magnitude=min_magnitude)
+    if yaw is None:
+        return SpecificForceResolution(gravity, None, False, (0, 0), None)
+    lon, _ = _rotate(h1, h2, yaw)
+    agree, disagree = longitudinal_sign_votes(lon, speed_kph, timestamps)
+    if agree == 0 and disagree == 0:
+        return SpecificForceResolution(gravity, yaw, False, (0, 0), None)
+    flipped = disagree > agree
+    rotation = specific_force_rotation(gravity, yaw, sign_flipped=flipped)
+    return SpecificForceResolution(gravity, yaw, flipped, (agree, disagree), rotation)
 
 
 def resolve_frame(
@@ -276,12 +485,14 @@ def resolve_frame(
     accel_x_column: str = "imu:ACCEL_X",
     accel_y_column: str = "imu:ACCEL_Y",
     accel_z_column: str = "imu:ACCEL_Z",
-    speed_column: str = "obd:SPEED",
-    heading_column: str = "gps:heading",
+    speed_column: str | None = None,
+    heading_column: str = HEADING_COLUMN,
     timestamp_column: str = "timestamp",
     quiescent_window: int = 20,
+    quiescent_lookahead: int = 0,
     gravity_removed: bool = False,
     yaw_offset_rad: float | None = None,
+    bindings: Bindings | None = None,
 ) -> FrameResolution:
     """Run the full gravity → heading → sign pipeline over one session's frame.
 
@@ -292,13 +503,21 @@ def resolve_frame(
     overrides step 2 entirely (the persisted-per-session value, once
     computed — see :func:`read_yaw_offset`) so a session doesn't need a
     fresh straight segment before its later rows can be frame-resolved.
+
+    ``speed_column`` ``None`` (the default) takes the best speed the frame has
+    (:func:`select_speed`); a named column is read through the same scaling.
+    ``quiescent_lookahead`` (rows) is the masks' look-ahead; a caller at IMU
+    rate passes :data:`QUIESCENT_LOOKAHEAD_SECONDS` in rows.
     """
     timestamps = frame[timestamp_column]
-    speed = (
-        frame[speed_column]
-        if speed_column in frame.columns
-        else pd.Series(np.nan, index=frame.index)
-    )
+    speed: pd.Series
+    if speed_column is None:
+        selected = select_speed(frame, bindings=bindings)
+        speed = selected[0] if selected is not None else pd.Series(np.nan, index=frame.index)
+    elif speed_column in frame.columns:
+        speed = physical_series(frame[speed_column], speed_column, bindings)
+    else:
+        speed = pd.Series(np.nan, index=frame.index)
     heading = frame[heading_column] if heading_column in frame.columns else None
 
     if gravity_removed:
@@ -313,7 +532,9 @@ def resolve_frame(
             },
             index=frame.index,
         )
-        quiescent = quiescent_mask(speed, heading, window=quiescent_window)
+        quiescent = quiescent_mask(
+            speed, heading, window=quiescent_window, lookahead=quiescent_lookahead
+        )
         gravity = estimate_gravity(accel, quiescent)
         linear_accel = accel.to_numpy() - gravity.to_numpy()
         h1_arr, h2_arr = _project_horizontal(linear_accel, gravity.to_numpy())
@@ -322,7 +543,7 @@ def resolve_frame(
 
     offset = yaw_offset_rad
     if offset is None and heading is not None:
-        straight = straight_mask(heading, window=quiescent_window)
+        straight = straight_mask(heading, window=quiescent_window, lookahead=quiescent_lookahead)
         offset = resolve_yaw_offset(h1, h2, straight)
 
     if offset is None:
@@ -339,6 +560,9 @@ def resolve_frame(
 
     lon, lat = _rotate(h1, h2, offset)
     lon, flipped = resolve_longitudinal_sign(lon, speed, timestamps)
+    if flipped:
+        # Keep LAT = up × LON (ISO 8855, left positive) through the flip.
+        lat = -lat
     return FrameResolution(
         linear_accel_lon=lon,
         linear_accel_lat=lat,
