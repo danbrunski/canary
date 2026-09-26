@@ -1905,9 +1905,63 @@ live here now, so the documents could be archived
     - The daemon's load audit gets the same policy.
     - Tests in `tests/test_feature_policy.py`, end to end on the tracked
       Xterra catalog: `ACCEL_PEDAL_POS_D` is refused, `O2_WR_LAMBDA_S5` kept.
-  - [ ] **Keep the once-a-minute DIDs out of detector inputs.** The IF already
+  - [x] **Keep the once-a-minute DIDs out of detector inputs.** The IF already
     discards all 8 for low coverage; the LSTM takes them as mostly empty
-    columns. Apply one coverage rule to both.
+    columns. Apply one coverage rule to both. **Desk done 2026-09-26; takes
+    effect at the next retrain.**
+    - **The rule.** `feature_pipeline.MIN_DETECTOR_COVERAGE` (0.5) is the IF's
+      old floor, promoted; `MIN_ISOLATION_FOREST_COVERAGE` is now an alias of
+      it. `apply_coverage_floor` applies it to both detectors on grid
+      *density*: the share of classified 1 Hz rows a channel is valued on,
+      counted only over the sessions that carry it. The DIDs measure 2.9 %.
+      A PID added last week scores ~100 % where present, and GRU-D masks the
+      drives without it.
+    - **Judged on the base channel, family-wide.** The premise was half
+      true: a 30 s rolling `__mean` holds one read for 30 rows, so a
+      once-a-minute channel's `__mean` can be valued on nearly every row
+      while its base is valued on ~3 %. Judged per column, such siblings
+      would have stayed in the sequence model.
+    - **The IF adds its own per-column check** over all classified rows (its
+      pre-D03.34 rule). Density is never below that coverage, so the IF's
+      only change is the rolling siblings of sparse channels.
+    - **Recorded** in both manifests under `coverage_floor_exclusions`:
+      `{min_coverage, columns: {col: {reason, coverage, measured_on}}}`. The
+      reasons are `sparse_for_grid` for both detectors and
+      `below_row_coverage` for the IF only. Both are taken from the
+      `DetectorFeatureSelection` that supplied the columns.
+    - **Before/after, laptop** (verifier's reproduction, 2026-09-26). Each
+      frame was built once with HEAD code; the HEAD and new selectors were
+      applied to it under the `canary.laptop.yaml` feature policy.
+      - `2026-09-23T150658`: IF 192→178. The 14 removed are all
+        `__mean`/`__std` of sparse bases: `did:` channels, catalyst temps,
+        derived `AFR_BANK_BALANCE`/`TPS_VOLTAGE_PER_PCT`. Sequence 209→180.
+      - The 30-session 09-21..23 corpus: IF 178→174, removing only
+        `CATALYST_TEMP_B{1,2}S1__{mean,std}` (base density 11.6 %).
+        Sequence 234→192: all 8 DIDs, catalyst temps, derived AFR/TPS and
+        `mem:ECM_{ENGINE_SPEED,IGNITION_TIMING}_RAM` out.
+      - Nothing was added and column order is preserved. With no policy the
+        counts are IF 204→200 (the same 4) and sequence 262→220.
+    - **Not done:**
+      - Density pools rows across the sessions that carry a channel, so one
+        long densely polled session could lift a channel that is sparse
+        elsewhere. Only `default` sessions train today, so this is moot now.
+        If it ever matters, judge density per session.
+      - An IF `deviation:` channel that is NaN off-regime would be labelled
+        `sparse_for_grid`. There is no impact today: no `deviation:` column
+        reaches the IF.
+    - **Deployed artifacts are unchanged.** Serving and evaluation read
+      `manifest.feature_columns`. Only `training_entry` calls the selectors.
+    - **Tests.**
+      - `tests/test_feature_pipeline.py`:
+        `test_a_once_a_minute_channel_is_no_input_of_either_detector`,
+        `test_a_channel_dense_where_present_stays_a_sequence_input` and
+        `test_the_if_selection_is_its_pre_d03_34_rule_but_for_sparse_families`.
+      - `tests/test_train_sequence_columns.py::test_both_trainers_exclude_a_once_a_minute_channel_and_name_why`
+        runs both trainers end to end.
+      - The old `test_sequence_features_keep_sparse_columns_the_if_drops` is
+        replaced.
+      - Mutations: judging siblings per column fails 3 of these tests;
+        removing the sequence floor fails 2.
   - [ ] **Deploy with the owed retrain.** The deployed IF and LSTM read eight of
     the dropped PIDs as features. After a pull without a retrain, those
     inputs go silent. Both detectors are evidence-only, so nothing alerts, but

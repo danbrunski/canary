@@ -72,15 +72,17 @@ from src.models.sequence_training import (
     tail_block_validation_start,
 )
 from src.preprocessing.feature_pipeline import (
+    COVERAGE_FLOOR_SCHEMA_KEY,
     DEFAULT_BINDINGS_PATH,
     FeaturePolicy,
     align_features_to_schema,
     build_feature_frame,
     build_feature_spec,
     expand_suppress_channels,
-    isolation_forest_feature_columns,
+    isolation_forest_feature_selection,
     resolve_feature_policy,
     sequence_feature_columns,
+    sequence_feature_selection,
 )
 from src.preprocessing.normalization import ZScoreScaler
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
@@ -294,7 +296,11 @@ def train_sequence_detector(
         )
     if features.empty:
         raise ValueError("every training row is parked: no row lies in a physical drive")
-    columns = sequence_feature_columns(features, policy=policy)
+    # D03.34 — the detector coverage floor (shared with the IF): a channel
+    # too sparse for the 1 Hz grid is not an input; the exclusions are
+    # recorded from this same selection.
+    selection = sequence_feature_selection(features, policy=policy)
+    columns = list(selection.columns)
     if not columns:
         raise ValueError(
             "no trainable feature columns — the sessions produced no numeric "
@@ -469,6 +475,7 @@ def train_sequence_detector(
     # A03.2/A03.3 — what this model conditions on and what it scores.
     feature_spec[FEATURE_SET_SCHEMA_KEY] = dict(resolution.record)
     feature_spec[UNOBSERVED_IN_TRAINING_SCHEMA_KEY] = sorted(unobserved_in_training)
+    feature_spec[COVERAGE_FLOOR_SCHEMA_KEY] = selection.coverage_record()
     feature_spec[ROWS_WITHOUT_DRIVE_SCHEMA_KEY] = rows_without_drive
     trained = train_sequence_autoencoder(
         backend,
@@ -631,11 +638,11 @@ def train_isolation_forest(
             force_rebuild=rebuild_feature_cache,
         )
     )
-    # IF-specific selection: additionally drops columns too sparse for a
-    # per-row detector to score on (see MIN_ISOLATION_FOREST_COVERAGE). The
-    # sequence trainer deliberately does NOT apply this — GRU-D consumes
-    # missingness as signal.
-    feature_columns = isolation_forest_feature_columns(features, policy=policy)
+    # The detector coverage floor (MIN_DETECTOR_COVERAGE, shared with the
+    # sequence trainer since D03.34) plus the IF's own row-coverage requirement: a
+    # per-row detector cannot score a row with any trained column missing.
+    selection = isolation_forest_feature_selection(features, policy=policy)
+    feature_columns = list(selection.columns)
     # B03.2 — a deviation column whose behavior model withholds
     # ``learned_feature`` (demoted/quarantined/exploratory in the profile's
     # behavior_policy.yaml) is not selected for a *new* model. The column is
@@ -675,6 +682,7 @@ def train_isolation_forest(
                 behavior_models=behavior_models,
             ),
             "behavior_learned_feature_withheld": dict(sorted(withheld.items())),
+            COVERAGE_FLOOR_SCHEMA_KEY: selection.coverage_record(),
         },
         fitted_at=datetime.now(UTC),
         calibration_frame=(

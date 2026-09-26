@@ -209,3 +209,95 @@ def test_a_tail_block_validation_never_moves_the_scaler(
     assert split.validation_indexes
     for i in split.validation_indexes:
         assert pd.Timestamp(dataset.windows[i].start_timestamp) > until
+
+
+#: Read once a minute, like the Xterra ``default``'s Mode 22 DIDs (D03.34). A
+#: served PID, so the serving gate does not refuse it first.
+ONCE_A_MINUTE = "CATALYST_TEMP_B1S1"
+
+
+def _once_a_minute_session(root: Path, name: str, *, start: float) -> Path:
+    records: list[TelemetryRecord] = []
+    for i in range(240):
+        t = start + i
+        records.extend(
+            [
+                TelemetryRecord.obd(t, "RPM", 780.0 + (i % 4), "rpm"),
+                TelemetryRecord.obd(t, "SPEED", float(i % 5), "km/h"),
+                TelemetryRecord.obd(t, "THROTTLE_POS", 6.0 + (i % 3), "%"),
+            ]
+        )
+        if i % 60 == 0:
+            records.append(TelemetryRecord.obd(t, ONCE_A_MINUTE, 400.0 + i / 10, "degC"))
+    write_records_to_parquet(records, root / name, max_rows=10_000)
+    return root / name
+
+
+def test_both_trainers_exclude_a_once_a_minute_channel_and_name_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D03.34: a channel read once per ~60 s is too sparse for the 1 Hz grid.
+    Neither detector trains on it, and each manifest names it under the same
+    reason; the 1 Hz channels are kept by both."""
+    from src.preprocessing.feature_pipeline import COVERAGE_FLOOR_SCHEMA_KEY, SPARSE_FOR_GRID
+
+    data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
+    data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
+    config_path = tmp_path / "canary.yaml"
+    config_path.write_text(yaml.safe_dump(data))
+    config = CanaryConfig.from_yaml(config_path)
+    root = tmp_path / "sessions"
+    sessions = [
+        _once_a_minute_session(root, f"2026-08-0{i + 1}T120000", start=1_785_600_000.0 + 86_400 * i)
+        for i in range(3)
+    ]
+    seen: dict[str, dict[str, Any]] = {}
+
+    def fake_sequence(_backend: object, dataset: Any, *_a: object, **kwargs: Any) -> None:
+        seen["sequence"] = {
+            "columns": list(dataset.feature_columns),
+            "spec": kwargs["feature_spec"],
+        }
+        raise _StopError
+
+    def fake_if(_features: object, _cfg: object, **kwargs: Any) -> None:
+        seen["isolation_forest"] = {
+            "columns": list(kwargs["feature_columns"]),
+            "spec": kwargs["feature_spec"],
+        }
+        raise _StopError
+
+    monkeypatch.setattr(training_entry, "train_sequence_autoencoder", fake_sequence)
+    monkeypatch.setattr(training_entry, "fit_isolation_forest", fake_if)
+    bindings = tmp_path / "no-bindings.yaml"
+    with pytest.raises(_StopError):
+        training_entry.train_sequence_detector(
+            training_entry.SEQUENCE_BACKBONES["lstm"],
+            sessions,
+            config,
+            tmp_path / "out",
+            bindings_path=bindings,
+        )
+    with pytest.raises(_StopError):
+        training_entry.train_isolation_forest(
+            sessions, config, tmp_path / "out-if", bindings_path=bindings
+        )
+
+    sparse = f"obd:{ONCE_A_MINUTE}"
+    for detector, got in seen.items():
+        assert "obd:RPM" in got["columns"], detector
+        # The read and its rolling siblings (the 30 s __mean holds it for
+        # half the rows) are all out, each named against the channel.
+        family = [c for c in got["spec"]["feature_health"]["columns"] if c.startswith(sparse)]
+        assert not family, detector
+        assert not any(c.startswith(sparse) for c in got["columns"]), detector
+        record = got["spec"][COVERAGE_FLOOR_SCHEMA_KEY]
+        assert record["min_coverage"] == 0.5
+        excluded = record["columns"]
+        assert {sparse, f"{sparse}__mean"} <= set(excluded), detector
+        for column in (sparse, f"{sparse}__mean"):
+            assert excluded[column]["reason"] == SPARSE_FOR_GRID, detector
+            assert excluded[column]["coverage"] < 0.1, detector
+            assert excluded[column]["measured_on"] == sparse, detector
+        assert "obd:RPM" not in excluded, detector
+    assert set(seen) == {"sequence", "isolation_forest"}

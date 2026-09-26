@@ -1398,16 +1398,16 @@ def trainable_feature_columns(
     return cols
 
 
-#: Minimum fraction of rows a feature must be observed on to be trainable by
-#: the **Isolation Forest**. Unlike the sequence detector — which is handed
-#: missingness explicitly via GRU-D mask/Δt channels and is expected to see
-#: sparse round-robin PIDs — the IF scores one row at a time and
+#: Minimum fraction of classified 1 Hz grid rows a feature column must be
+#: valued on to be a **detector input** — one floor, shared by the Isolation
+#: Forest and the sequence detector (D03.34, 2026-09-26).
+#:
+#: The IF needs it most: it scores one row at a time and
 #: ``TrainedIsolationForest.score`` refuses any row with a NaN in ANY trained
 #: feature (``group[feats].isna().any(axis=1)`` → score=inf, missing flag set,
 #: and the daemon's fail-safe then suppresses the emit). So every sparse column
 #: in the IF's schema multiplies the chance that a row is unscoreable, and a
 #: single structurally-absent column makes the detector permanently blind.
-#:
 #: Measured on the 2026-07-26 corpus: the IF trained 273 features of which NONE
 #: reached 75% coverage, so it could not score a single row — matching the Pi's
 #: observed ``missing_feature_rate: 1.0``. Offenders split in two:
@@ -1416,7 +1416,185 @@ def trainable_feature_columns(
 #: channels NaN'd as stale because the resampler's ceiling assumed a poll rate
 #: the contended bus never achieves. This threshold removes the former; the
 #: staleness ceiling (``preprocessing.max_gap_factor``) governs the latter.
-MIN_ISOLATION_FOREST_COVERAGE = 0.5
+#:
+#: The sequence detector gets the same floor on grid *density*
+#: (:func:`detector_grid_density`): its GRU-D mask/Δt channels make a
+#: forward-filled round-robin PID cheap, but a channel valued on 3 % of the
+#: rows of every drive that carries it (the Xterra ``default``'s eight Mode 22
+#: DIDs, read once per ~60 s window, and the ``derived:`` channels built from
+#: them) is a mostly-empty column, not a signal at the grid's rate. A channel
+#: that is dense where present but absent from some drives stays a sequence
+#: input: masking is what handles that, and the IF alone additionally needs
+#: it valued on the rows it scores (:data:`BELOW_ROW_COVERAGE`).
+MIN_DETECTOR_COVERAGE = 0.5
+
+#: The IF's coverage floor *is* the shared detector floor; the old name stays
+#: for callers and for the history in the comments that cite it.
+MIN_ISOLATION_FOREST_COVERAGE = MIN_DETECTOR_COVERAGE
+
+#: Named reasons a column fails the coverage floor, recorded per column in the
+#: manifest under :data:`COVERAGE_FLOOR_SCHEMA_KEY`.
+#:
+#: ``sparse_for_grid`` — both detectors: the column's *channel* (its base,
+#: :func:`~src.preprocessing.features.base_channel`) is valued on fewer than
+#: :data:`MIN_DETECTOR_COVERAGE` of the classified rows of the sessions that
+#: carry it, i.e. polled too slowly for the 1 Hz grid. The whole family goes:
+#: a 30 s rolling ``__mean`` of a once-a-minute read is valued on over half the
+#: rows only because the rolling window holds the one read for 30 s, past the
+#: resampler's forward-fill ceiling — the same read smeared, not a 1 Hz signal.
+SPARSE_FOR_GRID = "sparse_for_grid"
+#: ``below_row_coverage`` — IF only, per column (its pre-D03.34 rule): valued
+#: on fewer than :data:`MIN_DETECTOR_COVERAGE` of *all* the classified rows, so
+#: the row-wise IF could not score the rest (a channel dense where present but
+#: absent from some drives, or a ``__roc`` NaN on every stale tick).
+BELOW_ROW_COVERAGE = "below_row_coverage"
+
+#: Manifest ``schema`` key: the coverage floor a detector was cut with and
+#: every candidate column it excluded, with the named reason, the measured
+#: coverage and the column it was measured on (D03.34).
+COVERAGE_FLOOR_SCHEMA_KEY = "coverage_floor_exclusions"
+
+
+@dataclass(frozen=True)
+class CoverageExclusion:
+    """Why the coverage floor kept one candidate column out."""
+
+    reason: str
+    coverage: float
+    #: The column the coverage was measured on: the channel's base column for
+    #: :data:`SPARSE_FOR_GRID`, the column itself for :data:`BELOW_ROW_COVERAGE`.
+    measured_on: str
+
+
+@dataclass(frozen=True)
+class DetectorFeatureSelection:
+    """A detector's feature columns and what the coverage floor kept out.
+
+    The trainers record :attr:`coverage_exclusions` from the *same* object they
+    take :attr:`columns` from, so the manifest cannot name a different set than
+    the one the model was fit on.
+    """
+
+    columns: list[str]
+    coverage_exclusions: dict[str, CoverageExclusion]
+    min_coverage: float
+
+    def coverage_record(self) -> dict[str, Any]:
+        """The manifest record (:data:`COVERAGE_FLOOR_SCHEMA_KEY`)."""
+        return {
+            "min_coverage": self.min_coverage,
+            "measured_over": "classified-mode rows of the training frame",
+            "columns": {
+                column: {
+                    "reason": excluded.reason,
+                    "coverage": excluded.coverage,
+                    "measured_on": excluded.measured_on,
+                }
+                for column, excluded in sorted(self.coverage_exclusions.items())
+            },
+        }
+
+
+def detector_grid_density(features: pd.DataFrame, columns: Sequence[str]) -> dict[str, float]:
+    """``{column: density}``: the share of classified grid rows a column is
+    valued on, counted over only the sessions that carry it at all.
+
+    This is the grid-rate half of the coverage question, separated from
+    corpus presence: a once-a-minute DID scores ~3 % in every session that
+    polls it, while a PID added to polling last week scores ~100 % in the
+    sessions that have it. Rows are those of :func:`detector_coverage_rows`;
+    a frame without a session column is one session. A column never valued on
+    those rows has density 0.
+    """
+    scored = detector_coverage_rows(features)
+    present = list(dict.fromkeys(str(c) for c in columns if c in scored.columns))
+    if not present or scored.empty:
+        return dict.fromkeys(present, 0.0)
+    valued = scored[present].notna()
+    if "session" not in scored.columns:
+        rows = float(len(scored))
+        return {c: float(valued[c].sum()) / rows for c in present}
+    sessions = scored["session"].astype(str).to_numpy()
+    per_session = valued.groupby(sessions, sort=False).sum()
+    session_rows = pd.Series(sessions).value_counts().reindex(per_session.index)
+    carried_rows = (per_session > 0).mul(session_rows, axis=0).sum()
+    counts = per_session.sum()
+    return {
+        c: (float(counts[c]) / float(carried_rows[c]) if carried_rows[c] > 0 else 0.0)
+        for c in present
+    }
+
+
+def detector_coverage(features: pd.DataFrame, columns: Sequence[str]) -> dict[str, float]:
+    """``{column: coverage}`` over every classified row (the IF's measure)."""
+    scored = detector_coverage_rows(features)
+    rows = len(scored)
+    return {
+        str(c): (float(scored[c].notna().sum()) / rows if rows else 0.0)
+        for c in columns
+        if c in scored.columns
+    }
+
+
+def apply_coverage_floor(
+    features: pd.DataFrame,
+    columns: Sequence[str],
+    *,
+    require_row_coverage: bool,
+    min_coverage: float = MIN_DETECTOR_COVERAGE,
+) -> DetectorFeatureSelection:
+    """The shared detector coverage rule over already-trainable ``columns``.
+
+    Every detector drops a column whose channel is under ``min_coverage``
+    grid density (:data:`SPARSE_FOR_GRID`, judged on the base column when the
+    frame has it, so a sparse channel's rolling siblings go with it).
+    ``require_row_coverage`` adds the IF's per-column, row-wise requirement:
+    the same floor over all classified rows (:data:`BELOW_ROW_COVERAGE`).
+    Density is never below whole-frame coverage, so a raw column that passes
+    the row check passes the density check too; the IF's only difference from
+    its pre-D03.34 selection is the rolling siblings of a sparse channel.
+    ``min_coverage <= 0`` (or an empty frame) disables the floor.
+    """
+    kept = [str(c) for c in columns]
+    if min_coverage <= 0 or features.empty:
+        return DetectorFeatureSelection(kept, {}, float(min_coverage))
+    measured_on = {
+        column: (base if (base := base_channel(column)) in features.columns else column)
+        for column in kept
+    }
+    density = detector_grid_density(features, list(measured_on.values()))
+    coverage = detector_coverage(features, kept) if require_row_coverage else {}
+    excluded: dict[str, CoverageExclusion] = {}
+    selected: list[str] = []
+    for column in kept:
+        channel = measured_on[column]
+        if density.get(channel, 0.0) < min_coverage:
+            excluded[column] = CoverageExclusion(
+                SPARSE_FOR_GRID, round(density.get(channel, 0.0), 6), channel
+            )
+        elif require_row_coverage and coverage.get(column, 0.0) < min_coverage:
+            excluded[column] = CoverageExclusion(
+                BELOW_ROW_COVERAGE, round(coverage.get(column, 0.0), 6), column
+            )
+        else:
+            selected.append(column)
+    return DetectorFeatureSelection(selected, excluded, float(min_coverage))
+
+
+def isolation_forest_feature_selection(
+    features: pd.DataFrame,
+    *,
+    min_coverage: float = MIN_DETECTOR_COVERAGE,
+    policy: FeaturePolicy | None = None,
+) -> DetectorFeatureSelection:
+    """:func:`trainable_feature_columns` through the shared coverage floor,
+    with the IF's row-coverage requirement (:func:`apply_coverage_floor`)."""
+    return apply_coverage_floor(
+        features,
+        trainable_feature_columns(features, policy=policy),
+        require_row_coverage=True,
+        min_coverage=min_coverage,
+    )
 
 
 def isolation_forest_feature_columns(
@@ -1427,21 +1605,18 @@ def isolation_forest_feature_columns(
 ) -> list[str]:
     """Trainable columns restricted to those the IF can actually score on.
 
-    :func:`trainable_feature_columns` plus a per-column coverage floor — see
-    :data:`MIN_ISOLATION_FOREST_COVERAGE` for why the IF needs one and the
-    sequence detector does not. ``min_coverage=0`` recovers the old behaviour.
+    :func:`trainable_feature_columns` plus the per-column coverage floor — see
+    :data:`MIN_DETECTOR_COVERAGE` for why. ``min_coverage=0`` recovers the old
+    behaviour.
     """
-    columns = trainable_feature_columns(features, policy=policy)
-    if min_coverage <= 0 or features.empty:
-        return columns
-    scored = isolation_forest_coverage_rows(features)
-    rows = len(scored)
-    return [c for c in columns if float(scored[c].notna().sum()) / rows >= min_coverage]
+    return isolation_forest_feature_selection(
+        features, min_coverage=min_coverage, policy=policy
+    ).columns
 
 
-def isolation_forest_coverage_rows(features: pd.DataFrame) -> pd.DataFrame:
-    """The rows the IF coverage floor is measured over: those in a classified
-    operating mode.
+def detector_coverage_rows(features: pd.DataFrame) -> pd.DataFrame:
+    """The rows the detector coverage floor is measured over: those in a
+    classified operating mode (both detectors, D03.34).
 
     The IF never fits the ``unknown`` mode (``SKIP_UNCLASSIFIED_MODE``) and
     serving refuses one (A04.8), so an unclassified row is a row it can never
@@ -1470,16 +1645,11 @@ def low_coverage_columns(
     """
     if features.empty:
         return {}
-    scored = isolation_forest_coverage_rows(features)
-    rows = len(scored)
-    out: dict[str, float] = {}
-    for column in columns:
-        if column not in scored.columns:
-            continue
-        coverage = float(scored[column].notna().sum()) / rows
-        if coverage < min_coverage:
-            out[str(column)] = round(coverage, 6)
-    return out
+    return {
+        column: round(coverage, 6)
+        for column, coverage in detector_coverage(features, columns).items()
+        if coverage < min_coverage
+    }
 
 
 def _is_constant_column(series: pd.Series) -> bool:
@@ -1593,30 +1763,50 @@ def _signal_present(frame: pd.DataFrame, value: str | tuple[str, ...]) -> bool:
 DEVIATION_PREFIX = "deviation:"
 
 
-def sequence_feature_columns(
-    features: pd.DataFrame, *, policy: FeaturePolicy | None = None
-) -> list[str]:
-    """GRU-D LSTM-autoencoder feature columns: all trainable sensor channels.
+def sequence_feature_selection(
+    features: pd.DataFrame,
+    *,
+    min_coverage: float = MIN_DETECTOR_COVERAGE,
+    policy: FeaturePolicy | None = None,
+) -> DetectorFeatureSelection:
+    """GRU-D sequence-autoencoder feature columns, with what the shared
+    coverage floor kept out.
 
     Differs from :func:`trainable_feature_columns` (which the Isolation Forest
-    uses) in one way: it **drops the entire ``deviation:`` family** (raw and
-    rolling aggregates). Deviations are behavior-model-derived scores that are
-    NaN by contract whenever the model can't speak (off operating-regime) —
+    starts from) in one way: it **drops the entire ``deviation:`` family** (raw
+    and rolling aggregates). Deviations are behavior-model-derived scores that
+    are NaN by contract whenever the model can't speak (off operating-regime) —
     scattered NaN, not a gap. They are designed for the IF path, which imputes;
     an autoencoder reconstructing sensor *sequences* should not consume them.
 
-    The previous density / every-session pruning is **gone**: GRU-D feeds
-    missingness to the model via the mask/Δt channels, so a round-robin OBD PID
-    (stale most ticks) or a channel absent from some drives is kept at its native
-    rate rather than dropped. The remaining drops — all-NaN-everywhere and
-    corpus-constant (zero-variance) columns — are inherited from
+    Then the detector coverage floor (D03.34, :func:`apply_coverage_floor`) on
+    grid density only: GRU-D feeds missingness to the model via the mask/Δt
+    channels, so a round-robin PID forward-filled between polls, or a channel
+    absent from some drives, is kept. A channel valued on under
+    :data:`MIN_DETECTOR_COVERAGE` of the rows of the drives that carry it (a
+    DID read once a minute) is not a sequence at the grid's rate, and it and
+    its rolling siblings are dropped as :data:`SPARSE_FOR_GRID`. The remaining drops — all-NaN
+    everywhere and corpus-constant (zero-variance) columns — are inherited from
     :func:`trainable_feature_columns`.
     """
-    return [
+    candidates = [
         col
         for col in trainable_feature_columns(features, policy=policy)
         if not col.startswith(DEVIATION_PREFIX)
     ]
+    return apply_coverage_floor(
+        features, candidates, require_row_coverage=False, min_coverage=min_coverage
+    )
+
+
+def sequence_feature_columns(
+    features: pd.DataFrame,
+    *,
+    min_coverage: float = MIN_DETECTOR_COVERAGE,
+    policy: FeaturePolicy | None = None,
+) -> list[str]:
+    """The columns of :func:`sequence_feature_selection`."""
+    return sequence_feature_selection(features, min_coverage=min_coverage, policy=policy).columns
 
 
 def expand_suppress_channels(

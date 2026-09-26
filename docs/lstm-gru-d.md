@@ -81,6 +81,9 @@ is needed to proceed with LSTM as the shipped default.)
 ## Removed (superseded)
 
 - `feature_pipeline._dense_sequence_columns` density filter — keep all channels.
+  (Since 2026-09-26, D03.34: one coverage floor shared with the IF drops a
+  channel valued on under half its sessions' grid rows — polled too slowly for
+  the 1 Hz grid; masking still handles ordinary staleness.)
 - `sequence_dataset` window gap-rejection (`_window_has_gap`) — every window is
   valid; the mask handles staleness. Keep the NaN-on-required-value guard only
   for leading rows before a channel's first observation (impute to 0 = mean).
@@ -96,8 +99,9 @@ is needed to proceed with LSTM as the shipped default.)
 - `lstm_training.py` — masked MSE loss; persist scaler + decay params; per-mode
   thresholds on masked error.
 - `feature_pipeline.sequence_feature_columns` — return all trainable
-  non-deviation channels (no density/every-session pruning needed once masking
-  handles absence; keep an all-NaN-everywhere drop).
+  non-deviation channels (no every-session pruning: masking handles absence;
+  keep an all-NaN-everywhere drop). D03.34 (2026-09-26) adds back one floor,
+  shared with the IF, for channels too sparse for the 1 Hz grid.
 - `live.py` — per-channel last-observed tracking → `m`, `δ` each tick.
 - manifest — input layout (F, channel order), `max_gap`, decay tensors so serve
   reconstructs the model exactly.

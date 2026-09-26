@@ -21,15 +21,21 @@ from src.decode.behavior_models import BehaviorModels
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
+    BELOW_ROW_COVERAGE,
+    MIN_DETECTOR_COVERAGE,
     NON_TRAINABLE_COUNTER_CHANNELS,
+    SPARSE_FOR_GRID,
     FeaturizedFrame,
     _drop_fully_stale_rows,
     align_features_to_schema,
     candidate_feature_columns,
     featurize_wide_frame,
     isolation_forest_feature_columns,
+    isolation_forest_feature_selection,
+    low_coverage_columns,
     restrict_isolation_forest_expansion,
     sequence_feature_columns,
+    sequence_feature_selection,
     summarize_feature_health,
     trainable_feature_columns,
 )
@@ -62,9 +68,11 @@ def test_drop_fully_stale_rows_noop_without_gap_columns() -> None:
 
 
 def test_sequence_feature_columns_keeps_sparse_channels() -> None:
-    """GRU-D feeds missingness to the model, so the old density filter is gone:
-    a sparse round-robin OBD PID is kept at its native rate (masking handles
-    its staleness) rather than dropped from the sequence feature set."""
+    """GRU-D feeds missingness to the model: a round-robin OBD PID that is
+    forward-filled within its gap limit is valued on every grid row, so it
+    clears the D03.34 coverage floor and stays in, with its staleness carried by
+    the gap flags. (A channel polled too slowly for the grid does not; see
+    ``test_a_once_a_minute_channel_is_no_input_of_either_detector``.)"""
     n = 40
     frame = pd.DataFrame(
         {
@@ -807,16 +815,124 @@ def test_if_coverage_floor_is_opt_out() -> None:
     )
 
 
-def test_sequence_features_keep_sparse_columns_the_if_drops() -> None:
-    """The load-bearing asymmetry: GRU-D is handed missingness as signal via
-    mask/delta-t channels, so the sparse DID it keeps is exactly the one the
-    per-row IF must drop. Applying one filter to both would silently blind the
-    sequence detector to the DID channels it is meant to watch."""
-    frame = _coverage_frame()
-    seq = sequence_feature_columns(frame)
-    if_cols = isolation_forest_feature_columns(frame, min_coverage=0.5)
-    assert "did:ECM_AF_SENSOR_V_B1" in seq
-    assert "did:ECM_AF_SENSOR_V_B1" not in if_cols
+# ---------------------------------------------------------------------------
+# D03.34 (2026-09-26): one coverage floor for both detectors. The Xterra
+# ``default`` reads its eight Mode 22 DIDs once per ~60 s window; the IF
+# already dropped them, the sequence model took them as mostly empty columns.
+# ---------------------------------------------------------------------------
+
+
+def _once_a_minute_corpus(sessions: int = 3, n: int = 180) -> pd.DataFrame:
+    """Three drives: 1 Hz RPM, a DID valued on 2 of every 60 rows (one read a
+    minute, forward-filled one tick) whose 30 s rolling ``__mean`` holds that
+    read for 30 rows, and a PID dense in the last drive only."""
+    frames = []
+    for s in range(sessions):
+        did = [float(i + s) if i % 60 in (0, 1) else float("nan") for i in range(n)]
+        frames.append(
+            pd.DataFrame(
+                {
+                    "session": [f"s{s}"] * n,
+                    "timestamp": pd.date_range(f"2026-09-2{s}T14:00:00Z", periods=n, freq="1s"),
+                    MODE_COLUMN: ["city"] * n,
+                    "obd:RPM": [float(800 + i + s) for i in range(n)],
+                    "obd:RPM__mean": [float(800 + i + s) for i in range(n)],
+                    "did:ECM_AF_SENSOR_V_B1": did,
+                    "did:ECM_AF_SENSOR_V_B1__mean": pd.Series(did)
+                    .rolling(30, min_periods=1)
+                    .mean()
+                    .tolist(),
+                    "obd:O2_WR_LAMBDA_S5": [
+                        0.9 + 0.001 * i if s == sessions - 1 else float("nan") for i in range(n)
+                    ],
+                }
+            )
+        )
+    return pd.concat(frames, ignore_index=True)
+
+
+def test_a_once_a_minute_channel_is_no_input_of_either_detector() -> None:
+    """The acceptance case: the sparse-DID shape is excluded from both
+    detectors with the same named reason, rolling siblings included, and a
+    1 Hz channel is kept."""
+    frame = _once_a_minute_corpus()
+    did = "did:ECM_AF_SENSOR_V_B1"
+    # The smear the family rule exists for: the 30 s mean of a once-a-minute
+    # read is valued on over half the rows, the read itself on 3 %.
+    assert frame[f"{did}__mean"].notna().mean() > MIN_DETECTOR_COVERAGE
+    seq = sequence_feature_selection(frame)
+    iso = isolation_forest_feature_selection(frame)
+    for selection in (seq, iso):
+        assert {"obd:RPM", "obd:RPM__mean"} <= set(selection.columns)
+        for column in (did, f"{did}__mean"):
+            assert column not in selection.columns
+            excluded = selection.coverage_exclusions[column]
+            assert excluded.reason == SPARSE_FOR_GRID
+            assert excluded.coverage == pytest.approx(2 / 60, abs=1e-6)
+            assert excluded.measured_on == did
+        assert "obd:RPM" not in selection.coverage_exclusions
+        record = selection.coverage_record()
+        assert record["min_coverage"] == MIN_DETECTOR_COVERAGE
+        assert record["columns"][f"{did}__mean"] == {
+            "reason": SPARSE_FOR_GRID,
+            "coverage": pytest.approx(2 / 60, abs=1e-6),
+            "measured_on": did,
+        }
+    # The list functions are the selections' columns, so no caller can take
+    # one set and record another.
+    assert sequence_feature_columns(frame) == seq.columns
+    assert isolation_forest_feature_columns(frame) == iso.columns
+
+
+def test_a_channel_dense_where_present_stays_a_sequence_input() -> None:
+    """Density, not corpus presence, is the shared rule: a PID polled at the
+    grid rate since the last drive only (the bank-2 wide-band, added to
+    ``default`` on 2026-09-26) is masked where absent by GRU-D, so the
+    sequence model keeps it. The row-wise IF cannot score the rows without
+    it and drops it under its own, named, row-coverage requirement."""
+    frame = _once_a_minute_corpus()
+    seq = sequence_feature_selection(frame)
+    iso = isolation_forest_feature_selection(frame)
+    assert "obd:O2_WR_LAMBDA_S5" in seq.columns
+    assert "obd:O2_WR_LAMBDA_S5" not in iso.columns
+    excluded = iso.coverage_exclusions["obd:O2_WR_LAMBDA_S5"]
+    assert excluded.reason == BELOW_ROW_COVERAGE
+    assert excluded.coverage == pytest.approx(1 / 3, abs=1e-6)
+
+
+def test_the_if_selection_is_its_pre_d03_34_rule_but_for_sparse_families() -> None:
+    """The IF's behaviour is unchanged: its columns are exactly those at or
+    above the floor over every classified row (the pre-D03.34 per-column
+    filter), except the rolling siblings of a channel too sparse for the
+    grid, which the old filter let through on their smeared coverage."""
+
+    def old_rule(frame: pd.DataFrame) -> list[str]:
+        pooled = frame[frame[MODE_COLUMN] != "unknown"]
+        return [
+            c
+            for c in trainable_feature_columns(frame)
+            if pooled[c].notna().mean() >= MIN_DETECTOR_COVERAGE
+        ]
+
+    frame = _once_a_minute_corpus()
+    assert "did:ECM_AF_SENSOR_V_B1__mean" in old_rule(frame)
+    assert isolation_forest_feature_columns(frame) == [
+        c for c in old_rule(frame) if c != "did:ECM_AF_SENSOR_V_B1__mean"
+    ]
+    # Without a sparse family, the selection is the old rule exactly.
+    plain = pd.concat(
+        [
+            frame.drop(columns=["did:ECM_AF_SENSOR_V_B1__mean"]),
+            _coverage_frame().assign(session="s9"),
+        ],
+        ignore_index=True,
+    )
+    plain_trainable = trainable_feature_columns(plain)
+    plain_old = old_rule(plain)
+    assert isolation_forest_feature_columns(plain) == plain_old
+    assert low_coverage_columns(plain, plain_trainable).keys() == {
+        c for c in plain_trainable if c not in plain_old
+    }
 
 
 def test_feature_health_reports_coverage_and_low_coverage_drops() -> None:
