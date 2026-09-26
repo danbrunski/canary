@@ -178,6 +178,12 @@ class LiveFeatureSource:
     #: *before* the quality gate, so a plausibility check sees the raw sample
     #: the gate would drop. ``None`` (the default) costs one attribute test.
     sample_observer: Callable[[str, float, datetime], None] | None = None
+    #: B06.4 — called with every record :meth:`observe` receives, before any
+    #: decode, so a consumer that pairs reads on their own acquisition clock
+    #: (the lambda-delivery readout) sees each read — a fuel-cut sentinel's
+    #: text value included — rather than the latest numeric per channel. A
+    #: list, so one consumer cannot displace another.
+    record_observers: list[Callable[[TelemetryRecord], None]] = field(default_factory=list)
 
     _current_values: dict[str, float] = field(default_factory=dict)
     #: Per-channel wall-clock timestamp of the last fresh ``observe()``. GRU-D
@@ -354,6 +360,8 @@ class LiveFeatureSource:
 
         Side-effects only. Emitting a wide row is a separate tick.
         """
+        for record_observer in self.record_observers:
+            record_observer(record)
         if record.source == "obd":
             # Raw Mode-22 DID poll responses arrive as obd-source records with
             # channel "DID_<hex>" and a hex-string payload value. Decode them

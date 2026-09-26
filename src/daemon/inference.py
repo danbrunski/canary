@@ -49,6 +49,7 @@ from .inference_worker import (
     InferenceWorker,
     WorkerTick,
 )
+from .lambda_delivery_live import build_live_lambda_delivery
 
 if TYPE_CHECKING:
     # Annotation only: loaded on demand when ``plausibility.enabled``.
@@ -481,6 +482,9 @@ class LiveInferencePipeline:
         #: H04.2 — sensor committees: instrument cross-checks that flag. Run
         #: under every capture profile (R03.12 reasoning in committees_live).
         self._committees = build_live_committees(components, source, recorder)
+        #: B06.4 — lambda delivery error as a tuning readout: the offline
+        #: engine's rows, decided per tick; never alerts, not profile-gated.
+        self._lambda_delivery = build_live_lambda_delivery(components, source, recorder)
         #: Tick period, for naming a compute that outran it (D02.3).
         self._interval_seconds = interval_seconds
         self._owns_executor = executor is None
@@ -697,6 +701,12 @@ class LiveInferencePipeline:
             except Exception:  # noqa: BLE001 — committees are best-effort
                 log.exception("sensor committee tick failed")
             recorder.record_stage("committees", time.perf_counter() - stage_started)
+
+        if self._lambda_delivery is not None:
+            try:
+                self._lambda_delivery.tick_live(components)
+            except Exception:  # noqa: BLE001 — a readout is best-effort
+                log.exception("lambda delivery readout tick failed")
 
         # 4.7 — the segmenter falling back to constant "all" mode means
         # every mode-gated behavior surface silently never fires; make

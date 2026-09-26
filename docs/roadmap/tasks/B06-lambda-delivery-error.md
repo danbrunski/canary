@@ -60,7 +60,7 @@ a residual alone.
   constraint in a comment, so freezing one needs that schema field. A lag
   worth freezing needs a faster target read or sustained enrichment (still
   0–1 eligible enrichment rows per drive).
-- [~] **B06.4 — Share analysis and serving semantics.** Implement the
+- [x] **B06.4 — Share analysis and serving semantics.** Implement the
   relationship in the existing derived/model pipeline with B01's persisted
   eligibility. Reconcile analysis and live paths, including differing stored
   clocks and polling rates; no generic 1-second mean pairing may claim
@@ -86,6 +86,57 @@ a residual alone.
   The corpus choice is made (2026-09-23), but no delivery model can be
   fitted and validated yet (B06.5), and the serving path is new code, not a
   refit. Its 1 Hz pairing must not claim instantaneous tracking.
+  *Serving side done 2026-09-25: a tuning readout, not a detector.* Decision
+  (stated in `src/daemon/lambda_delivery_live.py` and the payload): delivery
+  error is served as a readout that never alerts and is **not** gated by
+  R03.12 or vehicle state — R03.12 keeps tuning captures out of the
+  learned-normal detectors, this learns nothing, and the tuning captures are
+  the only ones that carry enrichment. No delivery model is fitted or trusted
+  (B06.5/B06.6 stay data-blocked; payload `validated_model: false`,
+  `alerts: false`). One row judge serves both paths:
+  `lambda_delivery.judge_target_rows` is what `delivery_samples` now calls
+  (output bit-identical to before on 12 route × capture pairs: 223734 and
+  22T235224, all six declared routes) and what the live
+  `lambda_delivery_stream.DeliveryStream` calls per tick on a bounded window
+  of reads. The persisted eligibility is the declaration itself
+  (`lambda_delivery.yaml`: per-regime dwell/tolerance/holdoff, per-source
+  delay). Clocks reconciled: reads are taken per record off
+  `LiveFeatureSource.record_observers` on `acquired_at` (else the stored
+  stamp, converted exactly as the offline reader does); rows are decided on
+  the data's own clock 2 s after their pairing window closes, so replay
+  re-stamping and round-order delivery cannot change a verdict; a read that
+  arrives after a row depending on it was published is counted (`late_reads`);
+  round-stamped reads refuse (`clock_unsupported`). The 1 Hz tick is only
+  the publication cadence — a derived channel on the 1 Hz operating frame's
+  last-value cells would be the 1 s pairing R05.16 deleted, so none is
+  written (`claims_instantaneous_target_tracking: false`). Regimes separate
+  per route (`closed_loop`/`enrichment` stats, per-source validity, delay,
+  `regime_noise_floor`). Every empty route names its kind:
+  `inputs_not_observed` (missing specs listed) / `pending` /
+  `not_co_observed` / `clock_unsupported` / `no_eligible_rows` / `eligible`;
+  no declaration → `not_declared`, malformed → `withheld`. Published as
+  `/status` `detectors.inference.lambda_delivery`, cost as stage
+  `lambda_delivery` (laptop, 6 routes, committed capture: tick median 9.9 ms,
+  p95 14.2 ms under a 2-4 load average). Evidence, all in
+  `tests/test_lambda_delivery_live.py`:
+  `::test_live_readout_gives_the_offline_rows_on_a_committed_tuning_capture`
+  (records through a real `LiveFeatureSource`, a tick per data second, all six
+  routes: every row's pairing, state and residual `assert_frame_equal`
+  exact against `delivery_samples`; published state counts and per-regime
+  n/median/p95 equal; 0 late reads; eligible 560 RAM-route / 229 PID 0x44),
+  `::test_live_readout_gives_the_offline_rows_on_a_held_out_capture`
+  (`~/canary-data/.../_capture-tuning-2026-09-22T235224`, same assertions;
+  skips where absent), `::test_the_stream_decides_the_same_rows_whatever_the_tick_cadence`
+  (irregular 0.2-6 s ticks, 3 seeds), `::test_every_empty_result_says_which_kind`,
+  `::test_round_stamped_reads_are_refused_not_paired`,
+  `::test_the_acquisition_clock_decides_not_the_stored_stamp`,
+  `::test_a_late_read_is_counted_not_silently_folded`,
+  `::test_a_session_change_starts_a_new_drive`,
+  `::test_it_runs_under_a_tuning_capture_and_never_alerts`,
+  `::test_a_vehicle_without_a_declaration_says_so`,
+  `::test_a_malformed_declaration_withholds_the_readout`. Not done here:
+  a dashboard surface for the block (B06.6 names the fields; the payload
+  carries them), and a live check on the truck.
 - [~] **B06.5 — Evaluate useful sensitivity.** Use independent steady pulls
   and closed-loop controls with known calibration, adequate target variation
   and declared dwell. Test normal target steps plus lag, sustained lean/rich
@@ -109,8 +160,8 @@ a residual alone.
   under B02. There is no closed-loop noise floor either (refused by
   `regime_noise_floor`, correctly).
 - [ ] **B06.6 — Publish with bounded claims.** *Not publishable (2026-09-23):
-  corpus chosen, but there is no validated delivery model (B06.5) and no
-  serving implementation (B06.4).* Prefer this relationship over
+  corpus chosen, but there is no validated delivery model (B06.5). The serving
+  implementation landed 2026-09-25 as a non-alerting tuning readout (B06.4).* Prefer this relationship over
   adding an unconditional raw AFR-voltage surface when it qualifies. Surface
   target, actual, residual, regime and eligibility reason together. A detected
   delivery mismatch does not identify pressure, injector calibration or sensor

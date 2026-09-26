@@ -41,6 +41,7 @@ contract that relationship has to satisfy before anything is fitted on it:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -432,7 +433,12 @@ def to_lambda(values: pd.Series | np.ndarray, quantity: Quantity, *, afr_stoich:
     is ``afr / stoich``. A non-positive phi is fuel cut or garbage, never a
     mixture, so it maps to NaN rather than dividing into infinity.
     """
-    array = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
+    if isinstance(values, np.ndarray) and values.dtype.kind == "f":
+        # Already numeric: coercion would be the identity, at pandas' cost
+        # (the live readout converts a window of reads every tick).
+        array = values.astype(float, copy=False)
+    else:
+        array = pd.to_numeric(pd.Series(values), errors="coerce").to_numpy(dtype=float)
     valid = np.isfinite(array) & (array > 0)
     out = np.full(len(array), np.nan)
     if quantity == "phi":
@@ -651,20 +657,30 @@ class _TargetSide:
     cut: np.ndarray
     invalid: np.ndarray
     target_lambda: np.ndarray
+    #: Each row's position in ``[target reads..., sentinel reads...]`` as
+    #: given, so an incremental caller can follow a row across evaluations.
+    origin: np.ndarray
 
 
-def _target_side(
-    target: pd.DataFrame,
-    sentinel: pd.DataFrame | None,
+def target_side_from_arrays(
+    t_times: np.ndarray,
+    t_raw: np.ndarray,
+    s_times: np.ndarray,
     *,
     commanded: CommandedSource,
     quantity: Quantity | None,
     afr_stoich: float,
 ) -> _TargetSide:
     """One row per target observation *and* per fuel-cut sentinel observation,
-    so a cut is counted as ``fuel_cut`` instead of disappearing."""
-    t_times, t_raw = _long_values(target)
-    s_times, _ = _long_values(sentinel)
+    so a cut is counted as ``fuel_cut`` instead of disappearing.
+
+    Inputs are float seconds on the acquisition clock, each stream already in
+    its own time order; the merge is a stable sort, so at an equal instant a
+    target read precedes a sentinel read and each stream keeps its order.
+    """
+    t_times = np.asarray(t_times, dtype=float)
+    t_raw = np.asarray(t_raw, dtype=float)
+    s_times = np.asarray(s_times, dtype=float)
     cut_value = commanded.fuel_cut_value
     is_cut = np.zeros(len(t_raw), dtype=bool)
     if cut_value is not None:
@@ -683,7 +699,23 @@ def _target_side(
         if quantity is None
         else np.where(cut | invalid, np.nan, to_lambda(raw, quantity, afr_stoich=afr_stoich))
     )
-    return _TargetSide(times, raw, cut, invalid, target_lambda)
+    return _TargetSide(times, raw, cut, invalid, target_lambda, order)
+
+
+def _target_side(
+    target: pd.DataFrame,
+    sentinel: pd.DataFrame | None,
+    *,
+    commanded: CommandedSource,
+    quantity: Quantity | None,
+    afr_stoich: float,
+) -> _TargetSide:
+    """:func:`target_side_from_arrays` over long frames."""
+    t_times, t_raw = _long_values(target)
+    s_times, _ = _long_values(sentinel)
+    return target_side_from_arrays(
+        t_times, t_raw, s_times, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
+    )
 
 
 @dataclass(frozen=True)
@@ -697,14 +729,17 @@ class _MeasuredSide:
     calibration_missing: bool
 
 
-def _measured_side(
-    measured: pd.DataFrame,
+def measured_side_from_arrays(
+    m_times: np.ndarray,
+    m_raw: np.ndarray,
     *,
     instrument: MeasuredSource,
     calibration: AfrCalibration | None,
     afr_stoich: float,
 ) -> _MeasuredSide:
-    m_times, m_raw = _long_values(measured)
+    """Measured reads (float seconds, time-ordered; source quantity) as lambda."""
+    m_times = np.asarray(m_times, dtype=float)
+    m_raw = np.asarray(m_raw, dtype=float)
     calibration_missing = False
     censored = np.zeros(len(m_raw), dtype=bool)
     if instrument.transform == "voltage_afr":
@@ -728,6 +763,20 @@ def _measured_side(
         railed |= m_raw <= instrument.rail_low
     m_lambda = to_lambda(m_value, instrument.quantity, afr_stoich=afr_stoich)
     return _MeasuredSide(m_times, m_lambda, railed, censored, calibration_missing)
+
+
+def _measured_side(
+    measured: pd.DataFrame,
+    *,
+    instrument: MeasuredSource,
+    calibration: AfrCalibration | None,
+    afr_stoich: float,
+) -> _MeasuredSide:
+    """:func:`measured_side_from_arrays` over a long frame."""
+    m_times, m_raw = _long_values(measured)
+    return measured_side_from_arrays(
+        m_times, m_raw, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
+    )
 
 
 def _seconds_since_cut(times: np.ndarray, cut: np.ndarray) -> np.ndarray:
@@ -838,6 +887,206 @@ def _assign_states(n: int, conditions: list[tuple[str, np.ndarray]]) -> np.ndarr
     return state
 
 
+def declared_delays_s(
+    declaration: LambdaDeliveryDeclaration,
+    source: str,
+    *,
+    delay: TransportDelay | None = None,
+    regime_delays_s: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    """The transport delay each regime's reads of ``source`` pair with.
+
+    The declared one per regime (``not_estimated`` pairs with no shift);
+    ``delay`` overrides every regime's (the lag scan), ``regime_delays_s``
+    overrides named regimes (a bracket-end robustness check).
+    """
+    if delay is not None:
+        return {"closed_loop": float(delay.seconds), "enrichment": float(delay.seconds)}
+    rules = declaration.eligibility.regimes
+    delays_s = {
+        name: float(rules.delay(name, source).seconds or 0.0)
+        for name in ("closed_loop", "enrichment")
+    }
+    if regime_delays_s is not None:
+        delays_s.update({k: float(v) for k, v in regime_delays_s.items()})
+    return delays_s
+
+
+@dataclass(frozen=True)
+class JudgedRows:
+    """The rows one :func:`judge_target_rows` call decided, as arrays.
+
+    Arrays rather than a frame because the live readout decides a few rows
+    every tick and building a DataFrame each time was most of its cost;
+    :meth:`to_frame` gives :attr:`DeliverySamples.frame`'s columns.
+    """
+
+    #: Positions of the decided rows in the target side, ascending (time order).
+    rows: np.ndarray
+    #: The measured position each decided row paired with, ``-1`` for none.
+    paired: np.ndarray
+    #: Float seconds on the acquisition clock.
+    times: np.ndarray
+    target_raw: np.ndarray
+    target_lambda: np.ndarray
+    measured_lambda: np.ndarray
+    separation_s: np.ndarray
+    #: ``closed_loop`` / ``enrichment`` / ``lean_target``, ``""`` when the
+    #: target is not a mixture.
+    regime: np.ndarray
+    state: np.ndarray
+    residual_pct: np.ndarray
+
+    def to_frame(self) -> pd.DataFrame:
+        """:attr:`DeliverySamples.frame`: one row per decided row."""
+        return pd.DataFrame(
+            {
+                "timestamp": pd.to_datetime(self.times, unit="s", utc=True),
+                "target_raw": self.target_raw,
+                "target_lambda": self.target_lambda,
+                "measured_lambda": self.measured_lambda,
+                "separation_s": self.separation_s,
+                "regime": pd.Series(self.regime, dtype=object).replace("", None),
+                "state": self.state,
+                "residual_pct": self.residual_pct,
+            }
+        )
+
+
+def judge_target_rows(
+    target_side: _TargetSide,
+    measured_side: _MeasuredSide,
+    *,
+    commanded: CommandedSource,
+    declaration: LambdaDeliveryDeclaration,
+    quantity: Quantity | None,
+    delays_s: Mapping[str, float],
+    undecided: np.ndarray | None = None,
+    measured_free: np.ndarray | None = None,
+    horizon_s: float = math.inf,
+) -> JudgedRows:
+    """Pair target rows with measured reads and name each row's state.
+
+    The one implementation behind both the offline engine
+    (:func:`delivery_samples`, every row at once) and the live readout
+    (:class:`src.analysis.lambda_delivery_stream.DeliveryStream`, a few rows
+    per tick), so the two cannot disagree on a row (B06.4).
+
+    A row is decided when it is ``undecided`` (default: every row) and its
+    pairing window has closed — its shifted time plus the acquisition
+    tolerance is at or before ``horizon_s``. Decided rows pair, earliest
+    shifted time first, with the ``measured_free`` reads (default: all),
+    exactly as one :func:`match_ordered` pass over the whole drive would:
+    the greedy matcher walks reference reads in time order, so a pass over a
+    later block of rows, against the reads earlier blocks left unused, makes
+    the same choices. States read only earlier rows (dwell, gaps, the last
+    fuel cut), so a caller that keeps enough history before the first
+    undecided row gets the same verdicts as a whole-drive pass.
+    """
+    elig = declaration.eligibility
+    rules = elig.regimes
+    times, raw, cut = target_side.times, target_side.raw, target_side.cut
+    target_lambda = target_side.target_lambda
+    n = len(times)
+    regime = regime_of(target_lambda, elig.closed_loop_band)
+    enriching = regime == "enrichment"
+    shift = np.where(enriching, delays_s["enrichment"], delays_s["closed_loop"])
+    shifted = times + shift
+    tolerance = declaration.acquisition.max_separation_s
+    decide = np.ones(n, dtype=bool) if undecided is None else np.asarray(undecided, dtype=bool)
+    if math.isfinite(horizon_s):
+        decide = decide & (shifted + tolerance <= horizon_s)
+    rows = np.flatnonzero(decide)
+    k = len(rows)
+    free = (
+        np.arange(len(measured_side.times))
+        if measured_free is None
+        else np.flatnonzero(np.asarray(measured_free, dtype=bool))
+    )
+    policy = PairingPolicy.within(pd.Timedelta(seconds=tolerance), reference="a")
+    matched = match_ordered(shifted[rows], measured_side.times[free], policy)
+    paired = np.full(k, -1, dtype=np.intp)
+    separation = np.full(k, np.nan)
+    paired[matched.index_a] = free[matched.index_b]
+    separation[matched.index_a] = matched.separation_s
+    has_pair = paired >= 0
+    measured_lambda = np.full(k, np.nan)
+    pair_railed = np.zeros(k, dtype=bool)
+    pair_censored = np.zeros(k, dtype=bool)
+    if has_pair.any():
+        at = paired[has_pair]
+        measured_lambda[has_pair] = measured_side.lam[at]
+        pair_railed[has_pair] = measured_side.railed[at]
+        pair_censored[has_pair] = measured_side.censored[at]
+
+    def steady_under(rule: RegimeEligibility) -> np.ndarray:
+        return _steady_target_mask(
+            times,
+            target_lambda,
+            cut,
+            dwell_s=rule.steady_target_dwell_s,
+            max_gap_s=elig.max_target_gap_s,
+            tolerance=rule.target_step_tolerance,
+        )
+
+    steady = np.where(enriching, steady_under(rules.enrichment), steady_under(rules.closed_loop))
+    holdoff = np.where(
+        enriching,
+        rules.enrichment.post_fuel_cut_holdoff_s,
+        rules.closed_loop.post_fuel_cut_holdoff_s,
+    )
+    since_cut = _seconds_since_cut(times, cut)
+    row_regime = regime[rows]
+
+    state = _assign_states(
+        k,
+        [
+            ("fuel_cut", cut[rows]),
+            ("target_invalid", target_side.invalid[rows]),
+            ("convention_unverified", np.full(k, quantity is None)),
+            ("calibration_unknown", np.full(k, measured_side.calibration_missing)),
+            ("measured_missing", ~has_pair),
+            ("measured_rail", pair_railed),
+            ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
+            ("post_fuel_cut", since_cut[rows] < holdoff[rows]),
+            ("target_transient", ~steady[rows]),
+            (
+                "source_not_valid_in_regime",
+                np.isin(row_regime, ["closed_loop", "enrichment", "lean_target"])
+                & ~np.isin(row_regime, list(commanded.valid_regimes)),
+            ),
+            ("unsupported_regime", row_regime == "lean_target"),
+        ],
+    )
+
+    eligible = state == ELIGIBLE
+    row_target = target_lambda[rows]
+    residual = np.full(k, np.nan)
+    residual[eligible] = residual_pct(
+        measured_lambda[eligible], row_target[eligible], quantity="lambda"
+    )
+    return JudgedRows(
+        rows=rows,
+        paired=paired,
+        times=times[rows],
+        target_raw=raw[rows],
+        target_lambda=row_target,
+        measured_lambda=measured_lambda,
+        separation_s=separation,
+        regime=row_regime,
+        state=state,
+        residual_pct=residual,
+    )
+
+
+def state_counts(states: pd.Series | np.ndarray) -> dict[str, int]:
+    """Rows per state (every state named, zeros included) plus ``total``."""
+    values = np.asarray(states, dtype=object)
+    counts = {name: int((values == name).sum()) for name in STATES}
+    counts["total"] = int(len(values))
+    return counts
+
+
 def delivery_samples(
     *,
     target: pd.DataFrame,
@@ -875,114 +1124,38 @@ def delivery_samples(
     ``regime_delays_s`` overrides per regime (a bracket-end robustness check).
     ``evaluation=True`` additionally refuses drives that informed any
     regime's constants.
+
+    The rows are :func:`judge_target_rows`' — the same function the live
+    readout decides its rows with, tick by tick (B06.4).
     """
     commanded = declaration.commanded(target_source)
     instrument = declaration.measured(measured_source)
     _refuse_dependent_drive(drive_id, declaration, delay, evaluation=evaluation)
-    elig = declaration.eligibility
-    rules = elig.regimes
     quantity = resolve_quantity(commanded, calibration)
-
     target_side = _target_side(
         target, sentinel, commanded=commanded, quantity=quantity, afr_stoich=afr_stoich
     )
-    times, raw, cut = target_side.times, target_side.raw, target_side.cut
-    target_lambda = target_side.target_lambda
-    n = len(times)
     measured_side = _measured_side(
         measured, instrument=instrument, calibration=calibration, afr_stoich=afr_stoich
     )
-    regime = regime_of(target_lambda, elig.closed_loop_band)
-    enriching = regime == "enrichment"
-
-    if delay is not None:
-        delays_s = {"closed_loop": float(delay.seconds), "enrichment": float(delay.seconds)}
-    else:
-        delays_s = {
-            name: float(rules.delay(name, commanded.name).seconds or 0.0)
-            for name in ("closed_loop", "enrichment")
-        }
-        if regime_delays_s is not None:
-            delays_s.update({k: float(v) for k, v in regime_delays_s.items()})
-    shift = np.where(enriching, delays_s["enrichment"], delays_s["closed_loop"])
-    policy = PairingPolicy.within(
-        pd.Timedelta(seconds=declaration.acquisition.max_separation_s), reference="a"
+    delays_s = declared_delays_s(
+        declaration, commanded.name, delay=delay, regime_delays_s=regime_delays_s
     )
-    matched = match_ordered(times + shift, measured_side.times, policy)
-    paired = np.full(n, -1, dtype=np.intp)
-    separation = np.full(n, np.nan)
-    paired[matched.index_a] = matched.index_b
-    separation[matched.index_a] = matched.separation_s
-    has_pair = paired >= 0
-    measured_lambda = np.where(has_pair, measured_side.lam[np.maximum(paired, 0)], np.nan)
-    pair_railed = has_pair & measured_side.railed[np.maximum(paired, 0)]
-    pair_censored = has_pair & measured_side.censored[np.maximum(paired, 0)]
-
-    def steady_under(rule: RegimeEligibility) -> np.ndarray:
-        return _steady_target_mask(
-            times,
-            target_lambda,
-            cut,
-            dwell_s=rule.steady_target_dwell_s,
-            max_gap_s=elig.max_target_gap_s,
-            tolerance=rule.target_step_tolerance,
-        )
-
-    steady = np.where(enriching, steady_under(rules.enrichment), steady_under(rules.closed_loop))
-    holdoff = np.where(
-        enriching,
-        rules.enrichment.post_fuel_cut_holdoff_s,
-        rules.closed_loop.post_fuel_cut_holdoff_s,
+    judged = judge_target_rows(
+        target_side,
+        measured_side,
+        commanded=commanded,
+        declaration=declaration,
+        quantity=quantity,
+        delays_s=delays_s,
     )
-    since_cut = _seconds_since_cut(times, cut)
-
-    state = _assign_states(
-        n,
-        [
-            ("fuel_cut", cut),
-            ("target_invalid", target_side.invalid),
-            ("convention_unverified", np.full(n, quantity is None)),
-            ("calibration_unknown", np.full(n, measured_side.calibration_missing)),
-            ("measured_missing", ~has_pair),
-            ("measured_rail", pair_railed),
-            ("measured_censored", pair_censored | (has_pair & ~np.isfinite(measured_lambda))),
-            ("post_fuel_cut", since_cut < holdoff),
-            ("target_transient", ~steady),
-            (
-                "source_not_valid_in_regime",
-                np.isin(regime, ["closed_loop", "enrichment", "lean_target"])
-                & ~np.isin(regime, list(commanded.valid_regimes)),
-            ),
-            ("unsupported_regime", regime == "lean_target"),
-        ],
-    )
-
-    eligible = state == ELIGIBLE
-    residual = np.full(n, np.nan)
-    residual[eligible] = residual_pct(
-        measured_lambda[eligible], target_lambda[eligible], quantity="lambda"
-    )
-    frame = pd.DataFrame(
-        {
-            "timestamp": pd.to_datetime(times, unit="s", utc=True),
-            "target_raw": raw,
-            "target_lambda": target_lambda,
-            "measured_lambda": measured_lambda,
-            "separation_s": separation,
-            "regime": pd.Series(regime, dtype=object).replace("", None),
-            "state": state,
-            "residual_pct": residual,
-        }
-    )
-    counts = {name: int((state == name).sum()) for name in STATES}
-    counts["total"] = int(n)
     return DeliverySamples(
-        frame=frame,
+        frame=judged.to_frame(),
         target_source=commanded.name,
         measured_source=instrument.name,
         delays_s=delays_s,
         acquisition_max_separation_s=declaration.acquisition.max_separation_s,
-        counts=counts,
+        counts=state_counts(judged.state),
     )
 
 

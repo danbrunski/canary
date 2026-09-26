@@ -274,6 +274,10 @@ class InferenceTiming:
     #: with its reason), events and the relation in force; ``None`` before the
     #: first tick.
     committees: Mapping[str, Any] | None = None
+    #: B06.4 — the lambda delivery readout's per-route rows, states and
+    #: result kind; a tuning readout that never alerts. ``None`` before the
+    #: pipeline starts.
+    lambda_delivery: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -297,6 +301,9 @@ class InferenceTiming:
                 dict(self.sequence_envelope) if self.sequence_envelope is not None else None
             ),
             "committees": dict(self.committees) if self.committees is not None else None,
+            "lambda_delivery": (
+                dict(self.lambda_delivery) if self.lambda_delivery is not None else None
+            ),
         }
 
 
@@ -329,6 +336,7 @@ class InferenceTimingRecorder:
     _windows_unmeasured: int = field(default=0, repr=False)
     _plausibility: Mapping[str, Any] | None = field(default=None, repr=False)
     _committees: Mapping[str, Any] | None = field(default=None, repr=False)
+    _lambda_delivery: Mapping[str, Any] | None = field(default=None, repr=False)
     _envelope: EnvelopeCoverageMeter = field(default_factory=EnvelopeCoverageMeter, repr=False)
 
     def __post_init__(self) -> None:
@@ -395,6 +403,10 @@ class InferenceTimingRecorder:
     def set_committees(self, block: Mapping[str, Any] | None) -> None:
         """Publish the sensor-committee evaluator's live block (H04.2)."""
         self._committees = dict(block) if block is not None else None
+
+    def set_lambda_delivery(self, block: Mapping[str, Any] | None) -> None:
+        """Publish the lambda delivery readout's live block (B06.4)."""
+        self._lambda_delivery = dict(block) if block is not None else None
 
     def note_sequence_window(
         self,
@@ -470,6 +482,7 @@ class InferenceTimingRecorder:
             plausibility=self._plausibility,
             sequence_envelope=self._envelope.to_dict(),
             committees=self._committees,
+            lambda_delivery=self._lambda_delivery,
         )
 
 
