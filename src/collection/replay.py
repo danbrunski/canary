@@ -3,9 +3,10 @@
 Lets the daemon run with no hardware by re-emitting a previously captured
 session's telemetry onto the same ``asyncio.Queue`` the real CAN/OBD
 collectors feed. Downstream is identical to a real drive: the drain task
-writes Parquet, the live source decodes raw CAN via ``bindings.yaml`` into
-``decoded:*`` channels, and everything fans out to ``/ws/telemetry`` — so
-the dashboard shows real, previously-collected signals moving.
+writes Parquet (raw frames, never ``decoded`` rows: P02.8), the live source
+decodes raw CAN via ``bindings.yaml`` into ``decoded:*`` channels, and
+everything fans out to ``/ws/telemetry`` — so the dashboard shows real,
+previously-collected signals moving.
 
 Pacing reproduces the recording's own inter-row timing (scaled by
 ``replay_speed``), drift-corrected so it can't run away; a long capture
@@ -23,18 +24,24 @@ carried untouched, since they identify the *source* capture's rounds.
 **Only captured sources are re-emitted** (D02.9,
 ``data/analyses/2026-09-17-d029-replay-amplification.md``). The stored
 ``decoded``/``derived`` rows (:data:`src.telemetry.RE_DERIVED_SOURCES`) are
-regenerated downstream from the raw ``can`` frames and the inference tick, so
-re-emitting them wrote every decoded signal to Parquet twice (measured
-1.985x) *and* left the detectors reading whichever ``decoded:<channel>`` copy
-landed last — the stored one or the one freshly decoded from the frame, which
-differ exactly when ``bindings.yaml`` changed since the recording.
+regenerated downstream: ``decoded`` by the live source from the raw ``can``
+frames (and, for anything reading the replay's output, by the loader's decode
+on read), ``derived`` by the inference tick. Re-emitting them left the
+detectors reading whichever ``decoded:<channel>`` copy landed last — the
+stored one or the one freshly decoded from the frame, which differ exactly
+when ``bindings.yaml`` changed since the recording. Until P02.8 (2026-09-26)
+it also wrote every decoded signal to Parquet twice (measured 1.985x); no
+``decoded`` row is stored now, whatever reaches the storage sink.
 
 The one session shape where skipping would lose data is a recording from
 before raw-payload persistence landed (2026-07-29): its ``can`` rows carry no
 payload, so nothing downstream can re-derive anything. That is decided once
 per session by :func:`probe_rederivability` before the first row is emitted,
 reported in the log and in ``GET /control/replay``
-(``rederivable``/``rederivable_reason``), and never switched silently.
+(``rederivable``/``rederivable_reason``), and never switched silently. Such a
+replay emits its stored ``decoded`` rows to the live pipeline, and its output
+still stores none (P02.8); the source keeps its own. No session on the laptop
+has this shape (every one probed 2026-09-26 carries payloads).
 """
 
 from __future__ import annotations

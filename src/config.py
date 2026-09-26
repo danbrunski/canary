@@ -6,6 +6,7 @@ silently dropped, so typos in config don't become silent drift at runtime.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal, Self, get_args
@@ -14,6 +15,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR, DATA_DIR
+
+log = logging.getLogger(__name__)
 
 
 class _Strict(BaseModel):
@@ -474,14 +477,6 @@ class CollectionConfig(_Strict):
     reconnect_max_delay_seconds: float = 60.0
     queue_max_size: int = 10_000
     queue_warning_fraction: float = 0.8
-    #: Bindings confidence levels whose decoded signals are persisted to
-    #: session Parquet alongside the raw CAN frames (source ``decoded``,
-    #: RAW integer values — same semantics as the training path's
-    #: decode-at-read, see ``src/decode/frame_decoder.py``). Storage is
-    #: forever, so the default persists only ground-truth-validated
-    #: bindings; widen to e.g. ``["confirmed", "high"]`` deliberately.
-    #: Empty disables decoded persistence (raw frames are always kept).
-    persist_decoded_confidence: tuple[str, ...] = ("confirmed",)
     #: Simulation backend: when set, the daemon replays this recorded
     #: session (dir path or id under storage) onto the telemetry queue
     #: *instead of* the real CAN/OBD collectors — no hardware needed, the
@@ -499,6 +494,41 @@ class CollectionConfig(_Strict):
     #: Operator-intent recording gate (Task 8.6). Defaults off.
     record_arming: RecordArmingConfig = RecordArmingConfig()
     idle_shutdown: IdleShutdownConfig = IdleShutdownConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_persist_decoded_confidence(cls, data: Any) -> Any:
+        """``persist_decoded_confidence`` is retired (P02.8, operator 2026-09-26).
+
+        It chose which bindings' ``decoded`` rows were stored beside the raw
+        frames. Nothing stores them now, whatever it says: the session readers
+        decode the frames on read, with ``confirmed`` bindings plus any marked
+        ``persist: true`` in ``bindings.yaml``
+        (:func:`src.decode.bindings.on_read_signals`), the only value this key
+        ever shipped with. A config that still sets it loads (the Pi's
+        ``/etc/canary/canary.yaml`` does), and says so; a value other than
+        ``[confirmed]`` is named, because nothing honours it any more.
+        """
+        if not isinstance(data, dict) or "persist_decoded_confidence" not in data:
+            return data
+        data = dict(data)
+        value = data.pop("persist_decoded_confidence")
+        levels = sorted(str(v) for v in value) if isinstance(value, (list, tuple)) else value
+        if levels == ["confirmed"]:
+            log.warning(
+                "collection.persist_decoded_confidence is retired and ignored (P02.8): "
+                "decoded rows are no longer stored; readers decode confirmed and "
+                "persist: true bindings on read. Delete the key from this config."
+            )
+        else:
+            log.warning(
+                "collection.persist_decoded_confidence is retired and ignored (P02.8), and "
+                "this config's value %r is NOT honoured: decoded rows are no longer stored, "
+                "and readers decode confirmed bindings plus those marked persist: true in "
+                "bindings.yaml on read. Mark a binding persist: true to add it; delete the key.",
+                value,
+            )
+        return data
 
 
 class OperatingModeSpec(_Strict):

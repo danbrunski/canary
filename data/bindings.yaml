@@ -1567,13 +1567,15 @@ signals:
     offset: 0.0
     unit: "rpm"
     # Held at `high` deliberately. The mapping itself is not in doubt — the
-    # correlation below is 1.000000 at an exactly integral ratio. But
-    # `collection.persist_decoded_confidence` defaults to ("confirmed",), so
-    # promoting this line is not a statement about evidence: it starts
-    # persisting a new ~97 Hz decoded channel, which `trainable_feature_columns`
-    # derives from the data and would therefore add to the training feature
-    # set, breaking parity with every model trained before it. That is an
-    # operator decision about storage and retraining, not a decode question.
+    # correlation below is 1.000000 at an exactly integral ratio. But every
+    # session is read with its `confirmed` bindings decoded on read
+    # (`ON_READ_CONFIDENCES`, P02.8; nothing stores decoded rows), so
+    # promoting this line is not a statement about evidence: it adds a new
+    # ~97 Hz decoded channel to what the session readers see (the digest,
+    # classification and fingerprint chain among them), old sessions included,
+    # and anything that derives its columns from them would change with it.
+    # That is an operator decision about feature sets and retraining, not a
+    # decode question.
     confidence: high
     plausible_min: 0.0
     plausible_max: 8000.0

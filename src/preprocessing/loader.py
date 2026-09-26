@@ -1,4 +1,17 @@
-"""Parquet session loading utilities for preprocessing."""
+"""Parquet session loading utilities for preprocessing.
+
+**Every session is read with its ``decoded`` rows decoded on read (P02.8).**
+The recorder stores raw CAN frames with their payloads and no ``decoded``
+rows (operator decision 2026-09-26); sessions recorded before then also carry
+stored ones. :func:`read_session`, :func:`iter_session_parts` and the
+``value_number`` readers behind :func:`resample_and_segment` drop any stored
+``decoded`` row and decode the frames with the current catalog instead
+(:func:`src.preprocessing.decode.decode_on_read`), so a reader sees the same
+rows from an old session and a new one, and cannot prefer a stale stored copy.
+``decoded="as_recorded"`` is for the two kinds of reader that must see the
+disk as written: the training chain, which recomputes every binding itself
+(the recomputed row wins over a stored one), and storage accounting.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +25,14 @@ import numpy as np
 import pandas as pd
 
 from src.config import CanaryConfig
+from src.decode.bindings import Bindings
+from src.decode.slices import sentinel_channel
+from src.preprocessing.decode import (
+    can_channel_spellings,
+    decode_on_read,
+    on_read_can_ids,
+    on_read_catalog,
+)
 from src.preprocessing.imu_decimation import (
     ACCEL_LAT_COLUMN,
     ACCEL_LAT_MAX_COLUMN,
@@ -30,7 +51,7 @@ from src.preprocessing.resampler import (
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
-from src.telemetry import SOURCE_SEP
+from src.telemetry import CAN_SOURCE, DECODED_SOURCE, SOURCE_SEP
 from src.telemetry import channel_key as channel_key
 
 log = logging.getLogger(__name__)
@@ -38,6 +59,10 @@ log = logging.getLogger(__name__)
 PARQUET_PATTERN = "telemetry-*.parquet"
 INDEX_COLUMNS = ["session", "timestamp"]
 TelemetryValueKind = Literal["value", "value_number", "value_text", "value_bool", "payload"]
+#: How a reader gets a session's ``decoded`` rows (module docstring):
+#: ``on_read`` decodes them from the frames with the current catalog, whatever
+#: the session stored; ``as_recorded`` returns the rows exactly as written.
+DecodedRows = Literal["on_read", "as_recorded"]
 
 
 def has_telemetry(session_dir: Path) -> bool:
@@ -166,25 +191,143 @@ def session_time_span_seconds(session_dir: Path) -> float | None:
     return session_footer_span(session_dir).span_seconds
 
 
-def read_session(session_dir: Path, *, filters: Any = None) -> pd.DataFrame:
+def read_session(
+    session_dir: Path, *, filters: Any = None, decoded: DecodedRows = "on_read"
+) -> pd.DataFrame:
     """Read one telemetry session directory into a long-format DataFrame.
 
     ``filters`` is passed to ``pd.read_parquet`` (pyarrow DNF row filters) so
     a bounded reader can skip rows it will never use — e.g. the raw CAN
     frames of ids no requested binding decodes — without a second reader.
+
+    ``decoded`` (module docstring): by default the session's ``decoded`` rows
+    are decoded on read, and ``filters`` applies to them exactly as it applied
+    to stored ones (the frames they come from are read for the decode even
+    when ``filters`` excludes them, and dropped after it).
     """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
-    frames, skipped = _read_chunk_files(candidates, filters=filters)
+    frames, skipped = _read_chunk_files(candidates, _ReadPlan.of(filters, decoded))
     _warn_skipped_chunks(session_dir, skipped)
     if not frames:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
     return _finish_long_frame(frames, session_dir)
 
 
+@dataclass(frozen=True)
+class _ReadPlan:
+    """What one session read asks parquet for, and what it does after.
+
+    ``read_filters`` is ``filters`` widened, when a decoded row could pass
+    ``filters``, by the frames of the on-read catalog's ids; ``refilter``
+    then applies ``filters`` again after the decode, to the decoded rows and
+    to the widening's frames.
+    """
+
+    filters: Any
+    read_filters: Any
+    catalog: Bindings | None
+    on_read: bool
+    refilter: bool
+
+    @classmethod
+    def of(cls, filters: Any, decoded: DecodedRows) -> _ReadPlan:
+        if decoded == "as_recorded":
+            return cls(filters, filters, None, on_read=False, refilter=False)
+        if decoded != "on_read":
+            raise ValueError(f"decoded must be 'on_read' or 'as_recorded', not {decoded!r}")
+        catalog = on_read_catalog()
+        if filters is None or catalog is None or not _admits_decoded(filters, catalog):
+            return cls(filters, filters, catalog, on_read=True, refilter=False)
+        frames = [
+            ("source", "==", CAN_SOURCE),
+            ("channel", "in", can_channel_spellings(on_read_can_ids(catalog))),
+        ]
+        widened = [*_disjunction(filters), frames]
+        return cls(filters, widened, catalog, on_read=True, refilter=True)
+
+    def apply(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Decode ``frame`` on read (a batch of whole chunks) and refilter."""
+        if not self.on_read:
+            return frame
+        frame = decode_on_read(frame, self.catalog)
+        if self.refilter and not frame.empty:
+            frame = frame.loc[_dnf_mask(frame, self.filters)]
+        return frame
+
+
+def _disjunction(filters: Any) -> list[list[tuple[str, str, Any]]]:
+    """pyarrow DNF ``filters`` (one conjunction, or a list of them) as a list
+    of conjunctions."""
+    items = list(filters)
+    if items and isinstance(items[0], tuple):
+        return [list(items)]
+    return [list(conjunction) for conjunction in items]
+
+
+def _scalar_predicate(value: Any, op: str, operand: Any) -> bool:
+    return bool(_predicate(pd.Series([value], dtype=object), op, operand)[0])
+
+
+def _predicate(column: pd.Series, op: str, operand: Any) -> np.ndarray[Any, np.dtype[Any]]:
+    """One DNF predicate over a column, with pyarrow's null rule (a null never
+    matches, ``!=`` and ``not in`` included). Refuses an operator it does not
+    know rather than guess what pyarrow did with it."""
+    if op in ("=", "=="):
+        matched = column == operand
+    elif op == "!=":
+        matched = column != operand
+    elif op == "<":
+        matched = column < operand
+    elif op == "<=":
+        matched = column <= operand
+    elif op == ">":
+        matched = column > operand
+    elif op == ">=":
+        matched = column >= operand
+    elif op == "in":
+        matched = column.isin(list(operand))
+    elif op == "not in":
+        matched = ~column.isin(list(operand))
+    else:
+        raise ValueError(f"filter operator {op!r} is not supported on a decode-on-read read")
+    return np.asarray(matched.to_numpy(dtype=bool) & column.notna().to_numpy(dtype=bool))
+
+
+def _dnf_mask(frame: pd.DataFrame, filters: Any) -> np.ndarray[Any, np.dtype[Any]]:
+    """Rows of ``frame`` that pass pyarrow DNF ``filters``."""
+    passed = np.zeros(len(frame), dtype=bool)
+    for conjunction in _disjunction(filters):
+        matched = np.ones(len(frame), dtype=bool)
+        for column, op, operand in conjunction:
+            matched &= _predicate(frame[column], op, operand)
+        passed |= matched
+    return passed
+
+
+def _admits_decoded(filters: Any, catalog: Bindings) -> bool:
+    """Could a ``decoded`` row of ``catalog`` pass ``filters``?
+
+    Decided on ``source`` and ``channel`` predicates only; a predicate on any
+    other column counts as passable, so this may say yes needlessly (the
+    refilter then drops the rows) but never no wrongly.
+    """
+    names = [s.name for s in catalog.signals] + [sentinel_channel(s.name) for s in catalog.signals]
+    for conjunction in _disjunction(filters):
+        passable = True
+        for column, op, operand in conjunction:
+            if column == "source":
+                passable &= _scalar_predicate(DECODED_SOURCE, op, operand)
+            elif column == "channel":
+                passable &= any(_scalar_predicate(name, op, operand) for name in names)
+        if passable:
+            return True
+    return False
+
+
 def _read_chunk_files(
-    paths: Sequence[Path], *, filters: Any = None
+    paths: Sequence[Path], plan: _ReadPlan | None = None
 ) -> tuple[list[pd.DataFrame], list[str]]:
     """Read ``paths`` in the order given; returns the frames and skipped names.
 
@@ -192,18 +335,58 @@ def _read_chunk_files(
     atomic writer's target appears before its content lands). One bad tail
     chunk must not poison the whole training corpus — skip the unreadable
     ones and keep going.
+
+    ``plan`` (default: as recorded, unfiltered) decodes on read in batches of
+    whole chunks of about :data:`SESSION_PART_ROWS` rows: the decode is
+    row-local, so batching changes nothing but the per-call overhead.
     """
+    plan = plan if plan is not None else _ReadPlan.of(None, "as_recorded")
     frames: list[pd.DataFrame] = []
     skipped: list[str] = []
+    batch: list[pd.DataFrame] = []
+    batch_rows = 0
+
+    def flush() -> None:
+        nonlocal batch, batch_rows
+        if batch:
+            frames.append(plan.apply(pd.concat(batch, ignore_index=True)))
+            batch, batch_rows = [], 0
+
     for path in paths:
         if path.stat().st_size == 0:
             skipped.append(path.name)
             continue
         try:
-            frames.append(pd.read_parquet(path, filters=filters))
+            frame = pd.read_parquet(path, filters=plan.read_filters)
         except (OSError, ValueError, pd.errors.ParserError):
             skipped.append(path.name)
+            continue
+        if not plan.on_read:
+            frames.append(frame)
+            continue
+        batch.append(frame)
+        batch_rows += len(frame)
+        if batch_rows >= SESSION_PART_ROWS:
+            flush()
+    flush()
+    if plan.on_read:
+        _return_decode_memory()
     return frames, skipped
+
+
+def _return_decode_memory() -> None:
+    """Hand Arrow's freed decode temporaries back to the OS.
+
+    The decode on read allocates and frees many short-lived Arrow buffers
+    (string columns built by ``take``); the pool (mimalloc) keeps the freed
+    pages, and what a reader does next then allocates beside them. On
+    ``2026-09-18T144215`` that kept ~240 MB and took the digest chain's peak
+    from 1,492 MB to 1,764 MB; releasing it here brings it back to ~1,500 MB
+    (2026-09-26).
+    """
+    import pyarrow as pa
+
+    pa.default_memory_pool().release_unused()
 
 
 def _warn_skipped_chunks(session_dir: Path, skipped: Sequence[str]) -> None:
@@ -241,7 +424,11 @@ SESSION_PART_ROWS = 100_000
 
 
 def iter_session_parts(
-    session_dir: Path, *, target_rows: int = SESSION_PART_ROWS, filters: Any = None
+    session_dir: Path,
+    *,
+    target_rows: int = SESSION_PART_ROWS,
+    filters: Any = None,
+    decoded: DecodedRows = "on_read",
 ) -> Iterator[pd.DataFrame]:
     """:func:`read_session`, yielded in time-disjoint parts of ~``target_rows``.
 
@@ -256,16 +443,19 @@ def iter_session_parts(
     session in one part: correct, just not bounded.
 
     Raises ``FileNotFoundError`` as :func:`read_session` does when there is no
-    readable chunk. ``filters`` is :func:`read_session`'s row filter, applied
-    to every part (grouping still uses every row's footer statistics).
+    readable chunk. ``filters`` and ``decoded`` are :func:`read_session`'s,
+    applied to every part (grouping still uses every row's footer
+    statistics). A decoded row lands in its frame's part, which is exact: the
+    decode is row-local and shares its frame's timestamp.
     """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
     groups, skipped = _time_disjoint_chunk_groups(candidates, target_rows)
+    plan = _ReadPlan.of(filters, decoded)
     yielded = False
     for group in groups:
-        frames, unreadable = _read_chunk_files(group, filters=filters)
+        frames, unreadable = _read_chunk_files(group, plan)
         skipped.extend(unreadable)
         if frames:
             yielded = True
@@ -276,7 +466,11 @@ def iter_session_parts(
 
 
 def iter_session_numeric_parts(
-    session_dir: Path, *, target_rows: int = SESSION_PART_ROWS, align_ns: int
+    session_dir: Path,
+    *,
+    target_rows: int = SESSION_PART_ROWS,
+    align_ns: int,
+    on_read: Bindings | None | Literal["current"] = "current",
 ) -> Iterator[pd.DataFrame]:
     """:func:`_read_session_numeric`, yielded in time-disjoint parts.
 
@@ -286,22 +480,19 @@ def iter_session_numeric_parts(
     their whole-session relative order for any one channel and timestamp, the
     only order ``resample_long`` reads. Unreadable chunks are skipped silently,
     as :func:`_read_session_numeric` skips them.
+
+    ``on_read`` is the catalog the ``decoded`` rows are decoded with
+    (:func:`_read_numeric_chunks`); ``"current"`` loads it, and a cache that
+    versions by it (the derived store) passes the one it hashed.
     """
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
     groups, _skipped = _time_disjoint_chunk_groups(candidates, target_rows, align_ns=align_ns)
-    columns = ["timestamp", "source", "channel", "value_number"]
+    catalog = on_read_catalog() if on_read == "current" else on_read
     yielded = False
     for group in groups:
-        frames: list[pd.DataFrame] = []
-        for path in group:
-            if path.stat().st_size == 0:
-                continue
-            try:
-                frames.append(pd.read_parquet(path, columns=columns))
-            except (OSError, ValueError, pd.errors.ParserError):
-                continue
+        frames = _read_numeric_chunks(group, catalog)
         if not frames:
             continue
         yielded = True
@@ -315,6 +506,50 @@ def iter_session_numeric_parts(
         yield frame[["session", "timestamp", "source_channel", "value_number"]]
     if not yielded:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+
+
+#: The columns the ``value_number`` chain keeps.
+_NUMERIC_COLUMNS = ["timestamp", "source", "channel", "value_number"]
+
+
+def _read_numeric_chunks(paths: Sequence[Path], catalog: Bindings | None) -> list[pd.DataFrame]:
+    """The ``value_number`` columns of ``paths``, with ``decoded`` rows decoded
+    on read (module docstring) in batches of about :data:`SESSION_PART_ROWS`.
+
+    ``payload`` is read beside those columns for the decode and dropped after
+    it, so the frames hold no payload bytes. Before P02.8 this chain took the
+    stored ``decoded`` rows' ``value_number`` as they were; the rows it gets
+    now are the same ones, for sessions that never stored them too.
+    Unreadable chunks are skipped silently, as this chain always has.
+    """
+    frames: list[pd.DataFrame] = []
+    batch: list[pd.DataFrame] = []
+    batch_rows = 0
+
+    def flush() -> None:
+        nonlocal batch, batch_rows
+        if batch:
+            frame = decode_on_read(pd.concat(batch, ignore_index=True), catalog)
+            frames.append(frame[_NUMERIC_COLUMNS])
+            batch, batch_rows = [], 0
+
+    for path in paths:
+        if path.stat().st_size == 0:
+            continue
+        try:
+            frame = pd.read_parquet(path, columns=[*_NUMERIC_COLUMNS, "payload"])
+        except (OSError, ValueError, pd.errors.ParserError):
+            try:  # a chunk written before the payload column existed
+                frame = pd.read_parquet(path, columns=_NUMERIC_COLUMNS)
+            except (OSError, ValueError, pd.errors.ParserError):
+                continue
+        batch.append(frame)
+        batch_rows += len(frame)
+        if batch_rows >= SESSION_PART_ROWS:
+            flush()
+    flush()
+    _return_decode_memory()
+    return frames
 
 
 def _time_disjoint_chunk_groups(
@@ -396,9 +631,11 @@ def _chunk_time_span(meta: Any) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     return lo, hi
 
 
-def read_sessions(session_dirs: Iterable[Path]) -> pd.DataFrame:
+def read_sessions(
+    session_dirs: Iterable[Path], *, decoded: DecodedRows = "on_read"
+) -> pd.DataFrame:
     """Read several session directories into one long-format DataFrame."""
-    frames = [read_session(path) for path in session_dirs]
+    frames = [read_session(path, decoded=decoded) for path in session_dirs]
     if not frames:
         return _empty_long_frame()
     return pd.concat(frames, ignore_index=True).sort_values(
@@ -408,20 +645,12 @@ def read_sessions(session_dirs: Iterable[Path]) -> pd.DataFrame:
 
 
 def _read_session_numeric(session_dir: Path) -> pd.DataFrame:
-    """Read only columns needed by the numeric batch resampler."""
+    """Read only columns needed by the numeric batch resampler, ``decoded``
+    rows decoded on read (:func:`_read_numeric_chunks`)."""
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
-    frames: list[pd.DataFrame] = []
-    for path in candidates:
-        if path.stat().st_size == 0:
-            continue
-        try:
-            frames.append(
-                pd.read_parquet(path, columns=["timestamp", "source", "channel", "value_number"])
-            )
-        except (OSError, ValueError, pd.errors.ParserError):
-            continue
+    frames = _read_numeric_chunks(candidates, on_read_catalog())
     if not frames:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
     frame = pd.concat(frames, ignore_index=True)

@@ -55,17 +55,18 @@ def test_parse_spec_defaults_to_obd_and_rejects_nonsense() -> None:
 
 
 def test_decoded_rows_are_scaled_not_taken_at_face_value(tmp_path: Path) -> None:
-    """``decoded:`` stores the RAW integer on purpose — the reader must scale it.
+    """``decoded:`` carries the RAW integer on purpose — the reader must scale it.
 
-    ``ECM_RPM`` is 8 counts/rpm, so a stored 9600 is 1200 rpm. Reading
+    ``ECM_RPM`` is 8 counts/rpm, so a raw 9600 is 1200 rpm. Reading
     ``value_number`` directly is what first looked like a factor-of-8 decoder
     bug (it isn't one: src/decode/frame_decoder.py keeps rows raw so training's
-    scaler stays comparable across sessions).
+    scaler stays comparable across sessions). The session stores only the
+    frame (P02.8); the row is decoded on read.
     """
     session = _session(
         tmp_path,
         [
-            TelemetryRecord(timestamp=T0, source="decoded", channel="ECM_RPM", value=9600.0),
+            TelemetryRecord.can(T0.timestamp(), 0x1F9, _rpm_frame(1200.0)),
             TelemetryRecord(timestamp=T0, source="obd", channel="RPM", value=1200.0, unit="rpm"),
         ],
     )

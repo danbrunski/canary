@@ -42,8 +42,9 @@ DBC_SOURCE: Final = "dbc"
 #: boost/vacuum, estimated power/torque — Task 1.1). Unlike ``DBC_SOURCE``/
 #: ``did`` (pseudo-sources that only ever exist as wide-column prefixes),
 #: derived channels have no raw record to decode from later — the live tick
-#: that computes them is the only place the value ever exists — so, like
-#: ``DECODED_SOURCE``, they ride a real ``TelemetryRecord`` and get persisted.
+#: that computes them is the only place the value ever exists — so they ride a
+#: real ``TelemetryRecord`` and get persisted. (``DECODED_SOURCE`` rows ride
+#: one too, but are never persisted since P02.8: their raw frame is.)
 DERIVED_SOURCE: Final = "derived"
 #: Imported UpRev Osiris K-line datalog rows (``tools/import_uprev_log.py``).
 #: Never produced by the live daemon — only ever lands in a quarantined
@@ -92,12 +93,12 @@ assert set(get_args(TelemetrySource)) == {
 #: Sources the live pipeline **re-derives from a raw row** rather than
 #: receiving from a collector: ``decoded`` comes from a raw ``can`` frame
 #: (:meth:`src.preprocessing.live.LiveFeatureSource._apply_can_decode` for the
-#: detectors, :meth:`src.decode.frame_decoder.FrameDecoder.decode` for storage)
-#: and ``derived`` from the inference tick's computed channels
+#: detectors; the session readers decode it on read, and nothing stores it
+#: since P02.8) and ``derived`` from the inference tick's computed channels
 #: (:mod:`src.daemon.inference`). Anything that re-injects stored rows into the
-#: live queue (replay) must skip these or every signal is persisted twice and
-#: the detectors read whichever copy arrived last — see
-#: ``data/analyses/2026-09-17-d029-replay-amplification.md``.
+#: live queue (replay) must skip these or the detectors read whichever copy
+#: arrived last (and, before P02.8, every decoded signal was persisted twice)
+#: — see ``data/analyses/2026-09-17-d029-replay-amplification.md``.
 RE_DERIVED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DECODED_SOURCE, DERIVED_SOURCE})
 #: Sources that only ever originate at a collector/importer: nothing
 #: downstream can reconstruct them, so they are always safe to re-emit.

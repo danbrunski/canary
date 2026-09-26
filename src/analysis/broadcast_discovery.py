@@ -375,10 +375,17 @@ def _observed_can_ids(frame: pd.DataFrame) -> list[int]:
 
 
 def _load_session(session: Path) -> pd.DataFrame:
+    """The session's rows in file order, ``decoded:`` rows decoded on read
+    (P02.8), so a ``decoded:`` reference reads the same rows from a session
+    recorded before 2026-09-26 and from one recorded after, which stores none.
+    """
     import duckdb
 
+    from src.preprocessing.decode import decode_on_read, on_read_catalog
+
     pattern = str(session / "telemetry-*.parquet")
-    return duckdb.connect().execute(f"SELECT * FROM read_parquet('{pattern}')").df()
+    frame = duckdb.connect().execute(f"SELECT * FROM read_parquet('{pattern}')").df()
+    return decode_on_read(frame, on_read_catalog())
 
 
 __all__ = [

@@ -31,7 +31,8 @@ from src.analysis.committees import (
 )
 from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
-from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
+from src.collection.capture_profiles import MODE01_AUTO
+from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
 from src.decode.behavior_models import (
@@ -253,6 +254,15 @@ DEFAULT_CAPTURE_PROFILES_PATH = Path(__file__).resolve().parents[2] / "data/capt
 
 DID_PREFIX = "did:"
 DBC_PREFIX = "dbc:"
+OBD_PREFIX = "obd:"
+DERIVED_PREFIX = "derived:"
+
+#: Mode 01 PID channel names, the ones a capture profile's ``mode01`` selects.
+_MODE01_CHANNELS = frozenset(d.channel.upper() for d in MODE01_REGISTRY.values())
+
+
+def _is_mode01_channel(column: str) -> bool:
+    return column.removeprefix(OBD_PREFIX).upper() in _MODE01_CHANNELS
 
 
 @dataclass(frozen=True)
@@ -276,10 +286,21 @@ class FeaturePolicy:
         A ``did:`` channel trains only if it is in here; one polled solely by a
         research capture profile is NaN for the model's whole serving life.
         ``None`` = unresolvable, and then no ``did:`` channel trains.
+
+    ``serving_mode01``
+        The same answer for Mode 01
+        (:func:`~src.collection.capture_profiles.serving_mode01_channels`):
+        upper-cased channel names, or ``AUTO`` for every supported PID. An
+        ``obd:`` Mode 01 channel trains only if the serving profile polls it,
+        and a ``derived:`` channel only if each of its required input groups
+        has an input the serving profile supplies. The Xterra ``default``
+        dropped ten PIDs on 2026-09-26 (D03.34) that the old corpus still
+        carries. ``None`` = unresolvable, and then no Mode 01 channel trains.
     """
 
     bindings: Bindings | None
     serving_dids: frozenset[str] | None
+    serving_mode01: frozenset[str] | None
 
     @cached_property
     def _signals_by_name(self) -> dict[str, Signal]:
@@ -324,6 +345,47 @@ class FeaturePolicy:
                 return "serving capture profile unresolvable"
             if base.removeprefix(DID_PREFIX).upper() not in self.serving_dids:
                 return "not polled by the serving (default) capture profile"
+        if base.startswith(OBD_PREFIX) and _is_mode01_channel(base):
+            if self.serving_mode01 is None:
+                return "serving capture profile unresolvable"
+            if not self._served(base, frozenset()):
+                return "not polled by the serving (default) capture profile"
+        if base.startswith(DERIVED_PREFIX):
+            missing = self._unserved_group(base, frozenset())
+            if missing is not None:
+                return (
+                    f"needs one of {', '.join(missing)}, which the serving (default) "
+                    "capture profile does not poll"
+                )
+        return None
+
+    def _served(self, column: str, seen: frozenset[str]) -> bool:
+        """Will the serving profile supply ``column``? Namespaces other than
+        polled Mode 01, Mode 22 and derived ones are not this gate's to judge."""
+        if column.startswith(OBD_PREFIX) and _is_mode01_channel(column):
+            if self.serving_mode01 is None:
+                return False
+            name = column.removeprefix(OBD_PREFIX).upper()
+            return MODE01_AUTO in self.serving_mode01 or name in self.serving_mode01
+        if column.startswith(DID_PREFIX):
+            dids = self.serving_dids
+            return dids is not None and column.removeprefix(DID_PREFIX).upper() in dids
+        if column.startswith(DERIVED_PREFIX):
+            return self._unserved_group(column, seen) is None
+        return True
+
+    def _unserved_group(self, channel: str, seen: frozenset[str]) -> tuple[str, ...] | None:
+        """The first required input group of derived ``channel`` with no served
+        input, or ``None``. Undeclared channels are the source gate's business."""
+        from src.analysis.derived import DERIVED_CHANNEL_INPUTS
+
+        groups = DERIVED_CHANNEL_INPUTS.get(channel)
+        if groups is None or channel in seen:
+            return None
+        nested = seen | {channel}
+        for group in groups:
+            if not any(self._served(column, nested) for column in group):
+                return group
         return None
 
 
@@ -344,7 +406,7 @@ def resolve_feature_policy(
     or what that catalog would be seeded with (``collection.obd_dids``). With no
     ``config`` it falls back to the repo's ``data/capture_profiles.yaml``.
     """
-    from src.collection.capture_profiles import serving_mode22_dids
+    from src.collection.capture_profiles import serving_mode01_channels, serving_mode22_dids
 
     catalog = bindings
     if catalog is None:
@@ -353,7 +415,9 @@ def resolve_feature_policy(
         )
     if config is None:
         return FeaturePolicy(
-            bindings=catalog, serving_dids=serving_mode22_dids(DEFAULT_CAPTURE_PROFILES_PATH)
+            bindings=catalog,
+            serving_dids=serving_mode22_dids(DEFAULT_CAPTURE_PROFILES_PATH),
+            serving_mode01=serving_mode01_channels(DEFAULT_CAPTURE_PROFILES_PATH),
         )
     scoped = config
     if config.profiles.enabled:
@@ -363,6 +427,7 @@ def resolve_feature_policy(
     return FeaturePolicy(
         bindings=catalog,
         serving_dids=serving_mode22_dids(scoped.daemon.capture_profiles, scoped.collection),
+        serving_mode01=serving_mode01_channels(scoped.daemon.capture_profiles, scoped.collection),
     )
 
 
@@ -460,17 +525,20 @@ def _decode_long_frame(
     if bindings is None and dbc_database is None:
         return rest.sort_values(_LONG_SORT_COLUMNS, kind="stable")
 
-    # Every binding is recomputed from the raw frames here, including signals
-    # the daemon already stored as ``decoded:*`` rows. ``decode_can_rows``
-    # skips stored signals only when it sees them in its input, and these
-    # chunks hold CAN rows alone, so both copies reach the pivot and the
-    # recomputed row (sorted after the stored one) is the ``last`` it keeps.
-    # That is the live path's answer (``FrameDecoder`` decodes every frame
-    # with the current bindings), and on real sessions the two copies agree:
-    # 0 of 2.70M same-instant pairs differed across 2026-07-29T205841,
+    # Every binding is recomputed from the raw frames here. A session this
+    # chain reads (``decoded="as_recorded"``) may still carry the ``decoded:*``
+    # rows the daemon stored before P02.8 (2026-09-26); the chunks below hold
+    # CAN rows alone, so both copies reach the pivot and the recomputed row
+    # (sorted after the stored one) is the ``last`` it keeps. That is the live
+    # path's answer (``FrameDecoder`` decodes every frame with the current
+    # bindings), and on real sessions the two copies agree: 0 of 2.70M
+    # same-instant pairs differed across 2026-07-29T205841,
     # 2026-08-07T161543, 2026-09-18T160921 and
     # _capture-fuel-target-research-2026-09-21T195844 (2026-09-26). After a
     # binding edit the recomputed value is the current decode, as live.
+    # Reading sessions on read instead would change no frame, only add a
+    # second decode of the on-read signals that loses to this one; a session
+    # recorded after P02.8 has no stored row to lose.
     can_rows = long.loc[is_can]
     pieces: list[pd.DataFrame] = [rest]
     for start in range(0, len(can_rows), _CAN_DECODE_CHUNK_ROWS):
@@ -501,7 +569,9 @@ def _decode_session_to_wide(
     reject counts stay inspectable per-session (``scripts/disposition_report.py``)
     without duplicating the decode steps.
     """
-    long = _decode_long_frame(read_session(session_dir), bindings, dbc_database, did_map)
+    long = _decode_long_frame(
+        read_session(session_dir, decoded="as_recorded"), bindings, dbc_database, did_map
+    )
     return to_wide(long, coerce_numeric=True)
 
 
@@ -552,7 +622,7 @@ def resample_session_bounded(
     (P01.2): the trainers (via :func:`_decode_session_to_resampled`),
     ``evaluate_detectors`` (via :func:`load_resampled_session`) and the
     session-deviation analysis. Identical output to
-    ``resample_long_session(read_session(session_dir), ...)``
+    ``resample_long_session(read_session(session_dir, decoded="as_recorded"), ...)``
     (``tests/test_bounded_session_resample.py`` asserts it exactly), but it
     never pivots at raw resolution: :func:`reduce_session` keeps only the cells
     the resampler reads, and :func:`src.preprocessing.derived.resample_reduced`
@@ -604,7 +674,12 @@ def reduce_session(
     interval_ns = grid_interval_ns(resample_config)
 
     def decoded() -> Iterator[pd.DataFrame]:
-        for long in iter_session_parts(session_dir, target_rows=part_rows, filters=filters):
+        # As recorded: this chain recomputes every binding itself, and the
+        # recomputed row wins over a stored one (``_decode_long_frame``).
+        parts = iter_session_parts(
+            session_dir, target_rows=part_rows, filters=filters, decoded="as_recorded"
+        )
+        for long in parts:
             if raw_channels is not None and not long.empty:
                 pairs = long[["source", "channel"]].astype(str).drop_duplicates()
                 raw_channels.update(zip(pairs["source"], pairs["channel"], strict=True))

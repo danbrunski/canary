@@ -63,6 +63,7 @@ __all__ = [
     "DEFAULT_DERIVED_DIR",
     "DERIVED_CODE_VERSION",
     "DERIVED_DIR_ENV",
+    "NUMERIC_CODE_VERSION",
     "DecodeInputs",
     "DerivedLoad",
     "DerivedStore",
@@ -79,6 +80,17 @@ __all__ = [
 #: 1 -- P01.1/P01.2: per-channel bin extremes, typed cell values.
 #: 2 -- cells in a per-write file that ``meta.json`` names (:func:`_write`).
 DERIVED_CODE_VERSION = 2
+
+#: The ``value_number`` frame's own version, beside :data:`DERIVED_CODE_VERSION`
+#: (which it also checks). Bump on a change to that chain alone, so the
+#: trainers' frames, whose build is 28 minutes over the corpus, are not
+#: rebuilt for it.
+#:
+#: 1 -- P02.8: ``decoded:`` rows decoded on read with the on-read catalog
+#: (versioned by ``on_read_hash``), not taken from stored rows. A session that
+#: stored fewer bindings than the catalog now has (every recording before
+#: 2026-08-07) gains their channels.
+NUMERIC_CODE_VERSION = 1
 
 #: Gitignored (``data/cache/``) and outside every sessions tree, so training
 #: discovery never walks it.
@@ -278,10 +290,13 @@ class DerivedStore:
         """The ``value_number`` chain's reduced frame (``resample_and_segment``:
         digest, fingerprints, classification): read back, or built.
 
-        No catalog shapes it (that chain decodes nothing), so it is versioned
-        as a whole: the chunk list, the grid interval (which is also the IMU
-        decimation tick) and :data:`DERIVED_CODE_VERSION`.
+        Versioned as a whole: the chunk list, the grid interval (which is also
+        the IMU decimation tick), :data:`DERIVED_CODE_VERSION`,
+        :data:`NUMERIC_CODE_VERSION` and the on-read catalog its ``decoded:``
+        rows are decoded with (P02.8; an edit to one of those bindings
+        rebuilds it, naming the cause).
         """
+        from src.preprocessing.decode import on_read_catalog, on_read_hash
         from src.preprocessing.derived import reduce_numeric_session
 
         started = time.monotonic()
@@ -289,7 +304,9 @@ class DerivedStore:
         interval_ns = grid_interval_ns(resample_config)
         frame_dir = self.frame_dir(session_dir) / _NUMERIC
         meta = _read_meta(frame_dir)
-        stale = _numeric_staleness(meta, session_dir, interval_ns)
+        catalog = on_read_catalog()
+        decode_hash = on_read_hash(catalog)
+        stale = _numeric_staleness(meta, session_dir, interval_ns, decode_hash)
         cells: pd.DataFrame | None = None
         if stale is None:
             assert meta is not None
@@ -300,10 +317,12 @@ class DerivedStore:
             report = DerivedLoad(session_dir.name, "reused", "every input hash matches")
         else:
             refuse_on_the_pi()
-            reduced = reduce_numeric_session(session_dir, resample_config)
+            reduced = reduce_numeric_session(session_dir, resample_config, on_read=catalog)
             meta = {
                 "kind": _NUMERIC,
                 "code_version": DERIVED_CODE_VERSION,
+                "numeric_code_version": NUMERIC_CODE_VERSION,
+                "on_read_hash": decode_hash,
                 "interval_ns": interval_ns,
                 "source": _source_entry(session_dir),
                 "timestamp_unit": reduced.timestamp_unit,
@@ -460,7 +479,12 @@ def _expected_units(decoders: DecodeInputs, raw_pairs: Iterable[Sequence[str]]) 
     Mirrors ``_decode_long_frame``: raw CAN rows never become channels; a
     binding (or DID entry) makes its channel from the CAN (or ``DID_<hex>``)
     rows it reads *and* from any stored rows of that channel; every other
-    recorded channel passes through as itself.
+    recorded channel passes through as itself. That chain reads sessions as
+    recorded (``decoded="as_recorded"``), so a stored ``decoded`` row of a
+    session recorded before P02.8 reaches it and loses to the recomputed row;
+    a unit's filter reads those stored rows too, or a refresh would not equal
+    a rebuild. A session recorded after P02.8 has none, and the clause reads
+    nothing.
     """
     pairs = [(str(source), str(channel)) for source, channel in raw_pairs]
     present = {f"{source}{SOURCE_SEP}{channel}" for source, channel in pairs}
@@ -641,7 +665,7 @@ def _whole_frame_staleness(
 
 
 def _numeric_staleness(
-    meta: Mapping[str, Any] | None, session_dir: Path, interval_ns: int
+    meta: Mapping[str, Any] | None, session_dir: Path, interval_ns: int, decode_hash: str
 ) -> str | None:
     if meta is None:
         return "no derived frame yet"
@@ -649,6 +673,10 @@ def _numeric_staleness(
         return "not a numeric-chain frame"
     if meta.get("code_version") != DERIVED_CODE_VERSION:
         return f"derived code version {meta.get('code_version')} != {DERIVED_CODE_VERSION}"
+    if meta.get("numeric_code_version") != NUMERIC_CODE_VERSION:
+        return f"numeric code version {meta.get('numeric_code_version')} != {NUMERIC_CODE_VERSION}"
+    if meta.get("on_read_hash") != decode_hash:
+        return "the on-read decode catalog changed (a confirmed or persist: true binding)"
     if meta.get("interval_ns") != interval_ns:
         return f"grid interval {meta.get('interval_ns')} ns != {interval_ns} ns"
     if meta.get("source") != _source_entry(session_dir):

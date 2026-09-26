@@ -51,7 +51,6 @@ def _profile(**overrides: object) -> dict[str, Any]:
         "required_tuple": list(TUPLE),
         "min_achieved_rate_hz": 3.0,
         "round_timestamps": True,
-        "broadcast_decode": True,
     }
     base.update(overrides)
     return base

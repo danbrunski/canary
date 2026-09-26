@@ -29,7 +29,6 @@ const ACTIVE: CaptureProfileState = {
   min_achieved_rate_hz: null,
   requires_tune_revision: false,
   paused: false,
-  broadcast_decode: true,
   corpus_eligible: false,
   behavior_model_recipes: [],
   bus_budget_override: null,

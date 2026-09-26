@@ -73,20 +73,28 @@ class Signal(ByteSlice, LinearScale, PlausibleRange, SentinelState, _Strict):
     offset: float | None = None
     unit: str = UNKNOWN_UNIT
     confidence: Literal["confirmed", "high", "medium", "low", "hypothesized"]
-    #: Persist this signal as a ``decoded:`` row regardless of confidence.
+    #: Decode this signal on read into every session's ``decoded:`` rows,
+    #: regardless of confidence (:func:`on_read_signals`).
+    #:
+    #: The name is historical. Until P02.8 (operator, 2026-09-26) the recorder
+    #: *stored* these rows beside their frames; nothing stores ``decoded`` rows
+    #: now, and the flag says which bindings the session readers decode from
+    #: the raw frames instead: the digest/classification/fingerprint chain,
+    #: drive activity, the dashboard's latest-row seed, dataset export. Setting
+    #: it cannot turn persistence back on.
     #:
     #: Deliberately orthogonal to ``confidence``, because they answer different
-    #: questions. Confidence is *is this binding trustworthy*; this is *is it
-    #: worth disk forever*, and the answers diverge in both directions. A
-    #: `confirmed` third copy of a value already persisted from another frame
-    #: earns nothing at 88 Hz, while a `high` wheel speed is the only fast,
-    #: always-present road-speed source the live segmenter can reach.
+    #: questions. Confidence is *is this binding trustworthy*; this is *do the
+    #: session readers need it*, and the answers diverge in both directions. A
+    #: `confirmed` third copy of a value already read from another frame earns
+    #: nothing at 88 Hz, while a `high` wheel speed is the only fast,
+    #: always-present road-speed source the digest's segmenter can reach.
     #:
-    #: Persisting buys serve-time reach only — never information. Raw frame
-    #: payloads are stored regardless, and the training pipeline re-decodes
-    #: every binding from them irrespective of confidence or this flag. Set it
-    #: only when something *live* (segmenter, dashboard, status) needs the
-    #: value without a payload decode.
+    #: It buys reach only — never information. The training pipeline and the
+    #: live source decode every binding from the frames irrespective of
+    #: confidence or this flag. Turning it on adds a ``decoded:`` channel to
+    #: every session those readers see, old and new alike: a feature-set
+    #: change for anything that derives its columns from them.
     persist: bool = False
     #: May this signal be a *trained model feature* (IF / sequence detector)?
     #:
@@ -267,6 +275,25 @@ def is_trainable_binding(signal: Signal) -> bool:
     (``model_feature: false``).
     """
     return signal.confidence in TRAINABLE_CONFIDENCES and signal.model_feature
+
+
+#: Binding confidences every session is read with (P02.8): their signals are
+#: decoded from the raw frames into the session's ``decoded:`` rows by the
+#: loader (:func:`src.preprocessing.decode.decode_on_read`), for old sessions
+#: and new alike, with the current catalog. Exactly the set the recorder
+#: stored until 2026-09-26 (``collection.persist_decoded_confidence``'s only
+#: value ever shipped), so a reader sees the channels it always saw.
+ON_READ_CONFIDENCES: frozenset[str] = frozenset({"confirmed"})
+
+
+def on_read_signals(bindings: Bindings) -> list[Signal]:
+    """The signals a session's rows are read with (:data:`ON_READ_CONFIDENCES`
+    plus any ``persist: true`` signal), in catalog order."""
+    return [
+        signal
+        for signal in bindings.signals
+        if signal.confidence in ON_READ_CONFIDENCES or signal.persist
+    ]
 
 
 def load_bindings(path: Path) -> Bindings:

@@ -5,17 +5,20 @@ replay of it cannot show D02.9's doubling. These runs replay
 ``tests/fixtures/replay/decoded-slice`` instead — 20 s of the D02.9 evidence
 session (``2026-09-10T142711``, cut by ``tools/make_replay_fixture.py``) whose
 stored ``decoded`` rows are exactly the ones its kept ``can`` frames produced,
-plus its stored ``derived`` and ``gps`` rows. Each run goes through the real
-emit path (``replay_session``), the daemon fanout, the storage decoder and the
-Parquet writer, and the report's ``replay_accounting`` checks the persisted
-rows against the source as identities.
+plus its stored ``derived`` and ``gps`` rows: the shape of a session recorded
+before P02.8. Each run goes through the real emit path (``replay_session``),
+the daemon fanout, the storage sink and the Parquet writer, and the report's
+``replay_accounting`` checks the persisted rows against the source as
+identities.
 
-Covered: a payload-bearing source (stored ``decoded``/``derived`` skipped,
-re-derived once), the same source with its payloads stripped (a pre-2026-07-29
-recording: stored rows are the only copy and must be kept), a negative control
-proving the identity fails when the emit filter regresses, and live-GPS
+Covered: a payload-bearing source (stored ``decoded``/``derived`` skipped at
+the emit path), the same source with its payloads stripped (a pre-2026-07-29
+recording: its stored rows are emitted to the live pipeline, the only copy it
+has), a negative control where the emit filter regresses, and live-GPS
 contamination (live producers go through the daemon's ``LiveIngress``, closed
-for the replay, since D02.9's isolation landed).
+for the replay, since D02.9's isolation landed). In every one the replay's
+output stores no ``decoded`` row (P02.8): the storage sink refuses them
+whatever reaches it.
 """
 
 from __future__ import annotations
@@ -77,9 +80,11 @@ def test_fixture_is_a_decoded_bearing_source() -> None:
     assert can["payload"].map(lambda p: isinstance(p, bytes) and len(p) > 0).all()
 
 
-async def test_payload_bearing_replay_persists_decoded_once(tmp_path: Path) -> None:
-    """D02.9 item 2 — stored decoded/derived rows are skipped at the emit path
-    and decoded is re-derived exactly once from the replayed frames."""
+async def test_payload_bearing_replay_skips_stored_rows_and_stores_no_decoded(
+    tmp_path: Path,
+) -> None:
+    """D02.9 item 2 — stored decoded/derived rows are skipped at the emit path;
+    P02.8 — the output stores no decoded row (readers decode its frames)."""
     artifacts, acct = await _run(_spec(DECODED_SLICE), tmp_path)
     stats = artifacts.replay_emission
     assert stats is not None and stats.rederivable is True, stats
@@ -87,30 +92,40 @@ async def test_payload_bearing_replay_persists_decoded_once(tmp_path: Path) -> N
     assert stats.rows_skipped == SOURCE_ROWS["decoded"] + SOURCE_ROWS["derived"]
     assert acct["pass_complete"] is True, acct
     assert acct["decoded"]["identity_holds"] is True, acct
-    assert acct["decoded"]["stored_emitted"] == 0
-    assert acct["decoded"]["ratio_to_expected"] == 1.0
-    assert acct["rederived_decoded_rows"] > 0
+    assert acct["decoded"]["persisted"] == 0
+    assert acct["decoded"]["emitted_by_replay"] == 0
+    assert acct["decoded"]["stored_in_source"] == SOURCE_ROWS["decoded"]
     assert acct["captured"]["identity_holds"] is True, acct
+    assert "decoded" not in acct["persisted_rows_by_source"]
     assert "derived" not in acct["persisted_rows_by_source"]
 
 
-async def test_regressed_emit_filter_is_caught_as_doubling(
+async def test_a_regressed_emit_filter_still_stores_no_decoded_row(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Negative control: with the emit filter disabled while the probe still
-    says re-derivable (the pre-``c15f66a`` behaviour), the identity fails at
-    exactly 2x — the instrument can see what D02.9 measured as 1.985x."""
+    says re-derivable (the pre-``c15f66a`` behaviour), the stored rows are
+    re-emitted. Before P02.8 that stored every decoded signal twice (D02.9
+    measured 1.985x). Now the storage sink refuses the decoded copies, so the
+    identity holds, and the regression shows where it still lands: the
+    re-emitted ``derived`` rows (inference is off, so nothing else makes them)."""
     monkeypatch.setattr(Rederivability, "skip_sources", property(lambda self: frozenset()))
-    _artifacts, acct = await _run(_spec(DECODED_SLICE), tmp_path)
+    artifacts, acct = await _run(_spec(DECODED_SLICE), tmp_path)
+    stats = artifacts.replay_emission
+    assert stats is not None and stats.rows_skipped == 0, stats
     assert acct["pass_complete"] is True, acct
-    assert acct["decoded"]["identity_holds"] is False, acct
-    assert acct["decoded"]["ratio_to_expected"] == 2.0, acct
+    assert acct["decoded"]["identity_holds"] is True, acct
+    assert acct["decoded"]["persisted"] == 0, acct
+    assert acct["persisted_rows_by_source"]["derived"] == SOURCE_ROWS["derived"], acct
 
 
-async def test_legacy_payloadless_replay_keeps_stored_decoded(tmp_path: Path) -> None:
+async def test_legacy_payloadless_replay_emits_stored_decoded_but_stores_none(
+    tmp_path: Path,
+) -> None:
     """D02.9 constraint — a recording from before raw-payload persistence
     cannot re-derive anything, so its stored decoded/derived rows are the only
-    copy: all emitted, none re-derived, none doubled."""
+    copy and are all emitted. P02.8 — the output still stores no decoded row;
+    the source keeps its own."""
     legacy = tmp_path / "legacy-source"
     legacy.mkdir()
     frame = pd.read_parquet(DECODED_SLICE / "telemetry-00000.parquet")
@@ -122,9 +137,9 @@ async def test_legacy_payloadless_replay_keeps_stored_decoded(tmp_path: Path) ->
     assert stats is not None and stats.rederivable is False, stats
     assert "predates raw-payload persistence" in (stats.rederivable_reason or "")
     assert stats.rows_skipped == 0
-    assert acct["rederived_decoded_rows"] == 0
     assert acct["decoded"]["identity_holds"] is True, acct
-    assert acct["decoded"]["persisted"] == SOURCE_ROWS["decoded"]
+    assert acct["decoded"]["persisted"] == 0
+    assert acct["decoded"]["emitted_by_replay"] == SOURCE_ROWS["decoded"]
     assert acct["persisted_rows_by_source"]["derived"] == SOURCE_ROWS["derived"]
     assert acct["captured"]["identity_holds"] is True, acct
 

@@ -355,11 +355,6 @@ def mode01_batch_compatible(first: str, second: str) -> bool:
     return False
 
 
-def broadcast_decode_enabled() -> bool:
-    with _lock:
-        return _profile.broadcast_decode
-
-
 def set_active(
     enabled: bool,
     *,
@@ -570,7 +565,6 @@ __all__ = [
     "DEFAULT_TUNING_CHANNELS",
     "activate",
     "active_profile",
-    "broadcast_decode_enabled",
     "channels",
     "capture_started_monotonic",
     "did_continuous_enabled",

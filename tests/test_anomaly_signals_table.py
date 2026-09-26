@@ -87,7 +87,6 @@ def test_a_profile_missing_the_stft_inputs_warns_for_the_bank_balance_models() -
             "LONG_FUEL_TRIM_2": 1.0,
         },
         corpus_eligible=True,
-        broadcast_decode=True,
     )
     warnings = {
         w["model"]: w["missing_channels"]

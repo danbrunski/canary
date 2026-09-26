@@ -84,8 +84,10 @@ def _catalogs() -> DecodeInputs:
 
 
 def _expected(session: Path, decoders: DecodeInputs) -> pd.DataFrame:
+    # As recorded, like the store's chain (the loader's decode on read would
+    # add the repo catalog's on-read signals beside ``decoders``', P02.8).
     return resample_long_session(
-        read_session(session),
+        read_session(session, decoded="as_recorded"),
         decoders.bindings,
         decoders.dbc,
         decoders.did_map,

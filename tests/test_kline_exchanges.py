@@ -220,8 +220,9 @@ def test_each_bit_transition_is_listed_with_its_time(abs_session: pd.DataFrame) 
 
 
 def _pairing_session(tmp_path: Path, raws: list[int]) -> pd.DataFrame:
-    """ABS 0x1202 counts beside the ECM's CAN rpm (``decoded:ECM_RPM`` is
-    stored raw, 8 counts/rpm), 20 ms apart, at 3.125 rpm per ABS count."""
+    """ABS 0x1202 counts beside the ECM's CAN rpm (the 0x1F9 frame, whose
+    ``decoded:ECM_RPM`` is raw, 8 counts/rpm, decoded on read: P02.8), 20 ms
+    apart, at 3.125 rpm per ABS count."""
     records: list[TelemetryRecord] = []
     for k, raw in enumerate(raws):
         t = EPOCH + k * 0.5
@@ -230,12 +231,9 @@ def _pairing_session(tmp_path: Path, raws: list[int]) -> pd.DataFrame:
                 t, source="kline", channel="ABS:1202", value=raw.to_bytes(2, "big").hex()
             )
         )
-        rpm = raw * 3.125
-        records.append(
-            TelemetryRecord.from_epoch(
-                t + 0.02, source="decoded", channel="ECM_RPM", value=float(round(rpm * 8))
-            )
-        )
+        counts = round(raw * 3.125 * 8)
+        payload = bytes([0x20, 0x00, (counts >> 8) & 0xFF, counts & 0xFF, 0, 0, 0, 0])
+        records.append(TelemetryRecord.can(t + 0.02, 0x1F9, payload))
     return _session(tmp_path, records, "2026-09-24T164000")
 
 

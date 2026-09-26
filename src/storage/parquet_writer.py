@@ -44,7 +44,7 @@ from src.storage.retention import (
 from src.storage.retention import (
     enforce_storage_cap as enforce_storage_cap,
 )
-from src.telemetry import TelemetryRecord
+from src.telemetry import DECODED_SOURCE, TelemetryRecord
 
 log = logging.getLogger(__name__)
 
@@ -123,7 +123,18 @@ class ParquetTelemetryWriter:
         self.session_paths: list[SessionPaths] = [self.paths]
 
     def write(self, record: TelemetryRecord) -> Path | None:
-        """Append one record, flushing when row count or time threshold is reached."""
+        """Append one record, flushing when row count or time threshold is reached.
+
+        Refuses a ``decoded`` record (P02.8, operator 2026-09-26): decoded rows
+        are never stored, the readers decode the raw frames on read. The
+        daemon's storage sink never hands one over (``drain.storable``); this
+        makes any other writer of a session unable to either.
+        """
+        if record.source == DECODED_SOURCE:
+            raise ValueError(
+                f"refusing to store decoded:{record.channel}: decoded rows are never stored "
+                "(P02.8); the raw CAN frame is the record, and readers decode it on read"
+            )
         self._rotate_if_record_gap(record)
         self._rotate_if_engine_run_time_reset(record)
         if self.arming_gate is not None and not self.arming_gate.observe(record):
@@ -339,6 +350,11 @@ def write_records_to_parquet(
     The output is byte-equivalent (modulo compression headers) to what the
     daemon would have produced if the same records had streamed through it,
     so downstream tooling can ignore where the data came from.
+
+    Unlike :meth:`ParquetTelemetryWriter.write` it takes a ``decoded`` record
+    as given: tests build sessions recorded before P02.8 (which stored them)
+    with it, and ``tools/log_to_parquet.py`` converts raw logs, which have
+    none.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []

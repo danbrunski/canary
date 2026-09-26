@@ -8,6 +8,7 @@ from src.mcp_server.client import DaemonClient
 from src.storage.telemetry_query import (
     QueryValidationError,
     TelemetryQuery,
+    decoded_rows_note,
 )
 
 
@@ -71,12 +72,19 @@ def query_telemetry(
         query_telemetry(sql="SELECT session, avg(value_number) FROM telemetry "
                              "WHERE channel = 'RPM' GROUP BY session",
                          since="2026-07-01", until="2026-07-18")
+
+    ``decoded`` rows in the view are decoded on read from the raw CAN frames
+    with the current bindings (P02.8: none is stored since 2026-09-26, and an
+    older session's stored ones are never shown). A query that asks for them
+    gets a ``note`` saying so, and an ``empty_reason`` when it finds nothing,
+    zero aggregates included
+    (:func:`src.storage.telemetry_query.decoded_rows_note`).
     """
     try:
         rows = query_runner.run(sql, row_limit=row_limit, session=session, since=since, until=until)
     except QueryValidationError as exc:
         return {"ok": False, "error": str(exc), "rows": [], "count": 0}
-    return {"ok": True, "rows": rows, "count": len(rows)}
+    return {"ok": True, "rows": rows, "count": len(rows), **decoded_rows_note(sql, rows)}
 
 
 __all__ = ["get_recent_telemetry", "query_telemetry"]

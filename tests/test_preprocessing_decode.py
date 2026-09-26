@@ -631,7 +631,8 @@ def test_a_sentinel_column_is_a_text_state_and_the_number_column_skips_it() -> N
 
 def test_stored_sentinel_rows_count_as_stored() -> None:
     """A session the sensor never woke in stored only ``_SENTINEL`` rows; the
-    batch decode must not re-add the signal beside them."""
+    batch decode replaces them (P02.8: decode always) and never adds the
+    signal beside them."""
     frame = _can_long_frame(_sentinel_frames()[:1])
     stored = decode_can_rows(frame, _sentinel_bindings())
     assert set(stored.loc[stored["source"] == "decoded", "channel"]) == {
@@ -650,3 +651,72 @@ def test_decode_signal_column_masks_the_sentinel_and_the_mask_finds_it() -> None
     values = decode_signal_column(payloads, signal)
     assert np.isnan(values[[0, 2, 4]]).all() and values[[1, 3]].tolist() == [148.0, 150.0]
     assert decode_sentinel_mask(payloads, signal).tolist() == [True, False, True, False, False]
+
+
+# ---------------------------------------------------------------------------
+# P02.8 — the decode on read is the storage decoder's rule, exactly
+# ---------------------------------------------------------------------------
+
+
+def test_the_vectorized_slice_matches_the_scalar_rule() -> None:
+    """``_raw_column`` slices a whole column at once; every value must be the
+    one :func:`src.decode.slices.slice_raw` gives, for every order, width and
+    offset, with short, empty, missing and ``bytearray`` payloads mixed in."""
+    from src.decode.bindings import decode_raw
+    from src.preprocessing.decode import _raw_column
+
+    rng = np.random.default_rng(20260926)
+    payloads: list[object] = []
+    for _ in range(4_000):
+        kind = rng.integers(0, 10)
+        if kind == 0:
+            payloads.append(None)
+        elif kind == 1:
+            payloads.append(b"")
+        else:
+            length = int(rng.choice([1, 2, 3, 5, 8, 8, 8, 12]))
+            raw = bytes(rng.integers(0, 256, size=length, dtype=np.uint8))
+            payloads.append(bytearray(raw) if kind == 2 else raw)
+    column = pd.Series(payloads, dtype=object)
+    for order in ("big", "little"):
+        for width in (1, 2, 3, 4, 6, 8):
+            for start in (0, 1, 3):
+                signal = _sig(byte_start=start, byte_length=width, byte_order=order)
+                got = _raw_column(column, signal)
+                for value, payload in zip(got, payloads, strict=True):
+                    expected = (
+                        decode_raw(signal, bytes(payload))
+                        if isinstance(payload, (bytes, bytearray))
+                        else None
+                    )
+                    if expected is None:
+                        assert np.isnan(value)
+                    else:
+                        assert value == float(expected)
+
+
+def test_decode_on_read_writes_what_the_storage_decoder_wrote(tmp_path: Path) -> None:
+    """Rows, values, units, metadata, dtypes and order: each frame's rows follow
+    it, in catalog signal order; the sentinel word is a state row; a payload
+    too short for a slice yields no row (not a NaN one); stored rows are
+    dropped and never read. Both sides go through Parquet, as a session does."""
+    from src.decode.frame_decoder import FrameDecoder
+    from src.preprocessing.decode import decode_on_read
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.telemetry import TelemetryRecord
+
+    def through_parquet(rows: list[TelemetryRecord], name: str) -> pd.DataFrame:
+        (path,) = write_records_to_parquet(rows, tmp_path / name)
+        return pd.read_parquet(path)
+
+    bindings = _sentinel_bindings()
+    records = [TelemetryRecord.can(ts, can_id, raw) for ts, can_id, raw in _sentinel_frames()]
+    records.append(TelemetryRecord.can(1000.4, 0x385, bytes([0, 0, 21])))  # too short for byte 3
+    stale = TelemetryRecord.decoded(records[1].timestamp, "TYRE_A", 1.0, "psi")
+    decoder = FrameDecoder.from_bindings(bindings)
+    expected = [row for record in records for row in (record, *decoder.decode(record))]
+
+    stored = through_parquet([*records[:2], stale, *records[2:]], "stored")
+    got = decode_on_read(stored, bindings)
+    pd.testing.assert_frame_equal(got, through_parquet(expected, "written"), check_exact=True)
+    assert decode_on_read(stored, None)["source"].tolist() == ["can"] * len(records)

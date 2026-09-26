@@ -145,23 +145,28 @@ def digest_address_space_bytes(config: CanaryConfig) -> int:
     return max(_ADDRESS_SPACE_FLOOR_MB, min(_ADDRESS_SPACE_CEILING_MB, derived_mb)) * _MIB
 
 
-#: Peak resident bytes per session row for the digest chain.
+#: Peak resident bytes per stored session row for the digest chain.
 #:
-#: Measured 2026-09-17 on the raw-timestamp pivot: ``resample_and_segment``
-#: over the 2,622,370-row ``2026-08-08T214218`` peaked at 5,483 MB to emit
-#: 1,143 rows — 2,193 bytes/row, recorded here as 2,200.
+#: Measured 2026-09-17 on the raw-timestamp pivot: 2,193 bytes/row. Re-measured
+#: 2026-09-22 on the long-form reduction (D03.6): 390 and 280 bytes/row.
 #:
-#: Re-measured 2026-09-22 on the long-form reduction that replaced the pivot
-#: (D03.6, ``data/analyses/2026-09-22-d03-d04-desk-pass.md``), same session,
-#: same laptop, each stage in its own process: ``resample_and_segment``
-#: 859 MB, ``compute_digest`` 959 MB, ``compute_digest_under_limit`` under
-#: the Pi's 4 GiB ``RLIMIT_AS`` 976 MB — **390 bytes/row**. A 5,570,352-row
-#: session (``2026-09-18T144215``) peaked at 1,490 MB, 280 bytes/row. The
-#: figure here is twice the larger measurement, because the Pi's allocator
-#: is not the laptop's and under-estimating turns a clean refusal into a
-#: child that dies (a caught ``MemoryError`` under the ceiling, never the
-#: daemon — but still a session without a digest).
-#: **This is the one number to change when the reduction changes** — the
+#: Re-measured 2026-09-26 after P02.8, which stopped storing ``decoded`` rows:
+#: new sessions have ~28 % fewer stored rows while the chain decodes them on
+#: read, so memory per *stored* row rose. ``compute_digest`` peak RSS, laptop,
+#: each session in its own process, on copies with the decoded rows removed
+#: (the new-session format):
+#:
+#: - ``2026-09-23T162918``: 1.08 M rows, 653 MB, 632 B/row;
+#: - ``2026-09-23T150658``: 1.35 M rows, 738 MB, 573 B/row;
+#: - ``2026-09-20T152758``: 12.84 M rows, 4,334 MB, 354 B/row.
+#:
+#: The peak is about 314 MB fixed plus ~313 B per row, so small sessions read
+#: high per row but sit far below the ceiling. Where this budget binds (~5 M
+#: rows) the chain costs ~376 B/row, and 800 keeps a 2.1x margin -- the
+#: margin, not the per-row figure of a short session, is the invariant, and the
+#: margin exists because the Pi's allocator is not the laptop's and
+#: ``RLIMIT_AS`` bounds virtual memory, not RSS.
+#: **This is the one number to change when the reduction changes** -- the
 #: row budget follows from it.
 DIGEST_PEAK_BYTES_PER_ROW = 800
 
@@ -171,8 +176,9 @@ def digest_row_budget(config: CanaryConfig) -> int:
 
     Derived = the child's address-space ceiling divided by the measured
     per-row peak, so the budget and the ceiling cannot drift apart. On the
-    8 GB Pi that is a 4 GiB child / 800 B per row ≈ 5.4 M rows (about 38
-    minutes of ``default`` collection at ~2,355 rows/s). The derivation is
+    8 GB Pi that is a 4 GiB child / 800 B per row ≈ 5.4 M stored rows (about
+    53 minutes of ``default`` collection at ~1,700 stored rows/s once decoded
+    rows are no longer stored, P02.8). The derivation is
     the point: a hand-picked 4 M budget once sat against a ceiling that
     covered only 1.95 M rows, and sessions between the two spawned a child
     that then died of ``MemoryError``.

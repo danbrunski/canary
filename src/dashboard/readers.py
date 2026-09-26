@@ -27,7 +27,7 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
-from src.preprocessing.decode import decoded_channel
+from src.preprocessing.decode import decode_on_read, decoded_channel, on_read_catalog
 from src.preprocessing.loader import PARQUET_PATTERN
 from src.timefmt import parse_iso_utc
 
@@ -37,23 +37,30 @@ def read_latest_telemetry_rows(
     *,
     n: int = 100,
 ) -> list[dict[str, Any]]:
-    """Return the last ``n`` rows of the newest session, spanning chunks."""
+    """Return the last ``n`` rows of the newest session, spanning chunks.
+
+    ``decoded`` rows are decoded on read from the frames (P02.8), as every
+    session reader sees them: a session recorded since then stores none.
+    """
     latest = _resolve_latest_session(storage_path)
     if latest is None:
         return []
     chunks = sorted(latest.glob(PARQUET_PATTERN))
     if not chunks:
         return []
+    catalog = on_read_catalog()
     collected: list[pd.DataFrame] = []
     total = 0
     for chunk in reversed(chunks):  # newest-first; stop once we have >= n
         if chunk.stat().st_size == 0:
             continue
-        df = pd.read_parquet(chunk)
+        df = decode_on_read(pd.read_parquet(chunk), catalog)
         collected.append(df)
         total += len(df)
         if total >= n:
             break
+    if not collected:
+        return []
     table = (
         collected[0]
         if len(collected) == 1
@@ -76,6 +83,8 @@ _PER_CHANNEL_COLUMNS = [
     "value_bool",
     "unit",
 ]
+#: ``_PER_CHANNEL_COLUMNS`` plus what the decode on read needs (P02.8).
+_PER_CHANNEL_READ_COLUMNS = [*_PER_CHANNEL_COLUMNS, "payload"]
 
 
 def read_latest_per_channel(
@@ -94,6 +103,11 @@ def read_latest_per_channel(
     the previous session, which stopped being written when the capture started.
     That is exactly how `vehicle_state` came to report `no_data` for the whole
     of every tuning capture.
+
+    ``decoded:`` rows are decoded on read from the window's frames (P02.8):
+    the dashboard seed and the Parquet ``vehicle_state`` (broadcast rpm when
+    Mode 01 is dark) get the rows a session recorded before then stored, and
+    the same rows from one recorded after it, which stores none.
     """
     latest = session_dir if session_dir is not None else _resolve_latest_session(storage_path)
     if latest is None:
@@ -102,13 +116,25 @@ def read_latest_per_channel(
     if not chunks:
         return []
     collected: list[pd.DataFrame] = []
+    earliest: pd.Timestamp | None = None
+    latest_seen: pd.Timestamp | None = None
     for chunk in reversed(chunks[-max_chunks:]):  # newest-first
-        collected.append(pd.read_parquet(chunk, columns=_PER_CHANNEL_COLUMNS))
-        spanned = pd.concat(collected) if len(collected) > 1 else collected[0]
-        ts = pd.to_datetime(spanned["timestamp"], utc=True)
-        if (ts.max() - ts.min()).total_seconds() >= window_seconds:
+        frame = pd.read_parquet(chunk, columns=_PER_CHANNEL_READ_COLUMNS)
+        collected.append(frame)
+        # The span so far, from each chunk's own extremes: re-concatenating
+        # every chunk read so far (payloads included) made this quadratic.
+        ts = pd.to_datetime(frame["timestamp"], utc=True)
+        if not ts.empty:
+            earliest = ts.min() if earliest is None else min(earliest, ts.min())
+            latest_seen = ts.max() if latest_seen is None else max(latest_seen, ts.max())
+        if (
+            earliest is not None
+            and latest_seen is not None
+            and (latest_seen - earliest).total_seconds() >= window_seconds
+        ):
             break
     table = pd.concat(collected[::-1], ignore_index=True)
+    table = decode_on_read(table, on_read_catalog())[_PER_CHANNEL_COLUMNS]
     table["timestamp"] = pd.to_datetime(table["timestamp"], utc=True)
     table = table.sort_values("timestamp", kind="stable")
     latest_rows = table.groupby(["source", "channel"], as_index=False).last()

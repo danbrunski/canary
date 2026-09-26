@@ -307,12 +307,16 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M**, Pi.
 
-- [ ] **P02.8 Decide whether to keep persisting decoded rows.** 28 % of stored
+- [~] **P02.8 Decide whether to keep persisting decoded rows.** 28 % of stored
   rows are `decoded` values: seven channels at ~84 Hz, 95 % of them
   repeating the previous value. They can all be computed from the payloads
   stored beside them. Recomputing gives the same values (P01 round 2), and
   P01's decode recomputes every binding anyway. Plausibility's stream loader
   still prefers stored rows where they exist.
+
+  *Decided 2026-09-26 (operator): drop them.* New sessions store no `decoded`
+  rows, and every reader decodes on read. Old sessions keep theirs; they are
+  never rewritten.
 
   **Do:**
   1. List every reader of stored `decoded` rows: `query_telemetry` over the
@@ -328,6 +332,118 @@ recomputes the rolling frame over the whole buffered window every tick.
   - Numbers for both sides, and the decision recorded.
   - If the rows are dropped, every listed reader returns today's values on a
     stored session.
+
+  *Implemented and verified at the desk 2026-09-26 (Do 1, 4, 5). Remaining,
+  on the Pi (Do 2, 3):* writer CPU and bytes before and after under a
+  sustained capture (~116 req/s); decode-on-read latency for the Pi-side
+  readers (the trip-end digest child, the `/telemetry/latest?per_channel`
+  seed and the Parquet `vehicle_state`, `/analysis/binned` and the session
+  chart).
+  - **Nothing stores a decoded row.** `drain.storable` is the storage sink's
+    fanout subscription and is repeated in `run_storage_sink`;
+    `ParquetTelemetryWriter.write` refuses one. The storage `FrameDecoder`
+    wiring is gone (`storage_decode_for`, `drain_kwargs["storage_decode"]`,
+    `run_storage_sink(decode=)`, the harness decoder); the trip tracker keeps
+    its own road-speed decode and the live source is untouched.
+    `test_the_daemon_stores_no_decoded_row_whatever_config_or_profile_say`:
+    the retired config key set to `[confirmed, high]`, a profile carrying
+    `broadcast_decode: true` and the decoded rows a legacy replay emits → 20
+    frames and 1 obd row stored, 0 decoded; the loader decodes the 20 frames.
+  - **Knobs retired, still load.** `collection.persist_decoded_confidence` is
+    popped with a logged warning (louder when not `[confirmed]`) and removed
+    from the example configs; the profile's `broadcast_decode` is dropped with
+    a once-per-process warning, gone from the model, the starter catalog, the
+    editor and the TS types. Saved catalogs, the Xterra's included, load
+    unchanged. What every reader decodes is `on_read_signals`: `confirmed`
+    plus `persist: true` (the only value the key ever shipped with).
+  - **Every reader decodes on read, one rule.**
+    `preprocessing.decode.decode_on_read` writes exactly the storage
+    decoder's rows, each after its frame in catalog order (file-order
+    `check_exact` against the stored rows of `2026-09-18T152144`, 1.75 M rows,
+    and `_capture-fuel-target-research-2026-09-21T195844`, 2.87 M). The loader
+    (`read_session`, `iter_session_parts`, the `value_number` readers) drops
+    stored rows and applies it, filters included; `as_recorded` is for the
+    training chain (recomputes every binding) and storage accounting. Also:
+    drive activity, the dashboard latest-row readers, `fetch_channel_rows`
+    (in SQL), broadcast discovery, `pull_report`; plausibility decodes always;
+    `decode_can_rows` replaces stored rows. Raw SQL (`query_telemetry`) reads
+    a `telemetry` view of the stored rows other than `decoded`, `UNION ALL`
+    each on-read binding decoded from its frames in SQL. A query naming
+    `decoded` carries `note`, plus `empty_reason` when it finds nothing (no
+    rows, or a zero/null aggregate). `tools/backfill_decoded.py` is retired: it
+    rewrote sessions to store what is now decoded on read.
+  - **Parity:** HEAD on the originals vs this tree on copies with the decoded
+    rows removed: `2026-09-18T152144`,
+    `_capture-fuel-target-research-2026-09-21T195844`,
+    `_capture-tuning-2026-09-21T223734` and `2026-09-20T152758` (17.9 M rows;
+    its whole-session reads, `read_channels` and `compare_channels`, were
+    skipped). Identical: the `value_number` segmented frame,
+    fingerprint, classification, trip summary and digest; the 1 Hz training
+    chain (resampled, features, operating frames); `read_channels` of the 7
+    decoded specs; 6 `compare_channels` verdicts; drive activity; the latest
+    rows and Parquet `vehicle_state`; `fetch_channel_rows` below the row
+    limit's last instant (that instant's tie order is SQL's; now broken by
+    channel). Plausibility samples and modes are the same rows, each channel's
+    sequence identical, only the order of channels within one instant
+    differing; evaluator evidence is identical (`152144` and
+    `_capture-tuning-2026-09-21T223734`, each clean plus 75 faulted runs over
+    15 checked decoded channels: 0 mismatching runs).
+    The behavior-validation frame (`mode-inputs`) is identical on `152144`.
+    This tree on `152144` as recorded and stripped: every output
+    byte-identical. `tests/test_decoded_rows_never_stored.py` (20) repeats
+    this per reader on the committed slice, stored, stripped and mixed.
+  - **Current catalog, old sessions too (the decision's cost).**
+    `2026-08-06T151547` stored 4 of the 7 channels and now reads all 7:
+    the segmented frame gains the 3 wheel speeds, classification
+    `feature_columns` 63 → 66, fingerprint committee residuals move. July
+    sessions stored none: `2026-07-26T225058`'s evaluation frame gains 4
+    channels, and its drive grouping moves, because activity now counts the
+    decoded broadcast. `decode_can="none"` (historical scope) reads no decoded
+    channel at all, so that July frame is otherwise identical.
+  - **Numbers, laptop** (HEAD on the original, then this tree on the stripped
+    copy, back to back). Parquet bytes −14 % (`152758` 161.6 → 137.7 MB), rows
+    −28 %. Digest chain in memory: `2026-09-18T144215` 1,492 → 1,509 MB peak
+    (281 → 401 B per stored row); `2026-08-08T214218` 836 → 827 MB (467 B per
+    stored row); `2026-09-20T152758` 4,160 → 4,222 MB,
+    63 → 80 s (its numeric read 21.6 → 41.8 s: 5.07 M rows decoded).
+    `read_latest_per_channel` 438 → 559 ms (`152144`) and 518 → 529 ms
+    (`152758`); drive activity 0.27 → 0.63 s and 3.8 → 5.4 s;
+    `fetch_channel_rows` of 3 keys over the whole session 2.6 → 4.1 s and 5.3 →
+    7.9 s.
+
+
+  - **Verifier, 2026-09-26: FAIL on three defects, since fixed.**
+    - *Raw SQL did not decode on read.* On a stripped copy, `count(*)` of
+      decoded `ECM_RPM` was 0, against 76,600 on the original. It now reads
+      the view above. `2026-09-23T162918`: 63,027 on the original and on the
+      stripped copy. A query that touches no decoded row costs the same on
+      both (93 ms). Scans made only of files with no `payload` column (before
+      2026-07-29) skip the decoded branch.
+      `test_query_telemetry_decodes_on_read_and_names_the_kind_of_empty`.
+    - *The digest budget's margin was stated, not measured.* P02.8 cuts stored
+      rows ~28 % while the chain decodes them on read, so memory per *stored*
+      row rose. `compute_digest` peak RSS on stripped copies:
+      - `162918`: 1.08 M rows, 653 MB, 632 B/row;
+      - `150658`: 1.35 M rows, 738 MB, 573 B/row;
+      - `152758`: 12.84 M rows, 4,334 MB, 354 B/row.
+
+      That is about 314 MB fixed plus ~313 B/row. Short sessions read high
+      per row but sit far below the ceiling. Where the budget binds (~5 M
+      rows) it is ~376 B/row, so `DIGEST_PEAK_BYTES_PER_ROW = 800` keeps a
+      2.1x margin and stays. Its docstring and the `canary.example.yaml`
+      comment (which still said 2,200 B/row) now carry these measurements.
+    - *A warn-once global was never reset.* `capture_profiles._reset_for_tests`
+      is registered in `process_state`, and a test pins the `broadcast_decode`
+      warning.
+  - **Behaviour changes not listed above.**
+    - `read_session_decoded` with no bindings file returns no decoded rows
+      (it used to keep stored ones).
+    - The validation report drops `decoder_signals`. `decoded_expansion`
+      becomes `decoded_rows_stored`. The replay block's
+      `rederived_decoded_rows` becomes `emitted_by_replay` /
+      `stored_in_source`.
+    - `_channel_satisfied("decoded:…")` is always true.
+    - `decode_can="none"` drops post-July sessions' stored decoded rows too.
 
   Size **M**, Pi and operator.
 
@@ -346,44 +462,80 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M–L**. Built at the desk; measured on the Pi.
 
-- [ ] **P02.10 Store CAN frames change-only, with a heartbeat (operator
-  decision).** On the 09-20 drive, 41 % of CAN frames repeat their id's
-  previous payload.
-  - **What.** Store a frame only when its payload differs from that id's
-    previous frame. Add one heartbeat frame per id per second while nothing
-    changes, and per-id frame counts per second.
-  - **What is kept.** Every distinct payload survives. Re-decoding after a
-    binding correction, and discovery on the 16 unbound ids, lose nothing.
-    Liveness keeps 1 s resolution, and receive-loss counting keeps its
-    per-second counts.
-  - **What is lost.** Sub-second frame timing, which only bus-health work
-    reads.
-  - **Combined with P02.8.** Dropping decoded rows as well leaves roughly
-    8 M rows for that drive instead of 17.9 M. That is still over the 5.4 M
-    digest budget, so P02.1 stays needed.
-  - **The parity catch.** Two readers depend on dense samples:
-    - The resampler takes each bin's last value and marks a channel stale
-      once its last observation is older than its max gap. Without the
-      heartbeat, a steady signal would read as stale. The heartbeat must be
-      no longer than the grid interval.
-    - Acquisition-time pairing looks for a sample near each OBD read, so the
-      reader must reconstruct as-of values. That belongs inside the reader,
-      never in its callers.
-  - **Mixed corpus.** Old full-rate sessions stay as they are and still read.
+- [ ] **P02.10 Store CAN frames on change; re-write an unchanged id once per
+  stale timeout (operator decision).** On the 09-20 drive, 41 % of CAN frames
+  repeat their id's previous payload.
 
-  **Accept:** write full-rate sessions change-only, then:
-  - the 1 Hz frames and features match exactly (`check_exact`);
+  *Decided 2026-09-26 (operator):*
+  - A CAN frame is stored only when its payload differs from that id's
+    previous frame.
+  - An unchanged id is written again once per *broadcast stale timeout*, so
+    its value never lapses. The timeout is one config setting, default 10 s.
+    The re-write happens 1 s before the timeout, derived from it rather than
+    configured separately. The config refuses a timeout under 2 s.
+  - No "stopped" rows.
+  - Sub-second frame timing, and per-id frame counts, go to an optional
+    capture profile that stores every frame.
+
+  *Measured the same day, same drive:*
+  - Change-only keeps 7.35 M of 12.5 M frames.
+  - A 1 s re-write would add 94,588 rows (+1.3 %). A 10 s timeout should add
+    about a tenth of that; that is an estimate, so measure it.
+  - An id went silent for more than a second 818 times.
+  - With P02.8 as well, the drive would be about 7.7 M rows instead of
+    17.9 M. That is still over the 5.4 M digest budget, so P02.1 stays needed.
+
+  **What changes where:**
+  - **Storage sink.** A per-id filter (last payload, last write) with
+    per-session state, so every id's first frame in a session is written and
+    a session stands alone. The storage mode is recorded in the data itself,
+    per chunk, so readers know which spans are change-only. Old sessions
+    store every frame.
+  - **Resampler.** Broadcast channels (`can:`/`decoded:`/`dbc:`) get their own
+    stale class, set to the timeout. OBD polls and other fast channels keep
+    2 s. The resampler already gives slow channels their own class (120 s).
+  - **Live feature pipeline.** It consumes the same filtered stream as
+    storage, so live, stored and replayed features match exactly. Consumers
+    that need every frame (freshness, bus health) keep the raw stream.
+  - **Readers.** Pairing for broadcast channels uses the value as of the
+    instant: the last stored row before it, valid within the timeout. That
+    logic lives inside the reader, never in its callers.
+  - **Frame-count readers.** Anything that counts stored frames or computes
+    rates must refuse a change-only span and name the cause, or point at the
+    every-frame profile.
+  - **Every-frame profile.** A capture-profile field selects every-frame
+    storage, and a starter profile goes in `data/capture_profiles.yaml`.
+    Saved catalogs are never re-seeded, so the Pi's catalog needs the profile
+    added by hand.
+
+  **Costs:**
+  - A module that really stops transmitting keeps its last value for up to
+    the timeout before the data shows a gap.
+  - The timeout feeds the models' `__gap` features. Moving broadcast channels
+    from 2 s to 10 s changes features only during real 2–10 s dropouts. Count
+    the grid cells it changes across the corpus. If any change, this is a
+    feature-spec change, and the detectors are retrained before deploy (a
+    retrain is already owed).
+
+  **Accept:**
+  - Change-only copies of real sessions give 1 Hz frames and features equal
+    (`check_exact`) to the full-rate originals under the same timeout.
+  - The corpus count of cells that change between a 2 s and a 10 s broadcast
+    timeout is reported, and it decides the retrain.
   - `tests/test_analysis_ground_truth.py` passes, including its 1:1
-    broadcast-versus-Mode 01 check;
-  - `compare_channels` gives the same pairs and verdicts on three captures;
-  - rows, bytes and writer CPU are measured on the Pi;
-  - a mixed old/new corpus reads.
+    broadcast-versus-Mode 01 check.
+  - `compare_channels` gives the same verdicts on three captures.
+  - Live features on the filtered stream equal offline features on the
+    stored data (replay).
+  - A mixed old/new corpus reads, and frame-count readers refuse change-only
+    spans with a named cause.
+  - On the Pi: rows, bytes and writer CPU are measured before and after.
 
   **Later, not here.** Masking the counter bytes on the twelve ids that
   change every frame could save more. A mask is per-vehicle knowledge,
   though, and would need its own verification.
 
-  Size **M–L**, Pi and operator.
+  Size **M–L**. Built at the desk; measured on the Pi.
 
 ## Tracked elsewhere
 

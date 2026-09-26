@@ -34,8 +34,16 @@ DRIVE_SLICE = Path("tests/fixtures/ground_truth/drive-slice/telemetry-00000.parq
 
 
 def _unbounded(session: Path, bindings: object, dbc: object, dids: object) -> pd.DataFrame:
+    # As recorded, like the chain under test: it recomputes every binding with
+    # the catalog it is given, where the loader's decode on read would add the
+    # repo catalog's own (P02.8).
     return resample_long_session(
-        read_session(session), bindings, dbc, dids, ResampleConfig(), session_name=session.name
+        read_session(session, decoded="as_recorded"),
+        bindings,
+        dbc,
+        dids,
+        ResampleConfig(),
+        session_name=session.name,
     )
 
 
@@ -74,8 +82,15 @@ def test_real_drive_slice_matches_the_whole_session_chain(
     parts: list[int] = []
     real = feature_pipeline.iter_session_parts
 
-    def spy(session_dir: Path, *, target_rows: int, filters: object = None) -> object:
-        for part in real(session_dir, target_rows=target_rows, filters=filters):
+    def spy(
+        session_dir: Path, *, target_rows: int, filters: object = None, decoded: str = "on_read"
+    ) -> object:
+        for part in real(
+            session_dir,
+            target_rows=target_rows,
+            filters=filters,
+            decoded=decoded,  # type: ignore[arg-type]
+        ):
             parts.append(len(part))
             yield part
 

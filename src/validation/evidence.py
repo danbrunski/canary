@@ -11,15 +11,15 @@ satisfy exactly, overloaded or not::
 
 and, separately, every broadcast sequence number the adapter delivered is on
 disk exactly once or is listed as missing (with the missing count bounded by
-the drops above). Decoded ``decoded:*`` rows are reconciled on their own as a
-one-to-many expansion of the persisted frames, never mixed into raw counts.
+the drops above). No ``decoded:*`` row may be on disk at all (P02.8: decoded
+rows are never stored, the readers decode the frames on read); that is its
+own identity, never mixed into raw counts.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -38,10 +38,8 @@ from src.collection.capture_losses import (
     reconcile_losses,
     summarize_losses,
 )
-from src.decode.bindings import load_bindings
-from src.decode.frame_decoder import FrameDecoder
 from src.paths import DIDS_YAML
-from src.telemetry import CAPTURED_SOURCES, TelemetryRecord
+from src.telemetry import CAPTURED_SOURCES, DECODED_SOURCE
 from src.validation.harness import RunArtifacts
 from src.validation.synthetic_bus import (
     SYNTH_BROADCAST_ID,
@@ -65,12 +63,16 @@ DIDS_PATH = DIDS_YAML
 
 def read_rows(session_dirs: Sequence[Path]) -> pd.DataFrame:
     """Every persisted row across the writer's session dirs, on the
-    acquisition clock, tagged with the dir it came from."""
+    acquisition clock, tagged with the dir it came from.
+
+    As recorded: this is an account of what the writer put on disk, so the
+    loader's decode on read (P02.8) must not add rows to it.
+    """
     frames: list[pd.DataFrame] = []
     for session_dir in session_dirs:
         if not any(session_dir.glob("telemetry-*.parquet")):
             continue
-        frame = read_acquisition_frame(session_dir)
+        frame = read_acquisition_frame(session_dir, decoded="as_recorded")
         frame["session_dir"] = str(session_dir)
         frames.append(frame)
     if not frames:
@@ -164,70 +166,39 @@ def sequence_reconciliation(
     }
 
 
-def decoded_expansion(
-    frame: pd.DataFrame, *, persisted_signals: int, synthetic: bool
-) -> dict[str, Any]:
-    decoded = frame[frame["source"] == "decoded"]
-    broadcast_rows = int(
-        ((frame["source"] == "can") & (frame["channel"].str.upper() == BROADCAST_CHANNEL)).sum()
-    )
-    out: dict[str, Any] = {
+def decoded_rows_stored(frame: pd.DataFrame) -> dict[str, Any]:
+    """P02.8's identity: the writer stored no ``decoded`` row at all.
+
+    Decoded rows are never stored (operator decision 2026-09-26); the storage
+    sink refuses them whatever the profile or config says, and the readers
+    decode the persisted frames on read. Until then this block reconciled
+    them as ``persisted frames x persisted signals``.
+    """
+    decoded = frame[frame["source"] == DECODED_SOURCE]
+    return {
         "decoded_rows": int(len(decoded)),
         "decoded_by_channel": {
             str(k): int(v) for k, v in decoded["channel"].value_counts().items()
         },
-        "note": "one-to-many expansion of persisted frames; kept apart from raw counts",
+        "expected_decoded_rows": 0,
+        "identity_holds": len(decoded) == 0,
+        "note": "decoded rows are never stored (P02.8); readers decode the frames on read",
     }
-    if synthetic:
-        expected = broadcast_rows * persisted_signals
-        out.update(
-            {
-                "persisted_broadcast_frames": broadcast_rows,
-                "signals_per_frame": persisted_signals,
-                "expected_decoded_rows": expected,
-                "identity_holds": expected == int(len(decoded)),
-            }
-        )
-    return out
-
-
-def _rederived_rows(can_frames: pd.DataFrame, bindings_path: Path) -> int:
-    """How many ``decoded`` rows the storage decoder makes from ``can_frames``.
-
-    The same decoder, bindings and confidence filter the harness wires into
-    the storage sink, so this is the one-to-many expansion the writer is
-    *supposed* to have persisted from the frames it persisted.
-    """
-    decoder = FrameDecoder.from_bindings(
-        load_bindings(bindings_path), confidence_levels=("confirmed",)
-    )
-    now = datetime.now(UTC)
-    total = 0
-    for channel, payload in zip(can_frames["channel"], can_frames["payload"], strict=True):
-        if not isinstance(payload, (bytes, bytearray)):
-            continue
-        total += len(
-            decoder.decode(
-                TelemetryRecord(
-                    timestamp=now, source="can", channel=str(channel), payload=bytes(payload)
-                )
-            )
-        )
-    return total
 
 
 def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str, Any]:
     """Replay rows persisted, per source, against the source session (D03.7).
 
-    D02.9's doubling (stored ``decoded`` rows re-emitted *and* re-derived from
-    the replayed frames) and its live-GPS contamination (the Pi's receiver
-    writing into ``_replay-*``) are both row-count identities against the
-    source, so they are checked as identities:
+    D02.9's live-GPS contamination (the Pi's receiver writing into
+    ``_replay-*``) is a row-count identity against the source, and so is
+    P02.8's rule that no ``decoded`` row is stored:
 
-    - ``decoded`` persisted == stored ``decoded`` the emit policy let through
-      + what the storage decoder re-derives from the persisted ``can`` frames.
-      Under the re-derivable policy the first term is zero by construction, so
-      this identity holds even for an incomplete pass.
+    - ``decoded`` persisted == 0, always. A payload-bearing source's stored
+      ``decoded`` rows are skipped at the emit path, and a legacy
+      payload-less source's are emitted (the live pipeline needs them) but
+      never stored; the storage sink stores none whatever reaches it. Until
+      P02.8 the identity was stored-emitted + re-derived by the storage
+      decoder, which is how D02.9's doubling showed.
     - every captured source persisted == its count in the source, once a full
       pass completed with nothing dropped; any excess is listed as
       ``foreign_rows`` (rows no recording contained).
@@ -238,8 +209,6 @@ def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str,
     source = read_rows([artifacts.replay_source])
     source_by = {str(k): int(v) for k, v in source["source"].value_counts().items()}
     persisted_by = {str(k): int(v) for k, v in frame["source"].value_counts().items()}
-    persisted_can = frame[frame["source"] == "can"]
-    rederived = _rederived_rows(persisted_can, artifacts.bindings_path)
     storage_dropped = int(_sink(artifacts, "storage").get("dropped_records") or 0)
     complete = stats.passes >= 1 and stats.rows_dropped == 0 and storage_dropped == 0
     out: dict[str, Any] = {
@@ -249,26 +218,16 @@ def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str,
         "rederivable_reason": stats.rederivable_reason,
         "skipped_sources": list(stats.skipped_sources),
         "pass_complete": complete,
-        "rederived_decoded_rows": rederived,
     }
-    stored_decoded = 0 if stats.rederivable else source_by.get("decoded", 0)
-    decoded_persisted = persisted_by.get("decoded", 0)
-    if stats.rederivable or complete:
-        expected = stored_decoded + rederived
-        out["decoded"] = {
-            "persisted": decoded_persisted,
-            "expected": expected,
-            "stored_emitted": stored_decoded,
-            "identity_holds": decoded_persisted == expected,
-            "ratio_to_expected": None if expected == 0 else decoded_persisted / expected,
-        }
-    else:
-        out["decoded"] = {
-            "persisted": decoded_persisted,
-            "identity_holds": None,
-            "reason": "legacy policy re-emits stored decoded rows; the pass did not "
-            "complete, so how many were emitted is unknown",
-        }
+    decoded_persisted = persisted_by.get(DECODED_SOURCE, 0)
+    out["decoded"] = {
+        "persisted": decoded_persisted,
+        "expected": 0,
+        "stored_in_source": source_by.get(DECODED_SOURCE, 0),
+        "emitted_by_replay": 0 if stats.rederivable else source_by.get(DECODED_SOURCE, 0),
+        "identity_holds": decoded_persisted == 0,
+        "note": "decoded rows are never stored (P02.8), whatever the replay emits",
+    }
     if complete:
         captured = sorted((set(source_by) | set(persisted_by)) & set(CAPTURED_SOURCES))
         foreign = {
@@ -895,9 +854,7 @@ def analyse(artifacts: RunArtifacts) -> dict[str, Any]:
         "sequence_reconciliation": sequence_reconciliation(
             frame, artifacts, drops_total=drops_total
         ),
-        "decoded_expansion": decoded_expansion(
-            frame, persisted_signals=artifacts.decoder_signals, synthetic=synthetic
-        ),
+        "decoded_rows_stored": decoded_rows_stored(frame),
         "replay_accounting": replay_accounting(frame, artifacts),
         "losses": losses,
         "transport": {

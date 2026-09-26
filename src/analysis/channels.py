@@ -59,7 +59,7 @@ from src.control.capture_manifest import read_capture_manifest
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import read_session
+from src.preprocessing.loader import DecodedRows, read_session
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than
@@ -334,7 +334,10 @@ def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) ->
 
 
 def _long_frame_with_metadata(
-    session: Path | pd.DataFrame, *, acquired_time: bool = False
+    session: Path | pd.DataFrame,
+    *,
+    acquired_time: bool = False,
+    decoded: DecodedRows = "on_read",
 ) -> tuple[pd.DataFrame, _MetadataFields | None]:
     """:func:`_long_frame` plus the metadata columns it had to parse.
 
@@ -342,8 +345,17 @@ def _long_frame_with_metadata(
     the one parse. ``None`` covers both "nothing was parsed" cases: without
     ``acquired_time`` no metadata is wanted (and no caller should pay the parse
     for it), and a frame with no ``metadata_json`` column has none to parse.
+
+    A session directory is read with its ``decoded:`` rows decoded on read
+    (P02.8, ``loader.read_session``), so ``decoded:`` specs read the same rows
+    from a session recorded before 2026-09-26 and from one recorded after,
+    which stores none. ``decoded`` is the loader's mode.
     """
-    frame = session.copy() if isinstance(session, pd.DataFrame) else read_session(Path(session))
+    frame = (
+        session.copy()
+        if isinstance(session, pd.DataFrame)
+        else read_session(Path(session), decoded=decoded)
+    )
     if not acquired_time:
         return frame, None
     fields = _metadata_fields(frame)
@@ -357,7 +369,9 @@ def _long_frame_with_metadata(
     return frame, fields
 
 
-def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
+def read_acquisition_frame(
+    session: Path | pd.DataFrame, *, decoded: DecodedRows = "on_read"
+) -> pd.DataFrame:
     """The raw session on its acquisition clock, with ``timestamp_basis`` per row.
 
     For consumers that decode rows themselves (the broadcast byte sweep) but
@@ -365,8 +379,10 @@ def read_acquisition_frame(session: Path | pd.DataFrame) -> pd.DataFrame:
     :func:`read_channels`. Also carries ``acquired_at`` (float Unix seconds),
     ``generation`` and ``round_id`` (nullable) so round membership is a column
     rather than a JSON parse; :func:`round_skew` summarises them.
+    ``decoded="as_recorded"`` is for an account of what is on disk (storage
+    accounting), which the decode on read must not add to.
     """
-    frame, fields = _long_frame_with_metadata(session, acquired_time=True)
+    frame, fields = _long_frame_with_metadata(session, acquired_time=True, decoded=decoded)
     if fields is None:
         for column in (ACQUIRED_AT_COLUMN, GENERATION_COLUMN, ROUND_ID_COLUMN):
             frame[column] = pd.Series(pd.NA, index=frame.index, dtype="Float64")

@@ -903,7 +903,8 @@ def test_an_alert_sink_failure_never_costs_the_evidence() -> None:
 def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) -> None:
     """``load_stream`` reads a session in time-disjoint parts (a 2 h drive
     whole took the A02.11 evaluation to 13.2 GB); samples and modes must
-    equal the whole-session chain exactly, stored decoded rows included."""
+    equal the whole-session chain exactly. A chunk of stored decoded rows
+    (values no frame decodes to) changes neither: P02.8, decode always."""
     import pyarrow as pa
     import pyarrow.compute as pc
     import pyarrow.parquet as pq
@@ -927,8 +928,8 @@ def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) ->
     for i in range(6):
         piece = table.slice(i * step, step if i < 5 else table.num_rows - i * step)
         pq.write_table(piece, session / f"telemetry-{i:05d}.parquet")
-    # One chunk of stored decoded rows for a checked signal: they win over a
-    # re-decode in every part, not only in the part that holds them.
+    # One chunk of stored decoded rows for a checked signal, with made-up
+    # values: never read (P02.8), in any part; the frames are decoded instead.
     stored = next(iter(sorted(_checked_decoded(catalog))))
     can = table.filter(pc.equal(table["source"], "can")).slice(0, 50)
     n = can.num_rows
@@ -960,6 +961,11 @@ def test_the_part_by_part_stream_equals_the_whole_session_one(tmp_path: Path) ->
     assert (samples["channel"] == f"decoded:{stored}").sum() > 0
     pd.testing.assert_frame_equal(samples, stream.samples, check_exact=True)
     assert list(modes) == list(stream.modes)
+    (session / "telemetry-00006.parquet").unlink()
+    without = load_stream(
+        session, config, catalog, bindings=bindings, did_map=did_map, part_rows=3_000
+    )
+    pd.testing.assert_frame_equal(without.samples, stream.samples, check_exact=True)
 
 
 def test_the_catalog_fingerprint_is_stable_across_hash_seeds() -> None:

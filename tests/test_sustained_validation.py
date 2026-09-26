@@ -91,8 +91,8 @@ async def _run(spec: ScenarioSpec, tmp_path: Path, *, inference: bool) -> RunArt
 
 async def test_sequence_accounting_reconciles_exactly(tmp_path: Path) -> None:
     """C10.15 — every adapter-delivered sequence number is on disk exactly once,
-    the push identity holds at every stage, and decoded rows are reconciled as
-    an expansion, not as raw input."""
+    the push identity holds at every stage, and no decoded row is on disk
+    (P02.8: never stored; readers decode the frames on read)."""
     artifacts = await _run(_mini(scenario("fuel-map")), tmp_path, inference=False)
     report = build_report(artifacts)
     evidence = report["evidence"]
@@ -104,9 +104,9 @@ async def test_sequence_accounting_reconciles_exactly(tmp_path: Path) -> None:
     assert losses["identity_holds"] is True, losses
     assert losses["frames_tapped_identity"]["holds"] is True, losses
     assert losses["storage_dropped"] == 0
-    decoded = evidence["decoded_expansion"]
+    decoded = evidence["decoded_rows_stored"]
     assert decoded["identity_holds"] is True, decoded
-    assert decoded["decoded_rows"] == 2 * decoded["persisted_broadcast_frames"]
+    assert decoded["decoded_rows"] == 0
     assert evidence["rows"]["by_source"]["obd"] > 0
 
 

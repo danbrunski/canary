@@ -399,13 +399,19 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
     policy = None
     if config is not None:
         try:
-            from src.collection.capture_profiles import serving_mode22_dids
+            from src.collection.capture_profiles import (
+                serving_mode01_channels,
+                serving_mode22_dids,
+            )
             from src.decode.engineering import repo_bindings
             from src.preprocessing.feature_pipeline import FeaturePolicy
 
             policy = FeaturePolicy(
                 bindings=repo_bindings(),
                 serving_dids=serving_mode22_dids(config.daemon.capture_profiles, config.collection),
+                serving_mode01=serving_mode01_channels(
+                    config.daemon.capture_profiles, config.collection
+                ),
             )
         except Exception:  # noqa: BLE001 — the audit is advisory; the model still loads
             log.exception("isolation_forest feature-policy audit unavailable")

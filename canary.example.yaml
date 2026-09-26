@@ -132,10 +132,9 @@ collection:
   reconnect_max_delay_seconds: 60
   queue_max_size: 10000
   queue_warning_fraction: 0.8
-  # Persist decoded CAN signals (source "decoded", raw integer values) to
-  # session Parquet for bindings at these confidence levels. Storage is
-  # forever: default is validated bindings only. [] disables.
-  persist_decoded_confidence: [confirmed]
+  # No decoded CAN rows are stored (P02.8): readers decode the raw frames on
+  # read. The retired `persist_decoded_confidence` key is ignored with a
+  # warning; delete it from a live config.
 
 preprocessing:
   resample_hz: 1
@@ -469,8 +468,9 @@ dashboard:
 #   # an over-large one raises MemoryError in the child instead of letting the
 #   # kernel pick a victim. digest_address_space_mb unset derives the cap from
 #   # physical RAM (half, clamped to 1-4 GiB) -> 4 GiB on the 8 GB Pi.
-#   # digest_row_budget unset derives the row limit from that cap and the
-#   # measured 2,200 bytes/row (~1.95 M rows on the Pi), so the two cannot
+#   # digest_row_budget unset derives the row limit from that cap and
+#   # DIGEST_PEAK_BYTES_PER_ROW (800 B per stored row, twice the measured peak
+#   # where the budget binds; ~5.4 M rows on the Pi), so the two cannot
 #   # state different limits; a session over it is refused with a
 #   # digest_skipped.json naming the count and the budget. 0 disables the row
 #   # check but keeps the cap.

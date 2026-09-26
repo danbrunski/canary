@@ -1844,12 +1844,20 @@ live here now, so the documents could be archived
     - Tests: `tests/test_xterra_default_poll_list.py`. They pin every listed
       name as pollable, keep PID 0x01, exclude the ten, check no behavior
       model is starved, and check the slow cadence for the two demoted PIDs.
-  - [ ] **Trainers must not learn a Mode 01 channel that serving no longer
-    polls.** Trainers already refuse a `did:` feature the serving profile
-    never polls (`serving_mode22_dids`, used in `feature_pipeline.py`).
-    Mode 01 has no such gate, so the next retrain would learn the ten dropped
-    PIDs from the old corpus and then find them missing live. Add the same
-    gate for Mode 01 names, driven by the same saved catalog.
+  - [x] **Trainers must not learn a Mode 01 channel that serving no longer
+    polls (2026-09-26).**
+    - `capture_profiles.serving_mode01_channels` answers the DID gate's
+      question for Mode 01, from the same saved catalog: the channel names, or
+      `AUTO`.
+    - `FeaturePolicy.serving_mode01` refuses an `obd:` Mode 01 channel the
+      serving `default` does not poll. It also refuses a `derived:` channel
+      when one of its required input groups has no served input (checked
+      through `DERIVED_CHANNEL_INPUTS`). Today none of the ten dropped PIDs
+      feeds a derived channel.
+    - Unresolvable means no Mode 01 channel trains, as for DIDs.
+    - The daemon's load audit gets the same policy.
+    - Tests in `tests/test_feature_policy.py`, end to end on the tracked
+      Xterra catalog: `ACCEL_PEDAL_POS_D` is refused, `O2_WR_LAMBDA_S5` kept.
   - [ ] **Keep the once-a-minute DIDs out of detector inputs.** The IF already
     discards all 8 for low coverage; the LSTM takes them as mostly empty
     columns. Apply one coverage rule to both.

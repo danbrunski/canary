@@ -43,6 +43,14 @@ STARTER_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "capture_p
 #: (``builtin_revision`` / ``operator_modified``, removed 2026-09-21). Dropped
 #: on load so those files still validate under ``extra="forbid"``.
 _RETIRED_PROFILE_KEYS = ("builtin_revision", "operator_modified")
+#: ``broadcast_decode`` chose whether a capture stored ``decoded`` rows beside
+#: its raw frames. Retired by P02.8 (operator 2026-09-26): no capture stores
+#: them, and every reader decodes the frames on read, so the field has nothing
+#: left to switch. Saved catalogs on the Pi carry it and nothing re-seeds a
+#: saved catalog, so it is accepted and dropped with a named warning (once per
+#: process), never an error; the next save of the catalog writes it out.
+_RETIRED_BROADCAST_DECODE = "broadcast_decode"
+_broadcast_decode_warned = False
 
 #: Request rate above which the storage sink has a *measured* problem: 25 req/s
 #: backed the writer up until it dropped 2491 records on 2026-07-29, and the
@@ -106,6 +114,9 @@ class CaptureProfile(_Strict):
     def _drop_retired_keys(cls, data: Any) -> Any:
         if isinstance(data, dict) and any(key in data for key in _RETIRED_PROFILE_KEYS):
             data = {k: v for k, v in data.items() if k not in _RETIRED_PROFILE_KEYS}
+        if isinstance(data, dict) and _RETIRED_BROADCAST_DECODE in data:
+            data = {k: v for k, v in data.items() if k != _RETIRED_BROADCAST_DECODE}
+            _warn_broadcast_decode_retired()
         return data
 
     name: str
@@ -248,7 +259,6 @@ class CaptureProfile(_Strict):
     #: reports the source as ``unknown``, so a comparison across a flash can
     #: tell the calibration was unrecorded. Do not restore the refusal.
     requires_tune_revision: bool = False
-    broadcast_decode: bool = True
     corpus_eligible: bool = False
     #: Narrow exception to corpus isolation: these captures may be evidence
     #: for only the named behavior-surface recipes. They remain excluded from
@@ -586,6 +596,25 @@ class CaptureProfileCatalog(_Strict):
         return next((profile for profile in self.profiles if profile.name == normalized), None)
 
 
+def _reset_for_tests() -> None:
+    """Forget that the ``broadcast_decode`` retirement was already reported
+    (``src.collection.process_state``)."""
+    global _broadcast_decode_warned
+    _broadcast_decode_warned = False
+
+
+def _warn_broadcast_decode_retired() -> None:
+    global _broadcast_decode_warned
+    if _broadcast_decode_warned:
+        return
+    _broadcast_decode_warned = True
+    log.warning(
+        "capture profile field broadcast_decode is retired and ignored (P02.8): no capture "
+        "stores decoded rows, and every reader decodes the raw frames on read. Saving the "
+        "catalog drops it."
+    )
+
+
 def default_profile(collection: CollectionConfig) -> CaptureProfile:
     """The reserved ``default`` profile; it mirrors the active config exactly."""
     default_channels = {name: 1.0 for name in collection.obd_pids}
@@ -605,7 +634,6 @@ def default_profile(collection: CollectionConfig) -> CaptureProfile:
         ),
         mode01=default_channels,
         mode22=tuple(collection.obd_dids),
-        broadcast_decode=bool(collection.persist_decoded_confidence),
         corpus_eligible=True,
     )
 
@@ -696,13 +724,59 @@ def serving_mode22_dids(
     return polled
 
 
+#: The serving profile's Mode 01 selection, keyed like ``_SERVING_DID_CACHE``.
+_SERVING_MODE01_CACHE: dict[Path, tuple[int, frozenset[str]]] = {}
+
+#: In a :func:`serving_mode01_channels` answer: every supported PID is polled.
+MODE01_AUTO = "AUTO"
+
+
+def serving_mode01_channels(
+    path: Path, collection: CollectionConfig | None = None
+) -> frozenset[str] | None:
+    """Upper-cased Mode 01 channel names the serving (``default``) profile polls.
+
+    :func:`serving_mode22_dids`'s question for Mode 01: a PID that the serving
+    profile no longer polls is NaN for a model's whole serving life, however
+    much of the old corpus carries it. The Xterra ``default`` dropped ten PIDs
+    on 2026-09-26 (D03.34), and without this answer the next retrain would have
+    learned them. Contains :data:`MODE01_AUTO` when the profile polls every
+    supported PID. Empty when Mode 01 is disabled. ``None`` is unresolvable,
+    as for DIDs. Same precedence: a saved catalog is authoritative, and with
+    no file the ``default`` profile is the one :func:`seed_catalog` would
+    write.
+    """
+    try:
+        mtime = path.stat().st_mtime_ns
+    except FileNotFoundError:
+        if collection is None:
+            return None
+        return _mode01_selection(default_profile(collection))
+    cached = _SERVING_MODE01_CACHE.get(path)
+    if cached is not None and cached[0] == mtime:
+        return cached[1]
+    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
+    default = catalog.by_name(DEFAULT_PROFILE_NAME)
+    polled = _mode01_selection(default) if default is not None else frozenset()
+    _SERVING_MODE01_CACHE[path] = (mtime, polled)
+    return polled
+
+
+def _mode01_selection(profile: CaptureProfile) -> frozenset[str]:
+    if not profile.mode01_enabled:
+        return frozenset()
+    return frozenset(name.upper() for name in profile.mode01)
+
+
 def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:
     """Can ``profile`` supply ``channel``, following derived inputs?
 
     Namespaces reach the vehicle by different routes, and flattening them to a
     bare name is what makes a naive check cry wolf: `derived:` channels are
     *computed* and so never appear in any poll list, while `decoded:` ones ride
-    the broadcast decoder rather than occupying a request slot.
+    the broadcast bus rather than occupying a request slot. Every profile
+    records the broadcast frames, and the live source and every reader decode
+    them (P02.8), so no profile can starve a `decoded:` input.
     """
     namespace, separator, name = channel.partition(":")
     if not separator:
@@ -713,7 +787,7 @@ def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[st
     if namespace == "did":
         return any(upper == item.upper() for item in profile.mode22)
     if namespace == "decoded":
-        return profile.broadcast_decode
+        return True
     if namespace == "derived":
         groups = DERIVED_CHANNEL_INPUTS.get(channel)
         if groups is None or channel in seen:

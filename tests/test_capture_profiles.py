@@ -885,7 +885,6 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
             "BAROMETRIC_PRESSURE": 1.0,
         },
         corpus_eligible=True,
-        broadcast_decode=True,
     )
     warnings = store.save(profile)
     flagged = {warning["model"] for warning in warnings}
@@ -915,16 +914,19 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
         name="default",
         mode01={"RPM": 1.0, "ENGINE_LOAD": 1.0, "MAF": 1.0, "INTAKE_TEMP": 1.0},
         corpus_eligible=True,
-        broadcast_decode=True,
     )
     starved = {w["model"]: w["missing_channels"] for w in store.save(no_baro)}
     assert starved.get("ve_vs_rpm_load") == ["derived:VE_AMBIENT_PERCENT"]
 
-    # Ambient-referenced VE needs no MAP (B04.5), so turning broadcast decode
-    # off does not starve it: baro and IAT both come from Mode 01 here.
-    without_decode = profile.model_copy(update={"broadcast_decode": False})
-    starved = model_input_warnings(without_decode, behavior_models)
-    assert "ve_vs_rpm_load" not in {warning["model"] for warning in starved}
+    # No profile can starve a ``decoded:`` input: every one records the
+    # broadcast frames, and the live source and the readers decode them
+    # (P02.8 retired the profile's ``broadcast_decode`` switch).
+    assert not {
+        channel
+        for warning in model_input_warnings(profile, behavior_models)
+        for channel in warning["missing_channels"]
+        if channel.startswith("decoded:")
+    }
 
 
 def test_capture_preserves_and_restores_an_operator_bus_budget(tmp_path: Path) -> None:

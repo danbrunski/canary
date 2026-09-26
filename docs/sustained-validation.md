@@ -21,7 +21,7 @@ down below and were not attempted.
 | adapter / ECU | `SyntheticEcu` (`src/validation/synthetic_bus.py`), the C02/C04/C06 `ScriptedEcu` on a `RealClock` whose `advance` sleeps | **synthetic** — every report says `hardware.adapter: synthetic` |
 | collector | `collect_can_obd_from_config` → `run_can_obd_loop` in its thread, the shipped `client_factory` path, `ThreadHandoff`, reconnect policy | real |
 | passive sniffer | `collect_can_from_config` → `CanReader` thread | real |
-| fanout and sinks | `drain_queue_with_broadcast`: storage (with `FrameDecoder` decode), dashboard broadcaster (a subscriber counts and drops), live feature source, DTC and monitor sinks | real |
+| fanout and sinks | `drain_queue_with_broadcast`: storage (raw rows only; no `decoded` row is stored since P02.8), dashboard broadcaster (a subscriber counts and drops), live feature source, DTC and monitor sinks | real |
 | writer | `ParquetTelemetryWriter` behind `AsyncParquetTelemetryWriter`, `enter_capture_mode` manifests, atomic fsync'd chunks | real (`InstrumentedParquetWriter` only times `flush` and can inject a stall) |
 | capture lifecycle | `record_capture_start` epoch, `bus_budget.set_override` + `tuning_profile.activate` in the control route's order, `finalize_capture` (boundary → drain → flush → judge) | real |
 | inference | `run_live_inference` on its deadline grid, `LiveFeatureSource` with the synthetic bindings, behavior detector, derived-channel persistence | real; **IF is a declared stub** (`models.isolation_forest.status: stub`) because only manifests are checked in under `models/`; the sequence detector is declared `absent` |
@@ -94,8 +94,10 @@ basis per row kind, session dirs), `evidence` (below) and a `headline`.
   adapter_delivered_frames` (the C06 tap invariant); queue high-water marks
   per sink; kernel counters `unavailable`; dashboard subscriber drops kept
   apart (freshest wins by design).
-- `decoded_expansion` — `decoded:*` rows reconciled as `persisted frames ×
-  persisted signals`, never mixed into raw counts.
+- `decoded_rows_stored` — no `decoded:*` row on disk at all (P02.8, operator
+  2026-09-26: decoded rows are never stored, the readers decode the frames on
+  read). It replaced `decoded_expansion`, which reconciled them as `persisted
+  frames × persisted signals`; reports written before then carry that block.
 - `transport` — requests on the wire by service (from the ECU's own log),
   frames by responder, ECU-side batch/single/session counts, the scheduler's
   final snapshot (rounds, session control, discovery, batching, resolved

@@ -20,7 +20,7 @@ from src.decode.dids import DID_SOURCE, DecodedDid
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
-from src.telemetry import TelemetryRecord
+from src.telemetry import DECODED_SOURCE, TelemetryRecord
 
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
@@ -60,6 +60,21 @@ class TelemetrySink:
     queue: asyncio.Queue[TelemetryRecord]
     overflow: TelemetryOverflowPolicy
     accepts: Callable[[TelemetryRecord], bool] | None = None
+
+
+def storable(record: TelemetryRecord) -> bool:
+    """The storage sink's subscription: every record but a ``decoded`` one.
+
+    Decoded rows are never stored (P02.8, operator decision 2026-09-26). They
+    were 28 % of every session's rows, 95 % repeats, and every one is
+    recomputable from the raw frame stored beside it; the session readers
+    decode them on read (``src.preprocessing.decode.decode_on_read``). No
+    config key or capture profile reaches this: a replay of an old session
+    that emits its stored decoded rows, or anything else that puts one on the
+    ingest queue, still stores none
+    (``tests/test_decoded_rows_never_stored.py``).
+    """
+    return record.source != DECODED_SOURCE
 
 
 def accepts_source(source: str) -> Callable[[TelemetryRecord], bool]:
@@ -229,16 +244,14 @@ async def run_storage_sink(
     health_monitor: HealthMonitor | None = None,
     write_batch_size: int = STORAGE_WRITE_BATCH_SIZE,
     write_batch_max_wait_seconds: float = STORAGE_WRITE_BATCH_MAX_WAIT_SECONDS,
-    decode: Callable[[TelemetryRecord], Sequence[TelemetryRecord]] | None = None,
 ) -> None:
     """Persist telemetry to Parquet from its own queue.
 
-    ``decode`` (e.g. :meth:`src.decode.frame_decoder.FrameDecoder.decode`)
-    expands each queued record into extra rows persisted alongside it —
-    raw CAN frames become queryable ``decoded:*`` rows. Decoded rows are
-    interleaved directly after their source record so the batch stays
-    chronological (the writer's session-gap rotation requires ordered
-    timestamps; decoded rows share their source record's timestamp).
+    Writes each dequeued record as it arrived, except a ``decoded`` one
+    (:func:`storable`, P02.8): the raw frames are the source of truth and the
+    readers decode them on read. Until 2026-09-26 this sink also expanded
+    every raw CAN frame into stored ``decoded:*`` rows through a storage-side
+    ``FrameDecoder``; that expansion is gone, and nothing can pass one in.
     """
     if write_batch_size <= 0:
         raise ValueError("write_batch_size must be positive")
@@ -279,12 +292,12 @@ async def run_storage_sink(
                     except TimeoutError:
                         break
 
-            to_write = records
-            if decode is not None:
-                to_write = []
-                for record in records:
-                    to_write.append(record)
-                    to_write.extend(decode(record))
+            # The fanout never enqueues a decoded row here (``storable`` is
+            # this sink's subscription); the refusal is repeated for any other
+            # way onto this queue. A per-id stage (P02.10's change-only CAN
+            # frames) belongs here too: it sees every dequeued record, in
+            # arrival order, before the writer does.
+            to_write = [record for record in records if storable(record)]
 
             try:
                 started_at = time.perf_counter()
@@ -298,8 +311,6 @@ async def run_storage_sink(
                         # ``_storage_call`` reports and swallows the exception
                         # so the sink can continue. The failed batch is no
                         # longer queued, therefore count it as explicit loss.
-                        # Loss is counted in *queued* records — decoded
-                        # expansions are derivatives, not independent data.
                         health_monitor.note_telemetry_drop("storage", count=len(records))
                     else:
                         health_monitor.observe_telemetry_write(
@@ -686,7 +697,6 @@ async def drain_queue_with_broadcast(
     storage_warning_mb: int | None = None,
     queue_warning_fraction: float = 0.8,
     health_monitor: HealthMonitor | None = None,
-    storage_decode: Callable[[TelemetryRecord], Sequence[TelemetryRecord]] | None = None,
     barrier: PipelineBarrier | None = None,
 ) -> None:
     """Run collector fanout plus independent storage/live/dashboard sinks.
@@ -694,8 +704,10 @@ async def drain_queue_with_broadcast(
     Kept under the historical name for callers. Parquet remains the durable
     recording sink, but it is no longer the dispatcher for live inference.
 
-    Sink subscriptions (C07.6): storage, broadcast and live receive every
-    record. The GPS (trip) sink only receives what ``GpsTracker.accepts``
+    Sink subscriptions (C07.6): broadcast and live receive every record, and
+    storage every record but a ``decoded`` one (:func:`storable`, P02.8: never
+    stored, whatever a config or capture profile says). The GPS (trip) sink
+    only receives what ``GpsTracker.accepts``
     names — ``gps`` records, Mode 01 vehicle speed, and the declared
     road-speed frame decimated to 2 Hz (D03.29) — and the DTC and monitor sinks only ``obd``
     records (``DtcState.observe`` / ``MonitorState.observe`` return on any
@@ -755,9 +767,9 @@ async def drain_queue_with_broadcast(
             stop_event,
             storage_path=storage_path,
             storage_warning_mb=storage_warning_mb,
-            decode=storage_decode,
             **common,
         ),
+        accepts=storable,
     )
 
     if telemetry_broadcaster is not None:
@@ -1045,5 +1057,6 @@ __all__ = [
     "run_storage_sink",
     "run_telemetry_broadcast_sink",
     "run_telemetry_fanout",
+    "storable",
     "_record_to_dict",
 ]

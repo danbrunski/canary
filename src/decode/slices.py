@@ -13,6 +13,9 @@ This module is the arithmetic, once:
 - :func:`slice_raw`, :func:`linear_factors` / :func:`linear_value` and
   :func:`in_range` are plain functions over the numbers, for catalogs whose
   field names differ (the sensor catalog says ``endianness``/``valid_min``);
+  :func:`slice_raw_column` is :func:`slice_raw` over a whole column of
+  payloads at once (the session decode on read, P02.8), tested value for
+  value against it;
 - :class:`ByteSlice`, :class:`LinearScale` and :class:`PlausibleRange` are
   method-only mixins over the conventional field names, so a model gains the
   behaviour without the mixin reordering or re-declaring its fields;
@@ -26,7 +29,7 @@ This module is the arithmetic, once:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -50,6 +53,68 @@ def slice_raw(
     if len(data) < end:
         return None
     return int.from_bytes(data[byte_start:end], byteorder=byte_order, signed=signed)
+
+
+def payload_lengths(payloads: Any) -> Any:
+    """Each payload's byte length (an ``int64`` array), ``-1`` for anything
+    that is not ``bytes``/``bytearray`` — which :func:`slice_raw_column`
+    treats as no payload, as a scalar caller skipping it does.
+
+    A column of ``bytes`` and nulls (what Parquet gives) is measured by Arrow
+    without a Python call per payload; anything else element by element.
+    """
+    import numpy as np
+    import pandas as pd
+    import pyarrow as pa
+    import pyarrow.compute as pc
+
+    if len(payloads) and pd.api.types.infer_dtype(payloads, skipna=True) == "bytes":
+        column = pa.array(payloads, type=pa.binary(), from_pandas=True)
+        measured = pc.fill_null(pc.binary_length(column), -1)  # type: ignore[attr-defined, no-untyped-call, unused-ignore]
+        return np.asarray(measured.to_numpy(), dtype=np.int64)
+    return np.fromiter(
+        (len(p) if isinstance(p, (bytes, bytearray)) else -1 for p in payloads),
+        dtype=np.int64,
+        count=len(payloads),
+    )
+
+
+def slice_raw_column(
+    payloads: Any,
+    lengths: Any,
+    byte_start: int,
+    byte_length: int,
+    byte_order: ByteOrder,
+) -> Any:
+    """:func:`slice_raw` for a column of payloads, as ``float64``; NaN where
+    :func:`slice_raw` would give ``None`` or there is no payload.
+
+    ``payloads`` is an object array, ``lengths`` its :func:`payload_lengths`
+    (computed once per column and shared by every slice of it). Payloads are
+    grouped by length and each group is sliced as one ``uint8`` matrix, so a
+    frame costs no Python call. Unsigned only, at most 8 bytes: ``uint64``
+    holds any such slice exactly, and its ``float64`` rounds as ``float(int)``
+    does. (No catalog that decodes a column declares a signed slice.)
+    """
+    import numpy as np
+
+    if not 1 <= byte_length <= 8:
+        raise ValueError(f"a column slice is 1-8 bytes, not {byte_length}")
+    out = np.full(len(payloads), np.nan, dtype=np.float64)
+    end = byte_start + byte_length
+    for length in np.unique(lengths[lengths >= end]):
+        rows = np.flatnonzero(lengths == length)
+        matrix = np.frombuffer(b"".join(payloads[rows]), dtype=np.uint8).reshape(
+            rows.size, int(length)
+        )
+        window = matrix[:, byte_start:end].astype(np.uint64)
+        if byte_order == "little":
+            window = window[:, ::-1]
+        raw = np.zeros(rows.size, dtype=np.uint64)
+        for column in range(byte_length):
+            raw = (raw << np.uint64(8)) | window[:, column]
+        out[rows] = raw.astype(np.float64)
+    return out
 
 
 def linear_factors(scale: float | None, offset: float | None) -> tuple[float, float] | None:
@@ -237,6 +302,8 @@ __all__ = [
     "in_range",
     "linear_factors",
     "linear_value",
+    "payload_lengths",
     "sentinel_channel",
     "slice_raw",
+    "slice_raw_column",
 ]

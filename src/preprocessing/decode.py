@@ -24,26 +24,47 @@ binding; over a multi-hour capture across ~16 bindings that's millions of
 transient rows during the `to_wide` pivot (which then collapses to one
 column per signal, downsampled by the resampler). Fine for the session
 lengths we record now; revisit if multi-hour captures strain memory.
+
+**Decoded rows are decoded on read, never stored (P02.8, operator
+2026-09-26).** Raw CAN frames with their payloads are the source of truth.
+Until then the recorder also stored a ``decoded`` row per confirmed (or
+``persist: true``) binding per frame: 28 % of every session's rows, 95 % of
+them repeating the previous value, and all of them recomputable (0 of 2.70 M
+same-instant pairs differed, P01 round 2). :func:`decode_on_read` is the one
+place those rows come from now: the session loader
+(:mod:`src.preprocessing.loader`) replaces any stored ``decoded`` row with it,
+for old sessions and new alike, so every reader sees the same rows with the
+current catalog. Old sessions keep their stored rows on disk; nothing reads
+them. (``tools/backfill_decoded.py``, which wrote ``decoded`` rows into old
+sessions, is retired with it: it rewrote sessions to store what is now
+decoded on read.)
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 
 from src.can_ids import parse_can_channel
-from src.decode.bindings import Bindings, Signal, decode_raw, load_bindings
-from src.decode.slices import sentinel_channel
+from src.decode.bindings import Bindings, Signal, load_bindings, on_read_signals
+from src.decode.engineering import repo_bindings
+from src.decode.slices import payload_lengths, sentinel_channel, slice_raw_column
 from src.paths import BINDINGS_YAML
+from src.telemetry import CAN_SOURCE, channel_key
 from src.telemetry import DECODED_SOURCE as DECODED_SOURCE
-from src.telemetry import channel_key
 
 DEFAULT_BINDINGS_PATH = BINDINGS_YAML
+
+#: The catalog :func:`on_read_catalog` reads by default. Looked up at call
+#: time, so a test can point the loader at its own catalog.
+ON_READ_BINDINGS_PATH = BINDINGS_YAML
 
 
 def decoded_channel(signal_name: str) -> str:
@@ -52,13 +73,24 @@ def decoded_channel(signal_name: str) -> str:
 
 
 def _raw_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
-    def extract(payload: object) -> float:
-        if not isinstance(payload, (bytes, bytearray)):
-            return float("nan")
-        raw = decode_raw(signal, bytes(payload))
-        return float("nan") if raw is None else float(raw)
+    """``signal``'s raw integer in each payload, as float64; NaN where a
+    payload is not bytes or is too short for the slice
+    (:func:`src.decode.slices.slice_raw_column`, the vectorized
+    :func:`~src.decode.slices.slice_raw`: a session's decode on read runs over
+    millions of frames)."""
+    values = payloads.to_numpy(dtype=object)
+    return _slice_column(values, payload_lengths(values), signal)
 
-    return np.asarray(payloads.map(extract).to_numpy(), dtype=np.float64)
+
+def _slice_column(
+    values: np.ndarray[Any, np.dtype[Any]],
+    lengths: np.ndarray[Any, np.dtype[Any]],
+    signal: Signal,
+) -> np.ndarray[Any, np.dtype[Any]]:
+    column: np.ndarray[Any, np.dtype[Any]] = slice_raw_column(
+        values, lengths, signal.byte_start, signal.byte_length, signal.byte_order
+    )
+    return column
 
 
 def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any, np.dtype[Any]]:
@@ -66,10 +98,11 @@ def decode_signal_column(payloads: pd.Series, signal: Signal) -> np.ndarray[Any,
 
     NaN where a payload is not bytes or is too short for the binding's byte
     range, and where it holds the binding's declared sentinel word (A04.6: a
-    state, not a number — :func:`decode_sentinel_mask` finds those). Built on
-    :func:`src.decode.bindings.decode_raw`, the one byte-slice rule, so this
-    batch path, the storage-side ``FrameDecoder`` and
-    ``tools/backfill_decoded.py`` cannot extract a signal differently.
+    state, not a number — :func:`decode_sentinel_mask` finds those). The byte
+    slice is :func:`src.decode.slices.slice_raw`'s (vectorized in
+    :func:`_raw_column`), the rule the live ``FrameDecoder`` applies per
+    frame, so the batch paths and the live path cannot extract a signal
+    differently.
     """
     values = _raw_column(payloads, signal)
     if signal.sentinel_raw is None:
@@ -136,38 +169,33 @@ def decode_can_rows(
     confidence levels (e.g. `{"high", "medium"}` to skip hypothesized).
     Default `None` decodes all bindings.
 
+    Every selected signal is decoded, always (P02.8): ``decoded`` rows of a
+    signal already in the frame (and of its ``_SENTINEL`` channel) are
+    replaced by the recomputed ones, never kept beside them or preferred to
+    them. Such rows are the loader's own decode on read
+    (:func:`decode_on_read`, same values), or a stored row of an old
+    session that an ``as_recorded`` read passed through.
+
     Returns a new frame with the decoded rows concatenated and re-sorted by
-    timestamp. The input is not mutated. If `long_frame` is empty, has no
-    CAN rows, or no binding matches, it's returned unchanged.
+    timestamp. The input is not mutated. If `long_frame` is empty or no
+    binding is selected, it's returned unchanged; with no CAN row a selected
+    binding reads, it's returned without the replaced rows.
     """
     if long_frame.empty or "source" not in long_frame.columns:
-        return long_frame
-
-    can_rows = long_frame[long_frame["source"] == "can"]
-    if can_rows.empty:
         return long_frame
 
     signals = bindings.signals
     if confidence_levels is not None:
         signals = [s for s in signals if s.confidence in confidence_levels]
-    # Sessions written after decoded-channel persistence landed (or run
-    # through tools/backfill_decoded.py) already carry stored decoded rows
-    # with identical raw-value semantics — recomputing those signals here
-    # would double every row and feed duplicate observations to `to_wide`.
-    # Stored rows win *when they are in the frame passed here*; re-run the
-    # backfill tool to refresh them after a binding definition changes. The
-    # batch feature chain (``feature_pipeline._decode_long_frame``) passes
-    # CAN rows only, so it recomputes every signal instead (see there).
-    # A signal whose sentinel state rows alone were stored (a session the
-    # sensor never woke in) counts as stored too.
-    already_stored = set(long_frame.loc[long_frame["source"] == DECODED_SOURCE, "channel"].unique())
-    if already_stored:
-        signals = [
-            s
-            for s in signals
-            if s.name not in already_stored and sentinel_channel(s.name) not in already_stored
-        ]
     if not signals:
+        return long_frame
+    replaced = {s.name for s in signals} | {sentinel_channel(s.name) for s in signals}
+    earlier = (long_frame["source"] == DECODED_SOURCE) & long_frame["channel"].isin(replaced)
+    if bool(earlier.any()):
+        long_frame = long_frame.loc[~earlier]
+
+    can_rows = long_frame[long_frame["source"] == "can"]
+    if can_rows.empty:
         return long_frame
 
     by_can_id: dict[int, list[Signal]] = {}
@@ -242,16 +270,21 @@ def read_session_decoded(
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     confidence_levels: set[str] | None = None,
 ) -> pd.DataFrame:
-    """`read_session` then `decode_can_rows` in one call.
+    """The session read with ``bindings_path`` as its decode catalog.
 
-    Convenience for the standard pipeline entry point. If `bindings_path`
-    doesn't exist, falls back to a plain `read_session` (no decoded rows) —
-    so the pipeline still works in a checkout without the bindings file.
+    Convenience for the standard pipeline entry point: the raw rows, and a
+    ``decoded`` row for each frame the catalog's (confidence-filtered)
+    signals read, decoded here. No stored ``decoded`` row survives (P02.8),
+    and neither does the loader's own decode on read, which uses the repo
+    catalog: every decoded row comes from ``bindings_path``. If it doesn't
+    exist, the frame has no decoded rows — so the pipeline still works in a
+    checkout without the bindings file.
     """
     # Local import to avoid a module-level loader ↔ decode dependency.
     from src.preprocessing.loader import read_session
 
-    long_frame = read_session(session_dir)
+    long_frame = read_session(session_dir, decoded="as_recorded")
+    long_frame = decode_on_read(long_frame, None).reset_index(drop=True)
     if not bindings_path.exists():
         return long_frame
     bindings = load_bindings(bindings_path)
@@ -280,6 +313,7 @@ def read_session_decoded_subset(
     *,
     bindings: Bindings | None,
     decoded: Iterable[str],
+    rows: Literal["on_read", "as_recorded"] = "on_read",
 ) -> tuple[pd.DataFrame, Bindings | None]:
     """One bounded read of a session for a *subset* of broadcast signals (R04.14).
 
@@ -292,11 +326,15 @@ def read_session_decoded_subset(
     the resample chain. A whole-bus read of one 42 MB drive peaked above 6 GB,
     which is why both bounded readers (``plausibility.offline.session_long``,
     ``analysis.behavior_validation.build_evaluation_frame``) exist at all.
+
+    ``rows`` is the loader's ``decoded`` mode: the session's ``decoded`` rows
+    decoded on read (default), or as recorded for a caller that drops every
+    ``decoded`` row it is given and decodes what it keeps itself.
     """
     from src.preprocessing.loader import read_session
 
     filters, subset, ids = decoded_subset_plan(bindings, decoded)
-    long = read_session(Path(session_dir), filters=filters)
+    long = read_session(Path(session_dir), filters=filters, decoded=rows)
     return keep_can_ids(long, ids), subset
 
 
@@ -327,3 +365,206 @@ def keep_can_ids(long: pd.DataFrame, ids: set[int]) -> pd.DataFrame:
         keep[np.flatnonzero(is_can)] = parsed.isin(ids).to_numpy(dtype=bool)
         long = long.loc[keep].reset_index(drop=True)
     return long
+
+
+# ---------------------------------------------------------------------------
+# Decode on read (P02.8)
+# ---------------------------------------------------------------------------
+
+
+def on_read_catalog(bindings: Bindings | None = None) -> Bindings | None:
+    """The catalog a session's rows are read with (P02.8).
+
+    ``bindings`` (default: the catalog at :data:`ON_READ_BINDINGS_PATH`,
+    re-read when the file changes) narrowed to
+    :func:`src.decode.bindings.on_read_signals`. ``None`` when there is no
+    catalog or it holds no such signal: a session is then read with no
+    ``decoded`` rows at all, never with its stored ones.
+    """
+    catalog = bindings if bindings is not None else repo_bindings(ON_READ_BINDINGS_PATH)
+    if catalog is None:
+        return None
+    signals = on_read_signals(catalog)
+    if not signals:
+        return None
+    return catalog.model_copy(update={"signals": signals})
+
+
+def on_read_hash(catalog: Bindings | None) -> str:
+    """A version of ``catalog``'s decode, for caches of what readers see
+    (the derived store's ``value_number`` frame): the on-read signals' specs,
+    in order. Any edit to one of them changes it."""
+    specs = [] if catalog is None else [s.model_dump(mode="json") for s in catalog.signals]
+    return hashlib.sha256(json.dumps(specs, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def on_read_can_ids(catalog: Bindings | None) -> set[int]:
+    """The CAN ids ``catalog``'s signals read (empty without a catalog)."""
+    return set() if catalog is None else {signal.can_id for signal in catalog.signals}
+
+
+def decode_on_read(frame: pd.DataFrame, catalog: Bindings | None) -> pd.DataFrame:
+    """``frame``'s rows as every reader sees them (P02.8).
+
+    Stored ``decoded`` rows are dropped, and each raw CAN row that a
+    ``catalog`` signal reads (:func:`on_read_catalog`) becomes exactly the
+    rows the recorder's storage decoder used to write for it
+    (``FrameDecoder.decode``): the raw integer as float64 for a slice the
+    payload holds, the ``<NAME>_SENTINEL`` state row (value text = the stated
+    meaning) for the declared sentinel word, and no row for a payload too
+    short for the slice. So a session recorded before P02.8 and a copy with
+    its ``decoded`` rows removed read identically, and both read with the
+    current catalog.
+
+    The new rows carry ``frame``'s own columns, each in its dtype: ``unit``
+    the binding's display unit, ``metadata_json`` ``{"binding_confidence",
+    "can_id"}`` (the stored rows' serialization), ``payload`` null, and any
+    other column (``session``, ...) copied from the frame the row came from.
+    Each follows its frame directly, in catalog signal order, where the
+    storage decoder wrote it, so even a reader of row order (the last N rows)
+    sees the stored sequence. The index is reset.
+    """
+    if frame.empty or "source" not in frame.columns:
+        return frame
+    stored = (frame["source"] == DECODED_SOURCE).to_numpy(dtype=bool)
+    base = frame.loc[~stored] if stored.any() else frame
+    if catalog is None or "payload" not in base.columns:
+        return base
+    decoded = _on_read_rows(base, catalog)
+    if decoded is None:
+        return base
+    rows, frame_positions = decoded
+    order = np.argsort(
+        np.concatenate([2 * np.arange(len(base)), 2 * frame_positions + 1]), kind="stable"
+    )
+    return pd.concat([base, rows], ignore_index=True).iloc[order].reset_index(drop=True)
+
+
+def _on_read_rows(
+    frame: pd.DataFrame, catalog: Bindings
+) -> tuple[pd.DataFrame, np.ndarray[Any, np.dtype[Any]]] | None:
+    """The rows :func:`decode_on_read` adds to ``frame`` (no stored ones in
+    it) and each one's frame position, built as one frame: a session is
+    decoded chunk by chunk or part by part, so per-signal frames would cost
+    more than the decode itself."""
+    is_can = (frame["source"] == CAN_SOURCE).to_numpy(dtype=bool)
+    if not is_can.any():
+        return None
+    by_id: dict[int, list[Signal]] = {}
+    for signal in catalog.signals:
+        by_id.setdefault(signal.can_id, []).append(signal)
+    can_positions = np.flatnonzero(is_can)
+    # One hash pass over the CAN rows' channel spellings; each id's rows are
+    # then an integer compare, not a string compare per spelling.
+    codes, spellings = pd.factorize(frame["channel"].iloc[can_positions])
+    payloads = frame["payload"].to_numpy(dtype=object)[can_positions]
+    positions: list[np.ndarray[Any, np.dtype[Any]]] = []
+    values: list[np.ndarray[Any, np.dtype[Any]]] = []
+    labels: list[tuple[str, str | None, str, str, int]] = []
+    for code, channel in enumerate(spellings):
+        can_id = parse_can_channel(str(channel))
+        signals = by_id.get(can_id) if can_id is not None else None
+        if not signals:
+            continue
+        in_channel = codes == code
+        group = can_positions[in_channel]
+        group_payloads = payloads[in_channel]
+        lengths = payload_lengths(group_payloads)
+        for signal in signals:
+            raw = _slice_column(group_payloads, lengths, signal)
+            if signal.sentinel_raw is None:
+                sentinel = np.zeros(raw.size, dtype=bool)
+            else:
+                sentinel = raw == float(signal.sentinel_raw)
+            numeric = ~np.isnan(raw) & ~sentinel
+            meta = json.dumps(
+                {"can_id": can_id, "binding_confidence": signal.confidence}, sort_keys=True
+            )
+            for mask, name, text, unit, value in (
+                (numeric, signal.name, None, signal.display_unit, raw),
+                (
+                    sentinel,
+                    sentinel_channel(signal.name),
+                    signal.sentinel_meaning or "sentinel",
+                    "",
+                    np.full(raw.size, np.nan),
+                ),
+            ):
+                count = int(mask.sum())
+                if count:
+                    positions.append(group[mask])
+                    values.append(value[mask])
+                    labels.append((name, text, unit, meta, count))
+    if not positions:
+        return None
+    at = np.concatenate(positions)
+    return _rows_from(frame, at, np.concatenate(values), labels), at
+
+
+def _rows_from(
+    frame: pd.DataFrame,
+    positions: np.ndarray[Any, np.dtype[Any]],
+    values: np.ndarray[Any, np.dtype[Any]],
+    labels: list[tuple[str, str | None, str, str, int]],
+) -> pd.DataFrame:
+    """``decoded`` rows at ``positions`` of ``frame`` (their CAN rows), in
+    ``frame``'s columns and dtypes; ``labels`` names each run of rows.
+
+    Every column keeps the frame's dtype: a stored row read back from parquet
+    has a ``str`` value_text (NaN when null), a tz-aware timestamp, and so on,
+    and the concatenated frame must not change type under them.
+    """
+    counts = np.array([label[4] for label in labels], dtype=np.int64)
+    index = pd.RangeIndex(positions.size)
+
+    def repeated(field: int, column: str) -> Any:
+        return _repeated([label[field] for label in labels], counts, frame[column].dtype)
+
+    fields: dict[str, Any] = {
+        "source": lambda: pd.Series(DECODED_SOURCE, index=index, dtype=frame["source"].dtype),
+        "channel": lambda: repeated(0, "channel"),
+        "value_number": lambda: pd.Series(values, index=index, dtype=frame["value_number"].dtype),
+        "value_text": lambda: repeated(1, "value_text"),
+        "value_bool": lambda: pd.Series(None, index=index, dtype=frame["value_bool"].dtype),
+        "unit": lambda: repeated(2, "unit"),
+        "payload": lambda: pd.Series(None, index=index, dtype=frame["payload"].dtype),
+        "metadata_json": lambda: repeated(3, "metadata_json"),
+        "source_channel": lambda: _repeated(
+            [f"{DECODED_SOURCE}:{label[0]}" for label in labels],
+            counts,
+            frame["source_channel"].dtype,
+        ),
+        "value": lambda: pd.Series(
+            np.where(
+                np.repeat(np.array([label[1] is None for label in labels]), counts),
+                values.astype(object),
+                np.repeat(np.array([label[1] for label in labels], dtype=object), counts),
+            ),
+            index=index,
+            dtype=frame["value"].dtype,
+        ),
+    }
+    data = {
+        column: (
+            fields[column]()
+            if column in fields
+            else frame[column].iloc[positions].reset_index(drop=True)
+        )
+        for column in frame.columns
+    }
+    return pd.DataFrame(data, index=index)
+
+
+def _repeated(labels: list[Any], counts: np.ndarray[Any, np.dtype[Any]], dtype: Any) -> Any:
+    """``labels[i]`` repeated ``counts[i]`` times, as a column of ``dtype``.
+
+    A pyarrow-backed ``str`` column is built by an Arrow ``take`` over the few
+    distinct labels (6x faster than converting a Python object per row, and a
+    session's decode on read makes millions of rows); anything else from an
+    object array.
+    """
+    if isinstance(dtype, pd.StringDtype) and dtype.storage == "pyarrow":
+        codes = pa.array(np.repeat(np.arange(len(labels)), counts))
+        column = pa.array(labels, type=pa.large_string()).take(codes)
+        return pd.Series(pd.array(column, dtype=dtype))
+    return pd.Series(np.repeat(np.array(labels, dtype=object), counts), dtype=dtype)

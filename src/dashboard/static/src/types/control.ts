@@ -138,7 +138,6 @@ export interface CaptureProfile {
   min_achieved_rate_hz: number | null;
   /** Refuse to arm without a named calibration. */
   requires_tune_revision: boolean;
-  broadcast_decode: boolean;
   corpus_eligible: boolean;
   /** Exact behavior-surface recipes this isolated capture may train. */
   behavior_model_recipes: string[];
@@ -174,7 +173,6 @@ export interface CaptureProfileState {
   running_tune_revision?: string | null;
   /** Rows accepted into the current session; absent if the writer is unwired. */
   rows_written?: number;
-  broadcast_decode: boolean;
   corpus_eligible: boolean;
   behavior_model_recipes: string[];
   bus_budget_override: number | null;

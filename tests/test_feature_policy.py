@@ -48,6 +48,8 @@ from src.preprocessing.segmenter import MODE_COLUMN
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_BINDINGS = REPO_ROOT / "data" / "bindings.yaml"
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
+#: A serving profile that polls every supported Mode 01 PID (``AUTO``).
+EVERY_PID = frozenset({"AUTO"})
 
 
 def _signal(name: str, confidence: str, **extra: object) -> Signal:
@@ -93,6 +95,7 @@ def _family(base: str) -> set[str]:
 def test_hypothesized_binding_is_not_a_candidate_and_a_high_one_is() -> None:
     policy = FeaturePolicy(
         bindings=_bindings(_signal("GUESS", "hypothesized"), _signal("SOLID", "high")),
+        serving_mode01=EVERY_PID,
         serving_dids=frozenset(),
     )
     cols = set(candidate_feature_columns(_frame("decoded:GUESS", "decoded:SOLID"), policy=policy))
@@ -101,13 +104,21 @@ def test_hypothesized_binding_is_not_a_candidate_and_a_high_one_is() -> None:
 
 @pytest.mark.parametrize("confidence", ["medium", "low", "hypothesized"])
 def test_every_confidence_below_high_is_gated(confidence: str) -> None:
-    policy = FeaturePolicy(bindings=_bindings(_signal("X", confidence)), serving_dids=frozenset())
+    policy = FeaturePolicy(
+        bindings=_bindings(_signal("X", confidence)),
+        serving_mode01=EVERY_PID,
+        serving_dids=frozenset(),
+    )
     assert candidate_feature_columns(_frame("decoded:X"), policy=policy) == []
     assert confidence not in TRAINABLE_CONFIDENCES
 
 
 def test_confirmed_binding_is_a_candidate() -> None:
-    policy = FeaturePolicy(bindings=_bindings(_signal("X", "confirmed")), serving_dids=frozenset())
+    policy = FeaturePolicy(
+        bindings=_bindings(_signal("X", "confirmed")),
+        serving_mode01=EVERY_PID,
+        serving_dids=frozenset(),
+    )
     assert set(candidate_feature_columns(_frame("decoded:X"), policy=policy)) == _family(
         "decoded:X"
     )
@@ -117,14 +128,20 @@ def test_a_binding_correction_removes_the_feature_rather_than_blinding_the_model
     """The failure this gate exists for: a binding is demoted after training.
     With the gate, the demoted channel simply stops being selected next time."""
     frame = _frame("decoded:X")
-    before = FeaturePolicy(bindings=_bindings(_signal("X", "high")), serving_dids=frozenset())
-    after = FeaturePolicy(bindings=_bindings(_signal("X", "low")), serving_dids=frozenset())
+    before = FeaturePolicy(
+        bindings=_bindings(_signal("X", "high")), serving_mode01=EVERY_PID, serving_dids=frozenset()
+    )
+    after = FeaturePolicy(
+        bindings=_bindings(_signal("X", "low")), serving_mode01=EVERY_PID, serving_dids=frozenset()
+    )
     assert candidate_feature_columns(frame, policy=before)
     assert candidate_feature_columns(frame, policy=after) == []
 
 
 def test_decoded_column_absent_from_the_catalog_is_not_a_candidate() -> None:
-    policy = FeaturePolicy(bindings=_bindings(_signal("X", "high")), serving_dids=frozenset())
+    policy = FeaturePolicy(
+        bindings=_bindings(_signal("X", "high")), serving_mode01=EVERY_PID, serving_dids=frozenset()
+    )
     frame = _frame("decoded:NOT_A_BINDING")
     assert candidate_feature_columns(frame, policy=policy) == []
     assert feature_policy_exclusions(frame, policy) == {
@@ -133,14 +150,18 @@ def test_decoded_column_absent_from_the_catalog_is_not_a_candidate() -> None:
 
 
 def test_no_catalog_means_no_decoded_features() -> None:
-    policy = FeaturePolicy(bindings=None, serving_dids=frozenset())
+    policy = FeaturePolicy(bindings=None, serving_mode01=EVERY_PID, serving_dids=frozenset())
     frame = _frame("decoded:X", "obd:RPM")
     assert set(candidate_feature_columns(frame, policy=policy)) == _family("obd:RPM")
     assert feature_policy_exclusions(frame, policy) == {"decoded:X": "no bindings catalog loaded"}
 
 
 def test_dbc_copy_of_a_gated_binding_is_gated_but_external_dbc_trains() -> None:
-    policy = FeaturePolicy(bindings=_bindings(_signal("GUESS", "low")), serving_dids=frozenset())
+    policy = FeaturePolicy(
+        bindings=_bindings(_signal("GUESS", "low")),
+        serving_mode01=EVERY_PID,
+        serving_dids=frozenset(),
+    )
     cols = set(candidate_feature_columns(_frame("dbc:GUESS", "dbc:VENDOR_ONLY"), policy=policy))
     assert cols == _family("dbc:VENDOR_ONLY")
 
@@ -152,7 +173,11 @@ def test_dbc_copy_of_a_gated_binding_is_gated_but_external_dbc_trains() -> None:
 
 def test_model_feature_false_excludes_a_high_confidence_binding() -> None:
     brake = _signal("BRAKE", "high", model_feature=False)
-    policy = FeaturePolicy(bindings=_bindings(brake, _signal("RPM", "high")), serving_dids=None)
+    policy = FeaturePolicy(
+        bindings=_bindings(brake, _signal("RPM", "high")),
+        serving_mode01=EVERY_PID,
+        serving_dids=None,
+    )
     frame = _frame("decoded:BRAKE", "decoded:RPM")
     assert set(candidate_feature_columns(frame, policy=policy)) == _family("decoded:RPM")
     assert not is_trainable_binding(brake)
@@ -241,7 +266,9 @@ def test_fuel_level_and_misfire_counters_are_kept_in_frame_but_never_candidates(
 
 
 def test_did_not_polled_by_the_serving_profile_is_excluded_and_a_polled_one_kept() -> None:
-    policy = FeaturePolicy(bindings=None, serving_dids=frozenset({"ECM_AIR_CHARGE"}))
+    policy = FeaturePolicy(
+        bindings=None, serving_mode01=EVERY_PID, serving_dids=frozenset({"ECM_AIR_CHARGE"})
+    )
     frame = _frame("did:ECM_AIR_CHARGE", "did:ECM_INJECTOR_PULSE_1")
     assert set(candidate_feature_columns(frame, policy=policy)) == _family("did:ECM_AIR_CHARGE")
     assert feature_policy_exclusions(frame, policy) == {
@@ -250,11 +277,68 @@ def test_did_not_polled_by_the_serving_profile_is_excluded_and_a_polled_one_kept
 
 
 def test_unresolvable_serving_profile_excludes_every_did() -> None:
-    policy = FeaturePolicy(bindings=None, serving_dids=None)
+    policy = FeaturePolicy(bindings=None, serving_mode01=EVERY_PID, serving_dids=None)
     frame = _frame("did:ECM_AIR_CHARGE")
     assert candidate_feature_columns(frame, policy=policy) == []
     assert feature_policy_exclusions(frame, policy) == {
         "did:ECM_AIR_CHARGE": "serving capture profile unresolvable"
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4b. Mode 01 features must be servable (D03.34)
+# ---------------------------------------------------------------------------
+
+
+def test_mode01_pid_the_serving_profile_dropped_is_excluded() -> None:
+    """The Xterra ``default`` dropped ten PIDs on 2026-09-26. The old corpus
+    still carries them, so without this gate the next retrain learns them."""
+    policy = FeaturePolicy(
+        bindings=None, serving_dids=frozenset(), serving_mode01=frozenset({"RPM", "MAF"})
+    )
+    frame = _frame("obd:RPM", "obd:ABSOLUTE_LOAD")
+    assert set(candidate_feature_columns(frame, policy=policy)) == _family("obd:RPM")
+    assert feature_policy_exclusions(frame, policy) == {
+        "obd:ABSOLUTE_LOAD": "not polled by the serving (default) capture profile"
+    }
+
+
+def test_auto_serves_every_mode01_pid_and_unresolvable_serves_none() -> None:
+    frame = _frame("obd:RPM", "obd:ABSOLUTE_LOAD")
+    auto = FeaturePolicy(bindings=None, serving_dids=frozenset(), serving_mode01=EVERY_PID)
+    assert feature_policy_exclusions(frame, auto) == {}
+    unknown = FeaturePolicy(bindings=None, serving_dids=frozenset(), serving_mode01=None)
+    assert feature_policy_exclusions(frame, unknown) == {
+        "obd:RPM": "serving capture profile unresolvable",
+        "obd:ABSOLUTE_LOAD": "serving capture profile unresolvable",
+    }
+
+
+def test_a_derived_channel_needs_a_served_input_in_every_required_group() -> None:
+    """``AIR_MASS_PER_CYCLE`` needs MAF and one of RPM / broadcast ECM_RPM."""
+    frame = _frame("derived:AIR_MASS_PER_CYCLE")
+    served = FeaturePolicy(
+        bindings=None, serving_dids=frozenset(), serving_mode01=frozenset({"MAF"})
+    )
+    # RPM is not polled, but the broadcast ECM_RPM alternative is always there.
+    assert feature_policy_exclusions(frame, served) == {}
+    starved = FeaturePolicy(
+        bindings=None, serving_dids=frozenset(), serving_mode01=frozenset({"RPM"})
+    )
+    reason = feature_policy_exclusions(frame, starved)["derived:AIR_MASS_PER_CYCLE"]
+    assert "obd:MAF" in reason and "does not poll" in reason
+
+
+def test_the_xterra_serving_profile_gates_its_dropped_pids() -> None:
+    """End to end on the tracked Xterra catalog."""
+    from src.collection.capture_profiles import serving_mode01_channels
+
+    served = serving_mode01_channels(REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml")
+    assert served is not None and "AUTO" not in served
+    policy = FeaturePolicy(bindings=None, serving_dids=frozenset(), serving_mode01=served)
+    frame = _frame("obd:RPM", "obd:O2_WR_LAMBDA_S5", "obd:ACCEL_PEDAL_POS_D")
+    assert feature_policy_exclusions(frame, policy) == {
+        "obd:ACCEL_PEDAL_POS_D": "not polled by the serving (default) capture profile"
     }
 
 
@@ -361,6 +445,7 @@ def test_repo_default_profile_serves_the_injector_pulse_dids() -> None:
 def test_feature_spec_records_policy_exclusions_with_reasons() -> None:
     policy = FeaturePolicy(
         bindings=_bindings(_signal("GUESS", "hypothesized"), _signal("SOLID", "high")),
+        serving_mode01=EVERY_PID,
         serving_dids=frozenset(),
     )
     frame = _frame("decoded:GUESS", "decoded:SOLID", "did:UNSERVED")

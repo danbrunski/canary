@@ -8,8 +8,9 @@ signal-driven (sustained RPM slope), honoring that CANary is a passive
 recorder — no in-drive tagging required.
 
 RPM source, best first:
-  1. stored ``decoded:ECM_RPM`` rows (~100 Hz; from ingest persistence or
-     ``tools/backfill_decoded.py``) — scaled to rpm via ``bindings.yaml``
+  1. ``decoded:ECM_RPM`` rows (~100 Hz), decoded on read from the raw 0x1F9
+     frames (P02.8: nothing stores them since 2026-09-26) — scaled to rpm via
+     ``bindings.yaml``
   2. ``uprev:RPM`` (~16 Hz UpRev K-line import)
   3. ``obd:RPM`` (~1 Hz Mode 01 poll) — reported with a loud caveat: at
      this rate the derivative is qualitative at best
@@ -36,6 +37,7 @@ import pandas as pd
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import apply_scaling, load_bindings
+from src.preprocessing.decode import decode_on_read, on_read_catalog
 
 #: Fraction of the wideband's low rail treated as "pegged" (10.0 + margin).
 WIDEBAND_RAIL_CEILING = 10.05
@@ -72,11 +74,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 
 def _read_session_frame(session_dir: Path) -> pd.DataFrame:
+    """The session's numeric rows, ``decoded:`` rows decoded on read from the
+    frames (P02.8), chunk by chunk so no payload outlives its chunk."""
     chunks = sorted(session_dir.glob("telemetry-*.parquet"))
     if not chunks:
         raise SystemExit(f"error: no telemetry parquet in {session_dir}")
+    catalog = on_read_catalog()
+    columns = ["timestamp", "source", "channel", "value_number"]
     frames = [
-        pd.read_parquet(c, columns=["timestamp", "source", "channel", "value_number"])
+        decode_on_read(pd.read_parquet(c, columns=[*columns, "payload"]), catalog)[columns]
         for c in chunks
     ]
     return pd.concat(frames, ignore_index=True).sort_values("timestamp", kind="stable")
@@ -116,8 +122,8 @@ def _rpm_series(frame: pd.DataFrame, bindings_path: Path) -> RpmSeries:
         t0 = obd["timestamp"].iloc[0]
         secs = (obd["timestamp"] - t0).dt.total_seconds().to_numpy()
         return RpmSeries(
-            "obd:RPM (~1 Hz — derivative is QUALITATIVE at this rate; "
-            "run tools/backfill_decoded.py for the 100 Hz series)",
+            "obd:RPM (~1 Hz — derivative is QUALITATIVE at this rate; the session has "
+            "no decodable 0x1F9 frames for the 100 Hz series)",
             secs,
             obd["value_number"].to_numpy(float),
             t0,

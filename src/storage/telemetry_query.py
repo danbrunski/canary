@@ -13,21 +13,35 @@ extensions, mutate state, or run forever.
 The validator is intentionally simple: regex-based rejection of dangerous
 keywords combined with a parser pass that requires the statement to be a
 single SELECT. DuckDB's read-only connection is the defense in depth.
+
+**``decoded`` rows are decoded on read, in the view (P02.8, operator
+2026-09-26).** Nothing stores them now, and an older session's stored ones are
+the decode of its recording day. The ``telemetry`` view therefore never shows
+a stored ``decoded`` row: it is the stored rows with ``source <> 'decoded'``,
+``UNION ALL`` each on-read binding's rows decoded from its raw CAN frames
+(:func:`_decoded_select`, the storage decoder's rule), so raw SQL sees the
+current catalog's decoded rows for old sessions and new alike, as every other
+reader does. A binding outside the on-read set was never stored and has no
+rows here either; :func:`decoded_rows_note` names that, and points a query
+that finds nothing at the ``can:`` decode.
 """
 
 from __future__ import annotations
 
+import json
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import duckdb
 
+from src.decode.slices import sentinel_channel
 from src.session import parse_session_timestamp
 
 if TYPE_CHECKING:
+    from src.decode.bindings import Bindings, Signal
     from src.storage.catalog import SessionCatalog
 
 #: Statements that read state are allowed. Anything else (DDL, DML, ATTACH,
@@ -65,6 +79,44 @@ _ANALYSIS_ROW_LIMIT = 200_000
 
 class QueryValidationError(ValueError):
     """Raised when ``validate_query`` rejects a statement."""
+
+
+#: A query that names the ``decoded`` source or a ``decoded:`` channel.
+_DECODED_MENTION = re.compile(r"\bdecoded\b", re.IGNORECASE)
+
+DECODED_ROWS_NOTE = (
+    "decoded rows here are decoded on read from the raw CAN frames with the current "
+    "bindings (P02.8: none is stored since 2026-09-26, and an older session's stored "
+    "ones are never shown); only confirmed and persist: true bindings have them. Any "
+    "other binding: read_channels with a can: spec, or hex(payload) on source='can'."
+)
+
+
+def decoded_rows_note(sql: str, rows: Sequence[Mapping[str, Any]]) -> dict[str, str]:
+    """The fields a raw query's result carries when it asks for ``decoded``
+    rows: ``note`` always, and ``empty_reason`` when it found nothing -- no
+    rows, or one row of zero/null aggregates (``count(*)`` is 0) -- so an
+    empty answer says which kind of empty it is (AGENTS.md)."""
+    if not _DECODED_MENTION.search(sql):
+        return {}
+    fields = {"note": DECODED_ROWS_NOTE}
+    if _found_nothing(rows):
+        fields["empty_reason"] = (
+            "no decoded rows match: either the scope has no raw CAN frame of that "
+            "binding's id, or the binding is not decoded on read (not confirmed or "
+            "persist: true), which no session ever stored"
+        )
+    return fields
+
+
+def _found_nothing(rows: Sequence[Mapping[str, Any]]) -> bool:
+    """No rows, or one row whose every value is zero or null (an aggregate over
+    nothing: ``count(*)`` is 0, ``avg``/``max`` are null)."""
+    if not rows:
+        return True
+    if len(rows) > 1:
+        return False
+    return all(v is None or (isinstance(v, (int, float)) and v == 0) for v in rows[0].values())
 
 
 def _parse_session_timestamp(session_dir_name: str) -> datetime | None:
@@ -256,19 +308,16 @@ class TelemetryQuery:
                 "CREATE OR REPLACE VIEW telemetry AS "
                 "SELECT NULL AS timestamp, NULL AS source, NULL AS channel, "
                 "NULL AS value_number, NULL AS value_text, NULL AS value_bool, "
-                "NULL AS unit, NULL AS metadata_json, NULL AS session WHERE 1=0"
+                "NULL AS unit, NULL::BLOB AS payload, NULL AS metadata_json, "
+                "NULL AS session WHERE 1=0"
             )
             return False
-        # DuckDB rejects prepared parameters inside CREATE VIEW, so the file
-        # list is inlined. The path is operator-controlled (env var) — not
-        # user input — but single-quote-escape anyway for safety.
-        quoted = ", ".join(f"'{p.replace(chr(39), chr(39) * 2)}'" for p in files)
-        self._con.execute(
-            "CREATE OR REPLACE VIEW telemetry AS "
-            "SELECT *, regexp_extract(filename, '([^/\\\\]+)[/\\\\][^/\\\\]+\\.parquet', 1) "
-            "    AS session "
-            f"FROM parquet_scan([{quoted}], filename=true)"
-        )
+        from src.preprocessing.decode import on_read_catalog
+
+        columns = {
+            row[0] for row in self._con.execute(f"DESCRIBE SELECT * FROM {_scan(files)}").fetchall()
+        }
+        self._con.execute(view_sql(files, on_read_catalog(), decode="payload" in columns))
         return True
 
     def close(self) -> None:
@@ -328,20 +377,25 @@ class TelemetryQuery:
         controlled. Rows with a null ``value_number`` (text/bool channels, or
         a channel that's simply absent from the scope) are excluded — both
         consumers bin/plot numeric series only.
+
+        ``decoded:`` keys read the view's decoded rows, which are decoded on
+        read from the raw frames (P02.8, module docstring): a stored
+        ``decoded`` row is never read, so old sessions and new answer alike.
         """
         if not channel_keys:
             return []
         self._refresh_view(session=session, since=since, until=until)
         limit = row_limit if row_limit is not None else _ANALYSIS_ROW_LIMIT
         placeholders = ", ".join("?" for _ in channel_keys)
+        # ``channel_key`` breaks timestamp ties, so which rows a row limit cuts
+        # through one instant (one frame's several signals) is deterministic.
         sql = (
             "SELECT timestamp, session, (source || ':' || channel) AS channel_key, "
             "value_number "
             "FROM telemetry "
             f"WHERE (source || ':' || channel) IN ({placeholders}) "
             "AND value_number IS NOT NULL "
-            "ORDER BY timestamp "
-            f"LIMIT {int(limit)}"
+            f"ORDER BY timestamp, channel_key LIMIT {int(limit)}"
         )
         cursor = self._con.execute(sql, list(channel_keys))
         columns = [d[0] for d in cursor.description] if cursor.description else []
@@ -349,4 +403,90 @@ class TelemetryQuery:
         return [dict(zip(columns, row, strict=False)) for row in rows]
 
 
-__all__ = ["TelemetryQuery", "QueryValidationError", "validate_query"]
+def _sql_text(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+#: The ``session`` column: the chunk file's parent directory name.
+_SESSION_COLUMN = "regexp_extract(filename, '([^/\\\\]+)[/\\\\][^/\\\\]+\\.parquet', 1) AS session"
+
+
+def _scan(files: Sequence[str]) -> str:
+    return "parquet_scan([" + ", ".join(_sql_text(p) for p in files) + "], filename=true)"
+
+
+def view_sql(files: Sequence[str], catalog: Bindings | None, *, decode: bool = True) -> str:
+    """The ``telemetry`` view over ``files`` (module docstring): the stored
+    rows that are not ``decoded``, and each on-read signal of ``catalog``
+    decoded from its frames. DuckDB rejects prepared parameters inside
+    ``CREATE VIEW``, so everything is inlined; the file paths are
+    operator-controlled and the channel names come from the bindings file,
+    but both are quote-escaped anyway."""
+    scan = _scan(files)
+    selects = [f"SELECT *, {_SESSION_COLUMN} FROM {scan} WHERE source <> 'decoded'"]
+    # Files written before raw payloads were stored (2026-07-29) have no
+    # ``payload`` column, and a scan made only of them cannot decode anything.
+    if decode:
+        for signal in catalog.signals if catalog is not None else []:
+            selects.extend(_decoded_select(signal, scan))
+    return "CREATE OR REPLACE VIEW telemetry AS " + " UNION ALL BY NAME ".join(selects)
+
+
+def _decoded_select(signal: Signal, scan: str) -> list[str]:
+    """``signal``'s ``decoded`` rows, decoded from its raw CAN frames in SQL.
+
+    The storage decoder's rule (``src.preprocessing.decode.decode_on_read``):
+    the unsigned slice of the payload as a float, no row for a payload too
+    short for the slice, and the ``<NAME>_SENTINEL`` state row (value text =
+    the stated meaning, no number) for the declared sentinel word; ``unit``
+    and ``metadata_json`` as the stored rows had them. The frames are matched
+    under every era's channel spelling (R04.14). Done in DuckDB, so the rows
+    keep the stored rows' types and a query's filter can prune the branch.
+    """
+    from src.preprocessing.decode import can_channel_spellings
+
+    start, length = signal.byte_start, signal.byte_length
+    pairs = [f"substring(hex(f.payload), {2 * (start + i) + 1}, 2)" for i in range(length)]
+    if signal.byte_order == "little":
+        pairs.reverse()
+    raw = f"CAST('0x' || {' || '.join(pairs)} AS UBIGINT)"
+    spellings = ", ".join(_sql_text(c) for c in can_channel_spellings([signal.can_id]))
+    meta = json.dumps(
+        {"can_id": signal.can_id, "binding_confidence": signal.confidence}, sort_keys=True
+    )
+    frames = (
+        # ``f.``-qualified: the select list names its own ``payload``/``source``/
+        # ``channel`` columns, and DuckDB would bind a bare name to those.
+        f"FROM {scan} AS f WHERE f.source = 'can' AND f.channel IN ({spellings}) "
+        f"AND octet_length(f.payload) >= {start + length}"
+    )
+
+    def select(channel: str, number: str, text: str, unit: str) -> str:
+        return (
+            "SELECT f.timestamp, 'decoded' AS source, "
+            f"{_sql_text(channel)} AS channel, {number} AS value_number, "
+            f"{text} AS value_text, NULL::BOOLEAN AS value_bool, "
+            f"{_sql_text(unit)} AS unit, NULL::BLOB AS payload, "
+            f"{_sql_text(meta)} AS metadata_json, f.filename, {_SESSION_COLUMN} "
+        )
+
+    number = select(signal.name, f"CAST({raw} AS DOUBLE)", "NULL::VARCHAR", signal.display_unit)
+    if signal.sentinel_raw is None:
+        return [number + frames]
+    sentinel = int(signal.sentinel_raw)
+    meaning = _sql_text(signal.sentinel_meaning or "sentinel")
+    state = select(sentinel_channel(signal.name), "NULL::DOUBLE", meaning, "")
+    return [
+        number + frames + f" AND {raw} <> {sentinel}",
+        state + frames + f" AND {raw} = {sentinel}",
+    ]
+
+
+__all__ = [
+    "DECODED_ROWS_NOTE",
+    "QueryValidationError",
+    "TelemetryQuery",
+    "decoded_rows_note",
+    "validate_query",
+    "view_sql",
+]

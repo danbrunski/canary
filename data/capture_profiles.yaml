@@ -40,7 +40,6 @@ profiles:
   min_achieved_rate_hz: null
   max_tuple_skew_s: null
   requires_tune_revision: false
-  broadcast_decode: true
   corpus_eligible: true
   behavior_model_recipes: []
   storage_prefix: ''
@@ -117,7 +116,6 @@ profiles:
   min_achieved_rate_hz: 3.0
   max_tuple_skew_s: null
   requires_tune_revision: true
-  broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes: []
   storage_prefix: _capture-fuel-map
@@ -189,7 +187,6 @@ profiles:
   min_achieved_rate_hz: 12.0
   max_tuple_skew_s: null
   requires_tune_revision: true
-  broadcast_decode: true
   corpus_eligible: false
   behavior_model_recipes:
   - air_charge_vs_rpm_throttle_did

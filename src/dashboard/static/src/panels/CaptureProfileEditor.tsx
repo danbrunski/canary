@@ -53,7 +53,6 @@ export const blankProfile = (): CaptureProfile => {
     required_tuple: [],
     min_achieved_rate_hz: null,
     requires_tune_revision: false,
-    broadcast_decode: true,
     corpus_eligible: false,
     behavior_model_recipes: [],
     storage_prefix: `_capture-${name}`,
@@ -359,14 +358,6 @@ export function CaptureProfileEditor({
       </div>
 
       <div className="flex flex-wrap gap-5 text-sm">
-        <label>
-          <input
-            type="checkbox"
-            checked={draft.broadcast_decode}
-            onChange={(event) => setDraft({ ...draft, broadcast_decode: event.target.checked })}
-          />{" "}
-          decode broadcast CAN
-        </label>
         <label>
           <input
             type="checkbox"

@@ -26,7 +26,6 @@ from src.control.profile_capture import (
 )
 from src.control.replay_control import ReplayController
 from src.decode.bindings import load_bindings
-from src.decode.frame_decoder import FrameDecoder
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
@@ -356,39 +355,24 @@ def can_receive_stats_observer(health: HealthMonitor) -> Callable[[CanReceiveSta
     return _observe
 
 
-def storage_decode_for(
-    decoder: FrameDecoder | None,
-) -> Callable[[TelemetryRecord], Sequence[TelemetryRecord]] | None:
-    """The storage sink's ``decode``: ``decoder`` while the capture profile
-    lets the broadcast bus be decoded (``tuning_profile``), else nothing.
-    ``None`` without a decoder (no persisted ``decoded:`` rows)."""
-    if decoder is None:
-        return None
-
-    def _decode(record: TelemetryRecord) -> Sequence[TelemetryRecord]:
-        return decoder.decode(record) if tuning_profile.broadcast_decode_enabled() else ()
-
-    return _decode
-
-
 def drain_kwargs(
     config: CanaryConfig,
     components: DaemonComponents,
     *,
     active_session_path: Callable[[], Path],
-    storage_decoder: FrameDecoder | None,
     on_trip_complete: Callable[[Path, TripEnd], None] | None = None,
     on_trip_unobservable: Callable[[Path, TripEnd], None] | None = None,
 ) -> dict[str, Any]:
     """The daemon's wiring of :func:`drain_queue_with_broadcast`, as keywords.
 
     Everything but the queue, writer, stop event and live source: the sinks'
-    targets from ``components``, the storage-warning and queue-warning
-    thresholds from ``config``, and the storage decode. The validation
-    harness composes this rather than hand-copying the call, which is how it
-    came to validate a drain with no GPS sink and no storage warning (R04.13).
-    The trip hooks are the daemon's own business (a trip end schedules a
-    digest), so a caller that must not run one leaves them ``None``.
+    targets from ``components`` and the storage-warning and queue-warning
+    thresholds from ``config``. The validation harness composes this rather
+    than hand-copying the call, which is how it came to validate a drain with
+    no GPS sink and no storage warning (R04.13). The trip hooks are the
+    daemon's own business (a trip end schedules a digest), so a caller that
+    must not run one leaves them ``None``. There is no storage decode to wire:
+    decoded rows are never stored (P02.8, ``drain.storable``).
     """
     return {
         "telemetry_broadcaster": components.telemetry_broadcaster,
@@ -405,7 +389,6 @@ def drain_kwargs(
         "storage_warning_mb": config.collection.storage_warning_mb,
         "queue_warning_fraction": config.collection.queue_warning_fraction,
         "health_monitor": components.health_monitor,
-        "storage_decode": storage_decode_for(storage_decoder),
     }
 
 
@@ -607,37 +590,14 @@ async def run_daemon(
             obd_handoff_stats_callback=obd_handoff_stats_observer(components.health_monitor),
         )
 
-    # Decoded-channel persistence (config-gated): bound CAN signals at the
-    # configured confidence levels are stored as queryable ``decoded:*`` rows
-    # next to their raw frames. Absent bindings file → decoder is None and
-    # only raw frames are persisted, exactly as before.
-    #
-    # Loaded once and shared with the trip tracker (D03.29), which reads the
-    # binding declared ``quantity: road_speed`` so a drive with no GPS fix
-    # still ends a trip. Same file, same moment as the decoder always loaded.
-    bindings = (
-        load_bindings(DEFAULT_BINDINGS_PATH)
-        if DEFAULT_BINDINGS_PATH.exists()
-        and (config.collection.persist_decoded_confidence or components.gps_tracker is not None)
-        else None
-    )
+    # The trip tracker (D03.29) reads the binding declared ``quantity:
+    # road_speed`` so a drive with no GPS fix still ends a trip; it decodes
+    # that frame itself. Nothing else here decodes: decoded rows are never
+    # stored (P02.8, ``drain.storable``), and the live source decodes every
+    # binding for the detectors and the dashboard on its own.
     if components.gps_tracker is not None:
-        components.gps_tracker.use_bindings(bindings)
-    storage_frame_decoder = (
-        FrameDecoder.from_bindings(
-            bindings,
-            confidence_levels=config.collection.persist_decoded_confidence,
-        )
-        if config.collection.persist_decoded_confidence and bindings is not None
-        else None
-    )
-    if storage_frame_decoder is not None:
-        log.info(
-            "decoded-channel persistence enabled",
-            extra={
-                "signals": storage_frame_decoder.signal_count,
-                "confidence": list(config.collection.persist_decoded_confidence),
-            },
+        components.gps_tracker.use_bindings(
+            load_bindings(DEFAULT_BINDINGS_PATH) if DEFAULT_BINDINGS_PATH.exists() else None
         )
 
     # The live source is built after collection starts (below); the drain's
@@ -656,7 +616,6 @@ async def run_daemon(
                 config,
                 components,
                 active_session_path=lambda: storage_writer.paths.root,
-                storage_decoder=storage_frame_decoder,
                 on_trip_complete=lambda session_dir, end: _run_trip_end_hook(
                     session_dir, config, components, end
                 ),
@@ -863,5 +822,4 @@ __all__ = [
     "run_retention_sweeper",
     "serve_in_background",
     "shutdown_trip_end",
-    "storage_decode_for",
 ]

@@ -535,11 +535,15 @@ def _register_read_tools(
             """Run a single SELECT/WITH against the telemetry Parquet view.
 
             View name is `telemetry` with columns timestamp, source, channel,
-            value_number, value_text, value_bool, unit, metadata_json, and a
-            derived `session` column. Non-SELECT statements are rejected.
+            value_number, value_text, value_bool, unit, payload, metadata_json,
+            and a derived `session` column. Non-SELECT statements are rejected.
             session/since/until scope which sessions' parquet back the view
             for this call (cheaper than scanning the whole corpus) — since/
             until are ISO-8601 or a bare session id, inclusive both ends.
+            `decoded` rows are decoded on read from the raw CAN frames with the
+            current bindings (P02.8: none is stored since 2026-09-26, and an old
+            session's stored ones are never shown); a query that asks for them
+            carries a note, and an empty_reason when it finds nothing.
             """
             return telemetry_tool.query_telemetry(
                 query_runner,

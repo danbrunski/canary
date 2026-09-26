@@ -1401,11 +1401,16 @@ def build_evaluation_frame(
     ``decode_can="none"`` skips raw CAN entirely: the segmenter's decoded
     fallback candidates did not exist when the July 2026 artifacts were fit,
     so reproducing their persisted held-out numbers needs the historical
-    input scope (the idle holdout is 90 rows without it, 114 with it).
+    input scope (the idle holdout is 90 rows without it, 114 with it). That
+    scope has no ``decoded:`` channel at all (P02.8): neither the loader's
+    decode on read nor an old session's stored rows, so a July session reads
+    as it did when those numbers were made. ``"mode-inputs"`` reads the
+    session with its ``decoded:`` rows decoded on read, as every reader does,
+    and decodes its own signals over them.
     """
     from src.decode.bindings import load_bindings
     from src.decode.dids import load_did_map
-    from src.preprocessing.decode import read_session_decoded_subset
+    from src.preprocessing.decode import decode_on_read, read_session_decoded_subset
     from src.preprocessing.feature_pipeline import (
         drop_fully_stale_rows,
         featurize_wide_frame,
@@ -1419,7 +1424,15 @@ def build_evaluation_frame(
     resample_config = resample_config_for(config)
     parts = []
     for session in sessions:
-        long, subset = read_session_decoded_subset(Path(session), bindings=bindings, decoded=wanted)
+        if decode_can == "none":
+            long, subset = read_session_decoded_subset(
+                Path(session), bindings=bindings, decoded=wanted, rows="as_recorded"
+            )
+            long = decode_on_read(long, None)  # drops stored decoded rows, decodes none
+        else:
+            long, subset = read_session_decoded_subset(
+                Path(session), bindings=bindings, decoded=wanted
+            )
         parts.append(
             resample_long_session(
                 long, subset, None, did_map, resample_config, session_name=Path(session).name

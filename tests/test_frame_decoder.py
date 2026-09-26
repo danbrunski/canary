@@ -1,12 +1,11 @@
-"""FrameDecoder — decoded-channel persistence for the storage sink."""
+"""FrameDecoder — the live path's per-frame decoder, and the rule the decode on
+read shares (P02.8: nothing stores ``decoded`` rows any more)."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 from pathlib import Path
-
-import pytest
 
 from src.decode.bindings import Bindings, Signal
 from src.decode.frame_decoder import FrameDecoder
@@ -55,14 +54,13 @@ def test_decodes_bound_signal_to_raw_value() -> None:
     assert row.metadata == {"can_id": 0x1F9, "binding_confidence": "confirmed"}
 
 
-def test_confidence_filter_drops_unlisted_bindings() -> None:
-    decoder = FrameDecoder.from_bindings(
-        _bindings(_RPM_SIGNAL, _HYPOTHESIZED_SIGNAL),
-        confidence_levels=("confirmed",),
-    )
+def test_the_live_decoder_decodes_every_binding_whatever_its_confidence() -> None:
+    """The live source shows and scores every binding; the confidence filter
+    was the storage sink's, and there is no storage sink decode any more."""
+    decoder = FrameDecoder.from_bindings(_bindings(_RPM_SIGNAL, _HYPOTHESIZED_SIGNAL))
     rows = decoder.decode(_rpm_frame(8000))
-    assert [r.channel for r in rows] == ["ECM_RPM"]
-    assert decoder.signal_count == 1
+    assert [r.channel for r in rows] == ["ECM_RPM", "ECM_MYSTERY"]
+    assert decoder.signal_count == 2
 
 
 def test_short_payload_omits_signal_instead_of_nan() -> None:
@@ -82,9 +80,9 @@ def test_from_path_returns_none_when_bindings_absent(tmp_path: Path) -> None:
 
 
 def test_matches_decode_can_rows_semantics() -> None:
-    """Stored rows must be indistinguishable from the batch decode-at-read
-    path, or `decode_can_rows`' skip-existing guard would leave mixed
-    conventions in the corpus."""
+    """A live record must be indistinguishable from the batch decode's row,
+    or a value the dashboard showed and the one a reader decodes later would
+    follow different conventions."""
     import pandas as pd
 
     from src.preprocessing.decode import decode_can_rows
@@ -109,8 +107,10 @@ def test_matches_decode_can_rows_semantics() -> None:
     assert stored.metadata == json.loads(batch_row["metadata_json"])
 
 
-def test_decode_can_rows_skips_signals_already_stored() -> None:
-    """A backfilled/ingest-decoded session must not get duplicate rows."""
+def test_decode_can_rows_replaces_a_stored_row_with_the_recomputed_one() -> None:
+    """P02.8: decode always. An old session's stored row (here a stale value,
+    as after a binding edit) is replaced by the current decode, never kept
+    beside it or preferred to it."""
     import pandas as pd
 
     from src.preprocessing.decode import decode_can_rows
@@ -121,16 +121,21 @@ def test_decode_can_rows_skips_signals_already_stored() -> None:
             "timestamp": [record.timestamp, record.timestamp],
             "source": ["can", "decoded"],
             "channel": [record.channel, "ECM_RPM"],
+            "value_number": [None, 1.0],
             "payload": [record.payload, None],
             "session": ["s", "s"],
         }
     )
     out = decode_can_rows(long_frame, _bindings(_RPM_SIGNAL))
-    assert len(out) == len(long_frame)  # nothing appended — stored row wins
+    decoded = out[out["source"] == "decoded"]
+    assert len(out) == len(long_frame)
+    assert decoded["value_number"].tolist() == [26875.0]
 
 
-def test_storage_sink_persists_decoded_rows_interleaved() -> None:
-    """run_storage_sink with a decoder writes raw + decoded, in order."""
+def test_the_storage_sink_never_writes_a_decoded_row() -> None:
+    """P02.8: whatever reaches the storage sink's queue, a decoded row is not
+    written; raw rows are written in order. (The fanout does not even
+    enqueue one: ``tests/test_decoded_rows_never_stored.py``.)"""
     from src.daemon.drain import run_storage_sink
 
     written: list[TelemetryRecord] = []
@@ -151,12 +156,14 @@ def test_storage_sink_persists_decoded_rows_interleaved() -> None:
         def close(self) -> list[Path]:
             return []
 
-    decoder = FrameDecoder.from_bindings(_bindings(_RPM_SIGNAL))
+    frame = _rpm_frame(26875)
+    (decoded,) = FrameDecoder.from_bindings(_bindings(_RPM_SIGNAL)).decode(frame)
 
     async def _run() -> None:
         queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         stop = asyncio.Event()
-        queue.put_nowait(_rpm_frame(26875))
+        queue.put_nowait(frame)
+        queue.put_nowait(decoded)
         queue.put_nowait(TelemetryRecord.obd(1_753_800_000.5, "RPM", 3360.0, "rpm"))
         task = asyncio.create_task(
             run_storage_sink(
@@ -164,7 +171,6 @@ def test_storage_sink_persists_decoded_rows_interleaved() -> None:
                 _Writer(),  # type: ignore[arg-type] — protocol subset is what the sink uses
                 stop,
                 poll_interval=0.01,
-                decode=decoder.decode,
             )
         )
         await queue.join()
@@ -173,34 +179,21 @@ def test_storage_sink_persists_decoded_rows_interleaved() -> None:
 
     asyncio.run(_run())
 
-    assert [(r.source, r.channel) for r in written] == [
-        ("can", "0x1F9"),
-        ("decoded", "ECM_RPM"),
-        ("obd", "RPM"),
-    ]
-    decoded = written[1]
-    assert decoded.value == 26875.0
-    assert decoded.timestamp == written[0].timestamp  # chronological interleave
+    assert [(r.source, r.channel) for r in written] == [("can", "0x1F9"), ("obd", "RPM")]
 
 
-@pytest.mark.parametrize("levels", [(), None])
-def test_from_bindings_confidence_edge_cases(levels: tuple[str, ...] | None) -> None:
-    decoder = FrameDecoder.from_bindings(
-        _bindings(_RPM_SIGNAL, _HYPOTHESIZED_SIGNAL), confidence_levels=levels
-    )
-    # None → everything; empty tuple → nothing (runtime treats empty config
-    # as "disabled" before construction, but the class itself is literal).
-    assert decoder.signal_count == (2 if levels is None else 0)
-
-
-def test_persist_flag_survives_a_confidence_filter() -> None:
-    """`persist` answers "worth disk forever", not "trustworthy".
+def test_persist_puts_a_binding_in_the_on_read_set_whatever_its_confidence() -> None:
+    """`persist` answers "do the session readers need it", not "trustworthy".
 
     The wheel-speed bindings sit at `high` for a documented reason — Mode 01
     speed is quantised to whole km/h, so the last digit of the 1/16 scale is
-    unpinned — and must NOT be promoted to `confirmed` to get persisted. They
-    are still the only fast road-speed source the live segmenter can reach.
+    unpinned — and must NOT be promoted to `confirmed` to be read. They are
+    still the only fast road-speed source the digest's segmenter can reach.
+    Nothing is stored either way (P02.8): this is the set every session is
+    decoded with on read.
     """
+    from src.decode.bindings import on_read_signals
+
     bindings = Bindings(
         schema_version=1,
         signals=[
@@ -227,13 +220,14 @@ def test_persist_flag_survives_a_confidence_filter() -> None:
         ],
     )
 
-    decoder = FrameDecoder.from_bindings(bindings, confidence_levels=("confirmed",))
-    names = {sig.name for sigs in decoder._by_can_id.values() for sig in sigs}
-    assert names == {"WHEEL_SPEED"}
+    assert [signal.name for signal in on_read_signals(bindings)] == ["WHEEL_SPEED"]
+    assert [signal.name for signal in on_read_signals(_bindings(_HYPOTHESIZED_SIGNAL))] == []
+    assert [signal.name for signal in on_read_signals(_bindings(_RPM_SIGNAL))] == ["ECM_RPM"]
 
 
-def test_persist_defaults_off_so_storage_stays_opt_in() -> None:
-    """Storage is forever; a new binding must not start writing rows by default."""
+def test_persist_defaults_off_so_the_on_read_set_stays_opt_in() -> None:
+    """A binding joins every session's decoded rows only when confirmed or
+    marked: a new one must not change what the readers see by default."""
     signal = Signal(
         name="NEW", module="ECM", can_id=0x123, byte_start=0, byte_length=1, confidence="confirmed"
     )

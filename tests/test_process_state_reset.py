@@ -211,6 +211,7 @@ NOT_STATE: dict[tuple[str, str], str] = {
         _READ_ONLY_TABLE,
     ),
     ("capture_profiles.py", "_SERVING_DID_CACHE"): "cache keyed by path + mtime; never stale",
+    ("capture_profiles.py", "_SERVING_MODE01_CACHE"): "cache keyed by path + mtime; never stale",
     ("gpio_lines.py", "GPIO_V2_GET_LINE_IOCTL"): "an int computed at import",
     ("gpio_lines.py", "GPIO_V2_LINE_SET_VALUES_IOCTL"): "an int computed at import",
     ("reconnect.py", "DEFAULT_RECONNECT_POLICY"): "frozen dataclass",

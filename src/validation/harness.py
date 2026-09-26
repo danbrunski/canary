@@ -72,8 +72,6 @@ from src.daemon.runtime import (
     obd_handoff_stats_observer,
 )
 from src.dashboard.broadcast import Broadcaster, Subscription
-from src.decode.bindings import load_bindings
-from src.decode.frame_decoder import FrameDecoder
 from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
 from src.paths import BINDINGS_YAML
@@ -433,7 +431,6 @@ class RunArtifacts:
     spec_fields_dropped: list[str]
     can_spec: CanObdSpec | None
     bindings_path: Path
-    decoder_signals: int
     models: dict[str, Any]
     components_enabled: dict[str, Any]
     started_wall: float = 0.0
@@ -675,7 +672,6 @@ def _start_pipeline(
     components: DaemonComponents,
     config: CanaryConfig,
     bindings_path: Path,
-    decoder: FrameDecoder,
     enable_inference: bool,
 ) -> _Pipeline:
     """Writer, drain fanout, dashboard/score consumers, heartbeat and the
@@ -711,7 +707,6 @@ def _start_pipeline(
                 config,
                 components,
                 active_session_path=lambda: writer.paths.root,
-                storage_decoder=decoder,
             ),
         ),
         name="c10-drain",
@@ -1023,9 +1018,6 @@ async def run_scenario(
         if synthetic
         else REAL_BINDINGS
     )
-    decoder = FrameDecoder.from_bindings(
-        load_bindings(bindings_path), confidence_levels=("confirmed",)
-    )
     pipeline = _start_pipeline(
         spec,
         label=label,
@@ -1033,7 +1025,6 @@ async def run_scenario(
         components=components,
         config=config,
         bindings_path=bindings_path,
-        decoder=decoder,
         enable_inference=enable_inference,
     )
     can_spec: CanObdSpec | None = None
@@ -1053,11 +1044,12 @@ async def run_scenario(
         spec_fields_dropped=spec_dropped,
         can_spec=can_spec,
         bindings_path=bindings_path,
-        decoder_signals=decoder.signal_count,
         models=models,
         components_enabled={
             "collector": spec.kind,
-            "decode_storage": True,
+            # P02.8: decoded rows are never stored; the storage sink writes
+            # the raw frames and the readers decode them on read.
+            "decode_storage": False,
             "dashboard_broadcast": True,
             "live_feature_source": live,
             "inference_loop": live,

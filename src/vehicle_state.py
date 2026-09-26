@@ -312,8 +312,10 @@ def derive_from_latest_rows(
 
     ``decoded`` rows count as CAN liveness: broadcast decode never stops, even
     when Mode 01 is dark — which it is *by ECU design* during an all-DID
-    capture. ``decoded:ECM_RPM`` is stored in raw counts and scaled with the
-    binding through the shared accessor (never a local constant).
+    capture. The reader decodes them on read from the raw frames (P02.8:
+    nothing stores them), so a session recorded after 2026-09-26 still yields
+    broadcast rpm here. ``decoded:ECM_RPM`` carries raw counts and is scaled
+    with the binding through the shared accessor (never a local constant).
     """
     obd_rpm: float | None = None
     decoded_rpm: float | None = None

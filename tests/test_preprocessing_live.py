@@ -470,18 +470,25 @@ def test_a_nan_sample_is_not_an_observation_live_or_offline(config: CanaryConfig
     assert live_rpm[:3] == [700.0] * 3 and math.isnan(live_rpm[3])
 
 
-def test_live_and_storage_decode_a_frame_to_the_same_record(config: CanaryConfig) -> None:
-    """R04.4: the live source publishes ``FrameDecoder.decode``'s records — the
-    storage sink's — over every confidence. Before, it re-implemented the
-    decode and drifted: metadata ``confidence`` vs ``binding_confidence``, an
-    int value vs a float, and ``""`` vs ``"unknown"`` for the unit."""
+def test_live_and_on_read_decode_a_frame_to_the_same_record(config: CanaryConfig) -> None:
+    """R04.4: the live source publishes ``FrameDecoder.decode``'s records over
+    every confidence. Before, it re-implemented the decode and drifted:
+    metadata ``confidence`` vs ``binding_confidence``, an int value vs a
+    float, and ``""`` vs ``"unknown"`` for the unit. P02.8: nothing stores
+    those rows now, and the readers' decode on read must make exactly the
+    live record for each on-read signal, or a value shown live and the one a
+    reader decodes later could differ."""
+    import json
+
+    import pandas as pd
+
     from src.decode.frame_decoder import FrameDecoder
+    from src.preprocessing.decode import decode_on_read, on_read_catalog
 
     bindings = load_bindings(Path("data/bindings.yaml"))
     live = LiveFeatureSource(config=config, bindings=bindings)
-    storage = FrameDecoder.from_bindings(
-        bindings, confidence_levels=config.collection.persist_decoded_confidence
-    )
+    on_read = on_read_catalog(bindings)
+    assert on_read is not None
     everything = FrameDecoder.from_bindings(bindings)
     now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC).timestamp()
     compared = 0
@@ -490,8 +497,12 @@ def test_live_and_storage_decode_a_frame_to_the_same_record(config: CanaryConfig
         live_records = live.decode_for_telemetry(record)
         assert live_records == everything.decode(record)
         by_name = {decoded.channel: decoded for decoded in live_records}
-        for stored in storage.decode(record):
-            assert by_name[stored.channel] == stored
+        rows = decode_on_read(pd.DataFrame([record.parquet_row()]), on_read)
+        for row in rows[rows["source"] == "decoded"].to_dict(orient="records"):
+            shown = by_name[row["channel"]]
+            assert row["value_number"] == shown.value
+            assert row["unit"] == shown.unit
+            assert json.loads(row["metadata_json"]) == shown.metadata
             compared += 1
     assert compared > 0
     # A binding whose unit is the placeholder reads as no unit on every path.

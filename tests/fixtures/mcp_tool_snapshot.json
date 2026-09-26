@@ -1340,7 +1340,7 @@
     }
   },
   "query_telemetry": {
-    "description": "Run a single SELECT/WITH against the telemetry Parquet view.\n\n            View name is `telemetry` with columns timestamp, source, channel,\n            value_number, value_text, value_bool, unit, metadata_json, and a\n            derived `session` column. Non-SELECT statements are rejected.\n            session/since/until scope which sessions' parquet back the view\n            for this call (cheaper than scanning the whole corpus) \u2014 since/\n            until are ISO-8601 or a bare session id, inclusive both ends.\n            ",
+    "description": "Run a single SELECT/WITH against the telemetry Parquet view.\n\n            View name is `telemetry` with columns timestamp, source, channel,\n            value_number, value_text, value_bool, unit, payload, metadata_json,\n            and a derived `session` column. Non-SELECT statements are rejected.\n            session/since/until scope which sessions' parquet back the view\n            for this call (cheaper than scanning the whole corpus) \u2014 since/\n            until are ISO-8601 or a bare session id, inclusive both ends.\n            `decoded` rows are decoded on read from the raw CAN frames with the\n            current bindings (P02.8: none is stored since 2026-09-26, and an old\n            session's stored ones are never shown); a query that asks for them\n            carries a note, and an empty_reason when it finds nothing.\n            ",
     "inputSchema": {
       "properties": {
         "row_limit": {

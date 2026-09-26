@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.fsm import PHYSICAL_LIMITS
+from src.decode.bindings import Bindings
 from src.preprocessing.loader import (
     INDEX_COLUMNS,
     coerce_numeric_columns,
@@ -585,14 +586,20 @@ def resample_numeric_reduced(
 
 
 def reduce_numeric_session(
-    session_dir: Path, resample_config: ResampleConfig, *, part_rows: int | None = None
+    session_dir: Path,
+    resample_config: ResampleConfig,
+    *,
+    part_rows: int | None = None,
+    on_read: Bindings | None | Literal["current"] = "current",
 ) -> ReducedSession:
     """Reduce a session for :func:`resample_numeric_reduced` (P01.2).
 
     Reads ``value_number`` part by part on tick-aligned boundaries, decimates
     raw IMU acceleration per tick exactly as ``resample_and_segment`` does, and
-    keeps the cells ``resample_long`` reads. No decode and no gate: that chain
-    has neither.
+    keeps the cells ``resample_long`` reads. No gate, and no decode beyond the
+    loader's decode on read of the ``decoded:`` rows (P02.8; ``on_read`` is
+    that catalog, ``loader.iter_session_numeric_parts``): that chain has
+    neither.
     """
     from src.preprocessing.loader import (
         SESSION_PART_ROWS,
@@ -607,6 +614,7 @@ def reduce_numeric_session(
             session_dir,
             target_rows=part_rows or SESSION_PART_ROWS,
             align_ns=interval_ns,
+            on_read=on_read,
         )
     )
     return reduce_long_frames(

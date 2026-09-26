@@ -7,9 +7,10 @@ desk:
 
 * :func:`session_samples` — one row per arrived numeric sample
   (``t`` epoch seconds, ``channel`` wide key, ``value``). ``decoded:`` rows are
-  decoded from the raw CAN frames (stored decoded rows win, as in training),
-  ``did:`` rows from the raw ``DID_<hex>`` polls; nothing is resampled or
-  forward-filled.
+  always decoded from the raw CAN frames with the current bindings (P02.8: a
+  stored ``decoded`` row of an old session is never read, and a new session
+  has none), ``did:`` rows from the raw ``DID_<hex>`` polls; nothing is
+  resampled or forward-filled.
 * :func:`sample_modes` — the operating mode in force at each sample, from the
   same segmenter the daemon runs over the 1 Hz grid (the live evaluator uses
   the latest tick's mode the same way).
@@ -98,9 +99,12 @@ def session_long(
     from src.preprocessing.decode import read_session_decoded_subset
 
     wanted = set(decoded)
-    long, subset = read_session_decoded_subset(session_dir, bindings=bindings, decoded=wanted)
-    stored = set(long.loc[long["source"] == "decoded", "channel"].unique())
-    return _decode_subset(long, subset=subset, did_map=did_map, wanted=wanted, stored=stored)
+    # As recorded: _decode_subset drops every decoded row it is given and
+    # decodes the ones it keeps, so the loader's own decode would be discarded.
+    long, subset = read_session_decoded_subset(
+        session_dir, bindings=bindings, decoded=wanted, rows="as_recorded"
+    )
+    return _decode_subset(long, subset=subset, did_map=did_map)
 
 
 def _decode_subset(
@@ -108,15 +112,14 @@ def _decode_subset(
     *,
     subset: Bindings | None,
     did_map: DidMap | None,
-    wanted: set[str],
-    stored: set[str],
 ) -> pd.DataFrame:
     """:func:`session_long`'s decode of an already-read long frame.
 
-    ``stored`` names the broadcast signals the *session* already carries as
-    stored ``decoded:`` rows; those win and are not re-decoded. It is passed
-    in rather than read off ``long`` so a part of a session decodes exactly as
-    the whole session would.
+    Every ``decoded:`` row it keeps is decoded here from the frame's raw CAN
+    rows with ``subset`` (one semantics, P02.8): the loader's own decoded rows
+    are dropped first, so a channel's samples never depend on what the
+    session happened to store. Row-local, so a part of a session decodes
+    exactly as the whole session would.
     """
     from src.decode.dids import decode_did_rows
     from src.preprocessing.decode import decode_can_rows
@@ -125,45 +128,19 @@ def _decode_subset(
     rest = long.loc[~is_can]
     if did_map is not None:
         rest = decode_did_rows(rest, did_map)
-    pieces = [rest.loc[(rest["source"] != "decoded") | rest["channel"].isin(wanted)]]
+    pieces = [rest.loc[rest["source"] != "decoded"]]
     if subset is not None and bool(is_can.any()):
-        # Stored decoded rows win (decode_can_rows would skip them anyway).
-        signals = [s for s in subset.signals if s.name not in stored]
-        if signals:
-            decoded_rows = decode_can_rows(
-                long.loc[is_can], subset.model_copy(update={"signals": signals})
-            )
-            pieces.append(decoded_rows.loc[decoded_rows["source"] == "decoded"])
+        decoded_rows = decode_can_rows(long.loc[is_can], subset)
+        pieces.append(decoded_rows.loc[decoded_rows["source"] == "decoded"])
     out = pd.concat(pieces, ignore_index=True) if len(pieces) > 1 else pieces[0]
     return out.sort_values("timestamp", kind="stable").reset_index(drop=True)
-
-
-def _stored_decoded_channels(session_dir: Path) -> set[str]:
-    """Every broadcast signal the session stores as ``decoded:`` rows (two
-    columns, filtered, per chunk)."""
-    import pyarrow.parquet as pq
-
-    from src.preprocessing.loader import PARQUET_PATTERN
-
-    names: set[str] = set()
-    for path in sorted(session_dir.glob(PARQUET_PATTERN)):
-        if path.stat().st_size == 0:
-            continue
-        try:
-            table = pq.read_table(  # type: ignore[no-untyped-call, unused-ignore]
-                path, columns=["channel"], filters=[("source", "==", "decoded")]
-            )
-        except Exception:  # noqa: BLE001 - an unreadable chunk contributes no rows
-            continue
-        names.update(str(c) for c in table.column("channel").unique().to_pylist())
-    return names
 
 
 def samples_from_long(long: pd.DataFrame) -> pd.DataFrame:
     """Arrived numeric samples: ``t`` (epoch s), ``channel``, ``value``.
 
-    One row per (channel, timestamp) — a stored decoded row and a re-decode
-    of the same frame are one arrival.
+    One row per (channel, timestamp): two frames of one id stamped at the
+    same instant are one arrival.
     """
     if long.empty:
         return pd.DataFrame({"t": [], "channel": [], "value": []})
@@ -259,18 +236,18 @@ def load_stream(
 
     wanted = _checked_decoded(catalog) | set(segmenter_decoded())
     filters, subset, ids = decoded_subset_plan(bindings, wanted)
-    stored = _stored_decoded_channels(session_dir)
     resample = resample_config_for(config)
     segmenter = set(segmenter_channels())
     sample_parts: list[pd.DataFrame] = []
     segmenter_parts: list[pd.DataFrame] = []
 
     for part in iter_session_parts(
-        session_dir, target_rows=part_rows or SESSION_PART_ROWS, filters=filters
+        session_dir,
+        target_rows=part_rows or SESSION_PART_ROWS,
+        filters=filters,
+        decoded="as_recorded",  # _decode_subset decodes every decoded row it keeps
     ):
-        long = _decode_subset(
-            keep_can_ids(part, ids), subset=subset, did_map=did_map, wanted=wanted, stored=stored
-        )
+        long = _decode_subset(keep_can_ids(part, ids), subset=subset, did_map=did_map)
         samples = samples_from_long(long)
         if not samples.empty:
             sample_parts.append(samples)

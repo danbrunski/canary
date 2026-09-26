@@ -41,6 +41,7 @@ import pandas as pd
 
 from src.control.sessions import is_session_dir_name, session_started_at
 from src.session import format_session_timestamp
+from src.telemetry import CAN_SOURCE, DECODED_SOURCE
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,10 @@ DRIVE_GAP_SECONDS = 300.0
 #: OBD/UDS responses (J1979, DIDs, memory reads) and decoded engine
 #: broadcast. GPS, IMU, derived channels and raw bus frames keep arriving
 #: from a parked truck with the Pi powered, so they are not evidence of a
-#: drive.
+#: drive. ``decoded`` rows are decoded on read from the frames (P02.8), the
+#: rows a session read by :mod:`src.preprocessing.loader` carries, so a
+#: session recorded after 2026-09-26 (which stores none) is placed exactly
+#: as one recorded before it.
 ACTIVITY_SOURCES: tuple[str, ...] = ("obd", "decoded")
 
 #: Frame column :func:`stamp_physical_drives` writes: the row's drive id, or
@@ -186,11 +190,14 @@ def activity_seconds(path: Path) -> np.ndarray[Any, Any]:
     if cached is not None:
         return cached
     chunks = [c for c in sorted(Path(path).glob("telemetry-*.parquet")) if c.stat().st_size > 0]
-    seconds = _read_seconds(chunks, ACTIVITY_SOURCES)
+    stored = tuple(source for source in ACTIVITY_SOURCES if source != DECODED_SOURCE)
+    seconds = _read_seconds(chunks, stored)
     if seconds is None:  # no ``source`` column: synthetic data, every row counts
         seconds = _read_seconds(chunks, None)
-    elif not seconds.size:
-        seconds = _read_seconds(chunks, ("can",))
+    else:
+        seconds = np.concatenate([seconds, _decoded_seconds(chunks)])
+        if not seconds.size:
+            seconds = _read_seconds(chunks, ("can",))
     result = np.unique(seconds) if seconds is not None and seconds.size else np.empty(0, "float64")
     _ACTIVITY_CACHE[key] = result
     return result
@@ -204,42 +211,102 @@ def _read_seconds(
     ``source`` column. Unreadable chunks are skipped, like the loader does."""
     import pyarrow as pa
     import pyarrow.dataset as ds
-    import pyarrow.parquet as pq
 
     if not chunks:
         return np.empty(0, dtype="float64")
-    try:
-        names = pq.ParquetFile(chunks[0]).schema_arrow.names  # type: ignore[no-untyped-call, unused-ignore]
-    except Exception:  # noqa: BLE001
-        names = []
-    if sources is not None and "source" not in names:
+    if sources is not None and "source" not in _column_names(chunks[0]):
         return None
     expression = (
         None if sources is None else ds.field("source").isin(pa.array(list(sources)))  # type: ignore[attr-defined, no-untyped-call, unused-ignore]
     )
-    tables: list[Any] = []
+    parts = []
+    for table in _read_tables(chunks, ["timestamp"], expression):
+        if table.num_rows:
+            parts.append(_floored(table["timestamp"].to_pandas()))
+    return np.concatenate(parts) if parts else np.empty(0, dtype="float64")
+
+
+def _decoded_seconds(chunks: Sequence[Path]) -> np.ndarray[Any, Any]:
+    """Floored epoch seconds of the ``decoded`` rows the session reads with.
+
+    Decoded on read (P02.8): a frame of an id the on-read catalog decodes
+    (:func:`src.preprocessing.decode.on_read_catalog`) yields a decoded row
+    exactly when its payload holds at least one of that id's slices, the
+    sentinel word included (``decode_on_read``'s rule, which is the storage
+    decoder's). Only the length decides, so this reads timestamps, channels
+    and payload lengths, not values.
+    """
+    import pyarrow as pa
+    import pyarrow.compute as pc
+    import pyarrow.dataset as ds
+
+    from src.can_ids import parse_can_channel
+    from src.preprocessing.decode import can_channel_spellings, on_read_catalog
+
+    catalog = on_read_catalog()
+    if catalog is None or not chunks:
+        return np.empty(0, dtype="float64")
+    names = _column_names(chunks[0])
+    if not {"source", "channel", "payload"} <= set(names):
+        return np.empty(0, dtype="float64")
+    shortest: dict[int, int] = {}
+    for signal in catalog.signals:
+        end = signal.byte_start + signal.byte_length
+        shortest[signal.can_id] = min(end, shortest.get(signal.can_id, end))
+    expression = (ds.field("source") == CAN_SOURCE) & ds.field("channel").isin(  # type: ignore[attr-defined, no-untyped-call, unused-ignore]
+        pa.array(can_channel_spellings(shortest))
+    )
+    parts = []
+    for table in _read_tables(chunks, ["timestamp", "channel", "payload"], expression):
+        if not table.num_rows:
+            continue
+        channels = table["channel"].to_pandas()
+        needed = channels.map(
+            {c: shortest.get(parse_can_channel(str(c)) or -1, -1) for c in channels.unique()}
+        ).to_numpy(dtype=np.int64)
+        lengths = pc.fill_null(pc.binary_length(table["payload"]), -1).to_numpy()  # type: ignore[attr-defined, no-untyped-call, unused-ignore]
+        decodes = (needed >= 0) & (lengths >= needed)
+        if decodes.any():
+            parts.append(_floored(table["timestamp"].to_pandas()[decodes]))
+    return np.concatenate(parts) if parts else np.empty(0, dtype="float64")
+
+
+def _column_names(chunk: Path) -> list[str]:
+    import pyarrow.parquet as pq
+
     try:
-        tables.append(
+        return list(pq.ParquetFile(chunk).schema_arrow.names)  # type: ignore[no-untyped-call, unused-ignore]
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _read_tables(chunks: Sequence[Path], columns: list[str], expression: Any) -> list[Any]:
+    """``columns`` of the rows ``expression`` selects, skipping torn chunks."""
+    import pyarrow.dataset as ds
+
+    try:
+        return [
             ds.dataset([str(c) for c in chunks], format="parquet").to_table(  # type: ignore[no-untyped-call, unused-ignore]
-                columns=["timestamp"], filter=expression
+                columns=columns, filter=expression
             )
-        )
+        ]
     except Exception:  # noqa: BLE001 - a torn chunk: read the rest one by one
+        tables: list[Any] = []
         for chunk in chunks:
             try:
                 tables.append(
                     ds.dataset(str(chunk), format="parquet").to_table(  # type: ignore[no-untyped-call, unused-ignore]
-                        columns=["timestamp"], filter=expression
+                        columns=columns, filter=expression
                     )
                 )
             except Exception:  # noqa: BLE001
                 continue
-    parts = []
-    for table in tables:
-        if table.num_rows:
-            seconds = _epoch_seconds(table["timestamp"].to_pandas())
-            parts.append(np.floor(seconds[np.isfinite(seconds)]))
-    return np.concatenate(parts) if parts else np.empty(0, dtype="float64")
+        return tables
+
+
+def _floored(stamps: pd.Series) -> np.ndarray[Any, Any]:
+    seconds = _epoch_seconds(stamps)
+    return np.asarray(np.floor(seconds[np.isfinite(seconds)]), dtype="float64")
 
 
 def activity_spans(path: Path, *, gap_seconds: float = DRIVE_GAP_SECONDS) -> list[SessionSpan]:

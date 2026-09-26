@@ -8,9 +8,19 @@ disambiguation the agent docs rely on.
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from src.dashboard.status import classify_vehicle_state
+from src.telemetry import TelemetryRecord
+
+
+def _broadcast_rpm(timestamp: datetime, counts: int) -> TelemetryRecord:
+    """The ECM's 0x1F9 frame carrying ``counts`` (8 per rpm) at bytes 2-3, the
+    ``ECM_RPM`` binding. Sessions store the frame, never a ``decoded`` row
+    (P02.8); the Parquet reader decodes it on read."""
+    payload = bytes([0x20, 0x00, (counts >> 8) & 0xFF, counts & 0xFF, 0, 0, 0, 0])
+    return TelemetryRecord(timestamp=timestamp, source="can", channel="0x1F9", payload=payload)
 
 
 def _common_telemetry(**overrides: object) -> dict[str, object]:
@@ -233,20 +243,14 @@ def test_all_did_capture_classifies_from_decoded_broadcast(tmp_path: Path) -> No
 
     from src.dashboard.status import _derive_vehicle_state
     from src.storage.parquet_writer import write_records_to_parquet
-    from src.telemetry import TelemetryRecord
 
     now = datetime(2026, 8, 5, 12, 0, 30, tzinfo=UTC)
     storage = tmp_path / "vehicle"
     capture = storage / "_capture-tuning-did-2026-08-05T120000"
     write_records_to_parquet(
         [
-            # 2500 rpm x 8 counts, exactly as the frame decoder persists it.
-            TelemetryRecord(
-                timestamp=now.replace(second=29),
-                source="decoded",
-                channel="ECM_RPM",
-                value=20000.0,
-            ),
+            # 2500 rpm x 8 counts in the frame; decoded on read.
+            _broadcast_rpm(now.replace(second=29), 20000),
         ],
         capture,
     )
@@ -373,12 +377,7 @@ def test_a_stale_obd_rpm_does_not_beat_a_live_broadcast(tmp_path: Path) -> None:
                 value=750.0,
             ),
             # Broadcast rpm, current: 781 rpm x 8 counts.
-            TelemetryRecord(
-                timestamp=now.replace(second=29),
-                source="decoded",
-                channel="ECM_RPM",
-                value=6248.0,
-            ),
+            _broadcast_rpm(now.replace(second=29), 6248),
         ],
         session,
     )
@@ -409,9 +408,7 @@ def test_broadcast_fallback_still_reports_a_genuinely_stopped_engine(tmp_path: P
             TelemetryRecord(
                 timestamp=now.replace(second=3), source="obd", channel="RPM", value=750.0
             ),
-            TelemetryRecord(
-                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=0.0
-            ),
+            _broadcast_rpm(now.replace(second=29), 0),
         ],
         session,
     )
@@ -436,9 +433,7 @@ def test_fresh_obd_still_wins_over_the_broadcast(tmp_path: Path) -> None:
             TelemetryRecord(
                 timestamp=now.replace(second=29), source="obd", channel="RPM", value=900.0
             ),
-            TelemetryRecord(
-                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=6248.0
-            ),
+            _broadcast_rpm(now.replace(second=29), 6248),
         ],
         session,
     )
@@ -522,7 +517,6 @@ def test_the_three_derivations_agree_on_an_all_did_capture(tmp_path: Path) -> No
 
     from src.dashboard.status import derive_vehicle_state_from_storage
     from src.storage.parquet_writer import write_records_to_parquet
-    from src.telemetry import TelemetryRecord
     from src.vehicle_state import derive_from_inputs
 
     now = datetime(2026, 9, 24, 12, 0, 30, tzinfo=UTC)
@@ -530,9 +524,7 @@ def test_the_three_derivations_agree_on_an_all_did_capture(tmp_path: Path) -> No
     capture = storage / "_capture-tuning-did-2026-09-24T120000"
     write_records_to_parquet(
         [
-            TelemetryRecord(
-                timestamp=now.replace(second=29), source="decoded", channel="ECM_RPM", value=20000.0
-            ),
+            _broadcast_rpm(now.replace(second=29), 20000),
         ],
         capture,
     )

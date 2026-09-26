@@ -18,6 +18,12 @@ writer:
   correspondence (a doubled replay then reads 2.000x, not "about 2");
 - a few Mode 01 references, every ``gps`` row and every ``derived`` row.
 
+It deliberately keeps the shape of a session recorded **before P02.8**
+(2026-09-26): nothing stores ``decoded`` rows since then, so such a session
+is the only kind that can carry them, and the replay emit filter must still
+skip them when an old session is replayed. The tool refuses a source with no
+stored ``decoded`` rows rather than cut a slice that tests nothing.
+
 Regenerate (the source is the D02.9 evidence session preserved on the laptop)::
 
     .venv/bin/python tools/make_replay_fixture.py \\
@@ -81,6 +87,12 @@ def extract(
         for ts, channel in zip(kept_can["timestamp"], kept_can["channel"], strict=True)
     }
     decoded = frame[frame["source"] == "decoded"]
+    if decoded.empty:
+        raise SystemExit(
+            f"error: {session.name} stores no decoded rows in that window: a session "
+            "recorded after P02.8 (2026-09-26) never does, and this slice exists to "
+            "carry them; cut it from an older recording"
+        )
     decoded_keys = [
         (ts, _can_id_of(meta))
         for ts, meta in zip(decoded["timestamp"], decoded["metadata_json"], strict=True)

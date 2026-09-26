@@ -108,7 +108,6 @@ DEFAULT_PROFILE: dict[str, Any] = {
     "mode01": {"AUTO": 1.0},
     "mode22": (),
     "corpus_eligible": True,
-    "broadcast_decode": True,
 }
 
 
@@ -118,7 +117,6 @@ def _capture(name: str, **fields: Any) -> dict[str, Any]:
         "description": f"C10 synthetic workload: {name}",
         "round_timestamps": True,
         "corpus_eligible": False,
-        "broadcast_decode": True,
         "storage_prefix": f"_capture-{name}",
         "capacity_evidence": "C10 synthetic-bus workload; no hardware capacity is claimed here.",
     }

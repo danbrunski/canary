@@ -46,7 +46,7 @@ Endpoint summary:
 | --- | --- |
 | `GET /status` | storage path/free space, latest session, loaded model versions, vehicle, anomaly counters; running calibration (`ecu_calibration_id`, `ecu_calibration_read_at`, `calibration_matches_registry` true/false/null, `calibration_alert`) and `tuning_readiness` chips `{ok, value, detail, fix}` (W02); `startup` — when this daemon started recording (S01.1, below). `?view=compact` is the pollable projection and carries `startup` too |
 | `GET /config` | JSON view of the loaded `canary.yaml` |
-| `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk |
+| `GET /telemetry/latest?n=N` | newest `N` telemetry rows from disk; `decoded:` rows are decoded on read from the raw CAN frames (P02.8: none is stored since 2026-09-26), exactly as a session recorded before then stored them. `per_channel=true` gives the latest row per channel (the dashboard seed and the Parquet `vehicle_state`) |
 | `GET /anomalies?since=...&limit=N` | persisted anomaly events from JSONL; `since` and `limit` skip whole daily files, so pass one — with neither, the daemon parses the entire history |
 | `GET /bindings` | decoded CAN binding metadata for display |
 | `GET /dids` | Mode 22 DID catalog metadata |
@@ -58,7 +58,7 @@ Endpoint summary:
 | `GET /obd/dtc` | cached stored/pending/permanent DTC report, MIL state, staleness |
 | `GET /obd/monitors` | cached Mode 06 on-board monitor sweep — per-cylinder misfire counts, raw monitor test results (value/min/max, pass/fail), staleness |
 | `GET /sessions/{id}/trip-summary` | trip-summary sidecar (duration, distance, fuel/economy/CO2, idle time/fraction, max/avg speed, 0-60, 1/4-mile) — computed on demand from the stored session on first request, cached to `trip_summary.json` after |
-| `GET /analysis/binned?value=&x=&y=&x_bins=&y_bins=&agg=&session=&since=&until=&units=` | ad-hoc binned aggregation over the DuckDB parquet layer ("trims by rpm×load") — `agg` is `mean`\|`median`\|`p95`\|`count`; `y`/`y_bins` optional (1D when omitted); `units` is `stored` (default) or `engineering`, the latter rescaling `decoded:` channels via `bindings.yaml` (they are stored raw on purpose — `decoded:ECM_RPM` is 8 counts/rpm) |
+| `GET /analysis/binned?value=&x=&y=&x_bins=&y_bins=&agg=&session=&since=&until=&units=` | ad-hoc binned aggregation over the DuckDB parquet layer ("trims by rpm×load") — `agg` is `mean`\|`median`\|`p95`\|`count`; `y`/`y_bins` optional (1D when omitted); `units` is `stored` (default) or `engineering`, the latter rescaling `decoded:` channels via `bindings.yaml` (they are raw counts on purpose — `decoded:ECM_RPM` is 8 counts/rpm). `decoded:` channels of `confirmed` and `persist: true` bindings are decoded on read from the raw CAN frames, in the query (P02.8: no `decoded` row is stored since 2026-09-26) |
 
 ### `/status.startup` — when recording began (S01.1)
 
