@@ -1,0 +1,45 @@
+# Driving-dyno facts for the 2008 Nissan Xterra — H07.
+#
+# Loaded by src/analysis/dyno.py (strict schema). Mass, tyre and gear ratios
+# are NOT here: they are vehicle parameters in profiles.yaml, with their own
+# evidence (H07.1, H07.10, H07.11). This file holds what the dyno adds:
+#
+#   inertia      stated estimates until measured (H07.6); results computed
+#                with them carry `inertia: estimated`
+#   squat        body pitch per g, fitted on flat ground (H07.4)
+#   road_load    A + B*v + C*v^2 from a neutral coast-down pair (H07.5)
+#   noise_floors same-day, same-ROM spread per rpm band (H07.8)
+#
+# squat, road_load and noise_floors are owed by the H07.12 NA baseline drive.
+# Each is written from a fit's `to_record(conditions)`, which will not build
+# a record without its conditions.
+
+schema_version: 1
+
+inertia:
+  road_wheels: 4
+  wheel_shape_factor: 0.7
+  driveline_output_kg_m2: 1.0
+  engine_side_kg_m2: 0.25
+  evidence: >-
+    ESTIMATES, 2026-09-26, none measured. Wheel side: four road wheels at the
+    profile's measured 40.3 kg per wheel and tyre (wheel_tire_assembly_kg) and
+    the 2.609 m loaded circumference (r = 0.415 m), with a shape factor of 0.7
+    of m*r^2 (an LT tyre's mass sits near the rim; a solid disc is 0.5, a thin
+    ring 1.0) -- about 19.4 kg m^2. driveline_output_kg_m2 (propshaft,
+    differentials, axle shafts, hubs and rotors, referred to the wheels) is an
+    order-of-magnitude figure, not a part weight. engine_side_kg_m2 (crank,
+    flywheel, clutch, gearbox input) is the PHYSICAL crank-side inertia, a
+    typical 4 L V6 manual figure within a plausible 0.15-0.35 kg m^2. It sits
+    upstream of the driveline losses, so the wheels see eta times it, with
+    eta = 1 - drivetrain_loss_fraction from profiles.yaml (0.85). The one
+    convention is dyno.INERTIA_CONVENTION. H07.6's two-gear pulls measure
+    eta*I_e and replace the estimate (measured_engine). In 3rd (overall 7.11)
+    the estimates add ~119 kg (wheel side) + ~62 kg (0.85 x 0.25 kg m^2
+    through the ratio) to a ~2,311 kg test mass. A 40 % error in the
+    engine-side estimate therefore moves 3rd-gear wheel force during a pull by
+    ~1.0 %.
+
+squat: null
+road_load: null
+noise_floors: []

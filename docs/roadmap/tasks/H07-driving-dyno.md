@@ -112,23 +112,239 @@ under GPS. Defects a dyno would inherit:
   one time base from the acquisition clock. **Accept:** synthetic tests with
   known speed profiles; refusal named when GPS is below the H04.3 quality
   gates.
-- [ ] **H07.4 Body pitch under acceleration.** **Do:** on flat ground,
+- [~] **H07.4 Body pitch under acceleration.** **Do:** on flat ground,
   `f − a` should equal `g·sin(θ)` with θ ≈ 0; fit the residual against `a` to
   get a squat coefficient (degrees of pitch per g). Store it as profile data
   with conditions (load in the truck, tyre pressure). **Accept:** synthetic
   recovery of a known coefficient; the fit refuses when the stretch is not
   flat by GPS altitude over the window.
-- [ ] **H07.5 Road-load model from coast-downs.** **Do:** fit
+  **Partial (2026-09-26): desk done; truck: real coefficients owed (H07.12),
+  and with this receiver, most real windows cannot be judged flat (below).**
+  `src/analysis/dyno.py` `fit_squat` fits `asin((f − a)/g)` against `a/g`.
+
+  **Altitude noise is measured, not assumed.** This was revised twice on
+  2026-09-26 after verification. The first flatness se treated GPS altitude
+  samples as independent. Real GNSS altitude wanders: parked, on this
+  truck, the 10 s-lag variogram grows as ~h^1.5 and varies ~20x within one
+  afternoon. The white-noise se therefore refused 200/200 flat roads under
+  AR(1) noise as `not_flat`.
+  - `fit_squat` now requires `altitude_noise`: one or more `AltitudeNoise`
+    models, measured by `measure_altitude_noise` on a parked stretch of the
+    same session (≥ 180 s, speed ≤ 0.5 m/s). Its refusals are
+    `not_stationary`, `too_few_samples`, `inputs_missing` and `no_spread`.
+  - The model is white noise plus a powered-exponential wander,
+    `γ(h) = white + σ²(1 − exp(−(h/τ)^α))` with 0 < α < 2 (a valid
+    variogram). Every grade and leak se is the exact `−wᵀΓw` for slope
+    weights `w`, which needs only the variogram because the weights sum to
+    zero. On a uniform grid it uses the Toeplitz form, which matches the
+    dense sum to 6e-16.
+  - Given references before and after the runs, every se (the window's,
+    each segment's, the leak's) is computed under each and the larger kept.
+    This is the third revision: the second picked one reference by segment se
+    alone.
+  - On the real long parked run, the model's 200 m segment se matched the
+    estimator's scatter along the reference: 0.298 / 0.291 %,
+    0.200 / 0.178 %, 0.389 / 0.379 %, 0.168 / 0.179 %, 0.200 / 0.216 %.
+    It errs high elsewhere (0.54 / 0.45 %).
+  - Synthetic references: the model se has median model/true 0.96–1.03, and
+    10th–90th percentile 0.84–1.10 at 120 s, 0.93–1.09 at 300 s.
+
+  **Refusals, in this order.** The order was fixed in the third revision: a
+  4 % grade read as 4.05 ± 0.30 % under AR(1) noise, and a ±5 % crest, used
+  to come back `grade_unresolvable` ("the road may be flat").
+  1. `not_flat` for any grade shown to exceed the gate, however noisy:
+     - the window's mean beyond 0.5 % + 2 se;
+     - or any 200 m segment (sliding by 50 m), resolved or not, beyond
+       0.5 % + z·se, with z = Φ⁻¹(1 − 0.05/2m) family-wise over m
+       independent segments (2.3 / 2.8 / 3.1 for 460 m / 90 s / 240 s
+       windows).
+
+     The first revision added the segment check for crests: a crest with ~0
+     mean grade used to pass and read 6.9 deg/g against a true 1.2.
+  2. `grade_unresolvable` only then: the window's or any segment's 2 se is
+     above 0.5 %, or the altitude is too sparse to form a 200 m segment
+     (fewer than 10 samples; this used to skip the crest check silently).
+     Nothing was shown to exceed the gate, and nothing shows the road is
+     inside it. The reason names what the parked noise does over the time a
+     200 m segment takes, not its sill or τ, which are unidentifiable when τ
+     reaches the fit grid's ceiling.
+  3. `grade_correlated` when the local GPS grade, regressed on `a/g`, leaks
+     more than 3 se into the slope. The real-noise false rates are in the
+     table below.
+  - `inputs_missing`, `too_few_samples` (< 50), `accel_span_too_small`
+    (< 0.1 g).
+
+  **Measured, synthetic (10 Hz):**
+
+  | Case | Result |
+  |---|---|
+  | Flat, white 1 m | 199/200 scored (90 s), 98/100 (240 s); the rest `grade_correlated` |
+  | Flat, AR(1) 0.5 m / τ 10 s | 100/100 (90 s) and 50/50 (240 s) `grade_unresolvable`, never `not_flat` |
+  | Flat, AR(1) 1 m / τ 10 s | same |
+  | Flat, AR(1) 1 m / τ 2 s | same |
+  | 4 % grade, AR(1) 1 m / τ 10 s | `not_flat` 10/10 |
+  | ±5 % crest, AR(1) 1 m / τ 10 s | `not_flat` 10/10 |
+  | Constant 0.4 % (inside the gate), 240 s | 0/40 `not_flat` with the family-wise z; 15/40 at 2 se per segment |
+  | Crest, 20/20 | `not_flat` |
+  | Rolling ±1.5 %, 20/20 | `not_flat` |
+  | In phase ±0.4 % | `grade_correlated` 50/50 (90 s), 30/30 (240 s) |
+  | In phase ±0.3 % | `grade_correlated` 41/50 |
+  | In phase ±0.2 % | `grade_correlated` 23/50 |
+  | In phase ±0.1 % | passes 47/50 at +0.2 deg/g (the stated blind spot, ~3x the leak se of 0.12 deg/g at 90 s) |
+
+  **Measured on real parked GNSS altitude** (all parked runs ≥ 270 s in the
+  five 2026-09-20/21 sessions, injected into flat synthetic windows):
+
+  | Reference | 90 s windows | 240 s windows |
+  |---|---|---|
+  | One, at the start of the parked run | 96/96 `grade_unresolvable` | 34/34 `grade_unresolvable` |
+  | The preceding 180 s | 57/96 scored, 34 unresolvable, 4 `not_flat`, 1 `grade_correlated` | 15/34 scored, 15 unresolvable, 3 `not_flat`, 1 `grade_correlated` |
+  | Bracketed before and after (the API's recommended use) | 42/90 scored, 47 unresolvable, **1 `not_flat`** | 13/33 scored, 19 unresolvable, **1 `not_flat`** |
+
+  An independent bracketed sweep of `2026-09-20T152758` (the verifier's,
+  with its own window alignment) found **2 `grade_correlated` and 1
+  `not_flat` in 82 windows**. The false refusals come from noise worse than
+  both references. This parked altitude is nonstationary and its z-tails
+  are heavy, so a reference model cannot rule them out: expect a few per
+  cent of flat windows to be refused with a wrong cause.
+
+  The receiver was the pre-HAT rig's USB GPS (`docs/CANary-HAT-Spec.md` §10:
+  "USB dongle, 1 Hz class"), since the rev 2.0 HAT's M10 was fitted
+  2026-09-23. Whether the M10 does better is untested.
+
+  **Protocol finding for H07.12:** about half of real flat windows could not
+  be judged at 0.5 % per 200 m with this receiver's altitude, and none with
+  a reference from the start of a parked run. Across 11 references sampled
+  along the parked runs, 2 se of a 200 m segment was 0.28–0.40 % in 6 and
+  0.60–2.3 % in 5: the four taken at the start of a parked run, plus one 30 minutes in (0.78 %).
+  Unresolvable windows occur throughout a run, not only early. Options are
+  in the report.
+
+  Tests:
+  - `test_flat_road_under_wandering_altitude_is_unresolvable_not_not_flat`
+    (three AR(1) settings)
+  - `test_real_parked_gnss_altitude_is_not_white_and_the_model_says_so` and
+    `test_squat_on_real_parked_altitude_noise_never_reads_as_not_flat`, on
+    the committed 720 s slice `tests/fixtures/gnss_altitude/parked-2026-09-20T152758.json`
+    (17.8 KB, relative time and altitude only, pre-HAT USB receiver, chosen
+    by rule as the first slice after 15 minutes parked; 3 of its 4 windows
+    score)
+  - `test_each_standard_error_takes_the_noisier_reference`: two references
+    that rank oppositely for the window and the leak se
+  - `test_a_steep_grade_is_not_flat_however_noisy_the_altitude` and
+    `test_a_steep_crest_is_not_flat_however_noisy_the_altitude` (AR(1)
+    1 m / τ 10 s)
+  - Gate-branch pins, each checked by mutation (all six mutants killed:
+    z → 2.0; window mean without + 2 se; window-unresolvable branch removed;
+    only resolved segments tested; first reference only; sparse check
+    removed):
+    - `test_segment_threshold_is_family_wise_not_two_se_per_segment`
+    - `test_window_mean_gate_allows_for_its_own_standard_error`
+    - `test_an_unresolvable_window_says_so_about_the_window`
+    - `test_altitude_too_sparse_for_segments_is_unresolvable`
+  - `test_altitude_noise_reference_refusals`
+  - the crest, rolling and in-phase tests
+
+  The leak and its se, the largest segment grade and the noise model used
+  are recorded on every fit. Stored as `SquatCoefficient` in the vehicle's
+  `dyno.yaml`. Its required `SquatConditions` are payload, front and rear
+  tyre pressure, road, date and sessions, and a record is only built through
+  `SquatFit.to_record(conditions)`.
+
+  Known answer 1.2 deg/g with a 0.3 deg mounting offset:
+  - Noise-free: 1.2000 / 0.3000.
+  - With noise (0.03 m/s² f, 0.02 m/s² a, 10 Hz, 240 s): 1.178 / 1.204 /
+    1.183 (−1.8 / +0.4 / −1.4 %, se 0.024) on seeds 1–3; test tolerance 5 %.
+  - A constant 0.3 % grade goes into the offset, not the slope.
+  - The reported slope se and leak se track the seed scatter (tested
+    0.7–1.4 and 0.7–1.5).
+
+  Tests: `tests/test_dyno.py::test_squat_*`.
+- [~] **H07.5 Road-load model from coast-downs.** **Do:** fit
   `F_rl(v) = A + B·v + C·v²` from clutch-in, neutral coast-downs (SAE J2263
   style), using `F_rl = −m·f − (m_eff,neutral − m)·a`, both directions, and
   store A, B, C with conditions and fit residuals. **Accept:** synthetic
   coast-down data with known coefficients recovered within 5 %.
-- [ ] **H07.6 Rotating inertia.** **Do:** estimate `m_eff` per gear from
+  **Partial (2026-09-26): desk done; truck: real coefficients owed (H07.12).**
+  `fit_road_load` fits each heading separately and averages the pair, so
+  wind's ±2·C·w in B cancels and C·w² is left in A. Stored as
+  `RoadLoadCoefficients` with per-heading fits, standard errors, residual sd,
+  test mass, `m_eff,neutral`, the `inertia` flag and `squat_corrected`, plus
+  required `RoadLoadConditions` (road, date, sessions, payload, tyre
+  pressures, ambient temperature). `DynoProfile` refuses a single-direction
+  road load. **Found by the known-answer test:** the IMU's residual pitch
+  offset μ (mount, bias, the grade the gravity vector was estimated on) is the
+  same force in both directions and indistinguishable from A; 0.3 deg is
+  118.7 N at 2,311 kg. `estimate_pitch_offset` measures it from the pair's kinematics
+  (grade flips sign, μ does not), and the fit removes it and records
+  `imu_pitch_offset_deg`. The test drive: 0.5 % grade, 2 m/s wind, 1.2 deg/g
+  squat and a 0.3 deg offset. Known answers A 180 N, B 5.0 N/(m/s), C 0.55
+  N/(m/s)²; noise-free A 182.20 (= A + C·w²), B 5.0000, C 0.55000. With
+  3 coasts per heading and noise 0.005 / 0.003 m/s² at 10 Hz, seeds 11–15
+  give A +0.8..+1.7 %, B −2.2..+1.9 %, C −0.5..+0.6 %, and μ 0.2998–0.3007.
+  **B is the weak coefficient:** at 0.03 m/s² noise one pair scatters B by
+  ~19 % (A 4 %, C 5 %), and the reported se covers the truth (10 seeds within
+  3.5 se), so H07.12 needs several coasts per heading. The standard errors
+  are not inflated: over 20 seeds the se/scatter ratio is 0.84 / 0.83 / 0.85
+  for A / B / C (tested 0.6–1.4), and a doubled se fails that test.
+  Leaving C·w² in A costs 1.2 % of A at 2 m/s of wind and 2.75 % at 3 m/s.
+  Refusals:
+  `single_direction`, `too_many_directions`, `speed_span_too_small`
+  (< 30 km/h), `too_few_samples`, `inputs_missing`, `non_physical` (A or
+  C ≤ 0). Tests: `tests/test_dyno.py::test_road_load_*`,
+  `::test_pitch_offset_*`.
+- [~] **H07.6 Rotating inertia.** **Do:** estimate `m_eff` per gear from
   wheel, driveline and engine inertia; first from nominal values stated as
   estimates, then from pulls in two gears over the same rpm band, where
   engine torque is the same and the difference in wheel force isolates the
   inertia term. Until measured, results carry an `inertia: estimated` flag.
   **Accept:** a synthetic two-gear test recovers a known engine inertia.
+  **Partial (2026-09-26): desk done; truck: real coefficients owed (H07.12
+  pulls in two gears).** `data/nissan-xterra-2008/dyno.yaml` `inertia` holds
+  the stated estimates, labelled as such: 4 road wheels, shape factor 0.7 of
+  m·r² on the profile's 40.3 kg wheel and 2.609 m tyre, 1.0 kg·m² output
+  driveline, 0.25 kg·m² engine side. That is ~119 kg wheel-side plus ~62 kg
+  engine-side in 3rd (η × 0.25 through the ratio, with η = 0.85). `Driveline.from_vehicle` builds `m_eff` per gear and
+  neutral from those and `VehicleParameters`, refusing `not_configured` and
+  naming every missing fact. Its `inertia` flag reads `estimated` until
+  `measured_engine` holds an `EngineInertiaRecord`, and `RoadLoadFit` carries
+  the flag.
+
+  **One inertia convention (revised 2026-09-26 after verification).** The
+  fit and the first generator both put η in the same place, which is
+  circular. The crank, flywheel and clutch sit upstream of the lossy
+  gearbox, so the wheel sees `η·N/r·(T − I_e·α)`, and the fit measures
+  `η·I_e`. `dyno.INERTIA_CONVENTION` names this.
+  - `fit_engine_inertia` pairs the two gears per 100 rpm bin and fits
+    `τ_b − τ_a = η·I_e·(α_a − α_b)`. It reports `reflected_kg_m2` (= η·I_e),
+    the assumed `driveline_efficiency` (1 − the profile's
+    `drivetrain_loss_fraction`) and `engine_kg_m2` (= reflected / η).
+  - `Driveline.effective_mass` uses η·I_e·N²/r².
+  - `EngineInertiaRecord` refuses an `engine_kg_m2` that is not
+    reflected / η, and any other `assumption` string.
+  - `Driveline.from_vehicle` refuses (`conditions_mismatch`) a measured
+    record whose η differs from the profile's.
+  - The `dyno.yaml` estimate is documented as the physical crank inertia.
+  - The generator now applies η = 0.85 at the crank. A lossless driveline
+    reads 0.153 for a true 0.18, and a test pins this.
+
+  Known answer 0.18 kg·m² (the driveline estimates 0.25):
+  - Noise-free: 0.1799 (reflected 0.1529).
+  - Three pulls in each of 2nd and 3rd at 0.03 m/s² noise, 100 Hz, 1 % grade:
+    0.1814 / 0.1829 / 0.1822 (+0.8 / +1.6 / +1.2 %, se 0.0027–0.0040) on
+    seeds 21–23.
+  - se/scatter over 12 seeds: 1.19 (tested 0.7–1.7).
+  - `pitch_offset_deg` is required: passing 0 instead of the true 0.3 deg
+    gives 0.259 (+44 %).
+
+  Wheel-side inertia stays an estimate, because two gears cannot separate
+  it. The measured crank inertia scales as 1/η_assumed, while `m_eff` uses
+  the measured product and is unaffected.
+  Refusals: `same_gear`, `rpm_overlap_too_small`,
+  `alpha_difference_too_small` (5th against 6th), `too_few_samples`,
+  `inputs_missing`, `invalid_input`, `non_physical`. Tests:
+  `tests/test_dyno.py::test_two_gear_*`, `::test_driveline_*`,
+  `::test_xterra_profile_*`.
 - [ ] **H07.7 The power computation.** **Do:** `src/analysis/dyno.py`: detect
   pulls (reuse `pull_report.detect_pulls` and `WotInventory` for
   wide-open-throttle provenance), refuse on gear change, clutch slip (rpm/speed
@@ -140,11 +356,34 @@ under GPS. Defects a dyno would inherit:
   estimate. **Accept:** a synthetic pull generated from a known torque curve,
   road load and grade is recovered within 2 % over the band; each refusal
   has a test and a named reason.
-- [ ] **H07.8 Repeatability before claims.** **Do:** a same-day, same-ROM
+- [~] **H07.8 Repeatability before claims.** **Do:** a same-day, same-ROM
   noise floor: at least three pull pairs, the spread per rpm band recorded as
   data with conditions (as N01 does for STFT). The analysis refuses to call
   two runs different when they differ by less than the floor. **Accept:** the
   floor loader and the refusal have tests.
+  **Partial (2026-09-26): desk done, acceptance met; truck: the Xterra's floor
+  itself owed (H07.12's three pull pairs).** `record_dyno_floor` resamples
+  each pull pair onto one 50 rpm grid and pools the per-point sd per rpm band.
+  It refuses `too_few_pull_pairs` (< 3), `direction_mismatch` (a single
+  direction), `not_same_day_same_rom` (gear, road, induction, tune revision or
+  date differ, naming the field), `no_spread` (identical curves) and
+  `no_overlap`. `DynoNoiseFloor` requires `FloorConditions`: gear, road, NA or
+  boosted, tune revision, date, and the baro, IAT and ambient ranges.
+  `n_pull_pairs ≥ 3` is enforced by the schema. `RunConditions` is the
+  required per-result conditions block from H07's rules. `compare_runs`
+  pairs the two curves at the same rpm and marks a band `differs` only at
+  ≥ 2 × √2·sd (`noise_floor.SIGMA_THRESHOLD`); anything below is
+  `within_floor`, and an uncovered band is `not_covered`. It refuses
+  `no_floor`, `conditions_mismatch` (gear, road, induction or quantity, both
+  named), `direction_mismatch` and `no_overlap`. The loader is
+  `load_dyno_profile`. A missing file gives `None`, never an invented floor.
+  An empty or non-mapping file raises `ValueError` naming the file, and a
+  misspelt key, a wrong `schema_version`, a negative band sd or broken YAML
+  also raises (`test_dyno_loader_refuses_malformed_files`).
+  `DynoProfile.noise_floor_for` names the recorded regimes on a mismatch and
+  refuses duplicate regimes. Tests: `tests/test_dyno.py::test_floor_*`,
+  `::test_compare_*`, `::test_profile_floor_*`,
+  `::test_committed_xterra_dyno_file_*`.
 - [ ] **H07.9 A workbench page.** **Do:** a `dyno` workbench job kind, an
   `/analysis/dyno` route through the single-flight child, and a tab on the
   Analysis page: power and torque against rpm per pull pair, overlay of runs,
