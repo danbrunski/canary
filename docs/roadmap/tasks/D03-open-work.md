@@ -1812,6 +1812,63 @@ live here now, so the documents could be archived
     `0x60D`, per the
     [Leaf DBC review](../../../data/analyses/2026-09-08-leaf-dbc-review.md)).
 
+- [~] **D03.34 Trim `default` polling to the channels something reads
+  (operator, 2026-09-26).** The Xterra `default` polled Mode 01 as `AUTO`:
+  every PID the ECM answers, 35 of them, plus a dozen probes it never answers.
+  - **Why.** On 2026-09-26 the operator asked whether `default` captures more
+    than useful anomaly detection needs. The evidence:
+    - The Isolation Forest cannot see a single-quantity fault of any size
+      (A04.1); many overlapping inputs dilute the one that broke.
+    - A02.11's realistic faults (MAF gain, lazy O2, thermostat, bank
+      imbalance, idle air leak) all appear in a handful of quantities:
+      airflow and load, per-bank trims, the wide-band A/F, coolant.
+    - The primary detectors are the behavior models and deterministic checks
+      (A06.4).
+    - A map of what reads each channel found ten PIDs that fed nothing but
+      the evidence-role IF/LSTM, or nothing at all.
+  - [x] **Dropped from Mode 01, desk done 2026-09-26.**
+    - Unread: 0x21 `DISTANCE_W_MIL`, 0x30 `WARMUPS_SINCE_DTC_CLEAR`, 0x31
+      `DISTANCE_SINCE_DTC_CLEAR`.
+    - Never changed on a 2.4 h drive: 0x32 `EVAP_VAPOR_PRESSURE`.
+    - IF/LSTM only: 0x43 `ABSOLUTE_LOAD`, 0x45 `RELATIVE_THROTTLE_POS`, 0x47
+      `ABS_THROTTLE_POS_B`, 0x49/0x4A `ACCEL_PEDAL_POS_D/E`, 0x4C
+      `COMMANDED_THROTTLE_ACTUATOR`. Broadcast 0x23D carries pedal and throttle
+      voltage at ~84 Hz.
+    - `RUN_TIME` and `EVAPORATIVE_PURGE` now poll at the slow cadence (weight
+      0.2 on the medium tier).
+    - `MONITOR_STATUS` stays, because PID 0x01 also carries `MIL_STATUS`.
+    - `data/nissan-xterra-2008/capture_profiles.yaml` now lists 25 PIDs
+      instead of `AUTO`, which also ends the probes of never-answered PIDs.
+    - The catalog's own starved-behavior-model check (`model_input_warnings`)
+      reports none.
+    - Tests: `tests/test_xterra_default_poll_list.py`. They pin every listed
+      name as pollable, keep PID 0x01, exclude the ten, check no behavior
+      model is starved, and check the slow cadence for the two demoted PIDs.
+  - [ ] **Trainers must not learn a Mode 01 channel that serving no longer
+    polls.** Trainers already refuse a `did:` feature the serving profile
+    never polls (`serving_mode22_dids`, used in `feature_pipeline.py`).
+    Mode 01 has no such gate, so the next retrain would learn the ten dropped
+    PIDs from the old corpus and then find them missing live. Add the same
+    gate for Mode 01 names, driven by the same saved catalog.
+  - [ ] **Keep the once-a-minute DIDs out of detector inputs.** The IF already
+    discards all 8 for low coverage; the LSTM takes them as mostly empty
+    columns. Apply one coverage rule to both.
+  - [ ] **Deploy with the owed retrain.** The deployed IF and LSTM read eight of
+    the dropped PIDs as features. After a pull without a retrain, those
+    inputs go silent. Both detectors are evidence-only, so nothing alerts, but
+    their evidence degrades until the retrain lands.
+  - [ ] **Truck.** On the first drive after deploy, confirm:
+    - the achieved rates;
+    - `MIL_STATUS` still arrives;
+    - the dropped PIDs are gone from the session.
+  - **Not decided here:**
+    - Poll PID 0x28, bank-2 wide-band A/F. The ECM advertises it and
+      `obd_registry` decodes it as `O2_WR_LAMBDA_S5`, but it is not in
+      `PID_DECODERS`, so it is never requested. It needs a test read.
+    - Raise the core fast set from ~0.75 Hz to at least 1 Hz.
+    - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
+      reason to keep the dropped throttle PIDs, and it was not built.
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi

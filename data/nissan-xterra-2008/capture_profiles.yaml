@@ -2,10 +2,55 @@ schema_version: 1
 profiles:
 - name: default
   description: Normal telemetry and anomaly-detection collection
-  notes: ''
+  notes: 'Mode 01 is an explicit list, not AUTO (operator, 2026-09-26; D03.34).
+    AUTO polled every PID this ECM answers, and a channel map of what reads each
+    one found ten that fed no detector, check, digest or display.
+
+
+    Dropped:
+
+    - 0x21 DISTANCE_W_MIL, 0x30 WARMUPS_SINCE_DTC_CLEAR and 0x31
+    DISTANCE_SINCE_DTC_CLEAR: nothing read them.
+
+    - 0x32 EVAP_VAPOR_PRESSURE: never changed on a 2.4 h drive.
+
+    - 0x43 ABSOLUTE_LOAD, 0x45 RELATIVE_THROTTLE_POS, 0x47 ABS_THROTTLE_POS_B,
+    0x49/0x4A ACCEL_PEDAL_POS_D/E and 0x4C COMMANDED_THROTTLE_ACTUATOR: only the
+    evidence-role IF/LSTM read them. Broadcast 0x23D carries pedal and throttle
+    voltage at ~84 Hz.
+
+
+    RUN_TIME and EVAPORATIVE_PURGE poll at the slow cadence (weight 0.2 on the
+    medium tier). MONITOR_STATUS stays because PID 0x01 also carries MIL_STATUS.
+    A listed name is the only way in: AUTO also probed a dozen PIDs this ECM
+    never answers.'
   experimental: false
   mode01:
-    AUTO: 1.0
+    RPM: 1.0
+    SPEED: 1.0
+    MAF: 1.0
+    ENGINE_LOAD: 1.0
+    THROTTLE_POS: 1.0
+    TIMING_ADVANCE: 1.0
+    O2_WR_LAMBDA_S1: 1.0
+    O2_B1S2: 1.0
+    O2_B2S2: 1.0
+    CONTROL_MODULE_VOLTAGE: 1.0
+    FUEL_STATUS: 1.0
+    COOLANT_TEMP: 1.0
+    INTAKE_TEMP: 1.0
+    SHORT_FUEL_TRIM_1: 1.0
+    SHORT_FUEL_TRIM_2: 1.0
+    LONG_FUEL_TRIM_1: 1.0
+    LONG_FUEL_TRIM_2: 1.0
+    COMMANDED_EQUIV_RATIO: 1.0
+    RUN_TIME: 0.2
+    EVAPORATIVE_PURGE: 0.2
+    MONITOR_STATUS: 1.0
+    BAROMETRIC_PRESSURE: 1.0
+    FUEL_LEVEL: 1.0
+    CATALYST_TEMP_B1S1: 1.0
+    CATALYST_TEMP_B2S1: 1.0
   mode01_batch_groups: []
   mode22:
   - ECM_RPM
