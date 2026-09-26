@@ -435,6 +435,13 @@ training envelope". That is useful to know. It is not a diagnosis.
     pass. The envelope check reads the buffer's condition columns, at 39 µs
     per window on the laptop. A lower-cadence screen could keep the check
     every tick and run the forward pass every n.
+  - *Option added 2026-09-26 ([P02](P02-raw-reads-evaluation-and-pi-costs.md)):*
+    keep the forward pass on every tick but make it cheaper, using int8
+    dynamic quantization or an ONNX Runtime export. The gain is unmeasured
+    here. It is judged by replay score parity: scores within a stated
+    tolerance and identical verdicts on a held-out session. The latest
+    measurement is `stages.sequence` at a median of 344 ms per tick on the
+    truck (2026-09-24, above).
 - [x] **A06.7 — Update the docs that describe the detectors' role.**
   *Done 2026-09-23*, citing A02.11
   (`2026-09-23-a02-detector-baseline.md`: IF 1.18 [0.00, 3.94] per

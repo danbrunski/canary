@@ -1,5 +1,18 @@
 # Implementation task index
 
+**Status 2026-09-26: P01 and P02, pipeline memory and time.**
+[`P01-derived-session-frames.md`](P01-derived-session-frames.md) took the
+training and evaluation chain from 12–15 GB per long session to about 1.3 GB.
+It does this by reducing sessions before the pivot and storing each 1 Hz frame
+once. [`P02-raw-reads-evaluation-and-pi-costs.md`](P02-raw-reads-evaluation-and-pi-costs.md)
+lists what remains:
+- readers that still load whole sessions: the digest on the Pi,
+  `read_channels`;
+- the evaluation harness's own compute;
+- the Pi's write path and tick.
+
+P02.1–P02.6 are desk items; P02.7–P02.10 need the Pi.
+
 **Status 2026-09-24: B02 and W02 archived.** Every box in both is ticked;
 they moved to [`archive/`](archive/), and the links in B00, W00 and
 `../workbench-workflows.md` point there.
