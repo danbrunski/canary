@@ -47,7 +47,6 @@ from src.preprocessing.resampler import (
     TIMESTAMP_COLUMN,
     is_flag_column,
     resample_config_for,
-    resample_long,
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
@@ -472,14 +471,21 @@ def iter_session_numeric_parts(
     align_ns: int,
     on_read: Bindings | None | Literal["current"] = "current",
 ) -> Iterator[pd.DataFrame]:
-    """:func:`_read_session_numeric`, yielded in time-disjoint parts.
+    """The ``value_number`` chain's rows (:func:`_read_numeric_chunks`), in
+    time-disjoint parts: the only way that chain reads a session (P02.1).
 
-    Same grouping as :func:`iter_session_parts`, but a part also ends only on
-    an ``align_ns`` bin edge (epoch-floored), so a per-tick aggregate
-    (:func:`_decimate_imu_long`) never sees half a tick. Each part's rows keep
+    Chunks are grouped as :func:`iter_session_parts` groups them, and a part
+    ends only on an ``align_ns`` bin edge (epoch-floored), so a per-tick
+    aggregate (:func:`_decimate_imu_long`) never sees half a tick. The edge is
+    made by carrying each part's last, possibly incomplete, bin into the next
+    part rather than by requiring chunk boundaries to fall on one: the writer
+    starts a chunk right after the last, in the same second almost always, so
+    requiring an aligned chunk boundary left ``2026-09-18T144215`` (558 chunks)
+    in one part and ``2026-09-20T152758`` (1,980) in two -- the whole session
+    in memory, which P02.1 measured before fixing it. Each part's rows keep
     their whole-session relative order for any one channel and timestamp, the
     only order ``resample_long`` reads. Unreadable chunks are skipped silently,
-    as :func:`_read_session_numeric` skips them.
+    as this chain always has.
 
     ``on_read`` is the catalog the ``decoded`` rows are decoded with
     (:func:`_read_numeric_chunks`); ``"current"`` loads it, and a cache that
@@ -488,24 +494,40 @@ def iter_session_numeric_parts(
     candidates = sorted(session_dir.glob(PARQUET_PATTERN))
     if not candidates:
         raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
-    groups, _skipped = _time_disjoint_chunk_groups(candidates, target_rows, align_ns=align_ns)
+    groups, _skipped = _time_disjoint_chunk_groups(candidates, target_rows)
     catalog = on_read_catalog() if on_read == "current" else on_read
-    yielded = False
+    carry: pd.DataFrame | None = None
     for group in groups:
         frames = _read_numeric_chunks(group, catalog)
         if not frames:
             continue
-        yielded = True
         frame = pd.concat(frames, ignore_index=True)
         frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
         frame["session"] = session_dir.name
         frame["source_channel"] = (
             frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
         )
+        frame = frame[["session", "timestamp", "source_channel", "value_number"]]
+        if carry is not None:
+            # Every carried row is earlier than this group's first (groups are
+            # time-disjoint and in time order), so the stable sort keeps both
+            # sides' order.
+            frame = pd.concat([carry, frame], ignore_index=True)
         frame = frame.sort_values("timestamp", kind="stable").reset_index(drop=True)
-        yield frame[["session", "timestamp", "source_channel", "value_number"]]
-    if not yielded:
+        stamps = pd.DatetimeIndex(frame["timestamp"])
+        ns = stamps.as_unit("ns").tz_localize(None).to_numpy().view(np.int64)
+        valid = int(np.count_nonzero(stamps.notna()))  # NaT sorts last
+        split = (
+            int(np.searchsorted(ns[:valid], int(ns[valid - 1]) // align_ns * align_ns))
+            if valid
+            else 0
+        )
+        carry = frame.iloc[split:]
+        if split:
+            yield frame.iloc[:split].reset_index(drop=True)
+    if carry is None:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
+    yield carry.reset_index(drop=True)
 
 
 #: The columns the ``value_number`` chain keeps.
@@ -553,7 +575,7 @@ def _read_numeric_chunks(paths: Sequence[Path], catalog: Bindings | None) -> lis
 
 
 def _time_disjoint_chunk_groups(
-    candidates: Sequence[Path], target_rows: int, *, align_ns: int | None = None
+    candidates: Sequence[Path], target_rows: int
 ) -> tuple[list[list[Path]], list[str]]:
     """Group chunks into time-disjoint parts for :func:`iter_session_parts`.
 
@@ -585,12 +607,7 @@ def _time_disjoint_chunk_groups(
     current_hi: pd.Timestamp | None = None
     current_rows = 0
     for lo, hi, rows, path in spans:
-        if (
-            current
-            and current_hi is not None
-            and _starts_after(lo, current_hi, align_ns)
-            and current_rows >= target_rows
-        ):
+        if current and current_hi is not None and lo > current_hi and current_rows >= target_rows:
             groups.append(sorted(current, key=lambda p: p.name))
             current, current_hi, current_rows = [], None, 0
         current.append(path)
@@ -599,13 +616,6 @@ def _time_disjoint_chunk_groups(
     if current:
         groups.append(sorted(current, key=lambda p: p.name))
     return groups, skipped
-
-
-def _starts_after(lo: pd.Timestamp, hi: pd.Timestamp, align_ns: int | None) -> bool:
-    """``lo`` is strictly after ``hi`` (and in a later ``align_ns`` bin, if given)."""
-    if align_ns is None:
-        return bool(lo > hi)
-    return bool(lo.value // align_ns > hi.value // align_ns)
 
 
 def _chunk_time_span(meta: Any) -> tuple[pd.Timestamp, pd.Timestamp] | None:
@@ -642,24 +652,6 @@ def read_sessions(
         ["session", "timestamp", "source", "channel"],
         kind="stable",
     )
-
-
-def _read_session_numeric(session_dir: Path) -> pd.DataFrame:
-    """Read only columns needed by the numeric batch resampler, ``decoded``
-    rows decoded on read (:func:`_read_numeric_chunks`)."""
-    candidates = sorted(session_dir.glob(PARQUET_PATTERN))
-    if not candidates:
-        raise FileNotFoundError(f"no {PARQUET_PATTERN} files in {session_dir}")
-    frames = _read_numeric_chunks(candidates, on_read_catalog())
-    if not frames:
-        raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
-    frame = pd.concat(frames, ignore_index=True)
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-    frame["session"] = session_dir.name
-    frame["source_channel"] = (
-        frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
-    )
-    return frame[["session", "timestamp", "source_channel", "value_number"]]
 
 
 def _decimate_imu_long(frame: pd.DataFrame, *, hz: float) -> pd.DataFrame:
@@ -860,27 +852,24 @@ def resample_and_segment(
     sessions = [Path(path) for path in session_dirs]
     resample_config = resample_config_for(config)
     if value == "value_number":
-        # Process one session at a time and concatenate only the reduced grids.
-        # The previous chain pivoted millions of mostly-unique raw timestamps
-        # before reducing them to 1 Hz, creating a multi-gigabyte sparse frame.
-        # With a derived store active (laptop tools, P01.2) each session's
-        # reduced cells are read back or built instead; the output is the same.
-        # The store is never active on the Pi (``active_store``), where the
-        # digest and workbench children keep this in-memory path.
-        from src.preprocessing.derived import resample_numeric_reduced
+        # One session at a time, each read part by part (P02.1): a part of
+        # ~SESSION_PART_ROWS is reduced to the cells the resampler reads before
+        # the next is read, so memory is one part plus the session's reduced
+        # cells, never the whole session. That holds with or without a store:
+        # the store (laptop tools, P01.2) only reads back the same cells
+        # instead of rebuilding them. It is never active on the Pi
+        # (``active_store``), where the digest and classification children run
+        # this same bounded chain.
+        from src.preprocessing.derived import reduce_numeric_session, resample_numeric_reduced
         from src.preprocessing.derived_store import active_store
 
         store = active_store()
         reduced = [
             resample_numeric_reduced(
-                store.load_numeric(session, resample_config)[0], resample_config
-            )
-            if store is not None
-            else resample_long(
-                _decimate_imu_long(
-                    _read_session_numeric(session), hz=config.preprocessing.resample_hz
-                ),
-                config=resample_config,
+                store.load_numeric(session, resample_config)[0]
+                if store is not None
+                else reduce_numeric_session(session, resample_config),
+                resample_config,
             )
             for session in sessions
         ]

@@ -426,6 +426,10 @@ def read_delivery_inputs(
                 bindings_path=bindings_path,
                 dids_path=dids_path,
             )
+        except MemoryError:
+            # Out of memory is the child's refusal, never "inputs never
+            # captured" (P02.1 verification, 2026-09-26).
+            raise
         except Exception as exc:  # an unresolvable spec is itself a missing input
             frame = pd.DataFrame(columns=_EMPTY_LONG)
             if role != "sentinel":

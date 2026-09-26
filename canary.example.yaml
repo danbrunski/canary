@@ -460,21 +460,26 @@ dashboard:
 #   lstm_artifact: lstm_autoencoder/model.pt                  # relative to models_dir
 #   model_poll_seconds: 30.0
 #   retention_sweep_seconds: 3600.0
-#   # Trip-end digest guards (D03.6). A digest loads the whole session twice
-#   # and peaks at O(rows x channels): 5,483 MB measured for 2,622,370 rows,
-#   # to emit 1,143. Twice in one day that took the daemon out -- once
-#   # OOM-killed, once wedged for 38 minutes because the Pi has swap.
-#   # The digest now runs in a child process whose address space is capped, so
-#   # an over-large one raises MemoryError in the child instead of letting the
+#   # Trip-end digest guards (D03.6, P02.1). Before D03.6 a digest loaded the
+#   # whole session twice and pivoted it at raw resolution: 5,483 MB for
+#   # 2,622,370 rows, to emit 1,143. Twice in one day that took the daemon
+#   # out -- once OOM-killed, once wedged for 38 minutes because the Pi had swap.
+#   # The digest runs in a child process whose address space is capped, so an
+#   # over-large one raises MemoryError in the child instead of letting the
 #   # kernel pick a victim. digest_address_space_mb unset derives the cap from
 #   # physical RAM (half, clamped to 1-4 GiB) -> 4 GiB on the 8 GB Pi.
-#   # digest_row_budget unset derives the row limit from that cap and
-#   # DIGEST_PEAK_BYTES_PER_ROW (800 B per stored row, twice the measured peak
-#   # where the budget binds; ~5.4 M rows on the Pi), so the two cannot
-#   # state different limits; a session over it is refused with a
-#   # digest_skipped.json naming the count and the budget. 0 disables the row
-#   # check but keeps the cap.
+#   # Since P02.1 the digest reads a session part by part, so its peak follows
+#   # the recorded span, not the rows (~290 MB + ~28 KB per second measured;
+#   # 503 MB for a 12.8 M-row, 2 h 23 min drive that had peaked at 4,265 MB).
+#   # digest_span_budget_seconds unset derives the span limit from the cap
+#   # (DIGEST_CHAIN_FIXED_BYTES + DIGEST_CHAIN_BYTES_PER_SECOND: ~13.7 h for a
+#   # 4 GiB child). digest_row_budget bounds whole-session raw reads: a
+#   # capture's tuning section and the workbench jobs; unset it derives from
+#   # the cap and DIGEST_PEAK_BYTES_PER_ROW (800 B per stored row, ~5.4 M rows
+#   # on the Pi). A session over either is refused with a digest_skipped.json
+#   # naming its size and the budget; 0 disables a check but keeps the cap.
 #   digest_row_budget: null
+#   digest_span_budget_seconds: null
 #   digest_address_space_mb: null
 #   broadcaster_queue_size: 100
 #   control_token_env: CANARY_CONTROL_TOKEN

@@ -9,8 +9,10 @@ own (AGENTS.md, "No analysis on the Pi while it collects"):
    collector must not lose memory or CPU to a report; a nice-19 pandas run once
    cost a 3-minute outage and 150k dropped records. The refusal names the
    profile and the laptop path instead of competing.
-2. **Row preflight.** A session over ``daemon.digest_row_budget`` is not read;
-   it is reported as ``over_budget`` beside the result.
+2. **Size preflight.** A session over ``daemon.digest_row_budget`` (raw
+   reads), or over ``daemon.digest_span_budget_seconds`` for ``classify``,
+   which reads part by part (P02.1), is not read; it is reported as
+   ``over_budget`` beside the result.
 3. **One child at a time.** The spawn child and ``RLIMIT_AS`` ceiling are the
    digest's own (:mod:`src.control.trip_end`), and the job waits for neither:
    an identical request in flight is shared, anything else — including a
@@ -26,7 +28,7 @@ from concurrent.futures import BrokenExecutor, Executor
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
 from src.analysis.tune_revisions import resolve_session_revision
@@ -50,9 +52,10 @@ from src.control.trip_end import (
     any_digest_in_flight,
     digest_address_space_bytes,
     digest_row_budget,
+    digest_span_budget_seconds,
     limit_address_space,
 )
-from src.preprocessing.loader import count_session_rows
+from src.preprocessing.loader import count_session_rows, session_time_span_seconds
 from src.profiles import active_registry, profile_dir
 from src.session import session_sort_key
 
@@ -164,13 +167,20 @@ def select_sessions(
     *,
     sessions: list[str],
     revision: str | None = None,
+    reads: Literal["raw", "value_number"] = "raw",
 ) -> Selection:
     """Resolve named sessions and/or every session on ``revision``.
 
     Ordered by :func:`session_started_at`, never by directory name. Named
     sessions beyond the limit are refused; a revision selection keeps the
-    newest and names the rest in ``omitted``. Sessions over the row budget
-    come back as ``over_budget`` rather than being read.
+    newest and names the rest in ``omitted``. Sessions over the budget come
+    back as ``over_budget`` rather than being read.
+
+    ``reads`` says what the job reads, which decides the budget: ``"raw"``
+    (the default, every analysis job) reads whole sessions of raw rows and is
+    bounded by ``digest_row_budget``; ``"value_number"`` (``classify``) runs
+    the part-by-part ``resample_and_segment`` chain (P02.1), whose peak
+    follows the recorded span, and is bounded by ``digest_span_budget_seconds``.
     """
     root = config.collection.storage_path
     chosen: dict[str, Path] = {}
@@ -218,24 +228,36 @@ def select_sessions(
                 ),
             },
         )
-    budget = digest_row_budget(config)
     ordered = sorted(chosen.values(), key=_started)
     usable: list[Path] = []
     over: list[Unavailable] = []
     for session in ordered:
-        rows = count_session_rows(session)
-        if budget and rows is not None and rows > budget:
-            over.append(
-                Unavailable(
-                    session.name,
-                    "over_budget",
-                    f"{rows:,} rows exceeds the {budget:,}-row analysis budget; "
-                    "analyse it on the laptop",
-                )
-            )
+        reason = _over_budget(session, config, reads)
+        if reason is not None:
+            over.append(Unavailable(session.name, "over_budget", reason))
         else:
             usable.append(session)
     return Selection(usable=usable, over_budget=over, omitted=omitted)
+
+
+def _over_budget(
+    session: Path, config: CanaryConfig, reads: Literal["raw", "value_number"]
+) -> str | None:
+    """Why ``session`` is over the budget for what the job reads, or ``None``."""
+    if reads == "value_number":
+        span_budget = digest_span_budget_seconds(config)
+        span = session_time_span_seconds(session)
+        if span_budget and span is not None and span > span_budget:
+            return (
+                f"{span / 3600:,.2f} h of recorded span exceeds the "
+                f"{span_budget / 3600:,.2f} h analysis budget; analyse it on the laptop"
+            )
+        return None
+    budget = digest_row_budget(config)
+    rows = count_session_rows(session)
+    if budget and rows is not None and rows > budget:
+        return f"{rows:,} rows exceeds the {budget:,}-row analysis budget; analyse it on the laptop"
+    return None
 
 
 def run_workbench_job(

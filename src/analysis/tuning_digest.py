@@ -182,6 +182,17 @@ class TuningDigest:
         }
 
 
+def has_tuning_section(session_dir: Path) -> bool:
+    """Whether a digest of ``session_dir`` computes this section: it is a
+    capture (a manifest names its profile, or its directory is ``_``-prefixed).
+
+    The section reads the whole session raw (``read_channels``), unlike the
+    rest of the digest, so the digest's pre-flight budgets such a session by
+    its rows (``digest_preflight``); both ask here, so they cannot disagree.
+    """
+    return _capture_profile_name(session_dir) is not None or session_dir.name.startswith("_")
+
+
 def _capture_profile_name(session_dir: Path) -> str | None:
     manifest = read_capture_manifest(session_dir)
     return None if manifest is None else manifest.profile
@@ -217,11 +228,19 @@ def _read_specs(
         return {}
     try:
         frame = read_channels(session_dir, specs, acquired_time=acquired_time)
+    except MemoryError:
+        # Out of memory is the digest child's to report (child_out_of_memory,
+        # src.control.trip_end), never an absent channel or a failed section:
+        # swallowed here, a capture over the ceiling read as "inputs never
+        # captured" (P02.1, 2026-09-26).
+        raise
     except Exception:  # noqa: BLE001 — fall back to per-spec so one bad name is not fatal
         out: dict[str, pd.DataFrame] = {}
         for spec in specs:
             try:
                 rows = read_channels(session_dir, [spec], acquired_time=acquired_time)
+            except MemoryError:
+                raise
             except Exception:  # noqa: BLE001, PERF203 — an absent channel is normal
                 continue
             if not rows.empty:
@@ -399,6 +418,8 @@ def _measured_afr_summary(
             continue
         try:
             samples = read_channels(session_dir, [provider], acquired_time=True)
+        except MemoryError:
+            raise
         except Exception:  # noqa: BLE001 — capability report carries the ordinary reason
             continue
         afr = voltage_to_afr(samples["value"], transfer).dropna()
@@ -500,6 +521,8 @@ def _infer_wot(
     """
     try:
         frame = read_aligned(session_dir, [rpm_spec, demand_spec], grid="1s", require_all=True)
+    except MemoryError:
+        raise
     except Exception as exc:  # noqa: BLE001
         return WotInventory(0, 0, [], "unavailable", reason=f"{demand_spec}: {exc}")
     if frame.empty:
@@ -563,6 +586,8 @@ def _infer_wot(
                     & (with_afr[rpm_spec] > criterion.rpm_floor)
                 ).sum()
             )
+        except MemoryError:
+            raise
         except Exception:  # noqa: BLE001
             measured = 0
     return WotInventory(
@@ -622,6 +647,8 @@ def _wot_inventory(
                         by_band=_bands(per_second, load_wot.rpm_bands),
                         source="tagged",
                     )
+        except MemoryError:
+            raise
         except Exception:  # noqa: BLE001
             pass
     # A DID-continuous capture must never borrow Mode 01 to make an empty
@@ -668,6 +695,8 @@ def _wot_inventory(
             grid="1s",
             require_all=True,
         )
+    except MemoryError:
+        raise
     except Exception as exc:  # noqa: BLE001
         return WotInventory(0, 0, [], "unavailable", reason=f"obd:RPM/obd:ENGINE_LOAD: {exc}")
     if frame.empty:
@@ -700,6 +729,8 @@ def _wot_inventory(
         paired = int(
             ((with_afr["obd:RPM"] > rpm_floor) & (with_afr["obd:ENGINE_LOAD"] > load_floor)).sum()
         )
+    except MemoryError:
+        raise
     except Exception:  # noqa: BLE001
         paired = 0
     # The Mode 01 path gates on measured load, not on a tag, so it is inferred
@@ -756,6 +787,8 @@ def _did_pull_inventory(
         return {"available": False, "reason": "confirmed RPM provider is unavailable"}
     try:
         rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
+    except MemoryError:
+        raise
     except Exception:  # noqa: BLE001 — surfaced as absent evidence below
         return {"available": False, "reason": "RPM provider could not be read"}
     if rpm.empty:
@@ -792,6 +825,8 @@ def _did_pull_inventory(
             continue
         try:
             samples = read_channels(session_dir, [provider], acquired_time=True)
+        except MemoryError:
+            raise
         except Exception:  # noqa: BLE001 — optional evidence stays unavailable
             evidence[label] = None
             continue
@@ -1302,10 +1337,9 @@ def compute_tuning_digest(
     notes are assembled in a fixed order so the digest reads the same way
     whichever sections had something to say.
     """
-    profile = _capture_profile_name(session_dir)
-    is_capture = profile is not None or session_dir.name.startswith("_")
-    if not is_capture:
+    if not has_tuning_section(session_dir):
         return None
+    profile = _capture_profile_name(session_dir)
 
     inputs = _digest_inputs(session_dir, config, profile)
     calibration = inputs.context.calibration
@@ -1366,4 +1400,4 @@ def compute_tuning_digest(
     )
 
 
-__all__ = ["TUNING_SCHEMA_VERSION", "TuningDigest", "compute_tuning_digest"]
+__all__ = ["TUNING_SCHEMA_VERSION", "TuningDigest", "compute_tuning_digest", "has_tuning_section"]

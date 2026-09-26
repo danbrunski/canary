@@ -352,11 +352,11 @@ its own criteria frozen before its data.
 - No `/boot/firmware` edit and no Pi reboot from the road unless the prompt
   names the stop: a Pi that fails to boot loses the drive. Rank boot-config
   candidates in the driveway, where idle bus traffic is enough.
-- The trip-end digest refuses sessions over its row budget (see
-  `DIGEST_PEAK_BYTES_PER_ROW`; ~13.6 min of `default` driving as of
-  2026-09-18). Until D03.6 lands: when the operator says they are ~10 min
-  from parking, restart the daemon and reopen the window so the final
-  session is small enough to digest.
+- The trip-end digest is budgeted by recorded span since P02.1 (~13.7 h
+  for the Pi's 4 GiB child, `digest_span_budget_seconds`), so an ordinary
+  drive of any realistic length digests; never restart the daemon to keep a
+  session small. A capture is also budgeted by rows (its tuning section reads
+  it whole until P02.2: `DIGEST_PEAK_BYTES_PER_ROW`, ~5.4 M stored rows).
 - Code gate before any commit: whole-repo ruff + mypy + the touched area's
   tests, targeted only. Tests rewrite `data/<vehicle>/capture_profiles.yaml`:
   back it up first and restore your version. Explicit pathspecs. Work in the

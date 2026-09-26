@@ -1019,25 +1019,30 @@ class DaemonConfig(_Strict):
     #: ``scope_config`` always sets it, per vehicle (R05.15: it used to be one
     #: directory inside ``jobs/`` shared by every profile).
     calibration_dir: Path = CONTROL_DIR / "calibration"
-    #: Ceiling on the row count a trip-end digest will load (D03.6). Peak
-    #: memory for a digest is O(rows x channels) because the wide pivot runs
-    #: at raw timestamp resolution *before* the 1 Hz resample: 5,483 MB
-    #: measured for a 2,622,370-row session, to produce 1,143 final rows. On
-    #: the 8 GB Pi the cliff is bracketed between ~4.5 M rows (a session that
-    #: completed) and ~5.9 M rows (the daemon OOM-killed), so 4 M sits just
-    #: inside the known-good side. A session over the budget gets a
+    #: Ceiling on the stored rows a whole-session *raw* read in the digest
+    #: child may attempt (D03.6): a capture's tuning section (``read_channels``
+    #: with no row filter) and the workbench jobs. Since P02.1 the rest of the
+    #: digest reads part by part and is bounded by
+    #: ``digest_span_budget_seconds`` instead. A session over the budget gets a
     #: ``digest_skipped.json`` naming the count and the budget instead of an
     #: attempt; ``0`` disables the check.
     #:
     #: ``None`` (the default) **derives** the budget from the child's
     #: address-space ceiling and the measured per-row peak, rather than
     #: stating a second number that can drift out of step with the first. A
-    #: hand-picked 4 M sat against a 4 GiB ceiling that only covers ~2 M rows,
+    #: hand-picked 4 M sat against a 4 GiB ceiling that only covered ~2 M rows,
     #: so sessions in between passed the budget, spawned a child and died of
     #: ``MemoryError`` — safe, but it reported a memory anomaly where the
-    #: honest answer was "this is simply larger than what fits". One number,
-    #: one place to change when the O(rows x channels) cost is fixed.
+    #: honest answer was "this is simply larger than what fits".
     digest_row_budget: int | None = Field(default=None, ge=0)
+    #: Ceiling, in seconds of recorded span (Parquet footer timestamps), on
+    #: the session a digest or a ``classify`` job may attempt (P02.1). Their
+    #: ``value_number`` chain holds one part of raw rows at a time plus the
+    #: session's reduced cells and 1 Hz frames, so its peak follows the span,
+    #: not the rows. ``None`` derives it from the child's address-space ceiling
+    #: (``src.control.trip_end.digest_span_budget_seconds``: ~13.7 h for a
+    #: 4 GiB child); ``0`` disables the check (the ceiling still applies).
+    digest_span_budget_seconds: float | None = Field(default=None, ge=0)
     #: Hard ``RLIMIT_AS`` ceiling, in MiB, applied inside the digest child
     #: process before it touches any data. This is the backstop that holds
     #: even if the row budget is raised or the memory cost regresses: an

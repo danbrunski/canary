@@ -40,7 +40,11 @@ from src.analysis.session_classifier import classify_session
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
-from src.preprocessing.loader import count_session_rows, resample_and_segment
+from src.preprocessing.loader import (
+    count_session_rows,
+    resample_and_segment,
+    session_time_span_seconds,
+)
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
@@ -64,13 +68,20 @@ SCHEMA_VERSION = 2
 #: daemon was OOM-killed computing looked exactly like a session nobody had
 #: got round to.
 DIGEST_SKIPPED_FILENAME = "digest_skipped.json"
-SKIP_SCHEMA_VERSION = 1
+#: 2 (P02.1): adds ``span_seconds`` / ``span_budget_seconds``, and
+#: ``row_budget`` is set only where a row budget applies (a capture's tuning
+#: section); an ordinary drive's is ``null``.
+SKIP_SCHEMA_VERSION = 2
 
 #: The directory is replay output / quarantine / scratch, not a recording of
 #: this vehicle (``src.control.sessions.is_session_dir_name``).
 REASON_NOT_A_SESSION = "not_a_session"
-#: More rows than ``daemon.digest_row_budget`` allows to be loaded at once.
+#: A capture whose tuning section would read more rows than
+#: ``daemon.digest_row_budget`` allows to be loaded at once.
 REASON_OVER_ROW_BUDGET = "over_row_budget"
+#: A longer recorded span than ``daemon.digest_span_budget_seconds`` allows the
+#: ``value_number`` chain (P02.1).
+REASON_OVER_SPAN_BUDGET = "over_span_budget"
 #: The child hit its ``RLIMIT_AS`` ceiling (or the machine's own limit).
 REASON_CHILD_OUT_OF_MEMORY = "child_out_of_memory"
 #: The child was still working when the timeout expired and was terminated.
@@ -162,8 +173,10 @@ class DigestSkipped:
     Written whenever the computation is refused up front or fails in the
     child, so "the digest was skipped: 6,400,000 rows over the 4,000,000-row
     budget" and "the digest was never attempted" are different things on
-    disk. ``row_count`` is the Parquet footer count (no data read), ``None``
-    when nothing readable was there to count.
+    disk. ``row_count`` is the Parquet footer count and ``span_seconds`` the
+    footer timestamps' span (no data read), ``None`` when nothing readable was
+    there to count. ``row_budget`` is ``None`` where no row budget applies:
+    since P02.1 only a capture's tuning section still reads a session whole.
     """
 
     schema_version: int
@@ -179,6 +192,8 @@ class DigestSkipped:
     #: ``classifier_version``: a later schema may compute what this one
     #: declined, and a reader must be able to see the refusal is stale.
     digest_schema_version: int = SCHEMA_VERSION
+    span_seconds: float | None = None
+    span_budget_seconds: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -189,8 +204,41 @@ class DigestSkipped:
             "recorded_at": self.recorded_at,
             "row_count": self.row_count,
             "row_budget": self.row_budget,
+            "span_seconds": self.span_seconds,
+            "span_budget_seconds": self.span_budget_seconds,
             "digest_schema_version": self.digest_schema_version,
         }
+
+
+@dataclass(frozen=True)
+class DigestBudgets:
+    """A session's size, and the budgets that apply to its digest.
+
+    Footer reads only. The one place that decides which budgets apply, so the
+    pre-flight and every refusal sidecar written after it (the child's
+    failures, ``no_speed_source``) name the same numbers.
+    """
+
+    row_count: int | None
+    #: Set only when the digest has a tuning section (a capture), the one part
+    #: that still reads the session whole; ``None`` otherwise, or when disabled.
+    row_budget: int | None
+    span_seconds: float | None
+    #: ``None`` when disabled.
+    span_budget_seconds: float | None
+
+    @classmethod
+    def of(cls, session_dir: Path, config: CanaryConfig) -> DigestBudgets:
+        from src.analysis.tuning_digest import has_tuning_section
+        from src.control.trip_end import digest_row_budget, digest_span_budget_seconds
+
+        rows = digest_row_budget(config) if has_tuning_section(session_dir) else 0
+        return cls(
+            row_count=count_session_rows(session_dir),
+            row_budget=rows or None,
+            span_seconds=session_time_span_seconds(session_dir),
+            span_budget_seconds=digest_span_budget_seconds(config) or None,
+        )
 
 
 def _skipped(
@@ -198,8 +246,7 @@ def _skipped(
     reason: str,
     detail: str,
     *,
-    row_count: int | None,
-    row_budget: int | None,
+    budgets: DigestBudgets,
     now: datetime | None = None,
 ) -> DigestSkipped:
     return DigestSkipped(
@@ -208,8 +255,10 @@ def _skipped(
         reason=reason,
         detail=detail,
         recorded_at=_format_timestamp(datetime.now(UTC) if now is None else now),
-        row_count=row_count,
-        row_budget=row_budget,
+        row_count=budgets.row_count,
+        row_budget=budgets.row_budget,
+        span_seconds=budgets.span_seconds,
+        span_budget_seconds=budgets.span_budget_seconds,
     )
 
 
@@ -221,42 +270,60 @@ def digest_preflight(
 ) -> DigestSkipped | None:
     """The gate every digest computation passes, or ``None`` to go ahead.
 
-    Two refusals, both cheap (a name match and Parquet footer metadata — no
-    data read), and both here rather than at a call site because the caller
-    that forgot them is the one that took the daemon down:
+    Three refusals, all cheap (a name match, a capture manifest and Parquet
+    footer metadata — no data read), and all here rather than at a call site
+    because the caller that forgot them is the one that took the daemon down:
 
     * the directory is not a session (``_replay-*`` and friends) — the HTTP
       read has always refused those via ``resolve_session``; the trip-end
       hook did not, and computed a digest over 5.9 M replayed rows;
-    * the session holds more rows than ``daemon.digest_row_budget``. Peak
-      memory is O(rows x channels) because the pivot runs before the
-      resample: 5,483 MB measured for 2,622,370 rows, and the 8 GB Pi's
-      cliff is bracketed between ~4.5 M rows (completed) and ~5.9 M rows
-      (OOM-killed). The budget refuses instead of trying and dying.
+    * its recorded span is over ``daemon.digest_span_budget_seconds``. Since
+      P02.1 the ``value_number`` chain reads the session part by part, so its
+      peak follows the span (and channel count), not the rows: ~290 MB plus
+      ~28 KB per second, measured (``src.control.trip_end``);
+    * it is a capture, whose tuning section still reads it whole, with more
+      rows than ``daemon.digest_row_budget``. Before P02.1 every digest was
+      budgeted this way: the whole-session pivot peaked at 5,483 MB for
+      2,622,370 rows, and the 8 GB Pi's cliff was bracketed between ~4.5 M
+      rows (completed) and ~5.9 M rows (OOM-killed).
     """
     from src.control.sessions import is_session_dir_name
-    from src.control.trip_end import digest_row_budget
+    from src.control.trip_end import digest_row_budget, digest_span_budget_seconds
 
-    # Derived from the child's address-space ceiling when unset, so the budget
-    # and the ceiling cannot state different limits (see digest_row_budget).
-    budget = digest_row_budget(config)
     if not is_session_dir_name(session_dir.name):
+        # Derived from the child's address-space ceiling when unset, so a
+        # budget and the ceiling cannot state different limits.
         return _skipped(
             session_dir,
             REASON_NOT_A_SESSION,
             f"{session_dir.name!r} is not a live session or capture directory",
-            row_count=None,
-            row_budget=budget or None,
+            budgets=DigestBudgets(
+                row_count=None,
+                row_budget=digest_row_budget(config) or None,
+                span_seconds=None,
+                span_budget_seconds=digest_span_budget_seconds(config) or None,
+            ),
             now=now,
         )
-    rows = count_session_rows(session_dir)
-    if budget > 0 and rows is not None and rows > budget:
+    budgets = DigestBudgets.of(session_dir, config)
+    span, span_budget = budgets.span_seconds, budgets.span_budget_seconds
+    if span_budget is not None and span is not None and span > span_budget:
+        return _skipped(
+            session_dir,
+            REASON_OVER_SPAN_BUDGET,
+            f"{span / 3600:,.2f} h of recorded span over the {span_budget / 3600:,.2f} h "
+            "digest budget (its 1 Hz chain grows with the span)",
+            budgets=budgets,
+            now=now,
+        )
+    rows, row_budget = budgets.row_count, budgets.row_budget
+    if row_budget is not None and rows is not None and rows > row_budget:
         return _skipped(
             session_dir,
             REASON_OVER_ROW_BUDGET,
-            f"{rows:,} rows over the {budget:,}-row digest budget",
-            row_count=rows,
-            row_budget=budget,
+            f"{rows:,} rows over the {row_budget:,}-row digest budget (a capture's "
+            "tuning section reads the whole session)",
+            budgets=budgets,
             now=now,
         )
     return None
@@ -417,8 +484,9 @@ def _fingerprint_top_movers(
 def _tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] | None:
     """Tuning digest for a capture session; ``None`` for an ordinary drive.
 
-    Never raises: a normal drive's digest must not fail because the tuning
-    section had nothing to say, or because a vehicle has no AFR calibration.
+    Never raises but ``MemoryError``: a normal drive's digest must not fail
+    because the tuning section had nothing to say, or because a vehicle has no
+    AFR calibration; running out of memory is the child's refusal to report.
     But "not a capture" and "the section crashed" are different answers
     (R05.12): a crash is reported as ``{"available": False, "kind":
     "failed", "error": ...}``, never as the ``None`` an ordinary drive gets.
@@ -427,6 +495,12 @@ def _tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] |
 
     try:
         section = compute_tuning_digest(session_dir, config)
+    except MemoryError:
+        # Out of memory is the digest child's to report (child_out_of_memory,
+        # src.control.trip_end), never an absent channel or a failed section:
+        # swallowed here, a capture over the ceiling read as "inputs never
+        # captured" (P02.1, 2026-09-26).
+        raise
     except Exception as exc:  # noqa: BLE001 — a digest is a report, not a gate
         log.warning("tuning digest section failed for %s", session_dir.name, exc_info=True)
         return {"available": False, "kind": "failed", "error": f"{type(exc).__name__}: {exc}"}
@@ -573,8 +647,10 @@ __all__ = [
     "REASON_NOT_A_SESSION",
     "REASON_NO_SPEED_SOURCE",
     "REASON_OVER_ROW_BUDGET",
+    "REASON_OVER_SPAN_BUDGET",
     "SCHEMA_VERSION",
     "SKIP_SCHEMA_VERSION",
+    "DigestBudgets",
     "DigestSkipped",
     "SessionDigest",
     "clear_digest_skipped",

@@ -1268,7 +1268,7 @@ def test_get_session_digest_409s_with_the_reason_when_refused(
     records = [TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)]
     write_records_to_parquet(records, session, max_rows=10_000)
     tight = config.model_copy(
-        update={"daemon": config.daemon.model_copy(update={"digest_row_budget": 1})}
+        update={"daemon": config.daemon.model_copy(update={"digest_span_budget_seconds": 1})}
     )
 
     app = create_app(tight, anomalies_dir=anomalies_dir, control_token="secret")
@@ -1279,9 +1279,11 @@ def test_get_session_digest_409s_with_the_reason_when_refused(
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert detail["error"] == "digest_refused"
-    assert detail["digest_skipped"]["reason"] == "over_row_budget"
+    assert detail["digest_skipped"]["reason"] == "over_span_budget"
     assert detail["digest_skipped"]["row_count"] == 10
-    assert detail["digest_skipped"]["row_budget"] == 1
+    assert detail["digest_skipped"]["span_seconds"] == 9.0
+    assert detail["digest_skipped"]["span_budget_seconds"] == 1
+    assert detail["digest_skipped"]["row_budget"] is None
     assert not (session / "digest.json").exists()
 
 

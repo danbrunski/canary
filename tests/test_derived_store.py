@@ -485,21 +485,39 @@ def _imu_session(root: Path) -> Path:
     return session
 
 
+def _whole_session_numeric(session: Path) -> pd.DataFrame:
+    """The ``value_number`` rows of every chunk at once: the unbounded read the
+    no-store chain made before P02.1, kept here as the reference the
+    part-by-part chain must reproduce."""
+    from src.preprocessing.decode import on_read_catalog
+    from src.preprocessing.loader import PARQUET_PATTERN, _read_numeric_chunks
+    from src.telemetry import SOURCE_SEP
+
+    frame = pd.concat(
+        _read_numeric_chunks(sorted(session.glob(PARQUET_PATTERN)), on_read_catalog()),
+        ignore_index=True,
+    )
+    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+    frame["session"] = session.name
+    frame["source_channel"] = (
+        frame["source"].astype(str) + SOURCE_SEP + frame["channel"].astype(str)
+    )
+    return frame[["session", "timestamp", "source_channel", "value_number"]]
+
+
 def test_the_value_number_chain_reads_the_store_and_matches_raw(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """``resample_and_segment(value="value_number")`` (digest, fingerprints,
-    classification) gives the same frame through the store, built or reused,
-    and a tick-aligned part split leaves IMU decimation unchanged."""
+    classification) gives the whole-session read's frame part by part, with
+    or without the store, built or reused, and a tick-aligned part split
+    leaves IMU decimation unchanged."""
     from src.config import CanaryConfig
     from src.preprocessing.derived import reduce_numeric_session, resample_numeric_reduced
     from src.preprocessing.derived_store import use_store
-    from src.preprocessing.loader import (
-        _decimate_imu_long,
-        _read_session_numeric,
-        resample_and_segment,
-    )
+    from src.preprocessing.loader import _decimate_imu_long, resample_and_segment
     from src.preprocessing.resampler import resample_config_for, resample_long
+    from src.preprocessing.segmenter import segment_operating_modes
 
     monkeypatch.delenv(DERIVED_DIR_ENV, raising=False)
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
@@ -507,7 +525,7 @@ def test_the_value_number_chain_reads_the_store_and_matches_raw(
     session = _imu_session(tmp_path / "sessions")
 
     raw = resample_long(
-        _decimate_imu_long(_read_session_numeric(session), hz=resample.hz), config=resample
+        _decimate_imu_long(_whole_session_numeric(session), hz=resample.hz), config=resample
     )
     assert {"imu:ACCEL_LON_RMS", "imu:JERK_MAX", "imu:ACCEL_LAT_MAX"} <= set(raw.columns)
     for part_rows in (700, 5_000):
@@ -517,6 +535,15 @@ def test_the_value_number_chain_reads_the_store_and_matches_raw(
         pd.testing.assert_frame_equal(raw, parts, check_exact=True)
 
     expected = resample_and_segment([session], config, value="value_number")
+    pd.testing.assert_frame_equal(
+        segment_operating_modes(
+            raw,
+            config.preprocessing.operating_modes,
+            mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
+        ),
+        expected,
+        check_exact=True,
+    )
     with use_store(tmp_path / "derived"):
         built = resample_and_segment([session], config, value="value_number")
         reused = resample_and_segment([session], config, value="value_number")
@@ -531,6 +558,38 @@ def test_the_value_number_chain_reads_the_store_and_matches_raw(
     numeric_cells.unlink()
     _, report = store.load_numeric(session, resample)
     assert report.status == "built" and numeric_cells.name in report.reason
+
+
+def test_without_a_store_the_value_number_chain_reads_one_part_at_a_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P02.1: with no store (the Pi's digest and classification children, and
+    every laptop caller that does not activate one) the chain still reads the
+    session part by part, so its memory is one part plus the 1 Hz cells, never
+    the whole session. The store only adds reuse."""
+    from src.config import CanaryConfig
+    from src.preprocessing import loader
+
+    monkeypatch.delenv(DERIVED_DIR_ENV, raising=False)
+    monkeypatch.setattr(loader, "SESSION_PART_ROWS", 3_000)
+    session = _imu_session(tmp_path / "sessions")
+    total = loader.count_session_rows(session)
+    assert total is not None
+    reads: list[int] = []
+    real = loader._read_numeric_chunks
+
+    def counted(paths: Any, catalog: Any) -> list[pd.DataFrame]:
+        frames = real(paths, catalog)
+        reads.append(sum(len(frame) for frame in frames))
+        return frames
+
+    monkeypatch.setattr(loader, "_read_numeric_chunks", counted)
+    frame = loader.resample_and_segment(
+        [session], CanaryConfig.from_yaml(Path("canary.example.yaml")), value="value_number"
+    )
+    assert not frame.empty
+    assert sum(reads) == total
+    assert len(reads) > 2 and max(reads) < total // 2
 
 
 def test_the_store_is_never_active_on_the_pi(

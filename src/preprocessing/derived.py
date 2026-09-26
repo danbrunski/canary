@@ -274,6 +274,14 @@ def _reduce_part(
     cell_ts = t[starts]
     bins = cell_ts // interval_ns
 
+    # A float column has one kind of "observed": every non-null cell parses as
+    # a number and stays non-null as float32, so the three masks are one mask,
+    # nothing is non-numeric, and a channel with no limit has nothing to gate.
+    # The ``value_number`` chain (P02.1: every digest, fingerprint and
+    # classification) is exactly that case; asking pandas per channel and part
+    # cost it 2.4x its whole-session wall time.
+    float_cells = ~pd.isna(cell_value) if pd.api.types.is_float_dtype(long[value_column]) else None
+
     keep = np.zeros(len(cell_code), dtype=bool)
     structural = np.zeros(len(cell_code), dtype=bool)
     non_numeric: set[str] = set()
@@ -282,11 +290,14 @@ def _reduce_part(
     bounds = np.flatnonzero(np.concatenate(([True], cell_code[1:] != cell_code[:-1], [True])))
     for lo, hi in zip(bounds[:-1], bounds[1:], strict=True):
         name = str(names[cell_code[lo]])
-        column = pd.Series(cell_value[lo:hi], dtype=object)
         channel_bins = bins[lo:hi]
         rows = _extremes(channel_bins, np.ones(hi - lo, dtype=bool))
         structural[lo + rows] = True
         keep[lo + rows] = True
+        if float_cells is not None and name not in limits:
+            keep[lo + _extremes(channel_bins, float_cells[lo:hi])] = True
+            continue
+        column = pd.Series(cell_value[lo:hi], dtype=object)
         masks, part_non_numeric, counts = _observed_masks(name, column, limits)
         if part_non_numeric:
             non_numeric.add(name)

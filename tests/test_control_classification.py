@@ -149,7 +149,11 @@ def test_classify_one_session_routes_trend_alert_through_given_emitter(tmp_path:
 
 
 def _route_client(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, row_budget: int | None = None
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    row_budget: int | None = None,
+    span_budget: float | None = None,
 ) -> tuple[TestClient, CanaryConfig, list[str]]:
     """App with the classify route; the child pool is a thread (the spawn path
     is ``test_workbench_analysis``'s real-child test) and records each job."""
@@ -162,7 +166,11 @@ def _route_client(
     config = config.model_copy(
         update={
             "daemon": config.daemon.model_copy(
-                update={"catalog_db": tmp_path / "catalog.db", "digest_row_budget": row_budget}
+                update={
+                    "catalog_db": tmp_path / "catalog.db",
+                    "digest_row_budget": row_budget,
+                    "digest_span_budget_seconds": span_budget,
+                }
             )
         }
     )
@@ -218,18 +226,35 @@ def test_classification_route_defers_while_a_capture_records(
     assert not (session / FINGERPRINT_FILENAME).exists()
 
 
-def test_classification_route_refuses_over_the_row_budget(
+def test_classification_route_refuses_over_the_span_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    session = _write_session(tmp_path)  # 180 rows
-    client, _config, jobs = _route_client(tmp_path, monkeypatch, row_budget=10)
+    """P02.1: classifying runs the part-by-part ``value_number`` chain, whose
+    peak follows the recorded span, so the span budget refuses it."""
+    session = _write_session(tmp_path)  # 59 s of span
+    client, _config, jobs = _route_client(tmp_path, monkeypatch, span_budget=10)
 
     response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
 
     assert response.status_code == 409
     detail = response.json()["detail"]
     assert detail["reason"] == "over_budget"
+    assert "h of recorded span" in detail["message"]
     assert jobs == []
+
+
+def test_classification_route_is_not_budgeted_by_rows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The row budget bounds whole-session raw reads; classifying no longer
+    makes one (P02.1), so a drive over it still classifies."""
+    session = _write_session(tmp_path)  # 180 rows
+    client, _config, jobs = _route_client(tmp_path, monkeypatch, row_budget=10)
+
+    response = client.post(f"/control/sessions/{session.name}/classification", headers=_AUTH)
+
+    assert response.status_code == 201, response.text
+    assert jobs == ["classify"]
 
 
 def test_classification_route_keeps_its_400_and_404(

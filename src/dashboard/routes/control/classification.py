@@ -56,8 +56,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # R03.2: classifying reads the whole session (resample_and_segment,
         # then the fingerprint), so it runs in the workbench's bounded
         # single-flight child, deferred while a capture records and refused
-        # over the row budget. Trend alerting and the catalog stay here, in
-        # the parent, because the emitter is the live one.
+        # over the span budget (P02.1: that chain reads part by part, so its
+        # peak follows the span, not the rows). Trend alerting and the catalog
+        # stay here, in the parent, because the emitter is the live one.
         if session_kind(session_id) is not SessionKind.LIVE:
             raise HTTPException(
                 status_code=400,
@@ -71,7 +72,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
             )
         try:
             capture_deferral(config, [session_id])
-            selection = select_sessions(config, sessions=[session_id])
+            selection = select_sessions(config, sessions=[session_id], reads="value_number")
         except WorkbenchRefusedError as exc:
             raise HTTPException(exc.status, exc.detail) from exc
         if selection.over_budget:

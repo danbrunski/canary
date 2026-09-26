@@ -152,7 +152,7 @@ recomputes the rolling frame over the whole buffered window every tick.
 
 ## Desk (laptop)
 
-- [ ] **P02.1 Every `resample_and_segment` caller on the part-by-part
+- [~] **P02.1 Every `resample_and_segment` caller on the part-by-part
   reduction, store or no store.**
   - Make P01 round 2's part-by-part chain the implementation of
     `resample_and_segment` whether or not a store is active. Memory is then
@@ -179,7 +179,126 @@ recomputes the rolling frame over the whole buffered window every tick.
   - With the Pi connected, the digest child's peak is measured on a drive
     over the old budget.
 
+  *Implemented and verified at the desk 2026-09-26. Remaining:* the Pi
+  measurement (last Accept bullet), and the capture row budget (operator
+  decision below).
+  - **The part-by-part chain was not bounded, and now is.** Its parts had to
+    end on a 1 s bin edge, and the writer starts a chunk in the same second
+    the last one ended, so `2026-09-18T144215` (558 chunks) read as one part
+    and `2026-09-20T152758` (1,980) as two: the whole session in memory, store
+    or not. `iter_session_numeric_parts` now carries each part's last,
+    possibly incomplete, bin into the next part instead (119-166 parts on
+    `152758`). `resample_and_segment(value="value_number")` runs
+    `reduce_numeric_session` whether or not a store is active; the store
+    only reads the same cells back. The unbounded `_read_session_numeric` is
+    gone from `src` (the test keeps it as its reference). `_reduce_part` takes
+    a float column's one "observed" mask instead of three per channel and part
+    (identical cells; without it the chain ran 2.4x slower).
+    `test_without_a_store_the_value_number_chain_reads_one_part_at_a_time`
+    (reads summed = session rows, largest read < half) and
+    `test_the_value_number_chain_reads_the_store_and_matches_raw` (whole-session
+    reference = parts, and = the no-store segmented frame).
+  - **Parity** (`check_exact` segmented frame; fingerprint, classification,
+    trip summary and digest compared as dicts), HEAD's whole-session chain vs
+    this tree without a store and with one (built, then reused in the same
+    run), each on the stored-decoded original and a stripped copy (decoded
+    rows removed): all identical.
+
+    | session | frame | orig | stripped | no store | store |
+    |---|---|---|---|---|---|
+    | `2026-09-18T152144` | 805 x 201 | 1.75 M rows | 1.24 M | = | = |
+    | `_capture-fuel-target-research-2026-09-21T195844` | 1,193 x 120 | 2.87 M | 2.05 M | = | = |
+    | `2026-09-20T152758` | 8,571 x 201 | 17.9 M | 12.8 M | = | = |
+    | `2026-09-18T144215` | 2,359 x 201 | 5.57 M | 3.95 M | = | = |
+
+  - **4 GiB.** `compute_digest` of `2026-09-20T152758` inside
+    `limit_address_space(4 GiB)`: completes at 494 MB (orig) and 502 MB
+    (stripped), digest identical to HEAD's unlimited one. Four back-to-back
+    time-shifted copies of it (34,458 s, 51.4 M rows): 1,220 MB unlimited,
+    1,255 MB completing inside 4 GiB.
+  - **Peak RSS, before -> after** (laptop, fresh process each, back to back):
+
+    | session | `resample_and_segment` | `compute_digest` |
+    |---|---|---|
+    | `144215` orig (D03.6: 1,490) | 1,568 -> 337 MB | 1,592 -> 341 MB |
+    | `144215` stripped (P02.8: 1,509) | 1,555 -> 360 MB | 1,544 -> 347 MB |
+    | `152758` orig | 4,237 -> 505 MB | 4,247 -> 493 MB |
+    | `152758` stripped (P02.8: 4,334) | 4,190 -> 490 MB | 4,265 -> 503 MB |
+
+    Wall time, same process alternating (`resample_and_segment` only):
+    `144215` 8.3-8.8 -> 9.1-10.2 s, `152758` 26.7-31.7 -> 35.3-35.4 s.
+  - **The budget is now two rules** (`digest_preflight`, `DigestBudgets`):
+    - *Span, every digest* (`over_span_budget`,
+      `daemon.digest_span_budget_seconds`). The chain's peak follows the
+      recorded span: 322 / 347 / 503 / 1,220 MB at 805 / 2,359 / 8,571 /
+      34,458 s, ~290 MB + ~27.7 KB/s at ~200 1 Hz columns. Derived as
+      (address space - `DIGEST_CHAIN_FIXED_BYTES` 1 GiB) /
+      `DIGEST_CHAIN_BYTES_PER_SECOND` 64 KiB/s: ~13.7 h for the Pi's 4 GiB
+      child (margins ~3.5x fixed, ~2.3x slope: RLIMIT_AS counts virtual
+      memory, the Pi's allocator differs, wider profiles widen the frame). A
+      ceiling below the fixed cost gets 1 s, so everything is refused by name.
+      Read from footer timestamps (`session_time_span_seconds`). The
+      workbench's `classify` job uses it too (`select_sessions(...,
+      reads="value_number")`); raw-read jobs keep the row budget.
+    - *Rows, captures only* (`over_row_budget`, unchanged 800 B/row): the
+      tuning section still reads a capture whole
+      (`tuning_digest.has_tuning_section`, one predicate for both).
+    - `digest_skipped.json` schema 2 adds `span_seconds` and
+      `span_budget_seconds`; `row_budget` is `null` where no row budget
+      applies. Tests: `test_a_session_over_the_span_budget_is_refused_and_no_child_starts`,
+      `test_a_capture_over_the_row_budget_is_refused_and_no_child_starts`,
+      `test_an_ordinary_drive_is_not_budgeted_by_rows`,
+      `test_the_span_budget_is_derived_from_the_address_space_ceiling`,
+      `test_classification_route_refuses_over_the_span_budget`,
+      `test_classification_route_is_not_budgeted_by_rows`.
+  - **Found: out of memory in the tuning section read as absent data.** Its
+    reads caught `MemoryError` as an absent channel: under 4 GiB the stripped
+    fuel-target capture's digest "completed", saying the required-tuple
+    members were never captured, with no rates for seven polled channels.
+    `MemoryError` now leaves the section, so the child reports
+    `child_out_of_memory`
+    (`test_a_tuning_section_out_of_memory_is_the_childs_refusal_not_absent_data`).
+  - **Operator decision: the capture row budget.** The tuning section alone
+    peaks at 1,408-1,595 B per stored row on four stripped captures (1.31-2.83 M
+    rows, 2.0-3.8 GB), and the 2.05 M-row capture runs out inside 4 GiB, so
+    800 B/row (~5.4 M rows) lets captures of ~2-5.4 M rows start a child that
+    dies. Tightening it to ~3,000 B/row (~1.4 M rows, ~14 min) also tightens
+    the workbench jobs that share it. Not changed here; P02.2 removes the row
+    term.
+  - Stale text fixed: `trip_end` module docstring, the budget constants,
+    `DaemonConfig`, `canary.example.yaml`, the MCP digest tool doc (snapshot
+    regenerated), `classify_and_write`, and `.claude/commands/drive.md`
+    (which still said to restart the daemon near parking to keep sessions
+    small).
+
   Size **M**.
+
+  - **Verifier, 2026-09-26.**
+    - Parity: 40 of 40 configurations identical (no store, store built,
+      store reused, a HEAD-built store read by the new code; four sessions,
+      original and stripped). The cells are unchanged, so the store needs no
+      version bump.
+    - Two defects, since fixed:
+      - `tuning.read_delivery_inputs` still turned out-of-memory into "inputs
+        never captured". It now re-raises, and
+        `test_delivery_inputs_out_of_memory_is_not_inputs_never_captured`
+        pins that site.
+      - The stale 1 GiB-floor comment: a floor-sized child (a host with 2 GB
+        of RAM or less) now refuses every digest and classify job by name,
+        because the chain aborts under a 1 GiB limit.
+    - Known limits, recorded rather than fixed:
+      - The span budget's 64 KiB/s slope is 2.3x the ~27.7 KB/s measured at
+        ~200 columns, so a profile above ~460 1 Hz columns (all-DID or
+        memory captures, other vehicles) outgrows it. That surfaces as
+        `child_out_of_memory`, not a named over-budget refusal.
+      - `DIGEST_TIMEOUT_SECONDS=900` is not measured against the 13.7 h
+        admission: about 200 s on the laptop, possibly over 900 s on the Pi.
+        This joins the Pi measurement.
+      - Chunks without footer statistics skip the pre-flight and read as one
+        part. Narrow, since pyarrow writes statistics by default.
+      - Captures of ~2–5.4 M rows pass the row budget and fail as
+        `child_out_of_memory`. Named and safe; it waits for P02.2 (operator
+        default recommended).
 
 - [ ] **P02.2 Push channel selection into the raw read.**
   - `read_channels`, and every other `read_session(...)` followed by a channel
