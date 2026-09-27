@@ -145,7 +145,7 @@ class WidebandPairVerification(_Strict):
     """
 
     session: str = Field(min_length=1)
-    #: e.g. ``compare_channels obd:O2_WR_LAMBDA_S5 -> did:ECM_AF_SENSOR_V_B2``.
+    #: e.g. ``compare_channels obd:O2_WR_LAMBDA_S5 -> <vehicle bank-2 A/F voltage DID>``.
     comparison: str = Field(min_length=1)
     n_pairs: int = Field(ge=30)
     ratio_median: float = Field(gt=0)
