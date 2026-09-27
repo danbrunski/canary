@@ -29,6 +29,7 @@ measurement in hand.
   | `scripts/ci_gate.sh`, `-n auto` | `9d3fa4b` | 30.1 (1-min, at the serial re-run) | same test again, passed serially in 25 s — T01.9 |
   | `scripts/ci_gate.sh` vitest (full dashboard suite) | `92b5374` | not recorded | `src/panels/SessionsPanel.test.ts` › hosts SessionsCard and ReplayCard side by side; failed again in a full local `pnpm vitest run`, passed 3 of 3 alone — T01.10 |
   | `scripts/ci_gate.sh`, `-n auto` | `dda8835` | not recorded | `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`, passed serially in 7.5 s (a `test_daemon.py` test: T01.1's family, after its fix) |
+| `scripts/ci_gate.sh`, `-n auto` | `95eca7c` | 15.67 (1-min, at the serial re-run) | same test again, passed serially in 4.9 s; the commit touched only `tests/test_layering.py` and docs — T01.13 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -422,3 +423,26 @@ measurement in hand.
   the pipeline dies first), then stop. The later assertions are unchanged.
   Acceptance: 10 of 10 copies (two rounds of five concurrent `pytest -n0`)
   beside 12 CPU burners, and the whole file 28 of 28.
+
+- [ ] **T01.13 `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`
+  fails under gate load and passes alone.**
+  - **Seen twice in the parallel push gate:** at `dda8835`, and again on
+    2026-09-27 at `95eca7c` (load average 15.67, with another session running).
+    The second commit touched no `src/` code. It passed serially both times,
+    in 7.5 s and then 4.9 s.
+  - **Not T01.12's shape.** The test's only wait is
+    `settle(sub.get())`, the 30 s `HANG_GUARD_SECONDS`, not a short
+    wall-clock bound. So the failure may be an assertion (the first message
+    on the anomalies broadcaster not being `lstm_autoencoder`) rather than a
+    timeout.
+  - **No traceback survives.** `scripts/ci_gate.sh` writes the pytest log
+    inside its throwaway worktree, which is deleted afterwards.
+
+  **Do:**
+  1. Capture the failure by running the file beside one CPU burner per
+     core, as in T01.1's controlled-load recipe.
+  2. Fix the test, not the daemon, unless the traceback shows a daemon bug.
+  3. Consider having `ci_gate.sh` copy the log out of the worktree when a
+     test fails, so the next flake keeps its traceback.
+
+  **Acceptance:** 10 of 10 copies under the controlled load, as in T01.12.
