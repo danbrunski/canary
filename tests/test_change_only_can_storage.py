@@ -57,6 +57,7 @@ from src.storage.broadcast_storage import (
 )
 from src.storage.parquet_writer import ParquetTelemetryWriter, write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 EXAMPLE_YAML = Path("canary.example.yaml")
 BINDINGS = Path("data/bindings.yaml")
@@ -68,7 +69,7 @@ RPM_ID = 0x1F9
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 def _rpm_payload(rpm: float) -> bytes:

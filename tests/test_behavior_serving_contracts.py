@@ -65,13 +65,14 @@ from src.preprocessing.session_context import (
     start_context_columns,
 )
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 T0 = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    return example_config(Path("canary.example.yaml"))
 
 
 def _steady_model(**overrides: Any) -> BehaviorModel1D:

@@ -52,7 +52,7 @@ try:
         add_log_level_arg,
         add_override_reason_arg,
         add_profile_arg,
-        load_config,
+        load_scoped_config,
         scoped_models_dir,
     )
 except ImportError:  # loaded as `scripts.train_sequence` — repo root on path, not scripts/
@@ -62,7 +62,7 @@ except ImportError:  # loaded as `scripts.train_sequence` — repo root on path,
         add_log_level_arg,
         add_override_reason_arg,
         add_profile_arg,
-        load_config,
+        load_scoped_config,
         scoped_models_dir,
     )
 
@@ -325,7 +325,9 @@ def _resolve_training_sessions(args: argparse.Namespace) -> list[Path] | None:
 def _run(backend: SequenceTrainingBackend, args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = load_config(args)
+    # Scoped once, here (P02.11): the feature frame and the vehicle's
+    # sequence_roles.yaml are both read through the profile's data directory.
+    config = load_scoped_config(args, args.profile)
     args.out = args.out or scoped_models_dir(config, args.profile) / backend.model_type
 
     try:

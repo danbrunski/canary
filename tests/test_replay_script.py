@@ -10,6 +10,7 @@ from src.config import CanaryConfig
 from src.models.isolation_forest import fit_isolation_forest
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -31,7 +32,7 @@ class _IFConfig:
 
 
 def _config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 def _write_obd_session(root: Path, name: str = "2026-05-11T120000", n: int = 80) -> Path:

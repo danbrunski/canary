@@ -24,9 +24,9 @@ from typing import Any
 import pandas as pd
 
 try:
-    from _cli import add_common_args, load_config  # type: ignore[import-not-found]
+    from _cli import add_common_args, load_scoped_config  # type: ignore[import-not-found]
 except ImportError:  # loaded as `scripts.replay` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config
+    from scripts._cli import add_common_args, load_scoped_config
 
 from src.config import CanaryConfig
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
@@ -167,7 +167,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = load_config(args)
+        # The daemon's featurization reads the scoped config (P02.11).
+        config = load_scoped_config(args, None)
         result = replay_sessions(
             args.session_dir,
             config,

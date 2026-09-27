@@ -37,6 +37,7 @@ from src.collection.can_obd_client import PID_DECODERS
 from src.config import CanaryConfig
 from src.preprocessing.quality_gate import is_physically_valid
 from src.telemetry import OBD_SOURCE, channel_key
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -49,7 +50,7 @@ DEFECT_OFFSET_SECONDS = -SCENARIO_EPOCH.timestamp()
 
 @pytest.fixture(scope="module")
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 def _with_resample_hz(config: CanaryConfig, hz: float) -> CanaryConfig:

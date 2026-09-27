@@ -29,6 +29,7 @@ from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
+from tests.configs import example_config
 
 # ---------------------------------------------------------------------------
 # Synthetic Parquet session + bindings fixtures
@@ -102,7 +103,7 @@ signals:
 
 
 def _config() -> CanaryConfig:
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     # These tests train on small synthetic sessions (a couple hundred rows
     # after resampling + rolling-window warmup) — comfortably under the
     # production min_samples_per_mode floor (Task 2.2). Lower it so the
@@ -392,6 +393,9 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         "broadcast_max_gap_seconds": 10.0,
         # 1.1/1.2 — slow-channel (coolant/IAT/baro) ffill/gap ceiling, default.
         "slow_channel_max_gap_seconds": 120.0,
+        # P02.11 — the calibration the derived AFR channels read; a
+        # profile-less example config names the absent top-level file.
+        "afr_calibration": {"path": str(_config().daemon.afr_calibration), "sha256": None},
     }
 
 

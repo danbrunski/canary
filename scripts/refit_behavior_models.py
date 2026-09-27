@@ -486,9 +486,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         log.info("loaded prior models", extra={"count": len(existing.models)})
 
     # The feature pipeline gives the wide, resampled, segmented frame the
-    # fitters expect — same path the IF / LSTM trainers consume.
+    # fitters expect — same path the IF / LSTM trainers consume, through the
+    # scoped config so the derived channels see the vehicle's afr_calibration
+    # (P02.11).
     frame = build_feature_frame(
-        sessions, config, bindings_path=args.bindings, behavior_models_path=out
+        sessions, scoped, bindings_path=args.bindings, behavior_models_path=out
     )
     # B05.3 — tuning captures are never behavior-model evidence (R03.12,
     # operator 2026-09-24/25): their rows stay for drive grouping and are

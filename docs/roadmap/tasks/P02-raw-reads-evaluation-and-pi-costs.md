@@ -1115,6 +1115,209 @@ recomputes the rolling frame over the whole buffered window every tick.
     frame's steadiness window and look-ahead also assume dense samples, so a
     fix there is more than a longer age.
 
+## Desk (found 2026-09-27)
+
+- [x] **P02.11 Featurize offline through the profile-scoped config.** The
+  daemon runs `scope_config` in `main`, so live featurization read
+  `data/nissan-xterra-2008/afr_calibration.yaml`. The trainers
+  (`build_feature_frame`), the evaluation harness and the injection
+  featurization got the unscoped config. There `daemon.afr_calibration` is
+  `data/afr_calibration.yaml`, which does not exist, and
+  `_append_derived_channels` reads an absent file as "no calibration".
+  Every offline frame was therefore built without the calibration the served
+  frame had. The same leak applied to the readers that resolve beside
+  `afr_calibration`: `sequence_roles_path`, `plausibility_path`,
+  `committees_path` and `profiles.profile_dir`.
+
+  **Accept:**
+  - Featurization refuses a config that is not profile-scoped while
+    `profiles.enabled`, and names the incident.
+  - Every offline entry point passes the scoped config.
+  - Measured on two real drives: which feature columns differ, and whether
+    anything in the deployed IF/LSTM manifests changes.
+
+  *Done 2026-09-27.*
+  - **The marker.** `CanaryConfig._scoped_profile` is a pydantic
+    `PrivateAttr`, exposed as the read-only `scoped_profile` property.
+    `scope_config` is its only writer, and no YAML can set it
+    (`test_yaml_cannot_claim_to_be_scoped`). It survives `model_copy` and
+    pickling, so the scoring and digest children see it. `scope_config` is
+    idempotent for the same slug, where it used to nest `<slug>/<slug>/`, and
+    refuses to re-scope to a different one. `resolve_profile_for_tooling(config,
+    None)` on a scoped config returns the slug that config was scoped to. So
+    `resolve_feature_policy`, `scoped_models_dir` and `apply_since_boundary`
+    work unchanged downstream of an entry point that has already scoped. The
+    marker and the refusal live in `src/config.py` (layer 0), so
+    `preprocessing` imports nothing upward (`tests/test_layering.py` green).
+  - **The refusal.** `src.config.require_profile_scoped` raises
+    `UnscopedConfigError(ValueError)`. The error names the trainers, the
+    harness and the missing `afr_calibration.yaml`. It is called by:
+    - `featurize_wide_frame` and `featurize_perturbed_frame`;
+    - `_append_derived_channels`, the reader itself;
+    - `build_feature_frame`, before the cache lookup, so a hit cannot bypass
+      it;
+    - `LiveFeatureSource.__post_init__`;
+    - the feature-frame cache key;
+    - `build_feature_spec`'s calibration provenance;
+    - `sequence_roles_path`.
+
+    With `profiles.enabled: false`, unscoped passes, because the base paths
+    are then the vehicle's. `plausibility_path`, `committees_path` and
+    `profile_dir` are routed rather than refused. Refusing in `profile_dir`
+    failed daemon construction in ~30 tests: `main` → `active_registry` runs
+    before any scoping those tests do. Every offline caller of those three
+    readers was checked and now gets a scoped config (list below).
+  - **Callers swept** (`grep` for `featurize_wide_frame`,
+    `build_feature_frame`, `featurize_perturbed_frame`, `LiveFeatureSource(`,
+    `compute_fingerprint`, `build_evaluation_frame` and `load_config`).
+    - *Now scoped once at entry,* through `scripts/_cli.py`'s
+      `load_scoped_config(args, profile)` / `scoped_config`:
+      - `train_anomaly_model.py`, which also covers the `--evaluate`
+        injection featurization;
+      - `train_sequence.py`, which also covers `sequence_roles.yaml`;
+      - `retrain.py`, which also covers `accepted_baselines` and the spec's
+        `behavior_models`;
+      - `evaluate_detectors.py`. `_scoped` is applied once, and
+        `ScorerSpec.scoped_config` is gone, because `config` is the scoped
+        one;
+      - `refit_behavior_models.py`, where `build_feature_frame` now gets
+        `scoped`;
+      - `replay.py`;
+      - `benchmark_live_pipeline.py`, whose `--profile` is a workload preset,
+        so it scopes to the default vehicle;
+      - `fp_benchmark.py`;
+      - `sequence_bakeoff.py`;
+      - `label_sessions.py` and `export_dataset.py`. For these two the session
+        root keeps its unscoped default and the computations get the scoped
+        config.
+    - *Already scoped:*
+      - `validation/harness.py` and `main.py`;
+      - `analyze_session.py`, `fingerprint.py`, `evaluate_behavior_models.py`,
+        `inventory_behavior_inputs.py` and `evaluate_plausibility.py`;
+      - `tools/check_manifest_producibility.py` (`build_producible_catalog`,
+        whose docstring already *said* "must be profile-scoped");
+      - the MCP `get_behavior_deviations`.
+    - *Daemon side:* the digest and classify children and the dashboard
+      routes. They receive the daemon's scoped config, pickled.
+  - **Cache keys now hash the file actually read.**
+    - *Feature-frame cache.* The key hashes `afr_calibration` at the scoped
+      path and `vehicle.parameters`. It hashed neither before, so an edited
+      calibration served a stale frame. `FEATURE_FRAME_CACHE_VERSION` 6 → 7.
+    - *Score cache.* `KeySources.extra_data` takes
+      `config.daemon.afr_calibration` from the scoped config. Before, it
+      hashed the absent `data/afr_calibration.yaml`; the scoped file was
+      reached only through the `profile_dir` glob.
+    - *Feature spec.* `build_feature_spec` records `afr_calibration: {path,
+      sha256}` (`None` = built without one).
+  - **Measured on real drives.** `build_feature_frame` ran on each drive
+    with `canary.yaml`, old path against scoped. The old path is the unscoped
+    config with profiles off; its featurization inputs are identical to the
+    pre-fix call.
+
+    | drive | rows | columns old → new | changed values in shared columns |
+    |---|---|---|---|
+    | `2026-09-20T152758` | 8,570 | 873 → 899 | none |
+    | `2026-08-03T163440` | 1,883 | 873 → 899 | none |
+
+    - *The +26 columns are six channels,* each with its rolling siblings:
+      `TARGET_AFR`, `AFR_ERROR_B1`, `AFR_ERROR_B2`, `AFR_B2`,
+      `AFR_CENSORED_B2` and `LAMBDA_BANK_BALANCE_AF_VOLTAGE` (all
+      `derived:`). The last three come from the voltage transfer's bank-2
+      fallback and the B05.8 balance.
+    - *Raw coverage is low.* `TARGET_AFR` covers 3.6 % and 14.4 % of rows,
+      `AFR_ERROR_B1` 1.6 % and 6.5 %, and `AFR_B2` 2.8 % and 2.2 %.
+      `TARGET_AFR__mean` reaches 61 % on 163440.
+    - *Shared columns are identical,* `AFR_B1`, `AFR_CENSORED_B1` and
+      `AFR_BANK_BALANCE` included. Bank 1 comes from the λ PID, and the
+      Xterra's censor floor and ceiling, 10 and 18, equal the defaults.
+  - **Retrain verdict: none forced.** No column in either deployed manifest
+    (`models/nissan-xterra-2008/{isolation_forest,lstm_autoencoder}`, 295 and
+    361 columns) is added, dropped or changed, so served scores are unchanged
+    by construction. The A02.11 benchmark was not re-run for that reason.
+    The score cache misses once anyway: the harness files and the config dump
+    are both in the key.
+
+    The *next* retrain sees the six new channels and may select some of
+    them. Read the two follow-ups below before that retrain.
+  - **Tests.** `tests/test_featurization_profile_scope.py` has 15 tests:
+    - the marker, its idempotence, pickling, and that YAML cannot set it;
+    - the refusal at every entry;
+    - scoped and profile-less configs pass;
+    - the known answer: `derived:TARGET_AFR` equals the Xterra target map's
+      bilinear lookup exactly offline, and is absent on the old path;
+    - the cache key moves on a calibration edit;
+    - the spec records the calibration's sha256;
+    - `train_anomaly_model`, `train_sequence`, `retrain`,
+      `evaluate_detectors` and `replay` each hand on a config with
+      `scoped_profile == "nissan-xterra-2008"`.
+
+    The test configs that featurize were unscoped with profiles on. They now
+    say which shape they are:
+    - `daemon_test_config` (`conftest.daemon_config`) is **scoped by default**,
+      the Pi's shape: profiles on, every vehicle path under
+      `<path>/test-vehicle/` (`scoped_test_config`, `TEST_PROFILE`, whose
+      parameters deliberately differ from the YAML block's). `scoped=False`
+      is the profile-less daemon. So every `run_daemon` test runs scoped,
+      including `test_run_daemon_end_to_end_inference_emits_anomaly`.
+    - The two digest-route tests in `test_dashboard_api.py` run on a
+      `scoped_test_config`. The same route returns 409 `UnscopedConfigError`
+      on an unscoped profiles-on config (checked by hand), so their 200 covers
+      the scoped chain end to end.
+    - Single-vehicle harnesses say so: `tests/configs.py`'s
+      `profiles_disabled` and `example_config`; `digest_config` and
+      `test_dashboard_api._config` keep profiles off, because their tests seed
+      exact top-level paths.
+  - **Verifier round 1 (2026-09-27).**
+    - *HIGH, fixed: the config hot reload made every live tick refuse.*
+      `src/daemon/polling.py::poll_config` swapped
+      `live_source.config = CanaryConfig.from_yaml(path)`, which is unscoped.
+      On the Pi, any YAML edit left IF, sequence, behavior and the derived
+      channels dead until a restart.
+      - The fix is at the layer. `scope_config` now also records the
+        `VehicleProfile` it applied (`CanaryConfig._scope_source`, private,
+        pickled with the config). `src.profiles.rescope_like(fresh,
+        reference)` re-scopes a freshly loaded YAML with that very profile:
+        the same slug and the registry parameters `resolve_active_profile`
+        applied, never a `resolve_profile_for_tooling` re-derivation.
+      - `main`'s `scope_config` call is what records the profile, and
+        `poll_config` goes through `rescope_like`, then
+        `require_profile_scoped`.
+      - A reload that cannot be scoped keeps the previous config and logs why.
+        One case is profiles switched on under a profile-less daemon, which
+        needs a restart because the VIN probe is a startup decision. The other
+        is any re-scope error.
+      - No other runtime path swaps a `CanaryConfig`: `grep '\.config ='`
+        under `src/daemon`, `src/control` and `src/dashboard` finds only
+        `poll_config` and `tuner.config`, which is a `TuningConfig`.
+      - Tests: `tests/test_config_hot_reload.py` (3). A scoped reload keeps
+        `scoped_profile`, `TEST_PROFILE`'s parameters, the scoped
+        `afr_calibration` and storage path, and a fed tick featurizes. The
+        profiles-on-under-a-profile-less-daemon case keeps the previous
+        config, and so does a failing re-scope.
+        `test_rescope_like_reuses_the_resolved_profile_not_a_rederived_one`
+        covers the helper. The verifier's `hotreload.py` now prints `tick ok`.
+    - *MEDIUM, fixed:* the daemon and digest-route fixtures now run the Pi's
+      scoped shape (above).
+    - *LOW, documented:*
+      - `label_sessions` now runs its trend pass on the scoped config, so its
+        dedup state (`trend_alert_state`) and `reference_epoch` move to
+        `<base>/<slug>/`. Those are the files the daemon uses. A trend already
+        alerted under the old unscoped file can alert once more.
+      - `export_dataset`'s manifest `config_hash` changes, because the scoped
+        paths are in the dump, and its `vehicle` metadata is now the resolved
+        profile's.
+  - **Follow-ups found, not changed here.**
+    - `build_feature_frame`'s `behavior_models_path` defaults to the repo's
+      unscoped `data/behavior_models.yaml`, which does not exist. The trainers
+      never pass one, so trainer frames carry no `deviation:*` columns while
+      the daemon's do. No deployed manifest has one, although B03.2/B03.4
+      assume they can.
+    - `derived:TARGET_AFR` looks the target map up with `obd:ENGINE_LOAD`
+      (%). The map's load axis is `base_fuel_schedule` in ms (8.76–21.57), so
+      the value is dimensionally wrong wherever it exists, and
+      `AFR_ERROR_B*` inherits the error. This was already true on the daemon;
+      this change makes offline frames match it.
+
 ## Tracked elsewhere
 
 - **The sequence detector's tick cost is A06.6's.** It is not duplicated

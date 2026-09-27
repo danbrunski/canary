@@ -23,6 +23,7 @@ from src.decode.bindings import load_bindings
 from src.preprocessing.imu_live import LiveImuFrame
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 T0 = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
 IMU_HZ = 50
@@ -153,7 +154,7 @@ def test_reset_is_a_session_boundary() -> None:
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    return example_config(Path("canary.example.yaml"))
 
 
 def test_live_auto_tag_hook_receives_the_decimated_channel(

@@ -22,7 +22,8 @@ from typing import Any, Literal
 
 import yaml
 
-from src.config import CanaryConfig, _daemon_path_fields, rebase_state_paths
+from src.config import CanaryConfig, VehicleParameters, _daemon_path_fields, rebase_state_paths
+from src.profiles import VehicleProfile, scope_config
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO / "canary.example.yaml"
@@ -159,15 +160,71 @@ DAEMON_RUN_OVERRIDES: dict[str, Any] = {
 }
 
 
-def daemon_test_config(tmp_path: Path, **overrides: Mapping[str, Any]) -> CanaryConfig:
+def profiles_disabled(config: CanaryConfig) -> CanaryConfig:
+    """``config`` with ``profiles.enabled: false``: its base paths *are* the
+    vehicle's, so featurization may read them unscoped (P02.11).
+
+    Production never featurizes unscoped with profiles on -- the daemon scopes
+    in ``main`` and every offline entry point scopes once -- and
+    :func:`src.config.require_profile_scoped` refuses the combination. A test
+    whose config is a single-vehicle harness (tmp paths, the example YAML's
+    top-level data files) says so here instead.
+    """
+    return config.model_copy(
+        update={"profiles": config.profiles.model_copy(update={"enabled": False})}
+    )
+
+
+def example_config(path: Path = EXAMPLE_YAML) -> CanaryConfig:
+    """``canary.example.yaml`` (or ``path``) as a single-vehicle config, for
+    tests that featurize with it (:func:`profiles_disabled`)."""
+    return profiles_disabled(CanaryConfig.from_yaml(path))
+
+
+#: The vehicle profile :func:`scoped_test_config` scopes to. Its parameters
+#: differ from the ``vehicle:`` block's defaults on purpose, so a reader that
+#: re-derives the profile instead of reusing the resolved one shows up.
+TEST_PROFILE = VehicleProfile(
+    slug="test-vehicle",
+    vin="",
+    name="Test vehicle",
+    make="Nissan",
+    model="Xterra",
+    year=2008,
+    parameters=VehicleParameters(displacement_l=3.3),
+)
+
+
+def scoped_test_config(
+    config: CanaryConfig, profile: VehicleProfile = TEST_PROFILE
+) -> CanaryConfig:
+    """``config`` with profiles on, scoped as ``src.main`` scopes the daemon's:
+    every vehicle path under ``<base>/<slug>/`` (P02.11). The Pi's shape."""
+    enabled = config.model_copy(
+        update={"profiles": config.profiles.model_copy(update={"enabled": True})}
+    )
+    return scope_config(enabled, profile)
+
+
+def daemon_test_config(
+    tmp_path: Path, *, scoped: bool = True, **overrides: Mapping[str, Any]
+) -> CanaryConfig:
     """The config ``run_daemon`` tests start on (``conftest.daemon_config``).
 
     Detectors off, one ``idle`` mode, in-process feature build, fast model
     polling, every writable path under ``tmp_path``; ``overrides`` deep-merge
     on top, e.g. ``models={"isolation_forest": {"enabled": True}}``.
+
+    Scoped by default, as ``src.main`` builds it on the Pi: profiles on, every
+    vehicle path under ``<path>/test-vehicle/`` (:func:`scoped_test_config`),
+    overrides included. ``scoped=False`` is the profile-less daemon (profiles
+    off, paths as given) for a test that names exact paths (P02.11).
     """
     merged = _merge(copy.deepcopy(DAEMON_RUN_OVERRIDES), overrides)
-    return isolated_config(tmp_path, "daemon", **merged)
+    if not scoped:
+        _merge(merged, {"profiles": {"enabled": False}})
+        return isolated_config(tmp_path, "daemon", **merged)
+    return scoped_test_config(isolated_config(tmp_path, "daemon", **merged))
 
 
 def isolate(config: CanaryConfig, tmp_path: Path) -> CanaryConfig:

@@ -35,6 +35,7 @@ from src.plausibility.offline import (
     inject_plumbing_fault,
     run_evaluator,
 )
+from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
 XTERRA_PROFILE = REPO / "data" / "nissan-xterra-2008" / PLAUSIBILITY_FILENAME
@@ -175,7 +176,7 @@ def test_profile_schema_refuses_missing_confirm_policy_and_unprefixed_channels()
 
 
 def test_resolving_for_a_config_refuses_without_the_vehicle_file(tmp_path: Path) -> None:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     daemon = config.daemon.model_copy(
         update={"afr_calibration": tmp_path / "vehicle" / "afr_calibration.yaml"}
     )
@@ -185,7 +186,7 @@ def test_resolving_for_a_config_refuses_without_the_vehicle_file(tmp_path: Path)
 
 
 def test_the_xterra_profile_resolves_against_its_catalogs_and_modes() -> None:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     profile = load_plausibility_profile(XTERRA_PROFILE)
     catalog = resolve_limits(
         profile,
@@ -308,7 +309,7 @@ def test_stuck_fires_only_where_the_channel_is_expected_to_move() -> None:
 
 
 def test_coolant_holding_at_warm_idle_is_not_stuck_in_the_real_profile() -> None:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     catalog = resolve_limits(
         load_plausibility_profile(XTERRA_PROFILE),
         operating_modes=config.preprocessing.operating_modes,
@@ -441,7 +442,7 @@ def test_the_live_source_hands_every_value_to_the_observer_before_the_quality_ga
     from src.preprocessing.live import LiveFeatureSource
     from src.telemetry import TelemetryRecord
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     seen: list[tuple[str, float]] = []
     source = LiveFeatureSource(config=config)
     source.sample_observer = lambda channel, value, _at: seen.append((channel, value))
@@ -452,7 +453,7 @@ def test_the_live_source_hands_every_value_to_the_observer_before_the_quality_ga
 
 
 def _live_components(tmp_path: Path, *, enabled: bool, with_profile: bool) -> SimpleNamespace:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     vehicle = tmp_path / "vehicle"
     vehicle.mkdir(parents=True)
     if with_profile:
@@ -479,7 +480,7 @@ def test_plausibility_is_off_by_default_and_withheld_without_a_vehicle_file(
     from src.daemon.inference_metrics import InferenceTimingRecorder
     from src.preprocessing.live import LiveFeatureSource
 
-    assert CanaryConfig.from_yaml(REPO / "canary.example.yaml").plausibility.enabled is False
+    assert example_config(REPO / "canary.example.yaml").plausibility.enabled is False
     recorder = InferenceTimingRecorder()
     off = _live_components(tmp_path / "a", enabled=False, with_profile=True)
     source = LiveFeatureSource(config=off.config)
@@ -679,7 +680,7 @@ DRIVE_SLICE = REPO / "tests" / "fixtures" / "ground_truth" / "drive-slice"
 
 
 def _xterra_catalog() -> tuple[CanaryConfig, Any]:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     bindings = load_bindings(REPO / "data" / "bindings.yaml")
     catalog = resolve_limits(
         load_plausibility_profile(XTERRA_PROFILE),

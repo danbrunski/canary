@@ -77,6 +77,7 @@ def config(tmp_path: Path) -> CanaryConfig:
         },
         models={"out_of_process_feature_build": False},
         daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 64},
+        profiles={"enabled": False},
     )
 
 

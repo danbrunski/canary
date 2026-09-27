@@ -40,7 +40,7 @@ try:
         add_common_args,
         add_log_level_arg,
         add_profile_arg,
-        load_config,
+        load_scoped_config,
         scoped_models_dir,
     )
 except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on path, not scripts/
@@ -49,7 +49,7 @@ except ImportError:  # loaded as `scripts.train_anomaly_model` — repo root on 
         add_common_args,
         add_log_level_arg,
         add_profile_arg,
-        load_config,
+        load_scoped_config,
         scoped_models_dir,
     )
 
@@ -225,7 +225,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = load_config(args)
+    # Scoped once, here (P02.11): training and the --evaluate injection both
+    # featurize with the vehicle's afr_calibration, as the daemon does.
+    config = load_scoped_config(args, args.profile)
     args.out = args.out or scoped_models_dir(config, args.profile) / "isolation_forest"
 
     sessions: list[Path] = list(args.sessions)

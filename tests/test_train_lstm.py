@@ -23,6 +23,7 @@ from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.builders import write_obd_session
+from tests.configs import example_config
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -60,7 +61,7 @@ def _write_config(tmp_path: Path, **lstm_overrides: object) -> Path:
 
 
 def _config(tmp_path: Path, **lstm_overrides: object) -> CanaryConfig:
-    return CanaryConfig.from_yaml(_write_config(tmp_path, **lstm_overrides))
+    return example_config(_write_config(tmp_path, **lstm_overrides))
 
 
 def _no_bindings(tmp_path: Path) -> Path:

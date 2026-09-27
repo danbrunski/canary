@@ -32,7 +32,7 @@ from src.paths import ANOMALIES_DIR
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
-from tests.configs import daemon_test_config
+from tests.configs import daemon_test_config, example_config
 from tests.fakes import StubModelManager, fake_if_model
 from tests.waits import settle, wait_until
 
@@ -748,7 +748,7 @@ def test_daemon_config_defaults_are_sane() -> None:
 
 def test_canary_yaml_without_daemon_section_loads(tmp_path: Path) -> None:
     """The example config has no `daemon:` block; it must still load."""
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     assert isinstance(config.daemon, DaemonConfig)
     # uses the dataclass defaults
     assert config.daemon.model_poll_seconds == 30.0
@@ -2140,10 +2140,9 @@ async def test_build_live_feature_source_loads_accepted_baselines_when_present(
 
 async def test_drain_feeds_live_source_when_passed(tmp_path: Path) -> None:
     """The full producer → drain → live_source path with no separate observer."""
-    from src.config import CanaryConfig
     from src.preprocessing.live import LiveFeatureSource
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     source = LiveFeatureSource(config=config)
 
     writer = ParquetTelemetryWriter(tmp_path / "storage")

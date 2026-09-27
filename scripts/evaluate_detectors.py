@@ -286,8 +286,9 @@ def load_resampled_sessions(
 
 
 def _scoped(config: CanaryConfig, profile: str | None) -> CanaryConfig:
-    """The profile-scoped config (plausibility limits live in the profile's
-    data directory)."""
+    """The profile-scoped config every read of this run goes through (P02.11):
+    featurization's afr_calibration, the plausibility limits and the tune
+    registry live in the profile's data directory."""
     from src.profiles import resolve_profile_for_tooling, scope_config
 
     if not config.profiles.enabled:
@@ -1167,8 +1168,8 @@ class ScorerSpec:
     fitted (the untrained autoencoder as ``None``, rebuilt from its seed).
     """
 
+    #: Profile-scoped (P02.11): featurization refuses anything else.
     config: CanaryConfig
-    scoped_config: CanaryConfig
     if_path: Path | None
     sequence_path: Path | None
     baselines: list[tuple[ScoreModel | None, float]]
@@ -1222,7 +1223,7 @@ def build_worker_scorer(spec: ScorerSpec) -> DriveScorer:
     if spec.plausibility:
         raw.append(
             PlausibilityDetector(
-                spec.scoped_config,
+                spec.config,
                 bindings=bindings,
                 did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
             )
@@ -2262,26 +2263,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, str | None]) -> int:
     started = time.time()
     logging.getLogger("src.preprocessing.feature_pipeline").setLevel(logging.WARNING)
-    config = load_config(args)
+    # Scoped once, here (P02.11): featurization, the plausibility limits and
+    # the tune registry all read the vehicle's data directory. This harness
+    # used to featurize through the unscoped config — without the vehicle's
+    # afr_calibration.yaml the daemon applies — while hashing that absent file.
+    config = _scoped(load_config(args), args.profile)
     models_dir = scoped_models_dir(config, args.profile)
     data_dir = _profile_data_dir(config, args.profile)
     persistence = PersistenceSpec.from_config(config)
     if_path = args.if_model or models_dir / "isolation_forest" / "model.joblib"
     seq_path = args.sequence_model or models_dir / "lstm_autoencoder" / "model.pt"
-    behavior_path = args.behavior_models or _scoped(config, args.profile).daemon.behavior_models
-    scoped_config = _scoped(config, args.profile)
+    behavior_path = args.behavior_models or config.daemon.behavior_models
     # P02.5: every score-cache key input is hashed here, before anything is
     # loaded; the run's entries are committed only if they still hash so
     # after scoring (``changed_key_inputs`` below).
     key_sources = KeySources(
         config_path=Path(args.config).resolve(),
         profile_dir=data_dir,
-        # The AFR calibration featurization reads (``featurize_wide_frame``
-        # takes the unscoped config) and the limits the plausibility detector
-        # reads (scoped to the profile).
+        # The AFR calibration featurization reads and the limits the
+        # plausibility detector reads, both from the scoped config: the files
+        # the run actually loads.
         extra_data=(
             config.daemon.afr_calibration.resolve(),
-            plausibility_path(scoped_config).resolve(),
+            plausibility_path(config).resolve(),
         ),
         if_path=if_path,
         sequence_path=None if args.no_sequence else seq_path,
@@ -2329,9 +2333,8 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         tune_registry = load_tune_revisions(args.tune_revisions)
         tune_sources: tuple[Path, ...] = (args.tune_revisions,)
     else:
-        scoped = _scoped(config, args.profile)
-        tune_registry = active_registry(scoped)
-        tune_sources = active_registry_sources(scoped)
+        tune_registry = active_registry(config)
+        tune_sources = active_registry_sources(config)
     labels_path = args.labels or data_dir / LABELLED_EVENTS_FILENAME
     registry = load_labelled_events(
         labels_path, tune_registry=tune_registry, tune_sources=tune_sources
@@ -2616,7 +2619,7 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         try:
             raw_detectors.append(
                 PlausibilityDetector(
-                    _scoped(config, args.profile),
+                    config,
                     bindings=bindings,
                     did_map=(
                         load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None
@@ -2697,7 +2700,6 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
     def worker_spec() -> ScorerSpec:
         return ScorerSpec(
             config=config,
-            scoped_config=_scoped(config, args.profile),
             if_path=if_path if trained_if is not None else None,
             sequence_path=seq_path if trained_seq is not None else None,
             baselines=baseline_specs,

@@ -26,11 +26,12 @@ from src.decode.behavior_models import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    return example_config(Path("canary.example.yaml"))
 
 
 def _timing_model() -> BehaviorModel2D:

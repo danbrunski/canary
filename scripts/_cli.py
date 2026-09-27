@@ -116,6 +116,33 @@ def load_config(args: argparse.Namespace) -> CanaryConfig:
     return CanaryConfig.from_yaml(args.config)
 
 
+def scoped_config(config: CanaryConfig, profile_slug: str | None) -> CanaryConfig:
+    """``config`` scoped to the vehicle profile the daemon would serve.
+
+    Offline resolution (no VIN probe): ``--profile`` or the ``vehicle:``
+    block's default, the same one :func:`scoped_models_dir` writes under.
+    Unchanged with profiles disabled; idempotent on an already-scoped config.
+    """
+    if not config.profiles.enabled:
+        return config
+    return scope_config(config, resolve_profile_for_tooling(config, profile_slug))
+
+
+def load_scoped_config(args: argparse.Namespace, profile_slug: str | None) -> CanaryConfig:
+    """:func:`load_config`, scoped to ``profile_slug`` (a script's vehicle
+    ``--profile``; ``None`` for the ``vehicle:`` block's default profile).
+    Explicit rather than read off ``args``: some scripts' ``--profile`` is not
+    a vehicle (``benchmark_live_pipeline``'s workload preset).
+
+    Every script that featurizes starts here (P02.11): featurization reads the
+    vehicle's ``afr_calibration.yaml``, which only the scoped config names, and
+    refuses an unscoped one while profiles are enabled. The trainers and the
+    evaluation harness once featurized through the unscoped config, without the
+    calibration the daemon applied.
+    """
+    return scoped_config(load_config(args), profile_slug)
+
+
 def filter_sessions_by_age(sessions: list[Path], days: int, now: datetime) -> list[Path]:
     """Keep session dirs whose timestamped name falls within `days` of `now`.
 
@@ -205,10 +232,11 @@ def apply_since_boundary(
     behavior never blend into one corpus. ``sessions`` unchanged without the
     flag or without a boundary event.
 
-    ``config`` is the *unscoped* config; the ledger is read from the vehicle
-    profile ``args.profile`` resolves to (no VIN probe), the same one the
-    artifacts are written for. ``retrain.py`` and ``refit_behavior_models.py``
-    each carried a copy of this block, and retrain's read the unscoped ledger.
+    ``config`` may be unscoped or already scoped (P02.11: the trainers scope
+    at entry); the ledger is read from the vehicle profile ``args.profile``
+    resolves to (no VIN probe), the same one the artifacts are written for.
+    ``retrain.py`` and ``refit_behavior_models.py`` each carried a copy of this
+    block, and retrain's read the unscoped ledger.
     """
     if not getattr(args, "since_boundary", False):
         return sessions
@@ -282,6 +310,8 @@ __all__ = [
     "override_reason",
     "scoped_models_dir",
     "load_config",
+    "load_scoped_config",
+    "scoped_config",
     "discover_live_session_dirs",
     "filter_sessions_by_age",
     "filter_sessions_by_boundary",

@@ -25,7 +25,7 @@ from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import FusionScorer, isolation_forest_source, lstm_source
 from src.config import CanaryConfig, DetectorRolesConfig, FusionConfig
 from src.models.inference import SequenceInferenceResult
-from tests.configs import isolated_from_yaml
+from tests.configs import example_config, isolated_from_yaml
 from tests.fakes import lstm_result
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -99,7 +99,7 @@ def test_roles_default_to_the_operators_decision() -> None:
     "example", ["canary.example.yaml", "canary.pi.example.yaml", "canary.dev.example.yaml"]
 )
 def test_shipped_example_configs_carry_the_operators_roles(example: str) -> None:
-    config = CanaryConfig.from_yaml(REPO_ROOT / example)
+    config = example_config(REPO_ROOT / example)
     assert config.models.roles.by_source() == {
         "isolation_forest": "evidence",
         "lstm_autoencoder": "evidence",
@@ -292,6 +292,8 @@ preprocessing:
     idle:
       rpm_max: 900
       speed_max: 0
+profiles:
+  enabled: false
 models:
   out_of_process_feature_build: false
   roles:

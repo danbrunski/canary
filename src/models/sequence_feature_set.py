@@ -36,6 +36,7 @@ from typing import Any, Literal
 
 import yaml
 
+from src.config import CanaryConfig, require_profile_scoped
 from src.preprocessing.features import ROC_SUFFIX, split_rolling
 from src.trainability import non_trainable_inputs, source_exclusion_reason
 
@@ -201,8 +202,14 @@ def load_vehicle_sequence_roles(path: Path | None) -> VehicleSequenceRoles:
     return VehicleSequenceRoles(channels, mirrors, excluded, source=str(path))
 
 
-def sequence_roles_path(config: Any) -> Path:
-    """The active profile's ``sequence_roles.yaml`` (beside its other vehicle data)."""
+def sequence_roles_path(config: CanaryConfig) -> Path:
+    """The active profile's ``sequence_roles.yaml`` (beside its other vehicle data).
+
+    Refuses an unscoped config while profiles are enabled (P02.11): the
+    unscoped parent is the shared ``data/``, where no roles file exists, and
+    a missing file reads as an empty table rather than an error.
+    """
+    require_profile_scoped(config, reader="sequence_roles_path")
     return Path(config.daemon.afr_calibration).parent / SEQUENCE_ROLES_FILENAME
 
 

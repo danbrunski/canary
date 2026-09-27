@@ -9,13 +9,14 @@ from src.config import CanaryConfig
 from src.storage.catalog import SessionCatalog, rebuild_catalog
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
 
 
 def _config(tmp_path: Path) -> CanaryConfig:
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     return config.model_copy(
         update={"collection": config.collection.model_copy(update={"storage_path": tmp_path})}
     )

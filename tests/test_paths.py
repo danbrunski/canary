@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from src import paths
-from src.config import CanaryConfig
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -45,7 +45,7 @@ def test_feature_cache_key_hashes_the_dids_file_it_is_given(tmp_path: Path) -> N
     loaded, so a build against another catalog could be served a stale frame."""
     from src.preprocessing.feature_cache import build_feature_frame_cache_key
 
-    config = CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
+    config = example_config(REPO_ROOT / "canary.example.yaml")
     other = tmp_path / "dids.yaml"
     other.write_text(paths.DIDS_YAML.read_text() + "\n# edited\n")
 
@@ -79,7 +79,7 @@ def test_build_feature_frame_did_columns_do_not_depend_on_the_working_directory(
 ) -> None:
     from src.preprocessing.feature_pipeline import build_feature_frame
 
-    config = CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
+    config = example_config(REPO_ROOT / "canary.example.yaml")
     session = _did_session(tmp_path / "sessions")
 
     def did_columns(frame: object) -> list[str]:
@@ -104,7 +104,7 @@ def test_build_feature_frame_cache_key_hashes_the_dids_file_it_loads(tmp_path: P
 
     from src.preprocessing.feature_pipeline import build_feature_frame
 
-    config = CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
+    config = example_config(REPO_ROOT / "canary.example.yaml")
     session = _did_session(tmp_path / "sessions")
     other = tmp_path / "dids.yaml"
     other.write_text(paths.DIDS_YAML.read_text())

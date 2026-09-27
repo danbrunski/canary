@@ -24,7 +24,6 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
 from src.alerts.fusion import PersistenceGate
-from src.config import CanaryConfig
 from src.control.replay_control import (
     ReplayConflictError,
     ReplayController,
@@ -39,6 +38,7 @@ from src.storage.parquet_writer import (
     write_records_to_parquet,
 )
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 
 def _event(timestamp: str = "2026-05-19T18:00:00Z") -> AnomalyEvent:
@@ -208,7 +208,7 @@ def _make_isolated_controller(tmp_path: Path) -> _IsolatedController:
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     writer = ParquetTelemetryWriter(storage_root)
     anomaly_logger = AnomalyEventLogger(tmp_path / "anomalies")
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     live_source = LiveFeatureSource(config=config)
     persistence_gate = PersistenceGate(3, window=5)
     emitter = AnomalyEventEmitter(

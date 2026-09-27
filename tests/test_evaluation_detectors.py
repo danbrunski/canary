@@ -24,6 +24,7 @@ from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E40
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 from tests.builders import IFConfig
+from tests.configs import example_config
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
@@ -47,7 +48,7 @@ def _resampled(seed: int = 0, *, gap_after: int | None = None) -> pd.DataFrame:
 
 
 def _config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 def test_without_a_sequence_model_fused_is_withheld_not_zero() -> None:

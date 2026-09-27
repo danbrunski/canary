@@ -25,7 +25,7 @@ from src.dashboard.api import (
 )
 from src.dashboard.status import compact_status, gather_status_sources
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
-from tests.configs import isolated_config
+from tests.configs import isolated_config, scoped_test_config
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -40,7 +40,9 @@ def _config(tmp_path: Path, storage: Path, **overrides: Any) -> CanaryConfig:
         storage=storage,
         models={"isolation_forest": {"enabled": True}, "lstm_autoencoder": {"enabled": True}},
         dashboard={"port": 8000},
-        **overrides,
+        # The daemon serves the dashboard a scoped or profile-less config
+        # (P02.11): the digest routes featurize with it.
+        **{"profiles": {"enabled": False}, **overrides},
     )
 
 
@@ -1210,9 +1212,14 @@ def test_get_session_digest_requires_auth(config: CanaryConfig, anomalies_dir: P
 def test_get_session_digest_returns_computed_shape(
     config: CanaryConfig, anomalies_dir: Path
 ) -> None:
+    """On the Pi's shape (profiles on, scoped as ``main`` scopes it, P02.11):
+    the digest's fingerprint featurizes with that config and raises on an
+    unscoped one, so a 200 here is the scoped chain end to end."""
     from src.storage.parquet_writer import write_records_to_parquet
     from src.telemetry import TelemetryRecord
 
+    config = scoped_test_config(config)
+    assert config.scoped_profile == "test-vehicle"
     session_id = "2026-07-19T120000"
     session = config.collection.storage_path / session_id
     records = [
@@ -1297,11 +1304,11 @@ def test_get_session_digest_route_updates_the_catalog(tmp_path: Path) -> None:
 
     storage = tmp_path / "storage"
     storage.mkdir()
-    catalog_db = tmp_path / "catalog.db"
-    config = _config(tmp_path, storage, daemon={"catalog_db": catalog_db})
+    config = scoped_test_config(_config(tmp_path, storage))
+    catalog_db = config.daemon.catalog_db
 
     session_id = "2026-07-19T120000"
-    session = storage / session_id
+    session = config.collection.storage_path / session_id
     records = [
         TelemetryRecord.obd(1_779_400_000.0 + i, "SPEED", 60.0, "km/h") for i in range(10)
     ] + [TelemetryRecord.obd(1_779_400_000.0 + i, "RPM", 2000.0, "rpm") for i in range(10)]

@@ -42,6 +42,7 @@ from src.preprocessing.segmenter import (
     segment_operating_modes,
 )
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BINDINGS_PATH = REPO_ROOT / "data" / "bindings.yaml"
@@ -61,7 +62,7 @@ SPEED_60 = bytes([0x00, 0x00, 0x00, 0x00, 0x03, 0xC0, 0x00, 0x00])
 
 @pytest.fixture(scope="module")
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 @pytest.fixture(scope="module")

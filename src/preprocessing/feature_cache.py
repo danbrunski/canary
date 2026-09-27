@@ -12,7 +12,7 @@ from typing import Any
 
 import pandas as pd
 
-from src.config import CanaryConfig
+from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.models.artifact_hash import sha256_file
@@ -50,7 +50,12 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     broadcast stale class (``collection.broadcast_stale_timeout_seconds``,
 #:     10 s) instead of the fast 2 s one, and their ``__arrived`` flag reads "a
 #:     stored row within that timeout". Cached frames carry the old flags.
-FEATURE_FRAME_CACHE_VERSION = 6
+#: 7 — P02.11: featurization reads the vehicle's ``afr_calibration.yaml`` and
+#:     parameters through the profile-scoped config. Trainer frames were built
+#:     through the unscoped one, without the calibration (no ``TARGET_AFR`` /
+#:     ``AFR_ERROR_B*``) and with the ``vehicle:`` block's parameters; the key
+#:     now hashes both, and frames cached before it are not reused.
+FEATURE_FRAME_CACHE_VERSION = 7
 
 
 def build_feature_frame_cache_key(
@@ -84,6 +89,9 @@ def _feature_frame_cache_metadata(
     dbc_dir: Path,
     dids_path: Path = DEFAULT_DIDS_PATH,
 ) -> dict[str, Any]:
+    # The key hashes the calibration the build reads, which only the scoped
+    # config names (P02.11).
+    require_profile_scoped(config, reader="feature-frame cache key")
     payload: dict[str, Any] = {
         "cache_version": FEATURE_FRAME_CACHE_VERSION,
         "sessions": [_session_cache_entry(session_dir) for session_dir in session_dirs],
@@ -98,6 +106,11 @@ def _feature_frame_cache_metadata(
         # invalidates cached frames that decoded did:* columns.
         # ``dids_path`` must be the file the build actually loads.
         "dids": _file_cache_entry(dids_path),
+        # P02.11: the derived channels read these two. The calibration is
+        # hashed at the scoped path, so a frame built without it (or with a
+        # since-edited one) is never served.
+        "afr_calibration": _file_cache_entry(config.daemon.afr_calibration),
+        "vehicle_parameters": config.vehicle.parameters.model_dump(mode="json"),
     }
     return {**payload, "cache_key": _stable_hash(payload)}
 

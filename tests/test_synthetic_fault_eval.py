@@ -34,6 +34,7 @@ from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E40
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
 from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 from tests.builders import IFConfig
+from tests.configs import example_config
 
 EXAMPLE_YAML = Path(__file__).resolve().parent.parent / "canary.example.yaml"
 
@@ -77,7 +78,7 @@ def _two_mode_resampled(seed: int = 0) -> pd.DataFrame:
 
 
 def _config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 # ---------------------------------------------------------------------------

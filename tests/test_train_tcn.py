@@ -20,6 +20,7 @@ from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.tcn_training import load_tcn_autoencoder_model
 from tests.builders import write_obd_session
+from tests.configs import example_config
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -62,7 +63,7 @@ def _write_config(tmp_path: Path, **tcn_overrides: object) -> Path:
 
 
 def _config(tmp_path: Path, **tcn_overrides: object) -> CanaryConfig:
-    return CanaryConfig.from_yaml(_write_config(tmp_path, **tcn_overrides))
+    return example_config(_write_config(tmp_path, **tcn_overrides))
 
 
 def _no_bindings(tmp_path: Path) -> Path:

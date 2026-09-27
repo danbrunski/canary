@@ -45,6 +45,7 @@ from src.preprocessing.loader import (
 from src.preprocessing.resampler import resample_config_for
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 T0 = datetime(2026, 9, 26, 12, 0, tzinfo=UTC)
 IMU_HZ = 50
@@ -169,7 +170,7 @@ def config() -> CanaryConfig:
     """The example config with the accel-gated modes placed ahead of the speed
     bands (the example lists them after ``city``/``highway``, which claim every
     moving row first)."""
-    data = CanaryConfig.from_yaml(Path("canary.example.yaml")).model_dump()
+    data = example_config(Path("canary.example.yaml")).model_dump()
     data["preprocessing"]["operating_modes"] = {
         "launch": {"speed_max": 30, "accel_lon_min": 0.3},
         "hard_brake": {"speed_min": 1, "accel_lon_min": 0.4},
@@ -362,7 +363,7 @@ def test_store_and_no_store_give_the_same_frame(tmp_path: Path, config: CanaryCo
 
 def test_the_value_number_reduction_is_the_same_with_one_part_or_many(tmp_path: Path) -> None:
     session = write_session(tmp_path)
-    resample = resample_config_for(CanaryConfig.from_yaml(Path("canary.example.yaml")))
+    resample = resample_config_for(example_config(Path("canary.example.yaml")))
     grid_interval_ns(resample)
     one = reduce_numeric_session(session, resample, part_rows=10**9)
     many = reduce_numeric_session(session, resample, part_rows=150)

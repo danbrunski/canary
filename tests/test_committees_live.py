@@ -65,6 +65,7 @@ def _config(
         alerts={"min_seconds_between_events": 0},
         models={"roles": {"committee": committee_role}},
         committees={"enabled": enabled},
+        profiles={"enabled": False},
     )
 
 

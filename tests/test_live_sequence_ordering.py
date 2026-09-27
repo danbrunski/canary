@@ -47,7 +47,7 @@ from src.models.manager import LoadedModel
 from src.models.manifest import ModelManifestCommon
 from src.models.sequence_dataset import MASK_ARRIVED_SAMPLE, OBSERVATION_MASK_SCHEMA_KEY
 from src.telemetry import TelemetryRecord
-from tests.configs import isolate
+from tests.configs import example_config, isolate
 
 torch = pytest.importorskip("torch")
 
@@ -114,7 +114,7 @@ daemon:
     )
     # Every writable path the YAML leaves at a repo default goes under
     # tmp_path too (trip_state, audit log, ...): R07.2.
-    return isolate(CanaryConfig.from_yaml(path), tmp_path)
+    return isolate(example_config(path), tmp_path)
 
 
 # --- the artifact: arrived_sample mask + a training envelope, no training ----

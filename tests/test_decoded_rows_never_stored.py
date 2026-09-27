@@ -28,6 +28,7 @@ import pytest
 import yaml
 
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
 SLICE = REPO / "tests" / "fixtures" / "replay" / "decoded-slice" / "telemetry-00000.parquet"
@@ -191,10 +192,9 @@ def test_the_value_number_chain_decodes_on_read(copies: dict[str, Path], copy: s
     and the sequence dataset all read ``resample_and_segment``; before P02.8
     its only ``decoded:`` inputs were stored rows."""
     from src.analysis.fingerprint import compute_fingerprint
-    from src.config import CanaryConfig
     from src.preprocessing.loader import resample_and_segment
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     stored = resample_and_segment([copies["stored"]], config)
     other = resample_and_segment([copies[copy]], config)
     assert _decoded_channels(stored.columns) == ON_READ
@@ -209,13 +209,12 @@ def test_the_derived_numeric_frame_decodes_on_read_and_versions_by_the_catalog(
 ) -> None:
     """The store's ``value_number`` frame is shaped by the on-read catalog now,
     so an edit to one of its bindings rebuilds it and says why."""
-    from src.config import CanaryConfig
     from src.preprocessing import decode
     from src.preprocessing.derived_store import DerivedStore, use_store
     from src.preprocessing.loader import resample_and_segment
     from src.preprocessing.resampler import resample_config_for
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     resample = resample_config_for(config)
     in_memory = resample_and_segment([copies["stored"]], config)
     with use_store(tmp_path / "derived"):
@@ -276,7 +275,6 @@ def test_read_channels_reads_decoded_specs(copies: dict[str, Path], copy: str) -
 
 
 def test_plausibility_streams_decode_every_decoded_sample(copies: dict[str, Path]) -> None:
-    from src.config import CanaryConfig
     from src.decode.bindings import load_bindings
     from src.decode.dids import load_did_map
     from src.plausibility.limits import (
@@ -286,7 +284,7 @@ def test_plausibility_streams_decode_every_decoded_sample(copies: dict[str, Path
     )
     from src.plausibility.offline import load_stream
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     bindings = load_bindings(REPO / "data" / "bindings.yaml")
     did_map = load_did_map(REPO / "data" / "dids.yaml")
     catalog = resolve_limits(
@@ -432,9 +430,8 @@ def test_a_saved_catalog_carrying_broadcast_decode_loads_and_says_so(
     re-seeded: they load, the field is dropped, and the load names it (once
     per process; the conftest reset makes each test a fresh process here)."""
     from src.collection.capture_profiles import load_capture_profiles
-    from src.config import CanaryConfig
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     saved = yaml.safe_load((REPO / "data" / "capture_profiles.yaml").read_text())
     for profile in saved["profiles"]:
         profile["broadcast_decode"] = True

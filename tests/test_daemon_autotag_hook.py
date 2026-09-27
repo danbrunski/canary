@@ -27,6 +27,7 @@ def _config(tmp_path: Path, *, live_enabled: bool) -> CanaryConfig:
         models={"out_of_process_feature_build": False},
         daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 16},
         autotag={"live_enabled": live_enabled, "stopped_speed_max_kph": 3.0},
+        profiles={"enabled": False},
     )
 
 

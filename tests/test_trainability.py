@@ -25,7 +25,7 @@ from src.analysis.derived import (
     compute_derived_channels,
 )
 from src.analysis.refit import Surface1DRecipe, Surface2DRecipe
-from src.config import CanaryConfig, VehicleParameters
+from src.config import VehicleParameters
 from src.decode.behavior_models import load_behavior_models
 from src.preprocessing.feature_pipeline import (
     candidate_feature_columns,
@@ -41,6 +41,7 @@ from src.telemetry import (
     require_trainability_classified,
 )
 from src.trainability import SOURCE_NOT_TRAINABLE, source_exclusion_reason
+from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
 TELEMETRY_PY = REPO / "src" / "telemetry.py"
@@ -236,7 +237,7 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
 
 
 def test_external_sensors_and_their_derived_channels_yield_no_feature() -> None:
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())
     featurized = featurize_wide_frame(wide, config)
     features = featurized.features
@@ -272,7 +273,7 @@ def test_committee_channels_leave_the_trained_feature_list_unchanged() -> None:
     )
     from src.preprocessing.features import base_channel
 
-    config = CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())
     featurized = featurize_wide_frame(wide, config)
     committee = ("derived:SPEED_SOURCE_DIVERGENCE", OBD_SPEED_ACCEL_G, GPS_SPEED_ACCEL_G)

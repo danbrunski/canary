@@ -31,6 +31,7 @@ from src.models.sequence_training import choose_validation_sessions
 from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,7 +73,7 @@ def _record(
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(REPO_ROOT / "canary.example.yaml")
+    return example_config(REPO_ROOT / "canary.example.yaml")
 
 
 @pytest.fixture

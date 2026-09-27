@@ -20,6 +20,7 @@ from src.config import CanaryConfig
 from src.preprocessing import feature_pipeline
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 
 def _idle_session(root: Path) -> Path:
@@ -52,7 +53,7 @@ def test_fingerprint_runs_the_models_featurization(
         return real(wide, config, **kwargs)
 
     monkeypatch.setattr(fingerprint, "featurize_wide_frame", spy)
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     stats = fingerprint.compute_fingerprint(_idle_session(tmp_path), config)
     assert len(calls) == 1
     assert "behavior_models" in calls[0]

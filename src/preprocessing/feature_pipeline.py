@@ -10,6 +10,7 @@ training CLIs stay thin and behave identically.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import multiprocessing
 import os
@@ -33,7 +34,7 @@ from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_
 from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.collection.capture_profiles import MODE01_AUTO
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
-from src.config import CanaryConfig
+from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
 from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
@@ -896,6 +897,9 @@ def build_feature_frame(
     ``ZScoreScaler`` then normalizes them through ``trainable_feature_columns``
     without changes to either module.
     """
+    # Before the cache: a hit would otherwise hand back a frame an unscoped
+    # config could never have built correctly (P02.11).
+    require_profile_scoped(config, reader="build_feature_frame")
     session_dirs = [Path(session_dir) for session_dir in session_dirs]
     cache_path: Path | None = None
     cache_metadata: dict[str, Any] | None = None
@@ -1314,7 +1318,12 @@ def featurize_wide_frame(
     :class:`~src.preprocessing.live.LiveFeatureSource` carries start
     evidence across ticks itself (its ring buffer is far shorter than a
     warmup) and has already written those columns into ``wide``.
+
+    P02.11 — ``config`` must be profile-scoped while profiles are enabled
+    (:func:`~src.config.require_profile_scoped`): the derived channels read the
+    vehicle's ``afr_calibration.yaml``, which only the scoped config names.
     """
+    require_profile_scoped(config, reader="featurize_wide_frame")
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
     framed = _append_derived_channels(framed, config)
     cfg = _feature_config(config, feature_config)
@@ -1344,6 +1353,9 @@ def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.D
     # target them as outputs and the rolling feature builder picks up their
     # derivatives. `vehicle` unlocks VE_PERCENT (Task 4.1), which needs the
     # configured displacement.
+    # P02.11: the scoped config is the only one naming the vehicle's file; an
+    # unscoped one reads as "no calibration" and drops channels silently.
+    require_profile_scoped(config, reader="featurization (afr_calibration)")
     afr_calibration = (
         load_afr_calibration(config.daemon.afr_calibration)
         if config.daemon.afr_calibration.exists()
@@ -1583,6 +1595,7 @@ def featurize_perturbed_frame(
     sensor-committee columns (detectors, never features) are not recomputed,
     and a deviation that reads one sends the frame down the full path.
     """
+    require_profile_scoped(config, reader="featurize_perturbed_frame")
     reference = clean.operating_frame
 
     def full() -> pd.DataFrame:
@@ -2224,6 +2237,15 @@ def align_features_to_schema(
     return aligned
 
 
+def _afr_calibration_provenance(config: CanaryConfig) -> dict[str, str | None]:
+    """The ``afr_calibration.yaml`` featurization reads for ``config``, by path
+    and content hash (``None`` when absent)."""
+    require_profile_scoped(config, reader="feature spec (afr_calibration)")
+    path = config.daemon.afr_calibration
+    digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+    return {"path": str(path), "sha256": digest}
+
+
 def build_feature_spec(
     features: pd.DataFrame,
     feature_columns: Sequence[str],
@@ -2299,6 +2321,10 @@ def build_feature_spec(
         spec["slow_channel_max_gap_seconds"] = float(
             config.preprocessing.slow_channel_max_gap_seconds
         )
+        # P02.11: which calibration the derived AFR channels were built with,
+        # by content. ``sha256: None`` says "featurized without one" — the
+        # state every pre-P02.11 trainer frame was in, silently.
+        spec["afr_calibration"] = _afr_calibration_provenance(config)
     if sequence_length is not None:
         spec["sequence_length"] = sequence_length
     if sequence_stride is not None:

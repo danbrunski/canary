@@ -24,9 +24,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 try:
-    from _cli import add_common_args, load_config
+    from _cli import add_common_args, load_scoped_config
 except ImportError:  # loaded as `scripts.fp_benchmark` — repo root on path, not scripts/
-    from scripts._cli import add_common_args, load_config  # type: ignore[no-redef]
+    from scripts._cli import add_common_args, load_scoped_config  # type: ignore[no-redef]
 
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
@@ -133,7 +133,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     try:
-        config = load_config(args)
+        # The trainer's featurization, so the trainer's scoped config (P02.11).
+        config = load_scoped_config(args, None)
         report = run_false_positive_benchmark(
             args.model,
             args.session_dir,

@@ -17,9 +17,9 @@ from scripts.sequence_bakeoff import (
     main,
     run_bakeoff,
 )
-from src.config import CanaryConfig
 from src.models import evaluation as model_evaluation
 from tests.builders import write_obd_session
+from tests.configs import example_config
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -86,7 +86,7 @@ def _no_bindings(tmp_path: Path) -> Path:
 
 def test_run_bakeoff_compares_both_backbones(tmp_path: Path) -> None:
     _torch()
-    config = CanaryConfig.from_yaml(_write_config(tmp_path))
+    config = example_config(_write_config(tmp_path))
     train_session = write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     held_out = write_obd_session(tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0)
 

@@ -12,11 +12,11 @@ import pandas as pd
 import pytest
 import yaml
 
-from src.config import CanaryConfig
 from src.models import training_entry
 from src.models.sequence_training import ValidationChoice
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -57,7 +57,7 @@ def test_a_column_seen_only_in_validation_is_not_a_feature_and_is_named(
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
-    config = CanaryConfig.from_yaml(config_path)
+    config = example_config(config_path)
     root = tmp_path / "sessions"
     sessions = [
         _session(root, f"s{i}", start=1_778_500_000.0 + 3600 * i, extra=i == 2) for i in range(3)
@@ -124,7 +124,7 @@ def test_parked_rows_neither_train_nor_validate(
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
-    config = CanaryConfig.from_yaml(config_path)
+    config = example_config(config_path)
     root = tmp_path / "sessions"
     sessions = [
         _parked_session(root, f"2026-08-0{i + 1}T120000", start=1_785_600_000.0 + 86_400 * i)
@@ -178,7 +178,7 @@ def test_a_tail_block_validation_never_moves_the_scaler(
     )
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
-    config = CanaryConfig.from_yaml(config_path)
+    config = example_config(config_path)
     root = tmp_path / "sessions"
     session = _session(root, "2026-08-01T120000", start=1_785_600_000.0, extra=False)
     seen: dict[str, Any] = {}
@@ -245,7 +245,7 @@ def test_both_trainers_exclude_a_once_a_minute_channel_and_name_why(
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(yaml.safe_dump(data))
-    config = CanaryConfig.from_yaml(config_path)
+    config = example_config(config_path)
     root = tmp_path / "sessions"
     sessions = [
         _once_a_minute_session(root, f"2026-08-0{i + 1}T120000", start=1_785_600_000.0 + 86_400 * i)

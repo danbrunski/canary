@@ -64,6 +64,7 @@ from src.decode.behavior_models import (
 )
 from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
+from tests.configs import example_config
 
 T0 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 
@@ -474,9 +475,8 @@ def test_parked_hours_inside_one_drive_are_not_exposure() -> None:
     document = BehaviorValidationDocument.model_validate(
         {"approved_operating_modes": ["idle"], "drive_join_gap_seconds": 60000.0}
     )
-    from src.config import CanaryConfig
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     wide = EventPolicy.from_config(config, document)
     assert wide.exposure_break_seconds == 60000.0
     metrics = fold_metrics(
@@ -702,7 +702,6 @@ def test_identical_rows_with_a_changed_decoder_bump_the_version() -> None:
 
 
 def test_load_and_hot_reload_agree_with_the_fit(tmp_path: Path) -> None:
-    from src.config import CanaryConfig
     from src.daemon import poll_behavior_models
     from src.preprocessing.live import LiveFeatureSource
 
@@ -713,7 +712,7 @@ def test_load_and_hot_reload_agree_with_the_fit(tmp_path: Path) -> None:
     assert loaded.models[0] == model
     assert serving_status(loaded.models[0]).alerting
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     source = LiveFeatureSource(config=config, behavior_models=loaded)
     flagged = model.model_copy(update={"publication_flags": ["decoder_changed:bindings"]})
 

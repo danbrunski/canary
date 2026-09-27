@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.collection import bus_budget, tx_gate
-from src.config import CanaryConfig
+from src.config import CanaryConfig, UnscopedConfigError, require_profile_scoped
 from src.daemon.health import HealthMonitor
 from src.decode.behavior_models import (
     behavior_policy_path,
@@ -15,6 +15,7 @@ from src.decode.behavior_models import (
     unknown_operating_modes,
 )
 from src.models.manager import ModelManager
+from src.profiles import rescope_like
 
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
@@ -174,6 +175,13 @@ async def poll_config(
     change can't skew segmentation. Those (and model/fusion/emitter/hardware
     config, owned elsewhere) still need a restart. Errors log + keep the
     previous config.
+
+    P02.11: the reloaded YAML is re-scoped exactly as ``main`` scoped the
+    startup config (:func:`~src.profiles.rescope_like`: the same resolved
+    profile, registry vehicle parameters included). A bare ``from_yaml`` swapped
+    in an unscoped config, and with profiles on every later live tick refused
+    to featurize until a restart. A reload that cannot be scoped (profiles
+    switched on under a profile-less daemon) keeps the previous config.
     """
 
     def _structural(cfg: CanaryConfig) -> tuple[float, int, int]:
@@ -186,7 +194,8 @@ async def poll_config(
             if path.exists():
                 mtime = path.stat().st_mtime
                 if last_mtime is None or mtime > last_mtime:
-                    new_config = CanaryConfig.from_yaml(path)
+                    new_config = rescope_like(CanaryConfig.from_yaml(path), live_source.config)
+                    require_profile_scoped(new_config, reader="config hot-reload")
                     if _structural(new_config) != _structural(live_source.config):
                         log.warning(
                             "config change touches structural fields (resample_hz / "
@@ -204,6 +213,16 @@ async def poll_config(
                             },
                         )
                     last_mtime = mtime
+        except UnscopedConfigError as exc:
+            # Profiles switched on under a daemon that started without them:
+            # which vehicle is a startup decision (the VIN probe). Restart.
+            log.warning(
+                "config hot-reload cannot scope the new config; keeping previous "
+                "(restart required): %s",
+                exc,
+                extra={"path": str(path)},
+            )
+            last_mtime = path.stat().st_mtime if path.exists() else last_mtime
         except Exception:  # noqa: BLE001 — keep the previous config; log + retry
             log.exception("config hot-reload failed; keeping previous", extra={"path": str(path)})
         try:

@@ -72,12 +72,12 @@ import numpy as np
 try:
     from _cli import (
         add_bindings_arg,
-        load_config,
+        load_scoped_config,
     )
 except ImportError:
     from scripts._cli import (  # type: ignore[no-redef]
         add_bindings_arg,
-        load_config,
+        load_scoped_config,
     )
 
 from src.collection.can_obd_client import PID_DECODERS
@@ -823,7 +823,9 @@ def print_report(report: BenchmarkReport, report_path: Path | None = None) -> No
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     warmup, measured = resolve_tick_counts(args)
-    config = load_config(args)
+    # The vehicle's default profile (``--profile`` here is the workload
+    # preset): the live source refuses an unscoped config (P02.11).
+    config = load_scoped_config(args, None)
     bindings_path = args.bindings if args.bindings.is_file() else None
     bindings = load_bindings(bindings_path) if bindings_path is not None else None
     print(f"running {args.profile}: {warmup} warmup + {measured} measured ticks…", file=sys.stderr)

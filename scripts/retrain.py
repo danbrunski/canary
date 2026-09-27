@@ -62,7 +62,7 @@ try:
         add_override_reason_arg,
         add_profile_arg,
         apply_since_boundary,
-        load_config,
+        load_scoped_config,
         parse_since_argument,
         resolve_sessions,
         scoped_models_dir,
@@ -75,7 +75,7 @@ except ImportError:  # loaded as `scripts.retrain` — repo root on path, not sc
         add_override_reason_arg,
         add_profile_arg,
         apply_since_boundary,
-        load_config,
+        load_scoped_config,
         parse_since_argument,
         resolve_sessions,
         scoped_models_dir,
@@ -527,7 +527,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 def _main(args: argparse.Namespace) -> int:
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = load_config(args)
+    # Scoped once, here (P02.11): every trainer, the feature frames and the
+    # accepted baselines read the vehicle's data, as the daemon does.
+    config = load_scoped_config(args, args.profile)
     run = _start_run(args, config)
 
     if run.skip_if and run.skip_sequence:

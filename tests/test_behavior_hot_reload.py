@@ -22,6 +22,7 @@ from src.decode.behavior_models import (
     dump_behavior_models,
 )
 from src.preprocessing.live import LiveFeatureSource
+from tests.configs import example_config
 
 
 def _models(name: str, operating_mode: str | None) -> BehaviorModels:
@@ -57,9 +58,8 @@ async def test_poll_picks_up_new_yaml_without_restart(tmp_path: Path, yaml_path:
     """A fresh YAML on disk replaces the in-memory ``live_source.behavior_models``
     reference within one poll interval.
     """
-    from src.config import CanaryConfig
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     live_source = LiveFeatureSource(
         config=config,
         behavior_models=_models("coolant_warmup", operating_mode=None),
@@ -99,9 +99,8 @@ async def test_poll_picks_up_new_yaml_without_restart(tmp_path: Path, yaml_path:
 
 async def test_poll_keeps_previous_models_on_load_error(tmp_path: Path) -> None:
     """A corrupted YAML doesn't blank the in-memory models — log + retry."""
-    from src.config import CanaryConfig
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     original = _models("coolant_warmup", operating_mode="warmup")
     live_source = LiveFeatureSource(config=config, behavior_models=original)
     yaml_path = tmp_path / "behavior_models.yaml"
@@ -127,7 +126,6 @@ async def test_hot_reloaded_cold_start_contract_cannot_qualify_mid_drive(tmp_pat
     daemon restart."""
     from datetime import UTC, datetime, timedelta
 
-    from src.config import CanaryConfig
     from src.decode.behavior_decoder import deviation
     from src.decode.behavior_models import (
         CURRENT_SCHEMA_VERSION,
@@ -138,7 +136,7 @@ async def test_hot_reloaded_cold_start_contract_cannot_qualify_mid_drive(tmp_pat
     )
     from src.telemetry import TelemetryRecord
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     live_source = LiveFeatureSource(
         config=config, behavior_models=_models("coolant_warmup", operating_mode=None)
     )

@@ -42,6 +42,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX, FeatureConfig
 from src.preprocessing.resampler import GAP_SUFFIX
 from src.preprocessing.segmenter import MODE_COLUMN
+from tests.configs import example_config
 
 _ROLL_SUFFIXES = ("__mean", "__std", "__roc")
 
@@ -147,7 +148,7 @@ def test_trainable_feature_columns_drops_corpus_constant_channels() -> None:
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    return example_config(Path("canary.example.yaml"))
 
 
 def _wide(n: int = 5) -> pd.DataFrame:
@@ -366,7 +367,7 @@ def test_build_feature_frame_parallel_matches_serial(tmp_path: Path) -> None:
     feature values. Sessions are independent so this should hold exactly."""
     from src.preprocessing.feature_pipeline import build_feature_frame
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     # 3 sessions ⇒ above the parallel threshold; forcing max_workers=2 forces
     # the pool path. Each session is distinct (different start epochs) so we
     # also indirectly check ordering is preserved.
@@ -387,7 +388,7 @@ def test_build_feature_frame_skips_parallel_under_threshold(tmp_path: Path) -> N
     The result still has to equal the serial path."""
     from src.preprocessing.feature_pipeline import build_feature_frame
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     sessions = [
         _write_session(tmp_path, f"s{i}", rows=60, start_epoch=1_780_000_000.0 + i * 1000.0)
         for i in range(2)
@@ -418,7 +419,7 @@ def test_build_feature_frame_quality_gate_rejects_impossible_cell(tmp_path: Path
     ]
     write_records_to_parquet(records, session, max_rows=10_000)
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     frame = build_feature_frame([session], config, max_workers=1)
 
     assert 16383.0 not in frame["obd:RPM"].to_numpy()
@@ -440,7 +441,7 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     )
     from src.preprocessing.resampler import ResampleConfig
 
-    config = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    config = example_config(Path("canary.example.yaml"))
     session = _write_session(tmp_path, "s0", rows=60, start_epoch=1_780_000_000.0)
 
     resample_config = ResampleConfig(
@@ -954,10 +955,9 @@ def test_max_gap_factor_is_config_driven_for_train_and_serve() -> None:
     ceiling and LiveFeatureSource's serve-time staleness rule diverge — the
     preprocessing-parity failure the manifest's max_gap_seconds exists to
     catch."""
-    from src.config import CanaryConfig
     from src.preprocessing.resampler import ResampleConfig
 
-    cfg = CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    cfg = example_config(Path("canary.example.yaml"))
     rc = ResampleConfig(
         hz=cfg.preprocessing.resample_hz,
         max_gap_factor=cfg.preprocessing.max_gap_factor,

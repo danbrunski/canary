@@ -21,7 +21,7 @@ from src.datasets.export import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
-from tests.configs import write_isolated_config
+from tests.configs import example_config, write_isolated_config
 
 
 def _make_session(
@@ -55,7 +55,7 @@ def _config(tmp_path: Path) -> tuple[CanaryConfig, Path]:
     storage = tmp_path / "sessions"
     storage.mkdir()
     # The CLI tests read tmp_path/canary.yaml, so the config is written too.
-    return CanaryConfig.from_yaml(write_isolated_config(tmp_path, storage=storage)), storage
+    return example_config(write_isolated_config(tmp_path, storage=storage)), storage
 
 
 # ---------------------------------------------------------------------------

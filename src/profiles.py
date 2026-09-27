@@ -491,8 +491,11 @@ def resolve_profile_for_tooling(config: CanaryConfig, slug: str | None) -> Vehic
     and WITHOUT mutating the registry (so a dry-run stays read-only).
 
     ``--profile <slug>`` selects a registry entry (or a synthetic default under
-    that slug); otherwise the ``vehicle:`` block's default profile is used.
+    that slug); otherwise the ``vehicle:`` block's default profile is used. A
+    config already scoped (P02.11) resolves to the profile it was scoped to, so
+    re-resolving downstream of an entry point's ``scope_config`` is a no-op.
     """
+    slug = slug if slug is not None else config.scoped_profile
     if slug is not None:
         for profile in load_registry(config.profiles.registry_path):
             if profile.slug == slug:
@@ -521,10 +524,23 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
     the profile slug, and the ``vehicle:`` block reflecting the profile.
 
     ``profiles.registry_path`` is deliberately *not* scoped — it is the global
-    index that maps VIN to slug. The slug is recoverable downstream as
-    ``config.collection.storage_path.name``.
+    index that maps VIN to slug. The slug is recorded on the result as
+    ``config.scoped_profile`` (P02.11), which the vehicle-data readers
+    (featurization's ``afr_calibration``, the files beside it) require
+    (:func:`src.config.require_profile_scoped`).
+
+    Idempotent for the same profile: scoping an already-scoped config returns
+    it unchanged instead of nesting ``<slug>/<slug>/``. Re-scoping to a
+    *different* profile raises — its paths are no longer the base paths.
     """
     slug = profile.slug
+    if config.scoped_profile is not None:
+        if config.scoped_profile == slug:
+            return config
+        raise ValueError(
+            f"config is already scoped to profile {config.scoped_profile!r}; "
+            f"cannot re-scope it to {slug!r} (scope the unscoped config instead)"
+        )
 
     collection = config.collection.model_copy(
         update={"storage_path": _scope_dir(config.collection.storage_path, slug)}
@@ -562,9 +578,29 @@ def scope_config(config: CanaryConfig, profile: VehicleProfile) -> CanaryConfig:
             "parameters": profile.parameters,
         }
     )
-    return config.model_copy(
+    scoped = config.model_copy(
         update={"collection": collection, "daemon": daemon, "vehicle": vehicle}
     )
+    scoped._scoped_profile = slug
+    scoped._scope_source = profile
+    return scoped
+
+
+def rescope_like(config: CanaryConfig, reference: CanaryConfig) -> CanaryConfig:
+    """``config`` (freshly loaded, unscoped) scoped with the very profile
+    ``reference`` was scoped with: its slug *and* the registry vehicle
+    parameters ``resolve_active_profile`` applied, never a re-derivation.
+
+    The daemon's config hot-reload goes through this (P02.11): a bare
+    ``from_yaml`` swapped in an unscoped config and every live tick refused.
+    ``reference`` unscoped (profiles off) returns ``config`` as loaded.
+    """
+    profile = reference._scope_source
+    if profile is None:
+        return config
+    if not isinstance(profile, VehicleProfile):
+        raise TypeError(f"scoped config carries {type(profile).__name__}, not a VehicleProfile")
+    return scope_config(config, profile)
 
 
 # ---------------------------------------------------------------------------

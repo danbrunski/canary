@@ -42,6 +42,7 @@ def config(tmp_path: Path) -> CanaryConfig:
         # exercises the real dedupe path instead of disabling it outright.
         alerts={"min_seconds_between_events": 0.05},
         daemon={"model_poll_seconds": 0.05, "broadcaster_queue_size": 16},
+        profiles={"enabled": False},
     )
 
 

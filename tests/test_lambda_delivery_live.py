@@ -173,7 +173,7 @@ def _drive_live(
     """Records through a real LiveFeatureSource, one tick per data second."""
     recorder = InferenceTimingRecorder()
     live = LiveLambdaDelivery(readout, recorder=recorder)
-    source = LiveFeatureSource(config=isolated_config(tmp_path))
+    source = LiveFeatureSource(config=isolated_config(tmp_path, profiles={"enabled": False}))
     live.attach(source)
     next_tick: datetime | None = None
     for record in _records(session):
@@ -477,7 +477,7 @@ def test_it_runs_under_a_tuning_capture_and_never_alerts(
 ) -> None:
     """R03.12 stops the learned-normal detectors in tuning captures; this
     readout is not one of them, and it has no path to the emitter."""
-    config = isolated_config(tmp_path, "example")
+    config = isolated_config(tmp_path, "example", profiles={"enabled": False})
     components = build_components(config)
     tuning_profile.activate(
         CaptureProfile(
@@ -516,7 +516,7 @@ def test_it_runs_under_a_tuning_capture_and_never_alerts(
 
 
 def test_a_vehicle_without_a_declaration_says_so(tmp_path: Path) -> None:
-    components = build_components(isolated_config(tmp_path, "example"))
+    components = build_components(isolated_config(tmp_path, "example", profiles={"enabled": False}))
     recorder = InferenceTimingRecorder()
     source = LiveFeatureSource(config=components.config)
     live = build_live_lambda_delivery(
@@ -532,7 +532,7 @@ def test_a_vehicle_without_a_declaration_says_so(tmp_path: Path) -> None:
 
 
 def test_a_malformed_declaration_withholds_the_readout(tmp_path: Path) -> None:
-    components = build_components(isolated_config(tmp_path, "example"))
+    components = build_components(isolated_config(tmp_path, "example", profiles={"enabled": False}))
     recorder = InferenceTimingRecorder()
 
     def broken(_config: object) -> TuningContext:

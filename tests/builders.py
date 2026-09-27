@@ -160,11 +160,14 @@ RICH_SESSION_END = datetime(2026, 5, 20, 18, 5, 0, tzinfo=UTC)
 def digest_config(tmp_path: Path) -> CanaryConfig:
     """The example config for digest tests: real per-vehicle inputs, every
     writable path under ``tmp_path`` (the anomaly log, vehicle ledger and
-    reference epoch at the top level, where the digest tests seed them)."""
+    reference epoch at the top level, where the digest tests seed them).
+    Profiles off: the digest child gets the daemon's config, which is scoped
+    or profile-less, never unscoped with profiles on (P02.11)."""
     return isolated_config(
         tmp_path,
         "example",
         keep=READ_ONLY_INPUTS,
+        profiles={"enabled": False},
         daemon={
             "anomalies_dir": tmp_path / "anomalies",
             "vehicle_ledger": tmp_path / "vehicle_ledger.jsonl",

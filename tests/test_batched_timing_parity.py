@@ -30,6 +30,7 @@ from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import to_wide
 from src.preprocessing.resampler import ResampleConfig, gap_column, resample_wide
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 #: Six fast Mode 01 channels — one full batch (the ECM's six-PID limit).
 BATCH = ("RPM", "SPEED", "ENGINE_LOAD", "THROTTLE_POS", "MAF", "TIMING_ADVANCE")
@@ -144,7 +145,7 @@ def test_roc_matches_the_known_slope_away_from_the_outage() -> None:
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(Path("canary.example.yaml"))
+    return example_config(Path("canary.example.yaml"))
 
 
 def _live_gap_history(config: CanaryConfig, *, batched: bool) -> list[dict[str, object]]:

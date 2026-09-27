@@ -41,6 +41,7 @@ try:
         add_log_level_arg,
         discover_live_session_dirs,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.label_sessions` — repo root on path, not scripts/
     from scripts._cli import (  # type: ignore[no-redef]
@@ -48,6 +49,7 @@ except ImportError:  # loaded as `scripts.label_sessions` — repo root on path,
         add_log_level_arg,
         discover_live_session_dirs,
         load_config,
+        scoped_config,
     )
 
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
@@ -124,8 +126,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
     configure_logging(args.log_level)
 
-    config = load_config(args)
-    sessions_root = args.sessions_root or config.collection.storage_path
+    base = load_config(args)
+    sessions_root = args.sessions_root or base.collection.storage_path
+    # The session root keeps its unscoped default; the classify, fingerprint
+    # and trend passes read vehicle data, so they get the scoped config the
+    # daemon's own classify child runs with (P02.11: the fingerprint's
+    # featurization refuses an unscoped one).
+    config = scoped_config(base, None)
 
     if args.session:
         targets = [sessions_root / name for name in args.session]

@@ -29,6 +29,7 @@ from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
 from tests.builders import IFConfig
+from tests.configs import example_config
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 
@@ -153,11 +154,10 @@ def _main_args(root: Path, artifact: Path, tmp_path: Path) -> list[str]:
 
 
 def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> None:
-    from src.config import CanaryConfig
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     root = tmp_path / "sessions"
     seen = _write_session(root, "2026-05-12T000000", start=1_778_544_000.0, seed=1)
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
@@ -294,10 +294,9 @@ def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
     """A06.5: an evidence-role detector still reports its episodes per drive,
     but only alert-role detectors count against the budget."""
     from scripts.evaluate_detectors import DriveRecord, summarize_false_alarms
-    from src.config import CanaryConfig
     from src.models.evaluation_detectors import detector_roles
 
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     config.models.roles.isolation_forest = "alert"  # one of each role
     config.models.roles.sequence = "evidence"
     roles = detector_roles(config, ["isolation_forest", "sequence", "sequence_global", "fused"])
@@ -331,11 +330,10 @@ def test_evidence_role_detectors_are_not_held_to_the_alert_budget() -> None:
 def _unseen_drive_fixture(tmp_path: Path) -> tuple[Path, Path]:
     """One training session (not scored) and one unseen session under
     ``sessions/``; returns ``(sessions root, IF artifact)``."""
-    from src.config import CanaryConfig
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
     root = tmp_path / "sessions"
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
@@ -485,11 +483,10 @@ def _report_body(path: Path) -> dict[str, object]:
 
 
 def _fit_if(session: Path, artifact: Path, *, seed: int) -> None:
-    from src.config import CanaryConfig
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     trained = fit_isolation_forest(
         featurize_wide_frame(load_resampled_session(session, config), config).features,
         IFConfig(n_estimators=40, random_state=seed),
@@ -813,10 +810,9 @@ def test_the_cgroup_headroom_is_the_tightest_level_up_to_the_root(tmp_path: Path
 def test_the_key_hashes_the_afr_calibration_featurization_reads(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``featurize_wide_frame`` takes the unscoped config, so the unscoped
-    ``daemon.afr_calibration`` is the file whose edit must change the key."""
+    """The key hashes the ``afr_calibration`` featurization reads: the
+    profile-scoped one (P02.11), never the absent unscoped ``data/`` path."""
     import scripts.evaluate_detectors as harness
-    from src.config import CanaryConfig
 
     seen: list[Any] = []
     real = harness.key_inputs
@@ -830,5 +826,11 @@ def test_the_key_hashes_the_afr_calibration_featurization_reads(
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
     argv = _main_args(root, tmp_path / "absent.joblib", tmp_path)
     assert main([*argv, "--plan", "--out", str(tmp_path / "r.json")]) == 0
-    afr = CanaryConfig.from_yaml(EXAMPLE_YAML).daemon.afr_calibration.resolve()
-    assert afr in seen[0].extra_data
+    from src.config import CanaryConfig
+    from src.profiles import resolve_profile_for_tooling, scope_config
+
+    base = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    afr = scope_config(base, resolve_profile_for_tooling(base, None)).daemon.afr_calibration
+    assert afr.is_file(), "the example vehicle ships a calibration"
+    assert afr.resolve() in seen[0].extra_data
+    assert base.daemon.afr_calibration.resolve() not in seen[0].extra_data

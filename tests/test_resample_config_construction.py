@@ -31,6 +31,7 @@ from src.preprocessing.resampler import (
 )
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -108,7 +109,7 @@ def test_the_scan_catches_a_direct_construction(tmp_path: Path) -> None:
 
 @pytest.fixture
 def tuned() -> CanaryConfig:
-    base = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    base = example_config(EXAMPLE_YAML)
     return base.model_copy(
         update={
             "preprocessing": base.preprocessing.model_copy(

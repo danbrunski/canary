@@ -55,7 +55,7 @@ from src.analysis.derived import (
 )
 from src.can_ids import parse_can_channel
 from src.coerce import finite_float
-from src.config import CanaryConfig
+from src.config import CanaryConfig, require_profile_scoped
 from src.decode.accepted_baselines import AcceptedBaselines
 from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings
@@ -301,6 +301,9 @@ class LiveFeatureSource:
     latest_derived_channels: dict[str, float] | None = field(init=False, default=None)
 
     def __post_init__(self) -> None:
+        # At construction, not first tick: an unscoped config would featurize
+        # without the vehicle's afr_calibration (P02.11).
+        require_profile_scoped(self.config, reader="LiveFeatureSource")
         hz = max(self.config.preprocessing.resample_hz, 1.0)
         window_s = self.config.preprocessing.rolling_window_seconds
         # Keep a slack factor — pandas' time-window rolling can use anything

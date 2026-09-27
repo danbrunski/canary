@@ -47,6 +47,7 @@ def _config(tmp_path: Path) -> CanaryConfig:
         daemon={"afr_calibration": vehicle / "afr_calibration.yaml"},
         plausibility={"enabled": True},
         alerts={"min_seconds_between_events": 0},
+        profiles={"enabled": False},
     )
 
 

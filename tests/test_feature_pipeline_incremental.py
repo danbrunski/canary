@@ -35,6 +35,7 @@ from src.preprocessing.feature_pipeline import (
     load_resampled_session,
 )
 from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
 SLICE = REPO / "tests" / "fixtures" / "ground_truth" / "drive-slice"
@@ -67,7 +68,7 @@ _ADDED = {
 
 @pytest.fixture(scope="module")
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    return example_config(REPO / "canary.example.yaml")
 
 
 @pytest.fixture(scope="module")

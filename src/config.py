@@ -12,7 +12,14 @@ from pathlib import Path
 from typing import Any, Literal, Self, get_args
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
 from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR, DATA_DIR
 from src.storage.broadcast_storage import (
@@ -1307,6 +1314,22 @@ class CanaryConfig(_Strict):
     plausibility: PlausibilityConfig = PlausibilityConfig()
     committees: CommitteesConfig = CommitteesConfig()
 
+    #: The profile slug :func:`src.profiles.scope_config` nested this config's
+    #: vehicle paths under; ``None`` for a config as loaded. Private, so no YAML
+    #: can claim it: the one writer is ``scope_config``. It survives
+    #: ``model_copy`` and pickling (the scoring child gets the parent's object).
+    _scoped_profile: str | None = PrivateAttr(default=None)
+    #: The ``VehicleProfile`` itself (opaque here: ``profiles`` sits above this
+    #: module), so a freshly loaded YAML can be re-scoped exactly as this config
+    #: was -- same slug, same registry vehicle parameters
+    #: (:func:`src.profiles.rescope_like`, the config hot-reload).
+    _scope_source: Any = PrivateAttr(default=None)
+
+    @property
+    def scoped_profile(self) -> str | None:
+        """The profile slug this config is scoped to, or ``None`` (unscoped)."""
+        return self._scoped_profile
+
     @model_validator(mode="after")
     def _broadcast_timeout_inside_session_gap(self) -> Self:
         """An unchanged CAN id is re-written only once per broadcast stale
@@ -1330,6 +1353,38 @@ class CanaryConfig(_Strict):
         with path.open("r") as f:
             data = yaml.safe_load(f)
         return cls.model_validate(data)
+
+
+class UnscopedConfigError(ValueError):
+    """A vehicle-data reader was handed a config ``scope_config`` never scoped.
+
+    With profiles enabled, every vehicle-specific path (``afr_calibration`` and
+    the files beside it) exists only under ``<base>/<slug>/``; the unscoped path
+    names a file that is absent, and every reader treats absent as "this
+    vehicle has none" -- silently.
+    """
+
+
+def require_profile_scoped(config: CanaryConfig, *, reader: str) -> None:
+    """Refuse ``config`` for ``reader`` unless it is profile-scoped (P02.11).
+
+    Unscoped is correct only with ``profiles.enabled: false``, where the base
+    paths are the vehicle's. The incident this names: the daemon scopes its
+    config in ``main`` and so applied the vehicle's ``afr_calibration.yaml``
+    while the trainers and the evaluation harness featurized through the
+    unscoped config, where ``data/afr_calibration.yaml`` does not exist -- every
+    offline feature frame was built without the calibration the served one had.
+    """
+    if config.profiles.enabled and config.scoped_profile is None:
+        raise UnscopedConfigError(
+            f"{reader} needs a profile-scoped config (src.profiles.scope_config): with "
+            "profiles enabled the vehicle's data lives under <base>/<slug>/, and "
+            f"{config.daemon.afr_calibration} is the unscoped path. The trainers and "
+            "the evaluation harness once featurized through it without the vehicle's "
+            "afr_calibration.yaml while the daemon applied it (P02.11). Scope the "
+            "config once at the entry point (resolve_profile_for_tooling + "
+            "scope_config), or disable profiles."
+        )
 
 
 def _daemon_path_fields() -> tuple[str, ...]:

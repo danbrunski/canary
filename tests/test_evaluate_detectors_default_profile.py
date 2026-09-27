@@ -23,6 +23,7 @@ from src.control.capture_manifest import CAPTURE_MANIFEST_FILENAME  # noqa: E402
 from src.models.evaluation import default_profile_exclusion  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
+from tests.configs import example_config
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"
 DAY = 1_778_630_400.0  # 2026-05-13T00:00:00Z
@@ -82,11 +83,10 @@ def test_default_profile_exclusion_names_each_kind(tmp_path: Path) -> None:
 
 
 def test_tuning_capture_rows_reach_no_metric(tmp_path: Path) -> None:
-    from src.config import CanaryConfig
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
     from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     training = _write(tmp_path / "training", "2026-05-01T000000", start=DAY - 12 * 86_400,
                       n=120, rpm=1500.0, seed=1)  # fmt: skip
     trained = fit_isolation_forest(

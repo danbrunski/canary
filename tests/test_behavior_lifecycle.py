@@ -67,6 +67,7 @@ from src.models.spec_producibility import (
 )
 from src.preprocessing.feature_pipeline import build_feature_spec, consumed_behavior_fingerprints
 from src.preprocessing.live import LiveFeatureSource
+from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
 PROFILE_DIR = REPO / "data" / "nissan-xterra-2008"
@@ -76,7 +77,7 @@ SHIPPED_POLICY = PROFILE_DIR / BEHAVIOR_POLICY_FILENAME
 
 @pytest.fixture
 def config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(REPO / "canary.example.yaml")
+    return example_config(REPO / "canary.example.yaml")
 
 
 def _entry(**overrides: Any) -> dict[str, Any]:

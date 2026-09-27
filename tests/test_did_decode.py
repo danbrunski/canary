@@ -24,6 +24,7 @@ from src.decode.dids import (
 )
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -159,7 +160,7 @@ def test_empty_frame_returns_unchanged() -> None:
 
 
 def _config() -> CanaryConfig:
-    return CanaryConfig.from_yaml(EXAMPLE_YAML)
+    return example_config(EXAMPLE_YAML)
 
 
 def test_live_source_decodes_did_to_named_column() -> None:

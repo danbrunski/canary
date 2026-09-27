@@ -38,7 +38,7 @@ try:
         add_common_args,
         add_log_level_arg,
         add_override_reason_arg,
-        load_config,
+        load_scoped_config,
     )
 except ImportError:  # loaded as `scripts.sequence_bakeoff` — repo root on path, not scripts/
     from scripts._cli import (  # type: ignore[no-redef]
@@ -46,7 +46,7 @@ except ImportError:  # loaded as `scripts.sequence_bakeoff` — repo root on pat
         add_common_args,
         add_log_level_arg,
         add_override_reason_arg,
-        load_config,
+        load_scoped_config,
     )
 
 from src.config import CanaryConfig
@@ -443,7 +443,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
     configure_torch_threads()
-    config = load_config(args)
+    # Both backbones featurize like the trainers: scoped (P02.11).
+    config = load_scoped_config(args, None)
 
     log.info("bake-off device=%s", args.device)
     try:

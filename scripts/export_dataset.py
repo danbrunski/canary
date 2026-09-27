@@ -26,12 +26,14 @@ try:
         add_common_args,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 except ImportError:  # loaded as `scripts.export_dataset` — repo root on path, not scripts/
     from scripts._cli import (  # type: ignore[no-redef]
         add_common_args,
         add_log_level_arg,
         load_config,
+        scoped_config,
     )
 
 from src.datasets.export import (  # noqa: E402
@@ -79,8 +81,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(args.log_level)
-    config = load_config(args)
-    storage_root = args.sessions_root or config.collection.storage_path
+    base = load_config(args)
+    storage_root = args.sessions_root or base.collection.storage_path
+    # The feature matrix featurizes with the vehicle's afr_calibration, which
+    # only the scoped config names (P02.11); the session root keeps its default.
+    config = scoped_config(base, None)
 
     if args.mark_candidate is not None:
         meta = mark_training_candidate(storage_root / args.mark_candidate, purpose=args.purpose)

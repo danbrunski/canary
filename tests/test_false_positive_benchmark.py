@@ -30,6 +30,7 @@ from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from tests.configs import example_config
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]
@@ -232,7 +233,7 @@ def _write_obd_session(root: Path, name: str, *, rows: int, start_epoch: float) 
 
 def test_run_false_positive_benchmark_end_to_end(tmp_path: Path) -> None:
     _torch()
-    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    config = example_config(EXAMPLE_YAML)
     train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     held_out_session = _write_obd_session(
         tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0
@@ -265,7 +266,7 @@ def test_cli_main_prints_json_report(tmp_path: Path, capsys: pytest.CaptureFixtu
     _torch()
     config_path = tmp_path / "canary.yaml"
     config_path.write_text(EXAMPLE_YAML.read_text())
-    config = CanaryConfig.from_yaml(config_path)
+    config = example_config(config_path)
     train_session = _write_obd_session(tmp_path, "train", rows=120, start_epoch=1_778_500_000.0)
     held_out_session = _write_obd_session(
         tmp_path, "holdout", rows=120, start_epoch=1_778_600_000.0

@@ -17,6 +17,7 @@ from src.preprocessing.decode import (
     read_session_decoded,
 )
 from src.preprocessing.loader import to_wide
+from tests.configs import example_config
 
 # ---------------------------------------------------------------------------
 # Fixtures: synthetic long-format telemetry frames
@@ -474,7 +475,6 @@ def test_both_bounded_readers_decode_an_old_spelling_session_alike(
     spelled the id without ``0x`` decodes in both. ``build_evaluation_frame``
     pushed ``0x{id:X}`` down itself and got no ``decoded:`` values from it."""
     from src.analysis.behavior_validation import build_evaluation_frame
-    from src.config import CanaryConfig
     from src.decode.behavior_models import BehaviorModels
     from src.plausibility.offline import session_long
 
@@ -508,7 +508,7 @@ signals:
 
     frame = build_evaluation_frame(
         [session],
-        CanaryConfig.from_yaml(Path("canary.example.yaml")),
+        example_config(Path("canary.example.yaml")),
         BehaviorModels(schema_version=1),
         bindings_path=bindings_path,
         dids_path=tmp_path / "absent-dids.yaml",
