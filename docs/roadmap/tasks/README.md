@@ -1,5 +1,21 @@
 # Implementation task index
 
+**Status 2026-09-27: R09, package layering.**
+[`R09-package-layering.md`](R09-package-layering.md) gives `src/` one import
+direction. Nineteen pairs of packages import each other, up from 3 in May and
+13 two weeks ago. They trace to four misplacements, not nineteen:
+
+- runtime building blocks kept in `analysis/`;
+- session storage kept in `control/`;
+- feature assembly mixed into `preprocessing/`;
+- column constants kept in `preprocessing/`.
+
+R09.1 turns R01.8's `tests/test_layering.py` into a layer order and records
+today's 84 upward edges and 3 pairs in `OWED`, which stops the growth
+immediately. R09.2–R09.8 each move one group down and delete their entries.
+R09.1 needs one operator decision: replace R01.8's named-edge rule with a
+strict order. The overnight queue is unchanged.
+
 **Status 2026-09-26: P01 and P02, pipeline memory and time.**
 [`P01-derived-session-frames.md`](P01-derived-session-frames.md) took the
 training and evaluation chain from 12–15 GB per long session to about 1.3 GB.
