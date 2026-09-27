@@ -734,11 +734,22 @@ def test_squat_record_requires_conditions() -> None:
         SquatConditions(payload_kg=127.0, road="x", date=dt.date(2026, 9, 26), sessions=["s"])  # type: ignore[call-arg]
     record = _squat_record()
     accel = np.array([G * 0.1])
-    corrected = correct_specific_force(accel, accel, squat=record, pitch_offset_deg=0.0)
+    one = MotionSamples(t_s=[0.0], speed_mps=[20.0], accel_mps2=accel, sf_lon_mps2=accel)
+    corrected = correct_specific_force(one, squat=record, pitch_offset=_stated_offset(0.0))
+    assert not isinstance(corrected, DynoRefusal), corrected
     # 0.1 g of acceleration pitches 0.12 deg: sin(0.12 deg)·g removed.
     assert corrected[0] == pytest.approx(G * 0.1 - G * math.sin(math.radians(0.12)))
-    both = correct_specific_force(accel, accel, squat=record, pitch_offset_deg=0.3)
+    both = correct_specific_force(one, squat=record, pitch_offset=_stated_offset(0.3))
+    assert not isinstance(both, DynoRefusal), both
     assert both[0] == pytest.approx(G * 0.1 - G * math.sin(math.radians(0.42)))
+    # The public correction takes the offset with its frame, and refuses
+    # samples resolved in another one.
+    framed = replace(one, imu_reference_id="frame-b")
+    refusal = _refused(
+        correct_specific_force(framed, squat=record, pitch_offset=_stated_offset(0.3)),
+        "frame_mismatch",
+    )
+    assert "frame-b" in refusal.reason
 
 
 # ---------------------------------------------------------------------------
@@ -866,6 +877,59 @@ def test_pitch_offset_separates_from_grade_only_with_both_directions(
     _refused(estimate_pitch_offset([], squat=None), "inputs_missing")
 
 
+def _in_frame(legs: list[Leg], frame: str | None) -> list[Leg]:
+    return [Leg(leg.heading, replace(leg.samples, imu_reference_id=frame)) for leg in legs]
+
+
+def test_pitch_offset_is_bound_to_the_frame_it_was_measured_in(driveline: Driveline) -> None:
+    # A pitch offset is a property of one IMU rotation (imu_frame.json's
+    # reference_id). It carries that id, and nothing applies it to samples
+    # resolved in another frame.
+    pair = _in_frame(_coast_pair(driveline, 16), "frame-a")
+    offset = estimate_pitch_offset(pair, squat=_squat_record())
+    assert isinstance(offset, PitchOffset), offset
+    assert offset.reference_id == "frame-a"
+    mixed = [pair[0], *_in_frame(pair[1:], "frame-b")]
+    refusal = _refused(estimate_pitch_offset(mixed, squat=None), "frame_mismatch")
+    assert "frame-a" in refusal.reason and "frame-b" in refusal.reason
+    fit = fit_road_load(pair, driveline=driveline, test_mass_kg=MASS, squat=_squat_record())
+    assert isinstance(fit, RoadLoadFit), fit
+    assert fit.imu_reference_id == "frame-a"
+    _refused(
+        fit_road_load(
+            mixed,
+            driveline=driveline,
+            test_mass_kg=MASS,
+            squat=None,
+            allow_single_direction=True,
+        ),
+        "frame_mismatch",
+    )
+    # The two-gear fit applies the offset: pulls from another frame are refused,
+    # pulls from the same frame are fitted and record it.
+    rng = np.random.default_rng(3)
+    pulls = [_pull(rng, driveline, 2), _pull(rng, driveline, 3)]
+    framed = [GearPull(p.gear, replace(p.samples, imu_reference_id="frame-a")) for p in pulls]
+    kwargs = _inertia_kwargs(driveline)
+    refusal = _refused(fit_engine_inertia(pulls, pitch_offset=offset, **kwargs), "frame_mismatch")
+    assert "frame-a" in refusal.reason
+    fitted = fit_engine_inertia(framed, pitch_offset=offset, **kwargs)
+    assert isinstance(fitted, EngineInertiaFit), fitted
+    assert fitted.imu_reference_id == "frame-a"
+    assert (
+        fitted.to_record(
+            InertiaConditions(
+                road="r",
+                date=dt.date(2026, 9, 26),
+                sessions=["s"],
+                payload_kg=127.0,
+                tune_revision="ZS44A-20260920",
+            )
+        ).imu_reference_id
+        == "frame-a"
+    )
+
+
 def test_road_load_single_direction_is_refused_unless_asked_and_then_labelled(
     driveline: Driveline,
 ) -> None:
@@ -969,6 +1033,11 @@ def test_driveline_effective_mass_from_stated_estimates(driveline: Driveline) ->
         driveline.overall_ratio(7)
 
 
+def _stated_offset(deg: float = TRUE_MOUNT_OFFSET_DEG) -> PitchOffset:
+    """A known pitch offset in the synthetic data's frame (``reference_id`` None)."""
+    return PitchOffset(deg=deg, heading_pitch_deg={}, n_samples=0, reference_id=None)
+
+
 def _inertia_kwargs(driveline: Driveline) -> dict[str, object]:
     return {
         "driveline": driveline,
@@ -980,9 +1049,7 @@ def _inertia_kwargs(driveline: Driveline) -> dict[str, object]:
 
 def test_two_gear_fit_is_exact_without_noise(driveline: Driveline) -> None:
     pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    fit = fit_engine_inertia(
-        pulls, pitch_offset_deg=TRUE_MOUNT_OFFSET_DEG, **_inertia_kwargs(driveline)
-    )
+    fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
     assert isinstance(fit, EngineInertiaFit), fit
     assert fit.engine_kg_m2 == pytest.approx(TRUE_ENGINE_INERTIA, rel=0.005)
 
@@ -998,7 +1065,7 @@ def test_inertia_convention_is_upstream_of_driveline_losses(driveline: Driveline
     # and divides by the driveline's η: the crank inertia comes back, and the
     # product is what m_eff uses.
     pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset_deg": TRUE_MOUNT_OFFSET_DEG}
+    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
     fit = fit_engine_inertia(pulls, **kwargs)
     assert isinstance(fit, EngineInertiaFit), fit
     assert fit.reflected_kg_m2 == pytest.approx(ETA * TRUE_ENGINE_INERTIA, rel=0.005)
@@ -1015,9 +1082,7 @@ def test_inertia_convention_is_upstream_of_driveline_losses(driveline: Driveline
 
 def test_inertia_record_holds_one_convention(driveline: Driveline) -> None:
     pulls = [_pull(_Silent(), driveline, 2), _pull(_Silent(), driveline, 3)]  # type: ignore[arg-type]
-    fit = fit_engine_inertia(
-        pulls, pitch_offset_deg=TRUE_MOUNT_OFFSET_DEG, **_inertia_kwargs(driveline)
-    )
+    fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
     assert isinstance(fit, EngineInertiaFit)
     conditions = InertiaConditions(
         road="r",
@@ -1053,14 +1118,14 @@ def test_two_gear_pulls_recover_a_known_engine_inertia(driveline: Driveline, see
     offset = estimate_pitch_offset(_coast_pair(driveline, seed + 100), squat=_squat_record())
     assert isinstance(offset, PitchOffset)
     kwargs = _inertia_kwargs(driveline)
-    fit = fit_engine_inertia(pulls, pitch_offset_deg=offset.deg, **kwargs)
+    fit = fit_engine_inertia(pulls, pitch_offset=offset, **kwargs)
     assert isinstance(fit, EngineInertiaFit), fit
     # Known answer 0.18 kg m^2 (the driveline's estimate is 0.25) within 5 %.
     assert fit.engine_kg_m2 == pytest.approx(TRUE_ENGINE_INERTIA, rel=0.05)
     assert abs(fit.engine_kg_m2 - TRUE_ENGINE_INERTIA) <= 3.5 * fit.engine_kg_m2_se
     assert fit.imu_pitch_offset_deg == offset.deg
     # Why the offset is a required argument: left in, 0.3 deg moves it ~44 %.
-    blind = fit_engine_inertia(pulls, pitch_offset_deg=0.0, **kwargs)
+    blind = fit_engine_inertia(pulls, pitch_offset=_stated_offset(0.0), **kwargs)
     assert isinstance(blind, EngineInertiaFit)
     assert abs(blind.engine_kg_m2 / TRUE_ENGINE_INERTIA - 1.0) > 0.15
     assert fit.gears == (2, 3)
@@ -1089,9 +1154,7 @@ def test_two_gear_standard_error_is_not_inflated(driveline: Driveline) -> None:
     for seed in range(12):
         rng = np.random.default_rng(seed)
         pulls = [_pull(rng, driveline, 2), _pull(rng, driveline, 3)]
-        fit = fit_engine_inertia(
-            pulls, pitch_offset_deg=TRUE_MOUNT_OFFSET_DEG, **_inertia_kwargs(driveline)
-        )
+        fit = fit_engine_inertia(pulls, pitch_offset=_stated_offset(), **_inertia_kwargs(driveline))
         assert isinstance(fit, EngineInertiaFit), fit
         fits.append(fit)
     scatter = np.std([f.engine_kg_m2 for f in fits], ddof=1)
@@ -1103,7 +1166,7 @@ def test_two_gear_fit_refuses_degenerate_pulls(driveline: Driveline) -> None:
     rng = np.random.default_rng(22)
     second = _pull(rng, driveline, 2)
     third = _pull(rng, driveline, 3)
-    kwargs = {**_inertia_kwargs(driveline), "pitch_offset_deg": TRUE_MOUNT_OFFSET_DEG}
+    kwargs = {**_inertia_kwargs(driveline), "pitch_offset": _stated_offset()}
     _refused(fit_engine_inertia([], **kwargs), "inputs_missing")
     _refused(fit_engine_inertia([second, second], **kwargs), "same_gear")
     no_rpm = GearPull(3, replace(third.samples, rpm=None))

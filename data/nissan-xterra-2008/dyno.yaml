@@ -4,6 +4,8 @@
 # are NOT here: they are vehicle parameters in profiles.yaml, with their own
 # evidence (H07.1, H07.10, H07.11). This file holds what the dyno adds:
 #
+#   motion_sources  which channels a dyno window is built from, best first,
+#                with each speed channel's measured ratio to GPS (H07.3)
 #   inertia      stated estimates until measured (H07.6); results computed
 #                with them carry `inertia: estimated`
 #   squat        body pitch per g, fitted on flat ground (H07.4)
@@ -15,6 +17,44 @@
 # a record without its conditions.
 
 schema_version: 1
+
+# Absolute speed = channel / ratio_to_gps. GPS speed is the reference (ratio 1)
+# and the last resort; it is never listed. A channel the committee file also
+# states must carry the same ratio (tests/test_dyno_inputs.py checks).
+motion_sources:
+  speed:
+    - channel: decoded:VEHICLE_SPEED_2D1
+      ratio_to_gps: 0.932
+      evidence: >-
+        Measured 2026-09-26 (H07.3) by the H04.3 committee method: GPS epochs
+        with satellites >= 7, HDOP <= 2, speed >= 20 km/h, paired with the
+        0x2D1 frame nearest in acquisition time (within 20 ms), steady only
+        (|slope of 0x2D1 speed over +/-2 s| < 0.05 g). Per-session median
+        0x2D1/GPS: 0.9314 (2026-09-20T152758, n=1145), 0.9320
+        (2026-09-20T175050, n=7521), 0.9348 (2026-09-21T143331, n=910),
+        0.9324 (_capture-tuning-2026-09-22T235224, n=1010); 10th-90th
+        percentile per epoch about +/-2.5 %. Control on the same epochs:
+        0x6F7_A reads 0.9236 / 0.9214 / 0.9241 / 0.9233, reproducing the
+        committee's 0.921-0.924, so 0x2D1 reads ~1 % higher than the other
+        ECU copies and does NOT share their 0.9203. The 2026-09-23T150658 HAT
+        drive gave n=119 with a 0.10-1.53 per-epoch spread and is excluded
+        (GNSS integration day). Pre-HAT USB receiver.
+    - channel: decoded:WHEEL_SPEED_6F7_A
+      ratio_to_gps: 0.9203
+      evidence: >-
+        The committee relation in committees.yaml (SPEED_SOURCE_DIVERGENCE),
+        which carries the measurements; kept equal to it.
+    - channel: obd:SPEED
+      ratio_to_gps: 0.9203
+      evidence: >-
+        The committee relation in committees.yaml (SPEED_SOURCE_DIVERGENCE):
+        per-row median obd/gps over 2185 paired seconds of 2026-08-06T162657,
+        re-measured 0.915-0.924 on six drives. At ~0.7 Hz in 1 km/h steps it
+        is too coarse to differentiate at the default smoothing and is
+        refused as such; listed for completeness of the order.
+  rpm:
+    - decoded:ECM_RPM
+    - obd:RPM
 
 inertia:
   road_wheels: 4

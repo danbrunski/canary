@@ -105,13 +105,71 @@ under GPS. Defects a dyno would inherit:
   labels drift from the backend's. The digest's tagged-pull test runs over
   both spellings (`tests/test_tuning_digest.py`). `pnpm typecheck` clean; the
   tuning panel tests pass (38).
-- [ ] **H07.3 Speed and acceleration inputs.** **Do:** a function returning,
+- [x] **H07.3 Speed and acceleration inputs.** **Do:** a function returning,
   for a pull window, GPS speed (absolute), `0x2D1` broadcast speed scaled by
   the profile's measured ECU/GPS ratio (100 Hz), `a` from a smoothed
   derivative of the scaled broadcast speed, and `imu:SF_LON` (H02.4), all on
   one time base from the acquisition clock. **Accept:** synthetic tests with
   known speed profiles; refusal named when GPS is below the H04.3 quality
   gates.
+  **Evidence (2026-09-26):** `src/analysis/dyno_inputs.py`:
+  `read_motion_inputs(session, start, end, sources)` (one bounded read;
+  `decoded:` sources decoded from their raw frames whatever their binding
+  confidence, since the loader decodes only `confirmed` ones on read) and the
+  pure `build_motion_inputs(channels, ...)`, returning `DynoInputs` or a
+  `DynoRefusal`.
+  - **Speed** is the first source in `dyno.yaml` `motion_sources.speed` that
+    has data and puts 5 samples in the smoothing window, divided by that
+    channel's `ratio_to_gps`; GPS is the reference and last resort. Channel
+    names and ratios are profile data (`MotionSources`, which refuses a listed
+    `gps:speed` or a duplicate). **Measured for this item:** 0x2D1 reads
+    **0.932** of GPS (per-session medians 0.9314 / 0.9320 / 0.9348 / 0.9324,
+    committee method), not the 0x6F7/PID 0.9203: 0x6F7 on the same epochs
+    reproduced the committee's 0.921–0.924. A test holds the dyno ratios equal
+    to `committees.yaml` for every channel both state.
+  - **One time base:** every channel at its own acquisition stamps, averaged
+    into each 50 ms grid step when faster (a symmetric boxcar), interpolated
+    when slower, never shifted. Acceleration is the smoothed central difference
+    of speed, and **the same 0.5 s quadratic kernel smooths `imu:SF_LON`, speed
+    and rpm** (`matched_kernels`). The fit's own slope, the obvious choice, is
+    a differently weighted average: on a 0.1 s launch it put 0.25 m/s² into
+    `f − a`; matched, 0.036.
+  - GPS is received late, so the scale check fits the lag (−1…6 s) and pairs
+    GPS epochs with the speed at the same instant. On
+    `2026-09-20T175050` (21 windows of 20 s) GPS / scaled 0x2D1 read
+    0.9916–1.0197, lag 0.3–2.6 s. Two steady windows hit the 6 s search
+    bound, where the lag cannot be identified and does not matter.
+  - **Specific force** comes through `imu_frame.json` in m/s², and its
+    `reference_id` is copied onto `MotionSamples.imu_reference_id`.
+    `PitchOffset` now requires the `reference_id` it was measured in;
+    `estimate_pitch_offset` and `fit_road_load` refuse legs from mixed frames,
+    and `fit_engine_inertia` (whose argument is now a `PitchOffset`, not a
+    float) and `compute_power` refuse samples from another frame
+    (`frame_mismatch`). The fits record the id. The public
+    `correct_specific_force(samples, *, squat, pitch_offset: PitchOffset)`
+    returns the corrected force or refuses `frame_mismatch`; the bare-float
+    form is private (`_correct_specific_force`).
+  - **Degrades by name:** without a sidecar (or with a refused one, or no raw
+    accelerometer rows) `DynoInputs` is still built and records
+    `ImuUnavailable`; `.motion()` refuses `imu_unavailable` with that cause.
+  - **Refusals:** `gps_quality` (any epoch in the window failing
+    `SPEED_COMMITTEE.gates`, sats ≥ 7 and HDOP ≤ 2, or a gate channel not
+    recorded), `inputs_missing` (no GPS speed), `inputs_gap` (a hole in any
+    selected channel; the GPS limit is an absolute 2.5 s because the pre-HAT
+    receiver flushes each epoch twice), `speed_too_coarse` (names each source
+    and its rate), `speed_scale_mismatch` (beyond 3 %, naming the ratio the
+    window implies), `invalid_input`.
+  - **Limits:** the scale check is a gross-error check. 0x6F7's ratio used for
+    0x2D1 (1.3 % off) passes it (tested). A real session with a resolved
+    IMU frame has not been run, because none is on the laptop. The real smoke
+    above ran without IMU (`imu_frame_missing`, 21/23), and 2/23 windows were
+    refused `inputs_gap` for a 0.19 s 0x2D1 hole. A 20 s window takes ~12 s
+    to read from a whole stored session.
+  - Tests: `tests/test_dyno_inputs.py` (13). Mutation-checked, all 8 killed:
+    unsmoothed `f`, unsmoothed rpm, ratio not applied, GPS gate skipped,
+    speed gap unchecked, frame id dropped, scale check off, fit-slope
+    derivative. Also
+    `tests/test_dyno.py::test_pitch_offset_is_bound_to_the_frame_it_was_measured_in`.
 - [~] **H07.4 Body pitch under acceleration.** **Do:** on flat ground,
   `f − a` should equal `g·sin(θ)` with θ ≈ 0; fit the residual against `a` to
   get a squat coefficient (degrees of pitch per g). Store it as profile data
@@ -334,8 +392,8 @@ under GPS. Defects a dyno would inherit:
     0.1814 / 0.1829 / 0.1822 (+0.8 / +1.6 / +1.2 %, se 0.0027–0.0040) on
     seeds 21–23.
   - se/scatter over 12 seeds: 1.19 (tested 0.7–1.7).
-  - `pitch_offset_deg` is required: passing 0 instead of the true 0.3 deg
-    gives 0.259 (+44 %).
+  - `pitch_offset` (a `PitchOffset`, frame-checked since H07.3) is
+    required: passing 0 instead of the true 0.3 deg gives 0.259 (+44 %).
 
   Wheel-side inertia stays an estimate, because two gears cannot separate
   it. The measured crank inertia scales as 1/η_assumed, while `m_eff` uses
@@ -345,7 +403,7 @@ under GPS. Defects a dyno would inherit:
   `inputs_missing`, `invalid_input`, `non_physical`. Tests:
   `tests/test_dyno.py::test_two_gear_*`, `::test_driveline_*`,
   `::test_xterra_profile_*`.
-- [ ] **H07.7 The power computation.** **Do:** `src/analysis/dyno.py`: detect
+- [~] **H07.7 The power computation.** **Do:** `src/analysis/dyno.py`: detect
   pulls (reuse `pull_report.detect_pulls` and `WotInventory` for
   wide-open-throttle provenance), refuse on gear change, clutch slip (rpm/speed
   ratio leaving its gear band), throttle below the WOT criterion, grade
@@ -356,6 +414,80 @@ under GPS. Defects a dyno would inherit:
   estimate. **Accept:** a synthetic pull generated from a known torque curve,
   road load and grade is recovered within 2 % over the band; each refusal
   has a test and a named reason.
+  **Partial (2026-09-26):** acceptance met at the desk. Still owed:
+  - finding pulls in a session. `pull_report.detect_pulls` lives in `tools/`,
+    which `src/` does not import, and `WotInventory` is the digest's. H07.9's
+    job needs both.
+  - the truck's curve (H07.12).
+
+  `src/analysis/dyno.py` `compute_power(pulls, *, driveline, test_mass_kg,
+  road_load, squat, pitch_offset, wot, conditions, correction=None)` returns
+  `DynoPower` or a `DynoRefusal`.
+  - Per sample, `F = m·f + (m_eff − m)·a + F_rl(v)`, with `f` corrected for
+    squat and the pitch offset, and `m_eff` from `Driveline.effective_mass`
+    (`η·I_e·N²/r²`, one `INERTIA_CONVENTION`), so `F = η·N/r·T`.
+  - Each pull is binned per 50 rpm, the headings are averaged at the same
+    rpm, and the pair is their mean.
+  - Wheel torque is `P/ω_engine` (chassis-dyno convention, stated). Engine
+    power and torque are only `wheel / η` and carry `ENGINE_ESTIMATE_LABEL`.
+  - `pitch_offset` (a `PitchOffset`, frame-checked), `squat`, a *pair* road
+    load, the WOT criterion (`threshold_value`, `rpm_floor`) and
+    `RunConditions` are all required.
+  - SAE J1349 is optional (`J1349Correction`, with the vapour pressure stated
+    and its source) and refused on a boosted run. `DynoPower.dyno_curve()`,
+    what floors and comparisons read, is always uncorrected; the corrected
+    curve is separate.
+
+  **Known answer.** The generator (`tests/test_dyno_power.py`) writes every
+  effect out independently of the module: a torque curve peaking at 320 N m;
+  grade 0.4 ± 0.3 % along the road; 2 m/s wind (headwind northbound); squat
+  1.5 deg/g; a 0.3 deg IMU pitch offset (the IMU reads `a·cos φ + g·sin(θ+φ)`);
+  η = 0.85 at the crank after `I_e` = 0.18; the wheel side; noise on f, a, v
+  and rpm. Pulls are in 3rd, 2,450–5,500 rpm.
+  - Noise-free: worst engine-torque error 0.007 % over 2,550–5,450 rpm.
+  - Each heading alone carries the wind: northbound −0.8 to −1.7 %,
+    southbound +0.8 to +1.7 %. The pair cancels it.
+  - End to end, road load from `fit_road_load` on 3 coasts each way, the
+    offset from `estimate_pitch_offset` on a cruise pair, 2 noisy pulls each
+    way: worst error 0.40 / 0.39 / 0.47 % on seeds 31–33, and 0.27–0.47 %
+    over seeds 31–40 (test tolerance 2 %).
+  - **Through the producer at its own rate** (revised after verification: the
+    generator above samples at 100 Hz, which H07.3 never outputs, and a fixed
+    3 samples per 50 rpm bin crashed `compute_power` on 2nd-gear pulls at
+    20 Hz, ~1.8 samples per bin). Instruments at their own rates (speed and
+    rpm at 100 Hz in broadcast resolution, the IMU at 208 Hz, GPS at 1 Hz)
+    go through `build_motion_inputs` at 20 Hz, then `compute_power`. Worst
+    error 0.32–0.59 % in 2nd (2,700–5,250 rpm) and 0.38–0.54 % in 3rd over
+    seeds 41–48. 2nd gear sampled at 20 Hz, noise-free: 0.010 %. The per-bin
+    ask is now sized from the pull's own rate (at most 3, at least 1), and a
+    pull filling under half its bins is refused `too_few_bins`, naming the
+    rate.
+  - Each term's size, noise-free: squat omitted 2.2 %, offset omitted 2.7 %,
+    road load omitted 22 %, `I_e` 0.25 for 0.18 0.64 %, `I_e` without η
+    0.29 %.
+  - Mutation-checked, all 12 killed: the inertia term dropped, neutral
+    `m_eff`, squat ignored, the offset's sign flipped, engine = wheel × η, the
+    pair = one heading, road load dropped, no frame check, WOT unchecked, a
+    fixed per-bin ask of 3, no bin-fill gate, the public correction without
+    its frame check.
+
+  **Refusals, each tested with its reason**, in this order:
+  - arguments: `inputs_missing`, `invalid_input` (mixed gears),
+    `conditions_mismatch` (gear), `single_direction` (road load),
+    `correction_refused`;
+  - `frame_mismatch`;
+  - per pull: `inputs_missing` (rpm; operator demand), `too_few_samples`,
+    `gear_change` (rpm on another gear's line, named), `clutch_slip` (above
+    the line), `gear_ratio_mismatch` (below it, which slip cannot do: the
+    speed scale, tyre or gear is wrong), `not_wot`, `grade_varies` (2nd–98th
+    percentile of the IMU's own grade > 2 %, H07.7's stated amount),
+    `rpm_span_too_small` (< 1,000), `too_few_bins`;
+  - `too_many_directions`, `single_direction` (unless allowed, then labelled
+    `single`), `direction_mismatch`, `no_overlap`.
+
+  The gear band is ±4 %, because H07.11 found 4th 2.0 % off its published
+  ratio. GPS quality is refused where the samples are made (H07.3), not
+  here. Tests: `tests/test_dyno_power.py` (14).
 - [~] **H07.8 Repeatability before claims.** **Do:** a same-day, same-ROM
   noise floor: at least three pull pairs, the spread per rpm band recorded as
   data with conditions (as N01 does for STFT). The analysis refuses to call
