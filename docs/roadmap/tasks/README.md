@@ -13,8 +13,9 @@ direction. Nineteen pairs of packages import each other, up from 3 in May and
 R09.1 turns R01.8's `tests/test_layering.py` into a layer order and records
 today's 84 upward edges and 3 pairs in `OWED`, which stops the growth
 immediately. R09.2–R09.8 each move one group down and delete their entries.
-R09.1 needs one operator decision: replace R01.8's named-edge rule with a
-strict order. The overnight queue is unchanged.
+The operator adopted the strict order on 2026-09-27, replacing R01.8's
+named-edge rule, and R09.1 landed the same day. The overnight queue is
+unchanged.
 
 **Status 2026-09-26: P01 and P02, pipeline memory and time.**
 [`P01-derived-session-frames.md`](P01-derived-session-frames.md) took the

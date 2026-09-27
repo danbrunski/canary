@@ -1,25 +1,28 @@
-"""R01.8: the layering inversions R01 removed must not come back.
+"""R01.8 / R09.1: ``src/`` imports run in one direction.
 
-Walks every module under ``src/`` with ``ast`` (function-level lazy imports
-included) and fails on an import edge from a lower layer into a higher one:
+Walks every module under ``src/`` with ``ast`` -- function-level lazy imports
+and ``TYPE_CHECKING`` imports included -- and places each top-level package
+and each root module (``src/*.py``) in :data:`LAYERS`. Two rules:
 
-- ``decode`` -> ``analysis``;
-- ``daemon`` / ``control`` / ``models`` -> ``dashboard``;
-- ``control`` -> ``mcp_server``;
-- ``models`` -> ``analysis.refit``.
+- a module imports only from its own layer or a lower one;
+- two units in the same layer never import each other. (A pair across layers
+  always contains an upward import, which the first rule already reports.)
 
-This forbids edges rather than imposing a strict layer order: ``models`` and
-``preprocessing`` importing ``analysis.drives`` / ``derived`` / ``pairing`` is
-legitimate today (those are the single sources), and so are the source-policy
-imports H01 relies on.
+R01.8 forbade six named edges "rather than imposing a strict layer order".
+The pair count rose from 13 to 19 anyway, and the operator replaced that rule
+with this order on 2026-09-27 (``docs/roadmap/tasks/R09-package-layering.md``).
+The six R01.8 edges are all upward under :data:`LAYERS` and stay pinned in
+:func:`test_the_edges_r01_removed_stay_removed`.
 
-Two allowance tables, both checked for staleness so neither can outlive the
+Three allowance tables, all checked for staleness so none can outlive the
 edge it excuses:
 
-- :data:`OWED` lists edges a later roadmap item removes. When that item lands
-  the edge disappears and this test fails until the entry is deleted.
-- :data:`STANDING` lists existing edges R01.8 did not name. They are recorded
-  rather than hidden, so a *new* one still fails.
+- :data:`OWED` lists the upward imports that existed when the order was
+  adopted, each naming the R09 item that removes it. When that item lands the
+  edge disappears and this test fails until the entry is deleted.
+- :data:`OWED_PAIRS` does the same for same-layer pairs.
+- :data:`STANDING` lists the one upward import that stays: the composition
+  root serving the app.
 """
 
 from __future__ import annotations
@@ -30,95 +33,330 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src"
 
-#: (importing top-level package, forbidden module prefix).
-FORBIDDEN: tuple[tuple[str, str], ...] = (
-    ("decode", "src.analysis"),
-    ("daemon", "src.dashboard"),
-    ("control", "src.dashboard"),
-    ("models", "src.dashboard"),
-    ("control", "src.mcp_server"),
-    ("models", "src.analysis.refit"),
-)
+#: Layer of every top-level package and root module under ``src/``. A unit
+#: missing from this table fails the test, so a new package must be placed.
+LAYERS: dict[str, int] = {
+    # 0 foundation: byte -> engineering-unit decoding and the root helpers.
+    "decode": 0,
+    "atomic_write": 0,
+    "can_ids": 0,
+    "coerce": 0,
+    "config": 0,
+    "dataframe_utils": 0,
+    "jsonl_store": 0,
+    "log": 0,
+    "operating": 0,
+    "paths": 0,
+    "session": 0,
+    "telemetry": 0,
+    "timefmt": 0,
+    "trainability": 0,
+    # 1 persistence
+    "storage": 1,
+    "profiles": 1,
+    # 2 acquisition
+    "collection": 2,
+    # 3 pipeline
+    "preprocessing": 3,
+    # 4 detection
+    "models": 4,
+    "alerts": 4,
+    "plausibility": 4,
+    "datasets": 4,
+    # 5 workbench
+    "analysis": 5,
+    # 6 application
+    "control": 6,
+    "vehicle_state": 6,
+    # 7 runtime
+    "daemon": 7,
+    "startup": 7,
+    # 8 interface
+    "dashboard": 8,
+    "companion": 8,
+    "mcp_server": 8,
+    # 9 entry
+    "validation": 9,
+    "main": 9,
+}
 
-_IMPORTERS = frozenset(importer for importer, _target in FORBIDDEN)
-
-#: Temporary: removed by a named later item. (file relative to src, module).
-#: Empty since R05.10 moved surface evaluation into ``decode.surface_eval``.
-OWED: dict[tuple[str, str], str] = {}
-
-#: Existing daemon -> dashboard edges that R01.8 does not name. Recorded so a
-#: new edge of this kind still fails; each one wants a home decision of its own.
+#: Upward imports that stay. (file relative to src, imported module).
 STANDING: dict[tuple[str, str], str] = {
     ("daemon/server.py", "src.dashboard.api"): "composition root: the daemon serves the app",
-    ("daemon/components.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
-    ("daemon/drain.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
-    ("daemon/inference.py", "src.dashboard.broadcast"): "live broadcaster owned by dashboard",
-    # R03.9 moved these two edges out of daemon/inference.py with the detectors.
-    (
-        "daemon/detectors/common.py",
-        "src.dashboard.broadcast",
-    ): "live broadcaster owned by dashboard",
-    ("daemon/detectors/isolation_forest.py", "src.dashboard.broadcast"): (
-        "live broadcaster owned by dashboard"
-    ),
-    ("daemon/components.py", "src.dashboard.behavior_live"): "behavior-live state in dashboard",
-    ("daemon/detectors/behavior.py", "src.dashboard.behavior_live"): (
-        "behavior-live state in dashboard"
-    ),
-    ("daemon/idle_shutdown.py", "src.dashboard.ups"): "UPS keep-alive reader in dashboard",
+}
+
+#: Upward imports present when the order was adopted (2026-09-27). Each value
+#: names the R09 item (docs/roadmap/tasks/R09-package-layering.md) that
+#: removes the import. (file relative to src, imported module).
+#:
+#: - R09.2 leaf moves: ``src/columns.py``, ``src/artifact_hash.py``, the dtc
+#:   sidecar name, digest budgets, fault injection, storage-writer Protocols,
+#:   ``config``'s own validators;
+#: - R09.3 ``storage`` owns the session (sessions, manifests, readers);
+#: - R09.4 ``src/signals/`` (channel physics out of ``analysis``);
+#: - R09.5 ``src/vehicle/`` (profiles, tune revisions, vehicle ledger);
+#: - R09.6 ``src/behavior/`` + ``src/features/``, landed together;
+#: - R09.7 fusion and feedback into ``models``;
+#: - R09.8 daemon-owned objects out of ``dashboard``; Protocols for daemon types.
+OWED: dict[tuple[str, str], str] = {
+    ("alerts/emitter.py", "src.analysis.committees"): "R09.4",
+    ("alerts/events.py", "src.analysis.committees"): "R09.4",
+    ("analysis/capture_coverage.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/channels.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/digest.py", "src.control.dtc_state"): "R09.2",
+    ("analysis/digest.py", "src.control.sessions"): "R09.3",
+    ("analysis/digest.py", "src.control.trip_end"): "R09.2",
+    ("analysis/drives.py", "src.control.sessions"): "R09.3",
+    ("analysis/refit.py", "src.control.sessions"): "R09.3",
+    ("analysis/splits.py", "src.control.sessions"): "R09.3",
+    ("analysis/tune_revisions.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/tune_revisions.py", "src.control.sessions"): "R09.3",
+    ("analysis/tuning.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/tuning_digest.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/tuning_frame.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/workbench.py", "src.control.capture_manifest"): "R09.3",
+    ("analysis/workbench.py", "src.control.sessions"): "R09.3",
+    ("collection/capture_profiles.py", "src.analysis.derived"): "R09.4",
+    ("collection/collectors.py", "src.analysis.tune_revisions"): "R09.5",
+    ("collection/collectors.py", "src.control.calibration"): "R09.5",
+    ("collection/replay.py", "src.preprocessing.loader"): "R09.3",
+    ("collection/tuning_profile.py", "src.analysis.tune_revisions"): "R09.5",
+    ("config.py", "src.collection.lsm6dsox"): "R09.2",
+    ("config.py", "src.storage.broadcast_storage"): "R09.2",
+    ("control/profile_capture.py", "src.daemon.health"): "R09.8",
+    ("control/sequence_detector.py", "src.daemon.components"): "R09.8",
+    ("daemon/components.py", "src.dashboard.behavior_live"): "R09.8",
+    ("daemon/components.py", "src.dashboard.broadcast"): "R09.8",
+    ("daemon/detectors/behavior.py", "src.dashboard.behavior_live"): "R09.8",
+    ("daemon/detectors/common.py", "src.dashboard.broadcast"): "R09.8",
+    ("daemon/detectors/isolation_forest.py", "src.dashboard.broadcast"): "R09.8",
+    ("daemon/drain.py", "src.dashboard.broadcast"): "R09.8",
+    ("daemon/idle_shutdown.py", "src.dashboard.ups"): "R09.8",
+    ("daemon/inference.py", "src.dashboard.broadcast"): "R09.8",
+    ("datasets/export.py", "src.control.sessions"): "R09.3",
+    ("datasets/health.py", "src.control.sessions"): "R09.3",
+    ("decode/behavior_decoder.py", "src.preprocessing.features"): "R09.6",
+    ("decode/behavior_decoder.py", "src.preprocessing.local_range"): "R09.6",
+    ("decode/behavior_decoder.py", "src.preprocessing.resampler"): "R09.6",
+    ("decode/behavior_decoder.py", "src.preprocessing.session_context"): "R09.6",
+    ("decode/behavior_eligibility.py", "src.preprocessing.features"): "R09.6",
+    ("decode/behavior_eligibility.py", "src.preprocessing.local_range"): "R09.6",
+    ("decode/behavior_eligibility.py", "src.preprocessing.resampler"): "R09.6",
+    ("decode/behavior_eligibility.py", "src.preprocessing.segmenter"): "R09.6",
+    ("decode/behavior_eligibility.py", "src.preprocessing.session_context"): "R09.6",
+    ("models/evaluation.py", "src.analysis.drives"): "R09.4",
+    ("models/evaluation.py", "src.analysis.session_classifier"): "R09.3",
+    ("models/evaluation.py", "src.analysis.tune_revisions"): "R09.5",
+    ("models/evaluation.py", "src.control.capture_manifest"): "R09.3",
+    ("models/evaluation.py", "src.control.sessions"): "R09.3",
+    ("models/golden_baselines.py", "src.analysis.training_disposition"): "R09.2",
+    ("models/isolation_forest.py", "src.analysis.drives"): "R09.4",
+    ("models/sequence_autoencoder_training.py", "src.analysis.drives"): "R09.4",
+    ("models/sequence_validation_split.py", "src.analysis.drives"): "R09.4",
+    ("models/training_entry.py", "src.analysis.drives"): "R09.4",
+    ("plausibility/limits.py", "src.analysis.fsm"): "R09.4",
+    ("preprocessing/derived.py", "src.analysis.fsm"): "R09.4",
+    ("preprocessing/derived_store.py", "src.analysis.fsm"): "R09.4",
+    ("preprocessing/feature_cache.py", "src.models.artifact_hash"): "R09.2",
+    ("preprocessing/feature_pipeline.py", "src.analysis.afr"): "R09.4",
+    ("preprocessing/feature_pipeline.py", "src.analysis.committees"): "R09.4",
+    ("preprocessing/feature_pipeline.py", "src.analysis.derived"): "R09.4",
+    ("preprocessing/feature_pipeline.py", "src.analysis.drives"): "R09.4",
+    ("preprocessing/live.py", "src.analysis.derived"): "R09.4",
+    ("preprocessing/local_range.py", "src.analysis.pairing"): "R09.4",
+    ("preprocessing/quality_gate.py", "src.analysis.fsm"): "R09.4",
+    ("preprocessing/session_context.py", "src.analysis.pairing"): "R09.4",
+    ("profiles.py", "src.analysis.tune_revisions"): "R09.5",
+    ("profiles.py", "src.analysis.vehicle_ledger"): "R09.5",
+    ("profiles.py", "src.collection.can_bus"): "R09.5",
+    ("profiles.py", "src.collection.can_obd_client"): "R09.5",
+    ("profiles.py", "src.collection.obd_registry"): "R09.5",
+    ("storage/async_writer.py", "src.collection.capture_profiles"): "R09.2",
+    ("storage/catalog.py", "src.analysis.digest"): "R09.3",
+    ("storage/catalog.py", "src.analysis.fingerprint"): "R09.3",
+    ("storage/catalog.py", "src.analysis.session_classifier"): "R09.3",
+    ("storage/catalog.py", "src.control.dtc_state"): "R09.2",
+    ("storage/catalog.py", "src.preprocessing.loader"): "R09.3",
+    ("storage/parquet_writer.py", "src.collection.capture_profiles"): "R09.2",
+    ("storage/parquet_writer.py", "src.collection.record_arming"): "R09.2",
+    ("storage/telemetry_query.py", "src.preprocessing.decode"): "R09.3",
+    ("trainability.py", "src.analysis.committees"): "R09.4",
+    ("trainability.py", "src.analysis.derived"): "R09.4",
+    ("trainability.py", "src.preprocessing.features"): "R09.2",
+}
+
+#: Same-layer pairs present when the order was adopted, as sorted unit names.
+OWED_PAIRS: dict[tuple[str, str], str] = {
+    ("alerts", "models"): "R09.7",
+    ("companion", "dashboard"): "R09.8",
+    ("models", "plausibility"): "R09.2",
 }
 
 
-def _imported_modules(tree: ast.AST) -> set[str]:
+#: Fields that hold nested statements. Imports are statements, so walking only
+#: these reaches every import (function bodies, ``if TYPE_CHECKING:``, ``try``)
+#: without visiting the expression nodes that are most of the tree.
+_STATEMENT_FIELDS = ("body", "orelse", "finalbody", "handlers", "cases")
+
+
+def _imported_modules(tree: ast.Module) -> set[str]:
     modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            modules.add(node.module)
+    stack: list[ast.AST] = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.ImportFrom):
+            if node.module and node.level == 0:
+                modules.add(node.module)
         elif isinstance(node, ast.Import):
             modules.update(alias.name for alias in node.names)
+        else:
+            for field in _STATEMENT_FIELDS:
+                stack.extend(getattr(node, field, ()))
     return modules
 
 
 @cache
-def _violations() -> frozenset[tuple[str, str]]:
-    found: set[tuple[str, str]] = set()
-    for path in sorted(SRC.rglob("*.py")):
-        relative = path.relative_to(SRC)
-        if "static" in relative.parts:
+def _file_imports(root: Path) -> dict[Path, frozenset[str]]:
+    """Every module each source file imports, parsed once per root."""
+    return {
+        path.relative_to(root): frozenset(
+            _imported_modules(ast.parse(path.read_text(), filename=str(path)))
+        )
+        for path in _source_files(root)
+    }
+
+
+def _source_files(root: Path) -> list[Path]:
+    return [
+        path for path in sorted(root.rglob("*.py")) if "static" not in path.relative_to(root).parts
+    ]
+
+
+def _unit_of_file(relative: Path) -> str | None:
+    """The layer unit a file belongs to: its package, or its own stem at the root."""
+    if len(relative.parts) > 1:
+        return relative.parts[0]
+    return None if relative.stem == "__init__" else relative.stem
+
+
+def _unit_of_module(module: str) -> str | None:
+    parts = module.split(".")
+    return parts[1] if parts[0] == "src" and len(parts) > 1 else None
+
+
+@cache
+def _edges(root: Path) -> frozenset[tuple[str, str, str, str]]:
+    """Every cross-unit import: (file, importer unit, module, imported unit)."""
+    found: set[tuple[str, str, str, str]] = set()
+    for relative, modules in _file_imports(root).items():
+        importer = _unit_of_file(relative)
+        if importer is None:
             continue
-        package = relative.parts[0]
-        if package not in _IMPORTERS:
-            continue
-        for module in _imported_modules(ast.parse(path.read_text(), filename=str(path))):
-            for importer, target in FORBIDDEN:
-                if package == importer and (module == target or module.startswith(target + ".")):
-                    found.add((relative.as_posix(), module))
+        for module in modules:
+            target = _unit_of_module(module)
+            if target is not None and target != importer:
+                found.add((relative.as_posix(), importer, module, target))
     return frozenset(found)
 
 
-def test_no_new_layering_inversions() -> None:
-    unexpected = _violations() - set(OWED) - set(STANDING)
+def _units(root: Path) -> set[str]:
+    units = {_unit_of_file(relative) for relative in _file_imports(root)}
+    return {unit for unit in units if unit is not None}
+
+
+def _upward(root: Path) -> frozenset[tuple[str, str]]:
+    return frozenset(
+        (file, module)
+        for file, importer, module, target in _edges(root)
+        if importer in LAYERS and target in LAYERS and LAYERS[target] > LAYERS[importer]
+    )
+
+
+def _same_layer_pairs(root: Path) -> frozenset[tuple[str, str]]:
+    unit_edges = {(importer, target) for _file, importer, _module, target in _edges(root)}
+    return frozenset(
+        (a, b)
+        for a, b in unit_edges
+        if a < b and (b, a) in unit_edges and a in LAYERS and b in LAYERS and LAYERS[a] == LAYERS[b]
+    )
+
+
+def test_every_unit_has_a_layer() -> None:
+    units = _units(SRC)
+    missing = sorted(units - set(LAYERS))
+    assert not missing, "place these in LAYERS (tests/test_layering.py): " + ", ".join(missing)
+    stale = sorted(set(LAYERS) - units)
+    assert not stale, "remove these LAYERS entries, the unit is gone: " + ", ".join(stale)
+
+
+def test_no_new_upward_imports() -> None:
+    unexpected = _upward(SRC) - set(OWED) - set(STANDING)
     assert not unexpected, (
-        "layering inversion(s) — move the code to the lower layer instead: "
+        "import(s) into a higher layer -- move the shared code down to the importer's "
+        "layer or lower (see LAYERS): "
         + ", ".join(f"{file} -> {module}" for file, module in sorted(unexpected))
+    )
+
+
+def test_no_new_same_layer_pairs() -> None:
+    unexpected = _same_layer_pairs(SRC) - set(OWED_PAIRS)
+    assert not unexpected, (
+        "units in one layer import each other -- pick a direction and move the shared "
+        "code: " + ", ".join(f"{a} <-> {b}" for a, b in sorted(unexpected))
     )
 
 
 def test_allowances_are_not_stale() -> None:
     """An allowance whose edge is gone must be deleted, so none can linger."""
-    stale = (set(OWED) | set(STANDING)) - _violations()
-    assert not stale, "remove these allowances, the edge is gone: " + ", ".join(
+    upward = _upward(SRC)
+    stale = sorted((set(OWED) | set(STANDING)) - upward)
+    assert not stale, "remove these allowances, the import is gone: " + ", ".join(
         f"{file} -> {module} ({OWED.get((file, module)) or STANDING[(file, module)]})"
-        for file, module in sorted(stale)
+        for file, module in stale
+    )
+    stale_pairs = sorted(set(OWED_PAIRS) - _same_layer_pairs(SRC))
+    assert not stale_pairs, "remove these OWED_PAIRS entries, the pair is gone: " + ", ".join(
+        f"{a} <-> {b} ({OWED_PAIRS[(a, b)]})" for a, b in stale_pairs
     )
 
 
 def test_the_edges_r01_removed_stay_removed() -> None:
-    """Pinned explicitly: these were the R01-owned inversions."""
-    edges = _violations()
-    assert not any(module.startswith("src.mcp_server") for _file, module in edges)
-    assert not any(module == "src.analysis.refit" for _file, module in edges)
-    assert not any(module == "src.dashboard.paths" for _file, module in edges)
+    """Pinned explicitly: R01.8's inversions may not return, not even as OWED."""
+    edges = {(importer, module) for _file, importer, module, _target in _edges(SRC)}
+    assert not any(i == "decode" and m.startswith("src.analysis") for i, m in edges)
+    assert not any(i == "control" and m.startswith("src.mcp_server") for i, m in edges)
+    assert not any(i == "models" and m == "src.analysis.refit" for i, m in edges)
+    assert not any(m == "src.dashboard.paths" for _i, m in edges)
+    assert not any(i in {"control", "models"} and m.startswith("src.dashboard") for i, m in edges)
+
+
+def _write(root: Path, relative: str, text: str) -> None:
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_scanner_flags_a_lazy_upward_import(tmp_path: Path) -> None:
+    """The checks see imports hidden in function bodies, and allow downward ones."""
+    _write(tmp_path, "analysis/derived.py", "from src.storage.writer import Writer\n")
+    _write(
+        tmp_path,
+        "storage/writer.py",
+        "def flush():\n    from src.analysis.derived import DERIVED\n    return DERIVED\n",
+    )
+    assert _upward(tmp_path) == {("storage/writer.py", "src.analysis.derived")}
+
+
+def test_scanner_flags_a_same_layer_pair_through_type_checking(tmp_path: Path) -> None:
+    _write(tmp_path, "models/fusion.py", "from src.alerts.emitter import Emitter\n")
+    _write(
+        tmp_path,
+        "alerts/emitter.py",
+        "from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    from src.models.fusion import FusionScorer\n",
+    )
+    assert _same_layer_pairs(tmp_path) == {("alerts", "models")}
+    assert _upward(tmp_path) == frozenset()
 
 
 def test_src_never_imports_tests() -> None:
@@ -126,14 +364,12 @@ def test_src_never_imports_tests() -> None:
 
     ``src/validation/synthetic_bus.py`` once imported its scripted ECU from
     ``tests.capture_round_fakes``, which dragged ``pytest`` into
-    ``scripts/sustained_validation.py``. Every package under ``src`` is walked,
-    not only the :data:`FORBIDDEN` importers.
+    ``scripts/sustained_validation.py``. Every package under ``src`` is walked.
     """
     offenders = sorted(
-        f"{path.relative_to(SRC).as_posix()} -> {module}"
-        for path in SRC.rglob("*.py")
-        if "static" not in path.relative_to(SRC).parts
-        for module in _imported_modules(ast.parse(path.read_text(), filename=str(path)))
+        f"{relative.as_posix()} -> {module}"
+        for relative, modules in _file_imports(SRC).items()
+        for module in modules
         if module == "tests" or module.startswith("tests.") or module == "pytest"
     )
     assert not offenders, "src imports the test tree: " + ", ".join(offenders)
