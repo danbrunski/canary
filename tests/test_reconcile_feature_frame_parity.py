@@ -23,13 +23,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import MODE_COLUMN
 from src.preprocessing.feature_pipeline import (
     FeatureSpecReconciliation,
     _resolve_structural_columns,
     candidate_feature_columns,
     reconcile_feature_frame_to_spec,
 )
-from src.preprocessing.segmenter import MODE_COLUMN
 
 
 def _reference_reconcile(

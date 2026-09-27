@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.fit_provenance import fitted_now, training_data_hash
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.decode.behavior_models import (
     Axis2D,
     BehaviorModel2D,
@@ -39,7 +40,6 @@ from src.decode.surface_eval import (
     evaluate_2d,
     trusted_cell_mask,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 log = logging.getLogger(__name__)
 

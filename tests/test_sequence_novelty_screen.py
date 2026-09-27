@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from src.alerts.events import AnomalyEvent, sequence_envelope_summary
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.daemon.inference import LiveInferencePipeline, TickContext, _TickResult
 from src.daemon.inference_metrics import InferenceTimingRecorder
 from src.daemon.inference_scheduling import GenerationToken
@@ -31,7 +32,6 @@ from src.models.inference import (
     SequenceWindowBuffer,
     TrainingEnvelope,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 BARO = "obd:BAROMETRIC_PRESSURE"
 IAT = "obd:INTAKE_TEMP"

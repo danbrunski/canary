@@ -9,36 +9,24 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
+from src.columns import (
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    arrived_column,
+    gap_column,
+    is_flag_column,
+)
+from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS, validate_broadcast_stale_timeout
 from src.dataframe_utils import require_columns as _require_columns
 from src.storage.broadcast_storage import (
-    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
     FRAME_ATTR,
     change_only_timeout,
     is_broadcast_channel,
     refuse_shorter_stored_timeout,
-    validate_broadcast_stale_timeout,
 )
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
-
-SESSION_COLUMN = "session"
-TIMESTAMP_COLUMN = "timestamp"
-GAP_SUFFIX = "__gap"
-#: A03.1 — per-cell "a sample arrived this tick" flag. ``True`` at grid row
-#: ``t`` when at least one (quality-gated, numeric) sample of the channel has a
-#: timestamp in ``(t - interval, t]``: the sample was delivered by the row's own
-#: time, since the previous row. ``__gap`` answers a different question ("is
-#: the newest sample younger than ``max_gap``?") and stays the dead-sensor
-#: signal; the two differ on every forward-filled row inside ``max_gap``.
-#: The live source (``LiveFeatureSource``) emits the same flag for the same
-#: stream: "the cell's value was delivered after the previous tick".
-ARRIVED_SUFFIX = "__arrived"
-#: Every per-channel bookkeeping suffix the resampler emits. A column ending in
-#: one of these is never a value channel: use :func:`is_flag_column` rather
-#: than testing one suffix, so a new flag cannot leak into rolling features,
-#: scalers or model schemas at the one call site that forgot it.
-FLAG_SUFFIXES: tuple[str, ...] = (GAP_SUFFIX, ARRIVED_SUFFIX)
 
 #: Default forward-fill ceiling for slow channels (seconds) — generous
 #: because slow sensors (coolant, IAT, baro) legitimately update on the
@@ -324,21 +312,6 @@ def _refuse_shorter_stored_timeout(frame: pd.DataFrame, config: ResampleConfig) 
         config.broadcast_max_gap_seconds,
         what=", ".join(info.get("change_only_sessions") or ["this frame"]),
     )
-
-
-def gap_column(channel: str) -> str:
-    """Return the boolean gap-flag column name for a channel."""
-    return f"{channel}{GAP_SUFFIX}"
-
-
-def arrived_column(channel: str) -> str:
-    """Return the boolean "sample arrived this tick" column name (A03.1)."""
-    return f"{channel}{ARRIVED_SUFFIX}"
-
-
-def is_flag_column(column: object) -> bool:
-    """``True`` for per-channel bookkeeping columns (``__gap``, ``__arrived``)."""
-    return str(column).endswith(FLAG_SUFFIXES)
 
 
 def _arrival_flags(

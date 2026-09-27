@@ -47,10 +47,8 @@ from typing import TYPE_CHECKING, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.storage.broadcast_storage import (
-    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
-    is_broadcast_channel,
-)
+from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
+from src.storage.broadcast_storage import is_broadcast_channel
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig

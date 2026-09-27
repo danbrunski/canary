@@ -8,12 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.normalization import (
     SchemaMismatchError,
     ZScoreScaler,
 )
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 
 # ---------------------------------------------------------------------------
 # fit

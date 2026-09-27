@@ -11,7 +11,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.analysis.session_classifier import DetectedEvent, ModeSegment
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.columns import TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
 #: Deceleration (kph/s) below which we count the slowdown as "hard".

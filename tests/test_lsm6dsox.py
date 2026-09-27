@@ -14,7 +14,8 @@ from pathlib import Path
 import pytest
 
 from src.collection import lsm6dsox as lsm
-from src.collection.lsm6dsox import FifoDecoder, ImuSettings, Lsm6dsox, Lsm6dsoxError
+from src.collection.lsm6dsox import FifoDecoder, Lsm6dsox, Lsm6dsoxError
+from src.lsm6dsox_settings import ImuSettings
 from tests.fakes import FakeLsmBus, lsm_fifo_instants, lsm_fifo_word, lsm_stamp, lsm_vec
 
 FIXTURE = Path(__file__).parent / "fixtures" / "lsm6dsox" / "fifo_at_rest.json"

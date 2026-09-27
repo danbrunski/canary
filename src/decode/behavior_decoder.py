@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 from src.coerce import finite_float
+from src.columns import GAP_SUFFIX, ROC_SUFFIX, base_channel, gap_column
 from src.decode.accepted_baselines import AcceptedBaselineOverride
 from src.decode.behavior_eligibility import (
     ACTUAL_MISSING,
@@ -54,14 +55,8 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.decode.surface_eval import evaluate_1d, evaluate_2d
-from src.preprocessing.features import (
-    ROC_SUFFIX,
-    FeatureConfig,
-    base_channel,
-    compute_rate_of_change,
-)
+from src.preprocessing.features import FeatureConfig, compute_rate_of_change
 from src.preprocessing.local_range import append_local_ranges, local_range_column
-from src.preprocessing.resampler import GAP_SUFFIX, gap_column
 from src.preprocessing.session_context import append_start_context, start_context_specs
 
 log = logging.getLogger(__name__)

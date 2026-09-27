@@ -53,6 +53,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.fsm import PHYSICAL_LIMITS
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.decode.bindings import Bindings
 from src.preprocessing.imu_stream import ImuFramePlan, iter_framed_numeric_parts
 from src.preprocessing.loader import (
@@ -61,14 +62,7 @@ from src.preprocessing.loader import (
     non_numeric_columns,
 )
 from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    ResampleConfig,
-    arrived_column,
-    gap_column,
-    resample_wide,
-)
+from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.storage.broadcast_storage import (
     SessionCanStorage,
     refuse_shorter_read_timeout,

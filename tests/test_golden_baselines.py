@@ -5,8 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.analysis.training_disposition import ChannelBaseline, GoldenBaselines
 from src.models.golden_baselines import (
+    ChannelBaseline,
+    GoldenBaselines,
     golden_baselines_path,
     read_golden_baselines,
     write_golden_baselines,

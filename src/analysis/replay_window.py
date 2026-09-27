@@ -22,14 +22,13 @@ from typing import Any, cast
 import pandas as pd
 
 from src.coerce import finite_float
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     SCORE_COLUMN,
 )
 from src.models.lstm_autoencoder import MissingLSTMAutoencoderDependencyError
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import parse_iso_utc
 
 #: Per-row score caps so a 30-minute window doesn't return a 100k-row JSON

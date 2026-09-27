@@ -9,7 +9,8 @@ from pathlib import Path
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.analysis.vehicle_ledger import VehicleLedgerStore
-from src.control.dtc_state import SIDECAR_FILENAME, DtcState
+from src.control.dtc_state import DtcState
+from src.session import DTC_SIDECAR_FILENAME
 from src.telemetry import TelemetryRecord
 
 
@@ -214,9 +215,9 @@ def test_sidecar_written_atomically_on_change(tmp_path: Path) -> None:
         emitter=None,
     )
 
-    sidecar = session_dir / SIDECAR_FILENAME
+    sidecar = session_dir / DTC_SIDECAR_FILENAME
     assert sidecar.exists()
-    assert not (session_dir / (SIDECAR_FILENAME + ".tmp")).exists()
+    assert not (session_dir / (DTC_SIDECAR_FILENAME + ".tmp")).exists()
     payload = json.loads(sidecar.read_text())
     assert [c["code"] for c in payload["stored"]] == ["P0420"]
 
@@ -232,7 +233,7 @@ def test_sidecar_not_rewritten_when_nothing_changed(tmp_path: Path) -> None:
         session_dir=session_dir,
         emitter=None,
     )
-    sidecar = session_dir / SIDECAR_FILENAME
+    sidecar = session_dir / DTC_SIDECAR_FILENAME
     first_mtime = sidecar.stat().st_mtime_ns
 
     state.observe(
@@ -281,9 +282,9 @@ def test_new_session_does_not_inherit_the_previous_sessions_seen_codes(tmp_path:
     )
     assert emitter.counters.emitted == 2
     # And session B gets its own sidecar, independent of session A's.
-    assert (session_b / SIDECAR_FILENAME).exists()
-    payload_a = json.loads((session_a / SIDECAR_FILENAME).read_text())
-    payload_b = json.loads((session_b / SIDECAR_FILENAME).read_text())
+    assert (session_b / DTC_SIDECAR_FILENAME).exists()
+    payload_a = json.loads((session_a / DTC_SIDECAR_FILENAME).read_text())
+    payload_b = json.loads((session_b / DTC_SIDECAR_FILENAME).read_text())
     assert [c["code"] for c in payload_a["stored"]] == ["P0420"]
     assert [c["code"] for c in payload_b["stored"]] == ["P0420"]
 
@@ -397,7 +398,7 @@ def test_freeze_frame_reading_lands_in_the_cached_report_and_sidecar(tmp_path: P
     snapshot = state.snapshot()
     assert snapshot["freeze_frame"] == {"RPM": 2500.0}
 
-    sidecar = json.loads((session_dir / SIDECAR_FILENAME).read_text())
+    sidecar = json.loads((session_dir / DTC_SIDECAR_FILENAME).read_text())
     assert sidecar["freeze_frame"] == {"RPM": 2500.0}
 
 

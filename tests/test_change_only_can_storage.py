@@ -33,17 +33,13 @@ from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileCatalog,
 )
+from src.columns import arrived_column, gap_column
 from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
 from src.preprocessing.derived import reduce_numeric_session
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import read_session, read_sessions, resample_and_segment
-from src.preprocessing.resampler import (
-    ResampleConfig,
-    arrived_column,
-    gap_column,
-    resample_config_for,
-)
+from src.preprocessing.resampler import ResampleConfig, resample_config_for
 from src.storage.broadcast_storage import (
     FOOTER_KEY,
     BroadcastTimeoutMismatchError,

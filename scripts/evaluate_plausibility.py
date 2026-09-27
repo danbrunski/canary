@@ -12,7 +12,7 @@ Runs the live evaluator (:mod:`src.plausibility`) over each session's
   magnitudes, on the named channels, ``--n-injections`` each from one seeded
   generator per (drive, channel) in the benchmark's kind order;
 * **realistic faults** (``--realistic``) — A02.6's kinds swept over severity
-  through ``synthetic_fault_eval.inject_realistic_fault``, applied only to
+  through ``anomaly_injection.inject_realistic_fault``, applied only to
   samples that arrived.
 
 A detection counts for a fault only when it lands on a faulted channel inside
@@ -121,7 +121,7 @@ def _init(config_path: str, profile: str | None) -> None:
 
 
 def _context(config_path: Path, profile: str | None) -> Context:
-    from src.models.synthetic_fault_eval import load_fault_channel_roles
+    from src.preprocessing.anomaly_injection import load_fault_channel_roles
     from src.profiles import resolve_profile_for_tooling, scope_config
 
     config = CanaryConfig.from_yaml(config_path)
@@ -233,7 +233,7 @@ def _grade(hits: Sequence[EvidenceRecord], start: float) -> dict[str, Any]:
 
 def _context_frame(stream: SessionStream) -> pd.DataFrame:
     """1 Hz carried-forward frame for ``choose_fault_window``'s conditions."""
-    from src.models.synthetic_fault_eval import (
+    from src.preprocessing.anomaly_injection import (
         FUEL_STATUS_CHANNEL,
         MAF_CHANNEL,
         RPM_CHANNEL,
@@ -359,7 +359,7 @@ def run_job(job: Job) -> dict[str, Any]:
 
     realistic: list[dict[str, Any]] = []
     if job.realistic:
-        from src.models.synthetic_fault_eval import REALISTIC_FAULTS, choose_fault_window
+        from src.preprocessing.anomaly_injection import REALISTIC_FAULTS, choose_fault_window
 
         frame = _context_frame(stream)
         role_channels = [c for channels in context.roles.values() for c in channels]

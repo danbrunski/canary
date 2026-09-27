@@ -17,6 +17,9 @@ FRAMES_FILENAME = "frames.log"
 MANIFEST_FILENAME = "manifest.json"
 PIDS_FILENAME = "pids.jsonl"
 TAGS_FILENAME = "tags.jsonl"
+#: The DTC poll's session sidecar: written by ``src.control.dtc_state``, read
+#: by the digest and the session catalog.
+DTC_SIDECAR_FILENAME = "dtc.json"
 
 # Written by record.py at startup, removed on clean exit. Gives an
 # out-of-band controller (scripts/stop_recording.py, a supervisor) a stable

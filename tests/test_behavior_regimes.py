@@ -22,8 +22,7 @@ from src.analysis.behavior_validation import (
     regime_labels,
 )
 from src.analysis.refit import fit_recipe
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from tests.builders import (
     BEHAVIOR_PROFILE_CRITERIA,
     behavior_corpus,

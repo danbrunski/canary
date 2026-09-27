@@ -7,11 +7,11 @@ from typing import cast
 import pandas as pd
 
 from src.alerts.feedback import AnomalyFeedback, FeedbackLabel, anomaly_key
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.retraining_policy import (
     apply_retraining_feedback_policy,
     build_retraining_feedback_report,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _feedback(

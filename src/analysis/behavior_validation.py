@@ -74,6 +74,8 @@ from src.analysis.splits import (
     piece_time_ranges,
     training_leaks,
 )
+from src.artifact_hash import sha256_file_or_none
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_values
 from src.decode.behavior_decoder import band_half_widths, explain_expected_column, grade_deviation
@@ -98,13 +100,6 @@ from src.decode.behavior_models import (
     contract_fingerprint,
 )
 from src.decode.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
-from src.models.artifact_hash import sha256_file_or_none
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    gap_column,
-)
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import (
     StartContextSpec,
     append_start_context,
@@ -1075,7 +1070,8 @@ def regime_labels(
     and labels a row ``transient`` if any listed rate exceeds its limit,
     ``rate_unavailable`` if any rate is undefined, else ``steady``.
     """
-    from src.preprocessing.features import compute_rate_of_change, roc_column
+    from src.columns import roc_column
+    from src.preprocessing.features import compute_rate_of_change
 
     out: dict[str, np.ndarray] = {}
     if revision_of_piece is not None and SESSION_COLUMN in frame.columns:

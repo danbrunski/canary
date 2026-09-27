@@ -9,8 +9,6 @@ import pandas as pd
 
 from src.analysis.training_disposition import (
     MIN_BASELINE_SAMPLES,
-    ChannelBaseline,
-    GoldenBaselines,
     classify_dispositions,
     compute_golden_baselines,
     compute_quarantine_mask,
@@ -21,6 +19,7 @@ from src.decode.accepted_baselines import (
     DirectionalBand,
     Provenance,
 )
+from src.models.golden_baselines import ChannelBaseline, GoldenBaselines
 
 
 def _override(

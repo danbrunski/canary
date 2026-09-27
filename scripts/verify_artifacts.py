@@ -47,7 +47,7 @@ try:
 except ImportError:  # loaded as `scripts.verify_artifacts` — repo root on path, not scripts/
     import scripts._cli as _cli  # type: ignore[no-redef]  # noqa: F401
 
-from src.models.artifact_hash import sha256_file  # noqa: E402
+from src.artifact_hash import sha256_file  # noqa: E402
 
 log = logging.getLogger(__name__)
 

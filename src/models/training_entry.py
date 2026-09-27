@@ -28,6 +28,7 @@ from typing import Any
 import pandas as pd
 
 from src.analysis.drives import DRIVE_COLUMN, drop_rows_without_drive
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import withheld_learned_feature_columns
 from src.decode.behavior_models import load_behavior_models
@@ -85,8 +86,6 @@ from src.preprocessing.feature_pipeline import (
     sequence_feature_selection,
 )
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
-from src.preprocessing.segmenter import MODE_COLUMN
 
 log = logging.getLogger(__name__)
 

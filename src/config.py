@@ -7,9 +7,10 @@ silently dropped, so typos in config don't become silent drift at runtime.
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Literal, Self, get_args
+from typing import Any, Final, Literal, Self, get_args
 
 import yaml
 from pydantic import (
@@ -21,13 +22,45 @@ from pydantic import (
     model_validator,
 )
 
+from src.lsm6dsox_settings import ImuSettings
 from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR, DATA_DIR
-from src.storage.broadcast_storage import (
-    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
-    validate_broadcast_stale_timeout,
-)
 
 log = logging.getLogger(__name__)
+
+
+# Broadcast CAN change-only storage (P02.10): the stale timeout's default and
+# floor, and the re-write lead derived from it. Defined here, beside the
+# ``collection.broadcast_stale_timeout_seconds`` field they validate (R09.2);
+# ``src.storage.broadcast_storage`` states the rule that uses them.
+
+#: The operator's default (2026-09-26).
+DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS: Final = 10.0
+#: A shorter timeout is refused: the re-write happens one second before the
+#: timeout, so under two seconds an unchanged id would be re-written more
+#: often than once a second and the filter would save nothing it can measure.
+MIN_BROADCAST_STALE_TIMEOUT_SECONDS: Final = 2.0
+#: How long before the timeout an unchanged id is re-written: derived from the
+#: timeout, never configured. It covers ids whose frame period is under a
+#: second (the re-write fires on the first frame at least ``timeout - 1`` s
+#: after the last stored one, so the stored value is at most ``timeout - 1 +
+#: period`` old). A slower id could lapse that way (a 7 s id at 9 + 7 s), so
+#: :class:`~src.storage.broadcast_storage.CanChangeFilter` also keeps a frame
+#: when the next one, one inter-arrival later, would find the stored value past
+#: the timeout.
+REWRITE_LEAD_SECONDS: Final = 1.0
+
+
+def validate_broadcast_stale_timeout(seconds: float) -> float:
+    """``seconds`` as a timeout, or ``ValueError`` naming why it cannot be one."""
+    value = float(seconds)
+    if not math.isfinite(value) or value < MIN_BROADCAST_STALE_TIMEOUT_SECONDS:
+        raise ValueError(
+            f"broadcast stale timeout {seconds!r} s is under the "
+            f"{MIN_BROADCAST_STALE_TIMEOUT_SECONDS:g} s floor (P02.10, operator 2026-09-26): "
+            f"an unchanged CAN id is re-written {REWRITE_LEAD_SECONDS:g} s before the "
+            "timeout, so a shorter one would re-write it more than once a second"
+        )
+    return value
 
 
 class _Strict(BaseModel):
@@ -259,8 +292,6 @@ class ImuConfig(_Strict):
         if self.source != "lsm6dsox":
             return self
         # Validate against the driver's own tables so the two cannot drift.
-        from src.collection.lsm6dsox import ImuSettings
-
         try:
             ImuSettings(
                 odr_hz=self.sample_rate_hz,
@@ -495,7 +526,7 @@ class CollectionConfig(_Strict):
     #: resampler's stale class for broadcast channels (``can:``/``decoded:``/
     #: ``dbc:``) and the per-sample readers' as-of validity, so storage and
     #: every reader agree on it. Under 2 s is refused
-    #: (:func:`src.storage.broadcast_storage.validate_broadcast_stale_timeout`);
+    #: (:func:`validate_broadcast_stale_timeout`, above);
     #: it must also stay under ``preprocessing.session_gap_seconds``
     #: (:class:`CanaryConfig` checks). Changing it changes the models'
     #: broadcast ``__gap``/``__arrived`` features: a feature-spec change.
@@ -1068,7 +1099,7 @@ class DaemonConfig(_Strict):
     #: ``value_number`` chain holds one part of raw rows at a time plus the
     #: session's reduced cells and 1 Hz frames, so its peak follows the span,
     #: not the rows. ``None`` derives it from the child's address-space ceiling
-    #: (``src.control.trip_end.digest_span_budget_seconds``: ~13.7 h for a
+    #: (``src.analysis.digest.digest_span_budget_seconds``: ~13.7 h for a
     #: 4 GiB child); ``0`` disables the check (the ceiling still applies).
     digest_span_budget_seconds: float | None = Field(default=None, ge=0)
     #: Hard ``RLIMIT_AS`` ceiling, in MiB, applied inside the digest child

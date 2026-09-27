@@ -106,7 +106,7 @@ def _calibration_drive_count(calibration: SequenceWindowDataset, sessions: Seque
     (:func:`src.analysis.drives.count_drives` over the rows of the windowed
     pieces: the stamped drive where the frame carries one)."""
     from src.analysis.drives import count_drives
-    from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+    from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 
     frame = calibration.frame
     if SESSION_COLUMN not in frame.columns or TIMESTAMP_COLUMN not in frame.columns:

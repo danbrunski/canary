@@ -5,9 +5,9 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any, TypeVar
 
-from src.collection.capture_profiles import CaptureProfile
 from src.session import SessionPaths
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.protocols import StorageProfile
 from src.telemetry import TelemetryRecord
 
 _T = TypeVar("_T")
@@ -73,7 +73,7 @@ class AsyncParquetTelemetryWriter:
 
     async def enter_capture_mode(
         self,
-        profile: CaptureProfile,
+        profile: StorageProfile,
         capture_id: str,
         tune_revision: str | None = None,
         resolved_polling_plan: dict[str, Any] | None = None,

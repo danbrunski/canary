@@ -20,17 +20,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, mean_column, roc_column, std_column
 from src.preprocessing.features import (
     FEATURE_DTYPE,
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
     FeatureConfig,
     _rows_in_window,
     _value_columns,
     compute_features,
-    mean_column,
-    roc_column,
-    std_column,
 )
 
 

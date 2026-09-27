@@ -338,7 +338,7 @@ def test_strata_use_freshly_observed_values_only() -> None:
 
 
 def _shift_frame(n: int = 200, channels: int = 40) -> pd.DataFrame:
-    from src.preprocessing.segmenter import MODE_COLUMN
+    from src.columns import MODE_COLUMN
 
     rng = np.random.default_rng(0)
     frame = pd.DataFrame({MODE_COLUMN: ["city"] * (n // 2) + ["idle"] * (n // 2)})
@@ -364,8 +364,8 @@ def _z_detector(reduce: str, limit: float):  # type: ignore[no-untyped-def]
 
 
 def test_a_max_z_detector_passes_the_single_quantity_shift() -> None:
+    from src.columns import MODE_COLUMN
     from src.models.evaluation import single_quantity_shift
-    from src.preprocessing.segmenter import MODE_COLUMN
 
     report = single_quantity_shift(
         _z_detector("max", 6.0),
@@ -382,8 +382,8 @@ def test_a_max_z_detector_passes_the_single_quantity_shift() -> None:
 def test_a_detector_that_dilutes_one_quantity_is_recorded_as_failing() -> None:
     """The deployed IF's shape: every feature moved 3 sigma flags all rows,
     one quantity moved 100 sigma flags none. That is a failure, recorded."""
+    from src.columns import MODE_COLUMN
     from src.models.evaluation import single_quantity_shift
-    from src.preprocessing.segmenter import MODE_COLUMN
 
     report = single_quantity_shift(
         _z_detector("mean", 2.0),
@@ -399,8 +399,8 @@ def test_a_detector_that_dilutes_one_quantity_is_recorded_as_failing() -> None:
 
 
 def test_a_detector_the_shift_never_reaches_is_invalid_not_failing() -> None:
+    from src.columns import MODE_COLUMN
     from src.models.evaluation import single_quantity_shift
-    from src.preprocessing.segmenter import MODE_COLUMN
 
     def constant(frame: pd.DataFrame) -> dict[str, list[bool]]:
         return {"constant": [False] * len(frame)}
@@ -425,8 +425,8 @@ def test_the_shift_is_graded_only_where_the_quantity_was_observed() -> None:
     """A trim polled every few seconds: rows between samples carry a
     forward-filled value (``__gap`` set). A detector reading only arrived
     samples cannot see a fault there, and is not graded there."""
+    from src.columns import MODE_COLUMN
     from src.models.evaluation import single_quantity_shift
-    from src.preprocessing.segmenter import MODE_COLUMN
 
     frame = _shift_frame(n=200, channels=4)
     fresh = np.arange(len(frame)) % 4 == 0

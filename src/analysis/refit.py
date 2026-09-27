@@ -55,6 +55,7 @@ from src.analysis.derived import (
 )
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
+from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
 from src.control.sessions import session_started_at
 from src.decode.behavior_eligibility import (
     ServingSpec,
@@ -85,10 +86,7 @@ from src.decode.behavior_models import (
     refuse_non_trainable_sources,
 )
 from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.features import roc_column
 from src.preprocessing.local_range import append_local_ranges, local_range_column
-from src.preprocessing.resampler import SESSION_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import (
     StartContextSpec,
     append_start_context,

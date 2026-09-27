@@ -45,6 +45,7 @@ from src.analysis.refit import (
     fit_recipe,
     recipe_contract_fingerprint,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import VehicleParameters
 from src.decode.behavior_models import (
     BandExcessPersistence,
@@ -56,8 +57,6 @@ from src.decode.behavior_models import (
     contract_fingerprint,
 )
 from src.paths import DATA_DIR
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
-from src.preprocessing.segmenter import MODE_COLUMN
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 BALANCE = "derived:STFT_BANK_BALANCE"

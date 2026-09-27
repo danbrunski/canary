@@ -273,13 +273,13 @@ def test_segmenter_fallback_reproduces_mode01_labels() -> None:
     Mode 01 inputs blanked, and requires the two to agree where the PIDs were
     fresh. The pre-fix fallback (counts read as engineering units) scored 0.38.
     """
+    from src.columns import MODE_COLUMN
     from src.config import CanaryConfig
     from src.preprocessing.feature_pipeline import (
         _decode_session_to_resampled,
         segment_or_constant,
     )
     from src.preprocessing.resampler import ResampleConfig
-    from src.preprocessing.segmenter import MODE_COLUMN
 
     case = EXPECTATIONS["segmenter_fallback"]
     config = CanaryConfig.from_yaml(Path("canary.example.yaml"))

@@ -36,8 +36,8 @@ from typing import Any, Literal
 
 import yaml
 
+from src.columns import ROC_SUFFIX, split_rolling
 from src.config import CanaryConfig, require_profile_scoped
-from src.preprocessing.features import ROC_SUFFIX, split_rolling
 from src.trainability import non_trainable_inputs, source_exclusion_reason
 
 FEATURE_SET_SCHEMA_KEY = "sequence_feature_set"

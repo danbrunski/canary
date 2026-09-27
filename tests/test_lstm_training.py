@@ -8,6 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.models.lstm_training import (
     LSTMAutoencoderManifest,
@@ -20,7 +21,6 @@ from src.models.manifest import validate_manifest_common
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_training import SequenceThresholdCalibration
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 from tests.builders import sequence_training_frame
 
 # Torch training: not a commit gate (see the pyproject test tiers).

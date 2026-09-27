@@ -31,18 +31,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.config import CanaryConfig
-from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.features import FeatureConfig, base_channel, compute_features
-from src.preprocessing.loader import TelemetryValueKind, resample_and_segment
-from src.preprocessing.resampler import (
+from src.columns import (
     ARRIVED_SUFFIX,
     GAP_SUFFIX,
+    MODE_COLUMN,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
+    base_channel,
     is_flag_column,
 )
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.config import CanaryConfig
+from src.dataframe_utils import require_columns as _require_columns
+from src.preprocessing.features import FeatureConfig, compute_features
+from src.preprocessing.loader import TelemetryValueKind, resample_and_segment
 from src.timefmt import format_timestamp as _format_timestamp
 from src.trainability import source_exclusion_reason
 

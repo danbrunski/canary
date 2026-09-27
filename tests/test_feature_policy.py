@@ -24,6 +24,7 @@ from src.collection.capture_profiles import (
     seed_catalog,
     serving_mode22_dids,
 )
+from src.columns import GAP_SUFFIX, MODE_COLUMN
 from src.config import CanaryConfig
 from src.decode.bindings import (
     TRAINABLE_CONFIDENCES,
@@ -42,8 +43,6 @@ from src.preprocessing.feature_pipeline import (
     resolve_feature_policy,
     sequence_feature_columns,
 )
-from src.preprocessing.resampler import GAP_SUFFIX
-from src.preprocessing.segmenter import MODE_COLUMN
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 REPO_BINDINGS = REPO_ROOT / "data" / "bindings.yaml"

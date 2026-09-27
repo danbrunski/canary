@@ -14,6 +14,7 @@ from tests.builders import sequence_training_frame
 
 torch = pytest.importorskip("torch")
 
+from src.columns import SESSION_COLUMN  # noqa: E402
 from src.models.inference import (  # noqa: E402 — after importorskip guard
     SequenceInferenceEngine,
     SequenceInferenceResult,
@@ -27,7 +28,6 @@ from src.models.tcn_training import (  # noqa: E402
     train_tcn_autoencoder,
 )
 from src.preprocessing.normalization import ZScoreScaler  # noqa: E402
-from src.preprocessing.resampler import SESSION_COLUMN  # noqa: E402
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]

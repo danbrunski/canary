@@ -8,15 +8,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.preprocessing.features import (
-    FeatureConfig,
-    compute_features,
+from src.columns import (
+    GAP_SUFFIX,
+    MODE_COLUMN,
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
     mean_column,
     roc_column,
     std_column,
 )
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.features import FeatureConfig, compute_features
 
 
 def _uniform_session(

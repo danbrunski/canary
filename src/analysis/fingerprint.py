@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.analysis.committees import COMMITTEES
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
+from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.dataframe_utils import numeric_column
 from src.decode.behavior_decoder import DEVIATION_COLUMN_PREFIX
@@ -46,8 +47,6 @@ from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.loader import resample_and_segment
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 

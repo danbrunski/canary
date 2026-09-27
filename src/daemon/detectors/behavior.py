@@ -11,6 +11,7 @@ from src.alerts.fusion import (
     FusionSource,
 )
 from src.coerce import finite_float
+from src.columns import MODE_COLUMN
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
     TickContext,
@@ -27,7 +28,6 @@ from src.decode.behavior_models import (
     serving_status,
 )
 from src.preprocessing.live import LiveFeatureSource
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 from src.timefmt import format_timestamp
 

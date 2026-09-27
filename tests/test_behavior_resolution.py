@@ -21,12 +21,12 @@ from src.analysis.behavior_validation import (
     transient_controls,
 )
 from src.analysis.refit import default_recipes, fit_recipe
+from src.columns import SESSION_COLUMN
 from src.decode.behavior_models import (
     NoiseFloor,
     SyntheticFault,
     TransientControl,
 )
-from src.preprocessing.resampler import SESSION_COLUMN
 from tests.builders import (
     BEHAVIOR_PROFILE_CRITERIA,
     behavior_corpus,

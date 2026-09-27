@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.columns import MODE_COLUMN, UNKNOWN_MODE
 from src.config import CanaryConfig, OperatingModeSpec
 from src.preprocessing.segmenter import (
-    MODE_COLUMN,
-    UNKNOWN_MODE,
     SegmenterConfig,
     default_segmenter_config,
     mode_for_row,

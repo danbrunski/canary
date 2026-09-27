@@ -7,13 +7,10 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from src.columns import MODE_COLUMN, UNKNOWN_MODE, gap_column
 from src.config import OperatingModeSpec
 from src.decode.bindings import Bindings
 from src.decode.engineering import assert_scalable, physical_series, physical_value
-from src.preprocessing.resampler import gap_column
-
-MODE_COLUMN = "operating_mode"
-UNKNOWN_MODE = "unknown"
 
 #: Signals whose coalesced value is nulled out on a stale (gap-flagged) row
 #: before mode-rule evaluation, so a frozen sensor can't confidently mis-mode

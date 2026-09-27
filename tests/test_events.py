@@ -19,8 +19,7 @@ from src.analysis.events import (
     detect_stops,
     detect_wot_runs,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _base_frame(rows: int) -> pd.DataFrame:

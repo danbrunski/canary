@@ -35,9 +35,8 @@ from typing import Any
 from src.analysis.digest import read_digest, read_digest_skipped
 from src.analysis.fingerprint import read_fingerprint
 from src.analysis.session_classifier import read_classification
-from src.control.dtc_state import SIDECAR_FILENAME as DTC_FILENAME
 from src.preprocessing.loader import count_session_rows
-from src.session import classify_session_name, dir_size
+from src.session import DTC_SIDECAR_FILENAME, classify_session_name, dir_size
 from src.storage.sidecar import read_json_object
 from src.storage.sqlite_store import SqliteStore
 
@@ -212,7 +211,7 @@ class SessionCatalog(SqliteStore):
         session_id = session_dir.name
         classification = read_classification(session_dir)
         fingerprint = read_fingerprint(session_dir)
-        dtc = read_json_object(session_dir / DTC_FILENAME)
+        dtc = read_json_object(session_dir / DTC_SIDECAR_FILENAME)
         digest = read_digest(session_dir)
         # A written digest wins: ``persist_digest`` deletes the refusal, but a
         # catalog row must not depend on that delete having succeeded.

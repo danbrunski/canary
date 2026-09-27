@@ -14,6 +14,12 @@ import pytest
 pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
+from src.columns import (  # noqa: E402
+    GAP_SUFFIX,
+    MODE_COLUMN,  # noqa: E402
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+)
 from src.models.isolation_forest import (  # noqa: E402
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
@@ -31,8 +37,6 @@ from src.models.isolation_forest import (  # noqa: E402
     load_isolation_forest_model,
     resolvable_flag_rate,
 )
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
-from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 
 
 @dataclass(frozen=True)

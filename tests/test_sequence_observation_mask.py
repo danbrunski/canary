@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.inference import SequenceWindowBuffer
 from src.models.sequence_dataset import (
     MASK_ARRIVED_SAMPLE,
@@ -21,7 +22,6 @@ from src.models.sequence_dataset import (
     observation_mask_from_schema,
     observation_mask_record,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _frame() -> pd.DataFrame:

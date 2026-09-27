@@ -321,13 +321,8 @@ def test_live_gap_flag_matches_resampler_for_same_observations(config: CanaryCon
     ``__gap`` (mask = ¬gap) and Δt from per-channel last-observed timestamps.
     For the same observation history those flags must match what
     ``resample_wide`` would emit, or train and serve disagree on staleness."""
-    from src.preprocessing.resampler import (
-        SESSION_COLUMN,
-        TIMESTAMP_COLUMN,
-        ResampleConfig,
-        gap_column,
-        resample_wide,
-    )
+    from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+    from src.preprocessing.resampler import ResampleConfig, resample_wide
 
     base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
     # RPM is a fast channel observed at t=0 and t=4 only (so it goes stale in
@@ -380,13 +375,8 @@ def test_live_gap_flags_follow_a_non_default_fast_channels_like_the_resampler(
     re-derived the rule from the default slow-channel hints and disagreed on
     both channels."""
     import src.preprocessing.live as live_module
-    from src.preprocessing.resampler import (
-        SESSION_COLUMN,
-        TIMESTAMP_COLUMN,
-        ResampleConfig,
-        gap_column,
-        resample_wide,
-    )
+    from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+    from src.preprocessing.resampler import ResampleConfig, resample_wide
 
     recipe = ResampleConfig(
         hz=1.0,
@@ -434,13 +424,8 @@ def test_a_nan_sample_is_not_an_observation_live_or_offline(config: CanaryConfig
     ``_gap_flags`` drops NaN before ageing. The old ``_to_float`` let NaN
     through, so a NaN sample stamped the channel fresh (``__gap`` False) and
     NaN'd its cell, where training held the previous value."""
-    from src.preprocessing.resampler import (
-        SESSION_COLUMN,
-        TIMESTAMP_COLUMN,
-        gap_column,
-        resample_config_for,
-        resample_wide,
-    )
+    from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+    from src.preprocessing.resampler import resample_config_for, resample_wide
 
     base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
     values = [700.0, None, None, float("nan")]
@@ -1044,14 +1029,9 @@ def test_arrival_flags_match_the_resampler_for_the_same_stream(config: CanaryCon
     ``__arrived`` flag for the same input stream: off-grid samples, a channel
     that goes quiet, a slow channel between polls, and a quality-gate reject
     (which arrives on neither path)."""
+    from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column
     from src.preprocessing.quality_gate import apply_quality_gate
-    from src.preprocessing.resampler import (
-        SESSION_COLUMN,
-        TIMESTAMP_COLUMN,
-        arrived_column,
-        resample_config_for,
-        resample_wide,
-    )
+    from src.preprocessing.resampler import resample_config_for, resample_wide
 
     base = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)
     stream: list[tuple[float, str, float]] = []

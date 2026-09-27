@@ -30,6 +30,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from src.analysis.digest import (
+    digest_address_space_bytes,
+    digest_row_budget,
+    digest_span_budget_seconds,
+)
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
 from src.analysis.tune_revisions import resolve_session_revision
 from src.analysis.tuning_context import context_fields
@@ -50,9 +55,6 @@ from src.control.trip_end import (
     _discard_pool,
     _spawn_pool,
     any_digest_in_flight,
-    digest_address_space_bytes,
-    digest_row_budget,
-    digest_span_budget_seconds,
     limit_address_space,
 )
 from src.preprocessing.loader import count_session_rows, session_time_span_seconds

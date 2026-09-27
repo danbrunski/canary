@@ -22,13 +22,9 @@ from typing import Any
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    ResampleConfig,
-    resample_config_for,
-)
+from src.preprocessing.resampler import ResampleConfig, resample_config_for
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config

@@ -22,7 +22,7 @@ from scripts.verify_artifacts import (
     compare,
     main,
 )
-from src.models.artifact_hash import sha256_file
+from src.artifact_hash import sha256_file
 
 
 def _write_model(

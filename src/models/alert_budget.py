@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.models.artifact_hash import sha256_file
+from src.artifact_hash import sha256_file
 
 #: The incident every refusal names.
 ALERT_BUDGET_INCIDENT = (
@@ -345,7 +345,7 @@ def verdict_path_for(artifact_path: Path) -> Path:
 
 
 #: Old name, re-exported for its importers (``role_gate``, ``scripts/retrain``);
-#: the one definition is :func:`src.models.artifact_hash.sha256_file` (R01.6).
+#: the one definition is :func:`src.artifact_hash.sha256_file` (R01.6).
 file_sha256 = sha256_file
 
 

@@ -80,11 +80,11 @@ except ImportError:
         load_scoped_config,
     )
 
+from src.artifact_hash import sha256_file_or_none
 from src.collection.can_obd_client import PID_DECODERS
 from src.config import CanaryConfig
 from src.dashboard.version import _git_sha
 from src.decode.bindings import Bindings, load_bindings
-from src.models.artifact_hash import sha256_file_or_none
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 

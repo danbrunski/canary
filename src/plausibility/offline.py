@@ -22,7 +22,7 @@ desk:
   value; dropout), applied to *arrived samples* rather than a resampled grid:
   a dropout removes samples instead of forward-filling them.
 * :func:`inject_realistic_samples` — A02.6's realistic faults, through
-  ``synthetic_fault_eval.inject_realistic_fault`` itself, applied only to
+  ``anomaly_injection.inject_realistic_fault`` itself, applied only to
   cells that actually arrived.
 """
 
@@ -168,9 +168,9 @@ def sample_modes(
     bindings: Bindings | None,
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """Operating mode in force at each sample (``None`` before the first tick)."""
+    from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
     from src.preprocessing.feature_pipeline import resample_long_session, segment_or_constant
-    from src.preprocessing.resampler import TIMESTAMP_COLUMN, resample_config_for
-    from src.preprocessing.segmenter import MODE_COLUMN
+    from src.preprocessing.resampler import resample_config_for
 
     modes = np.full(len(samples), None, dtype=object)
     keys = long["source"].astype(str) + ":" + long["channel"].astype(str)
@@ -280,10 +280,10 @@ def _modes_on_grid(
     bindings: Bindings | None,
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """:func:`sample_modes` from a reduced segmenter frame."""
+    from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
     from src.preprocessing.derived import resample_reduced
     from src.preprocessing.feature_pipeline import segment_or_constant
-    from src.preprocessing.resampler import TIMESTAMP_COLUMN, resample_config_for
-    from src.preprocessing.segmenter import MODE_COLUMN
+    from src.preprocessing.resampler import resample_config_for
 
     modes = np.full(len(samples), None, dtype=object)
     if reduced.cells.empty or samples.empty:
@@ -441,10 +441,10 @@ def inject_realistic_samples(
     only where a sample arrived), with the fault's context channels (rpm,
     speed, fuel status) carried forward so its operating condition can be
     read on every row; the fault is applied by
-    ``synthetic_fault_eval.inject_realistic_fault``; only role-channel cells
+    ``anomaly_injection.inject_realistic_fault``; only role-channel cells
     that arrived are written back.
     """
-    from src.models.synthetic_fault_eval import (
+    from src.preprocessing.anomaly_injection import (
         FUEL_STATUS_CHANNEL,
         RPM_CHANNEL,
         SPEED_CHANNEL,

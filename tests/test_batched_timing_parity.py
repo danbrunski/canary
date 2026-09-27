@@ -24,11 +24,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import gap_column, roc_column
 from src.config import CanaryConfig
-from src.preprocessing.features import compute_features, roc_column
+from src.preprocessing.features import compute_features
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import to_wide
-from src.preprocessing.resampler import ResampleConfig, gap_column, resample_wide
+from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 

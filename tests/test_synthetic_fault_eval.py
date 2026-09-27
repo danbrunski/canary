@@ -22,6 +22,11 @@ pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
 from src.alerts.fusion import PersistenceGate  # noqa: E402
+from src.columns import (  # noqa: E402
+    MODE_COLUMN,  # noqa: E402
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+)
 from src.config import CanaryConfig  # noqa: E402
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.models.synthetic_fault_eval import (  # noqa: E402
@@ -31,8 +36,6 @@ from src.models.synthetic_fault_eval import (  # noqa: E402
     evaluate_detectors,
 )
 from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E402
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
-from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 from tests.builders import IFConfig
 from tests.configs import example_config
 
@@ -744,7 +747,7 @@ def _engine_frame(n: int = 600, *, idle_rows: int = 0) -> pd.DataFrame:
 
 
 def test_maf_gain_scales_every_airflow_channel_and_trims_compensate() -> None:
-    from src.models.synthetic_fault_eval import inject_realistic_fault
+    from src.preprocessing.anomaly_injection import inject_realistic_fault
 
     frame = _engine_frame()
     start, end = frame[TIMESTAMP_COLUMN].iloc[200], frame[TIMESTAMP_COLUMN].iloc[440]
@@ -773,10 +776,7 @@ def test_thermostat_fault_moves_decoded_counts_through_the_binding_scale() -> No
     """A physical 10 degC drop is 10 raw counts on a degC+40 broadcast channel
     — the fault is applied in engineering units, never to raw counts."""
     from src.decode.engineering import repo_bindings
-    from src.models.synthetic_fault_eval import (
-        THERMOSTAT_RAMP_SECONDS,
-        inject_realistic_fault,
-    )
+    from src.preprocessing.anomaly_injection import THERMOSTAT_RAMP_SECONDS, inject_realistic_fault
 
     frame = _engine_frame()
     start = frame[TIMESTAMP_COLUMN].iloc[100]
@@ -798,7 +798,7 @@ def test_thermostat_fault_moves_decoded_counts_through_the_binding_scale() -> No
 
 
 def test_lazy_o2_lags_the_sensor_without_changing_its_mean_level() -> None:
-    from src.models.synthetic_fault_eval import inject_realistic_fault
+    from src.preprocessing.anomaly_injection import inject_realistic_fault
 
     frame = _engine_frame()
     start, end = frame[TIMESTAMP_COLUMN].iloc[100], frame[TIMESTAMP_COLUMN].iloc[400]
@@ -810,7 +810,7 @@ def test_lazy_o2_lags_the_sensor_without_changing_its_mean_level() -> None:
 
 
 def test_idle_air_leak_signature_is_largest_at_idle() -> None:
-    from src.models.synthetic_fault_eval import inject_realistic_fault
+    from src.preprocessing.anomaly_injection import inject_realistic_fault
 
     frame = _engine_frame(idle_rows=300)
     start, end = frame[TIMESTAMP_COLUMN].iloc[200], frame[TIMESTAMP_COLUMN].iloc[400]
@@ -822,7 +822,7 @@ def test_idle_air_leak_signature_is_largest_at_idle() -> None:
 
 
 def test_fault_window_names_why_a_drive_cannot_carry_the_fault() -> None:
-    from src.models.synthetic_fault_eval import choose_fault_window
+    from src.preprocessing.anomaly_injection import choose_fault_window
 
     no_idle = _engine_frame(idle_rows=0)
     reason = choose_fault_window(
@@ -845,7 +845,7 @@ def test_fault_window_names_why_a_drive_cannot_carry_the_fault() -> None:
 
 
 def test_fault_channel_roles_refuse_an_unknown_role(tmp_path: Path) -> None:
-    from src.models.synthetic_fault_eval import load_fault_channel_roles
+    from src.preprocessing.anomaly_injection import load_fault_channel_roles
 
     good = tmp_path / "good.yaml"
     good.write_text("roles:\n  coolant: [decoded:ECM_COOLANT_TEMP]\n")

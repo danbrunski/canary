@@ -15,15 +15,16 @@ import pandas as pd
 import pytest
 
 from src.analysis.committees import committee_channel_reason
+from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models
 from src.decode.bindings import load_bindings
-from src.models.synthetic_fault_eval import (
+from src.preprocessing import feature_pipeline
+from src.preprocessing.anomaly_injection import (
     REALISTIC_FAULTS,
     inject_realistic_fault,
     load_fault_channel_roles,
 )
-from src.preprocessing import feature_pipeline
 from src.preprocessing.feature_pipeline import (
     _append_derived_channels,
     _column_root,
@@ -34,7 +35,6 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
     load_resampled_session,
 )
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
 from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]

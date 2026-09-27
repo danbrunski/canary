@@ -12,6 +12,7 @@ import pytest
 
 from scripts.fp_benchmark import main as fp_benchmark_main
 from scripts.fp_benchmark import run_false_positive_benchmark
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.models.false_positive_benchmark import (
     DEFAULT_K_GRID,
@@ -26,8 +27,6 @@ from src.models.sequence_training import (
     ReconstructionErrorDistribution,
     SequenceThresholdCalibration,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config

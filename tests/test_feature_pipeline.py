@@ -16,6 +16,7 @@ import pandas as pd
 import pytest
 
 from src.analysis.drives import DRIVE_COLUMN
+from src.columns import GAP_SUFFIX, MEAN_SUFFIX, MODE_COLUMN, ROC_SUFFIX, STD_SUFFIX
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
 from src.preprocessing.decode import decode_can_rows
@@ -39,9 +40,7 @@ from src.preprocessing.feature_pipeline import (
     summarize_feature_health,
     trainable_feature_columns,
 )
-from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX, FeatureConfig
-from src.preprocessing.resampler import GAP_SUFFIX
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.features import FeatureConfig
 from tests.configs import example_config
 
 _ROLL_SUFFIXES = ("__mean", "__std", "__roc")

@@ -10,6 +10,7 @@ from src.alerts.fusion import (
     downgrade_unsustained,
     lstm_source,
 )
+from src.columns import is_flag_column
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
     TickContext,
@@ -24,7 +25,6 @@ from src.daemon.inference_scheduling import GenerationToken
 from src.preprocessing.feature_pipeline import (
     reconcile_feature_frame_to_spec,
 )
-from src.preprocessing.resampler import is_flag_column
 
 
 @dataclass(frozen=True)

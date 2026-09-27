@@ -12,10 +12,10 @@ from typing import Any
 
 import pandas as pd
 
+from src.artifact_hash import sha256_file
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.decode.dbc import DEFAULT_DBC_DIR
-from src.models.artifact_hash import sha256_file
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import PARQUET_PATTERN
 

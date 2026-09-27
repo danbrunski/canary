@@ -154,9 +154,9 @@ def test_recording_path_does_not_import(module: str, recording_path_modules: set
 
 def test_preprocessing_package_lazy_reexports_still_resolve() -> None:
     import src.preprocessing as preprocessing
-    from src.preprocessing import MODE_COLUMN, feature_pipeline
+    from src.preprocessing import ResampleConfig, feature_pipeline
 
-    assert MODE_COLUMN == preprocessing.MODE_COLUMN
+    assert ResampleConfig is preprocessing.ResampleConfig
     assert feature_pipeline.__name__ == "src.preprocessing.feature_pipeline"
     with pytest.raises(AttributeError):
         _ = preprocessing.not_a_preprocessing_export  # type: ignore[attr-defined]

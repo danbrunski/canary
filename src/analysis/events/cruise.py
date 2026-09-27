@@ -11,9 +11,8 @@ from __future__ import annotations
 import pandas as pd
 
 from src.analysis.session_classifier import DetectedEvent, ModeSegment
+from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.operating import HIGHWAY_MODE
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp
 
 #: Speed below which we don't bother flagging cruise — that's idle / stop-and-go.

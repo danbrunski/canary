@@ -55,6 +55,7 @@ from src.analysis.derived import (
 )
 from src.can_ids import parse_can_channel
 from src.coerce import finite_float
+from src.columns import arrived_column, gap_column
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.accepted_baselines import AcceptedBaselines
 from src.decode.behavior_models import BehaviorModels
@@ -72,12 +73,7 @@ from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_f
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.imu_live import IMU_FRAME_INPUTS, LiveImuFrame
 from src.preprocessing.quality_gate import is_physically_valid
-from src.preprocessing.resampler import (
-    ResampleConfig,
-    arrived_column,
-    gap_column,
-    resample_config_for,
-)
+from src.preprocessing.resampler import ResampleConfig, resample_config_for
 from src.preprocessing.session_context import (
     EngineStartTracker,
     StartContextSpec,

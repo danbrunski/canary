@@ -36,6 +36,7 @@ from collections.abc import Iterable, Mapping
 from types import MappingProxyType
 from typing import Final, cast
 
+from src.columns import base_channel
 from src.telemetry import (
     DBC_SOURCE,
     INPUT_GATED_SOURCES,
@@ -70,9 +71,6 @@ _NON_TRAINABLE: Final = cast(Mapping[str, str], NON_TRAINABLE_SOURCES)
 
 
 def _base(column: str) -> str:
-    # Lazy: ``src.preprocessing`` imports this module.
-    from src.preprocessing.features import base_channel
-
     return base_channel(column)
 
 

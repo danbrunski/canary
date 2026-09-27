@@ -9,9 +9,10 @@ never changed at all. The operator decided:
 - an unchanged id is written again once per **broadcast stale timeout**, so
   its value never lapses. The timeout is one config setting
   (``collection.broadcast_stale_timeout_seconds``, default
-  :data:`DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS`); the re-write happens
-  :data:`REWRITE_LEAD_SECONDS` before it, derived rather than configured, and
-  a timeout under :data:`MIN_BROADCAST_STALE_TIMEOUT_SECONDS` is refused;
+  :data:`~src.config.DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS`); the re-write
+  happens :data:`~src.config.REWRITE_LEAD_SECONDS` before it, derived rather
+  than configured, and a timeout under
+  :data:`~src.config.MIN_BROADCAST_STALE_TIMEOUT_SECONDS` is refused;
 - there are no "stopped" rows;
 - sub-second frame timing and per-id frame counts need a capture profile that
   stores every frame (``CaptureProfile.store_every_frame``).
@@ -57,6 +58,11 @@ from typing import Any, Final, Literal
 import numpy as np
 
 from src.can_ids import parse_can_channel
+from src.config import (
+    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+    REWRITE_LEAD_SECONDS,
+    validate_broadcast_stale_timeout,
+)
 from src.telemetry import (
     CAN_FRAME_KIND_KEY,
     CAN_SOURCE,
@@ -67,21 +73,6 @@ from src.telemetry import (
 )
 
 log = logging.getLogger(__name__)
-
-#: The operator's default (2026-09-26).
-DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS: Final = 10.0
-#: A shorter timeout is refused: the re-write happens one second before the
-#: timeout, so under two seconds an unchanged id would be re-written more
-#: often than once a second and the filter would save nothing it can measure.
-MIN_BROADCAST_STALE_TIMEOUT_SECONDS: Final = 2.0
-#: How long before the timeout an unchanged id is re-written: derived from the
-#: timeout, never configured. It covers ids whose frame period is under a
-#: second (the re-write fires on the first frame at least ``timeout - 1`` s
-#: after the last stored one, so the stored value is at most ``timeout - 1 +
-#: period`` old). A slower id could lapse that way (a 7 s id at 9 + 7 s), so
-#: :class:`CanChangeFilter` also keeps a frame when the next one, one
-#: inter-arrival later, would find the stored value past the timeout.
-REWRITE_LEAD_SECONDS: Final = 1.0
 
 #: Parquet footer (schema metadata) key carrying a chunk's :class:`CanStorage`.
 FOOTER_KEY: Final = b"canary.can_storage"
@@ -126,19 +117,6 @@ def is_diagnostic_can_id(channel: str) -> bool:
 def is_broadcast_channel(channel: str) -> bool:
     """Whether a ``<source>:<channel>`` key is decoded from broadcast frames."""
     return str(channel).startswith(_BROADCAST_PREFIXES)
-
-
-def validate_broadcast_stale_timeout(seconds: float) -> float:
-    """``seconds`` as a timeout, or ``ValueError`` naming why it cannot be one."""
-    value = float(seconds)
-    if not np.isfinite(value) or value < MIN_BROADCAST_STALE_TIMEOUT_SECONDS:
-        raise ValueError(
-            f"broadcast stale timeout {seconds!r} s is under the "
-            f"{MIN_BROADCAST_STALE_TIMEOUT_SECONDS:g} s floor (P02.10, operator 2026-09-26): "
-            f"an unchanged CAN id is re-written {REWRITE_LEAD_SECONDS:g} s before the "
-            "timeout, so a shorter one would re-write it more than once a second"
-        )
-    return value
 
 
 def rewrite_after_seconds(stale_timeout_seconds: float) -> float:
@@ -749,11 +727,9 @@ def refuse_shorter_stored_timeout(
 
 __all__ = [
     "BROADCAST_NAMESPACES",
-    "DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS",
     "EVERY_FRAME_PROFILE",
     "FOOTER_KEY",
     "FRAME_ATTR",
-    "MIN_BROADCAST_STALE_TIMEOUT_SECONDS",
     "REWRITE_LEAD_SECONDS",
     "BroadcastTimeoutMismatchError",
     "CanChangeFilter",

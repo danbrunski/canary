@@ -35,6 +35,7 @@ import numpy as np
 import pandas as pd
 
 from src.alerts.fusion import FusionScorer
+from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, base_channel
 from src.config import CanaryConfig
 from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import (
@@ -58,10 +59,7 @@ from src.models.synthetic_fault_eval import (
     fusion_withheld_reason,
 )
 from src.preprocessing.feature_pipeline import align_features_to_schema, expand_suppress_channels
-from src.preprocessing.features import base_channel
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 
 
 @dataclass(frozen=True)

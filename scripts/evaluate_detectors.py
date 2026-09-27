@@ -91,13 +91,14 @@ from src.analysis.labelled_events import (
     load_labelled_events,
 )
 from src.analysis.tune_revisions import load_tune_revisions
+from src.artifact_hash import sha256_file_or_none
+from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.control.sessions import recorded_sessions, session_started_at
 from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
 from src.log import configure_logging
-from src.models.artifact_hash import sha256_file_or_none
 from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
     PROTOCOL_NAME,
@@ -158,15 +159,15 @@ from src.models.spec_producibility import (
     behavior_fingerprint_provenance,
     manifest_behavior_fingerprints,
 )
-from src.models.synthetic_fault_eval import (
+from src.paths import DATA_DIR
+from src.plausibility.limits import plausibility_path
+from src.preprocessing.anomaly_injection import (
     REALISTIC_FAULT_ROLES,
     REALISTIC_FAULTS,
     choose_fault_window,
     inject_realistic_fault,
     load_fault_channel_roles,
 )
-from src.paths import DATA_DIR
-from src.plausibility.limits import plausibility_path
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore, on_the_pi
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
@@ -178,8 +179,7 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
     load_resampled_session,
 )
-from src.preprocessing.resampler import TIMESTAMP_COLUMN, resample_config_for
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.resampler import resample_config_for
 from src.profiles import active_registry, active_registry_sources
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 
@@ -385,7 +385,7 @@ def record_seen(seen: dict[str, dict[str, str]], label: str, manifest: Any) -> N
             seen.setdefault(parent_session(str(name)), {})[label] = role.removesuffix("_sessions")
 
 
-#: R01.6: the one definition is ``src.models.artifact_hash.sha256_file_or_none``.
+#: R01.6: the one definition is ``src.artifact_hash.sha256_file_or_none``.
 file_sha256 = sha256_file_or_none
 
 

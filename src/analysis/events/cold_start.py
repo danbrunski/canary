@@ -14,7 +14,7 @@ import pandas as pd
 
 from src.analysis.session_classifier import DetectedEvent, ModeSegment
 from src.coerce import finite_float
-from src.preprocessing.resampler import TIMESTAMP_COLUMN
+from src.columns import TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
 #: Coolant temperature (°C) below which the engine is considered cold.

@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.refit import RPM_COLUMN, Recipe, recipe_serving_spec
+from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
 from src.dataframe_utils import numeric_values
 from src.decode.behavior_eligibility import (
     eligibility_reasons,
@@ -42,9 +43,7 @@ from src.decode.behavior_eligibility import (
 )
 from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES, fuel_status_name
 from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.features import ROC_SUFFIX, compute_rate_of_change
-from src.preprocessing.resampler import gap_column
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.features import compute_rate_of_change
 from src.preprocessing.session_context import (
     StartContextSpec,
     append_start_context,

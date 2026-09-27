@@ -39,8 +39,9 @@ order they engage:
 
 1. :func:`~src.analysis.digest.digest_preflight` refuses up front: the
    directory is not a session; its span is over
-   :func:`digest_span_budget_seconds` (every digest); or it is a capture whose
-   tuning section would read more rows than :func:`digest_row_budget`. Cheap:
+   :func:`~src.analysis.digest.digest_span_budget_seconds` (every digest); or it
+   is a capture whose tuning section would read more rows than
+   :func:`~src.analysis.digest.digest_row_budget`. Cheap:
    a name match and Parquet footer metadata.
 2. the computation runs in a single-use ``spawn`` child process
    (:func:`compute_digest_off_loop`), the pattern
@@ -62,7 +63,6 @@ import asyncio
 import dataclasses
 import functools
 import logging
-import os
 import resource
 from concurrent.futures import BrokenExecutor, Executor
 from datetime import UTC, datetime
@@ -71,6 +71,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.alerts.notifier import format_digest_message
 from src.analysis.digest import (
+    _MIB,
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
@@ -81,6 +82,7 @@ from src.analysis.digest import (
     DigestSkipped,
     SessionDigest,
     compute_digest,
+    digest_address_space_bytes,
     digest_preflight,
     get_or_compute_digest,
     persist_digest,
@@ -104,20 +106,6 @@ log = logging.getLogger(__name__)
 #: cannot hold the daemon's shutdown (or a background task) forever.
 DIGEST_TIMEOUT_SECONDS = 900.0
 
-#: ``RLIMIT_AS`` derivation when ``daemon.digest_address_space_mb`` is unset:
-#: half of physical RAM, clamped. Half leaves the running daemon (~1.5 GB on
-#: the Pi) and the page cache room beside the child, and the 4 GiB ceiling
-#: keeps a big laptop from handing the child a limit so wide it is no limit.
-#: A floor-sized child (1 GiB, any host with 2 GB of RAM or less) leaves no
-#: room above ``DIGEST_CHAIN_FIXED_BYTES``, so its span budget is 1 s and every
-#: digest and classify job there is refused by name. That is deliberate: the
-#: chain aborts outright under a 1 GiB limit (measured 2026-09-26), and a named
-#: refusal beats a child that dies.
-_ADDRESS_SPACE_FRACTION = 0.5
-_ADDRESS_SPACE_FLOOR_MB = 1024
-_ADDRESS_SPACE_CEILING_MB = 4096
-_MIB = 1024 * 1024
-
 
 class TripEndDigestUnavailableError(RuntimeError):
     """The digest produced no answer: the child failed to start, died, or
@@ -127,124 +115,6 @@ class TripEndDigestUnavailableError(RuntimeError):
     def __init__(self, reason: str, message: str) -> None:
         super().__init__(message)
         self.reason = reason
-
-
-def _physical_memory_bytes() -> int | None:
-    try:
-        return int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
-    except (OSError, ValueError, AttributeError):  # pragma: no cover - non-POSIX
-        return None
-
-
-def digest_address_space_bytes(config: CanaryConfig) -> int:
-    """The ``RLIMIT_AS`` ceiling to hand the digest child, in bytes.
-
-    ``daemon.digest_address_space_mb`` wins when set. Otherwise derived from
-    physical RAM (see ``_ADDRESS_SPACE_*``); when the machine will not report
-    its RAM, the ceiling constant is used — an unknown machine still gets a
-    bounded child, which is the whole point.
-    """
-    configured = config.daemon.digest_address_space_mb
-    if configured is not None:
-        return int(configured) * _MIB
-    total = _physical_memory_bytes()
-    if total is None:  # pragma: no cover - non-POSIX
-        return _ADDRESS_SPACE_CEILING_MB * _MIB
-    derived_mb = int(total * _ADDRESS_SPACE_FRACTION) // _MIB
-    return max(_ADDRESS_SPACE_FLOOR_MB, min(_ADDRESS_SPACE_CEILING_MB, derived_mb)) * _MIB
-
-
-#: Peak resident bytes per stored session row of a **whole-session raw read**
-#: in the digest child: the tuning section of a capture's digest
-#: (``tuning_digest.has_tuning_section``; ``read_channels`` with no row filter
-#: until P02.2) and the workbench jobs, which share this budget. Since P02.1 the
-#: rest of the digest no longer scales with rows (:data:`DIGEST_CHAIN_BYTES_PER_SECOND`).
-#:
-#: Measured 2026-09-17 on the raw-timestamp pivot: 2,193 bytes/row. Re-measured
-#: 2026-09-22 on the long-form reduction (D03.6): 390 and 280 bytes/row, and
-#: 2026-09-26 after P02.8 (decoded rows no longer stored): about 314 MB fixed
-#: plus ~313 B per stored row, 354-632 B/row on three sessions.
-#:
-#: Not re-derived by P02.1, and too loose for the tuning section: that section
-#: alone peaks at 1,408-1,595 B per stored row on four new-format captures
-#: (1.31-2.83 M rows, 2.0-3.8 GB, laptop, 2026-09-26), and under a 4 GiB
-#: ``RLIMIT_AS`` the 2.05 M-row ``_capture-fuel-target-research-2026-09-21T195844``
-#: ran out of memory inside it. Tightening it also tightens the workbench, so it
-#: is an operator decision recorded in P02.1; P02.2 (filtered reads) is what
-#: removes the row term.
-DIGEST_PEAK_BYTES_PER_ROW = 800
-
-#: The digest's ``value_number`` chain (P02.1): ``resample_and_segment`` read
-#: part by part, then classification and the fingerprint's featurization on
-#: the 1 Hz frame. Its peak is a fixed cost plus a cost per second of session:
-#: it holds one part of raw rows (~100 k) at a time and, for the whole
-#: session, only the reduced cells and 1 Hz frames, whose size follows the
-#: session's span and channel count, not its raw rows.
-#:
-#: ``compute_digest`` peak RSS, laptop, each run in its own process, new-format
-#: copies (decoded rows removed), 2026-09-26:
-#:
-#: - ``2026-09-18T152144``, 805 s: 322 MB;
-#: - ``2026-09-18T144215``, 2,359 s: 347 MB (1,544 MB before P02.1);
-#: - ``2026-09-20T152758``, 8,571 s, 12.8 M rows: 503 MB (4,265 MB before);
-#: - four back-to-back copies of it, 34,458 s, 51.4 M rows: 1,220 MB, and
-#:   1,255 MB completing inside a 4 GiB ``RLIMIT_AS``.
-#:
-#: That is ~290 MB fixed plus ~27.7 KB per second of session at the default
-#: profile's ~200 1 Hz columns. The constants below keep ~3.5x on the fixed
-#: part and ~2.3x on the slope: ``RLIMIT_AS`` bounds virtual memory, not RSS
-#: (the laptop's unconstrained VmPeak was 2.4 GB fixed plus 20.6 KB/s), the
-#: Pi's allocator is not the laptop's, and a capture profile with more
-#: channels widens the 1 Hz frame. A 4 GiB child gets ~13.7 h.
-#: **Change these when the chain changes** -- the span budget follows from them.
-DIGEST_CHAIN_FIXED_BYTES = 1024 * _MIB
-DIGEST_CHAIN_BYTES_PER_SECOND = 64 * 1024
-
-
-def digest_row_budget(config: CanaryConfig) -> int:
-    """How many stored rows a whole-session raw read in the child may attempt:
-    the configured budget, or derived.
-
-    Applies to a digest only when it has a tuning section (a capture,
-    :func:`~src.analysis.tuning_digest.has_tuning_section`), the one part of
-    the digest that still reads a session whole, and to the workbench jobs.
-    Every digest is also bounded by :func:`digest_span_budget_seconds`.
-
-    Derived = the child's address-space ceiling divided by the per-row peak,
-    so the budget and the ceiling cannot drift apart: on the 8 GB Pi a 4 GiB
-    child / 800 B per row ≈ 5.4 M stored rows. The derivation is the point: a
-    hand-picked 4 M budget once sat against a ceiling that covered only
-    1.95 M rows, and sessions between the two spawned a child that then died
-    of ``MemoryError``.
-
-    ``0`` disables the check (the ceiling still applies, so an over-large
-    session fails as a caught ``MemoryError`` rather than taking the daemon
-    with it).
-    """
-    configured = config.daemon.digest_row_budget
-    if configured is not None:
-        return int(configured)
-    return digest_address_space_bytes(config) // DIGEST_PEAK_BYTES_PER_ROW
-
-
-def digest_span_budget_seconds(config: CanaryConfig) -> float:
-    """How long a session the digest's ``value_number`` chain may attempt, in
-    seconds of recorded span: the configured budget, or derived.
-
-    Derived = what the child's address-space ceiling leaves after
-    :data:`DIGEST_CHAIN_FIXED_BYTES`, divided by
-    :data:`DIGEST_CHAIN_BYTES_PER_SECOND` -- ~13.7 h for the Pi's 4 GiB child.
-    A ceiling too small for the fixed cost gets a 1 s budget, so every session
-    is refused by name rather than attempted. The same rule bounds the
-    workbench's ``classify`` job, which runs the same chain.
-
-    ``0`` disables the check (the ceiling still applies).
-    """
-    configured = config.daemon.digest_span_budget_seconds
-    if configured is not None:
-        return float(configured)
-    room = digest_address_space_bytes(config) - DIGEST_CHAIN_FIXED_BYTES
-    return max(1.0, room / DIGEST_CHAIN_BYTES_PER_SECOND)
 
 
 def limit_address_space(nbytes: int) -> tuple[int, int]:
@@ -661,7 +531,6 @@ __all__ = [
     "TripEndDigestUnavailableError",
     "compute_digest_off_loop",
     "compute_digest_under_limit",
-    "digest_address_space_bytes",
     "digest_in_flight",
     "handle_trip_end",
     "handle_trip_end_off_loop",

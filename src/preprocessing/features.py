@@ -23,42 +23,17 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.resampler import (
+from src.columns import (
+    MODE_COLUMN,
+    ROLLING_SUFFIXES,
     SESSION_COLUMN,
     TIMESTAMP_COLUMN,
     is_flag_column,
+    mean_column,
+    roc_column,
+    std_column,
 )
-from src.preprocessing.segmenter import MODE_COLUMN
-
-MEAN_SUFFIX = "__mean"
-STD_SUFFIX = "__std"
-ROC_SUFFIX = "__roc"
-
-#: Every rolling-feature suffix this module appends. The one declaration:
-#: consumers split a column with :func:`split_rolling` / :func:`base_channel`
-#: rather than re-listing the suffixes (R04.3) -- a copy that missed a newly
-#: added rolling feature would lose its freshness mask at serve, leak around
-#: ``suppress_channels`` and misfile its calibration family, all silently.
-ROLLING_SUFFIXES: tuple[str, ...] = (MEAN_SUFFIX, STD_SUFFIX, ROC_SUFFIX)
-
-
-def split_rolling(column: str) -> tuple[str, str]:
-    """``"<base>__roc"`` -> ``("<base>", "__roc")``; a raw column -> ``(column, "")``."""
-    for suffix in ROLLING_SUFFIXES:
-        if column.endswith(suffix):
-            return column[: -len(suffix)], suffix
-    return column, ""
-
-
-def base_channel(column: str) -> str:
-    """The channel a rolling feature summarizes (the column itself when raw).
-
-    Also the sequence detector's *family* key: a channel and its rolling
-    siblings share one calibration band.
-    """
-    return split_rolling(column)[0]
-
+from src.dataframe_utils import require_columns as _require_columns
 
 #: Mirrors ``src.preprocessing.session_context.CONTEXT_PREFIX`` (kept local to
 #: avoid importing the behavior schema into this leaf module).
@@ -99,18 +74,6 @@ class FeatureConfig:
             raise ValueError("window_seconds must be positive")
         if self.min_periods < 1:
             raise ValueError("min_periods must be at least 1")
-
-
-def mean_column(channel: str) -> str:
-    return f"{channel}{MEAN_SUFFIX}"
-
-
-def std_column(channel: str) -> str:
-    return f"{channel}{STD_SUFFIX}"
-
-
-def roc_column(channel: str) -> str:
-    return f"{channel}{ROC_SUFFIX}"
 
 
 def compute_features(

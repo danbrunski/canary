@@ -82,11 +82,8 @@ except ImportError:  # loaded as `scripts.retrain` — repo root on path, not sc
     )
 
 from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore
-from src.analysis.training_disposition import (
-    GoldenBaselines,
-    classify_dispositions,
-    compute_quarantine_mask,
-)
+from src.analysis.training_disposition import classify_dispositions, compute_quarantine_mask
+from src.artifact_hash import sha256_file_or_none
 from src.config import CanaryConfig
 from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines
 from src.log import configure_logging
@@ -97,7 +94,6 @@ from src.models.alert_budget import (
     check_alert_budget,
     evaluation_drives,
 )
-from src.models.artifact_hash import sha256_file_or_none
 from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
     diff_reports,
@@ -110,7 +106,11 @@ from src.models.evaluation import (
     pick_calibration_holdouts,
     pick_evaluation_holdouts,
 )
-from src.models.golden_baselines import golden_baselines_path, read_golden_baselines
+from src.models.golden_baselines import (
+    GoldenBaselines,
+    golden_baselines_path,
+    read_golden_baselines,
+)
 from src.models.manifest import ManifestValidationError
 from src.models.publish import (
     ISOLATION_FOREST_SOURCE,
@@ -1576,7 +1576,7 @@ def _run_alert_budget_gate(
     return check
 
 
-#: R01.6: the one definition is ``src.models.artifact_hash.sha256_file_or_none``.
+#: R01.6: the one definition is ``src.artifact_hash.sha256_file_or_none``.
 _file_sha256 = sha256_file_or_none
 
 

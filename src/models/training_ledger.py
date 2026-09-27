@@ -33,8 +33,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.artifact_hash import sha256_file
 from src.jsonl_store import JsonlStore, latest_by_key
-from src.models.artifact_hash import sha256_file
 from src.models.manifest import ManifestValidationError, validate_manifest_common
 from src.paths import CONTROL_DIR
 

@@ -24,8 +24,8 @@ from src.analysis.digest import (
 from src.analysis.reference_epoch import build_reference_epoch, write_reference_epoch
 from src.analysis.vehicle_ledger import VehicleEvent, VehicleLedgerStore
 from src.config import CanaryConfig
-from src.control.dtc_state import SIDECAR_FILENAME as DTC_SIDECAR_FILENAME
 from src.decode.dtc_catalog import build_dtc_report
+from src.session import DTC_SIDECAR_FILENAME
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

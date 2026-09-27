@@ -25,6 +25,14 @@ import numpy as np
 import pandas as pd
 
 from src.coerce import optional_str as _optional_str
+from src.columns import (
+    MODE_COLUMN,
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+    UNKNOWN_MODE,
+    base_channel,
+    is_flag_column,
+)
 from src.dataframe_utils import require_columns as _require_columns
 from src.models.manifest import (
     manifest_path_for,
@@ -34,10 +42,7 @@ from src.models.manifest import (
 )
 from src.models.sequence_calibration import coerce_timestamp
 from src.preprocessing.feature_pipeline import build_feature_spec
-from src.preprocessing.features import base_channel
 from src.preprocessing.normalization import ZScoreScaler
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
-from src.preprocessing.segmenter import MODE_COLUMN, UNKNOWN_MODE
 from src.timefmt import format_timestamp as _format_timestamp
 from src.trainability import source_exclusion_reason
 

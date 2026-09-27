@@ -8,12 +8,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.preprocessing.anomaly_injection import (
     AnomalyInjector,
     InjectionWindow,
     windows_to_records,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _clean_frame(n: int = 60, channels: dict[str, list[float]] | None = None) -> pd.DataFrame:
@@ -632,7 +632,7 @@ def test_nothing_arrives_inside_an_injected_dropout():
     as the held value arriving every tick (a stuck sensor). Derived channels
     inherit it, since their arrival is built from their inputs'."""
     from src.analysis.derived import compute_anomaly_signals
-    from src.preprocessing.resampler import arrived_column, gap_column
+    from src.columns import arrived_column, gap_column
 
     n = 12
     frame = _clean_frame(

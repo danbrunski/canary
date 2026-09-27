@@ -14,8 +14,9 @@ from scripts.train_anomaly_model import (
     main,
     train,
 )
+from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
-from src.preprocessing import MODE_COLUMN, feature_pipeline
+from src.preprocessing import feature_pipeline
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     build_feature_frame,

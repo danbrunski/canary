@@ -37,16 +37,9 @@ from typing import Any, Literal
 
 import pandas as pd
 
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, UNKNOWN_MODE
 from src.config import CanaryConfig
 from src.preprocessing.loader import numeric_value_columns, resample_and_segment
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-)
-from src.preprocessing.segmenter import (
-    MODE_COLUMN,
-    UNKNOWN_MODE,
-)
 from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 

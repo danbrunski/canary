@@ -34,6 +34,16 @@ from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_
 from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.collection.capture_profiles import MODE01_AUTO
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
+from src.columns import (
+    FLAG_SUFFIXES,
+    GAP_SUFFIX,
+    MODE_COLUMN,
+    ROLLING_SUFFIXES,
+    UNKNOWN_MODE,
+    base_channel,
+    is_flag_column,
+    split_rolling,
+)
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
 from src.decode.behavior_models import (
@@ -65,14 +75,7 @@ from src.preprocessing.feature_cache import (
 from src.preprocessing.feature_cache import (
     build_feature_frame_cache_key as build_feature_frame_cache_key,
 )
-from src.preprocessing.features import (
-    CONTEXT_COLUMN_PREFIX,
-    ROLLING_SUFFIXES,
-    FeatureConfig,
-    base_channel,
-    compute_features,
-    split_rolling,
-)
+from src.preprocessing.features import CONTEXT_COLUMN_PREFIX, FeatureConfig, compute_features
 from src.preprocessing.loader import (
     SESSION_PART_ROWS,
     iter_session_parts,
@@ -80,20 +83,9 @@ from src.preprocessing.loader import (
     to_wide,
 )
 from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import (
-    FLAG_SUFFIXES,
-    GAP_SUFFIX,
-    ResampleConfig,
-    is_flag_column,
-    resample_wide,
-)
+from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
-from src.preprocessing.segmenter import (
-    MODE_COLUMN,
-    UNKNOWN_MODE,
-    SegmenterConfig,
-    segment_operating_modes,
-)
+from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
 from src.storage.broadcast_storage import (
     change_only_timeout,
     refuse_shorter_stored_timeout,
@@ -1807,7 +1799,7 @@ MIN_ISOLATION_FOREST_COVERAGE = MIN_DETECTOR_COVERAGE
 #: manifest under :data:`COVERAGE_FLOOR_SCHEMA_KEY`.
 #:
 #: ``sparse_for_grid`` — both detectors: the column's *channel* (its base,
-#: :func:`~src.preprocessing.features.base_channel`) is valued on fewer than
+#: :func:`~src.columns.base_channel`) is valued on fewer than
 #: :data:`MIN_DETECTOR_COVERAGE` of the classified rows of the sessions that
 #: carry it, i.e. polled too slowly for the 1 Hz grid. The whole family goes:
 #: a 30 s rolling ``__mean`` of a once-a-minute read is valued on over half the

@@ -6,8 +6,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.refit import Surface1DRecipe, fit_recipe
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _frame(sessions_to_rows: dict[str, int]) -> pd.DataFrame:

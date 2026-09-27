@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 import src.models.isolation_forest_evaluation as evaluation_module
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.isolation_forest import (
     CALIBRATED_ANOMALY_COLUMN,
     CALIBRATED_THRESHOLD_COLUMN,
@@ -24,8 +25,6 @@ from src.models.isolation_forest_evaluation import (
     score_distribution,
 )
 from src.preprocessing.anomaly_injection import AnomalyInjector
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 
 
 @dataclass(frozen=True)

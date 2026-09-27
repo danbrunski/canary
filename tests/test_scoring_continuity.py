@@ -29,6 +29,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.daemon import inference as inference_mod
 from src.daemon.detectors import sequence as sequence_mod
 from src.daemon.inference import (
@@ -54,7 +55,6 @@ from src.models.inference import (
     training_suppress_record,
 )
 from src.models.sequence_dataset import WINDOW_MAX_GAP_SECONDS, build_sequence_windows
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 # --- A01.1: a reply is applied only to the tick that asked for it ----------
 

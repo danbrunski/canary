@@ -2,12 +2,13 @@
 
 This package imports nothing when it is imported: every
 ``src.preprocessing.*`` import executes this file first, and the collection
-path imports ``src.preprocessing.resampler`` (for column names) through
-``src.analysis.derived``. When this file imported every submodule eagerly
-that pulled the loader, the feature builder, the segmenter and the anomaly
-injector onto the main thread before any collector ran (S01.3). The names
-below still resolve as ``src.preprocessing.<name>``; the module behind one is
-imported on first access.
+path used to import ``src.preprocessing.resampler`` (for column names)
+through ``src.analysis.derived``. When this file imported every submodule
+eagerly that pulled the loader, the feature builder, the segmenter and the
+anomaly injector onto the main thread before any collector ran (S01.3). The
+names below still resolve as ``src.preprocessing.<name>``; the module behind
+one is imported on first access. Column names are not among them: they live in
+:mod:`src.columns` (R09.2), and are imported from there.
 """
 
 from __future__ import annotations
@@ -18,7 +19,6 @@ from typing import Any
 #: Export name -> the module that defines it.
 _EXPORTS: dict[str, str] = {
     "DECODED_SOURCE": "src.preprocessing.decode",
-    "MODE_COLUMN": "src.preprocessing.segmenter",
     "AnomalyInjector": "src.preprocessing.anomaly_injection",
     "AnomalyKind": "src.preprocessing.anomaly_injection",
     "FeatureConfig": "src.preprocessing.features",
@@ -26,23 +26,18 @@ _EXPORTS: dict[str, str] = {
     "ResampleConfig": "src.preprocessing.resampler",
     "SchemaMismatchError": "src.preprocessing.normalization",
     "SegmenterConfig": "src.preprocessing.segmenter",
-    "UNKNOWN_MODE": "src.preprocessing.segmenter",
     "ZScoreScaler": "src.preprocessing.normalization",
     "channel_key": "src.preprocessing.loader",
     "compute_features": "src.preprocessing.features",
     "decode_can_rows": "src.preprocessing.decode",
     "decoded_channel": "src.preprocessing.decode",
     "discover_sessions": "src.preprocessing.loader",
-    "gap_column": "src.preprocessing.resampler",
-    "mean_column": "src.preprocessing.features",
     "mode_for_row": "src.preprocessing.segmenter",
     "read_session": "src.preprocessing.loader",
     "read_session_decoded": "src.preprocessing.decode",
     "read_sessions": "src.preprocessing.loader",
     "resample_wide": "src.preprocessing.resampler",
-    "roc_column": "src.preprocessing.features",
     "segment_operating_modes": "src.preprocessing.segmenter",
-    "std_column": "src.preprocessing.features",
     "to_wide": "src.preprocessing.loader",
     "windows_to_records": "src.preprocessing.anomaly_injection",
 }

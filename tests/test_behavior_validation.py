@@ -47,6 +47,7 @@ from src.analysis.refit import (
     fit_recipe,
     refit_all,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.decode.behavior_models import (
     STATUS_NO_HELD_OUT_VALIDATION,
     Axis1D,
@@ -62,8 +63,6 @@ from src.decode.behavior_models import (
     load_behavior_models,
     serving_status,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 from tests.configs import example_config
 
 T0 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)

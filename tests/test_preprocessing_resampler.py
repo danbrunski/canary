@@ -8,14 +8,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    ResampleConfig,
-    gap_column,
-    is_slow_channel,
-    resample_wide,
-)
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.preprocessing.resampler import ResampleConfig, is_slow_channel, resample_wide
 
 
 def _ts(seconds: int) -> datetime:
@@ -247,7 +241,7 @@ def test_arrived_flag_marks_only_rows_a_sample_was_delivered_to() -> None:
     received a sample; forward-filled rows inside ``max_gap`` keep ``__gap``
     False but are *not* arrivals. A slow channel's rows between polls are the
     case the old mask got wrong (baro: 52 samples, mask 1 on 90.8 % of rows)."""
-    from src.preprocessing.resampler import arrived_column, is_flag_column
+    from src.columns import arrived_column, is_flag_column
 
     wide = pd.DataFrame(
         [
@@ -273,7 +267,8 @@ def test_arrived_flag_marks_only_rows_a_sample_was_delivered_to() -> None:
 
 
 def test_resample_long_emits_the_same_arrival_flags_as_resample_wide() -> None:
-    from src.preprocessing.resampler import arrived_column, resample_long
+    from src.columns import arrived_column
+    from src.preprocessing.resampler import resample_long
 
     stamps = [_ts(0), _ts(1) + timedelta(milliseconds=300), _ts(4), _ts(6)]
     long = pd.DataFrame(

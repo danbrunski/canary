@@ -11,8 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.preprocessing.resampler import SESSION_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.columns import MODE_COLUMN, SESSION_COLUMN
 
 # ---------------------------------------------------------------------------
 # A03.8 — training envelope per operating mode

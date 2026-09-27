@@ -12,6 +12,11 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from src.columns import (  # noqa: E402
+    MODE_COLUMN,  # noqa: E402
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+)
 from src.models.sequence_dataset import SequenceWindowDataset  # noqa: E402
 from src.models.sequence_training import (  # noqa: E402
     MIN_OBSERVED_BLOCKS,
@@ -19,8 +24,6 @@ from src.models.sequence_training import (  # noqa: E402
     calibrate_sequence_thresholds,
     observed_block_counts,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
-from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 
 SEQ = 5
 

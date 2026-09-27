@@ -55,6 +55,7 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
+from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
 from src.dataframe_utils import numeric_values
 from src.decode.behavior_models import (
     BehaviorModel1D,
@@ -63,10 +64,7 @@ from src.decode.behavior_models import (
     ServingEligibility,
     fuel_status_name,
 )
-from src.preprocessing.features import ROC_SUFFIX
 from src.preprocessing.local_range import local_range_column
-from src.preprocessing.resampler import gap_column
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.preprocessing.session_context import start_context_columns
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 

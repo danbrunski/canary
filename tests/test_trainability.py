@@ -25,6 +25,7 @@ from src.analysis.derived import (
     compute_derived_channels,
 )
 from src.analysis.refit import Surface1DRecipe, Surface2DRecipe
+from src.columns import is_flag_column
 from src.config import VehicleParameters
 from src.decode.behavior_models import load_behavior_models
 from src.preprocessing.feature_pipeline import (
@@ -32,7 +33,6 @@ from src.preprocessing.feature_pipeline import (
     feature_policy_exclusions,
     featurize_wide_frame,
 )
-from src.preprocessing.resampler import is_flag_column
 from src.telemetry import (
     INPUT_GATED_SOURCES,
     NON_TRAINABLE_SOURCES,
@@ -271,7 +271,7 @@ def test_committee_channels_leave_the_trained_feature_list_unchanged() -> None:
         OBD_SPEED_ACCEL_G,
         committee_channel_reason,
     )
-    from src.preprocessing.features import base_channel
+    from src.columns import base_channel
 
     config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())

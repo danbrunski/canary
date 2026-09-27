@@ -28,6 +28,15 @@ try:
 except ImportError:  # loaded as `scripts.replay` — repo root on path, not scripts/
     from scripts._cli import add_common_args, load_scoped_config
 
+from src.columns import (
+    MEAN_SUFFIX,
+    MODE_COLUMN,
+    ROC_SUFFIX,
+    SESSION_COLUMN,
+    STD_SUFFIX,
+    TIMESTAMP_COLUMN,
+    is_flag_column,
+)
 from src.config import CanaryConfig
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.models.isolation_forest import (
@@ -37,16 +46,8 @@ from src.models.isolation_forest import (
 )
 from src.models.isolation_forest_evaluation import score_distribution
 from src.preprocessing.feature_pipeline import featurize_wide_frame
-from src.preprocessing.features import MEAN_SUFFIX, ROC_SUFFIX, STD_SUFFIX
 from src.preprocessing.loader import TelemetryValueKind, read_sessions, to_wide
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    is_flag_column,
-    resample_config_for,
-    resample_wide,
-)
-from src.preprocessing.segmenter import MODE_COLUMN
+from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.timefmt import format_timestamp
 
 

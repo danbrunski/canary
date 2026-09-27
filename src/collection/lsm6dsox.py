@@ -35,6 +35,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from src.collection.i2c_dev import RegisterBus
+from src.lsm6dsox_settings import ACCEL_RANGES, GYRO_RANGES, ODR_CODES, ImuSettings
 
 WHO_AM_I = 0x0F
 WHO_AM_I_VALUE = 0x6C
@@ -73,30 +74,6 @@ STATUS2_OVR_LATCHED = 0x08
 STATUS2_FULL = 0x20
 STATUS2_OVR = 0x40
 
-#: Nominal output data rates the chip supports, Hz -> ``ODR_XL``/``ODR_G``/``BDR`` code.
-ODR_CODES: dict[float, int] = {
-    12.5: 0x1,
-    26.0: 0x2,
-    52.0: 0x3,
-    104.0: 0x4,
-    208.0: 0x5,
-    416.0: 0x6,
-    833.0: 0x7,
-}
-#: Full scale (g) -> (``FS_XL`` code, g per LSB).
-ACCEL_RANGES: dict[int, tuple[int, float]] = {
-    2: (0b00, 0.061e-3),
-    4: (0b10, 0.122e-3),
-    8: (0b11, 0.244e-3),
-    16: (0b01, 0.488e-3),
-}
-#: Full scale (deg/s) -> (``FS_G`` code, deg/s per LSB).
-GYRO_RANGES: dict[int, tuple[int, float]] = {
-    250: (0b00, 8.75e-3),
-    500: (0b01, 17.5e-3),
-    1000: (0b10, 35.0e-3),
-    2000: (0b11, 70.0e-3),
-}
 #: Instants discarded after power-up, in seconds of chip time. Measured on the
 #: HAT 2026-09-23 at rest: the first accelerometer sample read 0.89 g against
 #: 1.00 g after it, and the gyroscope read up to 33 deg/s for ~50 ms (its
@@ -109,25 +86,6 @@ TICKS_WRAP = 1 << 32
 
 class Lsm6dsoxError(RuntimeError):
     """The device at the configured address is not an LSM6DSOX, or misbehaved."""
-
-
-@dataclass(frozen=True)
-class ImuSettings:
-    odr_hz: float
-    accel_range_g: int
-    gyro_range_dps: int
-
-    def __post_init__(self) -> None:
-        if self.odr_hz not in ODR_CODES:
-            raise ValueError(f"LSM6DSOX ODR {self.odr_hz} Hz; supported: {sorted(ODR_CODES)}")
-        if self.accel_range_g not in ACCEL_RANGES:
-            raise ValueError(
-                f"accel range {self.accel_range_g} g; supported: {sorted(ACCEL_RANGES)}"
-            )
-        if self.gyro_range_dps not in GYRO_RANGES:
-            raise ValueError(
-                f"gyro range {self.gyro_range_dps} dps; supported: {sorted(GYRO_RANGES)}"
-            )
 
 
 @dataclass(frozen=True)
@@ -366,13 +324,9 @@ class Lsm6dsox:
 
 
 __all__ = [
-    "ACCEL_RANGES",
-    "GYRO_RANGES",
-    "ODR_CODES",
     "FifoBatch",
     "FifoDecoder",
     "ImuSample",
-    "ImuSettings",
     "Lsm6dsox",
     "Lsm6dsoxError",
     "TemperatureSample",

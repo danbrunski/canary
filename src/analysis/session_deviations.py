@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor, Significance
+from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import deviation as evaluate_deviation
 from src.decode.behavior_models import (
@@ -48,7 +49,6 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
     resample_config_for,
 )
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 

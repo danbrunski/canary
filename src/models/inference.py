@@ -19,6 +19,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.columns import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN, base_channel
 from src.models.sequence_calibration import SequenceThresholdCalibration
 from src.models.sequence_dataset import (
     MASK_ARRIVED_SAMPLE,
@@ -29,8 +30,6 @@ from src.models.sequence_dataset import (
 )
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_scoring import SequenceScoringRule, score_exclusions
-from src.preprocessing.features import base_channel
-from src.preprocessing.resampler import GAP_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.timefmt import format_timestamp
 
 log = logging.getLogger(__name__)

@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_training import (
     dataloader_kwargs_for_device,
@@ -15,7 +16,6 @@ from src.models.sequence_training import (
     split_dataset,
     validate_dataset_observations,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 
 def _session_block(session: str, rows: int, start: str) -> pd.DataFrame:

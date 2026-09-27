@@ -8,11 +8,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.models.inference import SequenceInferenceEngine, SequenceWindowBuffer
 from src.models.lstm_training import train_lstm_autoencoder
 from src.models.sequence_dataset import SequenceWindowDataset
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 # Torch training: not a commit gate (see the pyproject test tiers).
 pytestmark = [pytest.mark.slow, pytest.mark.ml_training]

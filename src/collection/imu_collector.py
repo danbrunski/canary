@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from src.collection.i2c_dev import LinuxI2cBus, RegisterBus
-from src.collection.lsm6dsox import FifoBatch, ImuSettings, Lsm6dsox
+from src.collection.lsm6dsox import FifoBatch, Lsm6dsox
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import (
     DEFAULT_RECONNECT_POLICY,
@@ -33,6 +33,7 @@ from src.collection.reconnect import (
     wait_for_stop_or_timeout,
 )
 from src.config import ImuConfig
+from src.lsm6dsox_settings import ImuSettings
 from src.telemetry import TelemetryRecord
 
 log = logging.getLogger(__name__)

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from src.collection.obd_scheduler import FREEZE_FRAME_CHANNEL_PREFIX
 from src.decode.dtc_catalog import DtcReport, build_dtc_report, describe_dtc
+from src.session import DTC_SIDECAR_FILENAME
 from src.storage.sidecar import write_json_sidecar
 from src.telemetry import TelemetryRecord
 
@@ -34,8 +35,6 @@ if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
     from src.analysis.vehicle_ledger import VehicleLedgerStore
     from src.collection.obd_scheduler import FreezeFrameTrigger
-
-SIDECAR_FILENAME = "dtc.json"
 
 #: ``GET /obd/dtc`` treats the cached report stale after this many seconds
 #: with no poll landing. The daemon's default DTC-poll cadence is 300 s
@@ -264,12 +263,11 @@ class DtcState:
 def _write_sidecar(session_dir: Path, report: DtcReport) -> None:
     """Atomic tmp+rename write, matching ``control.json``
     (``src.control.sessions.write_session_metadata``, Task 1.7)."""
-    path = session_dir / SIDECAR_FILENAME
+    path = session_dir / DTC_SIDECAR_FILENAME
     write_json_sidecar(path, report.to_dict(), default=str)
 
 
 __all__ = [
     "DEFAULT_STALE_AFTER_SECONDS",
-    "SIDECAR_FILENAME",
     "DtcState",
 ]

@@ -880,8 +880,12 @@ def test_retrain_quarantine_exclusion_is_golden_anchored_when_declared(
     instead of this window's own (self-referential) statistics -- catching
     a drift that has come to dominate the candidate window, which
     window-local screening would wave through as the new "normal"."""
-    from src.analysis.training_disposition import ChannelBaseline, GoldenBaselines
-    from src.models.golden_baselines import golden_baselines_path, write_golden_baselines
+    from src.models.golden_baselines import (
+        ChannelBaseline,
+        GoldenBaselines,
+        golden_baselines_path,
+        write_golden_baselines,
+    )
 
     session = tmp_path / "sessions" / "2026-05-13T120000"
     session.mkdir(parents=True)

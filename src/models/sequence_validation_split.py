@@ -12,11 +12,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.sequence_calibration import MIN_CALIBRATION_SAMPLES
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_device import torch_training_modules
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 
 #: A03.5 — the stated rule validation sessions are chosen by, recorded in the
 #: manifest's ``validation_holdout``.

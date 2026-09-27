@@ -14,14 +14,13 @@ from src.analysis.refit import (
     fit_recipe,
     refit_all,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN
 from src.decode.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
     DeviationConfig,
 )
-from src.preprocessing.resampler import SESSION_COLUMN
-from src.preprocessing.segmenter import MODE_COLUMN
 
 # ---------------------------------------------------------------------------
 # Fixtures

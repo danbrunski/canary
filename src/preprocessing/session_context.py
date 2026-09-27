@@ -39,10 +39,10 @@ import pandas as pd
 
 from src.analysis.pairing import to_seconds
 from src.coerce import finite_float
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.dataframe_utils import numeric_values
 from src.decode.behavior_models import BehaviorModels, ColdStartRequirement
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 #: Prefix of serving-context columns. Excluded from rolling features (see
 #: ``features._value_columns``) and from every trainable feature selection.

@@ -14,6 +14,11 @@ import pytest
 pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
+from src.columns import (  # noqa: E402
+    MODE_COLUMN,  # noqa: E402
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
+)
 from src.models.feature_spec_health import (  # noqa: E402
     load_audit_snapshot,
     per_mode_blindness,
@@ -30,8 +35,6 @@ from src.models.isolation_forest import (  # noqa: E402
     fit_isolation_forest,
     load_isolation_forest_model,
 )
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN  # noqa: E402
-from src.preprocessing.segmenter import MODE_COLUMN  # noqa: E402
 
 
 @dataclass(frozen=True)

@@ -29,6 +29,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from src.artifact_hash import sha256_file
 from src.control.sessions import (
     delete_session,
     pin_session,
@@ -38,7 +39,6 @@ from src.control.sessions import (
     write_session_zip,
 )
 from src.dashboard.schemas import SessionMetadataRequest, SessionPinRequest
-from src.models.artifact_hash import sha256_file
 
 
 @dataclass(frozen=True)

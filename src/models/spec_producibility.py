@@ -38,9 +38,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
+from src.columns import base_channel
 from src.config import CanaryConfig
 from src.paths import BINDINGS_YAML, DBC_DIR, DIDS_YAML
-from src.preprocessing.features import base_channel
 from src.telemetry import SOURCE_SEP
 
 if TYPE_CHECKING:

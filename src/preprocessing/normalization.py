@@ -27,13 +27,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.dataframe_utils import require_columns as _require_columns
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    is_flag_column,
-)
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.trainability import source_exclusion_reason
 
 _DEFAULT_STD_FLOOR = 1e-9

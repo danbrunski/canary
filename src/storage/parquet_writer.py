@@ -23,14 +23,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from src.atomic_write import atomic_write_text
-from src.collection.capture_profiles import CaptureProfile
-from src.collection.record_arming import RecordArmingGate
+from src.config import DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 from src.session import SessionPaths, make_session_dir, make_unique_session_dir, session_paths
-from src.storage.broadcast_storage import (
-    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
-    CanChangeFilter,
-    CanStorage,
-)
+from src.storage.broadcast_storage import CanChangeFilter, CanStorage
+from src.storage.protocols import RecordGate, StorageProfile
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
 )
@@ -90,7 +86,7 @@ class ParquetTelemetryWriter:
         engine_run_time_reset_threshold_seconds: float = 5.0,
         session_gap_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
-        arming_gate: RecordArmingGate | None = None,
+        arming_gate: RecordGate | None = None,
         broadcast_stale_timeout_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
     ):
         self._clock: Callable[[], datetime] = (
@@ -318,7 +314,7 @@ class ParquetTelemetryWriter:
 
     def enter_capture_mode(
         self,
-        profile: CaptureProfile,
+        profile: StorageProfile,
         capture_id: str,
         tune_revision: str | None = None,
         resolved_polling_plan: dict[str, Any] | None = None,

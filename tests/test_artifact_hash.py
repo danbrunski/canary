@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from src.models.artifact_hash import sha256_file, sha256_file_or_none
+from src.artifact_hash import sha256_file, sha256_file_or_none
 
 
 def test_streaming_hash_matches_hashlib(tmp_path: Path) -> None:

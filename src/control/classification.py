@@ -59,7 +59,7 @@ def classify_and_write(config: CanaryConfig, session_id: str) -> dict[str, Any]:
     This is the part that reads the session (``resample_and_segment``, then
     ``compute_fingerprint`` — part by part since P02.1, a peak that follows
     the session's span: ``DIGEST_CHAIN_BYTES_PER_SECOND`` in
-    ``control/trip_end.py``), so the daemon runs it in the bounded
+    ``analysis/digest.py``), so the daemon runs it in the bounded
     single-flight child (``workbench_jobs`` kind ``classify``, R03.2). It
     returns only what the parent needs: the classification payload, whether
     the fingerprint sidecar was written, and the session directory. Nothing

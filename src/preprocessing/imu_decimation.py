@@ -34,7 +34,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.telemetry import channel_key
 
 IMU_SOURCE = "imu"

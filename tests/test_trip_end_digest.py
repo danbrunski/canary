@@ -26,7 +26,10 @@ from typing import Any
 import pytest
 
 from src.analysis.digest import (
+    DIGEST_CHAIN_BYTES_PER_SECOND,
+    DIGEST_CHAIN_FIXED_BYTES,
     DIGEST_FILENAME,
+    DIGEST_PEAK_BYTES_PER_ROW,
     DIGEST_SKIPPED_FILENAME,
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
@@ -38,7 +41,10 @@ from src.analysis.digest import (
     SKIP_SCHEMA_VERSION,
     SessionDigest,
     compute_digest,
+    digest_address_space_bytes,
     digest_preflight,
+    digest_row_budget,
+    digest_span_budget_seconds,
     get_or_compute_digest,
     read_digest,
     read_digest_skipped,
@@ -46,15 +52,9 @@ from src.analysis.digest import (
 from src.config import CanaryConfig
 from src.control import trip_end
 from src.control.trip_end import (
-    DIGEST_CHAIN_BYTES_PER_SECOND,
-    DIGEST_CHAIN_FIXED_BYTES,
-    DIGEST_PEAK_BYTES_PER_ROW,
     TripEndDigestUnavailableError,
     compute_digest_off_loop,
     compute_digest_under_limit,
-    digest_address_space_bytes,
-    digest_row_budget,
-    digest_span_budget_seconds,
     handle_trip_end_off_loop,
     limit_address_space,
 )

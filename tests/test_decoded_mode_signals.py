@@ -23,6 +23,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH as DAEMON_BINDINGS_PATH
 from src.datasets.health import _RANGE_CHANNELS
@@ -37,7 +38,6 @@ from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS, segmen
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.segmenter import (
     DEFAULT_SIGNAL_COLUMNS,
-    MODE_COLUMN,
     SegmenterConfig,
     segment_operating_modes,
 )

@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from src.analysis.refit import Surface1DRecipe, fit_recipe, refit_all
+from src.columns import SESSION_COLUMN
 from src.config import CanaryConfig
 from src.daemon import _observe_behavior
 from src.daemon.inference import BehaviorDetector, _BehaviorResidual
@@ -57,7 +58,6 @@ from src.decode.behavior_models import (
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.preprocessing.local_range import local_range_column
-from src.preprocessing.resampler import SESSION_COLUMN
 from src.preprocessing.session_context import (
     EngineStartTracker,
     StartContextSpec,

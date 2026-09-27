@@ -73,8 +73,9 @@ from typing import Any
 
 import pandas as pd
 
+from src.columns import is_flag_column
 from src.decode.accepted_baselines import AcceptedBaselines
-from src.preprocessing.resampler import is_flag_column
+from src.models.golden_baselines import ChannelBaseline, GoldenBaselines
 
 #: Rows in a (channel, operating_mode) group below this count can't support
 #: a meaningful quantile band — treat every value in that group as Accept
@@ -207,82 +208,6 @@ class DispositionSummary:
             "reject_counts": dict(self.reject_counts),
             "totals": self.totals,
         }
-
-
-@dataclass(frozen=True)
-class ChannelBaseline:
-    """One frozen ``(channel, operating_mode)`` baseline (Task 3.7) — the
-    statistics a golden run's input sessions produced, captured at
-    declaration time so a later candidate window is screened against a fixed
-    reference instead of its own (self-referential) statistics.
-
-    Exactly one of ``(median, scaled_mad)`` / ``baseline_values`` is
-    populated, matching :class:`ChannelDisposition`'s continuous/discrete
-    split — ``is_discrete`` says which.
-    """
-
-    channel: str
-    operating_mode: str | None
-    is_discrete: bool
-    median: float | None = None
-    scaled_mad: float | None = None
-    baseline_values: tuple[float, ...] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "channel": self.channel,
-            "operating_mode": self.operating_mode,
-            "is_discrete": self.is_discrete,
-            "median": self.median,
-            "scaled_mad": self.scaled_mad,
-            "baseline_values": (
-                list(self.baseline_values) if self.baseline_values is not None else None
-            ),
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> ChannelBaseline:
-        raw_values = data.get("baseline_values")
-        return cls(
-            channel=str(data["channel"]),
-            operating_mode=(
-                None if data.get("operating_mode") is None else str(data["operating_mode"])
-            ),
-            is_discrete=bool(data.get("is_discrete", False)),
-            median=(None if data.get("median") is None else float(data["median"])),
-            scaled_mad=(None if data.get("scaled_mad") is None else float(data["scaled_mad"])),
-            baseline_values=(None if raw_values is None else tuple(raw_values)),
-        )
-
-
-@dataclass(frozen=True)
-class GoldenBaselines:
-    """Frozen per-``(channel, operating_mode)`` baselines for one golden run
-    (Task 3.7). JSON-safe; persisted by ``src.models.golden_baselines``
-    alongside the training ledger, re-frozen every time the operator
-    re-declares golden for that ``model_type``."""
-
-    baselines: tuple[ChannelBaseline, ...] = field(default_factory=tuple)
-
-    def get(self, channel: str, operating_mode: str | None) -> ChannelBaseline | None:
-        """The frozen baseline for this exact ``(channel, operating_mode)``,
-        or ``None`` when golden's own input sessions never covered it (the
-        caller's documented fallback: screen that group window-local)."""
-        return next(
-            (
-                b
-                for b in self.baselines
-                if b.channel == channel and b.operating_mode == operating_mode
-            ),
-            None,
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"baselines": [b.to_dict() for b in self.baselines]}
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> GoldenBaselines:
-        return cls(baselines=tuple(ChannelBaseline.from_dict(b) for b in data.get("baselines", [])))
 
 
 def classify_dispositions(
@@ -719,10 +644,8 @@ __all__ = [
     "DEFAULT_DISCRETE_MAX_UNIQUE_FRACTION",
     "DEFAULT_DISCRETE_MAX_UNIQUE_VALUES",
     "MIN_BASELINE_SAMPLES",
-    "ChannelBaseline",
     "ChannelDisposition",
     "DispositionSummary",
-    "GoldenBaselines",
     "classify_dispositions",
     "compute_golden_baselines",
     "compute_quarantine_mask",

@@ -25,10 +25,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.columns import MODE_COLUMN
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_device import dataloader_kwargs_for_device, torch_training_modules
 from src.models.sequence_scoring import family_index
-from src.preprocessing.segmenter import MODE_COLUMN
 from src.timefmt import format_timestamp as _format_timestamp
 
 #: Minimum validation-window count for a per-mode reconstruction-error band to

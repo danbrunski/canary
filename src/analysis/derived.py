@@ -33,14 +33,9 @@ import pandas as pd
 
 from src.analysis import vehicle_signals
 from src.analysis.committees import COMMITTEES
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
-from src.preprocessing.resampler import (
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-    arrived_column,
-    gap_column,
-)
 
 if TYPE_CHECKING:
     # `src.analysis.afr` imports `fuel_properties` from this module, so the

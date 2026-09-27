@@ -22,8 +22,8 @@ from src.analysis.derived import (
     compute_anomaly_signals,
 )
 from src.collection.capture_profiles import CaptureProfile, model_input_warnings
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import VehicleParameters
-from src.preprocessing.resampler import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 
 BEHAVIOR_MODELS = Path("data/nissan-xterra-2008/behavior_models.yaml")
 

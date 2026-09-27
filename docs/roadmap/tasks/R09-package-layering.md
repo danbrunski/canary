@@ -266,7 +266,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
     (the existing pytest-free harness probe).
   - **Result.** 9 passed; ruff and mypy are clean.
 
-- [ ] **R09.2 Leaf moves: constants and single-purpose helpers.**
+- [x] **R09.2 Leaf moves: constants and single-purpose helpers.**
   Each move takes a name out of a higher layer into the lowest layer that
   owns it:
   - **`src/columns.py`**, holding the frame-column conventions now in
@@ -320,6 +320,127 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
 
   Check that `models/evaluation_detectors.py` is clean first (it lazily
   imports `plausibility`). Size **M**.
+  *Done 2026-09-27.* Every move is a pure move: the definitions were moved,
+  not copied, and an AST comparison of each moved definition between
+  `2ec9383` and the working tree finds them identical. The two exceptions are
+  a reworded `ChannelBaseline` docstring and `np.isfinite` → `math.isfinite`
+  on a Python `float`. No old module re-exports a moved name, and an AST
+  sweep of `src tests scripts tools` finds no import of one from its old home.
+  - **`src/columns.py`** (new, layer 0) holds `SESSION_COLUMN`,
+    `TIMESTAMP_COLUMN`, `GAP_SUFFIX`, `ARRIVED_SUFFIX`, `FLAG_SUFFIXES`,
+    `MODE_COLUMN`, `UNKNOWN_MODE`, `MEAN_SUFFIX`, `STD_SUFFIX`, `ROC_SUFFIX`,
+    `ROLLING_SUFFIXES`, `gap_column`, `arrived_column`, `is_flag_column`,
+    `split_rolling`, `base_channel`, `mean_column`, `std_column` and
+    `roc_column`. They are all pure string helpers, and none was left behind.
+    - 102 files import them from `src.columns`. The three preprocessing
+      modules import only the names they use themselves.
+    - `features` used to re-export `SESSION_COLUMN` and `TIMESTAMP_COLUMN`,
+      and `src/preprocessing/__init__`'s lazy `_EXPORTS` served `MODE_COLUMN`,
+      `UNKNOWN_MODE`, `gap_column`, `mean_column`, `std_column` and
+      `roc_column`. Both routes are gone.
+    - `CONTEXT_COLUMN_PREFIX` stays in `features`, because only
+      `preprocessing` imports it.
+    - `trainability` now imports `base_channel` at top level (the cycle it
+      dodged is gone).
+    - `analysis.derived` no longer imports `preprocessing` at all.
+  - **`src/artifact_hash.py`** (layer 0) is the old
+    `models/artifact_hash.py`. Its 12 importers were retargeted.
+  - **`dtc.json`** moved to `src/session.py` as `DTC_SIDECAR_FILENAME`.
+    `session.py`'s other names are `FRAMES_FILENAME` etc., and a bare
+    `SIDECAR_FILENAME` would be ambiguous there. `dtc_state`,
+    `analysis/digest`, `storage/catalog` and two tests import it from
+    `src.session`.
+  - **Digest budgets: second route.** `analysis.digest.get_or_compute_digest`
+    calls `digest_preflight(session_dir, config)`, and its HTTP/MCP callers
+    pass no budgets, so an `analysis` caller needs the derived default. The
+    following moved into `analysis/digest.py`:
+    - `digest_row_budget` and `digest_span_budget_seconds`;
+    - the constants they read: `DIGEST_PEAK_BYTES_PER_ROW`,
+      `DIGEST_CHAIN_FIXED_BYTES` and `DIGEST_CHAIN_BYTES_PER_SECOND`;
+    - `digest_address_space_bytes`, `_physical_memory_bytes`,
+      `_ADDRESS_SPACE_*` and `_MIB`. The derived default goes through these.
+
+    `control/trip_end.py` imports `digest_address_space_bytes` and `_MIB`
+    from there. `control/workbench_jobs.py` and `tests/test_trip_end_digest.py`
+    import the budgets from `analysis.digest`.
+  - **Realistic faults.** The whole A02.6 section of `synthetic_fault_eval`
+    moved to `preprocessing/anomaly_injection.py`:
+    - `inject_realistic_fault` and `choose_fault_window`;
+    - `load_fault_channel_roles`, `REALISTIC_FAULTS`, `REALISTIC_FAULT_ROLES`,
+      `RealisticFault`, `RealisticInjection` and `RealisticFaultKind`;
+    - the `*_CHANNEL` constants, the thermostat/trim/leak constants, and the
+      private masks and appliers.
+
+    `choose_fault_window` shares the private masks, so leaving it in `models`
+    would have meant importing private helpers across layers.
+    `plausibility/offline.py`, `scripts/evaluate_{detectors,plausibility}.py`
+    and two test files import them from there. `grep src.models src/plausibility`
+    is empty, lazy imports included.
+  - **`ChannelBaseline` and `GoldenBaselines`** moved into
+    `models/golden_baselines.py`. `classify_dispositions`,
+    `compute_quarantine_mask` and `compute_golden_baselines` stay in
+    `analysis/training_disposition.py` and import them downward.
+  - **Storage Protocols** in the new `storage/protocols.py`:
+    - `StorageProfile` exposes the `name`, `storage_prefix` and
+      `store_every_frame` properties plus `model_dump(*, mode)`;
+    - `RecordGate` exposes `observe(record) -> bool` and
+      `reset_for_new_session()`.
+
+    `parquet_writer` and `async_writer` are typed against them, and mypy
+    checks `CaptureProfile` and `RecordArmingGate` structurally at
+    `control/profile_capture.py`, `validation/harness.py` and
+    `daemon/runtime.py`.
+  - **`config.py`** now owns `DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS`,
+    `MIN_BROADCAST_STALE_TIMEOUT_SECONDS`, `REWRITE_LEAD_SECONDS` (the
+    validator reads it) and `validate_broadcast_stale_timeout`.
+    `broadcast_storage`, `preprocessing/resampler`, `plausibility/limits` and
+    `storage/parquet_writer` import them from config.
+  - **LSM6DSOX tables.** `ODR_CODES`, `ACCEL_RANGES`, `GYRO_RANGES` and
+    `ImuSettings` moved to the new root module `src/lsm6dsox_settings.py`
+    (layer 0, no imports), so the tables and the check stay one definition.
+    - `config.ImuConfig` imports `ImuSettings` at top level. The driver,
+      `imu_collector` and `test_lsm6dsox` import it from the new module.
+    - The error messages are unchanged:
+      `test_config_refuses_a_rate_the_lsm6dsox_cannot_do` passes.
+    - `test_process_state_reset.NOT_STATE` lost its three `lsm6dsox.py`
+      entries, because the tables left `collection/`.
+  - **Ledger.**
+    - `LAYERS` gains `columns`, `artifact_hash` and `lsm6dsox_settings` (all 0).
+    - `OWED` went from 84 to **69**: the 11 R09.2 entries, plus 4 R09.6
+      entries that the columns move also cleared.
+      `decode/behavior_decoder.py → preprocessing.resampler` and
+      `decode/behavior_eligibility.py → preprocessing.{features,resampler,segmenter}`
+      imported only column names, and the stale check forced them out.
+    - `OWED_PAIRS` lost `models ↔ plausibility`.
+    - No new upward edge or pair appeared.
+  - **`scripts/ml_paths.txt`** adds `src/columns.py` and `src/artifact_hash.py`.
+    The second keeps the tier coverage it had under `src/models/`.
+  - **Patch targets.** None needed retargeting: no `mock.patch` or
+    `monkeypatch.setattr` string or module-attribute patch names a moved
+    symbol. Two tests changed only their import lines:
+    `test_cold_start_imports.test_preprocessing_package_lazy_reexports_still_resolve`
+    now probes `ResampleConfig`, and `test_train_anomaly_model` imports
+    `MODE_COLUMN` from `src.columns`.
+  - **Gate.**
+    - `ruff check .` and `ruff format --check .` are clean, and `mypy` finds
+      no issues in 428 files.
+    - `tests/test_layering.py`: 9 passed.
+    - Inner-loop tier (`-m "not integration and not slow"`): 6393 passed,
+      1 skipped.
+    - Slow tests in the 33 affected files: 87 passed, 1 xfailed.
+    - `-m integration tests/test_replay_isolation.py`: 1 passed.
+    - `-m ml_training`: 122 passed.
+  - **Replay.** `tools/replay_event_diff.py ab`, `2ec9383` vs the working
+    tree, session `2026-09-18T213818`, 900 s, deployed IF
+    `2026-09-20T054703` + LSTM `2026-09-20T064628`:
+    - 901 ticks and 18 events on both sides;
+    - events identical: 18 of 18 paired, 8316 floats, max |delta| 0;
+    - scores identical: IF 0 of 901, LSTM 0 of 872 and fused 0 of 872 differ,
+      5255 floats, max |delta| 0;
+    - counters and meta identical.
+
+    The tool diffs events and scores, not stored rows. The storage writer's
+    change is annotation-only, and its tests pass.
 
 - [ ] **R09.3 `storage` owns the session.**
   - **`control/sessions.py` → `storage/sessions.py`, whole.** After the moves
