@@ -12,7 +12,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.derived import fuel_properties
+from src.analysis.derived import _append_dependency_gap, _selected_input, fuel_properties
 from src.analysis.vehicle_signals import af_sensor_voltage_columns, wideband_lambda_columns
 from src.config import VehicleParameters
 
@@ -117,6 +117,44 @@ class TargetAfrMap(_Strict):
 EquivRatioConvention = Literal["phi", "lambda", "unverified"]
 
 
+#: B05.8 — bank 1 minus bank 2 measured λ from the vehicle's A/F sensor
+#: voltages, both through the profile's one verified voltage transfer (held-out
+#: MAE 0.029 AFR per bank, the two banks agreeing: ``afr_calibration.yaml``).
+#: A voltage difference is not a mixture difference -- the transfer is
+#: non-linear (about 2 AFR/V rich of stoich, 3.9 AFR/V lean) -- so the
+#: balance is taken in λ, after each bank's own conversion.
+LAMBDA_BANK_BALANCE_AF_VOLTAGE = "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE"
+#: The same balance from the vehicle's two wide-range lambda PIDs. Produced
+#: only once ``AfrCalibration.wideband_bank_balance`` records that the bank-2
+#: PID agrees with the A/F voltage path (D03.34): an unverified PID pairing
+#: never becomes a channel a model could fit on. A second name, not a new
+#: source behind the old one, so a model fitted on one instrument pair is
+#: never served the other.
+LAMBDA_BANK_BALANCE_WIDEBAND = "derived:LAMBDA_BANK_BALANCE_WIDEBAND"
+
+
+class WidebandPairVerification(_Strict):
+    """Known-answer evidence that the wide-range lambda PIDs may be paired (D03.34).
+
+    The bank-2 PID (0x28 on the Xterra) is new and its scale is only known
+    to be λ by the J1979 definition. Before its balance against bank 1's PID
+    is a channel, a session holding both it and the A/F voltage DID must show
+    they agree the way bank 1's PID and DID do: ``compare_channels`` on
+    same-instant pairs through the voltage transfer, with the per-sample
+    ratio read, not only the fit.
+    """
+
+    session: str = Field(min_length=1)
+    #: e.g. ``compare_channels obd:O2_WR_LAMBDA_S5 -> did:ECM_AF_SENSOR_V_B2``.
+    comparison: str = Field(min_length=1)
+    n_pairs: int = Field(ge=30)
+    ratio_median: float = Field(gt=0)
+    #: Spread of the per-sample ratio (fraction, e.g. 0.005 for 0.5 %).
+    ratio_spread: float = Field(ge=0)
+    verified_on: date
+    basis: str = Field(min_length=1)
+
+
 class AfrCalibration(_Strict):
     schema_version: int = 1
     provenance: dict[str, str] = Field(default_factory=dict)
@@ -125,6 +163,9 @@ class AfrCalibration(_Strict):
     commanded_equiv_ratio_convention: EquivRatioConvention = "unverified"
     voltage_transfer: VoltageAfrTransfer | None = None
     target_maps: list[TargetAfrMap] = Field(default_factory=list)
+    #: B05.8 — ``None`` until the bank-2 wide-range PID is verified; until
+    #: then ``LAMBDA_BANK_BALANCE_WIDEBAND`` is never produced.
+    wideband_bank_balance: WidebandPairVerification | None = None
 
     def commanded_afr(self, value: float, *, afr_stoich: float) -> float:
         """Convert a raw PID 0x44 reading to commanded AFR.
@@ -269,6 +310,8 @@ def append_afr_channels(
             out[f"derived:AFR_B{bank}"] = measured
             out[f"derived:AFR_CENSORED_B{bank}"] = measured.le(floor) | measured.ge(ceiling)
 
+    _append_lambda_bank_balances(out, calibration, stoich=stoich, floor=floor, ceiling=ceiling)
+
     target = calibration.target_map(tune_revision) if calibration else None
     if target and "obd:RPM" in out and "obd:ENGINE_LOAD" in out:
         out["derived:TARGET_AFR"] = target_afr(out["obd:RPM"], out["obd:ENGINE_LOAD"], target)
@@ -279,6 +322,51 @@ def append_afr_channels(
                     out[measured_column] - out["derived:TARGET_AFR"]
                 ).where(~out[f"derived:AFR_CENSORED_B{bank}"])
     return out
+
+
+def _append_lambda_bank_balances(
+    out: pd.DataFrame,
+    calibration: AfrCalibration | None,
+    *,
+    stoich: float,
+    floor: float,
+    ceiling: float,
+) -> None:
+    """Append the per-instrument-pair λ bank balances (B05.8), in place.
+
+    Each bank's reading becomes λ on its own before the difference, and a
+    censored reading (at the transfer's floor or the fuel-cut ceiling) is no
+    measurement, so the balance is missing there rather than a rail-to-value
+    difference. Both inputs' freshness feeds the output's ``__gap``.
+    """
+    transfer = calibration.voltage_transfer if calibration else None
+    pairs: list[tuple[str, tuple[str, ...], tuple[str, ...]]] = []
+    if transfer is not None:
+        pairs.append(
+            (
+                LAMBDA_BANK_BALANCE_AF_VOLTAGE,
+                af_sensor_voltage_columns(1),
+                af_sensor_voltage_columns(2),
+            )
+        )
+    if calibration is not None and calibration.wideband_bank_balance is not None:
+        pairs.append(
+            (LAMBDA_BANK_BALANCE_WIDEBAND, wideband_lambda_columns(1), wideband_lambda_columns(2))
+        )
+    for output, bank_1, bank_2 in pairs:
+        columns = (_selected_input(out, bank_1), _selected_input(out, bank_2))
+        if columns[0] is None or columns[1] is None:
+            continue
+        lambdas = []
+        for column in columns:
+            if output == LAMBDA_BANK_BALANCE_AF_VOLTAGE:
+                assert transfer is not None
+                afr = voltage_to_afr(out[column], transfer)
+            else:
+                afr = pd.to_numeric(out[column], errors="coerce") * stoich
+            lambdas.append((afr / stoich).where((afr > floor) & (afr < ceiling)))
+        out[output] = (lambdas[0] - lambdas[1]).astype(float)
+        _append_dependency_gap(out, output, bank_1, bank_2)
 
 
 def afr_error_surface(
@@ -329,10 +417,13 @@ def afr_error_surface(
 
 
 __all__ = [
+    "LAMBDA_BANK_BALANCE_AF_VOLTAGE",
+    "LAMBDA_BANK_BALANCE_WIDEBAND",
     "AfrCalibration",
     "TargetAfrMap",
     "TargetMapProvenance",
     "VoltageAfrTransfer",
+    "WidebandPairVerification",
     "append_afr_channels",
     "afr_error_surface",
     "load_afr_calibration",

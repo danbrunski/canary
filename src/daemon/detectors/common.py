@@ -91,6 +91,43 @@ def gate_and_collect(
     return sustained
 
 
+def gate_band_excess_and_collect(
+    persistence: PersistenceGate,
+    key: str,
+    firing: bool | None,
+    *,
+    residual: float | None,
+    half_width: float | None,
+    limit: float,
+    reset_gap_seconds: float,
+    tuner: AlertTuner | None,
+    source: str,
+    mode: str | None,
+    now: float,
+    counters: EmitterCounters,
+) -> bool:
+    """:func:`gate_and_collect` for a model with its own fitted band-excess
+    persistence (B05.3): the accumulation replaces the M-of-N window for
+    ``key``. An operator ``DebouncePolicy`` for ``(source, mode)`` still owns
+    persistence outright (6.3), exactly as on the M-of-N path.
+    """
+    if firing is not None and tuner is not None and tuner.has_debounce_override(source, mode):
+        sustained = firing
+    else:
+        sustained = persistence.observe_band_excess(
+            key,
+            residual,
+            half_width,
+            firing=firing,
+            limit=limit,
+            reset_gap_seconds=reset_gap_seconds,
+            now=now,
+        )
+    if firing and not sustained:
+        counters.suppressed_persistence += 1
+    return sustained
+
+
 @dataclass(frozen=True)
 class TickContext:
     """Per-tick state every :class:`Detector` needs, computed once by

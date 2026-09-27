@@ -88,9 +88,124 @@ rather than building a second model system. Follow
   `FusionScorer.behavior_source`). Before, `fuel_trim_vs_rpm_load` (STFT B1)
   and `total_trim_b1` (STFT B1 + LTFT B1) were separate groups over the same
   reading. Evidence: `tests/test_fusion.py::test_one_measurement_is_one_voice_across_its_derived_channels`.
+  **Persistence rule (desk, 2026-09-26).** The 09-23 city events were all
+  runs of at most 18 warning ticks just past the 3.1-point band, on both folds
+  (training 5 in 0.81 h, test 5 in 1.75 h, peaks 3.1–5.7). One of them was
+  warmup trims washing out of the 30 s mean. The daemon's 3-of-5 gate latches
+  on every such run.
+  - *Rule.* `BandExcessPersistence` (`src/decode/behavior_models.py`) is a
+    two-sided CUSUM of the residual's excess over the warning half-width, per
+    evaluated tick. The model is sustained while that sum is strictly above a
+    limit. Refused ticks freeze the sum. A gap longer than 30 s restarts it
+    (`STFT_BANK_BALANCE_SMOOTHING_SECONDS`, the balance's own memory).
+  - *Fit.* The limit is fitted on the training fold only
+    (`fit_band_excess_persistence`): the largest sum the training drives' own
+    rows reach. It is persisted as `model.event_persistence`. A fold with no
+    excursion refuses the recipe by name
+    (`event_persistence_unfittable:no_training_excursion`).
+  - *One arithmetic.* The daemon (`PersistenceGate.observe_band_excess` via
+    `BehaviorDetector`) and the evaluator (`model_event_times`,
+    `EVALUATOR_VERSION` 4) run the same code. The STFT balance recipes declare
+    the rule; the LTFT ones keep the daemon gate.
+
+  **Default-profile evidence only, enforced (2026-09-26).** This applies the
+  recorded decisions: R03.12(a), and the standing rule that tuning captures
+  never train, evaluate or score behavior deviations. They supersede the
+  09-23 "captures included" choice for behavior models.
+  - *Stamp.* `stamp_profile_exclusions` (`behavior_validation.py`) marks each
+    row's session with R04.6's own `default_profile_exclusion`: a `_tuning-*`
+    session, or a capture whose manifest says `corpus_eligible: false`.
+  - *Refusal.* Stamped rows stay in the frame for drive grouping, so a
+    bridging capture still keeps a drive whole. `evaluate_rows` and the
+    refit's training rows refuse them as `profile_excluded:not_default_profile`.
+  - *No silent inclusion.* A capture or tuning piece with no verdict is
+    refused by name: `profile_unverified` in `fit_recipe` and `build_evidence`,
+    and `profile_excluded:no_session_directory` when stamping.
+  - *Refit CLI.* It stamps every frame and records `profile_exclusions` in the
+    provenance. Its explicit-path grant and capture discovery reach
+    corpus-eligible captures only. An explicit path to a tuning recording is
+    named on stderr with its reason (`note: N session(s) are not
+    default-profile evidence …`); when every path is one, the refit exits 1
+    naming each, before building a frame.
+  - *Evaluator.* `build_evaluation_frame` stamps by default. Only
+    `evaluate_behavior_models.py --mode historical` opts out, with
+    `profile_scope="every_recording"`, to reproduce numbers an artifact
+    recorded before the rule.
+  - *The guard is in the shared function.* `evaluate_rows` runs
+    `profile_refusals` on every call, so fold metrics, synthetic sensitivity
+    and transient controls cannot grade an unstamped capture. An unstamped
+    frame holding a capture raises `UnverifiedProfileError`
+    (`profile_unverified`). The keyword `profile_scope="every_recording"` is
+    the only opt-out, and only `_historical` passes it. Before this change,
+    the verifier's repro graded 2,561 capture rows of an unstamped real frame
+    silently.
+    Test: `tests/test_bank_balance_persistence.py::test_evaluate_rows_refuses_an_unstamped_frame_holding_a_capture`.
+  - *Tests.* `tests/test_bank_balance_persistence.py::test_tuning_capture_rows_are_refused_by_name_in_training_and_held_out`
+    shows a fit with stamped captures equals one without them (same training
+    hash, same held-out rows). Also `::test_a_capture_with_no_directory_is_refused_not_assumed_eligible`
+    and `::test_refit_cli_grants_nothing_to_a_non_default_capture`;
+    `tests/test_refit_behavior_models_script.py::test_main_refuses_explicit_paths_that_are_all_tuning_recordings`
+    and `::test_main_names_explicit_tuning_paths_and_never_trains_on_them`.
+
+  **Held-out results, default-profile rows only.** Frozen 09-23 corpus, HEAD
+  drive grouping; all 13 captures excluded. The frame first reproduced the
+  published city/highway evidence exactly (2151 rows / 5 events, 1539 / 9).
+  *Re-run 2026-09-26 (evening), from scratch:* frame rebuilt with
+  `build_evaluation_frame`'s default stamping in a worktree of HEAD `cbad3aa`
+  plus only the B05 files (so the uncommitted change-only CAN storage work
+  did not reach it): 81,562 rows, 8,551 of them stamped
+  `profile_excluded:not_default_profile` (10 captures with rows; 3 more have
+  none), 13 min, 3.0 GB peak. Unstamped, it again reproduced 2151/5 and
+  1539/9; stamped, the published models' own test folds shrink to 749 and
+  163 rows (65 % and 89 % of them were captures). Every number below
+  reproduced exactly, including the city training hash
+  `sha256:2be84459f373ec4d`.
+  - *City: `insufficient_evidence`.*
+    - Train `2026-09-21T142126` + `2026-09-22T163415`: 430 rows, limit 0.52
+      from a single excursion. That is a thin basis.
+    - Test `2026-09-22T233855` + `2026-09-23T032755`: 515 rows / 0.39 h,
+      MAE 1.46, bias +1.35, p95 3.00, width 4.00, 2 events.
+    - Control exposure is under 0.5 h. With the default gate the result is
+      the same: 2 events, `insufficient_evidence`.
+    - Synthetic ±5 %/120 s: 1.00/0.90 (default gate 0.90/0.80).
+  - *Highway: refused.* `event_persistence_unfittable:no_training_excursion`:
+    one training drive, 322 rows. Under the default gate it fails anyway
+    (synthetic 0.75/0.75, 0.09 h of control).
+  - *Idle: refused by the declared rule.* 656 training rows never left the
+    band. Under the daemon's default gate it would pass: 729 rows / 0.55 h,
+    MAE 0.93, p95 2.80, 0 events, synthetic 0.87/0.80. Whether a fold with no
+    excursion should fall back to the default gate is an operator decision.
+    That option was noticed after seeing this test result, so it was not
+    adopted here.
+  - *Context: the captures-included runs this replaces.* On the 09-23 split
+    city went from 5 test events to 0 in 1.75 h. On HEAD's split city
+    `passed` (991 rows). 82 % of those held-out rows were tuning captures, so
+    they are no longer evidence.
+
+  The candidate was regenerated from default-profile rows only, and the
+  capture-built one deleted:
+  `data/nissan-xterra-2008/_candidates/2026-09-26-bank-balance-persistence/behavior_models.yaml`
+  (gitignored; rewritten by the re-run, sha256 43104559…, identical to the
+  first default-profile fit except its provenance note and timestamps). It
+  holds `stft_bank_balance_city`, diagnostic-only, no capture piece in
+  `fit.sessions`/`calibration_sessions`/split, and its evidence provenance
+  lists the 13 excluded captures. It came from `fit_recipe` on the evaluator
+  frame path, not the CLI. Still built from capture rows and **not** touched
+  here (historical, or not B05's): `_candidates/2026-09-23/` (the 09-23
+  report's candidate set), the two `_candidates/2026-09-23-warm-idle-*` sets
+  (B07), and the committed published `behavior_models.yaml`, whose ten
+  ZS44A-20260920 fits (all `failed`, diagnostic-only) list 6–10 capture
+  pieces each. Tests: `tests/test_bank_balance_persistence.py` (gate,
+  training-only fit, refusal, daemon/evaluator parity, profile enforcement).
+
   **Remaining:**
-  - LTFT content (relearn) on this calibration;
-  - bank-balance event persistence that ordinary oscillation does not trip.
+  - LTFT content (relearn) on this calibration (truck).
+  - Default-profile exposure: at least 0.5 h more city, and more highway
+    drives (truck).
+  - The idle fallback decision above.
+  - A CLI refit into `_candidates` before any B03 promotion (the 09-23 CLI
+    refit took 1 h 17 min and 12.7 GB, over a desk session's budget).
+  - Operator: what becomes of the capture-built artifacts listed above.
 - [~] **B05.4 — Replace STFT-only alerting with evidence.** Compare qualified
   replacements and the old `fuel_trim_vs_rpm_load` on identical eligible rows
   and fault cases, including coverage outside the intersection. Demote the
@@ -192,9 +307,99 @@ rather than building a second model system. Follow
   voltage→AFR transfer is verified (`afr_calibration.yaml`, both banks agree
   on held-out logs), but a voltage difference is non-linear in lambda
   (≈ 2 AFR/V rich of 14.7, ≈ 3.9 AFR/V lean). No asymmetry claim is
-  supported ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §5). **Remaining:** closed-loop + steady gates on
-  the recipe contract (a `default_recipes` change), a residual in lambda
-  rather than volts, and declared criteria.
+  supported ([report](../../../data/analyses/2026-09-23-behavior-refit-validation-report.md) §5).
+
+  **Contract, residual and criteria (desk, 2026-09-26).** The remainders
+  above are done; the recipe is still unpublished.
+  - *λ residual.* The output is `derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE`
+    (`src/analysis/afr.py`). Each bank's A/F voltage goes through the
+    verified transfer, is divided by stoich, and only then are the banks
+    differenced. A censored bank (floor, or the fuel-cut ceiling) gives a
+    missing value, not a rail difference. The `__gap` column carries both
+    DIDs' freshness. Unit `lambda`, `_sigma(0.002)` (the DID LSB at 3.9 AFR/V).
+  - *Gates.* Closed loop `0x02` only, `warmup` excluded,
+    `TOTAL_TRIM_STEADY_RATES` (B05.2's measured limits), engine running.
+    B05.3's band-excess persistence, with a 30 s gap (the rate gates' horizon).
+  - *0x28 once verified, not assumed.* `derived:LAMBDA_BANK_BALANCE_WIDEBAND`
+    (PID 0x24 − 0x28) exists only while `afr_calibration.yaml` carries a
+    `wideband_bank_balance` record, which D03.34's owed `compare_channels`
+    check fills. Switching the recipe is then a one-line output change, which
+    flags `contract_changed:recipe` and so forces a refit. A model is never
+    served the other instrument pair.
+  - *Criteria.* Declared in `behavior_validation.yaml` before the fit: 0.05 λ
+    target (the STFT balance's 5 %), max MAE 0.02, p95 0.0375, 2 events/h,
+    ±0.05 λ/120 s.
+  - *Lag.* The two DIDs are acquired 22–66 ms apart (p50; p90 33–92 ms) at
+    ~2 Hz in the tuning captures. The 1 Hz row therefore pairs readings up to
+    ~0.5 s apart, a phase of the closed-loop oscillation. That is part of the
+    0.012 λ per-row σ.
+
+  **Default-profile rows only (enforced, see B05.3): not fitted.**
+  - `afr_bank_balance_robust` skips with "31 clean samples < min_samples=300",
+    with or without the persistence rule.
+  - The A/F DIDs are dense only in tuning captures, which are no longer
+    evidence. `default` lists `ECM_AF_SENSOR_V_B1/B2` in `mode22` at the
+    default DID cadence, which gave 13 samples each in `2026-09-23T150658`
+    (`DID_1225`/`DID_1226` over an 82-minute drive, re-counted 2026-09-26).
+    In the re-run frame the λ channel is finite on 230 default-profile rows
+    against 6,049 capture rows; the fit counts 31 clean samples.
+  - The earlier, now superseded, captures-included fit (98 % capture rows):
+    406 rows, MAE 0.0102 λ, p95 0.032 and 1.24 events/h met their criteria,
+    but synthetic 0.19/0.31 failed.
+  - Closed-loop limitation, recorded in the recipe: the ECM drives each
+    bank's measured λ to target, so a delivery asymmetry the trims absorb
+    shows in the STFT balance, not here.
+
+  **Detector features: kept out by the coverage floor today; not
+  explicitly excluded (2026-09-26).**
+  - The feature policy passes `derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE`,
+    because its inputs are serving-profile DIDs.
+  - D03.34's floor (`MIN_DETECTOR_COVERAGE` = 0.5, `e6f4d54`) drops it as
+    `sparse_for_grid`: grid density 0.026 on the 43 default-profile sessions
+    of the re-run frame. It drops the siblings the same way:
+    `did:ECM_AF_SENSOR_V_B1/B2` at 0.032 and `derived:AFR_BANK_BALANCE` at
+    0.028. Measured with `sequence_feature_selection` and
+    `isolation_forest_feature_selection` on that frame; neither keeps any of
+    the four.
+  - Captures included, the density would be 0.40, still under the floor.
+    Captures never train anyway.
+  - `engine_response` drops it too, as "no role assigned".
+  - The deployed sequence model (2026-09-20, before the floor) does train on
+    the siblings: the two voltages, `derived:AFR_BANK_BALANCE` and their
+    `__mean`. The deployed IF does not.
+  - **The floor stops excluding it if option (a) below is taken.** At ~1 Hz
+    the λ balance, the voltages and `derived:AFR_BANK_BALANCE` all pass
+    together. The λ balance is `derived:AFR_BANK_BALANCE` re-expressed
+    through the transfer, so it would double-weight one measurement.
+  - Taking (a) therefore needs an explicit detector exclusion. The place for
+    it is the feature pipeline's static exclusions
+    (`src/preprocessing/feature_pipeline.py`), which is held by uncommitted
+    concurrent work today, so it is not added here.
+
+  Tests: `tests/test_bank_balance_persistence.py` (λ channel, wideband
+  refusal, recipe contract/criteria).
+
+  **Open operator decision: A/F DID cadence on `default`.** Polling `0x1225`
+  and `0x1226` at ~1 Hz in the default profile (a `mode22_rate_weights`
+  entry) would give this recipe default-profile rows. It costs bus budget
+  beside the ~1 Hz core Mode 01 set (D03.34). The capture profile is
+  unchanged; this is the operator's call. Options:
+  - (a) Weight both DIDs to ~1 Hz on `default`. That is about 2 req/s more,
+    and each is paired within ~0.5 s. The re-run frame has 3,555
+    closed-loop, engine-running default rows, and they yield 31 clean λ rows
+    at today's cadence. At 1 Hz the same exposure would give an estimated
+    ~1,100: that is B05.2's ~31 % steady-gate pass rate, and it is an
+    estimate, not a measurement. It also lifts these channels over the
+    detector coverage floor, so it needs the explicit exclusion described
+    above.
+  - (b) Leave `default` alone. The recipe then stays unfitted and says why;
+    this is the status quo.
+
+  A tuning profile cannot supply these rows: non-default profiles are never
+  corpus-eligible (R03.12(a)).
+
+  **Remaining:** that decision, then default drives and a refit. Also the
+  D03.34 0x28 verification (truck).
 - [~] **B05.9 — Publish the qualified subset.** Archive B02 reports and run
   B03 compatibility/replay/rollout steps per accepted model. Record explicit
   reasons for each unfitted recipe and the smallest missing capture. Dashboard

@@ -981,6 +981,17 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         for bank in (1, 2)
         for kind in ("", "CENSORED_")
     },
+    # B05.8 — per-instrument-pair λ bank balances (afr.LAMBDA_BANK_BALANCE_*):
+    # the A/F voltage DIDs through the transfer, and the wide-range lambda
+    # PIDs (produced only once afr_calibration.yaml verifies the bank-2 PID).
+    "derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE": (
+        vehicle_signals.af_sensor_voltage_columns(1),
+        vehicle_signals.af_sensor_voltage_columns(2),
+    ),
+    "derived:LAMBDA_BANK_BALANCE_WIDEBAND": (
+        vehicle_signals.wideband_lambda_columns(1),
+        vehicle_signals.wideband_lambda_columns(2),
+    ),
     "derived:TARGET_AFR": (("obd:RPM",), ("obd:ENGINE_LOAD",)),
     **{
         f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))

@@ -64,6 +64,8 @@ from src.analysis.behavior_validation import (
     load_validation_document,
     mode_labels_predate_fix,
     piece_time_ranges,
+    profile_exclusions,
+    stamp_profile_exclusions,
     validation_document_path,
 )
 from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_all
@@ -223,7 +225,8 @@ def _discover_behavior_capture_sessions(
     directory. Behavior surfaces are narrower: a capture sidecar may name the
     exact recipes it is evidence for, and no others. Keeping this resolver in
     the refit CLI makes it impossible for IF/LSTM callers to accidentally opt
-    into research captures.
+    into research captures. A capture that is not corpus-eligible is never
+    discovered, whatever its sidecar grants (B05.3, R03.12).
     """
     if not root.exists() or not recipe_names:
         return []
@@ -233,6 +236,8 @@ def _discover_behavior_capture_sessions(
             continue
         manifest = read_capture_manifest(child)
         if manifest is None or not recipe_names.intersection(manifest.behavior_model_recipes):
+            continue
+        if not manifest.corpus_eligible:
             continue
         if has_telemetry(child):
             sessions.append(child)
@@ -367,10 +372,19 @@ def _capture_recipe_allowlists(
     *,
     explicit_recipe_grants: set[str] | None = None,
 ) -> dict[str, set[str]]:
-    """Return exact per-capture grants from sidecars or an explicit CLI selection."""
+    """Return exact per-capture grants from sidecars or an explicit CLI selection.
+
+    An explicit selection grants only corpus-eligible captures: a capture of a
+    non-default profile (R03.12(a)) is granted nothing, and its rows are
+    refused by name through the frame's profile stamp (B05.3).
+    """
     allowlists: dict[str, set[str]] = {}
+    excluded = profile_exclusions(sessions)
     for session in sessions:
         if not session.name.startswith("_capture-"):
+            continue
+        if session.name in excluded:
+            allowlists[session.name] = set()
             continue
         if explicit_recipe_grants is not None:
             allowlists[session.name] = set(explicit_recipe_grants)
@@ -427,6 +441,25 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not sessions:
         print("error: every session is excluded by a provenance resolution", file=sys.stderr)
         return 1
+    # B05.3 — tuning captures are never behavior-model evidence (R03.12,
+    # operator 2026-09-24/25). An explicit path reaches the frame (drive
+    # grouping keeps the drive whole) but is refused by name, never counted.
+    profile_excluded = profile_exclusions(sessions)
+    if profile_excluded and len(profile_excluded) == len(sessions):
+        print(
+            "error: every session is a non-default-profile recording, never behavior-model "
+            "evidence (R03.12): "
+            + "; ".join(f"{name}: {reason}" for name, reason in sorted(profile_excluded.items())),
+            file=sys.stderr,
+        )
+        return 1
+    if profile_excluded:
+        print(
+            f"note: {len(profile_excluded)} session(s) are not default-profile evidence; "
+            "their rows are refused as profile_excluded:not_default_profile (R03.12): "
+            + "; ".join(f"{name}: {reason}" for name, reason in sorted(profile_excluded.items())),
+            file=sys.stderr,
+        )
     revision_registry = active_registry(scoped)
     try:
         tune_revision = _consistent_tune_revision(sessions, revision_registry, validation_document)
@@ -457,6 +490,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     frame = build_feature_frame(
         sessions, config, bindings_path=args.bindings, behavior_models_path=out
     )
+    # B05.3 — tuning captures are never behavior-model evidence (R03.12,
+    # operator 2026-09-24/25): their rows stay for drive grouping and are
+    # refused by name in training and held-out evaluation alike.
+    frame = stamp_profile_exclusions(frame, sessions)
     log.info("built feature frame", extra={"rows": len(frame), "columns": len(frame.columns)})
 
     # B02.4 — a session recording across a flash mixes two calibrations.
@@ -502,6 +539,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             for name, grants in sorted(capture_recipe_allowlists.items())
         ],
         "provenance_resolutions": exclusion_notes + crossing_notes,
+        "profile_exclusions": [
+            f"{name}: {reason}" for name, reason in sorted(profile_excluded.items())
+        ],
         "mode_labels_stale": stale_labels,
         "config": [file_identity(args.config)],
     }

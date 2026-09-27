@@ -57,7 +57,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.alerts.fusion import PersistenceGate
+from src.alerts.fusion import BandExcessAccumulator, PersistenceGate
 from src.analysis import drives as _drives
 from src.analysis.pairing import to_seconds
 from src.analysis.splits import (
@@ -84,9 +84,11 @@ from src.decode.behavior_eligibility import (
     serving_spec,
 )
 from src.decode.behavior_models import (
+    BandExcessPersistence,
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
+    FittedBandExcessPersistence,
     FoldMetrics,
     RobustBaselineFit,
     SyntheticSensitivity,
@@ -108,6 +110,7 @@ from src.preprocessing.session_context import (
     append_start_context,
     start_context_columns,
 )
+from src.session import SessionKind, session_kind
 
 log = logging.getLogger(__name__)
 
@@ -121,7 +124,13 @@ log = logging.getLogger(__name__)
 #: truck (2026-09-23T032755) joined an evening and a morning drive into one
 #: group, and its span counted the parked hours as watched time -- control
 #: event rates came out ~10x too low.
-EVALUATOR_VERSION = 3
+#: 4 (2026-09-26, B05.3): a model carrying its own fitted
+#: ``BandExcessPersistence`` is evented through it (``model_event_times``),
+#: as the daemon does; every other model is evented exactly as in 3. Rows
+#: stamped as not default-profile evidence (tuning captures, R03.12) are
+#: refused as ``profile_excluded:*``, and evidence refuses an unstamped
+#: capture piece.
+EVALUATOR_VERSION = 4
 
 #: Drives needed before a drive-resampled bootstrap interval is reported.
 MIN_BOOTSTRAP_DRIVES = 3
@@ -346,6 +355,104 @@ class EventPolicy:
         )
 
 
+# ---------------------------------------------------------------------------
+# Default-profile evidence only (B05.3; R03.12, operator 2026-09-24/25)
+# ---------------------------------------------------------------------------
+
+#: Per-row stamp naming why a row's session is not behavior-model evidence
+#: (``None``: it is). Written by :func:`stamp_profile_exclusions` from the
+#: session directories themselves; read by :func:`evaluate_rows` and the refit.
+PROFILE_EXCLUSION_COLUMN = "context:profile_exclusion"
+#: Refusal code prefix for a row whose session is not the default profile.
+PROFILE_EXCLUDED = "profile_excluded"
+#: Why a behavior fit or its evidence refused a frame that carries capture or
+#: tuning pieces with no :data:`PROFILE_EXCLUSION_COLUMN` verdict.
+PROFILE_UNVERIFIED = "profile_unverified"
+
+_PROFILE_SCOPED_KINDS = frozenset({SessionKind.CAPTURE, SessionKind.TUNING})
+
+#: Which recordings count as evidence: ``"default_profile"`` (every caller) or
+#: ``"every_recording"`` (a historical reproduction only).
+ProfileScope = Literal["default_profile", "every_recording"]
+
+
+class UnverifiedProfileError(ValueError):
+    """Capture or tuning pieces reached behavior evidence without a verdict."""
+
+
+def profile_exclusions(sessions: Sequence[Path]) -> dict[str, str]:
+    """``{session name: reason}`` for the sessions that are not behavior evidence.
+
+    The operator's standing rule (2026-09-24/25; R03.12(a)/(b)) is that
+    tuning captures never train, evaluate or score the IF, the sequence model
+    or the behavior deviations. The decision per directory is R04.6's
+    :func:`src.models.evaluation.default_profile_exclusion`, reused rather
+    than restated: a ``_tuning-*`` session, or a capture whose own manifest
+    says it is not corpus-eligible.
+    """
+    from src.models.evaluation import default_profile_exclusion
+
+    return {
+        Path(session).name: reason
+        for session in sessions
+        if (reason := default_profile_exclusion(Path(session))) is not None
+    }
+
+
+def stamp_profile_exclusions(frame: pd.DataFrame, sessions: Sequence[Path]) -> pd.DataFrame:
+    """``frame`` with :data:`PROFILE_EXCLUSION_COLUMN` set from ``sessions``.
+
+    Excluded rows stay in the frame so drive grouping still sees the capture
+    that bridged two parts of one drive (a held-out fold stays honest), but
+    they are refused wherever evidence is counted. A capture or tuning piece
+    whose directory is not among ``sessions`` cannot be checked and is
+    refused too, never assumed eligible.
+    """
+    if SESSION_COLUMN not in frame.columns:
+        raise UnverifiedProfileError(
+            f"{PROFILE_UNVERIFIED}: no {SESSION_COLUMN} column to attribute rows to sessions"
+        )
+    names = {Path(session).name for session in sessions}
+    excluded = profile_exclusions(sessions)
+    codes: dict[str, str | None] = {}
+    for parent in pd.unique(frame[SESSION_COLUMN].astype(str).map(parent_session)):
+        if parent in excluded:
+            codes[parent] = f"{PROFILE_EXCLUDED}:not_default_profile"
+        elif parent not in names and session_kind(parent) in _PROFILE_SCOPED_KINDS:
+            codes[parent] = f"{PROFILE_EXCLUDED}:no_session_directory"
+        else:
+            codes[parent] = None
+    parents = frame[SESSION_COLUMN].astype(str).map(parent_session)
+    column = pd.Series([codes[parent] for parent in parents], index=frame.index, dtype=object)
+    return frame.assign(**{PROFILE_EXCLUSION_COLUMN: column})
+
+
+def profile_refusals(frame: pd.DataFrame) -> np.ndarray:
+    """Per-row profile refusal code (``None``: default-profile evidence).
+
+    Raises :class:`UnverifiedProfileError` when the frame holds a capture or
+    tuning piece but was never stamped: silently counting one would be the
+    failure this exists to prevent. An unstamped frame of plain sessions has
+    nothing to exclude.
+    """
+    if PROFILE_EXCLUSION_COLUMN in frame.columns:
+        values = frame[PROFILE_EXCLUSION_COLUMN].to_numpy(dtype=object)
+        return np.asarray([None if pd.isna(v) else str(v) for v in values], dtype=object)
+    if SESSION_COLUMN in frame.columns:
+        scoped = sorted(
+            parent
+            for parent in pd.unique(frame[SESSION_COLUMN].astype(str).map(parent_session))
+            if session_kind(parent) in _PROFILE_SCOPED_KINDS
+        )
+        if scoped:
+            raise UnverifiedProfileError(
+                f"{PROFILE_UNVERIFIED}: capture/tuning piece(s) {', '.join(scoped)} carry no "
+                "corpus-eligibility verdict; stamp the frame with stamp_profile_exclusions "
+                "(tuning captures are never behavior-model evidence, R03.12)"
+            )
+    return np.full(len(frame), None, dtype=object)
+
+
 @dataclass(frozen=True)
 class RowEvaluation:
     """Per-row outcome arrays for one model over one frame."""
@@ -404,6 +511,7 @@ def evaluate_rows(
     spec: ServingSpec | None = None,
     interval_seconds: float = 1.0,
     output_offset: float | np.ndarray = 0.0,
+    profile_scope: ProfileScope = "default_profile",
 ) -> RowEvaluation:
     """Evaluate ``model`` on every row of ``frame`` through the B01 evaluator.
 
@@ -414,7 +522,16 @@ def evaluate_rows(
     that column), then re-evaluates — derived columns are not recomputed. A
     per-row array (aligned with ``frame``) injects a shaped excursion, e.g. a
     short transient control (B04.3).
+
+    ``profile_scope`` (B05.3; R03.12): by default every row goes through
+    :func:`profile_refusals`, so a stamped non-default-profile row is refused
+    by name and an *unstamped* frame holding a capture or tuning piece raises
+    :class:`UnverifiedProfileError` instead of being graded. Only a historical
+    reproduction of numbers an artifact recorded before the rule passes
+    ``"every_recording"``.
     """
+    if profile_scope == "default_profile":
+        profile_refusals(frame)  # an unverified frame is refused before any work
     model_spec = serving_spec(model)
     spec = spec or model_spec
     output = model_spec.output
@@ -445,6 +562,10 @@ def evaluate_rows(
     contract_reasons = eligibility_reasons(work, spec, include_actual=True)
     expected, model_reasons = explain_expected_column(work, model)
     reasons = np.where(pd.isna(contract_reasons), model_reasons, contract_reasons).astype(object)
+    if profile_scope == "default_profile":
+        # B05.3 — a stamped non-default-profile row is refused by name first.
+        profile = profile_refusals(work)
+        reasons = np.where(pd.isna(profile), reasons, profile).astype(object)
     actual = numeric_values(work, output)
     evaluated = np.asarray(pd.isna(reasons), dtype=bool) & np.isfinite(expected)
     evaluated &= np.isfinite(actual)
@@ -556,6 +677,130 @@ def event_times(
             last_emit = now
             events.append((group, now))
     return events
+
+
+def band_excess_event_times(
+    ev: RowEvaluation,
+    groups: np.ndarray,
+    persistence: FittedBandExcessPersistence,
+    *,
+    dedupe_seconds: float,
+) -> list[tuple[object, float]]:
+    """``(group, emit time)`` under a model's fitted band-excess persistence (B05.3).
+
+    The daemon's path, offline: per group a fresh :class:`PersistenceGate`
+    whose :meth:`~PersistenceGate.observe_band_excess` holds the accumulator,
+    an event only on a firing tick that is sustained, then the emitter
+    dedupe. Refused rows are missing verdicts that leave the sums untouched.
+    """
+    events: list[tuple[object, float]] = []
+    verdicts = _verdicts(ev)
+    residual = ev.residual
+    half_width = ev.warning_half_width
+    codes, uniques = pd.factorize(pd.Series(groups, dtype=object), sort=False)
+    ordered = np.lexsort((ev.seconds, codes))
+    boundaries = np.flatnonzero(np.diff(codes[ordered])) + 1
+    for order in np.split(ordered, boundaries):
+        if not order.size:
+            continue
+        code = codes[order[0]]
+        group = uniques[code] if code >= 0 else groups[order[0]]
+        gate = PersistenceGate(1)
+        last_emit: float | None = None
+        for i in order:
+            verdict = verdicts[i]
+            now = float(ev.seconds[i]) if np.isfinite(ev.seconds[i]) else 0.0
+            width = float(half_width[i]) if np.isfinite(half_width[i]) else None
+            sustained = gate.observe_band_excess(
+                "behavior",
+                float(residual[i]) if verdict is not None else None,
+                width,
+                firing=verdict,
+                limit=persistence.limit,
+                reset_gap_seconds=persistence.rule.reset_gap_seconds,
+                now=now,
+            )
+            if verdict is not True or not sustained:
+                continue
+            if last_emit is not None and now - last_emit < dedupe_seconds:
+                continue
+            last_emit = now
+            events.append((group, now))
+    return events
+
+
+def model_event_times(
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
+    groups: np.ndarray,
+    policy: EventPolicy,
+) -> list[tuple[object, float]]:
+    """Events ``model`` emits over ``ev``: its own persistence, else the daemon gate.
+
+    The one place the evaluator decides how a model is evented, so held-out
+    control rates, synthetic sensitivity and transient controls all count
+    what the daemon would emit for *this* model (B05.3).
+    """
+    if model.event_persistence is not None:
+        return band_excess_event_times(
+            ev, groups, model.event_persistence, dedupe_seconds=policy.dedupe_seconds
+        )
+    return event_times(_verdicts(ev), ev.seconds, groups, policy)
+
+
+#: B05.3 — why a band-excess persistence could not be fitted on a training fold.
+PERSISTENCE_NO_TRAINING_EXCURSION = "event_persistence_unfittable:no_training_excursion"
+
+
+def fit_band_excess_persistence(
+    rule: BandExcessPersistence,
+    train_ev: RowEvaluation,
+    groups: np.ndarray,
+) -> FittedBandExcessPersistence | str:
+    """Fit ``rule``'s limit on the training fold's own rows (B02.3, B05.3).
+
+    Runs the accumulator over every evaluated training row, per drive group
+    and in time order, and takes the largest accumulated excess reached: the
+    limit an event must strictly exceed, so no ordinary excursion on the
+    training drives completes one. Test drives never enter. Returns a named
+    refusal instead of a zero limit when no training row ever left the band
+    (nothing says how large ordinary control gets), or when there are no
+    evaluated rows at all.
+    """
+    evaluated = train_ev.evaluated & np.isfinite(train_ev.warning_half_width)
+    if not evaluated.any():
+        return f"{PERSISTENCE_NO_TRAINING_EXCURSION}: no evaluated training rows"
+    largest = 0.0
+    excursions = 0
+    drives: set[str] = set()
+    residual = train_ev.residual
+    width = train_ev.warning_half_width
+    for group in pd.unique(pd.Series(groups[evaluated], dtype=object)):
+        rows = np.flatnonzero(evaluated & (groups == group))
+        rows = rows[np.argsort(train_ev.seconds[rows], kind="stable")]
+        drives.add(str(group))
+        accumulator = BandExcessAccumulator(rule.reset_gap_seconds)
+        for i in rows:
+            now = float(train_ev.seconds[i])
+            last = accumulator.last_seconds
+            restarts = last is None or now - last > rule.reset_gap_seconds
+            idle = restarts or accumulator.statistic == 0.0
+            after = accumulator.update(float(residual[i]), float(width[i]), now)
+            if idle and after > 0.0:
+                excursions += 1
+            largest = max(largest, after)
+    if largest <= 0.0:
+        return (
+            f"{PERSISTENCE_NO_TRAINING_EXCURSION}: {int(evaluated.sum())} evaluated training "
+            "rows never left the warning band"
+        )
+    return FittedBandExcessPersistence(
+        rule=rule,
+        limit=largest,
+        training_drives=sorted(drives),
+        training_rows=int(evaluated.sum()),
+        training_excursions=excursions,
+    )
 
 
 BaselineKind = Literal["training_median", "training_mode_median"]
@@ -717,7 +962,7 @@ def fold_metrics(
             warning_row_rate=float(np.mean(severity == "warning")),
             critical_row_rate=float(np.mean(severity == "critical")),
         )
-        events = count_events(_verdicts(ev), ev.seconds, drives, policy)
+        events = len(model_event_times(model, ev, drives, policy))
         metrics["events"] = events
         hours = metrics["evaluated_hours"]
         metrics["events_per_hour"] = events / hours if hours > 0 else None
@@ -904,11 +1149,9 @@ def synthetic_sensitivity(
         )
         windows = _windows(base, fault.duration_seconds)
         valid = windows >= 0
-        first_events = _first_event_per_window(
-            _verdicts(injected), injected.seconds, windows, valid, policy
-        )
+        first_events = _first_event_per_window(model, injected, windows, valid, policy)
         detected = set(first_events)
-        control = _windows_with_event(_verdicts(base), base.seconds, windows, valid, policy)
+        control = _windows_with_event(model, base, windows, valid, policy)
         scored = {int(w) for w, ok in zip(windows, valid, strict=True) if ok}
         scored = {w for w in scored if base.evaluated[windows == w].any()}
         control &= scored
@@ -962,7 +1205,7 @@ def transient_controls(
     valid = windows >= 0
     scored = {int(w) for w, ok in zip(windows, valid, strict=True) if ok}
     scored = {w for w in scored if base.evaluated[windows == w].any()}
-    control = _windows_with_event(_verdicts(base), base.seconds, windows, valid, policy) & scored
+    control = _windows_with_event(model, base, windows, valid, policy) & scored
     clean = scored - control
     onsets = _first_evaluated_seconds(base, windows)
     out: list[TransientControlResult] = []
@@ -977,10 +1220,7 @@ def transient_controls(
         injected = evaluate_rows(
             model, frame, spec=spec, interval_seconds=policy.interval_seconds, output_offset=offset
         )
-        detected = (
-            _windows_with_event(_verdicts(injected), injected.seconds, windows, valid, policy)
-            & clean
-        )
+        detected = _windows_with_event(model, injected, windows, valid, policy) & clean
         out.append(
             TransientControlResult(
                 magnitude=case.magnitude,
@@ -1005,14 +1245,14 @@ def _first_evaluated_seconds(ev: RowEvaluation, windows: np.ndarray) -> dict[int
 
 
 def _first_event_per_window(
-    verdicts: np.ndarray,
-    seconds: np.ndarray,
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
     windows: np.ndarray,
     valid: np.ndarray,
     policy: EventPolicy,
 ) -> dict[int, float]:
     first: dict[int, float] = {}
-    for window, when in event_times(verdicts[valid], seconds[valid], windows[valid], policy):
+    for window, when in model_event_times(model, ev.subset(valid), windows[valid], policy):
         key = int(window)  # type: ignore[call-overload]
         first[key] = min(when, first.get(key, when))
     return first
@@ -1039,13 +1279,13 @@ def _windows(ev: RowEvaluation, duration: float) -> np.ndarray:
 
 
 def _windows_with_event(
-    verdicts: np.ndarray,
-    seconds: np.ndarray,
+    model: BehaviorModel1D | BehaviorModel2D,
+    ev: RowEvaluation,
     windows: np.ndarray,
     valid: np.ndarray,
     policy: EventPolicy,
 ) -> set[int]:
-    return set(_first_event_per_window(verdicts, seconds, windows, valid, policy))
+    return set(_first_event_per_window(model, ev, windows, valid, policy))
 
 
 # ---------------------------------------------------------------------------
@@ -1233,7 +1473,15 @@ def build_evidence(
     tune_revision: str | None,
     spec: ServingSpec | None = None,
 ) -> tuple[ValidationEvidence, RowEvaluation]:
-    """Score the untouched test drives and turn the numbers into a verdict."""
+    """Score the untouched test drives and turn the numbers into a verdict.
+
+    Refuses (:class:`UnverifiedProfileError`) a test or calibration frame
+    holding capture/tuning pieces without a profile verdict: evidence is
+    counted on default-profile rows only.
+    """
+    profile_refusals(test_frame)
+    if calibration_frame is not None:
+        profile_refusals(calibration_frame)
     policy = context.policy
     drive_of_piece = {
         piece: drive.drive_id
@@ -1383,8 +1631,15 @@ def build_evaluation_frame(
     bindings_path: Path,
     dids_path: Path,
     decode_can: Literal["none", "mode-inputs"] = "mode-inputs",
+    profile_scope: ProfileScope = "default_profile",
 ) -> pd.DataFrame:
     """The training preprocessing chain, bounded to what evaluation reads.
+
+    ``profile_scope`` (B05.3): by default every row is stamped with its
+    session's profile verdict (:func:`stamp_profile_exclusions`), so tuning
+    captures are refused wherever evidence is counted. ``"every_recording"``
+    leaves the frame unstamped, for reproducing numbers an artifact recorded
+    before that rule; evidence built on it refuses a capture piece.
 
     Identical decode → reject gate → resample → derive → segment → prerequisite
     chain as ``build_feature_frame`` (shared functions, not copies), except raw
@@ -1444,7 +1699,10 @@ def build_evaluation_frame(
     ).operating_frame
     # Each row's physical drive, as build_feature_frame stamps it, so the
     # evaluator's drive grouping is the trainers' (src.analysis.drives).
-    return _drives.stamp_physical_drives(operating, [Path(s) for s in sessions])
+    stamped = _drives.stamp_physical_drives(operating, [Path(s) for s in sessions])
+    if profile_scope == "every_recording":
+        return stamped
+    return stamp_profile_exclusions(stamped, [Path(s) for s in sessions])
 
 
 def session_content_identity(session: Path) -> dict[str, Any]:
@@ -1469,6 +1727,10 @@ def session_content_identity(session: Path) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_JOIN_GAP_SECONDS",
     "EVALUATOR_VERSION",
+    "PROFILE_EXCLUDED",
+    "PROFILE_EXCLUSION_COLUMN",
+    "PROFILE_UNVERIFIED",
+    "UnverifiedProfileError",
     "BehaviorValidationDocument",
     "Drive",
     "DriveSplit",
@@ -1480,6 +1742,7 @@ __all__ = [
     "ValidationContext",
     "ReportRegimes",
     "apply_criteria",
+    "band_excess_event_times",
     "breakdown_by_labels",
     "build_evaluation_frame",
     "build_evidence",
@@ -1490,15 +1753,20 @@ __all__ = [
     "event_times",
     "evaluate_rows",
     "explicit_split",
+    "fit_band_excess_persistence",
     "fit_baseline",
     "fold_metrics",
     "group_drives",
     "load_validation_document",
+    "model_event_times",
     "parent_session",
     "PieceRanges",
     "piece_time_ranges",
+    "profile_exclusions",
+    "profile_refusals",
     "regime_labels",
     "session_content_identity",
+    "stamp_profile_exclusions",
     "synthetic_sensitivity",
     "training_leaks",
     "transient_controls",

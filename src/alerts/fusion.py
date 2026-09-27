@@ -94,6 +94,37 @@ class FusionSource:
     role: DetectorRole = "alert"
 
 
+@dataclass
+class BandExcessAccumulator:
+    """Two-sided CUSUM of a residual's excess beyond its warning half-width.
+
+    The arithmetic of ``BandExcessPersistence`` (B05.3,
+    ``src.decode.behavior_models``), in one place for the daemon's gate, the
+    offline evaluator and the training-fold fit: ``high`` accumulates
+    ``r - w`` and ``low`` accumulates ``-r - w``, each floored at zero. Call
+    :meth:`update` only for evaluated ticks; a gap longer than
+    ``reset_gap_seconds`` since the previous evaluated tick restarts both sums.
+    """
+
+    reset_gap_seconds: float
+    high: float = 0.0
+    low: float = 0.0
+    last_seconds: float | None = None
+
+    @property
+    def statistic(self) -> float:
+        return max(self.high, self.low)
+
+    def update(self, residual: float, half_width: float, now: float) -> float:
+        """Add one evaluated tick; return the accumulated excess after it."""
+        if self.last_seconds is not None and now - self.last_seconds > self.reset_gap_seconds:
+            self.high = self.low = 0.0
+        self.last_seconds = now
+        self.high = max(0.0, self.high + residual - half_width)
+        self.low = max(0.0, self.low - residual - half_width)
+        return self.statistic
+
+
 class PersistenceGate:
     """Require M-of-N firing ticks (per key) within a wall-clock-bound window.
 
@@ -155,6 +186,10 @@ class PersistenceGate:
         self._window = max(self._required, int(window) if window is not None else self._required)
         self._window_seconds = window_seconds
         self._history: dict[str, deque[tuple[float, bool]]] = {}
+        #: B05.3 — per-key band-excess accumulators for models that carry
+        #: their own fitted persistence (:meth:`observe_band_excess`). Kept
+        #: on the gate so :meth:`reset` clears them at a replay boundary too.
+        self._excess: dict[str, tuple[BandExcessAccumulator, float]] = {}
         self.suppressed = 0
 
     @property
@@ -173,6 +208,9 @@ class PersistenceGate:
         harness) pass the row's own timestamp so the bound reflects data
         time, not however fast the replay loop happens to run.
         """
+        # A model hot-reloaded from its own band-excess persistence back to the
+        # M-of-N gate must not keep answering ``active`` from the stale sums.
+        self._excess.pop(key, None)
         if firing is None:
             return self.active(key)
         clock = now if now is not None else time.monotonic()
@@ -186,10 +224,46 @@ class PersistenceGate:
 
     def active(self, key: str) -> bool:
         """Whether ``key`` is currently latched (read-only, no trimming)."""
+        excess = self._excess.get(key)
+        if excess is not None:
+            accumulator, limit = excess
+            return accumulator.statistic > limit
         history = self._history.get(key)
         if not history:
             return False
         return self._hits(history) >= self._required
+
+    def observe_band_excess(
+        self,
+        key: str,
+        residual: float | None,
+        half_width: float | None,
+        *,
+        firing: bool | None,
+        limit: float,
+        reset_gap_seconds: float,
+        now: float,
+    ) -> bool:
+        """Advance ``key``'s band-excess accumulation (B05.3); return sustained.
+
+        The M-of-N window is not used for this key: a model with a fitted
+        ``BandExcessPersistence`` is sustained while its accumulated excess
+        is strictly above ``limit``. ``firing=None`` (or no residual / band)
+        is a missing verdict and leaves the sums untouched, exactly like
+        :meth:`observe`. A changed ``limit`` or gap (a hot-reloaded model)
+        restarts the key's accumulation rather than judging old sums by it.
+        """
+        entry = self._excess.get(key)
+        if entry is None or entry[1] != limit or entry[0].reset_gap_seconds != reset_gap_seconds:
+            entry = (BandExcessAccumulator(reset_gap_seconds), limit)
+            self._excess[key] = entry
+        accumulator = entry[0]
+        if firing is None or residual is None or half_width is None:
+            return accumulator.statistic > limit
+        sustained = accumulator.update(residual, half_width, now) > limit
+        if firing and not sustained:
+            self.suppressed += 1
+        return sustained
 
     def reset(self) -> None:
         """Clear every key's window (Phase 7.1 replay isolation boundary).
@@ -200,6 +274,7 @@ class PersistenceGate:
         leaks a partial M-of-N streak across the boundary.
         """
         self._history.clear()
+        self._excess.clear()
         self.suppressed = 0
 
     def _trim(self, history: deque[tuple[float, bool]], now: float) -> None:
@@ -437,6 +512,7 @@ class FusedResult:
 
 
 __all__ = [
+    "BandExcessAccumulator",
     "FusionScorer",
     "FusionSource",
     "FusedResult",

@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from src.analysis.behavior_validation import (
+    PROFILE_EXCLUSION_COLUMN,
     BehaviorValidationDocument,
     Drive,
     EventPolicy,
@@ -160,6 +161,8 @@ def test_prefix_sorted_chronology_is_refused() -> None:
         [_drive(name, T0 + timedelta(days=day), seed=day) for day, name in enumerate(names)],
         ignore_index=True,
     )
+    # The captures here are verified default-profile evidence (B05.3 stamp).
+    frame[PROFILE_EXCLUSION_COLUMN] = None
     result = fit_recipe(_timing_recipe(), frame)
     model = result.model or result.candidate
     assert model is not None, result.reason

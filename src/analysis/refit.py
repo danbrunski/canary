@@ -35,16 +35,24 @@ from src.analysis.behavior_validation import (
     BehaviorValidationDocument,
     DriveSplit,
     UnorderedSessionsError,
+    UnverifiedProfileError,
     ValidationContext,
     build_evidence,
     carry_over_flags,
     chronological_split,
+    evaluate_rows,
+    fit_band_excess_persistence,
     fit_baseline,
     group_drives,
     parent_session,
     piece_time_ranges,
+    profile_refusals,
 )
-from src.analysis.derived import VE_AMBIENT_CHANNEL, VE_MANIFOLD_CHANNEL
+from src.analysis.derived import (
+    STFT_BANK_BALANCE_SMOOTHING_SECONDS,
+    VE_AMBIENT_CHANNEL,
+    VE_MANIFOLD_CHANNEL,
+)
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.control.sessions import session_started_at
@@ -58,6 +66,7 @@ from src.decode.behavior_eligibility import (
 from src.decode.behavior_models import (
     CLOSED_LOOP_FUEL_STATES,
     CURRENT_SCHEMA_VERSION,
+    BandExcessPersistence,
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
@@ -240,6 +249,10 @@ class _RecipeBase:
     #: B07.6 — persisted local-range steady limits (``LocalRangeCondition``);
     #: the refit builds their context before selecting rows, like serving.
     local_ranges: tuple[LocalRangeCondition, ...] = ()
+    #: B05.3 — the model's own event persistence rule. Its limit is fitted on
+    #: the training fold only (``fit_band_excess_persistence``) and persisted
+    #: on the model; ``None`` leaves the daemon's configured M-of-N gate.
+    event_persistence: BandExcessPersistence | None = None
     #: Persisted steady-state constraints. Keys are base telemetry columns;
     #: values are maximum absolute per-second rates over the feature
     #: pipeline's rolling horizon. The fitter applies them and the resulting
@@ -445,6 +458,24 @@ RPM_LOAD_2D_FIELDS: Mapping[str, Any] = {
 #: Operating modes the bank-balance baselines are conditioned on.
 BANK_BALANCE_MODES: tuple[str, ...] = ("idle", "city", "highway")
 
+#: B05.3 — the STFT bank-balance baselines are evented by accumulated excess
+#: beyond their warning band, not by the daemon's 3-of-5 tick count. The gap
+#: that restarts the accumulation is the signal's own memory: the balance is a
+#: 30 s trailing mean (``STFT_BANK_BALANCE_SMOOTHING_SECONDS``), so a value
+#: after a longer gap shares no sample with one before it. The limit is fitted
+#: per refit on the training fold. Measured before the rule (2026-09-23 city
+#: model v1, default gate): 5 events in 0.81 h on its training drives and 5 in
+#: 1.75 h on its test drives, every one a run of <= 18 warning ticks just past
+#: the 3.1-point band (peaks 3.1-5.7).
+STFT_BANK_BALANCE_PERSISTENCE = BandExcessPersistence(
+    reset_gap_seconds=STFT_BANK_BALANCE_SMOOTHING_SECONDS,
+    basis=(
+        "STFT_BANK_BALANCE_SMOOTHING_SECONDS: derived:STFT_BANK_BALANCE is a 30 s "
+        "trailing mean, so an evaluated tick after a longer gap shares no sample "
+        "with the accumulation before it (B05.3, 2026-09-26)"
+    ),
+)
+
 _BANK_BALANCE_NOTES: Mapping[str, str] = {
     "stft": (
         "Mode-conditioned robust median/MAD bank-balance baseline. "
@@ -497,6 +528,9 @@ def _bank_balance(kind: Literal["stft", "ltft"], mode: str) -> Surface1DRecipe:
         min_rpm=ENGINE_RUNNING_MIN_RPM,
         closed_loop_only=True,
         deviation=_sigma(0.8),
+        # B05.3 — STFT only: ordinary closed-loop oscillation is the STFT
+        # channel's; the LTFT baselines keep the daemon gate.
+        event_persistence=STFT_BANK_BALANCE_PERSISTENCE if kind == "stft" else None,
         notes=_BANK_BALANCE_NOTES[kind],
     )
 
@@ -1065,8 +1099,17 @@ def _eligible_rows(
     """3. The per-row serving contract (engine state, fuel control,
     cold-start context, required context, fresh inputs and actual, rate
     gates) — the *same* evaluator the decoder, daemon and replay use, so the
-    fit cannot learn from rows its model would refuse to grade."""
+    fit cannot learn from rows its model would refuse to grade.
+
+    B05.3 — plus the profile rule the daemon applies by capture state (R03.12):
+    a row stamped as a non-default-profile session is refused by name, and a
+    frame carrying capture/tuning pieces with no stamp refuses the recipe."""
+    try:
+        profile = profile_refusals(sub)
+    except UnverifiedProfileError as exc:
+        raise _RecipeSkipError(str(exc)) from exc
     reasons = eligibility_reasons(sub, spec, include_actual=True)
+    reasons = np.where(pd.isna(profile), reasons, profile).astype(object)
     eligible_rows = eligible_mask(reasons)
     if not eligible_rows.any():
         codes = {reason_code(str(reason)) for reason in reasons if reason is not None}
@@ -1200,6 +1243,7 @@ def _keep_prior_version(
         and model.fit.training_data_hash == prior_model.fit.training_data_hash
         and model.conditions == prior_model.conditions
         and model.eligibility == prior_model.eligibility
+        and model.event_persistence == prior_model.event_persistence
         and model.fit.tune_revision == prior_model.fit.tune_revision
         and _same_evidence_context(model, prior_model)
     ):
@@ -1336,6 +1380,7 @@ def _fit_recipe_phases(
             "fit": model.fit.model_copy(update={"tune_revision": tune_revision}),
         }
     )
+    model = _fit_event_persistence(recipe, model, sub, plan, spec, validation)
 
     if plan.split is not None:
         validation_reason, model = _validate_held_out(
@@ -1365,6 +1410,46 @@ def _fit_recipe_phases(
         raise _RecipeSkipError(gate_reason)
 
     return _keep_prior_version(model, prior_model)
+
+
+def _fit_event_persistence(
+    recipe: Recipe,
+    model: BehaviorModel1D | BehaviorModel2D,
+    sub: pd.DataFrame,
+    plan: FoldPlan,
+    spec: ServingSpec,
+    validation: ValidationContext,
+) -> BehaviorModel1D | BehaviorModel2D:
+    """4b. B05.3 — fit the recipe's event persistence on the training fold.
+
+    Every row of the training drives is scored through the serving contract
+    (refused rows included, so the accumulation freezes where serving would),
+    in time order per drive group; test and calibration drives never enter.
+    A fold with no excursion beyond the band refuses the recipe by name.
+    """
+    rule = recipe.event_persistence
+    if rule is None:
+        return model
+    if plan.split is not None and SESSION_COLUMN in sub.columns:
+        train_pieces = plan.split.pieces("train")
+        rows = sub[sub[SESSION_COLUMN].astype(str).isin(train_pieces)]
+        drive_of_piece = {
+            piece: drive.drive_id for drive in plan.split.train for piece in drive.pieces
+        }
+    else:
+        rows = sub
+        drive_of_piece = {}
+    train_ev = evaluate_rows(
+        model, rows, spec=spec, interval_seconds=validation.policy.interval_seconds
+    )
+    groups = np.asarray(
+        [drive_of_piece.get(str(piece), parent_session(str(piece))) for piece in train_ev.pieces],
+        dtype=object,
+    )
+    fitted = fit_band_excess_persistence(rule, train_ev, groups)
+    if isinstance(fitted, str):
+        raise _RecipeSkipError(fitted)
+    return model.model_copy(update={"event_persistence": fitted})
 
 
 def recipe_serving_spec(recipe: Recipe) -> ServingSpec:
@@ -1798,6 +1883,7 @@ def recipe_contract_fingerprint(recipe: Recipe) -> str:
             conditions=recipe.rate_conditions(),
             eligibility=recipe.serving_eligibility(),
             deviation=recipe.deviation,
+            event_persistence=recipe.event_persistence,
         )
     )
 

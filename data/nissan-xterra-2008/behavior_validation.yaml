@@ -302,3 +302,36 @@ recipes:
       - {magnitude: 5.0, direction: negative, duration_seconds: 120}
   stft_bank_balance_city: *stft_bank_balance
   stft_bank_balance_highway: *stft_bank_balance
+
+  # B05.8 — lambda bank balance (afr_bank_balance_robust, now bank 1 minus bank 2
+  # measured lambda from the A/F sensor voltage DIDs through the verified
+  # transfer, closed loop / warm / steady only). Declared 2026-09-26 BEFORE the
+  # recipe's first fit or test in lambda on the ZS44A-20260920 corpus; the
+  # 2026-09-23 fit was in volts, ungated and had no criteria. Same 5 % mixture
+  # target as the STFT bank balance and total trim, expressed in lambda; the
+  # error bounds keep the same proportions (max_mae 0.4x, p95 0.75x the
+  # meaningful deviation), so a meaningful shift sits outside the healthy 95th
+  # percentile.
+  afr_bank_balance_robust:
+    kind: constant_baseline
+    unit: lambda
+    noise_floor:
+      value: 0.0013
+      basis: >
+        one A/F sensor voltage DID LSB (0.005 V) at the transfer's steepest
+        near-stoich slope (3.9 AFR/V lean of 14.7, afr_calibration.yaml),
+        divided by 14.7; a quantization floor per bank, not a measured noise
+    meaningful_deviation: 0.05
+    meaningful_deviation_basis: >
+      a sustained 5 % bank-to-bank mixture difference while both loops are
+      closed -- the same 5 % target as the STFT bank balance, as lambda. In
+      closed loop the ECM drives each bank's measured lambda to target, so a
+      shift this size means a bank is not holding it
+    min_validation_drives: 2
+    min_eligible_observations: 150
+    max_mae: 0.02
+    max_abs_error_p95: 0.0375
+    max_control_events_per_hour: 2.0
+    synthetic_faults:
+      - {magnitude: 0.05, direction: positive, duration_seconds: 120}
+      - {magnitude: 0.05, direction: negative, duration_seconds: 120}

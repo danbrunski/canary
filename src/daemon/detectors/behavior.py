@@ -16,12 +16,14 @@ from src.daemon.detectors.common import (
     TickContext,
     _publish_score,
     gate_and_collect,
+    gate_band_excess_and_collect,
 )
 from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
-from src.decode.behavior_decoder import deviation, deviation_for_override
+from src.decode.behavior_decoder import band_half_widths, deviation, deviation_for_override
 from src.decode.behavior_eligibility import resolve_output_column
 from src.decode.behavior_models import (
     BehaviorModel1D,
+    FittedBandExcessPersistence,
     serving_status,
 )
 from src.preprocessing.live import LiveFeatureSource
@@ -107,16 +109,36 @@ class BehaviorDetector:
             # 6.3/3.1: a tuner override for (behavior, mode) fully owns
             # persistence for this key instead of stacking — see
             # `gate_and_collect`, shared with the IF + sequence detectors.
-            sustained = gate_and_collect(
-                persistence,
-                f"behavior:{residual.name}",
-                verdict,
-                tuner=tuner,
-                source="behavior",
-                mode=residual.operating_mode,
-                now=ctx.now.timestamp(),
-                counters=self._components.emitter.counters,
-            )
+            # B05.3 — a model that carries its own fitted persistence is
+            # sustained by accumulated band excess instead (the evaluator's
+            # `model_event_times` runs the same gate method offline).
+            fitted = residual.event_persistence
+            if fitted is not None:
+                sustained = gate_band_excess_and_collect(
+                    persistence,
+                    f"behavior:{residual.name}",
+                    verdict,
+                    residual=residual.deviation,
+                    half_width=residual.warning_half_width,
+                    limit=fitted.limit,
+                    reset_gap_seconds=fitted.rule.reset_gap_seconds,
+                    tuner=tuner,
+                    source="behavior",
+                    mode=residual.operating_mode,
+                    now=ctx.now.timestamp(),
+                    counters=self._components.emitter.counters,
+                )
+            else:
+                sustained = gate_and_collect(
+                    persistence,
+                    f"behavior:{residual.name}",
+                    verdict,
+                    tuner=tuner,
+                    source="behavior",
+                    mode=residual.operating_mode,
+                    now=ctx.now.timestamp(),
+                    counters=self._components.emitter.counters,
+                )
             if verdict is not True or not sustained:
                 continue
             sources.append(behavior)
@@ -183,6 +205,10 @@ class _BehaviorResidual:
     #: a serving contract, or no held-out validation): still graded and
     #: shown, never emitted or fused.
     alerting: bool = True
+    #: B05.3 — the model's own fitted persistence, and the warning half-width
+    #: at this tick's operating point that its accumulation reads.
+    event_persistence: FittedBandExcessPersistence | None = None
+    warning_half_width: float | None = None
 
 
 def _observe_behavior(
@@ -277,6 +303,9 @@ def _grade_surface_models(
             x = finite_float(point.get(model.axes[0].channel))
             y = finite_float(point.get(model.axes[1].channel))
         mode_match = model.operating_mode is None or mode == model.operating_mode
+        warning_half_width = (
+            band_half_widths(model, point)[0] if model.event_persistence is not None else None
+        )
         observations.append(
             BehaviorObservation(
                 name=model.name,
@@ -311,6 +340,8 @@ def _grade_surface_models(
                 override_reason=None if override is None else override.provenance.reason,
                 reason=result.reason,
                 alerting=status.alerting,
+                event_persistence=model.event_persistence,
+                warning_half_width=warning_half_width,
             )
         )
     return observations, residuals

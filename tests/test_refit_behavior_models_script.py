@@ -119,17 +119,26 @@ def test_behavior_capture_discovery_requires_an_exact_recipe_allowlist(tmp_path:
     for session in (eligible, unrelated, normal):
         session.mkdir()
         (session / "telemetry-00000.parquet").write_bytes(b"evidence")
-    for session, recipes in (
-        (eligible, ["cam_secondary_vs_command_rpm_did"]),
-        (unrelated, ["another_recipe"]),
+    tuning = tmp_path / "_capture-tuning-2026-08-07T030000"
+    tuning.mkdir()
+    (tuning / "telemetry-00000.parquet").write_bytes(b"evidence")
+    for session, recipes, profile, corpus_eligible in (
+        (eligible, ["cam_secondary_vs_command_rpm_did"], "default", True),
+        (unrelated, ["another_recipe"], "default", True),
+        # B05.3: a non-default capture is never behavior evidence, whatever
+        # its sidecar grants (R03.12).
+        (tuning, ["cam_secondary_vs_command_rpm_did"], "tuning", False),
     ):
         (session / "capture_profile.json").write_text(
             json.dumps(
                 {
                     "schema_version": 1,
-                    "profile": "research",
+                    "profile": profile,
                     "started_at": "2026-08-07T00:00:00Z",
-                    "profile_snapshot": {"behavior_model_recipes": recipes},
+                    "profile_snapshot": {
+                        "behavior_model_recipes": recipes,
+                        "corpus_eligible": corpus_eligible,
+                    },
                 }
             )
         )
@@ -151,9 +160,12 @@ def test_capture_recipe_allowlists_preserve_exact_per_capture_grants(tmp_path: P
             json.dumps(
                 {
                     "schema_version": 1,
-                    "profile": "research",
+                    "profile": "default",
                     "started_at": "2026-08-07T00:00:00Z",
-                    "profile_snapshot": {"behavior_model_recipes": recipes},
+                    "profile_snapshot": {
+                        "behavior_model_recipes": recipes,
+                        "corpus_eligible": True,
+                    },
                 }
             )
         )
@@ -538,3 +550,77 @@ def test_main_bumps_version_when_underlying_data_changes(
 
     models = load_behavior_models(out)
     assert models.models[0].version == 2
+
+
+# ---------------------------------------------------------------------------
+# B05.3 — explicit session paths: tuning recordings are refused by name
+# ---------------------------------------------------------------------------
+
+
+def test_main_refuses_explicit_paths_that_are_all_tuning_recordings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An explicit path grants nothing to a non-default recording (R03.12):
+    when every path is one, the refit refuses and names each, not fits."""
+    tuning = tmp_path / "sessions" / "_tuning-2026-05-13T120000"
+    tuning.mkdir(parents=True)
+    built: list[object] = []
+    monkeypatch.setattr(refit_cli, "build_feature_frame", lambda *a, **k: built.append(a))
+    out = tmp_path / "behavior_models.yaml"
+    rc = refit_cli.main(
+        ["--config", "canary.example.yaml", "--out", str(out), "--dry-run", str(tuning)]
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "_tuning-2026-05-13T120000: tuning session" in err
+    assert "R03.12" in err
+    assert not built and not out.exists()
+
+
+def test_main_names_explicit_tuning_paths_and_never_trains_on_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A tuning recording passed beside default sessions stays in the frame
+    (drive grouping) but is named on stderr and in the evidence provenance.
+    (That its rows never train is ``test_bank_balance_persistence``'s
+    fit-level test; here the recipe's event gate would drop them anyway.)"""
+    _patch_pipeline(monkeypatch, tmp_path)
+    defaults = [tmp_path / "sessions" / f"2026-05-1{day}T120000" for day in range(3)]
+    tuning = tmp_path / "sessions" / "_tuning-2026-05-12T121000"
+    tuning.mkdir(parents=True)
+    monkeypatch.setattr(
+        refit_cli,
+        "build_feature_frame",
+        lambda *_a, **_k: pd.concat(
+            [
+                *(_frame(s.name, seed=index) for index, s in enumerate(defaults)),
+                _frame(tuning.name, seed=9),
+            ],
+            ignore_index=True,
+        ),
+    )
+    out = tmp_path / "behavior_models.yaml"
+    rc = refit_cli.main(
+        [
+            "--config",
+            "canary.example.yaml",
+            "--out",
+            str(out),
+            "--recipe",
+            "coolant_warmup",
+            *(str(s) for s in [*defaults, tuning]),
+        ]
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "1 session(s) are not default-profile evidence" in err
+    assert "_tuning-2026-05-12T121000: tuning session" in err
+    from src.decode.behavior_models import load_behavior_models
+
+    model = load_behavior_models(out).models[0]
+    assert model.fit.sessions and tuning.name not in model.fit.sessions
+    assert model.evidence is not None
+    assert any(
+        entry.startswith("_tuning-2026-05-12T121000: tuning session")
+        for entry in model.evidence.provenance["profile_exclusions"]
+    )

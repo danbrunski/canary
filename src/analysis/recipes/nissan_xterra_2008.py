@@ -5,15 +5,39 @@ are this vehicle's, not the shared catalog's (R05.7, operator decision
 2026-09-25). Moved verbatim from ``refit.default_recipes``; their contract
 fingerprints are pinned by ``tests/test_recipe_catalog_golden.py``, so the
 Pi sees no ``contract_changed:recipe``. ``afr_bank_balance_robust`` is here
-too: its ``derived:AFR_BANK_BALANCE`` input is the AF-sensor-voltage DID pair.
+too: its input is the AF-sensor-voltage DID pair (B05.8 moved it from the
+voltage difference ``derived:AFR_BANK_BALANCE`` to the λ difference
+``derived:LAMBDA_BANK_BALANCE_AF_VOLTAGE``, a deliberate contract change).
 """
 
 from __future__ import annotations
 
 from typing import Literal
 
-from src.analysis.refit import Recipe, Surface2DRecipe, _sigma, _surface_1d, _surface_2d
-from src.decode.behavior_models import DeviationConfig
+from src.analysis.afr import LAMBDA_BANK_BALANCE_AF_VOLTAGE
+from src.analysis.refit import (
+    TOTAL_TRIM_STEADY_RATES,
+    Recipe,
+    Surface2DRecipe,
+    _sigma,
+    _surface_1d,
+    _surface_2d,
+)
+from src.decode.behavior_models import BandExcessPersistence, DeviationConfig
+from src.operating import ENGINE_RUNNING_MIN_RPM
+
+#: B05.8 — the λ bank balance reads two instantaneous DID samples, so the
+#: accumulation's memory is the steady-state gate's own horizon: the rate
+#: gates it persists are net changes over the feature pipeline's 30 s window.
+#: The limit is fitted per refit on the training fold (B05.3's rule).
+AFR_BANK_BALANCE_PERSISTENCE = BandExcessPersistence(
+    reset_gap_seconds=30.0,
+    basis=(
+        "the persisted steady-state gates (TOTAL_TRIM_STEADY_RATES) are net changes "
+        "over the feature pipeline's 30 s rolling horizon; evidence older than that "
+        "horizon is not from the same steady stretch (B05.8, 2026-09-26)"
+    ),
+)
 
 
 def _cam_tracking_2d(role: Literal["primary", "secondary"], *, output: str) -> Surface2DRecipe:
@@ -78,21 +102,43 @@ def recipes() -> list[Recipe]:
         ),
         _cam_tracking_2d("primary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED"),
         _cam_tracking_2d("secondary", output="did:ECM_INTAKE_CAM_ANGLE_MEASURED_B"),
+        # B05.8 — a λ residual, not volts: each bank's A/F sensor voltage goes
+        # through the verified transfer before the difference. Graded only in
+        # healthy closed loop (J1979 0x02), outside warmup and at steady
+        # rpm/load (B05.2's measured TOTAL_TRIM_STEADY_RATES), so enrichment
+        # and fuel-cut rails are never graded as asymmetry.
         _surface_1d(
             name="afr_bank_balance_robust",
-            output="derived:AFR_BANK_BALANCE",
-            output_unit="V",
-            x_column="derived:AFR_BANK_BALANCE",
+            output=LAMBDA_BANK_BALANCE_AF_VOLTAGE,
+            output_unit="lambda",
+            x_column=LAMBDA_BANK_BALANCE_AF_VOLTAGE,
             fit_method="robust_baseline",
             min_r_squared=None,
             min_samples=300,
-            deviation=DeviationConfig(kind="absolute", warning_band=0.05, critical_band=0.15),
+            min_rpm=ENGINE_RUNNING_MIN_RPM,
+            closed_loop_only=True,
+            excluded_operating_modes=("warmup",),
+            max_abs_rate_of_change=TOTAL_TRIM_STEADY_RATES,
+            # sigma_floor: one A/F-voltage DID LSB (0.005 V) at the transfer's
+            # steepest near-stoich slope (3.9 AFR/V lean of stoich) is 0.0013 λ
+            # per bank; a difference of two such channels, rounded up.
+            deviation=_sigma(0.002),
+            event_persistence=AFR_BANK_BALANCE_PERSISTENCE,
             notes=(
-                "Wideband AFR sensor voltage delta between banks. Expected "
-                "~0V; non-zero indicates bank-specific vacuum leak, "
-                "single-injector wear, exhaust leak ahead of one sensor, "
-                "single coil pack misfire. Sharpest bank-asymmetry detector "
-                "available once AF sensor DIDs are polling."
+                "Bank 1 minus bank 2 measured lambda from the A/F sensor voltage DIDs, "
+                "each through the profile's verified voltage->AFR transfer. Closed loop, "
+                "warm and steady only. In closed loop the ECM drives each bank's "
+                "measured lambda to target, so a delivery asymmetry its trims absorb "
+                "shows in the STFT bank balance, not here; this residual shows a bank "
+                "whose loop is not holding target."
+            ),
+            diagnostic_capabilities=("closed-loop bank lambda tracking asymmetry",),
+            diagnostic_limitations=(
+                "does not see a fuel-delivery asymmetry the closed-loop trims absorb "
+                "(read the STFT bank balance for that)",
+                "does not identify a particular injector, leak or sensor",
+                "both banks share one voltage transfer: a common sensor-model error "
+                "cancels, and a single-sensor bias is indistinguishable from mixture",
             ),
         ),
         _surface_2d(

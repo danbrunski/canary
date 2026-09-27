@@ -563,6 +563,59 @@ class ServingEligibility(_Strict):
     training_selection: TrainingSelection = Field(default_factory=TrainingSelection)
 
 
+class BandExcessPersistence(_Strict):
+    """B05.3 — event persistence by accumulated excess beyond the warning band.
+
+    The daemon's default gate counts band exceedances (M of N ticks) and is
+    blind to how far past the band a residual sits. A smoothed bank-balance
+    signal drifts just past its band for 10-25 s during ordinary closed-loop
+    control (and while warmup trims wash out of its 30 s mean), which latches
+    3-of-5 every time: 2.86 events/h on the 2026-09-23 city test drives, with
+    runs of 17-18 warning ticks on both folds. A real bank asymmetry is a
+    sustained shift, and a shift of the declared size lands well past the band.
+
+    The rule is Page's two-sided CUSUM on the excess over the warning
+    half-width ``w`` at each *evaluated* tick::
+
+        high = max(0, high + r - w)      low = max(0, low - r - w)
+
+    sustained while ``max(high, low)`` is strictly above the fitted limit
+    (output units x evaluated ticks). A refused tick leaves both sums
+    untouched: no measurement is not a clean one. A gap longer than
+    ``reset_gap_seconds`` between two evaluated ticks restarts them, so
+    evidence from before the gap never completes a later event. Declared
+    here is the form; the limit is fitted on the training fold only
+    (:class:`FittedBandExcessPersistence`) and applied identically by the
+    daemon (``PersistenceGate.observe_band_excess``) and the B02 evaluator.
+    """
+
+    kind: Literal["band_excess"] = "band_excess"
+    reset_gap_seconds: float = Field(gt=0)
+    #: Why this gap (a measured memory, a signal's smoothing window ...).
+    basis: str = Field(min_length=1)
+
+
+class FittedBandExcessPersistence(_Strict):
+    """A :class:`BandExcessPersistence` with its limit fitted on training drives.
+
+    ``limit`` is the largest accumulated excess the training fold's own
+    no-fault rows reached, so no training excursion completes an event; an
+    event needs strictly more. A training fold with no excursion beyond the
+    band cannot say how large ordinary control gets, and the fit refuses
+    rather than persist a zero limit. Fit-derived like ``reference_std``:
+    the contract fingerprint covers ``rule``, not the number.
+    """
+
+    rule: BandExcessPersistence
+    limit: float = Field(gt=0)
+    #: Drive groups (B02.3) the limit was fitted on — never a test drive.
+    training_drives: list[str] = Field(min_length=1)
+    #: Evaluated training rows the accumulation ran over.
+    training_rows: int = Field(ge=1)
+    #: Separate accumulations (a sum leaving zero) seen on those rows.
+    training_excursions: int = Field(ge=1)
+
+
 # ---------------------------------------------------------------------------
 # Validation criteria and persisted evidence (B02)
 # ---------------------------------------------------------------------------
@@ -1067,6 +1120,9 @@ class BehaviorModel1D(_Strict):
     #: contract, criteria or mode-taxonomy change) withheld trust without
     #: touching ``evidence``. Any entry makes the model diagnostic-only.
     publication_flags: list[str] = Field(default_factory=list)
+    #: B05.3 — this model's own event persistence (``None``: the daemon's
+    #: configured M-of-N gate). Applied by the daemon and the evaluator alike.
+    event_persistence: FittedBandExcessPersistence | None = None
     #: B03.2 — the profile policy entry governing this artifact, attached by
     #: :func:`load_behavior_models` / :func:`apply_behavior_policy`. Private:
     #: never serialized, and an artifact cannot carry its own policy.
@@ -1111,6 +1167,7 @@ class BehaviorModel2D(_Strict):
     diagnostic_limitations: list[str] = Field(default_factory=list)
     evidence: ValidationEvidence | None = None
     publication_flags: list[str] = Field(default_factory=list)
+    event_persistence: FittedBandExcessPersistence | None = None
     _policy_entry: LifecyclePolicyEntry | None = PrivateAttr(default=None)
     #: Cells with fewer fit samples than this evaluate to ``None`` (off-map)
     #: instead of grading against a near-meaningless mean/std. Default 1
@@ -1197,14 +1254,24 @@ def contract_fingerprint_payload(
     conditions: Sequence[RateOfChangeCondition],
     eligibility: ServingEligibility | None,
     deviation: DeviationConfig | None,
+    event_persistence: BandExcessPersistence | None = None,
 ) -> dict[str, object]:
     """The serving-contract fields validation evidence is only valid for.
 
-    Excludes fit-derived values (cells, coefficients, ``reference_std``) and
-    the training-only selection, which is provenance rather than contract —
-    so a recipe and the model it produced fingerprint identically.
+    Excludes fit-derived values (cells, coefficients, ``reference_std``, a
+    fitted persistence limit) and the training-only selection, which is
+    provenance rather than contract — so a recipe and the model it produced
+    fingerprint identically. ``event_persistence`` (B05.3) is the declared
+    rule; it enters the payload only when set, so every contract
+    fingerprinted before it keeps its identity and its evidence still matches.
     """
+    persistence = (
+        {}
+        if event_persistence is None
+        else {"event_persistence": event_persistence.model_dump(mode="json")}
+    )
     return {
+        **persistence,
         "kind": kind,
         "output": output,
         "inputs": list(inputs),
@@ -1254,6 +1321,9 @@ def contract_fingerprint(model: BehaviorModel1D | BehaviorModel2D) -> str:
             conditions=model.conditions,
             eligibility=model.eligibility,
             deviation=model.deviation,
+            event_persistence=(
+                None if model.event_persistence is None else model.event_persistence.rule
+            ),
         )
     )
 

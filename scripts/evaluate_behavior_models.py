@@ -90,6 +90,7 @@ from src.analysis.behavior_validation import (
     load_validation_document,
     parent_session,
     piece_time_ranges,
+    profile_exclusions,
     qualifying_drive_count,
     regime_labels,
     session_content_identity,
@@ -295,7 +296,15 @@ def _historical(
     mask = _pieces_of(frame, held_out)
     if not mask.any():
         return {"status": "held_out_sessions_not_supplied", "held_out": sorted(held_out)}
-    ev = evaluate_rows(model, frame[mask], spec=spec, interval_seconds=policy.interval_seconds)
+    # B05.3 — the one opt-out: re-derive what the artifact recorded, captures
+    # included, before the default-profile rule (the frame is unstamped here).
+    ev = evaluate_rows(
+        model,
+        frame[mask],
+        spec=spec,
+        interval_seconds=policy.interval_seconds,
+        profile_scope="every_recording",
+    )
     metrics = fold_metrics(model, ev, drive_of_piece=drive_of_piece, policy=policy)
     persisted = {
         "evaluated": fit.validation_sample_count,
@@ -675,6 +684,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         bindings_path=args.bindings,
         dids_path=args.dids,
         decode_can=decode_can,
+        # B05.3 — corrected evidence is default-profile rows only (R03.12);
+        # a historical reproduction re-derives what an artifact recorded.
+        profile_scope="default_profile" if args.mode == "corrected" else "every_recording",
     )
     inputs: dict[str, Any] = {
         "config": file_identity(args.config),
@@ -688,6 +700,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "git": _git_identity(),
         "decode_can": decode_can,
         "event_policy": policy.describe(),
+        "profile_exclusions": (
+            profile_exclusions(sessions) if args.mode == "corrected" else "not applied (historical)"
+        ),
         "sessions": [{**session_content_identity(s), "path": str(s)} for s in sessions],
     }
     results, drives = evaluate(

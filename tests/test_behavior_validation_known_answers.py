@@ -67,7 +67,10 @@ def _model(name: str) -> BehaviorModel1D | BehaviorModel2D:
 def _metrics(name: str, frame: pd.DataFrame):  # type: ignore[no-untyped-def]
     model = _model(name)
     spec = legacy_reproduction_spec(CATALOG[name], model)[0] if model.eligibility is None else None
-    ev = evaluate_rows(model, frame, spec=spec)
+    # A historical reproduction: the review measured these slices, captures
+    # included, before the default-profile rule (B05.3) -- the same opt-out
+    # evaluate_behavior_models.py --mode historical takes.
+    ev = evaluate_rows(model, frame, spec=spec, profile_scope="every_recording")
     return fold_metrics(model, ev, drive_of_piece={}, policy=EventPolicy()), ev
 
 
