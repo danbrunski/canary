@@ -344,7 +344,7 @@ recomputes the rolling frame over the whole buffered window every tick.
   Size **M–L**. P02.2 first: it uses the same spec-to-raw translation, and
   after it this item may not pay for itself. Measure before starting.
 
-- [ ] **P02.4 Featurize an injection incrementally.** `injection_sweep`
+- [x] **P02.4 Featurize an injection incrementally.** `injection_sweep`
   recomputes only the columns an injected channel can reach, and reuses the
   clean featurized frame for everything else. Reachable columns are:
   - the channel's own rolling features (`__mean`/`__std`/`__roc`/`__gap`);
@@ -364,7 +364,64 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M**.
 
-- [ ] **P02.5 Score drives in parallel, and cache scores.**
+  *Done 2026-09-27.*
+  - **Where.** `src/preprocessing/feature_pipeline.py::featurize_perturbed_frame`,
+    called by `DriveScorer.injection_sweep` in `scripts/evaluate_detectors.py`.
+    It finds the changed columns by comparing the injected slice with its
+    clean slice; it never takes them on trust. It then recomputes:
+    - derived channels reached through `DERIVED_CHANNEL_INPUTS` (and the
+      optional inputs), transitively, from their declared inputs only
+      (`derived_channels_reached`);
+    - deviations whose models name a changed channel anywhere in their
+      definition (`behavior_model_input_roots`);
+    - rolling features for the changed columns only.
+
+    It re-segments only when a segmenter input changed. If any row's mode
+    moves, or the columns differ, it runs the whole transform.
+  - **Declarations enforced by test**, not trusted.
+    `tests/test_feature_pipeline_incremental.py` scrambles every *undeclared*
+    column and requires each derived channel
+    (`test_every_derived_channel_reads_only_its_declared_inputs`) and each
+    behavior deviation
+    (`test_every_behavior_model_reads_only_the_channels_it_names`) to stay
+    put. `check_exact` against `featurize_wide_frame` covers every realistic
+    fault x severity on the committed ground-truth slice
+    (`test_every_realistic_fault_featurizes_incrementally_exactly`, 20 cases).
+    It also asserts that the full path runs only when a mode moved. Random
+    3-channel perturbations and the unchanged/new-column cases are covered as
+    well.
+  - **Two real drives, `check_exact`.** `2026-09-20T152758` (8,570 rows) and
+    `2026-08-03T163440` (1,883 rows): 80 featurizations (5 faults x 4
+    severities x {harness-style slice, whole session}), all equal. 4 took the
+    full path: the thermostat fault over the whole of 152758 moves operating
+    modes. Featurization alone took 69.1 s through the full transform and
+    34.9 s incrementally.
+  - **Stream rereads, measured.** The HEAD harness was instrumented with a
+    log line per `CachedStreams` read. 12 streams were read twice per drive
+    and 44 once (68 reads for 56 streams). The twice-read stream is each
+    in-era drive's longest session: once for clean scoring, once for the
+    whole sweep. No stream was read once per injection. `DriveScorer` now
+    reads every stream once per drive (56 reads), and a fully cached re-run
+    reads none.
+  - **A02.11 report, HEAD vs this change.** The command is the R04.6
+    default-profile one from A02.11, with `--derived-dir
+    data/cache/derived_sessions`, `--workers 1 --scoring-threads 0
+    --no-score-cache`, so torch keeps its default threads as before. Both
+    reports are identical apart from `generated_at`, `command` and
+    `behavior_models.path`, which names each run's snapshot directory: 18
+    drives, 184 injections, 1,472 outcomes. Both trees ran from snapshot
+    copies in the session scratchpad.
+
+    | stream cache | before (HEAD) | after |
+    |---|---|---|
+    | cold (56 streams built) | 1,195.7 s, 4.55 GB | 1,014.6 s, 4.23 GB |
+    | warm | 807.1 s, 4.25 GB | 723.0 s, 4.14 GB |
+
+    Wall time is from `rss_watch`; peak is the process tree's RSS. The
+    saving is modest because scoring, not featurization, dominates. P02.5
+    takes the rest.
+
+- [x] **P02.5 Score drives in parallel, and cache scores.**
   - **Parallel scoring.** Drives are independent, so score them across
     processes. Size the pool by the measured peak per worker (about 4.3 GB for
     one worker after P01.5). Pin torch threads per worker so the workers do
@@ -387,6 +444,155 @@ recomputes the rolling frame over the whole buffered window every tick.
   - A changed artifact is rescored only for its own detector.
 
   Size **M**.
+
+  *Done 2026-09-27.* All runs use the A02.11 R04.6 command (see P02.4) on
+  the laptop, with the stream cache warm. `--no-score-cache` is set unless a
+  row says otherwise.
+  - **Parallel scoring.** `score_drives` in `scripts/evaluate_detectors.py`
+    runs `DriveScorer.score_drive` per drive in a **spawned** pool, largest
+    drive first. Spawned, not forked: the parent has already run torch.
+    Results are merged in drive order. A broken pool, such as a worker
+    killed for memory, falls back to scoring in-process and reads back what
+    the workers finished.
+  - **Pool size.** `scoring_workers` caps `--workers` by the drive count, by
+    cores ÷ torch threads, and by memory: 0.8 x the lesser of `MemAvailable`
+    and the cgroup headroom, ÷ `SCORING_WORKER_PEAK_BYTES`. The headroom is
+    the least `memory.max - memory.current` over the process's group and its
+    parents up to the root (`max` counts as unlimited). The group is found
+    through `src.daemon.health.memory_limit_status`; this is what caps
+    `canary.service`'s `MemoryMax`. That constant is 3.3 GB, the
+    measured worker peak, and it assumes every worker peaks at once. On this
+    16 GB laptop, `--workers 4` therefore runs 3. **On the Pi** (`on_the_pi()`)
+    scoring always runs in-process, with no pool and no refusal. Tests:
+    `test_the_scoring_pool_is_capped_by_the_measured_worker_peak`,
+    `test_the_scoring_pool_respects_the_cgroup_and_stays_in_process_on_the_pi`,
+    `test_the_cgroup_headroom_is_the_tightest_level_up_to_the_root`.
+  - **Threads.** `--scoring-threads` (default 1) pins torch's thread count
+    in the parent and in every worker, and is part of the unit key.
+    Measured: reports at 1 thread and at torch's default (6 here) differ in
+    21 fields. They are the `vus_pr` estimates and bounds (max |Δ| 8.9e-6)
+    and `sequence_parity.max_score_difference` (1.18e-7 vs 1.31e-7). No
+    verdict, episode, rate or recall differs. The count is therefore fixed,
+    never derived from `--workers`. `--scoring-threads 0` keeps the pre-P02.5
+    behaviour, and P02.4 used it for the HEAD comparison.
+
+    | workers | wall | tree peak RSS | peak per worker | report vs N=1 |
+    |---|---|---|---|---|
+    | 1 | 814.5 s | 4.09 GB | (in-process) | — |
+    | 2 | 561.9 s | 6.80 GB | 3.27 GB | identical |
+    | 3 (asked 4; capped by memory) | 492.9 s | 8.15 GB | 3.29 GB | identical |
+    | 4 (memory cap lifted in a benchmark wrapper) | 443.9 s | 9.40 GB | 3.25 GB | identical |
+
+    "Identical" means apart from `generated_at` and `command`: 18 drives,
+    184 injections. The worker peak comes from the worker that scores the
+    drive holding `2026-09-20T152758`.
+  - **Score cache.** `src/models/evaluation_cache.py`, under
+    `--cache-dir/scores` (gitignored `data/cache/`, `refuse_on_the_pi`).
+    `--no-score-cache` opts out.
+    - **Component key.** The artifact's sha256 plus its manifest's. A fitted
+      baseline uses its pickled parameters and threshold. The untrained AE
+      uses the sequence identity, seed and threshold. Plausibility uses its
+      limits-catalog fingerprint. Fused uses the IF and sequence identities.
+    - **Unit key.** The session frame by content (`frame_key`), the slice
+      bounds, the injection spec (kind, severity, start, end, roles), and
+      the featurization inputs: the whole config, behavior-models and
+      bindings sha256, `data/*.yaml`, the DBCs, the profile's files, and the
+      thread environment.
+    - **Both keys** carry `code_version`: every `src/**/*.py`, the harness
+      and `_cli.py`, the Python version, and the numpy/pandas/sklearn/scipy/
+      torch versions.
+    - **A run keeps nothing it cannot prove.** The code and the config file
+      are hashed first, at the start of `main`, before the config is parsed.
+      Every other key input is hashed *before anything loads*
+      (`KeySources` / `key_inputs`): each artifact with its manifest, the
+      bindings, the behavior models, and the data catalogs. The catalogs
+      include two files that can sit outside `data/`: the unscoped config's
+      `daemon.afr_calibration`, which is the file featurization reads
+      (`test_the_key_hashes_the_afr_calibration_featurization_reads`), and
+      the profile-scoped `plausibility.yaml` that the plausibility detector
+      reads. Entries are staged
+      under `scores/.staging/<run>/`. A scoring worker re-hashes the inputs
+      before it loads anything. On a mismatch it refuses, naming the changed
+      inputs, and the parent scores in-process. After scoring, the parent
+      re-hashes again. Only if nothing moved does it commit the staged
+      entries into the store; otherwise it discards them and warns (`score
+      cache not updated: key inputs changed during the run: <names>`). A
+      failed or interrupted run drops its staging (`ExitStack` callback).
+      Test: `test_an_input_edited_mid_run_leaves_no_entry_under_either_key`
+      (1 and 2 workers). It edits the bindings between key and score, then
+      asserts that no entry exists in the store, that the workers refused,
+      and that the report is still written. *Known limit:* a file edited and
+      then reverted to its original bytes while the parent (which loads once
+      at the start) is running is not detected, because every re-check sees
+      the original bytes again.
+    - **Bounded.** At the end of a committed run, `ScoreCache.prune` keeps the
+      store under `SCORE_CACHE_MAX_BYTES` (1 GiB, about 29 A02.11 entry sets
+      at 35 MB each; a changed IF adds about 12 MB). It deletes
+      least-recently-used entries first, where a hit refreshes the entry's
+      mtime. It never deletes an entry the
+      current run read or wrote (mtime at or after the run's start), and it
+      removes staging directories older than 24 h, left by runs that died.
+      Test: `test_the_score_cache_stages_until_commit_and_prunes_least_recently_used`.
+    - Results after the first verifier fixes, fresh store (`K` runs,
+      2026-09-27):
+      - **Cold cache, `--workers 4`** (3 workers): 510.4 s, 8.19 GB tree,
+        0 of 2,374 lookups hit. No staging was left behind, and the report
+        is identical to the N=1 no-cache one. After the changed-artifact run
+        below, the store held 47 MB.
+      - **Unchanged re-run, `--workers 1`:** 149.6 s, 1.79 GB. 2,350 of
+        2,350 lookups were read back, no stream was read, and nothing was
+        featurized. The report is identical. At `--workers 4` (3 workers):
+        113.1 s, also identical. The remaining time is loading and hashing
+        the 67 derived frames.
+      - **`--workers 2`, no cache:** 551.9 s, identical.
+      - **Re-confirmed on the final code** (`L` runs, after the D1/D2 fixes,
+        fresh store). Cold at `--workers 4` (3 workers): 503.9 s, 8.24 GB,
+        35 MB committed, no staging left. Unchanged re-run at `--workers 1`:
+        150.1 s, 1.81 GB, 2,350 of 2,350 hits, no stream read. Both reports
+        are identical to the N=1 no-cache report.
+    - **Changed artifact.** The IF `model.joblib` was re-serialized, so the
+      model is the same and the sha256 is new (`6b010b70…`). `isolation_forest`
+      and `fused` were rescored, 294 of 294 units each missed; `fused`
+      consumes the IF. `sequence`, `pca`, `robust_z` and
+      `untrained_autoencoder` were read back (294 of 294 each), and so was
+      `plausibility` (286 of 286). Wall time was 327.7 s. The report differs
+      only in `artifacts.isolation_forest.path` and `.sha256`.
+    - Fixture tests: `test_workers_and_the_score_cache_leave_the_report_unchanged`
+      proves that the pool ran (both drives' results carry a worker pid) and
+      forbids `featurize_wide_frame` on the re-run. Also
+      `test_score_cache_keys_follow_content_and_entries_round_trip_exactly`.
+  - **Retrain's gates reuse it.** `retrain._evaluate_on_drives` already
+    passes `--cache-dir` beside the feature cache.
+    `test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_baseline`
+    asserts that the IF score entries keep their inode through a second
+    benchmark gate and through the alert-budget gate's evaluation. A
+    rescored entry is a new file renamed into place; a hit refreshes only
+    the mtime.
+  - **Behaviour change on the Pi.** The score cache and the derived store
+    both refuse on the Pi. A Pi-side retrain (`on_the_pi()` or
+    `--compute-target pi`) therefore now passes `--no-score-cache` and
+    `--no-derived-store` to its gates, which reduce each session in memory
+    and score it afresh. Test:
+    `test_the_gates_score_without_the_score_cache_on_the_pi`. Before this,
+    the score cache would have failed the gate. A derived store passed on
+    the Pi made every session load fail, and the harness then exited 0
+    having scored no drive.
+  - **An empty result names its kind.** When no evaluation drive loads (or
+    no requested session loads at all), the harness now exits 2 without
+    writing a report. It prints `error: no evaluation drive loaded; N
+    session load(s) failed:` followed by each session's error. Retrain
+    raises on that exit code. Test:
+    `test_zero_drives_because_every_load_failed_is_refused_and_named`. It
+    simulates the Pi against a derived store, gets exit 2 naming `never
+    built on the Pi`, and gets the same drive scored with
+    `--no-derived-store`.
+  - **Other.** `_profile_data_dir` now resolves `data/<slug>` from the repo
+    root, not the working directory.
+  - **Catalogs.** `default_decode_inputs` is memoized per process and keyed
+    on the files' bytes, so an edited catalog reloads. DBC loads per A02.11
+    run went from 67 to 1 per process: 1 at `--workers 1`, and one per
+    loading worker otherwise. Test:
+    `test_decode_catalogs_load_once_per_process_and_reload_on_an_edit`.
 
 - [ ] **P02.6 Re-measure the slow tier.**
   - Run `scripts/mark_slow_tests.py` on a fresh full timing log and regenerate

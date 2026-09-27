@@ -37,7 +37,13 @@ import pandas as pd
 from src.alerts.fusion import FusionScorer
 from src.config import CanaryConfig
 from src.models.inference import SequenceInferenceEngine
-from src.models.isolation_forest import SCORE_COLUMN, TrainedIsolationForest
+from src.models.isolation_forest import (
+    CALIBRATED_THRESHOLD_COLUMN,
+    MISSING_FEATURES_COLUMN,
+    MODEL_MODE_COLUMN,
+    SCORE_COLUMN,
+    TrainedIsolationForest,
+)
 from src.models.sequence_calibration import SequenceThresholdCalibration
 from src.models.sequence_dataset import (
     MASK_ARRIVED_SAMPLE,
@@ -419,33 +425,76 @@ class DeployedStack:
 
     def score(self, features: pd.DataFrame) -> dict[str, DetectorOutput]:
         out: dict[str, DetectorOutput] = {}
-        scored: pd.DataFrame | None = None
-        if self.trained_if is not None:
-            aligned = align_features_to_schema(features, list(self.trained_if.feature_columns))
-            scored = self.trained_if.score(aligned)
-            verdict = _if_anomalous(scored).to_numpy(dtype=object)
-            score = pd.to_numeric(scored[SCORE_COLUMN], errors="coerce").to_numpy(
-                dtype=float, copy=True
-            )
-            score[~np.isfinite(score)] = np.nan
-            out["isolation_forest"] = DetectorOutput(verdict, score)
-        sequence: SequenceScores | None = None
-        if self.sequence is not None:
-            sequence = self.sequence.score(features)
-            out["sequence"] = DetectorOutput(sequence.is_anomaly, sequence.global_score)
-            out["sequence_global"] = DetectorOutput(
-                sequence.is_anomaly_global, sequence.global_score
-            )
-        if "fused" not in self.withheld and scored is not None and sequence is not None:
-            fused = _fused_anomalous(
-                scored,
-                fusion=self.fusion,
-                scales=dict(self.trained_if.score_scales) if self.trained_if else {},
-                config=self.config,
-                sequence_results=sequence.results(),
-            ).to_numpy(dtype=object)
-            out["fused"] = DetectorOutput(fused, np.full(len(features), np.nan), pre_gated=True)
+        forest = self.score_isolation_forest(features) if self.trained_if is not None else None
+        if forest is not None:
+            out["isolation_forest"] = forest.output
+        sequence = self.score_sequence(features) if self.sequence is not None else None
+        if sequence is not None:
+            out.update(sequence_outputs(sequence))
+        if "fused" not in self.withheld and forest is not None and sequence is not None:
+            out["fused"] = self.fuse(forest, sequence)
         return out
+
+    # The three parts :meth:`score` joins, separately, so the harness's score
+    # cache (P02.5) can keep each one under its own artifact: a new IF artifact
+    # rescores the IF (and the fusion over it), never the sequence detector.
+
+    def score_isolation_forest(self, features: pd.DataFrame) -> IsolationForestScores:
+        if self.trained_if is None:
+            raise ValueError("no Isolation Forest artifact in this stack")
+        aligned = align_features_to_schema(features, list(self.trained_if.feature_columns))
+        scored = self.trained_if.score(aligned)
+        verdict = _if_anomalous(scored).to_numpy(dtype=object)
+        score = pd.to_numeric(scored[SCORE_COLUMN], errors="coerce").to_numpy(
+            dtype=float, copy=True
+        )
+        score[~np.isfinite(score)] = np.nan
+        return IsolationForestScores(
+            DetectorOutput(verdict, score),
+            scored.loc[:, [c for c in FUSION_COLUMNS if c in scored.columns]],
+        )
+
+    def score_sequence(self, features: pd.DataFrame) -> SequenceScores:
+        if self.sequence is None:
+            raise ValueError("no sequence artifact in this stack")
+        return self.sequence.score(features)
+
+    def fuse(self, forest: IsolationForestScores, sequence: SequenceScores) -> DetectorOutput:
+        """The fused verdict from the two sources' outputs; reads no features."""
+        fused = _fused_anomalous(
+            forest.fusion_frame,
+            fusion=self.fusion,
+            scales=dict(self.trained_if.score_scales) if self.trained_if else {},
+            config=self.config,
+            sequence_results=sequence.results(),
+        ).to_numpy(dtype=object)
+        return DetectorOutput(fused, np.full(len(fused), np.nan), pre_gated=True)
+
+
+#: The IF's scored columns the fusion reads (``_fused_anomalous``).
+FUSION_COLUMNS = (
+    TIMESTAMP_COLUMN,
+    MODEL_MODE_COLUMN,
+    CALIBRATED_THRESHOLD_COLUMN,
+    SCORE_COLUMN,
+    MISSING_FEATURES_COLUMN,
+)
+
+
+@dataclass(frozen=True)
+class IsolationForestScores:
+    """The IF's harness output plus the scored columns the fusion reads."""
+
+    output: DetectorOutput
+    fusion_frame: pd.DataFrame
+
+
+def sequence_outputs(sequence: SequenceScores) -> dict[str, DetectorOutput]:
+    """``sequence`` (as served) and ``sequence_global`` (the A02.3 ablation)."""
+    return {
+        "sequence": DetectorOutput(sequence.is_anomaly, sequence.global_score),
+        "sequence_global": DetectorOutput(sequence.is_anomaly_global, sequence.global_score),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -926,7 +975,12 @@ class PlausibilityDetector:
         keep = (times >= start.timestamp()) & (times < end.timestamp())
         if channels is not None:
             groups = {channel_group(c) for c in channels}
-            keep &= stream.samples["channel"].map(channel_group).isin(groups).to_numpy()
+            # Grouped once per distinct channel, not once per sample: mapping
+            # every sample built an object column the length of the stream,
+            # the harness's memory peak (P02.4). The mask is the same.
+            names = stream.samples["channel"]
+            allowed = [c for c in pd.unique(names) if channel_group(c) in groups]
+            keep &= names.isin(allowed).to_numpy()
         return stream.with_samples(
             stream.samples.loc[keep].reset_index(drop=True), stream.modes[keep]
         )
@@ -993,6 +1047,8 @@ __all__ = [
     "DeployedStack",
     "Detector",
     "DetectorOutput",
+    "FUSION_COLUMNS",
+    "IsolationForestScores",
     "MahalanobisBaseline",
     "PCABaseline",
     "PlausibilityDetector",
@@ -1006,6 +1062,7 @@ __all__ = [
     "detector_roles",
     "load_curated_channels",
     "raw_channels",
+    "sequence_outputs",
     "sequence_parity",
     "suppressed_for",
 ]

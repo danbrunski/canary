@@ -4,8 +4,10 @@ reporting, summaries, and an end-to-end run on fixture sessions."""
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -470,3 +472,363 @@ def test_an_if_whose_deviation_columns_cannot_be_produced_is_refused(
     assert main([*argv, "--out", str(tmp_path / "r.json")]) == 2
     assert "no behavior model 'speed_vs_rpm'" in capsys.readouterr().err
     assert not (tmp_path / "r.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# P02.5: parallel scoring and the score cache leave the report unchanged
+# ---------------------------------------------------------------------------
+
+
+def _report_body(path: Path) -> dict[str, object]:
+    report = json.loads(path.read_text())
+    return {k: v for k, v in report.items() if k not in ("generated_at", "command")}
+
+
+def _fit_if(session: Path, artifact: Path, *, seed: int) -> None:
+    from src.config import CanaryConfig
+    from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
+    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
+
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    trained = fit_isolation_forest(
+        featurize_wide_frame(load_resampled_session(session, config), config).features,
+        IFConfig(n_estimators=40, random_state=seed),
+        feature_columns=["obd:RPM", "obd:SPEED"],
+        fitted_at="2026-05-12T00:00:00Z",
+    )
+    trained.save(artifact, default_manifest_path(artifact))
+
+
+def _entries(cache: Path, component: str) -> set[Path]:
+    return set(cache.glob(f"scores/{component}-*/*/*.pkl"))
+
+
+def _record_scoring_pids(monkeypatch: pytest.MonkeyPatch, harness: Any) -> list[int]:
+    """Wrap ``score_drives``; the returned list fills with the pid that scored
+    each drive (a pool worker's, or this process's)."""
+    pids: list[int] = []
+    real = harness.score_drives
+
+    def recording(*args: Any, **kwargs: Any) -> Any:
+        results = real(*args, **kwargs)
+        pids.extend(result.pid for result in results)
+        return results
+
+    monkeypatch.setattr(harness, "score_drives", recording)
+    return pids
+
+
+def test_workers_and_the_score_cache_leave_the_report_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The A02.11 acceptance on fixture drives: ``--workers 1`` and
+    ``--workers 2`` write the same report, an unchanged re-run is read back
+    from the cache without featurizing anything, and a new IF artifact is
+    rescored for the IF alone (the plausibility scores are reused)."""
+    import scripts.evaluate_detectors as harness
+
+    training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    _write_session(root, "2026-05-14T000000", start=1_778_716_800.0, seed=3)
+    artifact = tmp_path / "models" / "model.joblib"
+    _fit_if(training, artifact, seed=0)
+    base = _main_args(root, artifact, tmp_path)
+    base[base.index("robust_z")] = "plausibility"
+    # Size the pool by a tiny per-worker peak, so two workers always fit.
+    monkeypatch.setattr(harness, "SCORING_WORKER_PEAK_BYTES", 1)
+
+    serial = tmp_path / "serial.json"
+    assert main([*base, "--no-score-cache", "--out", str(serial)]) == 0
+    assert "(--no-score-cache)" in capsys.readouterr().out
+    assert not (tmp_path / "cache" / "scores").exists()
+    parallel = tmp_path / "parallel.json"
+    workers = base.index("--workers") + 1
+    argv = [*base[:workers], "2", *base[workers + 1 :]]
+    # The pool really ran: every drive's result came from another process.
+    scored_by = _record_scoring_pids(monkeypatch, harness)
+    assert main([*argv, "--out", str(parallel)]) == 0
+    assert len(scored_by) == 2 and os.getpid() not in scored_by
+    assert len(json.loads(parallel.read_text())["drives"]) == 2
+    assert _report_body(parallel) == _report_body(serial)
+    assert not list((tmp_path / "cache" / "scores" / ".staging").glob("*"))
+
+    # Unchanged re-run: every score read back, no row featurized.
+    def refuse(*_a: object, **_k: object) -> object:
+        raise AssertionError("an unchanged re-run featurized rows")
+
+    capsys.readouterr()
+    with monkeypatch.context() as patched:
+        patched.setattr(harness, "featurize_wide_frame", refuse)
+        rerun = tmp_path / "rerun.json"
+        assert main([*base, "--out", str(rerun)]) == 0
+    line = next(x for x in capsys.readouterr().out.splitlines() if x.startswith("score cache:"))
+    hits, _, lookups = line.removeprefix("score cache: ").split(" lookups")[0].partition(" of ")
+    assert int(hits) == int(lookups) > 0
+    assert _report_body(rerun) == _report_body(serial)
+
+    # A new IF artifact: its own scores are new, plausibility's are reused.
+    cache = tmp_path / "cache"
+    before_if = _entries(cache, "isolation_forest")
+    before_plausibility = _entries(cache, "plausibility")
+    _fit_if(training, artifact, seed=1)
+    changed = tmp_path / "changed.json"
+    assert main([*base, "--out", str(changed)]) == 0
+    new_if = _entries(cache, "isolation_forest") - before_if
+    assert new_if and not {p.parent.parent for p in new_if} & {p.parent.parent for p in before_if}
+    assert _entries(cache, "plausibility") == before_plausibility
+    report = json.loads(changed.read_text())
+    assert (
+        report["artifacts"]["isolation_forest"]["sha256"]
+        != json.loads(serial.read_text())["artifacts"]["isolation_forest"]["sha256"]
+    )
+
+
+def test_score_cache_keys_follow_content_and_entries_round_trip_exactly(
+    tmp_path: Path,
+) -> None:
+    from src.models.evaluation_cache import ScoreCache, code_version, frame_key
+    from src.models.evaluation_detectors import DetectorOutput
+
+    frame = pd.DataFrame({"a": [1.0, np.nan, 3.0], "b": ["x", None, "z"]})
+    assert frame_key(frame) == frame_key(frame.copy())
+    moved = frame.copy()
+    moved.loc[2, "a"] = 3.0000001
+    assert frame_key(moved) != frame_key(frame)
+    assert frame_key(frame.astype({"a": "float32"})) != frame_key(frame)
+
+    extra = tmp_path / "harness.py"
+    extra.write_text("x = 1\n")
+    first = code_version([extra])
+    extra.write_text("x = 2\n")
+    assert code_version([extra]) != first
+
+    cache = ScoreCache(tmp_path / "scores")
+    verdict = np.array([True, np.True_, None, np.False_], dtype=object)
+    output = DetectorOutput(verdict, np.array([0.5, np.nan, 1.0, 2.0]))
+    assert cache.get("iforest-abc", "unit") is None
+    cache.put("iforest-abc", "unit", {"iforest": output})
+    back = cache.get("iforest-abc", "unit")["iforest"]
+    # The same element types, not merely equal values: the harness tests
+    # ``v is True or v is np.True_`` and must see what a fresh score gives.
+    assert [type(v) for v in back.verdict] == [type(v) for v in verdict]
+    np.testing.assert_array_equal(back.score, output.score)
+    assert cache.counts() == {"iforest": {"hits": 1, "misses": 1}}
+    assert ScoreCache(None).get("iforest-abc", "unit") is None
+
+
+def test_the_scoring_pool_is_capped_by_the_measured_worker_peak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``--workers`` is a ceiling: memory (the measured per-worker peak, as if
+    every worker peaked at once), cores at the pinned thread count, and the
+    drive count each cap it; one worker never spawns a pool."""
+    import scripts.evaluate_detectors as harness
+
+    peak = harness.SCORING_WORKER_PEAK_BYTES
+    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
+    room = int(3 * peak / harness.SCORING_MEMORY_FRACTION) + 1
+    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: room)
+    assert harness.scoring_workers(4, 18) == 3
+    assert harness.scoring_workers(4, 2) == 2
+    assert harness.scoring_workers(4, 18, threads=6) == 2
+    assert harness.scoring_workers(1, 18) == 1
+    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: peak // 2)
+    assert harness.scoring_workers(4, 18) == 1
+
+
+@pytest.mark.parametrize("workers", ["1", "2"])
+def test_an_input_edited_mid_run_leaves_no_entry_under_either_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    workers: str,
+) -> None:
+    """P02.5: the key is hashed before anything loads; a bindings edit between
+    then and scoring must not leave a score under the old key or the new one.
+    Scoring workers re-hash before they load and refuse (the parent finishes
+    in-process); the parent re-hashes after scoring and commits nothing."""
+    import scripts.evaluate_detectors as harness
+
+    training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    _write_session(root, "2026-05-14T000000", start=1_778_716_800.0, seed=3)
+    artifact = tmp_path / "models" / "model.joblib"
+    _fit_if(training, artifact, seed=0)
+    bindings = tmp_path / "bindings.yaml"
+    bindings.write_bytes((EXAMPLE_YAML.parent / "data" / "bindings.yaml").read_bytes())
+    base = _main_args(root, artifact, tmp_path)
+    at = base.index("--workers") + 1
+    argv = [*base[:at], workers, *base[at + 1 :], "--bindings", str(bindings)]
+    monkeypatch.setattr(harness, "SCORING_WORKER_PEAK_BYTES", 1)
+
+    real = harness.score_drives
+
+    def edit_then_score(*args: Any, **kwargs: Any) -> Any:
+        bindings.write_bytes(bindings.read_bytes() + b"\n# edited mid-run\n")
+        results = real(*args, **kwargs)
+        # A worker that loaded the edited bindings refused; the parent scored.
+        assert all(result.pid == os.getpid() for result in results)
+        return results
+
+    monkeypatch.setattr(harness, "score_drives", edit_then_score)
+    assert main([*argv, "--out", str(tmp_path / "r.json")]) == 0
+    assert "key inputs changed during the run: bindings" in capsys.readouterr().err
+    scores = tmp_path / "cache" / "scores"
+    assert not list(scores.rglob("*.pkl"))
+    assert json.loads((tmp_path / "r.json").read_text())["drives"]
+
+
+def test_the_score_cache_stages_until_commit_and_prunes_least_recently_used(
+    tmp_path: Path,
+) -> None:
+    import time
+
+    from src.models.evaluation_cache import STAGING_DIR, STALE_STAGING_SECONDS, ScoreCache
+
+    root = tmp_path / "scores"
+    cache = ScoreCache(root)
+    cache.put("a-1", "u1", [1])
+    assert not list((root / "a-1").rglob("*.pkl"))  # staged, not in the store
+    assert cache.get("a-1", "u1") == [1]  # this run reads its own entries
+    cache.discard()
+    assert ScoreCache(root).get("a-1", "u1") is None
+    cache = ScoreCache(root)
+    cache.put("a-1", "u1", [1])
+    assert cache.commit() == 1
+    assert ScoreCache(root).get("a-1", "u1") == [1]
+    assert not (root / STAGING_DIR / cache.run).exists()
+
+    # Twelve ~1 kB entries in a fresh store, oldest first.
+    root = tmp_path / "lru"
+    now = time.time()
+    filler = ScoreCache(root)
+    for i in range(12):
+        filler.put("b-1", f"u{i:02d}", b"x" * 1000)
+    filler.commit()
+    paths = {i: next(root.rglob(f"u{i:02d}.pkl")) for i in range(12)}
+    for i, path in paths.items():
+        os.utime(path, (now - 1000 + i, now - 1000 + i))
+    size = paths[0].stat().st_size
+    # A hit refreshes an entry's mtime: the oldest entry, once read, is recent.
+    assert ScoreCache(root).get("b-1", "u00") is not None
+    stale = root / STAGING_DIR / "dead-run"
+    stale.mkdir(parents=True)
+    os.utime(stale, (now - STALE_STAGING_SECONDS - 1,) * 2)
+
+    kept_since = now - 1000 + 10  # u10, u11 and the u00 just read are this run's
+    deleted = ScoreCache(root).prune(max_bytes=4 * size, keep_since=kept_since)
+    left = sorted(p.stem for p in root.rglob("*.pkl"))
+    # Least recently used went first until the store fit; this run's stayed.
+    assert left == ["u00", "u09", "u10", "u11"]
+    assert deleted == 8 and not stale.exists()
+    # The current run's entries survive even when they alone exceed the cap.
+    ScoreCache(root).prune(max_bytes=0, keep_since=now - 1000 + 9)
+    assert sorted(p.stem for p in root.rglob("*.pkl")) == left
+
+
+def test_the_scoring_pool_respects_the_cgroup_and_stays_in_process_on_the_pi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import scripts.evaluate_detectors as harness
+
+    group = tmp_path / "cgroup" / "system.slice" / "canary.service"
+    group.mkdir(parents=True)
+    self_cgroup = tmp_path / "self_cgroup"
+    self_cgroup.write_text("0::/system.slice/canary.service\n")
+    (group / "memory.max").write_text(f"{6 * 1024**3}\n")
+    (group / "memory.current").write_text(f"{1024**3}\n")
+    headroom = harness._cgroup_memory_headroom(
+        cgroup_root=tmp_path / "cgroup", self_cgroup=self_cgroup
+    )
+    assert headroom == 5 * 1024**3
+    (group / "memory.max").write_text("max\n")
+    assert (
+        harness._cgroup_memory_headroom(cgroup_root=tmp_path / "cgroup", self_cgroup=self_cgroup)
+        is None
+    )
+
+    peak = harness.SCORING_WORKER_PEAK_BYTES
+    monkeypatch.setattr(harness.os, "cpu_count", lambda: 12)
+    monkeypatch.setattr(harness, "on_the_pi", lambda: False)
+    monkeypatch.setattr(harness, "_available_memory_bytes", lambda: 100 * peak)
+    # The cgroup's headroom caps the pool below what MemAvailable would allow.
+    room = int(2 * peak / harness.SCORING_MEMORY_FRACTION) + 1
+    monkeypatch.setattr(harness, "_cgroup_memory_headroom", lambda: room)
+    assert harness.scoring_workers(4, 18) == 2
+    monkeypatch.setattr(harness, "_cgroup_memory_headroom", lambda: None)
+    assert harness.scoring_workers(4, 18) == 4
+    # On the Pi: in-process, whatever memory says, and no refusal.
+    monkeypatch.setattr(harness, "on_the_pi", lambda: True)
+    assert harness.scoring_workers(4, 18) == 1
+
+
+def test_zero_drives_because_every_load_failed_is_refused_and_named(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An empty result says which kind of empty it is (P02.5): a harness run
+    on the Pi with a derived store (which refuses to build there) loads no
+    session. It exits non-zero naming each failure, never 0 with no drives."""
+    import src.preprocessing.derived_store as derived_store
+
+    training = _write_session(tmp_path / "train", "2026-05-12T000000", start=1_778_544_000.0)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    artifact = tmp_path / "models" / "model.joblib"
+    _fit_if(training, artifact, seed=0)
+    out = tmp_path / "r.json"
+    argv = [*_main_args(root, artifact, tmp_path), "--no-score-cache", "--out", str(out)]
+    monkeypatch.setattr(derived_store, "on_the_pi", lambda: True)
+    assert main(argv) == 2
+    err = capsys.readouterr().err
+    assert "no evaluation drive loaded; 1 session load(s) failed" in err
+    assert "2026-05-13T000000: " in err and "never built on the Pi" in err
+    assert not out.exists()
+    # The same drive reduced in memory (what retrain now passes on the Pi).
+    at = argv.index("--derived-dir")
+    del argv[at : at + 2]
+    assert main([*argv, "--no-derived-store"]) == 0
+    assert len(json.loads(out.read_text())["drives"]) == 1
+
+
+def test_the_cgroup_headroom_is_the_tightest_level_up_to_the_root(tmp_path: Path) -> None:
+    import scripts.evaluate_detectors as harness
+
+    root = tmp_path / "cgroup"
+    leaf = root / "system.slice" / "canary.service"
+    leaf.mkdir(parents=True)
+    self_cgroup = tmp_path / "self_cgroup"
+    self_cgroup.write_text("0::/system.slice/canary.service\n")
+    (leaf / "memory.max").write_text("max\n")
+    (leaf / "memory.current").write_text("100\n")
+    (root / "system.slice" / "memory.max").write_text("1000\n")
+    (root / "system.slice" / "memory.current").write_text("400\n")
+    # The leaf is unlimited; its parent's ceiling binds it.
+    assert harness._cgroup_memory_headroom(cgroup_root=root, self_cgroup=self_cgroup) == 600
+    (leaf / "memory.max").write_text("300\n")
+    assert harness._cgroup_memory_headroom(cgroup_root=root, self_cgroup=self_cgroup) == 200
+
+
+def test_the_key_hashes_the_afr_calibration_featurization_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``featurize_wide_frame`` takes the unscoped config, so the unscoped
+    ``daemon.afr_calibration`` is the file whose edit must change the key."""
+    import scripts.evaluate_detectors as harness
+    from src.config import CanaryConfig
+
+    seen: list[Any] = []
+    real = harness.key_inputs
+
+    def recording(sources: Any) -> Any:
+        seen.append(sources)
+        return real(sources)
+
+    monkeypatch.setattr(harness, "key_inputs", recording)
+    root = tmp_path / "sessions"
+    _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
+    argv = _main_args(root, tmp_path / "absent.joblib", tmp_path)
+    assert main([*argv, "--plan", "--out", str(tmp_path / "r.json")]) == 0
+    afr = CanaryConfig.from_yaml(EXAMPLE_YAML).daemon.afr_calibration.resolve()
+    assert afr in seen[0].extra_data

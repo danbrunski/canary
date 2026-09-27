@@ -66,6 +66,7 @@ from src.preprocessing.feature_cache import (
 )
 from src.preprocessing.features import (
     CONTEXT_COLUMN_PREFIX,
+    ROLLING_SUFFIXES,
     FeatureConfig,
     base_channel,
     compute_features,
@@ -78,7 +79,13 @@ from src.preprocessing.loader import (
     to_wide,
 )
 from src.preprocessing.quality_gate import apply_quality_gate
-from src.preprocessing.resampler import GAP_SUFFIX, ResampleConfig, is_flag_column, resample_wide
+from src.preprocessing.resampler import (
+    FLAG_SUFFIXES,
+    GAP_SUFFIX,
+    ResampleConfig,
+    is_flag_column,
+    resample_wide,
+)
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import (
     MODE_COLUMN,
@@ -1157,12 +1164,41 @@ def load_resampled_session(
 
 def default_decode_inputs(bindings_path: Path = DEFAULT_BINDINGS_PATH) -> DecodeInputs:
     """The catalogs :func:`load_resampled_session` decodes with: bindings,
-    ``.dbc`` files and the DID map, each skipped when absent (as in training)."""
-    return DecodeInputs(
-        bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
-        dbc=load_dbc_dir(DEFAULT_DBC_DIR),
-        did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
-    )
+    ``.dbc`` files and the DID map, each skipped when absent (as in training).
+
+    Loaded once per process for the same file bytes (P02.5): parsing the DBC
+    alone cost ~0.3 s, and the evaluation harness asked once per session.
+    Keyed on the files' contents, so an edited catalog is reloaded.
+    """
+    stamp = _catalog_stamp(bindings_path, *sorted(DEFAULT_DBC_DIR.glob("*.dbc")), DEFAULT_DIDS_PATH)
+    cached = _DECODE_INPUTS_MEMO.get(stamp)
+    if cached is None:
+        cached = DecodeInputs(
+            bindings=load_bindings(bindings_path) if bindings_path.exists() else None,
+            dbc=load_dbc_dir(DEFAULT_DBC_DIR),
+            did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
+        )
+        _DECODE_INPUTS_MEMO.clear()
+        _DECODE_INPUTS_MEMO[stamp] = cached
+    return cached
+
+
+#: The last catalogs :func:`default_decode_inputs` loaded, by file contents.
+_DECODE_INPUTS_MEMO: dict[tuple[tuple[str, str | None], ...], DecodeInputs] = {}
+
+
+def _catalog_stamp(*paths: Path) -> tuple[tuple[str, str | None], ...]:
+    """Each path with its content hash (``None`` when absent)."""
+    import hashlib
+
+    stamp: list[tuple[str, str | None]] = []
+    for path in paths:
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            digest = None
+        stamp.append((str(path.resolve()), digest))
+    return tuple(stamp)
 
 
 def disposition_screen_frames(
@@ -1280,6 +1316,28 @@ def featurize_wide_frame(
     warmup) and has already written those columns into ``wide``.
     """
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
+    framed = _append_derived_channels(framed, config)
+    cfg = _feature_config(config, feature_config)
+    if behavior_models is not None and behavior_models.models:
+        framed = append_deviation_columns(
+            framed, behavior_models, rate_window_seconds=cfg.window_seconds
+        )
+    features = compute_features(_without_committee_columns(framed), config=cfg)
+    return FeaturizedFrame(
+        features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
+    )
+
+
+def _feature_config(config: CanaryConfig, feature_config: FeatureConfig | None) -> FeatureConfig:
+    return feature_config or FeatureConfig(
+        window_seconds=config.preprocessing.rolling_window_seconds
+    )
+
+
+def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
+    """Every derived channel :func:`featurize_wide_frame` appends between
+    segmentation and the behavior deviations, in order: the one list both it
+    and :func:`featurize_perturbed_frame` run."""
     # Derived anomaly signals (air mass per cycle, VE, bank-balance
     # asymmetries, total trim, catalyst efficiency, AFR/TPS cross-checks)
     # appended BEFORE behavior deviations + feature extraction so recipes can
@@ -1315,22 +1373,311 @@ def featurize_wide_frame(
     # frame for the committee evaluator and the fingerprint, and are never
     # rolled into the feature frame (see analysis.committees).
     framed = append_committee_residuals(framed)
-    cfg = feature_config or FeatureConfig(
-        window_seconds=config.preprocessing.rolling_window_seconds
-    )
-    if behavior_models is not None and behavior_models.models:
-        framed = append_deviation_columns(
-            framed, behavior_models, rate_window_seconds=cfg.window_seconds
-        )
+    return framed
+
+
+def _without_committee_columns(framed: pd.DataFrame) -> pd.DataFrame:
+    """``framed`` without the sensor-committee columns: committees are
+    detectors, not features, so they are never rolled (H04.1)."""
     committee_columns = [
         column
         for column in framed.columns
         if committee_channel_reason(base_channel(str(column))) is not None
     ]
-    features = compute_features(framed.drop(columns=committee_columns), config=cfg)
-    return FeaturizedFrame(
-        features=features, operating_frame=framed, segmenter_fell_back=segmenter_fell_back
+    return framed.drop(columns=committee_columns)
+
+
+def _column_root(column: str) -> str:
+    """The channel a column belongs to: rolling and bookkeeping suffixes off
+    (``obd:MAF__roc`` and ``obd:MAF__gap`` are both ``obd:MAF``)."""
+    root = base_channel(column)
+    for suffix in FLAG_SUFFIXES:
+        root = root.removesuffix(suffix)
+    return root
+
+
+def behavior_model_input_roots(model: Any) -> frozenset[str]:
+    """Every channel a behavior model's definition names, as column roots.
+
+    Read generically from the whole model (axes, output, eligibility gates,
+    cold-start channels, local ranges, required context), so a field added to
+    the schema is covered without this list being edited. Any string holding a
+    source separator counts; a timestamp string is harmlessly over-included.
+    """
+    from src.decode.behavior_eligibility import resolve_output_column
+
+    held = _MODEL_ROOTS.get(id(model))
+    if held is not None and held[0] is model:
+        return held[1]
+    roots: set[str] = {_column_root(resolve_output_column(model.output))}
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            if ":" in value:
+                roots.add(_column_root(value))
+        elif isinstance(value, Mapping):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, list | tuple | set | frozenset):
+            for item in value:
+                walk(item)
+
+    walk(model.model_dump())
+    if len(_MODEL_ROOTS) > 1024:
+        _MODEL_ROOTS.clear()
+    result = frozenset(roots)
+    # Held with the model itself, so a reused id can never serve another's.
+    _MODEL_ROOTS[id(model)] = (model, result)
+    return result
+
+
+#: :func:`behavior_model_input_roots` by model (a model's dump is ~2 ms, and
+#: the injection sweep asks for every model on every injection).
+_MODEL_ROOTS: dict[int, tuple[Any, frozenset[str]]] = {}
+
+
+def _changed_columns(frame: pd.DataFrame, reference: pd.DataFrame) -> list[str] | None:
+    """Columns of ``frame`` whose values differ from ``reference``'s (NaN equal
+    to NaN; a dtype change is a change), in ``frame``'s order, or ``None`` when
+    ``frame`` has a column ``reference`` lacks (not comparable).
+
+    Compared a dtype block at a time: column by column it was most of the
+    incremental path's cost.
+    """
+    if len(frame) != len(reference) or any(c not in reference.columns for c in frame.columns):
+        return None
+    columns = list(frame.columns)
+    ref_dtypes = dict(reference.dtypes.items())
+    changed: set[str] = set()
+    by_dtype: dict[Any, list[str]] = {}
+    for column, dtype in frame.dtypes.items():
+        if ref_dtypes[column] != dtype:
+            changed.add(str(column))
+        else:
+            by_dtype.setdefault(dtype, []).append(str(column))
+    for dtype, group in by_dtype.items():
+        kind = getattr(dtype, "kind", "O")
+        if kind in "fc" and isinstance(dtype, np.dtype):
+            a = frame[group].to_numpy()
+            b = reference[group].to_numpy()
+            same = ((a == b) | (np.isnan(a) & np.isnan(b))).all(axis=0)
+        elif kind in "biu" and isinstance(dtype, np.dtype):
+            same = (frame[group].to_numpy() == reference[group].to_numpy()).all(axis=0)
+        else:
+            same = np.array(
+                [
+                    frame[c].reset_index(drop=True).equals(reference[c].reset_index(drop=True))
+                    for c in group
+                ],
+                dtype=bool,
+            )
+        changed.update(c for c, ok in zip(group, same, strict=True) if not ok)
+    return [str(c) for c in columns if str(c) in changed]
+
+
+#: Columns every stage may read beside its own inputs: the row structure.
+_ROW_COLUMNS = ("session", "timestamp", MODE_COLUMN, DRIVE_COLUMN)
+
+
+def _segmenter_read_columns() -> frozenset[str]:
+    """Every column the operating-mode segmenter reads: its candidate signals,
+    their gap flags (stale-gated signals) and the row structure."""
+    inputs = segmenter_input_columns()
+    return frozenset({*inputs, *(f"{column}{GAP_SUFFIX}" for column in inputs), *_ROW_COLUMNS})
+
+
+def derived_channel_inputs(channel: str) -> frozenset[str]:
+    """Every channel a ``derived:`` channel's computation may read: each member
+    of each declared input group (any may be the one chosen) plus its
+    optional refinements. Empty for a channel that is not derived."""
+    from src.analysis.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
+
+    groups = DERIVED_CHANNEL_INPUTS.get(channel, ())
+    return frozenset(
+        {member for group in groups for member in group}
+        | set(DERIVED_CHANNEL_OPTIONAL_INPUTS.get(channel, ()))
     )
+
+
+def derived_channels_reached(roots: Collection[str]) -> frozenset[str]:
+    """The derived *feature* channels whose value can depend on any of
+    ``roots``, through the declared inputs, transitively.
+
+    Sensor-committee outputs are left out: they are detectors, never features
+    (H04.1), and their member transforms are not declared inputs.
+    """
+    from src.analysis.derived import DERIVED_CHANNEL_INPUTS
+
+    features = [c for c in DERIVED_CHANNEL_INPUTS if committee_channel_reason(c) is None]
+    reached: set[str] = set()
+    frontier = set(roots)
+    while True:
+        new = {
+            channel
+            for channel in features
+            if channel not in reached and derived_channel_inputs(channel) & (frontier | reached)
+        }
+        if not new:
+            return frozenset(reached)
+        reached |= new
+        frontier |= new
+
+
+def _derived_ancestors(channels: Collection[str]) -> frozenset[str]:
+    """``channels`` and every input they read, transitively."""
+    seen: set[str] = set()
+    stack = list(channels)
+    while stack:
+        channel = stack.pop()
+        if channel in seen:
+            continue
+        seen.add(channel)
+        stack.extend(derived_channel_inputs(channel) - seen)
+    return frozenset(seen)
+
+
+def _narrowed(frame: pd.DataFrame, roots: Collection[str]) -> pd.DataFrame:
+    """``frame``'s row-structure columns and every column of ``roots``
+    (values, gap and arrival flags), in ``frame``'s order."""
+    wanted = set(roots)
+    return frame.loc[
+        :, [c for c in frame.columns if c in _ROW_COLUMNS or _column_root(str(c)) in wanted]
+    ]
+
+
+def featurize_perturbed_frame(
+    clean: FeaturizedFrame,
+    clean_wide: pd.DataFrame,
+    wide: pd.DataFrame,
+    config: CanaryConfig,
+    *,
+    behavior_models: BehaviorModels | None = None,
+    feature_config: FeatureConfig | None = None,
+    bindings: Bindings | None = None,
+) -> pd.DataFrame:
+    """``featurize_wide_frame(wide, ...).features``, recomputing only what
+    changed (P02.4).
+
+    ``clean`` is :func:`featurize_wide_frame`'s output, with the same
+    arguments, for ``clean_wide`` — a frame with ``wide``'s rows and columns,
+    such as the one a fault was injected into. The changed columns are found
+    by comparing ``wide`` with ``clean_wide``, never taken on trust; only
+    what they can reach is recomputed:
+
+    - The operating mode is reused. When a column the segmenter reads
+      changed, the frame is re-segmented, and a row whose mode moved — like
+      rows or columns that differ — sends the whole frame down the full
+      transform.
+    - A derived channel is recomputed when a declared input changed
+      (:func:`derived_channels_reached`), from its declared inputs alone.
+    - A behavior deviation is recomputed when its model names a changed
+      channel (:func:`behavior_model_input_roots`), from those channels.
+    - Rolling features are recomputed for the changed columns alone:
+      :func:`~src.preprocessing.features.compute_features` is per column.
+
+    The rest is the clean frame's. That is exact only while each stage reads
+    what it declares, so ``tests/test_feature_pipeline_incremental.py``
+    perturbs every *undeclared* column and requires each derived channel and
+    deviation to stay put, and compares this against the full transform with
+    ``check_exact`` for every realistic fault. Returns features only: the
+    sensor-committee columns (detectors, never features) are not recomputed,
+    and a deviation that reads one sends the frame down the full path.
+    """
+    reference = clean.operating_frame
+
+    def full() -> pd.DataFrame:
+        return featurize_wide_frame(
+            wide,
+            config,
+            behavior_models=behavior_models,
+            feature_config=feature_config,
+            bindings=bindings,
+        ).features
+
+    if MODE_COLUMN in wide.columns or list(wide.columns) != list(clean_wide.columns):
+        return full()
+    changed_wide = _changed_columns(wide, clean_wide)
+    if changed_wide is None or set(changed_wide) & set(_ROW_COLUMNS):
+        return full()
+    if not changed_wide:
+        return clean.features
+    if set(changed_wide) & _segmenter_read_columns():
+        # A segmenter input moved (a coolant fault): re-segment, and go on
+        # only if not one row changed mode.
+        segmented, _ = segment_or_constant(wide, config, bindings=bindings)
+        if (
+            not segmented[MODE_COLUMN]
+            .reset_index(drop=True)
+            .equals(reference[MODE_COLUMN].reset_index(drop=True))
+        ):
+            return full()
+    # A column some stage rewrites (a collector-stored ``derived:`` channel
+    # that is recomputed here) is not an input the clean run kept as it was:
+    # only a column the stages carried through untouched is reused.
+    if _changed_columns(clean_wide.loc[:, changed_wide], reference) != []:
+        return full()
+    values: dict[str, pd.Series] = {c: wide[c] for c in changed_wide}
+    reached = derived_channels_reached({_column_root(c) for c in changed_wide})
+    if reached:
+        narrow = _narrowed(wide, _derived_ancestors(reached)).copy()
+        narrow[MODE_COLUMN] = reference[MODE_COLUMN].to_numpy()
+        derived = _append_derived_channels(narrow, config)
+        outputs = derived.loc[:, [c for c in derived.columns if _column_root(str(c)) in reached]]
+        moved = _changed_columns(outputs, reference)
+        if moved is None:
+            return full()
+        values.update({c: outputs[c] for c in moved})
+    cfg = _feature_config(config, feature_config)
+    if behavior_models is not None and behavior_models.models:
+        roots = {_column_root(c) for c in values}
+        models = [m for m in behavior_models.models if behavior_model_input_roots(m) & roots]
+        if models:
+            read = frozenset().union(*(behavior_model_input_roots(m) for m in models))
+            if any(committee_channel_reason(root) is not None for root in read):
+                return full()  # a committee column is never recomputed here
+            before = reference.loc[
+                :,
+                [
+                    c
+                    for c in reference.columns
+                    if not str(c).startswith((DEVIATION_PREFIX, CONTEXT_COLUMN_PREFIX))
+                    and not str(c).endswith(ROLLING_SUFFIXES)
+                ],
+            ]
+            frame = _narrowed(before, read).copy()
+            for column, series in values.items():
+                if column in frame.columns:
+                    frame[column] = series.to_numpy()
+            deviations = append_deviation_columns(
+                frame,
+                behavior_models.model_copy(update={"models": models}),
+                rate_window_seconds=cfg.window_seconds,
+            )
+            added = deviations.loc[:, [c for c in deviations.columns if c not in frame.columns]]
+            moved = _changed_columns(added, reference)
+            if moved is None:
+                return full()
+            values.update({c: added[c] for c in moved})
+    rolled_input = _without_committee_columns(
+        pd.concat(
+            [
+                reference.loc[:, ["session", "timestamp", MODE_COLUMN]],
+                *(
+                    series.rename(column).set_axis(reference.index)
+                    for column, series in values.items()
+                ),
+            ],
+            axis=1,
+        )
+    )
+    rolled = compute_features(rolled_input, config=cfg)
+    replaced = [c for c in rolled.columns if c not in ("session", "timestamp", MODE_COLUMN)]
+    features = clean.features
+    if any(column not in features.columns for column in replaced):
+        return full()
+    out = features.drop(columns=replaced)
+    out = pd.concat([out, rolled.loc[:, replaced]], axis=1)
+    return out.loc[:, list(features.columns)]
 
 
 def segment_or_constant(

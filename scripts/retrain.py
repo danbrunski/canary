@@ -141,7 +141,7 @@ from src.models.training_ledger import (
     TrainingLedger,
     build_run_record_from_manifest,
 )
-from src.preprocessing.derived_store import use_store
+from src.preprocessing.derived_store import on_the_pi, use_store
 from src.preprocessing.feature_pipeline import (
     DEFAULT_FEATURE_CACHE_DIR,
     FeaturePolicy,
@@ -1476,8 +1476,15 @@ def _evaluate_on_drives(
         # Beside the trainers' feature-frame cache (the harness's default when
         # that is the default too), so a test run's cache stays in its tree.
         argv += ["--cache-dir", str(Path(args.feature_cache).parent / "evaluation_frames")]
+    on_pi = on_the_pi() or getattr(args, "compute_target", None) == "pi"
+    if on_pi:
+        # The harness's score cache is laptop-only and refuses on the Pi
+        # (P01's rules): a Pi-side retrain scores its gates afresh (P02.5).
+        argv.append("--no-score-cache")
     derived = derived_dir_for(args)
-    argv += ["--no-derived-store"] if derived is None else ["--derived-dir", str(derived)]
+    # The derived store refuses to build on the Pi too, and a refused load
+    # is a skipped session: the gate would score nothing. Reduce in memory.
+    argv += ["--no-derived-store"] if derived is None or on_pi else ["--derived-dir", str(derived)]
     if args.profile:
         argv += ["--profile", str(args.profile)]
     argv += (

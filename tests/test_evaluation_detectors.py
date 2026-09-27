@@ -290,6 +290,16 @@ def test_plausibility_confirmations_land_on_the_shared_row_grid(tmp_path: Path) 
     )
     assert set(window.samples["channel"]) <= {"obd:RPM", "obd:SPEED", "obd:COOLANT_TEMP"}
     assert window.samples["t"].min() >= grid2.iloc[30].timestamp()
+    # P02.4 groups each distinct channel once; the samples kept are the ones
+    # grouping every sample kept.
+    from src.plausibility.limits import channel_group
+
+    samples = stream.samples
+    times = samples["t"].to_numpy()
+    keep = (times >= grid2.iloc[30].timestamp()) & (times < grid2.iloc[90].timestamp())
+    group = {channel_group("obd:SHORT_FUEL_TRIM_1")}
+    keep &= samples["channel"].map(channel_group).isin(group).to_numpy()
+    pd.testing.assert_frame_equal(window.samples, samples.loc[keep].reset_index(drop=True))
 
 
 def test_curated_mahalanobis_sees_a_broken_correlation_per_mode(tmp_path: Path) -> None:

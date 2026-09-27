@@ -763,6 +763,49 @@ def test_benchmark_gate_asks_the_harness_for_every_fault_on_a_fixed_seed(
     assert json.loads(report_path.read_text())["holdout"]["evaluation"] == [session.name]
 
 
+@pytest.mark.parametrize(
+    ("compute_target", "pi_board", "expected"),
+    [(None, False, False), ("pi", False, True), ("laptop", True, True)],
+)
+def test_the_gates_score_without_the_score_cache_on_the_pi(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    compute_target: str | None,
+    pi_board: bool,
+    expected: bool,
+) -> None:
+    """The harness's score cache and the derived store both refuse on the Pi
+    (P01's rules), so a Pi-side retrain passes ``--no-score-cache`` and
+    ``--no-derived-store`` to its gates rather than failing them (P02.5)."""
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    argv = ["--config", "canary.example.yaml", "--if-out", str(tmp_path / "if")]
+    if compute_target is not None:
+        argv += ["--compute-target", compute_target]
+    run = retrain._start_run(retrain.parse_args(argv), config)
+    calls: list[list[str]] = []
+
+    def harness(argv: list[str]) -> int:
+        calls.append(argv)
+        Path(argv[argv.index("--out") + 1]).write_text("{}")
+        return 0
+
+    monkeypatch.setattr(retrain, "run_evaluate_detectors", harness)
+    monkeypatch.setattr(retrain, "on_the_pi", lambda: pi_board)
+    retrain._evaluate_on_drives(
+        [tmp_path / "s"],
+        run,
+        if_model=tmp_path / "m.joblib",
+        sequence_model=None,
+        out=tmp_path / "r.json",
+    )
+    (called,) = calls
+    assert ("--no-score-cache" in called) is expected
+    # The derived store refuses on the Pi as well: the gate reduces in memory
+    # there, or every session load would fail and it would score nothing.
+    assert ("--no-derived-store" in called) is expected
+    assert ("--derived-dir" in called) is not expected
+
+
 def test_run_benchmark_gate_skips_cleanly_with_missing_if_artifact(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -865,9 +908,33 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     older.write_text(report_path.read_text())
     newer_other = analyses_dir / "benchmark-20990101-000000.json"
     newer_other.write_text(json.dumps({**report, "drives": []}))
+    # P02.5: the harness keeps each detector's scores beside the feature
+    # cache, so the next gate on the same artifact reads them back.
+    scores = tmp_path / "cache" / "evaluation_frames" / "scores"
+
+    def written() -> dict[Path, int]:
+        # Inode: an entry rescored is re-written (staged temp file, renamed
+        # into place on commit), so an unchanged inode means it was read back,
+        # not recomputed. (A hit refreshes the mtime, for LRU pruning.)
+        return {p: p.stat().st_ino for p in scores.glob("isolation_forest-*/*/*.pkl")}
+
+    kept = written()
+    assert kept
     report_path_2, diff = retrain._run_benchmark_gate(
         config, [session], retrain._start_run(args, config)
     )
+    assert written() == kept
+    # The alert-budget gate's evaluation (clean rows, same artifact) reads the
+    # benchmark gate's session scores back too.
+    run = retrain._start_run(args, config)
+    retrain._evaluate_on_drives(
+        [session],
+        run,
+        if_model=artifact_path,
+        sequence_model=None,
+        out=tmp_path / "alert-budget.json",
+    )
+    assert written() == kept
     assert diff is not None and diff["comparable"] is True
     assert diff["regressed"] is False
     assert diff["baseline"].endswith(report_path.name)

@@ -26,6 +26,16 @@ Rows are featurized with the profile's behavior models, as the trainers and
 the daemon featurize them, so an artifact trained on ``deviation:*`` columns
 is scored on those columns (the retired grid's blind spot, R06.5).
 
+Drives are scored in parallel (``--workers``, P02.5) and every detector's
+scores are cached under ``--cache-dir/scores``, keyed by the artifact's
+sha256, the session frame's content, the injection and the code
+(:mod:`src.models.evaluation_cache`): an unchanged re-run reads everything
+back, and a new artifact is rescored for its own detector alone. The report
+does not depend on ``--workers``; ``--scoring-threads`` fixes torch's thread
+count in every process, because the LSTM's scores move in the last bits
+between thread counts. An injected slice is featurized from its clean slice,
+recomputing only what the injected channels reach (P02.4).
+
 It is also retrain's post-train regression gate (R06.5, replacing the retired
 ``detector_benchmark`` grid): ``--baseline <report.json>`` diffs this run
 against an earlier report of the same drives under the same protocol
@@ -38,11 +48,17 @@ import argparse
 import hashlib
 import json
 import logging
+import multiprocessing
+import os
+import pickle
 import sys
-from collections.abc import Iterator, Mapping, Sequence
+import time
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
+from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -114,6 +130,7 @@ from src.models.evaluation import (
     sustained_alerts,
     vus_pr,
 )
+from src.models.evaluation_cache import ScoreCache, code_version, digest, frame_key
 from src.models.evaluation_detectors import (
     DeployedStack,
     Detector,
@@ -129,6 +146,7 @@ from src.models.evaluation_detectors import (
     detector_roles,
     load_curated_channels,
     raw_channels,
+    sequence_outputs,
     sequence_parity,
     suppressed_for,
 )
@@ -148,11 +166,15 @@ from src.models.synthetic_fault_eval import (
     load_fault_channel_roles,
 )
 from src.paths import DATA_DIR
-from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore
+from src.plausibility.limits import plausibility_path
+from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore, on_the_pi
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
     DEFAULT_DIDS_PATH,
+    FeaturizedFrame,
+    _available_memory_bytes,
     default_decode_inputs,
+    featurize_perturbed_frame,
     featurize_wide_frame,
     load_resampled_session,
 )
@@ -189,10 +211,15 @@ DEFAULT_GRACE_SECONDS = 60.0
 EVALUATION_SESSION_KINDS = RECORDED_SESSION_KINDS | {SessionKind.TUNING}
 
 
-def _load_one(args: tuple[Path, str | None, str]) -> tuple[str, pd.DataFrame | None, str | None]:
-    session, derived_dir, config_path = args
+def _load_one(
+    args: tuple[Path, str | None, CanaryConfig],
+) -> tuple[str, pd.DataFrame | None, str | None]:
+    # The config parsed once by the parent, not re-read here per session:
+    # re-reading it made a mid-run edit of the YAML reach the sessions loaded
+    # after it (2026-09-26: a key added under ``collection`` while a run was
+    # loading failed 49 sessions on the loaded schema, and dropped 9 drives).
+    session, derived_dir, config = args
     try:
-        config = CanaryConfig.from_yaml(Path(config_path))
         store = DerivedStore(Path(derived_dir)) if derived_dir is not None else None
         return session.name, load_resampled_session(session, config, store=store), None
     except Exception as exc:  # noqa: BLE001 - one bad session is a skip, not a crash
@@ -202,7 +229,6 @@ def _load_one(args: tuple[Path, str | None, str]) -> tuple[str, pd.DataFrame | N
 def load_resampled_sessions(
     sessions: Sequence[Path],
     config: CanaryConfig,
-    config_path: Path,
     *,
     derived_dir: Path | None,
     workers: int,
@@ -218,7 +244,7 @@ def load_resampled_sessions(
     derived frame is missing or stale instead of deriving it.
     """
     jobs = [
-        (session, str(derived_dir) if derived_dir is not None else None, str(config_path))
+        (session, str(derived_dir) if derived_dir is not None else None, config)
         for session in sessions
     ]
     frames: dict[str, pd.DataFrame] = {}
@@ -275,12 +301,23 @@ class CachedStreams(Mapping[tuple[str, str], Any]):
 
     Holding every session's stream at once was most of the harness's memory:
     RSS rose from 2.3 GB to 6.0 GB while the A02.11 streams loaded (2.4 GB of
-    samples plus what the allocator kept), and each is read at most twice
-    (clean scoring, then the drive's injection sweep).
+    samples plus what the allocator kept). Before P02.4 the longest session's
+    stream was read twice per drive (clean scoring, then the injection sweep,
+    which reused it for every injection); :class:`DriveScorer` now reads each
+    once per drive, and not at all when every score it feeds is cached.
     """
 
     def __init__(self, paths: Mapping[tuple[str, str], Path]) -> None:
         self._paths = dict(paths)
+
+    @property
+    def paths(self) -> dict[tuple[str, str], Path]:
+        return dict(self._paths)
+
+    def name_of(self, key: tuple[str, str]) -> str:
+        """The stream's cache-file name: its session key and catalog
+        fingerprint, so a score keyed on it follows an edited limit."""
+        return self._paths[key].name
 
     def __getitem__(self, key: tuple[str, str]) -> Any:
         from src.plausibility.offline import SessionStream
@@ -366,22 +403,12 @@ class SessionScore:
     alerting: np.ndarray[Any, np.dtype[np.bool_]]
 
 
-def score_session(
-    detectors: Sequence[Detector],
-    features: pd.DataFrame,
+def session_scores(
+    outputs: Mapping[str, DetectorOutput],
+    timestamps: pd.Series,
     persistence: PersistenceSpec,
-    *,
-    raw: Sequence[tuple[RawStreamDetector, Any]] = (),
 ) -> dict[str, SessionScore]:
-    """Every detector on one session's rows. ``raw`` pairs each arrived-sample
-    detector with its stream for the same rows; its verdicts land on this
-    frame's row grid, so every detector is graded on the same rows."""
-    timestamps = pd.to_datetime(features[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True)
-    outputs: dict[str, DetectorOutput] = {}
-    for detector in detectors:
-        outputs.update(detector.score(features))
-    for raw_detector, stream in raw:
-        outputs.update(raw_detector.score_stream(stream, timestamps))
+    """Every detector's output on one unit's rows, through the persistence gate."""
     out: dict[str, SessionScore] = {}
     for name, output in outputs.items():
         alerting = sustained_alerts(
@@ -516,153 +543,935 @@ def _seed_for(*parts: object) -> int:
     return int.from_bytes(digest[:4], "big")
 
 
-def injection_sweep(
-    drive: Drive,
-    session_frame: pd.DataFrame,
-    session_name: str,
-    *,
-    detectors: Sequence[Detector],
-    config: CanaryConfig,
-    bindings: Bindings | None,
-    roles: Mapping[str, Sequence[str]],
-    kinds: Sequence[str],
-    reps: int,
-    seed: int,
-    persistence: PersistenceSpec,
-    lead_seconds: float,
-    window_seconds: float,
-    grace_seconds: float,
-    raw: Sequence[tuple[RawStreamDetector, Any]] = (),
-    behavior_models: BehaviorModels | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Inject every (kind, severity) into the same windows of one session.
+# ---------------------------------------------------------------------------
+# Scoring units, the score cache and the per-drive scorer (P02.4/P02.5)
+# ---------------------------------------------------------------------------
 
-    One window per (kind, rep) — shared across severities so recall against
-    severity compares the same rows. Each window's clean slice is scored once;
-    a detection is an alert the fault caused on those rows. Returns
-    ``(outcomes, skipped, slices)``; ``slices`` carry scores and labels for
-    the threshold-free VUS-PR.
+#: Score-cache entry holding a unit's row timestamps: the grid every detector
+#: on that unit is graded on, so a fully cached unit needs no featurization.
+ROWS_ENTRY = "_rows"
+#: Score-cache entry holding how many rows a shift slice has (0 = no run).
+SHIFT_ROWS_ENTRY = "_shift_rows"
+
+
+def _component_key(name: str, identity: str, code: str) -> str:
+    return f"{name}-{digest(name, identity, code)[:20]}"
+
+
+@dataclass(frozen=True)
+class Component:
+    """One separately cached part of the detector set.
+
+    The deployed stack is three: the IF, the sequence detector (``sequence``
+    and ``sequence_global`` share one forward pass) and the fusion over both,
+    which reads their outputs and no features. Each baseline is one.
     """
-    outcomes: list[dict[str, Any]] = []
-    skipped: list[dict[str, Any]] = []
-    slices: list[dict[str, Any]] = []
-    stamps = pd.to_datetime(session_frame[TIMESTAMP_COLUMN], utc=True)
-    for kind in kinds:
-        for rep in range(reps):
-            rng = np.random.default_rng(_seed_for(seed, drive.drive_id, kind, rep))
-            window = choose_fault_window(
-                session_frame,
-                kind=kind,
-                length_seconds=window_seconds,
-                lead_seconds=lead_seconds,
-                rng=rng,
-            )
-            if isinstance(window, str):
-                skipped.append(
-                    {"drive": drive.drive_id, "kind": kind, "rep": rep, "reason": window}
+
+    name: str
+    key: str
+    names: tuple[str, ...]
+    compute: Callable[[pd.DataFrame | None, Mapping[str, Any]], Any]
+    outputs: Callable[[Any], dict[str, DetectorOutput]]
+    requires: tuple[str, ...] = ()
+    needs_features: bool = True
+
+
+def detector_components(
+    detectors: Sequence[Detector], identities: Mapping[str, str], code: str
+) -> list[Component]:
+    """The cacheable parts of ``detectors``, in the order their outputs were
+    always reported (a report's detector order is part of its identity)."""
+    components: list[Component] = []
+    for detector in detectors:
+        if isinstance(detector, DeployedStack):
+            stack = detector
+            if stack.trained_if is not None:
+                components.append(
+                    Component(
+                        "isolation_forest",
+                        _component_key("isolation_forest", identities["isolation_forest"], code),
+                        ("isolation_forest",),
+                        lambda f, _d, s=stack: s.score_isolation_forest(f),
+                        lambda p: {"isolation_forest": p.output},
+                    )
                 )
-                continue
-            start, end = window
-            lo = start - pd.Timedelta(seconds=lead_seconds)
-            hi = end + pd.Timedelta(seconds=grace_seconds + window_seconds / 4)
-            piece = session_frame.loc[((stamps >= lo) & (stamps < hi)).to_numpy()].reset_index(
-                drop=True
+            if stack.sequence is not None:
+                components.append(
+                    Component(
+                        "sequence",
+                        _component_key("sequence", identities["sequence"], code),
+                        ("sequence", "sequence_global"),
+                        lambda f, _d, s=stack: s.score_sequence(f),
+                        sequence_outputs,
+                    )
+                )
+            if (
+                "fused" not in stack.withheld
+                and stack.trained_if is not None
+                and stack.sequence is not None
+            ):
+                components.append(
+                    Component(
+                        "fused",
+                        _component_key(
+                            "fused",
+                            digest(identities["isolation_forest"], identities["sequence"]),
+                            code,
+                        ),
+                        ("fused",),
+                        lambda _f, d, s=stack: s.fuse(d["isolation_forest"], d["sequence"]),
+                        lambda p: {"fused": p},
+                        requires=("isolation_forest", "sequence"),
+                        needs_features=False,
+                    )
+                )
+        elif isinstance(detector, ThresholdedScore):
+            name = detector.model.name
+            components.append(
+                Component(
+                    name,
+                    _component_key(name, identities[name], code),
+                    (name,),
+                    lambda f, _d, t=detector: t.score(f),
+                    dict,
+                )
             )
-            fault_channels = [
-                channel for role in REALISTIC_FAULT_ROLES[kind] for channel in roles.get(role, ())
-            ]
-            raw_clean = [
-                (detector, detector.window(stream, lo, hi, channels=fault_channels))
-                for detector, stream in raw
-            ]
-            clean = score_session(
-                detectors,
-                featurize_wide_frame(
-                    piece, config, bindings=bindings, behavior_models=behavior_models
-                ).features,
-                persistence,
-                raw=raw_clean,
+        else:
+            raise TypeError(f"no cache identity for detector {type(detector).__name__}")
+    return components
+
+
+def score_model_identity(
+    model: ScoreModel, threshold: float, *, sequence: str | None, seed: int
+) -> str:
+    """A thresholded baseline's cache identity: its fitted parameters (or, for
+    the untrained autoencoder, the artifact whose shape it copies and its
+    seed) and its threshold."""
+    if isinstance(model, UntrainedAutoencoder):
+        return digest("untrained", sequence, seed, repr(threshold))
+    return digest(hashlib.sha256(pickle.dumps(model, protocol=4)).hexdigest(), repr(threshold))
+
+
+@dataclass
+class DriveTask:
+    """One held-out drive's rows, and what to run on them."""
+
+    drive: Drive
+    frames: dict[str, pd.DataFrame]
+    frame_keys: dict[str, str]
+    shift: bool
+    sweep: bool
+
+
+@dataclass
+class DriveResult:
+    """What scoring one drive produced, merged by the parent in drive order."""
+
+    scores: dict[str, dict[str, SessionScore]]
+    shift: dict[str, Any] | None
+    outcomes: list[dict[str, Any]]
+    skipped: list[dict[str, Any]]
+    slices: list[dict[str, Any]]
+    stream_reads: dict[str, int]
+    peak_rss_bytes: int
+    cache_counts: dict[str, dict[str, int]]
+    #: The process that scored the drive (a pool worker's, or the parent's).
+    pid: int = field(default_factory=os.getpid)
+
+
+@dataclass(frozen=True)
+class SweepSpec:
+    """The injection sweep's and the shift test's parameters."""
+
+    kinds: tuple[str, ...]
+    reps: int
+    seed: int
+    lead_seconds: float
+    window_seconds: float
+    grace_seconds: float
+    shift_rows: int
+
+
+def _peak_rss_bytes() -> int:
+    import resource
+
+    return int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss) * 1024
+
+
+class _Lazy:
+    """A value computed on first use and kept."""
+
+    def __init__(self, build: Callable[[], Any]) -> None:
+        self._build = build
+        self._done = False
+        self._value: Any = None
+
+    def __call__(self) -> Any:
+        if not self._done:
+            self._value = self._build()
+            self._done = True
+            self._build = lambda: None
+        return self._value
+
+
+def _features_of(featurized: Callable[[], FeaturizedFrame]) -> pd.DataFrame:
+    return featurized().features
+
+
+class DriveScorer:
+    """Scores one drive's units through the score cache.
+
+    A unit is a set of rows every detector is graded on: a held-out session,
+    an injection window's clean slice, one injected slice, or a drive's shift
+    slice. Each component's output on it is read back from the cache or
+    computed and kept; the features are built only when some component
+    misses, and an injected slice is featurized incrementally from its clean
+    slice (``featurize_perturbed_frame``, P02.4).
+    """
+
+    def __init__(
+        self,
+        *,
+        detectors: Sequence[Detector],
+        raw_detectors: Sequence[RawStreamDetector],
+        identities: Mapping[str, str],
+        stream_paths: Mapping[tuple[str, str], Path],
+        cache: ScoreCache,
+        code: str,
+        feature_key: str,
+        config: CanaryConfig,
+        bindings: Bindings | None,
+        behavior: BehaviorModels | None,
+        persistence: PersistenceSpec,
+        roles: Mapping[str, Sequence[str]],
+        sweep: SweepSpec,
+    ) -> None:
+        self.detectors = list(detectors)
+        self.components = detector_components(detectors, identities, code)
+        self.raw = list(raw_detectors)
+        self.raw_keys = {
+            r.names[0]: _component_key(r.names[0], identities[r.names[0]], code) for r in self.raw
+        }
+        self.streams = CachedStreams(stream_paths)
+        self.cache = cache
+        self.feature_key = feature_key
+        self.config = config
+        self.bindings = bindings
+        self.behavior = behavior
+        self.persistence = persistence
+        self.roles = {role: list(channels) for role, channels in roles.items()}
+        self.spec = sweep
+
+    def unit(self, *parts: Any) -> str:
+        return digest(self.feature_key, *parts)
+
+    def featurize(self, frame: pd.DataFrame) -> FeaturizedFrame:
+        return featurize_wide_frame(
+            frame, self.config, bindings=self.bindings, behavior_models=self.behavior
+        )
+
+    def score_unit(
+        self,
+        unit: str,
+        features: Callable[[], pd.DataFrame],
+        raw: Sequence[tuple[RawStreamDetector, str, Callable[[], Any]]] = (),
+    ) -> tuple[dict[str, DetectorOutput], pd.Series]:
+        """Every detector's output on ``unit``, and its row timestamps.
+
+        ``features`` builds the unit's featurized rows; it is called at most
+        once, and only when a component misses. ``raw`` pairs each
+        arrived-sample detector with its unit-specific key part and a builder
+        for its stream on these rows.
+        """
+        built = _Lazy(features)
+        payloads: dict[str, Any] = {}
+        for component in self.components:
+            payload = self.cache.get(component.key, unit)
+            if payload is None:
+                payload = component.compute(
+                    built() if component.needs_features else None,
+                    {name: payloads[name] for name in component.requires},
+                )
+                self.cache.put(component.key, unit, payload)
+            payloads[component.name] = payload
+        timestamps = self.cache.get(ROWS_ENTRY, unit)
+        if timestamps is None:
+            timestamps = pd.to_datetime(built()[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True)
+            self.cache.put(ROWS_ENTRY, unit, timestamps)
+        outputs: dict[str, DetectorOutput] = {}
+        for component in self.components:
+            outputs.update(component.outputs(payloads[component.name]))
+        for detector, part, stream in raw:
+            key = self.raw_keys[detector.names[0]]
+            raw_unit = digest(unit, part)
+            result = self.cache.get(key, raw_unit)
+            if result is None:
+                result = detector.score_stream(stream(), timestamps)
+                self.cache.put(key, raw_unit, result)
+            outputs.update(result)
+        return outputs, timestamps
+
+    def score_drive(self, task: DriveTask) -> DriveResult:
+        """Clean scores for every session, then the shift test and the
+        injection sweep on the drive's longest session."""
+        stream_reads: dict[str, int] = {}
+        loaded: dict[tuple[str, str], Any] = {}
+        before = self.cache.counts()
+
+        present = task.frames
+        longest = max(present, key=lambda n: int(engine_running(present[n]).sum()))
+
+        def stream_of(detector: RawStreamDetector, session: str) -> Any:
+            # Each stream is read once per drive. The longest session's is
+            # held for the drive: it serves its clean scoring and the whole
+            # sweep (before P02.4 it was read twice). The others are used
+            # once and never held (holding them all was most of the memory).
+            key = (detector.names[0], session)
+            if key in loaded:
+                return loaded[key]
+            stream_reads[session] = stream_reads.get(session, 0) + 1
+            stream = self.streams[key]
+            if session == longest:
+                loaded[key] = stream
+            return stream
+
+        longest_features = _Lazy(lambda: self.featurize(present[longest]).features)
+        scores: dict[str, dict[str, SessionScore]] = {}
+        for name, frame in present.items():
+            unit = self.unit("session", task.frame_keys[name])
+            builder = (
+                longest_features
+                if name == longest
+                else (lambda f=frame: self.featurize(f).features)
             )
-            for severity in REALISTIC_FAULTS[kind].severities:
-                faulted_frame, injection = inject_realistic_fault(
-                    piece,
+            outputs, stamps = self.score_unit(
+                unit,
+                builder,
+                raw=[
+                    (
+                        r,
+                        self.streams.name_of((r.names[0], name)),
+                        lambda r=r, n=name: stream_of(r, n),
+                    )
+                    for r in self.raw
+                ],
+            )
+            scores[name] = session_scores(outputs, stamps, self.persistence)
+        shift = (
+            self.shift(task.drive, longest, task.frame_keys[longest], longest_features)
+            if task.shift
+            else None
+        )
+        outcomes: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        slices: list[dict[str, Any]] = []
+        if task.sweep:
+            outcomes, skipped, slices = self.injection_sweep(
+                task.drive,
+                present[longest],
+                longest,
+                task.frame_keys[longest],
+                stream=lambda r: stream_of(r, longest),
+            )
+        after = self.cache.counts()
+        counts = {
+            name: {kind: value - before.get(name, {}).get(kind, 0) for kind, value in entry.items()}
+            for name, entry in after.items()
+        }
+        return DriveResult(
+            scores, shift, outcomes, skipped, slices, stream_reads, _peak_rss_bytes(), counts
+        )
+
+    def shift(
+        self,
+        drive: Drive,
+        session: str,
+        frame_key: str,
+        features: Callable[[], pd.DataFrame],
+    ) -> dict[str, Any] | None:
+        """A04.1 on the drive's longest session, each component's report cached."""
+        unit = self.unit("shift", self.unit("session", frame_key), self.spec.shift_rows, self.roles)
+        rows = self.cache.get(SHIFT_ROWS_ENTRY, unit)
+        # A slice known to be empty has no detector reports to look up: asking
+        # would count a miss per component on a re-run that computes nothing.
+        cached: dict[str, Any] = (
+            {c.name: None for c in self.components}
+            if rows == 0
+            else {c.name: self.cache.get(c.key, unit) for c in self.components}
+        )
+        missing = [c for c in self.components if cached[c.name] is None]
+        if rows is None or (rows and missing):
+            piece = shift_slice(features(), self.spec.shift_rows)
+            rows = len(piece)
+            self.cache.put(SHIFT_ROWS_ENTRY, unit, rows)
+            if rows and missing:
+                needed = self._closure(missing)
+
+                def score(frame: pd.DataFrame) -> dict[str, Any]:
+                    payloads: dict[str, Any] = {}
+                    for component in self.components:
+                        if component.name in needed:
+                            payloads[component.name] = component.compute(
+                                frame if component.needs_features else None,
+                                {name: payloads[name] for name in component.requires},
+                            )
+                    return {
+                        name: output.verdict
+                        for component in missing
+                        for name, output in component.outputs(payloads[component.name]).items()
+                    }
+
+                reports = single_quantity_shift(score, piece, self.roles, mode_column=MODE_COLUMN)
+                for component in missing:
+                    cached[component.name] = {
+                        name: reports[name].to_dict() for name in component.names if name in reports
+                    }
+                    self.cache.put(component.key, unit, cached[component.name])
+        if not rows:
+            return None
+        return {
+            "drive": drive.drive_id,
+            "session": session,
+            "rows": rows,
+            "detectors": {
+                name: report
+                for component in self.components
+                for name, report in (cached[component.name] or {}).items()
+            },
+        }
+
+    def _closure(self, components: Sequence[Component]) -> set[str]:
+        needed = {c.name for c in components}
+        for component in reversed(self.components):
+            if component.name in needed:
+                needed.update(component.requires)
+        return needed
+
+    @staticmethod
+    def _window(
+        detector: RawStreamDetector,
+        stream: Callable[[RawStreamDetector], Any],
+        lo: pd.Timestamp,
+        hi: pd.Timestamp,
+        channels: Sequence[str],
+    ) -> Any:
+        return detector.window(stream(detector), lo, hi, channels=channels)
+
+    def _injected_stream(
+        self,
+        detector: RawStreamDetector,
+        window: Callable[[], Any],
+        *,
+        kind: str,
+        severity: float,
+        start: pd.Timestamp,
+        end: pd.Timestamp,
+    ) -> Any:
+        return detector.inject(
+            window(), kind=kind, severity=severity, start=start, end=end, roles=self.roles
+        )
+
+    def _perturbed_features(
+        self, clean: Callable[[], FeaturizedFrame], piece: pd.DataFrame, faulted: pd.DataFrame
+    ) -> pd.DataFrame:
+        return featurize_perturbed_frame(
+            clean(),
+            piece,
+            faulted,
+            self.config,
+            bindings=self.bindings,
+            behavior_models=self.behavior,
+        )
+
+    def injection_sweep(
+        self,
+        drive: Drive,
+        session_frame: pd.DataFrame,
+        session_name: str,
+        frame_key: str,
+        *,
+        stream: Callable[[RawStreamDetector], Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        """Inject every (kind, severity) into the same windows of one session.
+
+        One window per (kind, rep) — shared across severities so recall against
+        severity compares the same rows. Each window's clean slice is scored once;
+        a detection is an alert the fault caused on those rows. Returns
+        ``(outcomes, skipped, slices)``; ``slices`` carry scores and labels for
+        the threshold-free VUS-PR. An injected slice is featurized from its
+        clean one, recomputing only what the injected channels reach (P02.4).
+        """
+        spec = self.spec
+        outcomes: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        slices: list[dict[str, Any]] = []
+        stamps = pd.to_datetime(session_frame[TIMESTAMP_COLUMN], utc=True)
+        for kind in spec.kinds:
+            for rep in range(spec.reps):
+                rng = np.random.default_rng(_seed_for(spec.seed, drive.drive_id, kind, rep))
+                window = choose_fault_window(
+                    session_frame,
                     kind=kind,
-                    severity=severity,
-                    start=start,
-                    end=end,
-                    roles=roles,
-                    bindings=bindings,
+                    length_seconds=spec.window_seconds,
+                    lead_seconds=spec.lead_seconds,
+                    rng=rng,
                 )
-                if not injection.perturbed:
+                if isinstance(window, str):
                     skipped.append(
-                        {
-                            "drive": drive.drive_id,
-                            "kind": kind,
-                            "rep": rep,
-                            "severity": severity,
-                            "reason": f"no role channel could be perturbed: "
-                            f"{dict(injection.not_perturbed)}",
-                        }
+                        {"drive": drive.drive_id, "kind": kind, "rep": rep, "reason": window}
                     )
                     continue
-                faulted = score_session(
-                    detectors,
-                    featurize_wide_frame(
-                        faulted_frame, config, bindings=bindings, behavior_models=behavior_models
-                    ).features,
-                    persistence,
-                    raw=[
-                        (
-                            detector,
-                            detector.inject(
-                                window_stream,
-                                kind=kind,
-                                severity=severity,
-                                start=start,
-                                end=end,
-                                roles=roles,
-                            ),
-                        )
-                        for detector, window_stream in raw_clean
-                    ],
+                start, end = window
+                lo = start - pd.Timedelta(seconds=spec.lead_seconds)
+                hi = end + pd.Timedelta(seconds=spec.grace_seconds + spec.window_seconds / 4)
+                piece = session_frame.loc[((stamps >= lo) & (stamps < hi)).to_numpy()].reset_index(
+                    drop=True
                 )
-                for name, result in faulted.items():
-                    outcome = fault_attributable_detection(
-                        result.timestamps,
-                        faulted_alerting=result.alerting,
-                        clean_alerting=clean[name].alerting,
-                        faulted_verdicts=list(result.verdict),
+                fault_channels = [
+                    channel
+                    for role in REALISTIC_FAULT_ROLES[kind]
+                    for channel in self.roles.get(role, ())
+                ]
+                clean_frame = _Lazy(partial(self.featurize, piece))
+                windows = {
+                    r.names[0]: _Lazy(partial(self._window, r, stream, lo, hi, fault_channels))
+                    for r in self.raw
+                }
+                raw_parts = {
+                    r.names[0]: digest(
+                        self.streams.name_of((r.names[0], session_name)), fault_channels
+                    )
+                    for r in self.raw
+                }
+                slice_unit = self.unit("slice", frame_key, lo.isoformat(), hi.isoformat())
+                clean_outputs, clean_stamps = self.score_unit(
+                    slice_unit,
+                    partial(_features_of, clean_frame),
+                    raw=[(r, raw_parts[r.names[0]], windows[r.names[0]]) for r in self.raw],
+                )
+                clean = session_scores(clean_outputs, clean_stamps, self.persistence)
+                for severity in REALISTIC_FAULTS[kind].severities:
+                    faulted_frame, injection = inject_realistic_fault(
+                        piece,
+                        kind=kind,
+                        severity=severity,
                         start=start,
                         end=end,
-                        grace_seconds=grace_seconds,
+                        roles=self.roles,
+                        bindings=self.bindings,
                     )
-                    outcomes.append(
-                        {
-                            "drive": drive.drive_id,
-                            "session": session_name,
-                            "kind": kind,
-                            "severity": severity,
-                            "rep": rep,
-                            "detector": name,
-                            "status": outcome.status,
-                            "time_to_detect_seconds": outcome.time_to_detect_seconds,
-                            "injection": injection,
-                        }
+                    if not injection.perturbed:
+                        skipped.append(
+                            {
+                                "drive": drive.drive_id,
+                                "kind": kind,
+                                "rep": rep,
+                                "severity": severity,
+                                "reason": f"no role channel could be perturbed: "
+                                f"{dict(injection.not_perturbed)}",
+                            }
+                        )
+                        continue
+                    injected_unit = digest(
+                        slice_unit,
+                        "inject",
+                        kind,
+                        severity,
+                        start.isoformat(),
+                        end.isoformat(),
+                        self.roles,
                     )
-                    labels = (
-                        (result.timestamps >= start)
-                        & (result.timestamps < end + pd.Timedelta(seconds=grace_seconds))
-                    ).to_numpy()
-                    slices.append(
-                        {
-                            "drive": drive.drive_id,
-                            "kind": kind,
-                            "detector": name,
-                            "scores": result.score,
-                            "labels": labels,
-                        }
+                    faulted_outputs, faulted_stamps = self.score_unit(
+                        injected_unit,
+                        partial(self._perturbed_features, clean_frame, piece, faulted_frame),
+                        raw=[
+                            (
+                                r,
+                                raw_parts[r.names[0]],
+                                partial(
+                                    self._injected_stream,
+                                    r,
+                                    windows[r.names[0]],
+                                    kind=kind,
+                                    severity=severity,
+                                    start=start,
+                                    end=end,
+                                ),
+                            )
+                            for r in self.raw
+                        ],
                     )
-    return outcomes, skipped, slices
+                    faulted = session_scores(faulted_outputs, faulted_stamps, self.persistence)
+                    for name, result in faulted.items():
+                        outcome = fault_attributable_detection(
+                            result.timestamps,
+                            faulted_alerting=result.alerting,
+                            clean_alerting=clean[name].alerting,
+                            faulted_verdicts=list(result.verdict),
+                            start=start,
+                            end=end,
+                            grace_seconds=spec.grace_seconds,
+                        )
+                        outcomes.append(
+                            {
+                                "drive": drive.drive_id,
+                                "session": session_name,
+                                "kind": kind,
+                                "severity": severity,
+                                "rep": rep,
+                                "detector": name,
+                                "status": outcome.status,
+                                "time_to_detect_seconds": outcome.time_to_detect_seconds,
+                                "injection": injection,
+                            }
+                        )
+                        labels = (
+                            (result.timestamps >= start)
+                            & (result.timestamps < end + pd.Timedelta(seconds=spec.grace_seconds))
+                        ).to_numpy()
+                        slices.append(
+                            {
+                                "drive": drive.drive_id,
+                                "kind": kind,
+                                "detector": name,
+                                "scores": result.score,
+                                "labels": labels,
+                            }
+                        )
+        return outcomes, skipped, slices
+
+
+# ---------------------------------------------------------------------------
+# Parallel scoring (P02.5)
+# ---------------------------------------------------------------------------
+
+#: Peak RSS of one scoring worker on A02.11's drives, measured 2026-09-27
+#: (P02.5): 3,272 / 3,291 / 3,251 MB at 2 / 3 / 4 workers, set by the worker
+#: that scores the drive holding ``2026-09-20T152758`` (8,570 rows, whose
+#: injection sweep holds the longest arrived-sample stream). The pool is sized
+#: so this many bytes per worker fit in :data:`SCORING_MEMORY_FRACTION` of
+#: ``MemAvailable``, as if every worker peaked at once; the peaks do not
+#: coincide (4 workers peaked at 9.40 GB for the whole tree, parent included).
+SCORING_WORKER_PEAK_BYTES = 3_300_000_000
+SCORING_MEMORY_FRACTION = 0.8
+
+
+@dataclass
+class ScorerSpec:
+    """What a spawned scoring worker rebuilds its :class:`DriveScorer` from.
+
+    Spawned, not forked: the parent has already run torch (the parity check
+    and the untrained autoencoder's calibration), and a forked child of a
+    process with a live OpenMP pool can hang in its first parallel region.
+    Artifacts are reloaded from their paths; fitted baselines travel as
+    fitted (the untrained autoencoder as ``None``, rebuilt from its seed).
+    """
+
+    config: CanaryConfig
+    scoped_config: CanaryConfig
+    if_path: Path | None
+    sequence_path: Path | None
+    baselines: list[tuple[ScoreModel | None, float]]
+    untrained_seed: int
+    plausibility: bool
+    bindings_path: Path | None
+    behavior_path: Path | None
+    identities: dict[str, str]
+    stream_paths: dict[tuple[str, str], Path]
+    cache_root: Path | None
+    cache_run: str
+    key_sources: KeySources
+    key_inputs: dict[str, str | None]
+    code: str
+    feature_key: str
+    persistence: PersistenceSpec
+    roles: dict[str, list[str]]
+    sweep: SweepSpec
+    threads: int
+
+
+def build_worker_scorer(spec: ScorerSpec) -> DriveScorer:
+    """The parent's detectors, rebuilt the way ``main`` builds them."""
+    config = spec.config
+    trained_if = load_isolation_forest_model(spec.if_path) if spec.if_path is not None else None
+    trained_seq = (
+        load_sequence_artifact(spec.sequence_path) if spec.sequence_path is not None else None
+    )
+    stack = DeployedStack(
+        config,
+        trained_if,
+        trained_seq,
+        suppress_channels=suppressed_for(trained_seq, config) if trained_seq else (),
+    )
+    detectors: list[Detector] = [stack]
+    for model, threshold in spec.baselines:
+        if model is None:
+            assert trained_seq is not None
+            model = UntrainedAutoencoder.like(
+                trained_seq,
+                seed=spec.untrained_seed,
+                suppress_channels=suppressed_for(trained_seq, config),
+            )
+        detectors.append(ThresholdedScore(model, threshold))
+    bindings = (
+        load_bindings(spec.bindings_path)
+        if spec.bindings_path is not None and spec.bindings_path.exists()
+        else None
+    )
+    raw: list[RawStreamDetector] = []
+    if spec.plausibility:
+        raw.append(
+            PlausibilityDetector(
+                spec.scoped_config,
+                bindings=bindings,
+                did_map=load_did_map(DEFAULT_DIDS_PATH) if DEFAULT_DIDS_PATH.exists() else None,
+            )
+        )
+    behavior = (
+        load_behavior_models(spec.behavior_path)
+        if spec.behavior_path is not None and spec.behavior_path.exists()
+        else None
+    )
+    return DriveScorer(
+        detectors=detectors,
+        raw_detectors=raw,
+        identities=spec.identities,
+        stream_paths=spec.stream_paths,
+        cache=ScoreCache(spec.cache_root, run=spec.cache_run),
+        code=spec.code,
+        feature_key=spec.feature_key,
+        config=config,
+        bindings=bindings,
+        behavior=behavior,
+        persistence=spec.persistence,
+        roles=spec.roles,
+        sweep=spec.sweep,
+    )
+
+
+_WORKER_SCORER: DriveScorer | None = None
+
+#: Torch threads per scoring process (``--scoring-threads``). Fixed, never
+#: derived from ``--workers``: the LSTM's float32 sums differ in the last
+#: bits between thread counts (measured: 6 vs 4 threads moved scores by up to
+#: 7.8e-07), so a count that followed the pool size would make the report
+#: depend on it. One thread per process makes it depend on neither the
+#: worker count nor the machine's core count; the pool supplies parallelism.
+DEFAULT_SCORING_THREADS = 1
+
+
+def pin_threads(threads: int) -> Callable[[], None]:
+    """Hold this process's torch intra-op pool to ``threads`` (``0`` leaves
+    torch's own default); returns what puts the previous count back. NumPy's
+    BLAS pool is left alone on purpose: its results also move with the thread
+    count, and every process then uses the same machine default, as the
+    harness always did."""
+    if threads <= 0:
+        return lambda: None
+    try:
+        import torch
+    except ImportError:  # torch-free installs score without the sequence model
+        return lambda: None
+    previous = torch.get_num_threads()
+    torch.set_num_threads(threads)
+    return lambda: torch.set_num_threads(previous)
+
+
+def _init_scoring_worker(spec: ScorerSpec) -> None:
+    global _WORKER_SCORER
+    pin_threads(spec.threads)
+    # This worker reloads the artifacts, catalogs and code from disk: if any
+    # of them is not what the parent keyed this run on, its scores would be
+    # staged under a key they do not match. Refuse; the parent then scores
+    # in-process with what it loaded, and commits nothing (P02.5).
+    changed = changed_key_inputs(spec.key_sources, spec.key_inputs)
+    if changed:
+        raise RuntimeError(
+            "scoring worker refused: key inputs changed since the run started: "
+            + ", ".join(changed)
+        )
+    _WORKER_SCORER = build_worker_scorer(spec)
+
+
+def _score_drive_task(task: DriveTask) -> DriveResult:
+    assert _WORKER_SCORER is not None, "scoring worker was not initialized"
+    return _WORKER_SCORER.score_drive(task)
+
+
+def _cgroup_memory_headroom(
+    *, cgroup_root: Path | None = None, self_cgroup: Path | None = None
+) -> int | None:
+    """The least ``memory.max - memory.current`` over this process's cgroup
+    and every parent group below the root (a parent's ceiling binds its
+    children too), or ``None`` when no level sets a byte ceiling (``max``) or
+    the files cannot be read. The group is found by the daemon's own parser
+    (``memory_limit_status``)."""
+    from src.daemon.health import CGROUP_ROOT, memory_limit_status
+
+    root = cgroup_root or CGROUP_ROOT
+    status = memory_limit_status(
+        cgroup_root=root, self_cgroup=self_cgroup or Path("/proc/self/cgroup")
+    )
+    if status["memory_max_source"] is None:
+        return None
+    group = Path(status["memory_max_source"]).parent
+    headroom: int | None = None
+    while group != root and group.is_relative_to(root):
+        try:
+            ceiling = (group / "memory.max").read_text().strip()
+            if ceiling != "max":
+                current = int((group / "memory.current").read_text())
+                room = max(0, int(ceiling) - current)
+                headroom = room if headroom is None else min(headroom, room)
+        except (OSError, ValueError):
+            pass
+        group = group.parent
+    return headroom
+
+
+def scoring_workers(requested: int, tasks: int, *, threads: int = 1) -> int:
+    """Workers for ``tasks`` drives: at most ``requested``, one per drive, no
+    more than the cores hold at ``threads`` torch threads each, and as many
+    as :data:`SCORING_WORKER_PEAK_BYTES` fit in the memory there is: the
+    lesser of ``MemAvailable`` and the cgroup's headroom (the Pi's
+    ``canary.service`` runs under ``MemoryMax``). On the Pi it is always one,
+    in-process: a pool of 3.3 GB workers is no thing to fork beside the
+    collector (AGENTS.md: no analysis on the Pi while it collects)."""
+    if requested <= 1 or tasks <= 1 or on_the_pi():
+        return 1
+    requested = min(requested, max(1, (os.cpu_count() or 1) // max(1, threads)))
+    limits = [m for m in (_available_memory_bytes(), _cgroup_memory_headroom()) if m is not None]
+    available = min(limits) if limits else None
+    by_memory = (
+        requested
+        if available is None
+        else int(available * SCORING_MEMORY_FRACTION // SCORING_WORKER_PEAK_BYTES)
+    )
+    return max(1, min(requested, tasks, by_memory))
+
+
+def score_drives(
+    tasks: Sequence[DriveTask],
+    *,
+    workers: int,
+    threads: int,
+    local: Callable[[], DriveScorer],
+    spec: Callable[[], ScorerSpec],
+) -> list[DriveResult]:
+    """Every drive's :class:`DriveResult`, in ``tasks`` order.
+
+    Drives are independent, so with ``workers > 1`` they are scored in
+    spawned processes, largest first; results are merged back in drive order,
+    so the report does not depend on the worker count. A worker killed for
+    memory breaks the pool: the drives are then scored in this process, and
+    whatever the workers finished is read back from the score cache.
+    """
+    count = scoring_workers(workers, len(tasks), threads=threads)
+    if count > 1:
+        log.info("scoring %d drives on %d workers (%d threads each)", len(tasks), count, threads)
+        order = sorted(
+            range(len(tasks)),
+            key=lambda i: -sum(len(frame) for frame in tasks[i].frames.values()),
+        )
+        results: dict[int, DriveResult] = {}
+        try:
+            with ProcessPoolExecutor(
+                max_workers=count,
+                mp_context=multiprocessing.get_context("spawn"),
+                initializer=_init_scoring_worker,
+                initargs=(spec(),),
+            ) as pool:
+                futures = {i: pool.submit(_score_drive_task, tasks[i]) for i in order}
+                results = {i: future.result() for i, future in futures.items()}
+        except BrokenExecutor as exc:
+            log.warning("parallel scoring aborted (%s); finishing in this process", exc)
+            results = {}
+        if len(results) == len(tasks):
+            return [results[i] for i in range(len(tasks))]
+    scorer = local()
+    return [scorer.score_drive(task) for task in tasks]
+
+
+def _thread_environment() -> dict[str, Any]:
+    """What sets the thread counts a score was computed at: torch's pool in
+    effect and the BLAS pool's defaults. Both move scores in the last bits,
+    so a score computed at other counts is not served (P02.5)."""
+    try:
+        import torch
+
+        torch_threads: int | None = torch.get_num_threads()
+    except ImportError:
+        torch_threads = None
+    return {
+        "torch_threads": torch_threads,
+        "cpu_count": os.cpu_count(),
+        **{
+            name: os.environ.get(name)
+            for name in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS")
+        },
+    }
+
+
+def _data_inputs_digest(config_path: Path, profile_dir: Path, extra: Sequence[Path] = ()) -> str:
+    """The data files a score can depend on besides the artifacts: the
+    config, the repo catalogs, the DBCs, the profile's own files and
+    ``extra`` (catalogs a config may point outside ``data/``). Hashed
+    wholesale (a hand-kept list is a thing to forget to edit)."""
+    files = [config_path, *sorted(DATA_DIR.glob("*.yaml")), *sorted((DATA_DIR / "dbc").glob("*"))]
+    files += sorted(p for p in profile_dir.glob("*") if p.suffix in (".yaml", ".yml", ".json"))
+    files += sorted(set(extra))
+    return digest(*[(str(p), file_sha256(p)) for p in files if p.is_file()])
+
+
+@dataclass(frozen=True)
+class KeySources:
+    """Every file a score-cache key is computed from (P02.5).
+
+    :func:`key_inputs` hashes them once, before anything is loaded; scoring
+    workers re-hash them before they load, and the parent re-hashes them
+    after scoring and commits the run's entries only if nothing moved. So a
+    score computed from bytes another session wrote mid-run can never be
+    kept under a key computed from the bytes before (or the reverse).
+    """
+
+    config_path: Path
+    profile_dir: Path
+    extra_data: tuple[Path, ...]
+    if_path: Path | None
+    sequence_path: Path | None
+    bindings_path: Path
+    behavior_path: Path
+    harness_files: tuple[Path, ...]
+
+
+def _artifact_input(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    return digest(file_sha256(path), file_sha256(path.with_name("model.manifest.json")))
+
+
+def key_inputs(sources: KeySources) -> dict[str, str | None]:
+    """Each key input by name: the code, each artifact (with its manifest),
+    the bindings, the behavior models and the data catalogs."""
+    return {
+        "code": code_version(sources.harness_files),
+        "config_file": (
+            file_sha256(sources.config_path) if sources.config_path.is_file() else None
+        ),
+        "isolation_forest": _artifact_input(sources.if_path),
+        "sequence": _artifact_input(sources.sequence_path),
+        "bindings": file_sha256(sources.bindings_path) if sources.bindings_path.exists() else None,
+        "behavior_models": (
+            file_sha256(sources.behavior_path) if sources.behavior_path.exists() else None
+        ),
+        "data": _data_inputs_digest(sources.config_path, sources.profile_dir, sources.extra_data),
+    }
+
+
+def changed_key_inputs(sources: KeySources, expected: Mapping[str, str | None]) -> list[str]:
+    """The names of the key inputs whose files no longer hash as ``expected``."""
+    now = key_inputs(sources)
+    return [name for name, value in now.items() if expected.get(name) != value]
 
 
 def shift_slice(features: pd.DataFrame, rows: int) -> pd.DataFrame:
@@ -674,23 +1483,6 @@ def shift_slice(features: pd.DataFrame, rows: int) -> pd.DataFrame:
     centre = int(running[running.size // 2])
     start = max(0, centre - rows // 2)
     return features.iloc[start : start + rows].reset_index(drop=True)
-
-
-def shift_known_answer(
-    detectors: Sequence[Detector],
-    features: pd.DataFrame,
-    quantities: Mapping[str, Sequence[str]],
-) -> dict[str, Any]:
-    """A04.1 on one slice: every detector's single-quantity-shift report."""
-
-    def score(frame: pd.DataFrame) -> dict[str, Any]:
-        out: dict[str, Any] = {}
-        for detector in detectors:
-            out.update({n: o.verdict for n, o in detector.score(frame).items()})
-        return out
-
-    reports = single_quantity_shift(score, features, quantities, mode_column=MODE_COLUMN)
-    return {name: report.to_dict() for name, report in reports.items()}
 
 
 def summarize_shift(per_drive: Sequence[Mapping[str, Any]], names: Sequence[str]) -> dict[str, Any]:
@@ -1295,6 +2087,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Detector score caches (default data/cache/evaluation_frames).",
     )
     parser.add_argument(
+        "--no-score-cache",
+        action="store_true",
+        help="Score everything afresh and keep nothing (P02.5; default: detector scores "
+        "are cached under --cache-dir/scores by artifact, frame, injection and code).",
+    )
+    parser.add_argument(
         "--derived-dir",
         type=Path,
         default=DEFAULT_DERIVED_DIR,
@@ -1308,7 +2106,21 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         const=None,
         help="Reduce every session in memory and keep nothing.",
     )
-    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=2,
+        help="Processes for session loading and for scoring drives (P02.5; the pool is "
+        "capped by memory and cores). The report does not depend on it.",
+    )
+    parser.add_argument(
+        "--scoring-threads",
+        type=int,
+        default=DEFAULT_SCORING_THREADS,
+        help="Torch threads in every scoring process, the same whatever --workers is "
+        "(the LSTM's scores move in the last bits between thread counts). 0 keeps torch's "
+        "default, the harness's behaviour before P02.5 (default %(default)s).",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--parity-rows", type=int, default=200)
     parser.add_argument("--budget", type=float, default=V1_ALERTS_PER_HOUR_BUDGET)
@@ -1384,7 +2196,7 @@ def _profile_data_dir(config: CanaryConfig, profile: str | None) -> Path:
     """``data/<slug>/`` — the vehicle's labels, tune registry and fault roles."""
     from src.profiles import resolve_profile_for_tooling
 
-    return Path("data") / resolve_profile_for_tooling(config, profile).slug
+    return DATA_DIR / resolve_profile_for_tooling(config, profile).slug
 
 
 def _spread_in_time(names: Sequence[str], count: int) -> list[str]:
@@ -1422,22 +2234,69 @@ def _behavior_record(
     }
 
 
+def _harness_files() -> tuple[Path, ...]:
+    here = Path(__file__).resolve()
+    return (here, here.with_name("_cli.py"))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    # P02.5: the code and the config file are hashed first, before the config
+    # is parsed or any module does work, so the key they give is what this
+    # run executes; ``changed_key_inputs`` re-checks both later.
+    early = {
+        "code": code_version(_harness_files()),
+        "config_file": file_sha256(Path(args.config)) if Path(args.config).is_file() else None,
+    }
     configure_logging(args.log_level)
+    # Before any torch work: the parity check and the untrained autoencoder's
+    # calibration run here, and must match what the scoring workers compute.
+    restore = pin_threads(args.scoring_threads)
+    try:
+        with ExitStack() as cleanup:
+            return _evaluate(args, cleanup, early)
+    finally:
+        restore()
+
+
+def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, str | None]) -> int:
+    started = time.time()
     logging.getLogger("src.preprocessing.feature_pipeline").setLevel(logging.WARNING)
     config = load_config(args)
     models_dir = scoped_models_dir(config, args.profile)
     data_dir = _profile_data_dir(config, args.profile)
     persistence = PersistenceSpec.from_config(config)
+    if_path = args.if_model or models_dir / "isolation_forest" / "model.joblib"
+    seq_path = args.sequence_model or models_dir / "lstm_autoencoder" / "model.pt"
+    behavior_path = args.behavior_models or _scoped(config, args.profile).daemon.behavior_models
+    scoped_config = _scoped(config, args.profile)
+    # P02.5: every score-cache key input is hashed here, before anything is
+    # loaded; the run's entries are committed only if they still hash so
+    # after scoring (``changed_key_inputs`` below).
+    key_sources = KeySources(
+        config_path=Path(args.config).resolve(),
+        profile_dir=data_dir,
+        # The AFR calibration featurization reads (``featurize_wide_frame``
+        # takes the unscoped config) and the limits the plausibility detector
+        # reads (scoped to the profile).
+        extra_data=(
+            config.daemon.afr_calibration.resolve(),
+            plausibility_path(scoped_config).resolve(),
+        ),
+        if_path=if_path,
+        sequence_path=None if args.no_sequence else seq_path,
+        bindings_path=args.bindings,
+        behavior_path=behavior_path,
+        harness_files=_harness_files(),
+    )
+    # The earliest hashes win: a change after them is caught by the re-checks.
+    inputs = {**key_inputs(key_sources), **early}
     bindings = load_bindings(args.bindings) if args.bindings.exists() else None
 
-    if_path = args.if_model or models_dir / "isolation_forest" / "model.joblib"
     trained_if: TrainedIsolationForest | None = (
         load_isolation_forest_model(if_path) if if_path.exists() else None
     )
     trained_seq: TrainedSequenceModel | None = None
-    seq_path = args.sequence_model or models_dir / "lstm_autoencoder" / "model.pt"
     if not args.no_sequence and seq_path.exists():
         # The backend the artifact's manifest names (LSTM or TCN), not a
         # hard-coded LSTM loader (R06.5: retrain's gate scores either).
@@ -1581,7 +2440,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name in needed:
             print(f"load {by_name[name]}")
         return 0
-    behavior_path = args.behavior_models or _scoped(config, args.profile).daemon.behavior_models
     behavior = load_behavior_models(behavior_path) if behavior_path.exists() else None
     behavior_record = _behavior_record(behavior_path, behavior, trained_if, if_path)
     absent = {
@@ -1598,17 +2456,46 @@ def main(argv: Sequence[str] | None = None) -> int:
     frames, load_errors = load_resampled_sessions(
         [by_name[n] for n in needed],
         config,
-        args.config,
         derived_dir=args.derived_dir,
         workers=args.workers,
         cache_only=args.cache_only,
     )
-    features = {
-        name: featurize_wide_frame(
-            frame, config, bindings=bindings, behavior_models=behavior
+    # "An empty result must say which kind of empty it is": zero drives scored
+    # because every load failed is not an evaluation, so refuse and name each
+    # failure rather than report nothing with exit 0 (P02.5: a Pi retrain once
+    # passed a derived store the Pi refuses, and its gate scored nothing).
+    evaluated = [n for d in evaluation for n in d.session_names if n not in excluded]
+    if (needed and not frames) or (evaluated and not any(n in frames for n in evaluated)):
+        failed = {n: load_errors[n] for n in needed if n in load_errors}
+        if failed:
+            print(
+                f"error: no evaluation drive loaded; {len(failed)} session load(s) failed:",
+                file=sys.stderr,
+            )
+            for name, error in failed.items():
+                print(f"  {name}: {error}", file=sys.stderr)
+            return 2
+    # P02.5: every score is cached under its detector's identity and its
+    # unit's key; the unit key starts from the session's frame by content.
+    code = str(inputs["code"])
+    cache = ScoreCache(None if args.no_score_cache else args.cache_dir / "scores")
+    # Staged entries of a run that fails or is interrupted are dropped.
+    cleanup.callback(cache.discard)
+    frame_keys = {name: frame_key(frame) for name, frame in frames.items()}
+    feature_key = digest(
+        "features",
+        code,
+        _thread_environment(),
+        config.model_dump(mode="json"),
+        inputs["behavior_models"],
+        inputs["bindings"],
+        inputs["data"],
+    )
+
+    def featurize(name: str) -> pd.DataFrame:
+        return featurize_wide_frame(
+            frames[name], config, bindings=bindings, behavior_models=behavior
         ).features
-        for name, frame in frames.items()
-    }
 
     stack = DeployedStack(
         config,
@@ -1616,36 +2503,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         trained_seq,
         suppress_channels=suppressed_for(trained_seq, config) if trained_seq else (),
     )
+    identities: dict[str, str] = {}
+    if trained_if is not None:
+        identities["isolation_forest"] = str(inputs["isolation_forest"])
+    if trained_seq is not None:
+        # The serve-time suppress list comes from the config, which is in
+        # every unit key (``feature_key``); the batch size is code.
+        identities["sequence"] = str(inputs["sequence"])
     detectors: list[Detector] = [stack]
     baseline_thresholds: dict[str, Any] = {}
-    fit_frames = [features[n] for n in fit_names if n in features]
-    calibration_frames = [features[n] for n in calibration_names if n in features]
-    if reference is not None and args.baselines and fit_frames and calibration_frames:
+    baseline_specs: list[tuple[ScoreModel | None, float]] = []
+    fit_present = [n for n in fit_names if n in frames]
+    calibration_present = [n for n in calibration_names if n in frames]
+    if reference is not None and args.baselines and fit_present and calibration_present:
         # Baselines see the served models' own raw channels (rolling siblings
         # dropped) — the same rows, the same inputs.
         channels = raw_channels(reference.feature_columns)
-        models: list[ScoreModel] = []
-        if "robust_z" in args.baselines:
-            models.append(RobustZBaseline.fit(fit_frames, channels))
-        if "pca" in args.baselines:
-            models.append(PCABaseline.fit(fit_frames, channels))
+        curated: tuple[str, ...] = ()
         if {"robust_z_curated", "mahalanobis_curated"} & set(args.baselines):
             curated = load_curated_channels(
                 args.curated_channels or data_dir / "curated_outlier_channels.yaml"
-            )
-            if "robust_z_curated" in args.baselines:
-                models.append(
-                    replace(RobustZBaseline.fit(fit_frames, curated), name="robust_z_curated")
-                )
-            if "mahalanobis_curated" in args.baselines:
-                models.append(MahalanobisBaseline.fit(fit_frames, curated))
-        if "untrained_autoencoder" in args.baselines and trained_seq is not None:
-            models.append(
-                UntrainedAutoencoder.like(
-                    trained_seq,
-                    seed=args.seed,
-                    suppress_channels=suppressed_for(trained_seq, config),
-                )
             )
         # Independent blocks of one sequence window, or of the rolling window
         # when no sequence model is scored.
@@ -1654,24 +2531,85 @@ def main(argv: Sequence[str] | None = None) -> int:
             if trained_seq is not None
             else config.preprocessing.rolling_window_seconds
         )
-        for model in models:
-            traces = [
-                ScoreTrace(
-                    pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True),
-                    model.scores(frame),
-                    engine_running(frame),
+        fitted_unit = digest(
+            feature_key,
+            "baselines",
+            [frame_keys[n] for n in fit_present],
+            [frame_keys[n] for n in calibration_present],
+            channels,
+            curated,
+            sorted(args.baselines),
+            identities.get("sequence"),
+            args.seed,
+            args.budget,
+            block_seconds,
+            persistence,
+        )
+        fitted: list[tuple[str, ScoreModel | None, dict[str, Any]]] | None = cache.get(
+            "_baselines", fitted_unit
+        )
+        if fitted is None:
+            fit_frames = [featurize(n) for n in fit_present]
+            calibration_frames = [featurize(n) for n in calibration_present]
+            models: list[ScoreModel] = []
+            if "robust_z" in args.baselines:
+                models.append(RobustZBaseline.fit(fit_frames, channels))
+            if "pca" in args.baselines:
+                models.append(PCABaseline.fit(fit_frames, channels))
+            if "robust_z_curated" in args.baselines:
+                models.append(
+                    replace(RobustZBaseline.fit(fit_frames, curated), name="robust_z_curated")
                 )
-                for frame in calibration_frames
-            ]
-            budget = alert_budget_threshold(
-                traces,
-                persistence=persistence,
-                block_seconds=block_seconds,
-                budget_per_engine_hour=args.budget,
+            if "mahalanobis_curated" in args.baselines:
+                models.append(MahalanobisBaseline.fit(fit_frames, curated))
+            if "untrained_autoencoder" in args.baselines and trained_seq is not None:
+                models.append(
+                    UntrainedAutoencoder.like(
+                        trained_seq,
+                        seed=args.seed,
+                        suppress_channels=suppressed_for(trained_seq, config),
+                    )
+                )
+            fitted = []
+            for model in models:
+                traces = [
+                    ScoreTrace(
+                        pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True).reset_index(drop=True),
+                        model.scores(frame),
+                        engine_running(frame),
+                    )
+                    for frame in calibration_frames
+                ]
+                budget = alert_budget_threshold(
+                    traces,
+                    persistence=persistence,
+                    block_seconds=block_seconds,
+                    budget_per_engine_hour=args.budget,
+                )
+                kept = None if isinstance(model, UntrainedAutoencoder) else model
+                fitted.append((model.name, kept, budget.to_dict()))
+            del fit_frames, calibration_frames
+            cache.put("_baselines", fitted_unit, fitted)
+        for name, kept, budget_dict in fitted:
+            baseline_thresholds[name] = budget_dict
+            threshold = budget_dict["threshold"]
+            if threshold is None:
+                continue
+            model_now: ScoreModel
+            if kept is None:
+                assert trained_seq is not None
+                model_now = UntrainedAutoencoder.like(
+                    trained_seq,
+                    seed=args.seed,
+                    suppress_channels=suppressed_for(trained_seq, config),
+                )
+            else:
+                model_now = kept
+            detectors.append(ThresholdedScore(model_now, threshold))
+            baseline_specs.append((kept, threshold))
+            identities[name] = score_model_identity(
+                model_now, threshold, sequence=identities.get("sequence"), seed=args.seed
             )
-            baseline_thresholds[model.name] = budget.to_dict()
-            if budget.threshold is not None:
-                detectors.append(ThresholdedScore(model, budget.threshold))
     withheld_detectors = dict(stack.withheld)
     raw_detectors: list[RawStreamDetector] = []
     if "plausibility" in args.baselines:
@@ -1687,6 +2625,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         except FileNotFoundError as exc:
             withheld_detectors["plausibility"] = f"withheld: {exc}"
+    for raw_detector in raw_detectors:
+        catalog = getattr(raw_detector, "catalog", None)
+        identities[raw_detector.names[0]] = catalog.fingerprint() if catalog is not None else ""
     names = [n for d in detectors for n in d.names] + [n for r in raw_detectors for n in r.names]
     streams = load_raw_streams(
         raw_detectors,
@@ -1697,22 +2638,109 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parity: dict[str, Any] | None = None
     if stack.sequence is not None and evaluation:
-        first = next((n for d in evaluation for n in d.session_names if n in features), None)
+        first = next((n for d in evaluation for n in d.session_names if n in frames), None)
         if first is not None:
-            parity = sequence_parity(
-                stack.sequence, features[first], rows=args.parity_rows
-            ).to_dict()
-            parity["session"] = first
+            parity_unit = digest(
+                feature_key, "parity", frame_keys[first], identities["sequence"], args.parity_rows
+            )
+            parity = cache.get("_parity", parity_unit)
+            if parity is None:
+                parity = sequence_parity(
+                    stack.sequence, featurize(first), rows=args.parity_rows
+                ).to_dict()
+                cache.put("_parity", parity_unit, parity)
+            parity = {**parity, "session": first}
+
+    sweep = SweepSpec(
+        kinds=tuple(args.faults) if args.injections_per_drive > 0 else (),
+        reps=args.injections_per_drive,
+        seed=args.seed,
+        lead_seconds=args.lead_seconds,
+        window_seconds=args.window_seconds,
+        grace_seconds=args.grace_seconds,
+        shift_rows=args.shift_rows,
+    )
+    roles = load_fault_channel_roles(args.fault_roles or data_dir / "fault_injection.yaml")
+    tasks: list[DriveTask] = []
+    for drive in evaluation:
+        present = {n: frames[n] for n in drive.session_names if n in frames and n not in excluded}
+        if not present:
+            continue
+        cross_era = bool(training_eras) and drive.era not in training_eras
+        tasks.append(
+            DriveTask(
+                drive,
+                present,
+                {n: frame_keys[n] for n in present},
+                shift=not args.no_shift_test and not cross_era,
+                sweep=not cross_era and bool(args.faults) and args.injections_per_drive > 0,
+            )
+        )
+
+    def local_scorer() -> DriveScorer:
+        return DriveScorer(
+            detectors=detectors,
+            raw_detectors=raw_detectors,
+            identities=identities,
+            stream_paths=streams.paths,
+            cache=cache,
+            code=code,
+            feature_key=feature_key,
+            config=config,
+            bindings=bindings,
+            behavior=behavior,
+            persistence=persistence,
+            roles=roles,
+            sweep=sweep,
+        )
+
+    def worker_spec() -> ScorerSpec:
+        return ScorerSpec(
+            config=config,
+            scoped_config=_scoped(config, args.profile),
+            if_path=if_path if trained_if is not None else None,
+            sequence_path=seq_path if trained_seq is not None else None,
+            baselines=baseline_specs,
+            untrained_seed=args.seed,
+            plausibility=bool(raw_detectors),
+            bindings_path=args.bindings,
+            behavior_path=behavior_path if behavior is not None else None,
+            identities=identities,
+            stream_paths=streams.paths,
+            cache_root=cache.root,
+            cache_run=cache.run,
+            key_sources=key_sources,
+            key_inputs=inputs,
+            code=code,
+            feature_key=feature_key,
+            persistence=persistence,
+            roles={role: list(channels) for role, channels in roles.items()},
+            sweep=sweep,
+            threads=args.scoring_threads,
+        )
+
+    # The parent's own lookups (baselines, parity); each drive adds its own.
+    cache_counts = cache.counts()
+    results = iter(
+        score_drives(
+            tasks,
+            workers=args.workers,
+            threads=args.scoring_threads,
+            local=local_scorer,
+            spec=worker_spec,
+        )
+    )
 
     scores: dict[str, dict[str, SessionScore]] = {}
     records: list[DriveRecord] = []
     outcomes: list[dict[str, Any]] = []
     skipped_injections: list[dict[str, Any]] = []
     slices: list[dict[str, Any]] = []
-    roles = load_fault_channel_roles(args.fault_roles or data_dir / "fault_injection.yaml")
     shift_runs: list[dict[str, Any]] = []
+    stream_reads: dict[str, int] = {}
+    worker_peak = 0
     for drive in evaluation:
-        present = {n: frames[n] for n in drive.session_names if n in features and n not in excluded}
+        present = {n: frames[n] for n in drive.session_names if n in frames and n not in excluded}
         if not present:
             skipped.append(
                 {
@@ -1727,29 +2755,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
             continue
-        for name in present:
-            scores[name] = score_session(
-                detectors,
-                features[name],
-                persistence,
-                raw=[(r, streams[(r.names[0], name)]) for r in raw_detectors],
-            )
+        result = next(results)
+        scores.update(result.scores)
+        for session, reads in result.stream_reads.items():
+            stream_reads[session] = stream_reads.get(session, 0) + reads
+        worker_peak = max(worker_peak, result.peak_rss_bytes)
+        for component, counts in result.cache_counts.items():
+            for kind, value in counts.items():
+                cache_counts.setdefault(component, {"hits": 0, "misses": 0})[kind] += value
         record = clean_drive_record(drive, present, scores, names, registry.events)
         record.excluded_sessions = {n: excluded[n] for n in drive.session_names if n in excluded}
         record.cross_era = bool(training_eras) and drive.era not in training_eras
         records.append(record)
-        if not args.no_shift_test and not record.cross_era:
-            longest = max(present, key=lambda n: int(engine_running(present[n]).sum()))
-            piece = shift_slice(features[longest], args.shift_rows)
-            if len(piece):
-                shift_runs.append(
-                    {
-                        "drive": drive.drive_id,
-                        "session": longest,
-                        "rows": len(piece),
-                        "detectors": shift_known_answer(detectors, piece, roles),
-                    }
-                )
+        if result.shift is not None:
+            shift_runs.append(result.shift)
         if record.cross_era:
             skipped_injections.append(
                 {
@@ -1759,29 +2778,34 @@ def main(argv: Sequence[str] | None = None) -> int:
                 }
             )
             continue
-        if args.faults and args.injections_per_drive > 0:
-            longest = max(present, key=lambda n: int(engine_running(present[n]).sum()))
-            found, skip, cut = injection_sweep(
-                drive,
-                present[longest],
-                longest,
-                detectors=detectors,
-                config=config,
-                bindings=bindings,
-                roles=roles,
-                kinds=args.faults,
-                reps=args.injections_per_drive,
-                seed=args.seed,
-                persistence=persistence,
-                lead_seconds=args.lead_seconds,
-                window_seconds=args.window_seconds,
-                grace_seconds=args.grace_seconds,
-                raw=[(r, streams[(r.names[0], longest)]) for r in raw_detectors],
-                behavior_models=behavior,
+        outcomes.extend(result.outcomes)
+        skipped_injections.extend(result.skipped)
+        slices.extend(result.slices)
+    log.info(
+        "stream reads per session %s; peak RSS of a scoring process %.0f MB",
+        stream_reads,
+        worker_peak / 1e6,
+    )
+    hits = sum(c["hits"] for c in cache_counts.values())
+    lookups = hits + sum(c["misses"] for c in cache_counts.values())
+    log.info("score cache by component: %s", cache_counts)
+    if cache.root is not None:
+        changed = changed_key_inputs(key_sources, inputs)
+        if changed:
+            # Some score may have come from the new bytes: keep none of them.
+            cache.discard()
+            log.warning(
+                "score cache: nothing kept; key inputs changed during the run: %s",
+                ", ".join(changed),
             )
-            outcomes.extend(found)
-            skipped_injections.extend(skip)
-            slices.extend(cut)
+            print(
+                "warning: score cache not updated: key inputs changed during the run: "
+                + ", ".join(changed),
+                file=sys.stderr,
+            )
+        else:
+            cache.commit()
+            cache.prune(keep_since=started)
 
     role_of = detector_roles(config, names)
     report: dict[str, Any] = {
@@ -1818,12 +2842,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "withheld_detectors": withheld_detectors,
         # What the baselines actually rest on: a requested session that did
         # not load is named under ``baseline_*_not_loaded``, never counted.
-        "baseline_fit_sessions": [n for n in fit_names if n in features],
-        "baseline_threshold_sessions": [n for n in calibration_names if n in features],
-        "baseline_fit_sessions_not_loaded": [n for n in fit_names if n not in features],
-        "baseline_threshold_sessions_not_loaded": [
-            n for n in calibration_names if n not in features
-        ],
+        "baseline_fit_sessions": [n for n in fit_names if n in frames],
+        "baseline_threshold_sessions": [n for n in calibration_names if n in frames],
+        "baseline_fit_sessions_not_loaded": [n for n in fit_names if n not in frames],
+        "baseline_threshold_sessions_not_loaded": [n for n in calibration_names if n not in frames],
         "baseline_thresholds": baseline_thresholds,
         "sequence_parity": parity,
         "drives": [r.to_dict() for r in records],
@@ -1888,6 +2910,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"{len(records)} held-out drive(s) scored, {len(skipped)} skipped; "
         f"{len(outcomes)} injection outcome(s)"
+    )
+    print(
+        f"score cache: {hits} of {lookups} lookups read back"
+        + ("" if cache.root is not None else " (--no-score-cache)")
     )
     if regression is not None:
         lines = regression_summary(regression)

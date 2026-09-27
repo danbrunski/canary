@@ -2047,6 +2047,18 @@
         "required": false,
         "type": null
       },
+      "--no-score-cache": {
+        "action": "_StoreTrueAction",
+        "choices": null,
+        "default": false,
+        "dest": "no_score_cache",
+        "nargs": 0,
+        "option_strings": [
+          "--no-score-cache"
+        ],
+        "required": false,
+        "type": null
+      },
       "--no-sequence": {
         "action": "_StoreTrueAction",
         "choices": null,
@@ -2118,6 +2130,18 @@
         ],
         "required": false,
         "type": null
+      },
+      "--scoring-threads": {
+        "action": "_StoreAction",
+        "choices": null,
+        "default": 1,
+        "dest": "scoring_threads",
+        "nargs": null,
+        "option_strings": [
+          "--scoring-threads"
+        ],
+        "required": false,
+        "type": "int"
       },
       "--seed": {
         "action": "_StoreAction",
