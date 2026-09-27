@@ -28,9 +28,7 @@ import pytest
 from src.analysis.digest import (
     DIGEST_CHAIN_BYTES_PER_SECOND,
     DIGEST_CHAIN_FIXED_BYTES,
-    DIGEST_FILENAME,
     DIGEST_PEAK_BYTES_PER_ROW,
-    DIGEST_SKIPPED_FILENAME,
     REASON_CHILD_FAILED,
     REASON_CHILD_OUT_OF_MEMORY,
     REASON_CHILD_TIMED_OUT,
@@ -46,8 +44,6 @@ from src.analysis.digest import (
     digest_row_budget,
     digest_span_budget_seconds,
     get_or_compute_digest,
-    read_digest,
-    read_digest_skipped,
 )
 from src.config import CanaryConfig
 from src.control import trip_end
@@ -58,7 +54,13 @@ from src.control.trip_end import (
     handle_trip_end_off_loop,
     limit_address_space,
 )
-from src.preprocessing.loader import count_session_rows, session_time_span_seconds
+from src.storage.session_files import count_session_rows, session_time_span_seconds
+from src.storage.session_products import (
+    DIGEST_FILENAME,
+    DIGEST_SKIPPED_FILENAME,
+    read_digest,
+    read_digest_skipped,
+)
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 from tests.fakes import slow_digest
 

@@ -116,7 +116,7 @@ def find_latest_session(sessions_root: Path) -> Path:
     ``_capture-*`` recording. Newest by parsed start time, over
     :data:`TAGGABLE_SESSION_KINDS`.
 
-    Not :func:`src.control.sessions.latest_session`: that one requires a
+    Not :func:`src.storage.sessions.latest_session`: that one requires a
     flushed telemetry chunk, which a ``record.py`` session (``frames.log``)
     never has and a just-started daemon session does not have yet, and a tag
     written in those first seconds belongs in the new session.

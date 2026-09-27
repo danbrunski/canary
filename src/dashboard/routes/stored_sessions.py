@@ -30,7 +30,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from src.artifact_hash import sha256_file
-from src.control.sessions import (
+from src.dashboard.schemas import SessionMetadataRequest, SessionPinRequest
+from src.storage.sessions import (
     delete_session,
     pin_session,
     summarize_session,
@@ -38,7 +39,6 @@ from src.control.sessions import (
     write_session_metadata,
     write_session_zip,
 )
-from src.dashboard.schemas import SessionMetadataRequest, SessionPinRequest
 
 
 @dataclass(frozen=True)

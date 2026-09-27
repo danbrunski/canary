@@ -27,8 +27,9 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, dbc_channel, load_dbc_dir
-from src.preprocessing.decode import decode_on_read, decoded_channel, on_read_catalog
-from src.preprocessing.loader import PARQUET_PATTERN
+from src.decode.on_read import on_read_catalog
+from src.preprocessing.decode import decode_on_read, decoded_channel
+from src.storage.session_files import PARQUET_PATTERN
 from src.timefmt import parse_iso_utc
 
 

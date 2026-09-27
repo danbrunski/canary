@@ -209,7 +209,7 @@ def test_the_derived_numeric_frame_decodes_on_read_and_versions_by_the_catalog(
 ) -> None:
     """The store's ``value_number`` frame is shaped by the on-read catalog now,
     so an edit to one of its bindings rebuilds it and says why."""
-    from src.preprocessing import decode
+    from src.decode import on_read
     from src.preprocessing.derived_store import DerivedStore, use_store
     from src.preprocessing.loader import resample_and_segment
     from src.preprocessing.resampler import resample_config_for
@@ -232,7 +232,7 @@ def test_the_derived_numeric_frame_decodes_on_read_and_versions_by_the_catalog(
             signal["byte_start"] = 0
     edited = tmp_path / "bindings.yaml"
     edited.write_text(yaml.safe_dump(catalog, sort_keys=False))
-    monkeypatch.setattr(decode, "ON_READ_BINDINGS_PATH", edited)
+    monkeypatch.setattr(on_read, "ON_READ_BINDINGS_PATH", edited)
     _reduced, rebuilt = store.load_numeric(copies["stripped"], resample)
     assert rebuilt.status == "built"
     assert "on-read decode catalog changed" in rebuilt.reason
@@ -243,7 +243,7 @@ def test_a_binding_edit_reaches_old_and_new_sessions_alike(
 ) -> None:
     """One semantics, the current catalog: a session's stale stored rows lose
     to the current decode exactly as a session that never stored them."""
-    from src.preprocessing import decode
+    from src.decode import on_read
     from src.preprocessing.loader import read_session
 
     catalog = yaml.safe_load((REPO / "data" / "bindings.yaml").read_text())
@@ -253,7 +253,7 @@ def test_a_binding_edit_reaches_old_and_new_sessions_alike(
     edited = tmp_path / "bindings.yaml"
     edited.write_text(yaml.safe_dump(catalog, sort_keys=False))
     before = read_session(copies["stored"])
-    monkeypatch.setattr(decode, "ON_READ_BINDINGS_PATH", edited)
+    monkeypatch.setattr(on_read, "ON_READ_BINDINGS_PATH", edited)
     old, new = read_session(copies["stored"]), read_session(copies["stripped"])
 
     def rpm(frame: pd.DataFrame) -> list[float]:

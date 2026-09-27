@@ -14,7 +14,7 @@ The pieces, each used by both ``src.analysis.refit`` (publication) and
   resampler splits a directory at gaps into ``#segment-NNN`` pieces. Pieces
   are grouped by parent directory, then adjacent directories are joined when
   the gap between them is at most ``join_gap_seconds``. Order comes from
-  parsed start times (``src.control.sessions.session_started_at``) or the
+  parsed start times (``src.storage.sessions.session_started_at``) or the
   frame's own timestamps — never from directory names, where a capture prefix
   sorts a later drive "earlier".
 * **Grouped splits.** Newest drives form the test fold, the next ones the

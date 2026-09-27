@@ -49,7 +49,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from src.collection.capture_lifetime import LONG_GAP_SECONDS, subtract_windows
-from src.collection.capture_losses import (
+from src.collection.kline.names import capture_key
+from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
+from src.storage.capture_losses import (
     CONTROLLER,
     RECORDING,
     RESET,
@@ -57,8 +59,7 @@ from src.collection.capture_losses import (
     VERIFIED,
     unknown_losses,
 )
-from src.collection.kline.names import capture_key
-from src.collection.obd_scheduler import BATCHING_COUNTERS, MODE22_BATCHING_COUNTERS
+from src.storage.capture_manifest import CAPTURE_QUALITY_SCHEMA_VERSION, SCOPE_LIVE
 
 #: Fraction of the requested rate a channel may fall to before it counts as a
 #: shortfall. Loose enough to absorb round scheduling jitter, tight enough that
@@ -102,15 +103,6 @@ DEGRADED_MIN_COVERAGE = 0.9
 #: Default acquisition skew a complete tuple may span when the profile does
 #: not declare ``max_tuple_skew_s`` and has no target rate to derive it from.
 DEFAULT_MAX_TUPLE_SKEW_S = 0.25
-
-SCHEMA_VERSION = 2
-
-#: Scopes a verdict can carry. ``trailing_snapshot`` is what a v1 sidecar is
-#: read back as: a 60 s window at stop time, not the capture.
-SCOPE_LIVE = "live"
-SCOPE_STOP = "stop"
-SCOPE_RECOMPUTE = "recompute"
-SCOPE_TRAILING = "trailing_snapshot"
 
 #: The constraint vocabulary (C03.10). Each failure names exactly one.
 UNANSWERED_INPUT = "unanswered_input"
@@ -216,7 +208,7 @@ class CaptureQuality:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": CAPTURE_QUALITY_SCHEMA_VERSION,
             "scope": self.scope,
             "verdict": self.verdict,
             "profile": self.profile,
@@ -1227,29 +1219,6 @@ def evaluate_capture_quality(  # noqa: PLR0913
     )
 
 
-def normalize_quality_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Read any sidecar version with its scope made explicit.
-
-    A v1 sidecar scored the trailing 60 s at stop and described cumulative
-    loss counters; it is returned as written plus ``scope: trailing_snapshot``
-    and ``losses`` marked unknown, so nothing downstream can mistake it for a
-    capture-wide verdict. v2 payloads pass through unchanged.
-    """
-    version = int(payload.get("schema_version") or 1)
-    if version >= SCHEMA_VERSION:
-        return dict(payload)
-    out = dict(payload)
-    out["scope"] = SCOPE_TRAILING
-    out["losses"] = unknown_losses()
-    out.setdefault("notes", [])
-    out["notes"] = [
-        *out["notes"],
-        "schema_version 1 sidecar: the verdict covers the trailing 60 s at stop, not the "
-        "capture; its storage counter was cumulative and loss inside the capture is unknown.",
-    ]
-    return out
-
-
 __all__ = [
     "ACQUISITION_GAP",
     "BATCHING_COUNTERS",
@@ -1262,11 +1231,6 @@ __all__ = [
     "PERSISTENCE_LOSS",
     "RATE_SHORTFALL",
     "RATE_TOLERANCE",
-    "SCHEMA_VERSION",
-    "SCOPE_LIVE",
-    "SCOPE_RECOMPUTE",
-    "SCOPE_STOP",
-    "SCOPE_TRAILING",
     "STALL_PERIODS",
     "TUPLE_CHANNEL",
     "TUPLE_INCOMPLETE",
@@ -1283,7 +1247,6 @@ __all__ = [
     "kline_pause_windows",
     "kline_requests",
     "gap_threshold_s",
-    "normalize_quality_payload",
     "profile_requests",
     "scope_batching",
     "tuple_rate_bound_hz",

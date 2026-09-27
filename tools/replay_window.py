@@ -21,7 +21,7 @@ from pathlib import Path
 
 from src.analysis.replay_window import replay_window
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
+from src.storage.sessions import resolve_session
 
 
 def _parse_iso(value: str | None) -> datetime | None:

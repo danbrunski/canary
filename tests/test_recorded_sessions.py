@@ -1,7 +1,7 @@
 """The "has data" predicate and the third session question (R06.6).
 
-``loader.has_telemetry`` replaces six hand-rolled checks that disagreed (any
-chunk vs. a non-empty chunk). ``control.sessions.recorded_sessions`` answers
+``session_files.has_telemetry`` replaces six hand-rolled checks that disagreed (any
+chunk vs. a non-empty chunk). ``storage.sessions.recorded_sessions`` answers
 "every recording on disk", captures included. It stays distinct from "which
 may train?" (``discover_sessions``) and "which is live?" (``latest_session``).
 """
@@ -10,8 +10,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.control.sessions import latest_session, recorded_sessions
-from src.preprocessing.loader import discover_sessions, has_telemetry
+from src.preprocessing.loader import discover_sessions
+from src.storage.session_files import has_telemetry
+from src.storage.sessions import latest_session, recorded_sessions
 
 
 def _session(root: Path, name: str, *, data: bool = True) -> Path:

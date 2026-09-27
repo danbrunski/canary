@@ -13,7 +13,7 @@ from typing import Any
 
 from src.analysis.trip_summary_sidecar import get_or_compute_trip_summary
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
+from src.storage.sessions import resolve_session
 
 
 def get_trip_summary(config: CanaryConfig, session_id: str) -> dict[str, Any] | None:

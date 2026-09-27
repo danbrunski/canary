@@ -61,12 +61,8 @@ import pandas as pd
 from src.collection.collectors import CollectorStarter
 from src.collection.reconnect import wait_for_stop_or_timeout
 from src.config import CanaryConfig
-from src.preprocessing.loader import (
-    PARQUET_PATTERN,
-    count_session_rows,
-    session_time_span_seconds,
-)
 from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay
+from src.storage.session_files import PARQUET_PATTERN, count_session_rows, session_time_span_seconds
 from src.telemetry import (
     CAN_SOURCE,
     RE_DERIVED_SOURCES,

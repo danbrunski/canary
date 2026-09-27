@@ -54,10 +54,10 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
-from src.control.capture_manifest import read_capture_manifest
 from src.session import SessionKind, issue_isolated_id, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay
+from src.storage.capture_manifest import read_capture_manifest
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 

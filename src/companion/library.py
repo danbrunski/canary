@@ -253,7 +253,7 @@ class CanaryLibrary(SqliteStore):
             training_candidate = h.training_candidate
             channels = [(c, h.channel_nan_fraction.get(c)) for c in h.channels]
         else:
-            from src.control.sessions import summarize_session
+            from src.storage.sessions import summarize_session
 
             summary = summarize_session(target)
             pinned = summary.pinned

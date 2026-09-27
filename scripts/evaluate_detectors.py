@@ -94,7 +94,6 @@ from src.analysis.tune_revisions import load_tune_revisions
 from src.artifact_hash import sha256_file_or_none
 from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
-from src.control.sessions import recorded_sessions, session_started_at
 from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import load_did_map
@@ -182,6 +181,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.resampler import resample_config_for
 from src.profiles import active_registry, active_registry_sources
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
+from src.storage.sessions import recorded_sessions, session_started_at
 
 log = logging.getLogger(__name__)
 

@@ -16,9 +16,6 @@ from src.control.sequence_detector import (
     SequenceDetectorController,
     SequenceDetectorUnavailableError,
 )
-from src.control.sessions import (
-    latest_session,
-)
 from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
     ProfileNameUpdateRequest,
@@ -33,6 +30,7 @@ from src.dashboard.ups import (
 )
 from src.dashboard.version import _canary_version, _git_sha
 from src.profiles import load_registry, update_profile_name
+from src.storage.sessions import latest_session
 
 
 def build_router(ctx: ControlContext) -> APIRouter:

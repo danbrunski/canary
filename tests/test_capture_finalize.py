@@ -26,7 +26,6 @@ from typing import Any
 import pytest
 
 from src.analysis import capture_coverage
-from src.collection.capture_losses import LossEpoch
 from src.control import capture_finalize
 from src.control.capture_finalize import (
     CaptureQualityUnavailableError,
@@ -34,6 +33,7 @@ from src.control.capture_finalize import (
     live_capture_quality,
     recompute_quality_off_loop,
 )
+from src.storage.capture_losses import LossEpoch
 from src.storage.parquet_writer import write_records_to_parquet
 from tests.builders import CAPTURE_T0, capture_rounds, write_capture_session
 

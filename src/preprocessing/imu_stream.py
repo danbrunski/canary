@@ -305,7 +305,7 @@ def iter_framed_numeric_parts(
     defaults to :func:`plan_imu_frame`; the parts are the reader's own when it
     does not apply.
     """
-    from src.preprocessing.decode import on_read_catalog
+    from src.decode.on_read import on_read_catalog
     from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_numeric_parts
 
     plan = plan_imu_frame(session_dir) if plan is None else plan

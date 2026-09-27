@@ -48,7 +48,7 @@ one.
 
 Capture sessions are written under `_`-prefixed directories so they never
 contaminate the training corpus. That also means **"which session is live"
-(`src.control.sessions.latest_session`) and "which sessions may train"
+(`src.storage.sessions.latest_session`) and "which sessions may train"
 (`preprocessing.loader.discover_sessions`) are different questions.** Don't use
 one to answer the other, and never order sessions by directory name: prefixes
 sort before dates, so use `session_started_at`.

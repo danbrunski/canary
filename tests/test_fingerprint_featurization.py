@@ -19,6 +19,7 @@ from src.analysis import fingerprint
 from src.config import CanaryConfig
 from src.preprocessing import feature_pipeline
 from src.storage.parquet_writer import write_records_to_parquet
+from src.storage.session_products import FINGERPRINT_SCHEMA_VERSION, SessionFingerprint
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 
@@ -63,8 +64,8 @@ def test_fingerprint_runs_the_models_featurization(
 
 def test_the_version_moved_so_old_sidecars_are_recomputed() -> None:
     assert fingerprint.FINGERPRINT_VERSION == "0.2.0"
-    old = fingerprint.SessionFingerprint(
-        schema_version=fingerprint.SCHEMA_VERSION,
+    old = SessionFingerprint(
+        schema_version=FINGERPRINT_SCHEMA_VERSION,
         fingerprint_version="0.1.0",
         computed_at="2026-07-20T00:00:00Z",
         session_id="2026-05-18T021421",

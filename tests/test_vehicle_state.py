@@ -271,8 +271,8 @@ def test_live_session_resolution_includes_captures(tmp_path: Path) -> None:
     a capture. Fixing that per-caller needed six call sites to remember; this
     pins the fix at the resolver instead.
     """
-    from src.control.sessions import latest_session
     from src.preprocessing.loader import discover_sessions
+    from src.storage.sessions import latest_session
 
     root = tmp_path / "vehicle"
     for name in ("2026-08-05T120000", "_capture-fuel-map-2026-08-05T130000"):
@@ -291,7 +291,7 @@ def test_live_session_resolution_orders_by_time_not_name(tmp_path: Path) -> None
     `_capture-` sorts before `_tuning-` regardless of date, so a capture a
     month later compares as earlier.
     """
-    from src.control.sessions import latest_session
+    from src.storage.sessions import latest_session
 
     root = tmp_path / "vehicle"
     for name in ("_tuning-2026-08-01T100000", "_capture-fuel-map-2026-09-01T100000"):
@@ -311,7 +311,7 @@ def test_one_parser_for_session_timestamps() -> None:
     to. Ordering sessions any other way is a bug waiting for a new prefix.
     """
     from src.analysis.tune_revisions import session_started_at as via_revisions
-    from src.control.sessions import session_started_at
+    from src.storage.sessions import session_started_at
 
     for name in (
         "2026-08-05T142720",
@@ -333,7 +333,7 @@ def test_an_empty_freshly_rotated_session_does_not_win(tmp_path: Path) -> None:
     costume. Falling back to the last session holding data is correct and
     self-correcting once the first chunk lands.
     """
-    from src.control.sessions import latest_session
+    from src.storage.sessions import latest_session
 
     root = tmp_path / "vehicle"
     has_data = root / "2026-08-05T120000"

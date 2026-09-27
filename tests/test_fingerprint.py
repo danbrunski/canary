@@ -9,13 +9,9 @@ import pytest
 import yaml
 
 from src.analysis.fingerprint import (
-    FINGERPRINT_FILENAME,
     FINGERPRINT_VERSION,
-    SCHEMA_VERSION,
-    SessionFingerprint,
     compute_fingerprint,
     is_stale,
-    read_fingerprint,
     write_fingerprint,
 )
 from src.config import CanaryConfig
@@ -26,6 +22,12 @@ from src.decode.behavior_models import (
     PolynomialFit,
 )
 from src.storage.parquet_writer import write_records_to_parquet
+from src.storage.session_products import (
+    FINGERPRINT_FILENAME,
+    FINGERPRINT_SCHEMA_VERSION,
+    SessionFingerprint,
+    read_fingerprint,
+)
 from src.telemetry import TelemetryRecord
 from tests.builders import write_rich_session
 from tests.configs import example_config
@@ -293,7 +295,7 @@ def test_write_read_round_trip(tmp_path: Path, rich_session: Path) -> None:
     assert path == rich_session / FINGERPRINT_FILENAME
 
     payload = json.loads(path.read_text())
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["schema_version"] == FINGERPRINT_SCHEMA_VERSION
     assert payload["fingerprint_version"] == FINGERPRINT_VERSION
     assert payload["session_id"] == rich_session.name
     assert payload["stats"]["idle_rpm_mean"] == pytest.approx(stats["idle_rpm_mean"])
@@ -306,7 +308,7 @@ def test_write_read_round_trip(tmp_path: Path, rich_session: Path) -> None:
 def test_is_stale() -> None:
     assert is_stale(None) is True
     current = SessionFingerprint(
-        schema_version=SCHEMA_VERSION,
+        schema_version=FINGERPRINT_SCHEMA_VERSION,
         fingerprint_version=FINGERPRINT_VERSION,
         computed_at="2026-05-20T12:00:00Z",
         session_id="s",
@@ -314,7 +316,7 @@ def test_is_stale() -> None:
     )
     assert is_stale(current) is False
     stale = SessionFingerprint(
-        schema_version=SCHEMA_VERSION,
+        schema_version=FINGERPRINT_SCHEMA_VERSION,
         fingerprint_version="0.0.0",
         computed_at="2026-05-20T12:00:00Z",
         session_id="s",

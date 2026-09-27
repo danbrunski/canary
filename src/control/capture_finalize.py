@@ -47,20 +47,13 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from src.collection import capture_generation
-from src.collection.capture_losses import (
-    LossEpoch,
-    reconcile_losses,
-    summarize_losses,
-)
-from src.collection.capture_quality import (
+from src.collection.capture_quality import CaptureQuality, batching_baseline
+from src.control import child_pool
+from src.storage.capture_losses import LossEpoch, reconcile_losses, summarize_losses
+from src.storage.capture_manifest import (
     SCOPE_LIVE,
     SCOPE_RECOMPUTE,
     SCOPE_STOP,
-    CaptureQuality,
-    batching_baseline,
-)
-from src.control import child_pool
-from src.control.capture_manifest import (
     read_capture_epoch,
     write_capture_epoch,
     write_capture_quality,

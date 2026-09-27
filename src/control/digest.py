@@ -11,9 +11,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from src.analysis.digest import get_or_compute_digest, read_digest_skipped
+from src.analysis.digest import get_or_compute_digest
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
+from src.storage.session_products import read_digest_skipped
+from src.storage.sessions import resolve_session
 
 
 def get_session_digest(

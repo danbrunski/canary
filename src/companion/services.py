@@ -34,11 +34,9 @@ from src.artifact_hash import sha256_file
 from src.companion.library import CanaryLibrary, LibrarySession
 from src.config import CanaryConfig
 from src.control.jobs import JobController
-from src.control.sessions import (
-    summarize_session,
-)
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.models.training_ledger import TrainingLedger
+from src.storage.sessions import summarize_session
 
 
 def companion_config(base_config: CanaryConfig, library: CanaryLibrary) -> CanaryConfig:

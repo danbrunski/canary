@@ -262,7 +262,7 @@ def test_iter_sessions_orders_by_time_and_filters_kinds(tmp_path: Path) -> None:
 def test_list_sessions_with_captures_and_limit_returns_newest_by_time(tmp_path: Path) -> None:
     """R01.1: sorted by ``session_id``, "newest N" was the lexically-last
     profile slugs, not the newest captures."""
-    from src.control.sessions import filter_sessions, list_sessions
+    from src.storage.sessions import filter_sessions, list_sessions
 
     for name in (
         "_capture-zeta-2026-08-01T100000",
@@ -284,15 +284,15 @@ def test_tuning_sessions_are_http_resolvable(tmp_path: Path) -> None:
     own recording, so HTTP reads resolve it and sidecars may be computed over
     it. Training still skips it (the ``_`` prefix); replay output is still
     not a session."""
-    from src.control.sessions import (
+    from src.preprocessing.loader import discover_sessions
+    from src.storage.parquet_writer import write_records_to_parquet
+    from src.storage.sessions import (
         is_session_dir_name,
         latest_session,
         list_sessions,
         recorded_sessions,
         resolve_session,
     )
-    from src.preprocessing.loader import discover_sessions
-    from src.storage.parquet_writer import write_records_to_parquet
     from src.telemetry import TelemetryRecord
 
     assert SessionKind.TUNING in RECORDED_SESSION_KINDS

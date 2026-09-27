@@ -469,7 +469,8 @@ def test_live_and_on_read_decode_a_frame_to_the_same_record(config: CanaryConfig
     import pandas as pd
 
     from src.decode.frame_decoder import FrameDecoder
-    from src.preprocessing.decode import decode_on_read, on_read_catalog
+    from src.decode.on_read import on_read_catalog
+    from src.preprocessing.decode import decode_on_read
 
     bindings = load_bindings(Path("data/bindings.yaml"))
     live = LiveFeatureSource(config=config, bindings=bindings)

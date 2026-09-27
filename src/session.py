@@ -96,7 +96,7 @@ _KIND_PATTERNS: tuple[tuple[SessionKind, re.Pattern[str]], ...] = (
 )
 
 #: Every kind a name can classify as. "What is live right now?" answers over
-#: all of them (:func:`src.control.sessions.latest_session`).
+#: all of them (:func:`src.storage.sessions.latest_session`).
 ALL_SESSION_KINDS: frozenset[SessionKind] = frozenset(SessionKind)
 #: This vehicle's own recordings that HTTP reads resolve and post-hoc sidecars
 #: are computed over (``is_session_dir_name``). ``_tuning-*`` counts (operator

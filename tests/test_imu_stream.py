@@ -269,7 +269,7 @@ def test_0x2d1_speed_is_decoded_from_the_stored_frames(
     ``SPEED_SOURCES``, and here the only speed: no Mode 01, no GPS speed) and
     records it, and the part-by-part stream reads the same rows and drops them
     after, so the frame gains nothing but the IMU channels."""
-    from src.preprocessing.decode import on_read_catalog
+    from src.decode.on_read import on_read_catalog
 
     session = write_session(tmp_path, speeds=speeds)
     sidecar = read_imu_frame_sidecar(session)

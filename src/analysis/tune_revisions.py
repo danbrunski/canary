@@ -81,7 +81,7 @@ def resolve_session_revision(
     session: Path, registry: TuneRevisionRegistry | None
 ) -> tuple[str | None, Literal["capture_manifest", "registry", "unknown"], bool]:
     """Resolve identity with explicit capture metadata taking precedence."""
-    from src.control.capture_manifest import read_capture_manifest
+    from src.storage.capture_manifest import read_capture_manifest
 
     manifest = read_capture_manifest(session)
     explicit = None if manifest is None else manifest.tune_revision
@@ -99,12 +99,12 @@ def resolve_session_revision(
 def session_started_at(session: str | Path) -> datetime | None:
     """Parse a session directory name's UTC start time.
 
-    Re-exported from :mod:`src.control.sessions`, which owns the session
+    Re-exported from :mod:`src.storage.sessions`, which owns the session
     naming rules. Kept as a name here because this module's callers think in
     terms of revisions rather than session plumbing — but there is one parser,
     not two.
     """
-    from src.control.sessions import session_started_at as _parse
+    from src.storage.sessions import session_started_at as _parse
 
     return _parse(session)
 

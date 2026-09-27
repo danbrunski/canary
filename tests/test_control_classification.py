@@ -14,11 +14,11 @@ from fastapi.testclient import TestClient
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
-from src.analysis.fingerprint import FINGERPRINT_FILENAME, read_fingerprint
 from src.analysis.reference_epoch import ReferenceEpoch, StatSummary, write_reference_epoch
 from src.config import CanaryConfig
 from src.control.classification import classify_one_session
 from src.storage.parquet_writer import write_records_to_parquet
+from src.storage.session_products import FINGERPRINT_FILENAME, read_fingerprint
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 

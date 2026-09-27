@@ -37,7 +37,8 @@ import pandas as pd
 from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import apply_scaling, load_bindings
-from src.preprocessing.decode import decode_on_read, on_read_catalog
+from src.decode.on_read import on_read_catalog
+from src.preprocessing.decode import decode_on_read
 from src.storage.broadcast_storage import session_can_storage
 
 #: Fraction of the wideband's low rail treated as "pegged" (10.0 + margin).

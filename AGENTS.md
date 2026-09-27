@@ -268,12 +268,12 @@ become required fields, validators, or refusals that name the incident.
 **Never order sessions by directory name.** Captures carry prefixes
 (`_capture-fuel-map-…`, `_tuning-…`), so string order sorts by prefix first
 and a capture a month later compares as "earlier". Use
-`src.control.sessions.session_started_at` / `latest_session` — one parser,
+`src.storage.sessions.session_started_at` / `latest_session` — one parser,
 ordering by parsed time. This has now been re-derived four separate times.
 
 **Two questions that look like one:** "which sessions may train?" excludes
 captures by design (`preprocessing.loader.discover_sessions`); "which session
-is live?" must include them (`control.sessions.latest_session`). Conflating
+is live?" must include them (`storage.sessions.latest_session`). Conflating
 them is what caused the bug above.
 
 **Never compare two signals by their aggregates.** This is the single most

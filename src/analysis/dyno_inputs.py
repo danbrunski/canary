@@ -646,7 +646,7 @@ def build_motion_inputs(
 def _filters(
     columns: Iterable[str], can_ids: set[int], lo: pd.Timestamp, hi: pd.Timestamp
 ) -> list[list[tuple[str, str, Any]]]:
-    from src.preprocessing.decode import can_channel_spellings
+    from src.decode.on_read import can_channel_spellings
 
     window: list[tuple[str, str, Any]] = [("timestamp", ">=", lo), ("timestamp", "<=", hi)]
     by_source: dict[str, list[str]] = {}

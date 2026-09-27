@@ -10,8 +10,9 @@ import pandas as pd
 
 from src.config import CanaryConfig
 from src.models.manifest import manifest_path_for
-from src.preprocessing.loader import PARQUET_PATTERN, discover_sessions
+from src.preprocessing.loader import discover_sessions
 from src.storage.monitor import free_space_mb
+from src.storage.session_files import PARQUET_PATTERN
 
 
 def build_preflight(

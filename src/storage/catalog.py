@@ -32,11 +32,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.digest import read_digest, read_digest_skipped
-from src.analysis.fingerprint import read_fingerprint
-from src.analysis.session_classifier import read_classification
-from src.preprocessing.loader import count_session_rows
 from src.session import DTC_SIDECAR_FILENAME, classify_session_name, dir_size
+from src.storage.session_files import count_session_rows
+from src.storage.session_products import (
+    read_classification,
+    read_digest,
+    read_digest_skipped,
+    read_fingerprint,
+)
 from src.storage.sidecar import read_json_object
 from src.storage.sqlite_store import SqliteStore
 
@@ -93,7 +96,7 @@ def _parse_started_at(session_id: str) -> str | None:
 def _parquet_row_count(session_dir: Path) -> int | None:
     """Sum of row counts across a session's Parquet chunks (footer metadata
     only, no data read). Thin alias for
-    :func:`src.preprocessing.loader.count_session_rows` — one implementation,
+    :func:`src.storage.session_files.count_session_rows` — one implementation,
     since the replay emit path needs the same count (D02.9)."""
     return count_session_rows(session_dir)
 

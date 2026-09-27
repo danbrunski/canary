@@ -26,7 +26,6 @@ import pandas as pd
 
 from src.columns import GAP_SUFFIX, MODE_COLUMN
 from src.config import CanaryConfig
-from src.control.sessions import read_session_metadata
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.preprocessing.feature_pipeline import segment_or_constant
 from src.preprocessing.loader import read_session, to_wide
@@ -38,6 +37,7 @@ from src.session import (
     parse_session_timestamp,
     session_paths,
 )
+from src.storage.sessions import read_session_metadata
 from src.storage.sidecar import read_json_object
 
 log = logging.getLogger(__name__)

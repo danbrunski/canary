@@ -27,11 +27,11 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
-from src.control.sessions import session_started_at  # noqa: E402
 from src.paths import BINDINGS_YAML  # noqa: E402
 from src.preprocessing import discover_sessions  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.session import LIVE_SESSION_KINDS, iter_sessions  # noqa: E402
+from src.storage.sessions import session_started_at  # noqa: E402
 
 log = logging.getLogger(__name__)
 

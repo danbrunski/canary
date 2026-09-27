@@ -17,12 +17,12 @@ import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from src.control.sessions import write_session_zip
 from src.dashboard.routes.stored_sessions import (
     SessionStore,
     build_stored_session_router,
     session_export_checksum,
 )
+from src.storage.sessions import write_session_zip
 
 
 def _session(root: Path) -> Path:

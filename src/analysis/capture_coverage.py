@@ -38,15 +38,18 @@ from src.analysis.channels import (
 )
 from src.collection.capture_lifetime import ChannelAccumulator
 from src.collection.capture_quality import (
-    SCOPE_RECOMPUTE,
     TUPLE_CHANNEL,
     CaptureQuality,
     effective_max_tuple_skew_s,
     evaluate_capture_quality,
-    normalize_quality_payload,
     profile_requests,
 )
-from src.control.capture_manifest import read_capture_manifest, read_capture_quality
+from src.storage.capture_manifest import (
+    SCOPE_RECOMPUTE,
+    normalize_quality_payload,
+    read_capture_manifest,
+    read_capture_quality,
+)
 
 log = logging.getLogger(__name__)
 

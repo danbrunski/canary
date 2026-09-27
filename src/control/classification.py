@@ -15,16 +15,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
-from src.analysis.session_classifier import (
-    DERIVED_TAGS_FILENAME,
-    classify_session,
-    read_classification,
-    write_classification,
-)
+from src.analysis.session_classifier import classify_session, write_classification
 from src.config import CanaryConfig
 from src.control.trends import evaluate_and_alert_trends
 from src.session import LIVE_SESSION_KINDS, SessionKind, iter_sessions, session_kind
 from src.storage.catalog import record_session_best_effort
+from src.storage.session_products import DERIVED_TAGS_FILENAME, read_classification
 
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter

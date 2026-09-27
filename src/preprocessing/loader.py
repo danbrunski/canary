@@ -27,13 +27,9 @@ import pandas as pd
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.config import CanaryConfig
 from src.decode.bindings import Bindings
+from src.decode.on_read import can_channel_spellings, on_read_catalog
 from src.decode.slices import sentinel_channel
-from src.preprocessing.decode import (
-    can_channel_spellings,
-    decode_on_read,
-    on_read_can_ids,
-    on_read_catalog,
-)
+from src.preprocessing.decode import decode_on_read, on_read_can_ids
 from src.preprocessing.imu_decimation import (
     ACCEL_LAT_COLUMN,
     ACCEL_LAT_MAX_COLUMN,
@@ -46,29 +42,18 @@ from src.preprocessing.imu_decimation import (
 from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.preprocessing.segmenter import segment_operating_modes
 from src.storage.broadcast_storage import FRAME_ATTR, frame_attrs, session_can_storage
+from src.storage.session_files import PARQUET_PATTERN, footer_utc, has_telemetry
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE, SOURCE_SEP
 from src.telemetry import channel_key as channel_key
 
 log = logging.getLogger(__name__)
 
-PARQUET_PATTERN = "telemetry-*.parquet"
 INDEX_COLUMNS = ["session", "timestamp"]
 TelemetryValueKind = Literal["value", "value_number", "value_text", "value_bool", "payload"]
 #: How a reader gets a session's ``decoded`` rows (module docstring):
 #: ``on_read`` decodes them from the frames with the current catalog, whatever
 #: the session stored; ``as_recorded`` returns the rows exactly as written.
 DecodedRows = Literal["on_read", "as_recorded"]
-
-
-def has_telemetry(session_dir: Path) -> bool:
-    """True when ``session_dir`` holds at least one non-empty telemetry chunk.
-
-    The one "does this session have data?" predicate (R06.6). Scripts had
-    drifted: some counted any chunk, some only non-empty ones. A directory
-    exists from the moment the writer rotates into it, before its first chunk
-    flushes, and a zero-byte chunk is not data.
-    """
-    return any(f.stat().st_size > 0 for f in session_dir.glob(PARQUET_PATTERN))
 
 
 def discover_sessions(root: Path) -> list[Path]:
@@ -85,105 +70,6 @@ def discover_sessions(root: Path) -> list[Path]:
         for child in root.iterdir()
         if child.is_dir() and not child.name.startswith("_") and has_telemetry(child)
     )
-
-
-@dataclass(frozen=True)
-class SessionFooterSpan:
-    """What a session's Parquet footers say without reading any data.
-
-    ``first``/``last`` are the ``timestamp`` column's row-group min/max over
-    every chunk (UTC); ``rows`` is the summed ``num_rows``. Each is ``None``
-    when unknown -- nothing readable, or chunks written without statistics --
-    never zero.
-    """
-
-    first: pd.Timestamp | None
-    last: pd.Timestamp | None
-    rows: int | None
-
-    @property
-    def span_seconds(self) -> float | None:
-        if self.first is None or self.last is None:
-            return None
-        return float((self.last - self.first).total_seconds())
-
-
-def session_footer_span(session_dir: Path) -> SessionFooterSpan:
-    """One walk of a session's Parquet footers: time span and row count.
-
-    The one footer reader (R05.14): :func:`count_session_rows`,
-    :func:`session_time_span_seconds` and ``analysis.workbench.session_span``
-    each walked the footers themselves. A truncated or 0-byte chunk (a
-    daemon crash mid-write) just doesn't count.
-    """
-    try:
-        import pyarrow.parquet as pq
-    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
-        return SessionFooterSpan(None, None, None)
-    lo: pd.Timestamp | None = None
-    hi: pd.Timestamp | None = None
-    rows = 0
-    seen = False
-    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
-        try:
-            if chunk.stat().st_size == 0:
-                continue
-            # pyarrow's typing of ParquetFile.__init__ varies by version (untyped
-            # in some, annotated in others) — unused-ignore keeps this line green
-            # under both, since CI and local envs can resolve different pyarrow.
-            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
-        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
-            continue
-        rows += meta.num_rows
-        seen = True
-        names = list(meta.schema.names)
-        if "timestamp" not in names:
-            continue
-        column = names.index("timestamp")
-        for group in range(meta.num_row_groups):
-            stats = meta.row_group(group).column(column).statistics
-            if stats is None or not stats.has_min_max:
-                continue
-            low, high = _footer_utc(stats.min), _footer_utc(stats.max)
-            if low is not None and (lo is None or low < lo):
-                lo = low
-            if high is not None and (hi is None or high > hi):
-                hi = high
-    return SessionFooterSpan(first=lo, last=hi, rows=rows if seen else None)
-
-
-def _footer_utc(value: Any) -> pd.Timestamp | None:
-    """A footer statistic as a UTC timestamp (naive statistics are UTC)."""
-    try:
-        stamp = pd.Timestamp(value)
-    except (TypeError, ValueError):
-        return None
-    if pd.isna(stamp):
-        return None
-    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
-
-
-def count_session_rows(session_dir: Path) -> int | None:
-    """Row count of a session's Parquet chunks from footer metadata only.
-
-    No data read, so this is cheap enough to call before a replay starts
-    (D02.9 reporting) or while indexing a session. ``None`` means "unknown"
-    (nothing readable) as distinct from a genuine zero.
-    """
-    return session_footer_span(session_dir).rows
-
-
-def session_time_span_seconds(session_dir: Path) -> float | None:
-    """Recorded span of a session in seconds, from Parquet footer statistics.
-
-    Reads only the ``timestamp`` column's row-group min/max, so like
-    :func:`count_session_rows` it is cheap enough to run before a replay
-    starts. A "1x" replay clamps every recorded gap to
-    :data:`src.collection.replay._MAX_GAP_SECONDS`, so wall time says nothing
-    about how much of the recording has been replayed; this is the
-    denominator that does (D02.9). ``None`` when no chunk carries statistics.
-    """
-    return session_footer_span(session_dir).span_seconds
 
 
 def read_session(
@@ -639,7 +525,7 @@ def _chunk_time_span(meta: Any) -> tuple[pd.Timestamp, pd.Timestamp] | None:
         stats = meta.row_group(group).column(column).statistics
         if stats is None or not stats.has_min_max:
             return None
-        low, high = _footer_utc(stats.min), _footer_utc(stats.max)
+        low, high = footer_utc(stats.min), footer_utc(stats.max)
         if low is None or high is None:
             return None
         lo = low if lo is None or low < lo else lo

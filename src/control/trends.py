@@ -32,7 +32,6 @@ from typing import Any
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
-from src.analysis.fingerprint import read_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.trends import evaluate_trends
 from src.config import CanaryConfig
@@ -43,6 +42,7 @@ from src.session import (
     session_kind,
     session_sort_key,
 )
+from src.storage.session_products import read_fingerprint
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 

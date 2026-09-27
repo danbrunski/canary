@@ -1,0 +1,128 @@
+"""The files of a recorded session: its telemetry chunks and their footers.
+
+Chunk-level helpers that answer "does this session hold data, how many rows,
+over what span" without reading any data. They live below the loader
+(``src.preprocessing.loader``), which reads the rows, so that ``storage``
+(session discovery, the catalog) and ``collection`` (replay) can ask these
+questions without importing the pipeline (R09.3).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+PARQUET_PATTERN = "telemetry-*.parquet"
+
+
+def has_telemetry(session_dir: Path) -> bool:
+    """True when ``session_dir`` holds at least one non-empty telemetry chunk.
+
+    The one "does this session have data?" predicate (R06.6). Scripts had
+    drifted: some counted any chunk, some only non-empty ones. A directory
+    exists from the moment the writer rotates into it, before its first chunk
+    flushes, and a zero-byte chunk is not data.
+    """
+    return any(f.stat().st_size > 0 for f in session_dir.glob(PARQUET_PATTERN))
+
+
+@dataclass(frozen=True)
+class SessionFooterSpan:
+    """What a session's Parquet footers say without reading any data.
+
+    ``first``/``last`` are the ``timestamp`` column's row-group min/max over
+    every chunk (UTC); ``rows`` is the summed ``num_rows``. Each is ``None``
+    when unknown -- nothing readable, or chunks written without statistics --
+    never zero.
+    """
+
+    first: pd.Timestamp | None
+    last: pd.Timestamp | None
+    rows: int | None
+
+    @property
+    def span_seconds(self) -> float | None:
+        if self.first is None or self.last is None:
+            return None
+        return float((self.last - self.first).total_seconds())
+
+
+def session_footer_span(session_dir: Path) -> SessionFooterSpan:
+    """One walk of a session's Parquet footers: time span and row count.
+
+    The one footer reader (R05.14): :func:`count_session_rows`,
+    :func:`session_time_span_seconds` and ``analysis.workbench.session_span``
+    each walked the footers themselves. A truncated or 0-byte chunk (a
+    daemon crash mid-write) just doesn't count.
+    """
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:  # pragma: no cover - pyarrow is a hard dependency elsewhere
+        return SessionFooterSpan(None, None, None)
+    lo: pd.Timestamp | None = None
+    hi: pd.Timestamp | None = None
+    rows = 0
+    seen = False
+    for chunk in sorted(session_dir.glob(PARQUET_PATTERN)):
+        try:
+            if chunk.stat().st_size == 0:
+                continue
+            # pyarrow's typing of ParquetFile.__init__ varies by version (untyped
+            # in some, annotated in others) — unused-ignore keeps this line green
+            # under both, since CI and local envs can resolve different pyarrow.
+            meta = pq.ParquetFile(chunk).metadata  # type: ignore[no-untyped-call, unused-ignore]
+        except Exception:  # noqa: BLE001 - a corrupt/truncated chunk just doesn't count
+            continue
+        rows += meta.num_rows
+        seen = True
+        names = list(meta.schema.names)
+        if "timestamp" not in names:
+            continue
+        column = names.index("timestamp")
+        for group in range(meta.num_row_groups):
+            stats = meta.row_group(group).column(column).statistics
+            if stats is None or not stats.has_min_max:
+                continue
+            low, high = footer_utc(stats.min), footer_utc(stats.max)
+            if low is not None and (lo is None or low < lo):
+                lo = low
+            if high is not None and (hi is None or high > hi):
+                hi = high
+    return SessionFooterSpan(first=lo, last=hi, rows=rows if seen else None)
+
+
+def footer_utc(value: Any) -> pd.Timestamp | None:
+    """A footer statistic as a UTC timestamp (naive statistics are UTC)."""
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(stamp):
+        return None
+    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+
+def count_session_rows(session_dir: Path) -> int | None:
+    """Row count of a session's Parquet chunks from footer metadata only.
+
+    No data read, so this is cheap enough to call before a replay starts
+    (D02.9 reporting) or while indexing a session. ``None`` means "unknown"
+    (nothing readable) as distinct from a genuine zero.
+    """
+    return session_footer_span(session_dir).rows
+
+
+def session_time_span_seconds(session_dir: Path) -> float | None:
+    """Recorded span of a session in seconds, from Parquet footer statistics.
+
+    Reads only the ``timestamp`` column's row-group min/max, so like
+    :func:`count_session_rows` it is cheap enough to run before a replay
+    starts. A "1x" replay clamps every recorded gap to
+    :data:`src.collection.replay._MAX_GAP_SECONDS`, so wall time says nothing
+    about how much of the recording has been replayed; this is the
+    denominator that does (D02.9). ``None`` when no chunk carries statistics.
+    """
+    return session_footer_span(session_dir).span_seconds

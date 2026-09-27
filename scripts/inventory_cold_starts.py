@@ -41,7 +41,7 @@ from src.analysis.cold_start_inventory import (  # noqa: E402
     runs_of_session,
     usable_context_runs,
 )
-from src.control.sessions import session_started_at  # noqa: E402
+from src.storage.sessions import session_started_at  # noqa: E402
 
 #: Replays re-emit a stored drive: their "starts" are copies, not new
 #: evidence, and counting them would inflate the inventory.

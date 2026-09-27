@@ -262,7 +262,7 @@ class DtcState:
 
 def _write_sidecar(session_dir: Path, report: DtcReport) -> None:
     """Atomic tmp+rename write, matching ``control.json``
-    (``src.control.sessions.write_session_metadata``, Task 1.7)."""
+    (``src.storage.sessions.write_session_metadata``, Task 1.7)."""
     path = session_dir / DTC_SIDECAR_FILENAME
     write_json_sidecar(path, report.to_dict(), default=str)
 

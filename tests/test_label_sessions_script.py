@@ -11,14 +11,16 @@ from pathlib import Path
 import yaml
 
 import scripts.label_sessions as label_sessions_cli
-from src.analysis.fingerprint import FINGERPRINT_FILENAME  # noqa: E402
 from src.analysis.reference_epoch import (  # noqa: E402
     ReferenceEpoch,
     StatSummary,
     write_reference_epoch,
 )
-from src.analysis.session_classifier import CLASSIFICATION_FILENAME  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
+from src.storage.session_products import (
+    CLASSIFICATION_FILENAME,  # noqa: E402
+    FINGERPRINT_FILENAME,  # noqa: E402
+)
 from src.telemetry import TelemetryRecord  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

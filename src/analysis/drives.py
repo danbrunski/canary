@@ -39,8 +39,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.control.sessions import is_session_dir_name, session_started_at
 from src.session import format_session_timestamp
+from src.storage.sessions import is_session_dir_name, session_started_at
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE
 
 log = logging.getLogger(__name__)
@@ -230,7 +230,7 @@ def _decoded_seconds(chunks: Sequence[Path]) -> np.ndarray[Any, Any]:
     """Floored epoch seconds of the ``decoded`` rows the session reads with.
 
     Decoded on read (P02.8): a frame of an id the on-read catalog decodes
-    (:func:`src.preprocessing.decode.on_read_catalog`) yields a decoded row
+    (:func:`src.decode.on_read.on_read_catalog`) yields a decoded row
     exactly when its payload holds at least one of that id's slices, the
     sentinel word included (``decode_on_read``'s rule, which is the storage
     decoder's). Only the length decides, so this reads timestamps, channels
@@ -241,7 +241,7 @@ def _decoded_seconds(chunks: Sequence[Path]) -> np.ndarray[Any, Any]:
     import pyarrow.dataset as ds
 
     from src.can_ids import parse_can_channel
-    from src.preprocessing.decode import can_channel_spellings, on_read_catalog
+    from src.decode.on_read import can_channel_spellings, on_read_catalog
 
     catalog = on_read_catalog()
     if catalog is None or not chunks:

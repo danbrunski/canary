@@ -195,7 +195,7 @@ def test_classify_one_session_skips_the_catalog_by_default(tmp_path: Path) -> No
 
 
 def test_pin_and_unpin_update_the_catalog_when_wired(tmp_path: Path) -> None:
-    from src.control.sessions import pin_session, unpin_session
+    from src.storage.sessions import pin_session, unpin_session
 
     session = _write_session(tmp_path)
     catalog_db = tmp_path / "catalog.db"

@@ -56,7 +56,6 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
-from src.control.capture_manifest import read_capture_manifest
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -67,6 +66,7 @@ from src.storage.broadcast_storage import (
     change_only_refusal,
     change_only_timeout,
 )
+from src.storage.capture_manifest import read_capture_manifest
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP
 
 #: Namespaces a spec may name. ``did``/``can`` are decode routes rather than

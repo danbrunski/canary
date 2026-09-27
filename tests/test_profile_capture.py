@@ -25,7 +25,6 @@ from src.collection.capture_profiles import CaptureProfileStore
 from src.config import CanaryConfig
 from src.control import capture_finalize
 from src.control.capture import CaptureController
-from src.control.capture_manifest import read_capture_manifest
 from src.control.profile_capture import (
     ProfileCaptureError,
     ProfileCaptureSession,
@@ -33,6 +32,7 @@ from src.control.profile_capture import (
 )
 from src.daemon.health import HealthMonitor
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.storage.capture_manifest import read_capture_manifest
 from src.storage.parquet_writer import ParquetTelemetryWriter
 
 EXAMPLE_YAML = Path(__file__).resolve().parents[1] / "canary.example.yaml"

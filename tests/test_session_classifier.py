@@ -17,19 +17,21 @@ import pandas as pd
 import pytest
 
 from src.analysis.session_classifier import (
-    CLASSIFICATION_FILENAME,
     CLASSIFIER_VERSION,
-    DERIVED_TAGS_FILENAME,
-    SCHEMA_VERSION,
-    DetectedEvent,
-    SessionClassification,
     classify_session,
     is_stale,
-    read_classification,
     write_classification,
 )
 from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
+from src.storage.session_products import (
+    CLASSIFICATION_FILENAME,
+    CLASSIFICATION_SCHEMA_VERSION,
+    DERIVED_TAGS_FILENAME,
+    DetectedEvent,
+    SessionClassification,
+    read_classification,
+)
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -77,7 +79,7 @@ def test_classify_session_writes_self_consistent_sidecar(tmp_path: Path) -> None
     write_classification(session, classification)
 
     payload = json.loads((session / CLASSIFICATION_FILENAME).read_text())
-    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["schema_version"] == CLASSIFICATION_SCHEMA_VERSION
     assert payload["classifier_version"] == CLASSIFIER_VERSION
     assert payload["session_id"] == session.name
     # Mode coverage sums to roughly session duration.

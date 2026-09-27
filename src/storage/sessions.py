@@ -1,4 +1,4 @@
-"""Session discovery and export helpers for the control API."""
+"""Session discovery, ordering, pins and export: the one home for session directories."""
 
 from __future__ import annotations
 
@@ -12,8 +12,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.control.capture_manifest import read_capture_manifest
-from src.preprocessing.loader import PARQUET_PATTERN, has_telemetry
 from src.session import (
     ALL_SESSION_KINDS,
     LIVE_SESSION_KINDS,
@@ -26,6 +24,8 @@ from src.session import (
     iter_sessions,
     session_sort_key,
 )
+from src.storage.capture_manifest import read_capture_manifest
+from src.storage.session_files import PARQUET_PATTERN, has_telemetry
 from src.storage.sidecar import read_json_object, write_json_sidecar
 
 log = logging.getLogger(__name__)

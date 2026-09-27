@@ -26,12 +26,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from src.analysis.digest import (
-    REASON_NO_SPEED_SOURCE,
-    read_digest,
-    read_digest_skipped,
-    write_digest,
-)
+from src.analysis.digest import REASON_NO_SPEED_SOURCE, write_digest
 from src.analysis.gps_tracker import (
     MODE01_SPEED_CHANNELS,
     ROAD_SPEED_QUANTITY,
@@ -43,6 +38,7 @@ from src.daemon.drain import drain_queue_with_broadcast
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import Bindings, load_bindings
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.session_products import read_digest, read_digest_skipped
 from src.telemetry import TelemetryRecord
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 from tests.fakes import slow_digest

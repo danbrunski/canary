@@ -56,10 +56,10 @@ import pandas as pd
 from src.analysis.channels import read_channels
 from src.analysis.clock_align import Alignment, AlignmentError, align_clocks
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
 from src.profiles import active_registry, resolve_profile_for_tooling, scope_config
 from src.session import format_session_timestamp
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.sessions import resolve_session
 from src.telemetry import TelemetryRecord
 
 #: Raw UpRev header (post strip, pre unit-suffix-extraction) -> canonical

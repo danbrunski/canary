@@ -19,8 +19,8 @@ from src.analysis.tuning import GateError, compare_sessions, delivery_error
 from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import build_tuning_frame, section_capabilities
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
 from src.profiles import resolve_profile_for_tooling, scope_config
+from src.storage.sessions import resolve_session
 
 
 def _scoped(config_path: Path, profile: str | None) -> CanaryConfig:

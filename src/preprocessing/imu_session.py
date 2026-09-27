@@ -707,7 +707,7 @@ def speed_decode_catalog(bindings: Bindings | None = None) -> Bindings | None:
     has none of them.
 
     The loader decodes only ``confirmed`` or ``persist: true`` bindings on
-    read (P02.8, ``decode.on_read_catalog``), and ``VEHICLE_SPEED_2D1`` is
+    read (P02.8, ``decode.on_read.on_read_catalog``), and ``VEHICLE_SPEED_2D1`` is
     ``high``: read through it, a session has no ``0x2D1`` speed at all and the
     resolver silently steered by Mode 01 or GPS. Every IMU reader decodes
     these signals from the raw frames itself (:func:`read_imu_inputs`, and
@@ -732,7 +732,8 @@ def read_imu_inputs(session_dir: Path, *, bindings: Bindings | None = None) -> d
     exactly as a decode on read would. Raises ``FileNotFoundError`` without
     telemetry.
     """
-    from src.preprocessing.decode import can_channel_spellings, decode_on_read, on_read_can_ids
+    from src.decode.on_read import can_channel_spellings
+    from src.preprocessing.decode import decode_on_read, on_read_can_ids
     from src.preprocessing.loader import read_session
 
     catalog = speed_decode_catalog(bindings)

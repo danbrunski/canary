@@ -56,8 +56,8 @@ from src.analysis.tuning_frame import (
 )
 from src.collection.capture_profiles import FUEL_DELIVERY_TUPLE
 from src.config import CanaryConfig
-from src.control.capture_manifest import read_capture_manifest, read_capture_quality
 from src.session import load_tags
+from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
 
 # The WOT load and rpm floors and the rpm band edges are vehicle facts: they
 # come from the profile's ``tuning_providers.yaml`` ``mode01_wot`` (R05.13),

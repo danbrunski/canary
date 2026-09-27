@@ -16,10 +16,6 @@ from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
 from src.control.capture import CaptureController
 from src.control.capture_finalize import recompute_quality_off_loop
-from src.control.capture_manifest import (
-    recover_interrupted_capture,
-    write_capture_quality,
-)
 from src.control.profile_capture import (
     AUTOSTART_TICK_SECONDS,
     CaptureAutostart,
@@ -29,6 +25,7 @@ from src.control.replay_control import ReplayController
 from src.decode.bindings import load_bindings
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
+from src.storage.capture_manifest import recover_interrupted_capture, write_capture_quality
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 

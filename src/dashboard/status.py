@@ -12,7 +12,6 @@ from src.analysis.gps_tracker import GpsTracker
 from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
 from src.config import CanaryConfig
-from src.control.capture_manifest import latest_capture_summary
 from src.control.replay_control import ReplayController
 from src.control.tuning_readiness import build_tuning_readiness
 from src.dashboard.ups import (
@@ -22,6 +21,7 @@ from src.dashboard.ups import (
     read_watchdog_status,
 )
 from src.models.feature_spec_health import load_audit_snapshot, structural_blindness_snapshot
+from src.storage.capture_manifest import latest_capture_summary
 from src.storage.monitor import free_space_mb
 from src.storage.sidecar import read_json_object
 
@@ -224,7 +224,7 @@ def _resolve_latest_session(storage_path: Path) -> Path | None:
     capture. Fixing it per-caller would have needed six call sites to
     remember; fixing the resolver makes them right by construction.
     """
-    from src.control.sessions import latest_session
+    from src.storage.sessions import latest_session
 
     return latest_session(storage_path)
 

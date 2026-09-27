@@ -49,7 +49,6 @@ from src.analysis.workbench import (
 )
 from src.collection import tuning_profile
 from src.config import CanaryConfig
-from src.control.sessions import is_session_dir_name, resolve_session, session_started_at
 from src.control.trip_end import (
     DIGEST_TIMEOUT_SECONDS,
     _discard_pool,
@@ -57,9 +56,10 @@ from src.control.trip_end import (
     any_digest_in_flight,
     limit_address_space,
 )
-from src.preprocessing.loader import count_session_rows, session_time_span_seconds
 from src.profiles import active_registry, profile_dir
 from src.session import session_sort_key
+from src.storage.session_files import count_session_rows, session_time_span_seconds
+from src.storage.sessions import is_session_dir_name, resolve_session, session_started_at
 
 #: Most sessions one pooled request may name. Each is read in turn in the
 #: child, so this bounds wall time rather than memory.

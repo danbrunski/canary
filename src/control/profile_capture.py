@@ -38,9 +38,9 @@ from src.control.capture_finalize import (
     live_capture_quality,
     record_capture_start,
 )
-from src.control.capture_manifest import read_capture_manifest, stamp_capture_end
 from src.session import issue_isolated_id
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.storage.capture_manifest import read_capture_manifest, stamp_capture_end
 from src.vehicle_state import ReplayStatusSource, derive_from_live_source
 
 if TYPE_CHECKING:

@@ -489,8 +489,9 @@ def _whole_session_numeric(session: Path) -> pd.DataFrame:
     """The ``value_number`` rows of every chunk at once: the unbounded read the
     no-store chain made before P02.1, kept here as the reference the
     part-by-part chain must reproduce."""
-    from src.preprocessing.decode import on_read_catalog
-    from src.preprocessing.loader import PARQUET_PATTERN, _read_numeric_chunks
+    from src.decode.on_read import on_read_catalog
+    from src.preprocessing.loader import _read_numeric_chunks
+    from src.storage.session_files import PARQUET_PATTERN
     from src.telemetry import SOURCE_SEP
 
     frame = pd.concat(
@@ -569,11 +570,12 @@ def test_without_a_store_the_value_number_chain_reads_one_part_at_a_time(
     the whole session. The store only adds reuse."""
     from src.config import CanaryConfig
     from src.preprocessing import loader
+    from src.storage.session_files import count_session_rows
 
     monkeypatch.delenv(DERIVED_DIR_ENV, raising=False)
     monkeypatch.setattr(loader, "SESSION_PART_ROWS", 3_000)
     session = _imu_session(tmp_path / "sessions")
-    total = loader.count_session_rows(session)
+    total = count_session_rows(session)
     assert total is not None
     reads: list[int] = []
     real = loader._read_numeric_chunks

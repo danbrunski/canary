@@ -32,7 +32,6 @@ from src.analysis.workbench import (
 from src.config import CanaryConfig
 from src.control.calibration import profile_dir
 from src.control.logs import DEFAULT_LOG_LIMIT, list_logs
-from src.control.sessions import resolve_session
 from src.control.workbench_jobs import (
     Selection,
     WorkbenchRefusedError,
@@ -43,6 +42,7 @@ from src.control.workbench_jobs import (
 from src.dashboard.security import (
     control_auth_dependency,
 )
+from src.storage.sessions import resolve_session
 
 DEFAULT_MEASURED = "obd:O2_WR_LAMBDA_S1"
 

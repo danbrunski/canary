@@ -61,15 +61,15 @@ from src.analysis.drives import (
 )
 from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.config import CanaryConfig
-from src.control.sessions import session_started_at
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.models.sequence_calibration import block_maxima as max_finite_per_block
 from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS
 from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.loader import PARQUET_PATTERN
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 from src.session import SessionKind, session_kind, session_sort_key
+from src.storage.session_files import PARQUET_PATTERN
+from src.storage.sessions import session_started_at
 
 log = logging.getLogger(__name__)
 
@@ -467,7 +467,7 @@ def session_mode_coverage(session: Path) -> set[str] | None:
     ``None`` when the session hasn't been classified (run
     ``scripts/label_sessions.py``); callers treat that as unknown coverage.
     """
-    from src.analysis.session_classifier import read_classification
+    from src.storage.session_products import read_classification
 
     classification = read_classification(session)
     if classification is None:
@@ -481,7 +481,7 @@ def session_mode_coverage(session: Path) -> set[str] | None:
 
 def session_holdout_health(session: Path) -> tuple[str, int] | None:
     """Classifier disposition and observed feature width for holdout screening."""
-    from src.analysis.session_classifier import read_classification
+    from src.storage.session_products import read_classification
 
     classification = read_classification(session)
     if classification is None:
@@ -822,7 +822,7 @@ def default_profile_exclusion(session_dir: Path) -> str | None:
     readable manifest is treated as the replay guard treats it (R03.12):
     eligible.
     """
-    from src.control.capture_manifest import read_capture_manifest
+    from src.storage.capture_manifest import read_capture_manifest
 
     name = Path(session_dir).name
     # Operator decision 2026-09-24: tuning logs do not represent the default

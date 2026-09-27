@@ -16,7 +16,19 @@ import pytest
 
 from src.analysis.capture_coverage import count_persisted_tuples
 from src.collection.capture_lifetime import CaptureLedger, ChannelAccumulator
-from src.collection.capture_losses import (
+from src.collection.capture_quality import (
+    ACQUISITION_GAP,
+    PERSISTENCE_LOSS,
+    RATE_SHORTFALL,
+    TUPLE_INCOMPLETE,
+    TUPLE_SKEW,
+    UNANSWERED_INPUT,
+    UNKNOWN_LOSS_COUNTERS,
+    batching_baseline,
+    evaluate_capture_quality,
+    tuple_rate_bound_hz,
+)
+from src.storage.capture_losses import (
     RESET,
     UNKNOWN,
     VERIFIED,
@@ -24,20 +36,7 @@ from src.collection.capture_losses import (
     reconcile_losses,
     summarize_losses,
 )
-from src.collection.capture_quality import (
-    ACQUISITION_GAP,
-    PERSISTENCE_LOSS,
-    RATE_SHORTFALL,
-    SCOPE_TRAILING,
-    TUPLE_INCOMPLETE,
-    TUPLE_SKEW,
-    UNANSWERED_INPUT,
-    UNKNOWN_LOSS_COUNTERS,
-    batching_baseline,
-    evaluate_capture_quality,
-    normalize_quality_payload,
-    tuple_rate_bound_hz,
-)
+from src.storage.capture_manifest import SCOPE_TRAILING, normalize_quality_payload
 from src.telemetry import TelemetryRecord
 
 TUPLE = ["RPM", "ENGINE_LOAD", "FUEL_STATUS", "COMMANDED_EQUIV_RATIO", "O2_WR_LAMBDA_S1"]

@@ -17,7 +17,7 @@ from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import PARQUET_PATTERN
+from src.storage.session_files import PARQUET_PATTERN
 
 log = logging.getLogger(__name__)
 

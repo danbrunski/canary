@@ -3,7 +3,7 @@
 A listing, not an analysis: everything here comes from sidecars and Parquet
 footers (row counts, row-group timestamp statistics), so it never loads a
 session and needs no child process. Ordered newest first by
-:func:`~src.control.sessions.session_started_at` — never by directory name,
+:func:`~src.storage.sessions.session_started_at` — never by directory name,
 since ``_capture-…`` prefixes sort before dates.
 """
 
@@ -17,9 +17,9 @@ from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.workbench import revision_boundaries, session_revision, session_span
 from src.config import CanaryConfig
 from src.control.calibration import active_registry
-from src.control.capture_manifest import read_capture_manifest, read_capture_quality
-from src.control.sessions import is_session_dir_name, session_started_at
 from src.session import TAGS_FILENAME
+from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
+from src.storage.sessions import is_session_dir_name, session_started_at
 
 #: Default page of the browser. Each row opens every chunk's footer, so an
 #: unbounded listing over months of ordinary sessions is not free.

@@ -436,7 +436,7 @@ def test_loss_counters_report_absent_can0_as_unknown_never_zero(tmp_path: Path) 
 
 
 def test_loss_epochs_reconcile_per_capture_not_since_boot(tmp_path: Path) -> None:
-    from src.collection.capture_losses import reconcile_losses
+    from src.storage.capture_losses import reconcile_losses
 
     stats = tmp_path / "statistics"
     stats.mkdir()

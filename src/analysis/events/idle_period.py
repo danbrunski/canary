@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.analysis.session_classifier import DetectedEvent, ModeSegment
 from src.columns import TIMESTAMP_COLUMN
+from src.storage.session_products import DetectedEvent, ModeSegment
 from src.timefmt import format_timestamp
 
 #: Speed below which we treat the vehicle as idling.

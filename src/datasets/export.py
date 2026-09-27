@@ -32,10 +32,10 @@ from typing import Any
 import pandas as pd
 
 from src.config import CanaryConfig
-from src.control.sessions import write_session_metadata
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import resample_config_for, resample_wide
 from src.session import MANIFEST_FILENAME, build_windows, load_tags, session_paths
+from src.storage.sessions import write_session_metadata
 from src.storage.sidecar import read_json_object
 
 log = logging.getLogger(__name__)

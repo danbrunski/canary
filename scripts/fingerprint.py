@@ -50,22 +50,20 @@ except ImportError:  # loaded as `scripts.fingerprint` — repo root on path, no
         load_config,
     )
 
-from src.analysis.fingerprint import (  # noqa: E402
-    compute_fingerprint,
-    is_stale,
-    read_fingerprint,
-    write_fingerprint,
-)
+from src.analysis.fingerprint import compute_fingerprint, is_stale, write_fingerprint
 from src.analysis.reference_epoch import (  # noqa: E402
     build_reference_epoch,
     write_reference_epoch,
 )
-from src.analysis.session_classifier import read_classification  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.control.trends import corpus_trend_summary  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, use_store  # noqa: E402
 from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.storage.session_products import (
+    read_classification,  # noqa: E402
+    read_fingerprint,
+)
 
 log = logging.getLogger(__name__)
 

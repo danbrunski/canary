@@ -27,10 +27,10 @@ from src.collection.capture_profiles import (
     seed_catalog,
 )
 from src.config import CanaryConfig
-from src.control.sessions import list_sessions
 from src.dashboard.api import create_app
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
+from src.storage.sessions import list_sessions
 from src.telemetry import TelemetryRecord
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

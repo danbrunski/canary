@@ -390,7 +390,8 @@ def _load_session(session: Path) -> pd.DataFrame:
     """
     import duckdb
 
-    from src.preprocessing.decode import decode_on_read, on_read_catalog
+    from src.decode.on_read import on_read_catalog
+    from src.preprocessing.decode import decode_on_read
 
     pattern = str(session / "telemetry-*.parquet")
     frame = duckdb.connect().execute(f"SELECT * FROM read_parquet('{pattern}')").df()

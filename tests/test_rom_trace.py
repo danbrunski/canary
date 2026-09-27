@@ -35,8 +35,8 @@ from src.analysis.rom_trace import (
 )
 from src.config import CanaryConfig
 from src.control import workbench_jobs
-from src.control.capture_manifest import CAPTURE_MANIFEST_FILENAME
 from src.dashboard.routes import workbench as workbench_routes
+from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 

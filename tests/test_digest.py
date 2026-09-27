@@ -12,13 +12,11 @@ from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
 from src.alerts.notifier import format_digest_message
 from src.analysis.digest import (
-    DIGEST_FILENAME,
     SessionDigest,
     _fingerprint_top_movers,
     _top_behavior_deviations,
     compute_digest,
     get_or_compute_digest,
-    read_digest,
     write_digest,
 )
 from src.analysis.reference_epoch import build_reference_epoch, write_reference_epoch
@@ -26,6 +24,7 @@ from src.analysis.vehicle_ledger import VehicleEvent, VehicleLedgerStore
 from src.config import CanaryConfig
 from src.decode.dtc_catalog import build_dtc_report
 from src.session import DTC_SIDECAR_FILENAME
+from src.storage.session_products import DIGEST_FILENAME, read_digest
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

@@ -15,9 +15,9 @@ from uuid import uuid4
 
 from src.coerce import optional_str as _optional_str
 from src.config import CanaryConfig
-from src.control.sessions import resolve_session
 from src.jsonl_store import append_jsonl_line
 from src.session import format_session_timestamp
+from src.storage.sessions import resolve_session
 
 JobKind = Literal[
     "retrain_if",

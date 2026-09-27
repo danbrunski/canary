@@ -40,19 +40,16 @@ from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.session_classifier import classify_session
 from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
-from src.preprocessing.loader import (
-    count_session_rows,
-    resample_and_segment,
-    session_time_span_seconds,
-)
+from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
+from src.storage.session_files import count_session_rows, session_time_span_seconds
+from src.storage.session_products import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME, read_digest
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
 
 log = logging.getLogger(__name__)
 
-DIGEST_FILENAME = "digest.json"
 #: 2 (A06.5): ``anomaly_counts_by_source`` counts alert-role events only and
 #: ``evidence_counts_by_source`` counts the rest. A schema-1 sidecar is still
 #: accurate as written — detector roles did not exist when it was computed,
@@ -62,20 +59,13 @@ DIGEST_FILENAME = "digest.json"
 #: would count events from long after the trip.
 SCHEMA_VERSION = 2
 
-#: Refusal sidecar (D03.6). A digest that did not run leaves this instead of
-#: nothing, so a reader can tell the three states apart: ``digest.json``
-#: present = computed; ``digest_skipped.json`` present = refused/failed, with
-#: the reason; neither = never attempted. Before this existed, a session the
-#: daemon was OOM-killed computing looked exactly like a session nobody had
-#: got round to.
-DIGEST_SKIPPED_FILENAME = "digest_skipped.json"
 #: 2 (P02.1): adds ``span_seconds`` / ``span_budget_seconds``, and
 #: ``row_budget`` is set only where a row budget applies (a capture's tuning
 #: section); an ordinary drive's is ``null``.
 SKIP_SCHEMA_VERSION = 2
 
 #: The directory is replay output / quarantine / scratch, not a recording of
-#: this vehicle (``src.control.sessions.is_session_dir_name``).
+#: this vehicle (``src.storage.sessions.is_session_dir_name``).
 REASON_NOT_A_SESSION = "not_a_session"
 #: A capture whose tuning section would read more rows than
 #: ``daemon.digest_row_budget`` allows to be loaded at once.
@@ -420,7 +410,7 @@ def digest_preflight(
       2,622,370 rows, and the 8 GB Pi's cliff was bracketed between ~4.5 M
       rows (completed) and ~5.9 M rows (OOM-killed).
     """
-    from src.control.sessions import is_session_dir_name
+    from src.storage.sessions import is_session_dir_name
 
     if not is_session_dir_name(session_dir.name):
         # Derived from the child's address-space ceiling when unset, so a
@@ -475,11 +465,6 @@ def write_digest_skipped(session_dir: Path, skipped: DigestSkipped) -> Path:
     return path
 
 
-def read_digest_skipped(session_dir: Path) -> dict[str, Any] | None:
-    """Load the refusal sidecar, or ``None`` if absent / unreadable."""
-    return read_json_object(session_dir / DIGEST_SKIPPED_FILENAME)
-
-
 def clear_digest_skipped(session_dir: Path) -> None:
     """Drop a stale refusal once a digest has actually been written.
 
@@ -492,7 +477,7 @@ def clear_digest_skipped(session_dir: Path) -> None:
 
 
 def _session_start(session_dir: Path) -> datetime | None:
-    from src.control.sessions import session_started_at
+    from src.storage.sessions import session_started_at
 
     return session_started_at(session_dir)
 
@@ -703,11 +688,6 @@ def _json_default(value: Any) -> Any:
     return str(value)
 
 
-def read_digest(session_dir: Path) -> dict[str, Any] | None:
-    """Load the sidecar dict, or ``None`` if absent / unreadable."""
-    return read_json_object(session_dir / DIGEST_FILENAME)
-
-
 def persist_digest(
     session_dir: Path,
     digest: SessionDigest,
@@ -773,9 +753,7 @@ def get_or_compute_digest(
 __all__ = [
     "DIGEST_CHAIN_BYTES_PER_SECOND",
     "DIGEST_CHAIN_FIXED_BYTES",
-    "DIGEST_FILENAME",
     "DIGEST_PEAK_BYTES_PER_ROW",
-    "DIGEST_SKIPPED_FILENAME",
     "REASON_CHILD_FAILED",
     "REASON_CHILD_OUT_OF_MEMORY",
     "REASON_CHILD_TIMED_OUT",
@@ -796,8 +774,6 @@ __all__ = [
     "digest_span_budget_seconds",
     "get_or_compute_digest",
     "persist_digest",
-    "read_digest",
-    "read_digest_skipped",
     "write_digest",
     "write_digest_skipped",
 ]

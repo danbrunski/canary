@@ -55,15 +55,14 @@ except ImportError:  # loaded as `scripts.label_sessions` — repo root on path,
 from src.analysis.fingerprint import compute_fingerprint, write_fingerprint
 from src.analysis.session_classifier import (
     CLASSIFIER_VERSION,
-    SessionClassification,
     classify_session,
     is_stale,
-    read_classification,
     write_classification,
 )
 from src.control.trends import evaluate_and_alert_trends
 from src.log import configure_logging
 from src.storage.catalog import record_session_best_effort
+from src.storage.session_products import SessionClassification, read_classification
 
 log = logging.getLogger(__name__)
 

@@ -16,7 +16,7 @@ Three problems carry most of the weight here:
 - **HTTP contracts do not change.** Paths, methods, status codes, response
   shapes and auth stay the same. Before any route moves, a snapshot test pins
   them (R03.4).
-- Live-session reads go through `control.sessions.latest_session`. Anything
+- Live-session reads go through `storage.sessions.latest_session`. Anything
   that reads a whole session goes through the bounded single-flight child
   (`workbench_jobs.run_off_loop`) and defers while a capture records.
 - `scripts/restart_canary.sh` semantics are untouched. Nothing here adds a

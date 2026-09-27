@@ -19,7 +19,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 
-from src.control.sessions import resolve_session
+from src.storage.sessions import resolve_session
 
 
 def build_session_read_router(

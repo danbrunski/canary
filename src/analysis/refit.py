@@ -56,7 +56,6 @@ from src.analysis.derived import (
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
-from src.control.sessions import session_started_at
 from src.decode.behavior_eligibility import (
     ServingSpec,
     eligibility_reasons,
@@ -92,6 +91,7 @@ from src.preprocessing.session_context import (
     append_start_context,
     start_context_columns,
 )
+from src.storage.sessions import session_started_at
 
 log = logging.getLogger(__name__)
 

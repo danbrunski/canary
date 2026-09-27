@@ -31,9 +31,9 @@ from src.control.jobs import JobController
 from src.control.profile_capture import CaptureAutostart, EventPublisher, ProfileCaptureSession
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
-from src.control.sessions import resolve_session
 from src.dashboard.broadcast import Broadcaster
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.storage.sessions import resolve_session
 
 if TYPE_CHECKING:
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).

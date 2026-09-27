@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from src.analysis.session_timeseries import compute_time_series
-from src.control.sessions import resolve_session
+from src.storage.sessions import resolve_session
 from src.storage.telemetry_query import TelemetryQuery
 
 

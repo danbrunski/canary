@@ -38,11 +38,11 @@ from pathlib import Path
 from typing import Any
 
 from src.collection import capture_lifetime
-from src.collection.capture_losses import CAN0_LOSS_FIELDS, LOSS_FIELDS, LossEpoch
 from src.models.drift import FeatureDriftReport as FeatureDriftReport
 from src.models.drift import feature_drift as feature_drift
 from src.models.drift import reconstruction_error_drift as reconstruction_error_drift
 from src.startup import StartupTimeline
+from src.storage.capture_losses import CAN0_LOSS_FIELDS, LOSS_FIELDS, LossEpoch
 
 log = logging.getLogger(__name__)
 
@@ -550,7 +550,7 @@ class HealthMonitor:
     def loss_counters(self) -> dict[str, int | None]:
         """Every attributable loss counter, cumulative, ``None`` = unavailable.
 
-        Keys are ``<sink>.<field>``; :mod:`src.collection.capture_losses`
+        Keys are ``<sink>.<field>``; :mod:`src.storage.capture_losses`
         assigns each a scope. The kernel's ``can0`` counters are included so
         a receive overrun during a capture is visible, and reported as
         ``None`` (unknown) on a host without the interface — never as zero.

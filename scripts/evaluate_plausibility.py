@@ -49,7 +49,6 @@ except ImportError:  # loaded as `scripts.evaluate_plausibility`
     from scripts._cli import add_common_args, add_profile_arg, load_config  # type: ignore[no-redef]
 
 from src.config import CanaryConfig
-from src.control.sessions import session_started_at
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import DidMap, load_did_map
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -70,6 +69,7 @@ from src.plausibility.offline import (
     run_evaluator,
 )
 from src.session import session_sort_key
+from src.storage.sessions import session_started_at
 
 #: The 2026-09-20 benchmark's channels (``bench_new.json``).
 BENCHMARK_CHANNELS = (

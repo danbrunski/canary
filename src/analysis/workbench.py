@@ -56,11 +56,11 @@ from src.analysis.tuning import (
 )
 from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_frame import ProviderRegistry
-from src.control.capture_manifest import read_capture_manifest
-from src.control.sessions import session_started_at
 from src.paths import BINDINGS_YAML, DIDS_YAML
-from src.preprocessing.loader import session_footer_span
 from src.session import TAGS_FILENAME, load_tags
+from src.storage.capture_manifest import read_capture_manifest
+from src.storage.session_files import session_footer_span
+from src.storage.sessions import session_started_at
 
 Regime = Literal["all", "closed_loop", "enrichment", "fuel_cut", "idle"]
 REGIMES: tuple[Regime, ...] = ("all", "closed_loop", "enrichment", "fuel_cut", "idle")
@@ -202,7 +202,7 @@ def session_span(session_dir: Path) -> tuple[datetime | None, datetime | None, i
     browser can list duration and size without loading a session. ``None``
     means unknown (nothing readable, or chunks written without statistics),
     never zero. The footer walk is the loader's
-    (:func:`src.preprocessing.loader.session_footer_span`, R05.14).
+    (:func:`src.storage.session_files.session_footer_span`, R05.14).
     """
     footer = session_footer_span(session_dir)
     return (

@@ -30,21 +30,26 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import pandas as pd
 
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, UNKNOWN_MODE
 from src.config import CanaryConfig
 from src.preprocessing.loader import numeric_value_columns, resample_and_segment
-from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
+from src.storage.session_products import (
+    CLASSIFICATION_FILENAME,
+    CLASSIFICATION_SCHEMA_VERSION,
+    DERIVED_TAGS_FILENAME,
+    DetectedEvent,
+    Disposition,
+    ModeSegment,
+    SessionClassification,
+)
+from src.storage.sidecar import require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
-
-CLASSIFICATION_FILENAME = "classification.json"
-DERIVED_TAGS_FILENAME = "derived_tags.jsonl"
 
 #: Increment when the classifier semantics change (new detectors, changed
 #: disposition rules, new fields). Stale sidecars are detected via
@@ -56,9 +61,6 @@ DERIVED_TAGS_FILENAME = "derived_tags.jsonl"
 #: instead of its own >= 70 km/h cut (R01.7).
 CLASSIFIER_VERSION = "0.3.1"
 
-SCHEMA_VERSION = 1
-
-Disposition = Literal["ready", "review", "quarantine"]
 
 #: When more than this fraction of session rows have ``operating_mode ==
 #: unknown``, the session is quarantined — the segmenter couldn't
@@ -74,106 +76,6 @@ _DEFAULT_QUARANTINE_UNKNOWN_FRACTION = 0.9
 #: ``_DEFAULT_QUARANTINE_UNKNOWN_FRACTION`` go to ``review`` so the
 #: operator can decide whether to use them as training input.
 _DEFAULT_REVIEW_UNKNOWN_FRACTION = 0.3
-
-
-@dataclass(frozen=True)
-class ModeSegment:
-    """One contiguous run of a single operating mode within a session."""
-
-    start_timestamp: str  # ISO 8601 UTC
-    end_timestamp: str  # ISO 8601 UTC, exclusive
-    mode: str
-    duration_seconds: float
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "start": self.start_timestamp,
-            "end": self.end_timestamp,
-            "mode": self.mode,
-            "duration_seconds": round(self.duration_seconds, 3),
-        }
-
-
-@dataclass(frozen=True)
-class DetectedEvent:
-    """One auto-detected physical event (``cold_start``, ``hard_accel``, ...)."""
-
-    timestamp: str  # ISO 8601 UTC — the event's reference moment
-    kind: str
-    fields: Mapping[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "timestamp": self.timestamp,
-            "kind": self.kind,
-            "fields": dict(self.fields),
-        }
-
-
-@dataclass(frozen=True)
-class SessionClassification:
-    """Full classifier output for one session."""
-
-    schema_version: int
-    classifier_version: str
-    classified_at: str
-    session_id: str
-    duration_seconds: float
-    mode_seconds: Mapping[str, float]
-    event_counts: Mapping[str, int]
-    mode_segments: tuple[ModeSegment, ...]
-    events: tuple[DetectedEvent, ...]
-    quality: Mapping[str, Any]
-    disposition: Disposition
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "classifier_version": self.classifier_version,
-            "classified_at": self.classified_at,
-            "session_id": self.session_id,
-            "duration_seconds": round(self.duration_seconds, 3),
-            "summary": {
-                "mode_seconds": {k: round(v, 3) for k, v in self.mode_seconds.items()},
-                "event_counts": dict(self.event_counts),
-            },
-            "mode_segments": [segment.to_dict() for segment in self.mode_segments],
-            "events": [event.to_dict() for event in self.events],
-            "quality": dict(self.quality),
-            "disposition": self.disposition,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> SessionClassification:
-        summary = dict(data.get("summary") or {})
-        return cls(
-            schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
-            classifier_version=str(data["classifier_version"]),
-            classified_at=str(data["classified_at"]),
-            session_id=str(data["session_id"]),
-            duration_seconds=float(data["duration_seconds"]),
-            mode_seconds={k: float(v) for k, v in dict(summary.get("mode_seconds", {})).items()},
-            event_counts={k: int(v) for k, v in dict(summary.get("event_counts", {})).items()},
-            mode_segments=tuple(
-                ModeSegment(
-                    start_timestamp=str(item["start"]),
-                    end_timestamp=str(item["end"]),
-                    mode=str(item["mode"]),
-                    duration_seconds=float(item["duration_seconds"]),
-                )
-                for item in data.get("mode_segments", [])
-            ),
-            events=tuple(
-                DetectedEvent(
-                    timestamp=str(item["timestamp"]),
-                    kind=str(item["kind"]),
-                    fields=dict(item.get("fields") or {}),
-                )
-                for item in data.get("events", [])
-            ),
-            quality=dict(data.get("quality") or {}),
-            disposition=str(data.get("disposition", "ready")),  # type: ignore[arg-type]
-        )
 
 
 # --------------------------------------------------------------------------- #
@@ -226,7 +128,7 @@ def classify_session(
 
     classified_at = _format_timestamp(datetime.now(UTC) if now is None else now)
     return SessionClassification(
-        schema_version=SCHEMA_VERSION,
+        schema_version=CLASSIFICATION_SCHEMA_VERSION,
         classifier_version=CLASSIFIER_VERSION,
         classified_at=classified_at,
         session_id=session_dir.name,
@@ -248,17 +150,6 @@ def write_classification(session_dir: Path, classification: SessionClassificatio
     return path
 
 
-def read_classification(session_dir: Path) -> SessionClassification | None:
-    """Load the sidecar, or ``None`` if absent / unreadable."""
-    data = read_json_object(session_dir / CLASSIFICATION_FILENAME)
-    if data is None:
-        return None
-    try:
-        return SessionClassification.from_dict(data)
-    except (KeyError, TypeError, ValueError):
-        return None
-
-
 def is_stale(classification: SessionClassification | None) -> bool:
     """True when a sidecar is missing or its classifier_version is behind."""
     if classification is None:
@@ -274,7 +165,7 @@ def is_stale(classification: SessionClassification | None) -> bool:
 def _empty_classification(session_id: str, now: datetime | None) -> SessionClassification:
     classified_at = _format_timestamp(datetime.now(UTC) if now is None else now)
     return SessionClassification(
-        schema_version=SCHEMA_VERSION,
+        schema_version=CLASSIFICATION_SCHEMA_VERSION,
         classifier_version=CLASSIFIER_VERSION,
         classified_at=classified_at,
         session_id=session_id,
@@ -464,17 +355,9 @@ def _default_detectors() -> list[EventDetectorCallable]:
 
 
 __all__ = [
-    "CLASSIFICATION_FILENAME",
     "CLASSIFIER_VERSION",
-    "DERIVED_TAGS_FILENAME",
-    "DetectedEvent",
-    "Disposition",
     "EventDetectorCallable",
-    "ModeSegment",
-    "SCHEMA_VERSION",
-    "SessionClassification",
     "classify_session",
     "is_stale",
-    "read_classification",
     "write_classification",
 ]

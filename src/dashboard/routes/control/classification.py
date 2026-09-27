@@ -17,9 +17,6 @@ from src.control.classification import (
     get_session_classification,
     list_events_by_kind,
 )
-from src.control.sessions import (
-    resolve_session,
-)
 from src.control.trends import corpus_trend_summary
 from src.control.workbench_jobs import (
     WorkbenchRefusedError,
@@ -29,6 +26,7 @@ from src.control.workbench_jobs import (
 )
 from src.dashboard.routes.control.context import ControlContext
 from src.session import SessionKind, session_kind
+from src.storage.sessions import resolve_session
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -119,9 +117,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # public-XOR-authenticated posture per route. Computed on first
         # request if the trip-end hook (Task 5.4) hasn't already written
         # digest.json for this session.
-        from src.analysis.digest import read_digest
         from src.control.digest import get_session_digest_refusal
         from src.control.trip_end import handle_trip_end_off_loop
+        from src.storage.session_products import read_digest
 
         try:
             session_dir = resolve_session(config.collection.storage_path, session_id)

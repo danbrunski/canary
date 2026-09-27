@@ -35,11 +35,11 @@ except ImportError:  # loaded as `scripts.derive_sessions`: repo root on path
         load_config,
     )
 
-from src.control.sessions import recorded_sessions, session_started_at
 from src.log import configure_logging
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore
 from src.preprocessing.feature_pipeline import default_decode_inputs
 from src.preprocessing.resampler import resample_config_for
+from src.storage.sessions import recorded_sessions, session_started_at
 
 
 def _utc_date(text: str) -> datetime:

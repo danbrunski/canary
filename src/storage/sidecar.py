@@ -23,8 +23,8 @@ from typing import Any
 from src.atomic_write import atomic_write_text
 
 #: The chunk glob every session reader keys off. Mirrors
-#: ``src.preprocessing.loader.PARQUET_PATTERN``; kept literal here so this
-#: module stays a leaf (the loader imports pandas and pyarrow).
+#: ``src.storage.session_files.PARQUET_PATTERN``; kept literal here so this
+#: module stays a leaf (``session_files`` imports pandas and pyarrow).
 TELEMETRY_GLOB = "telemetry-*.parquet"
 
 

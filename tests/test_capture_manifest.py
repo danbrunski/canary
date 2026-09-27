@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from src.control.capture_manifest import (
+from src.storage.capture_manifest import (
     CAPTURE_EPOCH_FILENAME,
     read_capture_epoch,
     read_capture_quality,

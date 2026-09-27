@@ -18,17 +18,13 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 
-from src.control.sessions import (
-    filter_sessions,
-    list_sessions,
-    summarize_session,
-)
 from src.dashboard.routes.control.context import ControlContext
 from src.dashboard.routes.stored_sessions import (
     SessionStore,
     build_stored_session_router,
     sessions_payload,
 )
+from src.storage.sessions import filter_sessions, list_sessions, summarize_session
 
 
 def _guard_active_capture(ctx: ControlContext, session_id: str) -> None:

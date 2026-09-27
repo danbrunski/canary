@@ -38,9 +38,9 @@ from src.analysis.workbench import (
 )
 from src.config import CanaryConfig
 from src.control import workbench_jobs
-from src.control.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUALITY_FILENAME
 from src.control.logs import list_logs
 from src.dashboard.routes import workbench as workbench_routes
+from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUALITY_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 

@@ -24,9 +24,9 @@ from scripts.evaluate_detectors import (  # noqa: E402
     summarize_recall,
 )
 from src.analysis.labelled_events import LabelledEvent  # noqa: E402
-from src.control.sessions import recorded_sessions  # noqa: E402
 from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
+from src.storage.sessions import recorded_sessions  # noqa: E402
 from src.telemetry import TelemetryRecord  # noqa: E402
 from tests.builders import IFConfig
 from tests.configs import example_config

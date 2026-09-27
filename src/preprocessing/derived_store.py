@@ -53,9 +53,10 @@ from src.decode.slices import sentinel_channel
 from src.paths import DATA_DIR
 from src.preprocessing.derived import CELL_COLUMNS, ReducedSession, grid_interval_ns
 from src.preprocessing.feature_cache import _session_cache_entry
-from src.preprocessing.loader import PARQUET_PATTERN, SESSION_PART_ROWS
+from src.preprocessing.loader import SESSION_PART_ROWS
 from src.preprocessing.resampler import ResampleConfig
 from src.storage.broadcast_storage import refuse_shorter_read_timeout, session_can_storage
+from src.storage.session_files import PARQUET_PATTERN
 from src.telemetry import DBC_SOURCE, DECODED_SOURCE, SOURCE_SEP
 
 log = logging.getLogger(__name__)
@@ -309,7 +310,8 @@ class DerivedStore:
         rebuilds it, naming the cause) and the session's IMU frame
         (``imu_frame.json``, H02.4).
         """
-        from src.preprocessing.decode import on_read_catalog, on_read_hash
+        from src.decode.on_read import on_read_catalog
+        from src.preprocessing.decode import on_read_hash
         from src.preprocessing.derived import reduce_numeric_session
         from src.preprocessing.imu_stream import plan_imu_frame
 

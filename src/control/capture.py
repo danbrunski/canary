@@ -18,7 +18,7 @@ from typing import Any
 from uuid import uuid4
 
 from src.collection.tags import write_tag
-from src.control.sessions import write_session_metadata
+from src.storage.sessions import write_session_metadata
 
 
 class CaptureConflictError(RuntimeError):

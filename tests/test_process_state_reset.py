@@ -183,7 +183,6 @@ NOT_STATE: dict[tuple[str, str], str] = {
     **dict.fromkeys(
         [
             ("ads1015.py", "PGA_CODES"),
-            ("capture_losses.py", "SINK_SCOPES"),
             ("custom_pids.py", "_ALLOWED_BINOPS"),
             ("custom_pids.py", "_ALLOWED_UNARYOPS"),
             ("custom_pids.py", "_ALLOWED_COMPARE"),

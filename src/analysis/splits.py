@@ -18,8 +18,8 @@ import pandas as pd
 
 from src.analysis import drives as _drives
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.control.sessions import session_started_at
 from src.decode.behavior_models import DriveRecord, DriveSplitRecord
+from src.storage.sessions import session_started_at
 
 #: Default join gap between adjacent directories of one physical drive. A
 #: capture arm/disarm rotates the writer with ~0 s gap; an engine restart

@@ -196,7 +196,7 @@ class TelemetryQuery:
     Constructs an in-memory DuckDB connection with one view, ``telemetry``,
     that selects from every ``telemetry-*.parquet`` under the configured
     storage root and adds a ``session`` column derived from the parent
-    directory name (matching :data:`src.preprocessing.loader.PARQUET_PATTERN`).
+    directory name (matching :data:`src.storage.session_files.PARQUET_PATTERN`).
     """
 
     def __init__(
@@ -334,7 +334,7 @@ class TelemetryQuery:
                 "NULL AS session WHERE 1=0"
             )
             return False
-        from src.preprocessing.decode import on_read_catalog
+        from src.decode.on_read import on_read_catalog
 
         columns = {
             row[0] for row in self._con.execute(f"DESCRIBE SELECT * FROM {_scan(files)}").fetchall()
@@ -465,7 +465,7 @@ def _decoded_select(signal: Signal, scan: str) -> list[str]:
     under every era's channel spelling (R04.14). Done in DuckDB, so the rows
     keep the stored rows' types and a query's filter can prune the branch.
     """
-    from src.preprocessing.decode import can_channel_spellings
+    from src.decode.on_read import can_channel_spellings
 
     start, length = signal.byte_start, signal.byte_length
     pairs = [f"substring(hex(f.payload), {2 * (start + i) + 1}, 2)" for i in range(length)]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -10,7 +11,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from src.atomic_write import atomic_write_text
-from src.collection.capture_quality import normalize_quality_payload
+from src.storage.capture_losses import unknown_losses
 from src.storage.sidecar import read_json_object, write_json_sidecar
 
 CAPTURE_MANIFEST_FILENAME = "capture_profile.json"
@@ -19,6 +20,17 @@ CAPTURE_QUALITY_FILENAME = "capture_quality.json"
 #: started under (C03.5), so a stop — or a later recompute — can reconcile
 #: against the counters as they were, not as they are.
 CAPTURE_EPOCH_FILENAME = "capture_epoch.json"
+
+#: Schema of the ``capture_quality.json`` sidecar (``collection.capture_quality``
+#: writes it). Distinct from :class:`CaptureManifest`'s own ``schema_version``.
+CAPTURE_QUALITY_SCHEMA_VERSION = 2
+
+#: Scopes a verdict can carry. ``trailing_snapshot`` is what a v1 sidecar is
+#: read back as: a 60 s window at stop time, not the capture.
+SCOPE_LIVE = "live"
+SCOPE_STOP = "stop"
+SCOPE_RECOMPUTE = "recompute"
+SCOPE_TRAILING = "trailing_snapshot"
 
 
 class CaptureManifest(BaseModel):
@@ -90,6 +102,29 @@ def read_capture_manifest(session_dir: Path) -> CaptureManifest | None:
         return None
 
 
+def normalize_quality_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Read any sidecar version with its scope made explicit.
+
+    A v1 sidecar scored the trailing 60 s at stop and described cumulative
+    loss counters; it is returned as written plus ``scope: trailing_snapshot``
+    and ``losses`` marked unknown, so nothing downstream can mistake it for a
+    capture-wide verdict. v2 payloads pass through unchanged.
+    """
+    version = int(payload.get("schema_version") or 1)
+    if version >= CAPTURE_QUALITY_SCHEMA_VERSION:
+        return dict(payload)
+    out = dict(payload)
+    out["scope"] = SCOPE_TRAILING
+    out["losses"] = unknown_losses()
+    out.setdefault("notes", [])
+    out["notes"] = [
+        *out["notes"],
+        "schema_version 1 sidecar: the verdict covers the trailing 60 s at stop, not the "
+        "capture; its storage counter was cumulative and loss inside the capture is unknown.",
+    ]
+    return out
+
+
 def read_capture_quality(session_dir: Path) -> dict[str, Any] | None:
     """The contract verdict written when this capture stopped, if any.
 
@@ -132,7 +167,7 @@ def recover_interrupted_capture(
     storage_root: Path, *, detected_at: datetime | None = None
 ) -> tuple[Path, CaptureManifest] | None:
     """Stamp the newest unclosed capture once after an unclean daemon exit."""
-    from src.control.sessions import session_started_at
+    from src.storage.sessions import session_started_at
 
     root = Path(storage_root)
     candidates: list[tuple[datetime, Path]] = []
@@ -162,7 +197,7 @@ def recover_interrupted_capture(
 
 def latest_capture_summary(storage_root: Path) -> dict[str, Any] | None:
     """Return the newest capture by parsed start time, prefixes ignored."""
-    from src.control.sessions import session_started_at
+    from src.storage.sessions import session_started_at
 
     root = Path(storage_root)
     rows: list[tuple[datetime, Path, CaptureManifest]] = []
@@ -210,7 +245,13 @@ __all__ = [
     "CAPTURE_EPOCH_FILENAME",
     "CAPTURE_MANIFEST_FILENAME",
     "CAPTURE_QUALITY_FILENAME",
+    "CAPTURE_QUALITY_SCHEMA_VERSION",
+    "SCOPE_LIVE",
+    "SCOPE_RECOMPUTE",
+    "SCOPE_STOP",
+    "SCOPE_TRAILING",
     "CaptureManifest",
+    "normalize_quality_payload",
     "read_capture_epoch",
     "read_capture_manifest",
     "read_capture_quality",

@@ -146,7 +146,7 @@ with 84 `OWED` edges plus the 3 pairs.
 | `preprocessing` → `analysis.{derived,committees,afr,fsm,pairing,drives}` | R09.4 |
 | `daemon` → `dashboard.{broadcast,behavior_live,ups}` | R09.8 |
 | `daemon/server.py` → `dashboard.api` | `STANDING` |
-| `decode` → `preprocessing.{features,local_range,resampler,session_context,segmenter}` | R09.6 |
+| `decode` → `preprocessing.{features,local_range,session_context}` (R09.2 cleared `resampler`, `segmenter`) | R09.6 |
 | `models` → `analysis.drives` | R09.4 |
 | `models` → `analysis.session_classifier` | R09.3 |
 | `models` → `analysis.tune_revisions` | R09.5 |
@@ -439,10 +439,17 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       5255 floats, max |delta| 0;
     - counters and meta identical.
 
-    The tool diffs events and scores, not stored rows. The storage writer's
-    change is annotation-only, and its tests pass.
+    The tool diffs events and scores, not stored rows. In place of the row
+    diff R00 asks for, the verifier showed that `ParquetTelemetryWriter` and
+    `AsyncParquetTelemetryWriter` are AST-identical to `2ec9383` with
+    annotations stripped, and that nothing they call changed apart from the
+    `math.isfinite` line. So the stored rows cannot differ.
+    **Verified 2026-09-27 (verifier): earned, with nits.** All 65 moved
+    definitions are AST-identical to their originals, apart from the three
+    declared exceptions. Every one of the 3,209 `from src.* import` pairs in
+    `src tests scripts tools` resolves.
 
-- [ ] **R09.3 `storage` owns the session.**
+- [x] **R09.3 `storage` owns the session.**
   - **`control/sessions.py` → `storage/sessions.py`, whole.** After the moves
     below, everything it imports is at layer 1 or below.
   - **`control/capture_manifest.py` → `storage/capture_manifest.py`.**
@@ -474,6 +481,143 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - A pinned-session replay gives an empty diff.
 
   Size **M**.
+  *Done 2026-09-27.* Every move is a pure move. An AST comparison of the 85
+  moved definitions between `5f6717b` and the working tree finds them
+  identical, apart from the renames below and the two lazy
+  `session_started_at` imports inside `capture_manifest`, which now name
+  `src.storage.sessions`. No old module defines or re-exports a moved name
+  (an old home that uses one imports it for itself and leaves it out of
+  `__all__`). Re-running the import rewriter over `src tests scripts tools`
+  finds no import of a moved name from its old home.
+  - **Whole modules** (`git mv`): `control/sessions.py` →
+    `storage/sessions.py` and `control/capture_manifest.py` →
+    `storage/capture_manifest.py`. `storage/sessions.py` now imports only
+    `session`, `storage.capture_manifest`, `storage.session_files`,
+    `storage.sidecar` and, lazily, `storage.catalog`.
+  - **`collection/capture_losses.py` → `storage/capture_losses.py`, whole**
+    (`git mv`). This file is not named in the item.
+    `normalize_quality_payload` calls `capture_losses.unknown_losses()`, and
+    that calls `summarize_losses`, so the payload migration still pointed up
+    into `collection`. The module imports nothing, so it moved whole rather
+    than being split. Its six importers were retargeted: `capture_quality`,
+    `control/capture_finalize`, `daemon/health`, `validation/evidence` and
+    three tests. `test_process_state_reset.NOT_STATE` lost its
+    `capture_losses.py` entry, because the table left `collection/`.
+  - **The quality payload's schema** moved into `storage/capture_manifest.py`:
+    `normalize_quality_payload`, the four `SCOPE_*` constants, and
+    `SCHEMA_VERSION`, renamed `CAPTURE_QUALITY_SCHEMA_VERSION`. The same
+    module already has `CaptureManifest.schema_version` (1), so a bare
+    `SCHEMA_VERSION = 2` there would be ambiguous. This follows R09.2's
+    `DTC_SIDECAR_FILENAME` rename. `capture_quality` imports back the two it
+    uses (`CAPTURE_QUALITY_SCHEMA_VERSION`, `SCOPE_LIVE`).
+    `analysis/capture_coverage`, `control/capture_finalize` and
+    `test_capture_quality` import them from storage.
+  - **File helpers: new `storage/session_files.py`.** It holds
+    `PARQUET_PATTERN`, `has_telemetry`, `count_session_rows` and
+    `session_time_span_seconds`. Those two counters are thin wrappers over
+    the footer reader, so `SessionFooterSpan`, `session_footer_span` and
+    `_footer_utc` moved too. `_footer_utc` is renamed `footer_utc`, because
+    the loader's `_chunk_time_span` still calls it and a private name should
+    not cross modules.
+    - Why a separate module rather than `storage/sessions.py`: `sessions` is
+      directory-level (names, ordering, pins, export) and needs only the
+      stdlib. These helpers are chunk-level and need pandas and pyarrow.
+    - Dependencies: pandas and pyarrow only.
+    - The loader imports `PARQUET_PATTERN`, `has_telemetry` and `footer_utc`
+      back. `storage/sidecar.TELEMETRY_GLOB`'s comment now points at the new
+      home.
+  - **Readers: new `storage/session_products.py`.** It holds `read_digest`,
+    `read_digest_skipped`, `read_fingerprint`, `read_classification` and
+    `DIGEST_FILENAME`, `DIGEST_SKIPPED_FILENAME`, `FINGERPRINT_FILENAME`,
+    `CLASSIFICATION_FILENAME` and `DERIVED_TAGS_FILENAME`.
+    - **This does not follow the item's plain-dict route.**
+      `read_fingerprint` and `read_classification` return dataclasses, and
+      two readers below `analysis` use their parsed fields. `storage/catalog`
+      reads duration, disposition, modes, events, quality and stats.
+      `models/evaluation` reads `mode_seconds`, `disposition` and `quality`.
+      A plain-dict reader would have made each of them re-parse the sidecar.
+      That would give three parsers of one file, and a different answer on a
+      malformed sidecar, which `from_dict` rejects whole.
+    - So the sidecar types moved down with their readers:
+      `SessionFingerprint`, `SessionClassification`, `ModeSegment`,
+      `DetectedEvent` and `Disposition`. They are pure data with
+      `to_dict`/`from_dict`, and they import nothing from `analysis`.
+    - Each module's sidecar `SCHEMA_VERSION` moved with its type, renamed
+      `FINGERPRINT_SCHEMA_VERSION` and `CLASSIFICATION_SCHEMA_VERSION`
+      because the two share a module. The digest's `SCHEMA_VERSION` and
+      `SKIP_SCHEMA_VERSION` stay in `analysis/digest.py`, since no reader
+      uses them.
+    - `CLASSIFIER_VERSION`, `FINGERPRINT_VERSION`, `is_stale`, computing and
+      writing stay in `analysis`, which imports the types back. The seven
+      `analysis/events/*` detectors import `DetectedEvent`/`ModeSegment` from
+      storage.
+    - `storage/catalog.py` imports no `analysis`.
+  - **Catalog functions: new `decode/on_read.py`.** It holds
+    `can_channel_spellings`, `on_read_catalog`, and `ON_READ_BINDINGS_PATH`.
+    `on_read_catalog` reads that constant at call time, and tests patch it,
+    so it moved too.
+    - Dependencies: `decode.bindings`, `decode.engineering` and `paths`. It
+      does not need `can_ids` or `telemetry`.
+    - `preprocessing/decode.py` keeps `read_session_decoded*`,
+      `decoded_subset_plan`, `decode_on_read`, `on_read_hash`,
+      `on_read_can_ids` and `DEFAULT_BINDINGS_PATH`. It imports
+      `can_channel_spellings` back.
+    - `storage/telemetry_query.py`, `loader`, `analysis/drives` and the rest
+      import from `decode.on_read`. `TelemetryQuery` stays in `storage/`.
+  - **Sweep.** An AST rewriter retargeted 145 import statements in 106 files
+    (`control.sessions` 46 files, `control.capture_manifest` 22,
+    `preprocessing.loader` 18, `session_classifier` 15, `preprocessing.decode`
+    13, `digest` 8, `fingerprint` 7, `capture_losses` 6, `capture_quality`
+    3). Module-level and lazy imports were both covered, as were
+    `TYPE_CHECKING` blocks.
+    - Docstrings naming the old paths were updated: `session.py`,
+      `collection/tags`, `control/{logs,dtc_state}`,
+      `analysis/{digest,tune_revisions,behavior_validation,workbench,drives,fingerprint}`,
+      `preprocessing/imu_session`, `daemon/health`, `storage/{catalog,telemetry_query,sidecar}`.
+    - Current-code docs were updated too: AGENTS.md's two paragraphs, R03's
+      Rules and `.claude/skills/engine-management/references/canary-workflow.md`.
+      Done-notes in other task files still name the old paths as history.
+  - **Patch targets.** No `mock.patch` string named a moved symbol. Three
+    module-attribute uses were retargeted:
+    - `test_decoded_rows_never_stored`: two
+      `monkeypatch.setattr(decode, "ON_READ_BINDINGS_PATH", …)` →
+      `monkeypatch.setattr(on_read, …)` on `src.decode.on_read`;
+    - `test_derived_store`: `loader.count_session_rows`;
+    - `test_fingerprint_featurization`: `fingerprint.SessionFingerprint` and
+      `fingerprint.SCHEMA_VERSION`.
+  - **Ledger.** `OWED` went from 69 to **45**, the 24 R09.3 entries exactly.
+    No other entry cleared, and no new upward edge or pair appeared.
+    `LAYERS` is unchanged, because every new module sits in an existing
+    package. `grep -rnE "src[./]control[./](sessions|capture_manifest)" src
+    tests scripts tools` finds nothing, and the three old files are gone.
+  - **`scripts/ml_paths.txt`** adds `src/decode/on_read.py` and
+    `src/storage/session_files.py`. Both were `src/preprocessing/` code that
+    feeds training (the on-read catalog, session discovery), so they keep
+    the tier coverage they had.
+  - **Gate.**
+    - `ruff check .` and `ruff format --check .` are clean, and `mypy` finds
+      no issues in 431 files.
+    - `tests/test_layering.py`: 9 passed.
+    - Session ordering: the 18 files that exercise `session_started_at` /
+      `latest_session` (`test_session`, `test_recorded_sessions`, `test_tags`,
+      `test_vehicle_state`, `test_capture_profiles`, `test_trends`, …): 484
+      passed. `test_daemon::test_run_daemon_end_to_end_inference_emits_anomaly`
+      failed once under `-n 4` and passed alone and in the slow run below
+      (the load flake T01 records).
+    - Inner-loop tier (`-m "not integration and not slow"`): 6393 passed,
+      1 skipped.
+    - Slow tests in the 130 affected files: 88 passed, 1 xfailed.
+    - `-m integration tests/test_replay_isolation.py`: 1 passed.
+    - `-m ml_training`: 122 passed.
+  - **Replay.** `tools/replay_event_diff.py ab`, `5f6717b` (`git archive`)
+    against a copy of the working tree, session `2026-09-18T213818`, 900 s,
+    deployed IF `2026-09-20T054703` + LSTM `2026-09-20T064628`. The tool
+    imports no moved path, so it drove both trees unchanged.
+    - 901 ticks, 18 events and 2645 score messages on both sides;
+    - events identical: 18 of 18 paired, 8316 floats, max |delta| 0;
+    - scores identical: IF 0 of 901, LSTM 0 of 872 and fused 0 of 872
+      differ, 5255 floats, max |delta| 0;
+    - counters and meta identical.
 
 - [ ] **R09.4 `src/signals/`: channel physics out of `analysis`.**
   - **Move to `src/signals/` (layer 0):** `derived`, `committees`, `afr`,

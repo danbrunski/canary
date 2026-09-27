@@ -1,7 +1,7 @@
 """Per-session fingerprint: a small stat vector for long-horizon drift (Task 4.1,
 eval-longitudinal-and-dtc.md).
 
-Where :class:`~src.analysis.session_classifier.SessionClassification` answers
+Where :class:`~src.storage.session_products.SessionClassification` answers
 "what happened in this drive" (modes, events, disposition), the fingerprint
 answers "how did this drive's engine behave, numerically" — a handful of
 scalars (warm-up rate, idle stability, fuel trims, bank-balance/committee
@@ -30,10 +30,8 @@ session," not "zero."
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
@@ -47,10 +45,13 @@ from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.loader import resample_and_segment
-from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
+from src.storage.session_products import (
+    FINGERPRINT_FILENAME,
+    FINGERPRINT_SCHEMA_VERSION,
+    SessionFingerprint,
+)
+from src.storage.sidecar import require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
-
-FINGERPRINT_FILENAME = "fingerprint.json"
 
 #: Increment when the stat set / semantics change, so a corpus-wide backfill
 #: can detect and re-skip already-current sidecars (mirrors
@@ -62,7 +63,6 @@ FINGERPRINT_FILENAME = "fingerprint.json"
 #: evaluation refuses the mix until the epoch is re-frozen.
 FINGERPRINT_VERSION = "0.2.0"
 
-SCHEMA_VERSION = 1
 
 #: Coolant temperature (°C) below which a session is considered to have
 #: captured an actual cold start. Matches
@@ -103,36 +103,6 @@ _BANK_BALANCE_COLUMNS: dict[str, str] = {
     "derived:LTFT_BANK_BALANCE": "ltft",
     "derived:AFR_BANK_BALANCE": "afr",
 }
-
-
-@dataclass(frozen=True)
-class SessionFingerprint:
-    """Full fingerprint sidecar payload for one session."""
-
-    schema_version: int
-    fingerprint_version: str
-    computed_at: str
-    session_id: str
-    stats: dict[str, float]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": self.schema_version,
-            "fingerprint_version": self.fingerprint_version,
-            "computed_at": self.computed_at,
-            "session_id": self.session_id,
-            "stats": dict(self.stats),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SessionFingerprint:
-        return cls(
-            schema_version=int(data.get("schema_version", SCHEMA_VERSION)),
-            fingerprint_version=str(data["fingerprint_version"]),
-            computed_at=str(data["computed_at"]),
-            session_id=str(data["session_id"]),
-            stats={str(k): float(v) for k, v in dict(data.get("stats") or {}).items()},
-        )
 
 
 def compute_fingerprint(
@@ -198,7 +168,7 @@ def write_fingerprint(
 ) -> Path:
     """Write the ``fingerprint.json`` sidecar and return its path. Idempotent."""
     fingerprint = SessionFingerprint(
-        schema_version=SCHEMA_VERSION,
+        schema_version=FINGERPRINT_SCHEMA_VERSION,
         fingerprint_version=FINGERPRINT_VERSION,
         computed_at=_format_timestamp(datetime.now(UTC) if now is None else now),
         session_id=session_dir.name,
@@ -207,17 +177,6 @@ def write_fingerprint(
     path = session_dir / FINGERPRINT_FILENAME
     write_json_sidecar(path, fingerprint.to_dict())
     return path
-
-
-def read_fingerprint(session_dir: Path) -> SessionFingerprint | None:
-    """Load the sidecar, or ``None`` if absent / unreadable."""
-    data = read_json_object(session_dir / FINGERPRINT_FILENAME)
-    if data is None:
-        return None
-    try:
-        return SessionFingerprint.from_dict(data)
-    except (KeyError, TypeError, ValueError):
-        return None
 
 
 def is_stale(fingerprint: SessionFingerprint | None) -> bool:
@@ -503,12 +462,8 @@ def _add_o2_health_stats(frame: pd.DataFrame, stats: dict[str, float]) -> None:
 
 
 __all__ = [
-    "FINGERPRINT_FILENAME",
     "FINGERPRINT_VERSION",
-    "SCHEMA_VERSION",
-    "SessionFingerprint",
     "compute_fingerprint",
     "is_stale",
-    "read_fingerprint",
     "write_fingerprint",
 ]

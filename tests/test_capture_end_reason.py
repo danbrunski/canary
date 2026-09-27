@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from src.control.capture_manifest import (
+from src.storage.capture_manifest import (
     latest_capture_summary,
     read_capture_manifest,
     recover_interrupted_capture,

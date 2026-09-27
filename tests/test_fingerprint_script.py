@@ -13,12 +13,7 @@ import pytest
 import yaml
 
 import scripts.fingerprint as fingerprint_cli
-from src.analysis.fingerprint import (  # noqa: E402
-    FINGERPRINT_FILENAME,
-    is_stale,
-    read_fingerprint,
-    write_fingerprint,
-)
+from src.analysis.fingerprint import is_stale, write_fingerprint
 from src.analysis.reference_epoch import (  # noqa: E402
     DEFAULT_REFERENCE_EPOCH_PATH,
     ReferenceEpoch,
@@ -29,6 +24,7 @@ from src.analysis.reference_epoch import (  # noqa: E402
 from src.analysis.session_classifier import classify_session, write_classification  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
+from src.storage.session_products import FINGERPRINT_FILENAME, read_fingerprint
 from src.telemetry import TelemetryRecord  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

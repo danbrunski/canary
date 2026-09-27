@@ -19,9 +19,9 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
-from src.control.sessions import filter_sessions, list_sessions
 from src.dashboard.api import create_app
 from src.dashboard.broadcast import Broadcaster
+from src.storage.sessions import filter_sessions, list_sessions
 from tests.configs import write_isolated_config
 
 
