@@ -1318,6 +1318,43 @@ recomputes the rolling frame over the whole buffered window every tick.
       `AFR_ERROR_B*` inherits the error. This was already true on the daemon;
       this change makes offline frames match it.
 
+- [ ] **P02.12 Behavior deviations reach training, as they reach serving.**
+  Operator decision 2026-09-27: yes. `build_feature_frame`'s
+  `behavior_models_path` defaults to the unscoped `data/behavior_models.yaml`,
+  which does not exist, and no trainer passes one. So trainer frames carry no
+  `deviation:*` columns, while the daemon's live frames do (P02.11 follow-up).
+  - Default it to the scoped `config.daemon.behavior_models`, as the daemon
+    reads it. Prefer taking it from the config over a path argument every
+    caller must remember. Sweep every `build_feature_frame` /
+    `featurize_wide_frame` caller for the same default.
+  - Measure before and after on ≥2 real default-profile drives: which
+    `deviation:*` columns appear, their coverage, and whether feature selection
+    would admit them. This adds features at the next retrain, so the measured
+    diff is the deliverable, not a retrain.
+  - Tuning captures stay out: behavior deviations are default-profile-only
+    (R03.12/R04.6). Check that the new columns respect that gate.
+  - Feature cache and spec keys must cover the behavior-model file actually
+    read.
+
+- [ ] **P02.13 `derived:TARGET_AFR` refuses a load channel in the wrong
+  unit.** Operator decision 2026-09-27: keep it out of detector features now,
+  fix the input next. `append_afr_channels` looks the target map up with
+  `obd:ENGINE_LOAD` (%). The map declares `load_axis_name:
+  base_fuel_schedule` and `load_axis_unit: ms` (8.76–21.57), so every
+  `TARGET_AFR` and `AFR_ERROR_B*` value is dimensionally wrong, on the daemon
+  too.
+  - Make the mismatch unrepresentable. The lookup takes its load channel from
+    the map's declared axis (a channel whose unit is `load_axis_unit`) and
+    refuses any other. With no verified base-fuel-schedule channel (0x1208 is
+    only a candidate; see the vehicle skill), the two channels are absent,
+    with a named reason. They are not computed from the wrong input.
+  - Keep `TARGET_AFR` / `AFR_ERROR_B*` out of detector features until a
+    verified axis channel exists: a feature-policy exclusion recorded in the
+    manifest, not a comment.
+  - Survey every consumer of `derived:TARGET_AFR` / `AFR_ERROR_B*` (dashboard,
+    tuning pages, workbench, MCP, digest) and report what goes absent.
+    Commanded AFR from PID 0x44 (φ) is a different quantity and is unaffected.
+
 ## Tracked elsewhere
 
 - **The sequence detector's tick cost is A06.6's.** It is not duplicated
