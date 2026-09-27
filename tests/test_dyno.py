@@ -57,8 +57,8 @@ from src.analysis.dyno import (
     save_dyno_profile,
 )
 from src.config import VehicleParameters
-from src.profiles import load_registry
 from src.signals.committees import STANDARD_GRAVITY as G
+from src.vehicle.profiles import load_registry
 
 REPO = Path(__file__).resolve().parents[1]
 

@@ -17,7 +17,6 @@ import scripts.evaluate_behavior_models as eval_cli
 import scripts.refit_behavior_models as refit_cli
 from src.analysis.behavior_validation import session_content_identity  # noqa: E402
 from src.analysis.refit import Surface2DRecipe, fit_recipe  # noqa: E402
-from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry  # noqa: E402
 from src.columns import (  # noqa: E402
     MODE_COLUMN,  # noqa: E402
     SESSION_COLUMN,
@@ -31,6 +30,7 @@ from src.decode.behavior_models import (  # noqa: E402
     ValidationCriteria,
     dump_behavior_models,
 )
+from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry  # noqa: E402
 
 T0 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
 NAMES = [f"2026-08-0{day + 1}T120000" for day in range(6)]

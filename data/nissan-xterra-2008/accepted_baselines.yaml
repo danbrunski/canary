@@ -3,7 +3,7 @@
 # "Directional overrides — the schema gap" section for the full rationale).
 #
 # Profile-scoped: this file lives under this vehicle's data tree
-# (`data/nissan-xterra-2008/`, resolved via `src.profiles.scope_config`) —
+# (`data/nissan-xterra-2008/`, resolved via `src.vehicle.profiles.scope_config`) —
 # a second vehicle profile must never inherit these declarations.
 #
 # ZERO ACTIVE OVERRIDES SHIP HERE. Declaring "this engine state is known and

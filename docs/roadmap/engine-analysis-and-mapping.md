@@ -407,7 +407,7 @@ New channels go in `compute_derived_channels` (performance) or
 | auto PID discovery | `obd_scheduler.py:398-459 build_poll_requests` (`:422-430`); tiers `:24-29` |
 | 0x43 decode bug | `can_obd_client.py:551` (single-byte) vs registry 2-byte |
 | Mode 06 parser (unwired) | `obd_registry.py:300-342`; service metadata `:1209-1216` |
-| Mode 09 decoders (VIN-only use) | `obd_registry.py:1157-1186`; probe `src/profiles.py:193` |
+| Mode 09 decoders (VIN-only use) | `obd_registry.py:1157-1186`; probe `src/collection/vehicle_probe.py` |
 | DID catalog | `data/dids.yaml` (13 identified; access `:24-37`); decode `src/decode/dids.py:110-201` |
 | DID window scheduler | `obd_scheduler.py:194-328 DidWindowController`; knobs `src/config.py:108-121`; Pi set `canary.pi.example.yaml:33-37` |
 | Custom-PID engine (unwired) | `src/collection/custom_pids.py` (legacy permitted-service set `:59`; deferred note `:22-24`) |

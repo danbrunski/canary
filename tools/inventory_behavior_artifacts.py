@@ -50,7 +50,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     sys.path.insert(0, str(REPO_ROOT))
     from src.analysis.behavior_inventory import build_inventory
     from src.config import CanaryConfig
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     config = CanaryConfig.from_yaml(args.config)
     slug = None

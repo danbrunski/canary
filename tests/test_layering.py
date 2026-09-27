@@ -57,7 +57,7 @@ LAYERS: dict[str, int] = {
     "trainability": 0,
     # 1 persistence
     "storage": 1,
-    "profiles": 1,
+    "vehicle": 1,
     # 2 acquisition
     "collection": 2,
     # 3 pipeline
@@ -103,9 +103,6 @@ STANDING: dict[tuple[str, str], str] = {
 #: - R09.7 fusion and feedback into ``models``;
 #: - R09.8 daemon-owned objects out of ``dashboard``; Protocols for daemon types.
 OWED: dict[tuple[str, str], str] = {
-    ("collection/collectors.py", "src.analysis.tune_revisions"): "R09.5",
-    ("collection/collectors.py", "src.control.calibration"): "R09.5",
-    ("collection/tuning_profile.py", "src.analysis.tune_revisions"): "R09.5",
     ("control/profile_capture.py", "src.daemon.health"): "R09.8",
     ("control/sequence_detector.py", "src.daemon.components"): "R09.8",
     ("daemon/components.py", "src.dashboard.behavior_live"): "R09.8",
@@ -121,12 +118,6 @@ OWED: dict[tuple[str, str], str] = {
     ("decode/behavior_decoder.py", "src.preprocessing.session_context"): "R09.6",
     ("decode/behavior_eligibility.py", "src.preprocessing.local_range"): "R09.6",
     ("decode/behavior_eligibility.py", "src.preprocessing.session_context"): "R09.6",
-    ("models/evaluation.py", "src.analysis.tune_revisions"): "R09.5",
-    ("profiles.py", "src.analysis.tune_revisions"): "R09.5",
-    ("profiles.py", "src.analysis.vehicle_ledger"): "R09.5",
-    ("profiles.py", "src.collection.can_bus"): "R09.5",
-    ("profiles.py", "src.collection.can_obd_client"): "R09.5",
-    ("profiles.py", "src.collection.obd_registry"): "R09.5",
 }
 
 #: Same-layer pairs present when the order was adopted, as sorted unit names.

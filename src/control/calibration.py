@@ -10,17 +10,11 @@ from typing import Any
 
 import yaml
 
-from src.analysis.tune_revisions import (
-    RegistryConflictError,
-    TuneRevision,
-    TuneRevisionRegistry,
-    calibration_matches,
-)
 from src.atomic_write import atomic_write_text
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.decode.dids import DidMap, MemoryChannel, load_did_map
-from src.profiles import (
+from src.vehicle.profiles import (
     active_registry,
     active_registry_path,
     active_registry_sources,
@@ -31,6 +25,12 @@ from src.profiles import (
     profile_dir,
     source_registry_path,
     unadopted_legacy_calibration,
+)
+from src.vehicle.tune_revisions import (
+    RegistryConflictError,
+    TuneRevision,
+    TuneRevisionRegistry,
+    calibration_matches,
 )
 
 

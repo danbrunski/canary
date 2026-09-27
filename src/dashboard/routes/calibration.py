@@ -11,7 +11,6 @@ from fastapi import Depends, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from src.analysis.memory_verification import plan_restamp, restamp, verify_channel
-from src.analysis.tune_revisions import TuneRevision
 from src.collection import tuning_profile
 from src.collection.can_collector import bus_factory
 from src.collection.can_obd_client import CanObdClient
@@ -28,6 +27,7 @@ from src.dashboard.security import (
     control_auth_dependency,
 )
 from src.decode.dids import load_did_map
+from src.vehicle.tune_revisions import TuneRevision
 
 
 class VerifyRequest(BaseModel):

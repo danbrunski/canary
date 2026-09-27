@@ -76,7 +76,6 @@ from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
 from src.paths import BINDINGS_YAML
 from src.preprocessing.live import LiveFeatureSource
-from src.profiles import resolve_profile_for_tooling, scope_config
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
@@ -96,6 +95,7 @@ from src.validation.synthetic_bus import (
     mode01_support_map,
     write_synthetic_bindings,
 )
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 

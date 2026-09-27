@@ -53,7 +53,6 @@ from src.analysis.lambda_delivery import (
     delivery_samples,
 )
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor
-from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.analysis.tuning_frame import ProviderRegistry
 from src.decode.surface_eval import bin_indices
 from src.paths import BINDINGS_YAML, DIDS_YAML
@@ -66,6 +65,7 @@ from src.signals.pairing import (
     weakest_basis,
 )
 from src.storage.capture_manifest import read_capture_manifest
+from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed
 #: from BFS, so it moves when fuelling moves; see the module docstring.

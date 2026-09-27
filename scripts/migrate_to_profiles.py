@@ -3,7 +3,7 @@
 
 CANary used to keep one vehicle's data in a flat tree. With multiple vehicle
 profiles, every vehicle-specific path moves under ``<base>/<slug>/`` (see
-``src/profiles.py``). This script moves the *existing* data into that layout
+``src/vehicle/profiles.py``). This script moves the *existing* data into that layout
 for one profile (the ``vehicle:`` block's default, or ``--slug``) and registers
 it in ``profiles.yaml`` so the daemon's VIN-resolution finds it.
 
@@ -43,14 +43,14 @@ except ImportError:  # loaded as `scripts.migrate_to_profiles` — repo root on 
 
 from src.config import CanaryConfig
 from src.log import configure_logging
-from src.profiles import (
+from src.session import SessionKind, session_kind
+from src.vehicle.profiles import (
     VehicleProfile,
     load_registry,
     resolve_profile_for_tooling,
     save_registry,
     scope_config,
 )
-from src.session import SessionKind, session_kind
 
 # Session directories are ``YYYY-MM-DDTHHMMSS`` (UTC). The ``_``-prefixed dirs
 # (``_archive``, ``_replay-*``) stay at the top level — they're excluded from

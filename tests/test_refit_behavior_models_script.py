@@ -183,7 +183,7 @@ def test_capture_recipe_allowlists_preserve_exact_per_capture_grants(tmp_path: P
 
 
 def test_tune_revision_gate_accepts_one_revision_and_refuses_mixed(tmp_path: Path) -> None:
-    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+    from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 
     old = tmp_path / "2026-08-06T000000"
     new = tmp_path / "2026-08-07T000000"
@@ -416,7 +416,7 @@ def test_since_boundary_excludes_sessions_older_than_boundary(
 ) -> None:
     """Task 3.5: a boundary event newer than every discovered session
     filters everything out (the CLI's existing "no sessions" error path)."""
-    from src.analysis.vehicle_ledger import VehicleLedgerStore
+    from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
     session = _patch_pipeline(monkeypatch, tmp_path)  # named 2026-05-13T120000
     VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl").record(
@@ -439,7 +439,7 @@ def test_since_boundary_excludes_sessions_older_than_boundary(
 def test_since_boundary_keeps_sessions_on_or_after_boundary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from src.analysis.vehicle_ledger import VehicleLedgerStore
+    from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
     _patch_pipeline(monkeypatch, tmp_path)  # named 2026-05-13T120000
     VehicleLedgerStore(tmp_path / "vehicle_ledger.jsonl").record(

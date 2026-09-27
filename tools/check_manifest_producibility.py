@@ -69,7 +69,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         summarize,
         unproducible_feature_columns,
     )
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     config = CanaryConfig.from_yaml(args.config)
     if config.profiles.enabled:

@@ -22,7 +22,6 @@ from fastapi.testclient import TestClient
 
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
-from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
 from src.analysis.tuning import GateError
 from src.analysis.tuning_frame import load_provider_registry
 from src.analysis.workbench import (
@@ -43,6 +42,7 @@ from src.signals.afr import AfrCalibration
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME, CAPTURE_QUALITY_FILENAME
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 
 BINDINGS = Path("data/bindings.yaml")
 #: The dev vehicle's mode01_wot.rpm_bands (profile data since R05.13).

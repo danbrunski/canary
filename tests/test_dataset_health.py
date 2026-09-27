@@ -9,13 +9,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 import scripts.dataset_health as cli
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
 from src.datasets.health import analyze_corpus, analyze_session
 from src.preprocessing.loader import discover_sessions
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 from tests.configs import write_isolated_config
 
 

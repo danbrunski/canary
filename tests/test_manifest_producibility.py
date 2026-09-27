@@ -29,7 +29,7 @@ from src.models.spec_producibility import (
     manifest_feature_columns,
     unproducible_feature_columns,
 )
-from src.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"

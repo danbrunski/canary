@@ -1042,7 +1042,7 @@ class DaemonConfig(_Strict):
     trend_alert_state: Path = CONTROL_DIR / "trend_alert_state.json"
     #: Behavior-model surfaces (hand-edited / refit-written). A config field
     #: rather than a hardcoded path so it can be scoped per vehicle profile
-    #: (see ``src/profiles.py``). Rooted at the checkout like the sibling
+    #: (see ``src/vehicle/profiles.py``). Rooted at the checkout like the sibling
     #: paths (R01.2), so a tool started from another directory reads the same
     #: file the daemon does.
     behavior_models: Path = DATA_DIR / "behavior_models.yaml"
@@ -1072,7 +1072,7 @@ class DaemonConfig(_Strict):
     #: Operational calibration state written from the dashboard: the flash
     #: registry ``append_flash`` extends, the verified RAM catalog and the last
     #: memory-verify outcomes. Left unset in YAML it resolves beside
-    #: ``jobs_dir`` (``src.profiles.operational_dir``), so a deployment that
+    #: ``jobs_dir`` (``src.vehicle.profiles.operational_dir``), so a deployment that
     #: pins ``jobs_dir`` under ``/data/canary`` keeps this there too; the
     #: default below is where that lands for the default ``jobs_dir``.
     #: ``scope_config`` always sets it, per vehicle (R05.15: it used to be one
@@ -1221,7 +1221,7 @@ class TuningReadinessConfig(_Strict):
 
 
 class ProfilesConfig(_Strict):
-    """Multi-vehicle profile resolution (see ``src/profiles.py``).
+    """Multi-vehicle profile resolution (see ``src/vehicle/profiles.py``).
 
     When the Pi is plugged into a vehicle, the daemon reads the VIN
     (OBD-II Mode 09 PID 0x02) at startup and resolves it to a profile slug,
@@ -1345,7 +1345,7 @@ class CanaryConfig(_Strict):
     plausibility: PlausibilityConfig = PlausibilityConfig()
     committees: CommitteesConfig = CommitteesConfig()
 
-    #: The profile slug :func:`src.profiles.scope_config` nested this config's
+    #: The profile slug :func:`src.vehicle.profiles.scope_config` nested this config's
     #: vehicle paths under; ``None`` for a config as loaded. Private, so no YAML
     #: can claim it: the one writer is ``scope_config``. It survives
     #: ``model_copy`` and pickling (the scoring child gets the parent's object).
@@ -1353,7 +1353,7 @@ class CanaryConfig(_Strict):
     #: The ``VehicleProfile`` itself (opaque here: ``profiles`` sits above this
     #: module), so a freshly loaded YAML can be re-scoped exactly as this config
     #: was -- same slug, same registry vehicle parameters
-    #: (:func:`src.profiles.rescope_like`, the config hot-reload).
+    #: (:func:`src.vehicle.profiles.rescope_like`, the config hot-reload).
     _scope_source: Any = PrivateAttr(default=None)
 
     @property
@@ -1408,7 +1408,7 @@ def require_profile_scoped(config: CanaryConfig, *, reader: str) -> None:
     """
     if config.profiles.enabled and config.scoped_profile is None:
         raise UnscopedConfigError(
-            f"{reader} needs a profile-scoped config (src.profiles.scope_config): with "
+            f"{reader} needs a profile-scoped config (src.vehicle.profiles.scope_config): with "
             "profiles enabled the vehicle's data lives under <base>/<slug>/, and "
             f"{config.daemon.afr_calibration} is the unscoped path. The trainers and "
             "the evaluation harness once featurized through it without the vehicle's "

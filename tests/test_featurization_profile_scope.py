@@ -27,8 +27,8 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
 )
 from src.preprocessing.live import LiveFeatureSource
-from src.profiles import resolve_profile_for_tooling, scope_config
 from src.signals.afr import load_afr_calibration, target_afr
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 from tests.configs import EXAMPLE_YAML, profiles_disabled
 
 SLUG = "nissan-xterra-2008"
@@ -91,7 +91,7 @@ def test_the_marker_survives_copies_and_the_process_boundary() -> None:
 def test_rescope_like_reuses_the_resolved_profile_not_a_rederived_one() -> None:
     """The hot reload's re-scope: the slug *and* the registry parameters the
     daemon resolved, which ``resolve_profile_for_tooling`` would not reproduce."""
-    from src.profiles import rescope_like
+    from src.vehicle.profiles import rescope_like
     from tests.configs import TEST_PROFILE, scoped_test_config
 
     running = scoped_test_config(_unscoped())

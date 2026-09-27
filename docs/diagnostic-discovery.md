@@ -65,7 +65,7 @@ a reconnect that resumes a half-finished walk.
   one slice (`test_discovery_stops_promptly_during_a_silent_probe`: 50 ms
   after the stop, against a 1 s request timeout).
 - Standalone use is unchanged: `CanObdClient` with `on_frame=None` (scripts,
-  `scripts/preflight.py`, the VIN probe in `src/profiles.py`, the DID sweep
+  `scripts/preflight.py`, the VIN probe in `src/collection/vehicle_probe.py`, the DID sweep
   transport in `src/analysis/did_scan.py`) receives as before, just in 50 ms
   slices.
 

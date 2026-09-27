@@ -32,7 +32,7 @@ general, put it there instead.
 
 1. **Calibration.** The operator reflashes with UpRev often. Resolve each
    session's calibration from `tune_revisions.yaml` by flash time
-   (`src.analysis.tune_revisions.resolve_session_revision`). The calibration
+   (`src.vehicle.tune_revisions.resolve_session_revision`). The calibration
    id does **not** change on an UpRev flash (it stays `1ZS44A00000`), so
    comparing ids cannot detect an unrecorded flash. Every flash resets the
    learned fuel trim (below). Whether it also clears throttle and idle learning
@@ -96,7 +96,7 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
 | K-line addresses, wake-up, modules (ECM, ABS) | `kline.yaml` |
 | ROM tables, axes, verified extraction | `rom_viewer.yaml`, `docs/uprev-rom-table-verification.md` |
 | Factory service manual (engine control = EC) | `xterra_fsm/ec.pdf` |
-| Per-vehicle partitioning of all learned state | `src/profiles.py`, keyed by VIN |
+| Per-vehicle partitioning of all learned state | `src/vehicle/profiles.py`, keyed by VIN |
 
 ## The traps that have cost the most on this truck
 

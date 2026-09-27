@@ -49,8 +49,8 @@ from src.analysis.session_deviations import (
 )
 from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
 from src.log import configure_logging
-from src.profiles import resolve_profile_for_tooling, scope_config
 from src.storage.sessions import resolve_session
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

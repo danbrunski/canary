@@ -1,7 +1,7 @@
 """A vehicle's K-line facts, as data: addresses, wake-up, framing, timing.
 
 Loaded from the active profile's ``kline.yaml`` (``daemon.kline_profile``,
-scoped per vehicle by ``src.profiles.scope_config``). Nothing here has a
+scoped per vehicle by ``src.vehicle.profiles.scope_config``). Nothing here has a
 vehicle-specific default: the next vehicle may be a 5-baud ISO 9141 ECU, and a
 guessed tester address reads exactly like dead hardware (the Xterra ignores
 ``0xF1`` and answers ``0xFC``). An absent file means "K-line not configured",

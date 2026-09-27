@@ -262,7 +262,7 @@ def test_plausibility_confirmations_land_on_the_shared_row_grid(tmp_path: Path) 
     1 Hz rows every other detector is graded on (A02.5)."""
     from src.decode.bindings import load_bindings
     from src.models.evaluation_detectors import PlausibilityDetector
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     config = _config()
     config = scope_config(config, resolve_profile_for_tooling(config, "nissan-xterra-2008"))

@@ -440,7 +440,8 @@ canary/
 │   ├── main.py                  # Entry point
 │   ├── config.py                # Pydantic config (all sections)
 │   ├── telemetry.py             # TelemetryRecord + sources (obd/can/decoded/gps)
-│   ├── session.py / profiles.py # Session dirs; VIN-keyed vehicle profiles
+│   ├── session.py               # Session dirs
+│   ├── vehicle/                 # VIN-keyed profiles, tune revisions, ledger
 │   ├── collection/              # OBD/CAN/GPS collectors, scheduler, replay
 │   ├── storage/                 # Parquet ring buffer + retention
 │   ├── preprocessing/           # Loader, resampling, segmentation, features,

@@ -51,7 +51,6 @@ import numpy as np
 import pandas as pd
 
 from src.alerts.fusion import PersistenceGate
-from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.config import CanaryConfig
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
@@ -70,6 +69,7 @@ from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 from src.session import SessionKind, session_kind, session_sort_key
 from src.storage.session_files import PARQUET_PATTERN
 from src.storage.sessions import session_started_at
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 log = logging.getLogger(__name__)
 

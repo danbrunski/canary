@@ -439,7 +439,7 @@ def resolve_targets(args: argparse.Namespace) -> Targets:
     if args.config is not None:
         sys.path.insert(0, str(REPO_ROOT))
         from src.config import CanaryConfig
-        from src.profiles import resolve_profile_for_tooling, scope_config
+        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
         config = CanaryConfig.from_yaml(args.config)
         if config.profiles.enabled:

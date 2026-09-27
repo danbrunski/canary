@@ -31,8 +31,8 @@ except ImportError:  # loaded as `scripts.vehicle_log` — repo root on path, no
         load_config,
     )
 
-from src.analysis.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore  # noqa: E402
-from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.vehicle.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore  # noqa: E402
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

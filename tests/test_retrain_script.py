@@ -268,8 +268,8 @@ def test_retrain_since_boundary_excludes_older_sessions(
     """
     import yaml
 
-    from src.analysis.vehicle_ledger import VehicleLedgerStore
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
     ledger_path = tmp_path / "vehicle_ledger.jsonl"
     data = yaml.safe_load(EXAMPLE_YAML.read_text())

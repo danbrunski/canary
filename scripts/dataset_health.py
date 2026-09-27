@@ -30,10 +30,10 @@ except ImportError:  # loaded as `scripts.dataset_health` — repo root on path,
         load_config,
     )
 
-from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 from src.datasets.health import analyze_corpus  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.preprocessing.loader import discover_sessions  # noqa: E402
+from src.vehicle.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

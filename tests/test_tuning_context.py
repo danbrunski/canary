@@ -15,7 +15,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.analysis.tune_revisions import TuneRevision
 from src.analysis.tuning_context import TuningContext
 from src.analysis.tuning_digest import compute_tuning_digest
 from src.collection import tuning_profile
@@ -23,15 +22,16 @@ from src.config import CanaryConfig
 from src.control import workbench_jobs
 from src.control.calibration import append_flash
 from src.mcp_server.tools import tuning_analysis
-from src.profiles import (
+from src.storage.parquet_writer import write_records_to_parquet
+from src.telemetry import TelemetryRecord
+from src.vehicle.profiles import (
     active_registry_path,
     operational_registry_path,
     resolve_profile_for_tooling,
     scope_config,
     source_registry_path,
 )
-from src.storage.parquet_writer import write_records_to_parquet
-from src.telemetry import TelemetryRecord
+from src.vehicle.tune_revisions import TuneRevision
 
 #: After every flash in the tracked Xterra registry, so the new one is newest.
 T0 = datetime(2026, 10, 2, 14, 0, 0, tzinfo=UTC)

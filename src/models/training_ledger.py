@@ -101,7 +101,7 @@ class TrainingRunRecord(BaseModel):
     publish_status: PublishStatus = "unpublished"
     #: Task 3.4 (online-training-strategy.md) — the operator's frozen
     #: reference run for this ``model_type`` (within this profile's ledger
-    #: file, which is already profile-scoped — see ``src/profiles.py``'s
+    #: file, which is already profile-scoped — see ``src/vehicle/profiles.py``'s
     #: ``training_ledger`` path scoping). Only ``TrainingLedger.set_golden``
     #: ever sets this; no retrain/scheduler/promotion code path may. At most
     #: one run per ``model_type`` is golden at a time (same demote-on-append

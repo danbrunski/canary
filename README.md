@@ -251,7 +251,7 @@ canary/
 ├── src/
 │   ├── main.py               # Entry point
 │   ├── config.py             # YAML → Pydantic
-│   ├── profiles.py           # Per-VIN vehicle profiles
+│   ├── vehicle/              # Per-VIN profiles, tune revisions, vehicle ledger
 │   ├── collection/           # OBD + CAN + GPS ingestion
 │   ├── daemon/               # Live capture + inference runtime
 │   ├── storage/              # Parquet ring buffer, retention

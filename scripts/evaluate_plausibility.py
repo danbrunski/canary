@@ -122,7 +122,7 @@ def _init(config_path: str, profile: str | None) -> None:
 
 def _context(config_path: Path, profile: str | None) -> Context:
     from src.preprocessing.anomaly_injection import load_fault_channel_roles
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     config = CanaryConfig.from_yaml(config_path)
     if config.profiles.enabled:

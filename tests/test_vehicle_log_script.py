@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import scripts.vehicle_log as vehicle_log_cli
-from src.analysis.vehicle_ledger import VehicleLedgerStore  # noqa: E402
+from src.vehicle.vehicle_ledger import VehicleLedgerStore  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"

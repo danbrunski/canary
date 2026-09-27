@@ -67,7 +67,7 @@ retracted findings.
 | Commanded vs measured fuelling, banded by rpm | `src.analysis.tuning.delivery_error`. It enforces the closed-loop, DFCO, band-composition and forbidden-axis gates below, and reports how many samples each gate dropped. |
 | Commanded vs measured λ as a declared relationship | `src.analysis.lambda_delivery`: which commanded source is valid in which regime, the λ/φ convention of each source, and the transport delay, declared per vehicle in `<profile>/lambda_delivery.yaml`. |
 | Same analysis across a flash boundary | `src.analysis.tuning.compare_sessions` |
-| Which calibration was in the ECU for this session? | `src.analysis.tune_revisions.resolve_session_revision`, over `<profile>/tune_revisions.yaml`. Don't reconstruct it from prose. |
+| Which calibration was in the ECU for this session? | `src.vehicle.tune_revisions.resolve_session_revision`, over `<profile>/tune_revisions.yaml`. Don't reconstruct it from prose. |
 | Which ROM cell is the ECM actually reading? | `src.analysis.rom_trace`: the ECM's own table coordinates (from RAM trace channels) beside the inferred rpm × load lookup. A disagreement between the two means a wrong axis decode or a wrong load scale. |
 | Bin anything by anything | `src.analysis.binned_analysis.compute_binned_analysis`. It uses the training pipeline's forward-fill resample, so it describes; it does not pair. |
 | Fit an expected-behavior surface over rpm × load | `src.analysis.surface_2d.fit_grid_binned_mean`: per-cell mean/std/**count**. Empty cells stay empty instead of getting a made-up value. |

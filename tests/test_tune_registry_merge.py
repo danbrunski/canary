@@ -17,23 +17,23 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.analysis.tune_revisions import (
-    RegistryConflictError,
-    TuneRevision,
-    TuneRevisionRegistry,
-    load_tune_revisions,
-    merge_tune_registries,
-)
 from src.collection import tuning_profile
 from src.config import CanaryConfig
 from src.control.calibration import append_flash, calibration_payload, calibration_status
-from src.profiles import (
+from src.vehicle.profiles import (
     active_registry,
     active_registry_sources,
     operational_registry_path,
     resolve_profile_for_tooling,
     scope_config,
     source_registry_path,
+)
+from src.vehicle.tune_revisions import (
+    RegistryConflictError,
+    TuneRevision,
+    TuneRevisionRegistry,
+    load_tune_revisions,
+    merge_tune_registries,
 )
 
 STOCK = TuneRevision(

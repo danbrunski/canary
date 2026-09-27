@@ -6,13 +6,13 @@ sessions' fingerprints (Task 4.1) — per-stat mean/std/quantiles. Retraining
 never touches this file; only ``scripts/fingerprint.py freeze`` writes it, on
 explicit operator command (a ledger ``corpus_boundary`` event is the prompt
 to consciously re-freeze, not any automatic process — see
-:mod:`src.analysis.vehicle_ledger`). Task 4.4's trend tests compare each new
+:mod:`src.vehicle.vehicle_ledger`). Task 4.4's trend tests compare each new
 session's fingerprint against this frozen band, not against a rolling
 baseline that would quietly absorb slow drift.
 
 Storage: a single JSON file (not append-only like the ledgers — there is
 exactly one *current* reference epoch at a time; re-freezing overwrites it).
-Profile-scoped via ``src.profiles.scope_config`` like the sibling
+Profile-scoped via ``src.vehicle.profiles.scope_config`` like the sibling
 ``daemon.*`` paths.
 """
 

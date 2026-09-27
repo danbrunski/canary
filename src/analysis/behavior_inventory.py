@@ -46,7 +46,7 @@ from src.models.spec_producibility import (
     manifest_behavior_fingerprints,
     manifest_feature_columns,
 )
-from src.profiles import active_registry, active_registry_path
+from src.vehicle.profiles import active_registry, active_registry_path
 
 INVENTORY_VERSION = 1
 

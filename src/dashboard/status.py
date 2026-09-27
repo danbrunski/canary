@@ -299,14 +299,14 @@ def _active_profile(config: CanaryConfig) -> dict[str, str | None] | None:
     """The active vehicle profile ``{slug, name, vin}``.
 
     The slug is recoverable as the scoped storage path's final component (see
-    ``src.profiles.scope_config``); name/vin come from the registry, falling
+    ``src.vehicle.profiles.scope_config``); name/vin come from the registry, falling
     back to the ``vehicle:`` block's derived label for the default profile that
     may not be registered yet.
     """
     slug = config.collection.storage_path.name
     fallback_name = f"{config.vehicle.year} {config.vehicle.make} {config.vehicle.model}".strip()
     try:
-        from src.profiles import load_registry
+        from src.vehicle.profiles import load_registry
 
         for profile in load_registry(config.profiles.registry_path):
             if profile.slug == slug:

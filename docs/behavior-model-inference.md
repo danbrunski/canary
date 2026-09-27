@@ -192,7 +192,7 @@ Resolved (task 4.E.1): the surfaces live in a sibling
 `behavior_models.yaml`, not in `bindings.yaml`. With vehicle profiles
 the live file is profile-scoped — e.g.
 `data/nissan-xterra-2008/behavior_models.yaml` — via
-`scope_config` (`src/profiles.py`); the unscoped `data/behavior_models.yaml`
+`scope_config` (`src/vehicle/profiles.py`); the unscoped `data/behavior_models.yaml`
 is the single-vehicle default.
 
 ## Integration with anomaly detection

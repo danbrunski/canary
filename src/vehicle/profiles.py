@@ -11,7 +11,9 @@ OBD-II Mode 09 PID 0x02 on functional addressing (``0x7DF`` → ``0x7E8``). That
 is standard OBD-II and does *not* need the UDS ``C0`` session that gates the
 Mode 22 DIDs, so the probe never clashes with Mode 01 polling. Reading it is
 request/response polling — the same class of operation the daemon already does
-for RPM. It is an ordinary active diagnostic request.
+for RPM. It is an ordinary active diagnostic request. The read transmits, so
+it lives in :mod:`src.collection.vehicle_probe`, and the caller hands it to
+``resolve_active_profile`` (R09.5).
 
 Two identifiers per profile:
 
@@ -32,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
-from contextlib import suppress
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,17 +46,11 @@ from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig, VehicleParameters
 
 if TYPE_CHECKING:
-    from src.analysis.tune_revisions import TuneRevisionRegistry
+    from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 log = logging.getLogger(__name__)
 
 REGISTRY_SCHEMA_VERSION = 1
-
-# VINs are 17 alphanumeric characters (ISO 3779; excludes I/O/Q). Real ECU
-# replies occasionally pad or truncate, so accept a forgiving length band and
-# reject obviously-bogus reads rather than registering a junk profile.
-_MIN_VIN_LEN = 11
-_MAX_VIN_LEN = 17
 
 
 # ---------------------------------------------------------------------------
@@ -176,125 +172,27 @@ def update_profile_name(path: Path, slug: str, name: str) -> VehicleProfile:
 
 
 # ---------------------------------------------------------------------------
-# VIN probe
+# VIN probe result
 # ---------------------------------------------------------------------------
-
-
-def _normalize_vin(vin: str) -> str | None:
-    cleaned = "".join(ch for ch in vin if ch.isalnum()).upper()
-    if _MIN_VIN_LEN <= len(cleaned) <= _MAX_VIN_LEN:
-        return cleaned
-    return None
 
 
 @dataclass(frozen=True)
 class VehicleInfoProbe:
-    """Result of the startup Mode 09 probe (Task 3.4 extends the VIN-only read)."""
+    """Result of the startup Mode 09 probe (Task 3.4 extends the VIN-only read).
+
+    The probe itself transmits, so it lives in
+    :func:`src.collection.vehicle_probe.probe_vehicle_info`; resolution takes
+    it from its caller as a :data:`VehicleInfoProber` (R09.5).
+    """
 
     vin: str | None
     calibration_id: str | None
     cvn: str | None
 
 
-def probe_vehicle_info(config: CanaryConfig) -> VehicleInfoProbe:
-    """One-shot Mode 09 read at startup: VIN (InfoType 0x02), calibration ID
-    (0x04), and CVN (0x06) over the same bus connection (Task 3.4).
-
-    Same no-op/failure posture as the VIN-only probe this generalizes:
-    ``None`` fields (never raises) when OBD is disabled, the bus is
-    ``virtual``, the source isn't the CAN-native path, or the read fails.
-    Opens its own short-lived bus and closes it before the main collectors
-    start. A missing/failed calibration ID or CVN read doesn't invalidate a
-    successful VIN read (or vice versa) — each InfoType is independent —
-    except when the VIN request met silence (no frame at all from a
-    diagnostic responder): then the other two are not asked (S01.4).
-    """
-    coll = config.collection
-    if coll.obd_source != "canable" or config.hardware.can.interface == "virtual":
-        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
-
-    # Imported lazily so this module (and config) stay importable without the
-    # python-can collector deps present.
-    import can
-
-    from src.collection.can_bus import bus_factory
-    from src.collection.can_obd_client import (
-        DEFAULT_RESPONSE_ID_MAX,
-        DEFAULT_RESPONSE_ID_MIN,
-        CanObdClient,
-    )
-    from src.collection.obd_registry import decode_calibration_ids, decode_cvn, decode_vin
-
-    try:
-        bus = bus_factory(config.hardware.can)
-    except Exception:
-        log.warning("vehicle info probe: failed to open CAN bus", exc_info=True)
-        return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
-
-    vin: str | None = None
-    calibration_id: str | None = None
-    cvn: str | None = None
-    # Any frame from a diagnostic responder, positive, negative or the first
-    # frame of a transfer that never completes: the module is awake.
-    responder_frames: list[int] = []
-
-    def _tap(frame: can.Message) -> None:
-        if DEFAULT_RESPONSE_ID_MIN <= frame.arbitration_id <= DEFAULT_RESPONSE_ID_MAX:
-            responder_frames.append(frame.arbitration_id)
-
-    try:
-        client = CanObdClient(
-            bus, timeout_seconds=config.profiles.vin_probe_timeout_seconds, on_frame=_tap
-        )
-
-        response = client.query_mode_09(0x02)
-        if response is None and not responder_frames:
-            # Silence, not a refusal: the ECU is asleep (key off), and the
-            # calibration ID and CVN come from the same module, so asking
-            # would cost two more full timeouts at every key-off boot (S01.4:
-            # 6 s of the 2026-09-22 cold trace). An NRC or a partial answer
-            # falls through to the independent reads below.
-            log.info(
-                "VIN probe: no Mode 09 response; calibration ID and CVN skipped "
-                "(no responder on the bus)"
-            )
-            return VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
-        if response is None:
-            log.info("VIN probe: Mode 09 VIN refused or incomplete; reading the others")
-        else:
-            decoded = decode_vin(response.payload)
-            if decoded is not None:
-                vin = _normalize_vin(decoded[0])
-                if vin is None:
-                    log.warning("VIN probe: implausible VIN payload %r", decoded[0])
-
-        response = client.query_mode_09(0x04)
-        if response is not None:
-            decoded = decode_calibration_ids(response.payload)
-            if decoded is not None and decoded[0]:
-                calibration_id = str(decoded[0])
-
-        response = client.query_mode_09(0x06)
-        if response is not None:
-            decoded = decode_cvn(response.payload)
-            if decoded is not None and decoded[0]:
-                cvn = str(decoded[0])
-    except Exception:
-        log.warning("vehicle info probe failed", exc_info=True)
-    finally:
-        with suppress(Exception):
-            bus.shutdown()
-
-    return VehicleInfoProbe(vin=vin, calibration_id=calibration_id, cvn=cvn)
-
-
-def read_vin(config: CanaryConfig) -> str | None:
-    """One-shot VIN read at startup. ``None`` on any failure — never raises.
-
-    Thin wrapper around :func:`probe_vehicle_info` (Task 3.4 generalized this
-    to also read calibration ID/CVN) kept for callers that only need the VIN.
-    """
-    return probe_vehicle_info(config).vin
+#: How resolution reads the vehicle: the caller's Mode 09 probe
+#: (:func:`src.collection.vehicle_probe.probe_vehicle_info` on the daemon).
+VehicleInfoProber = Callable[[CanaryConfig], VehicleInfoProbe]
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +290,7 @@ def _record_calibration_boundary(
     from inside ``resolve_active_profile``, before its caller has scoped
     ``config`` (the profile isn't resolved yet at that point).
     """
-    from src.analysis.vehicle_ledger import VehicleLedgerStore
+    from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
     ledger = VehicleLedgerStore(_scope_file(config.daemon.vehicle_ledger, profile.slug))
     ledger.record(
@@ -415,14 +313,16 @@ def _record_calibration_boundary(
 def _resolve_active_profile(
     config: CanaryConfig,
     *,
+    probe: VehicleInfoProber,
     override_slug: str | None = None,
 ) -> VehicleProfile:
     """Determine which vehicle this is and return its profile.
 
     * ``override_slug`` (CLI ``--profile``) → that registry entry, or a
       synthetic default under that slug; the VIN probe is skipped.
-    * else read the VIN; a registry hit returns that profile; an unknown VIN is
-      registered with a blank display name for the operator to fill in.
+    * else read the VIN with ``probe``; a registry hit returns that profile;
+      an unknown VIN is registered with a blank display name for the operator
+      to fill in.
     * no VIN (disabled / virtual / probe failed) → the default profile.
 
     The resolved profile is persisted to the registry (when ``auto_register``)
@@ -444,7 +344,7 @@ def _resolve_active_profile(
     if not config.profiles.enabled:
         return _default_profile(config)
 
-    vin_probe = probe_vehicle_info(config)
+    vin_probe = probe(config)
     vin = vin_probe.vin
     if vin is None:
         profile = _default_profile(config)
@@ -469,6 +369,7 @@ def _resolve_active_profile(
 def resolve_active_profile(
     config: CanaryConfig,
     *,
+    probe: VehicleInfoProber,
     override_slug: str | None = None,
 ) -> VehicleProfile:
     """Determine which vehicle this is and return its profile (the daemon's path).
@@ -478,7 +379,7 @@ def resolve_active_profile(
     profile owns it (:func:`migrate_legacy_calibration`). A migration failure
     is logged, never fatal: the read-only fallback still finds the files.
     """
-    profile = _resolve_active_profile(config, override_slug=override_slug)
+    profile = _resolve_active_profile(config, probe=probe, override_slug=override_slug)
     try:
         migrate_legacy_calibration(scope_config(config, profile))
     except (OSError, ValueError) as exc:
@@ -685,7 +586,7 @@ def _read_marker(directory: Path) -> dict[str, Any] | None:
 
 
 def _registries_share_history(config: CanaryConfig, legacy_registry: Path) -> tuple[bool, str]:
-    from src.analysis.tune_revisions import load_tune_revisions
+    from src.vehicle.tune_revisions import load_tune_revisions
 
     try:
         source = load_tune_revisions(source_registry_path(config))
@@ -870,10 +771,10 @@ def active_registry(config: CanaryConfig) -> TuneRevisionRegistry | None:
     source would have dropped the dashboard-recorded flashes. Both are read;
     tracked revisions the operational copy lacks are merged in by
     ``flashed_at``, and one name recorded as two different flashes raises
-    :class:`src.analysis.tune_revisions.RegistryConflictError` naming both
+    :class:`src.vehicle.tune_revisions.RegistryConflictError` naming both
     files. ``None`` when neither file exists.
     """
-    from src.analysis.tune_revisions import load_tune_revisions, merge_tune_registries
+    from src.vehicle.tune_revisions import load_tune_revisions, merge_tune_registries
 
     tracked_path = source_registry_path(config)
     operational_path = operational_file(config, "tune_revisions.yaml")

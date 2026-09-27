@@ -8,10 +8,10 @@ from pathlib import Path
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.control.dtc_state import DtcState
 from src.session import DTC_SIDECAR_FILENAME
 from src.telemetry import TelemetryRecord
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 
 def _reading(channel: str, value: object) -> TelemetryRecord:

@@ -12,7 +12,7 @@ the thing it describes (mirrors ``fingerprint.json``/``classification.json``
 next to a session, or ``model.manifest.json`` next to a model artifact)
 rather than inflating the already-JSONL ``TrainingRunRecord`` with a second,
 differently-shaped payload. The training ledger is the natural "next to"
-here — it's already profile-scoped (``src.profiles.scope_config``'s
+here — it's already profile-scoped (``src.vehicle.profiles.scope_config``'s
 ``training_ledger`` field), so a sibling directory inherits that scoping for
 free without a new config field.
 """

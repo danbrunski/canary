@@ -30,7 +30,7 @@ export interface TestProfileError {
 
 /** `GET /control/profiles` — a registered vehicle (multi-vehicle support).
  *  `slug` is the stable directory key; `name` is the operator-editable display
- *  label (blank until set). See src/profiles.py. */
+ *  label (blank until set). See src/vehicle/profiles.py. */
 export interface VehicleProfile {
   slug: string;
   vin: string;

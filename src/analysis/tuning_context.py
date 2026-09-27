@@ -28,12 +28,12 @@ from src.analysis.lambda_delivery import (
     load_lambda_delivery,
 )
 from src.analysis.noise_floor import NoiseFloor, load_noise_floor
-from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.tuning_frame import LoadWotCriterion, ProviderRegistry, load_provider_registry
 from src.config import CanaryConfig
-from src.profiles import active_registry, profile_dir
 from src.signals.afr import AfrCalibration, load_afr_calibration
 from src.signals.derived import fuel_properties
+from src.vehicle.profiles import active_registry, profile_dir
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 
 @dataclass(frozen=True, kw_only=True)

@@ -37,7 +37,6 @@ from src.analysis.channels import (
     read_channels,
 )
 from src.analysis.noise_floor import NoiseFloor, Significance, significance
-from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 from src.analysis.tuning import (
     DELIVERY_ENGINE_VERSION,
     DeliveryRoute,
@@ -61,6 +60,7 @@ from src.session import TAGS_FILENAME, load_tags
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import session_footer_span
 from src.storage.sessions import session_started_at
+from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 Regime = Literal["all", "closed_loop", "enrichment", "fuel_cut", "idle"]
 REGIMES: tuple[Regime, ...] = ("all", "closed_loop", "enrichment", "fuel_cut", "idle")

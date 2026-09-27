@@ -22,7 +22,6 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.kline.plan import KlineCatalog
 from src.collection.obd_scheduler import ForcePollTrigger
@@ -76,6 +75,7 @@ from src.decode.behavior_models import (
     DEFAULT_BEHAVIOR_MODELS_PATH,
 )
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 if TYPE_CHECKING:  # annotation only — src.daemon's package __init__ imports this module
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).

@@ -10,10 +10,11 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from src.collection import tx_gate
+from src.collection.vehicle_probe import probe_vehicle_info
 from src.config import CanaryConfig
 from src.log import configure_logging
-from src.profiles import resolve_active_profile, scope_config
 from src.startup import StartupTimeline
+from src.vehicle.profiles import resolve_active_profile, scope_config
 
 log = logging.getLogger(__name__)
 
@@ -116,7 +117,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     if config.profiles.enabled:
         # Identify the vehicle (by VIN) and scope every vehicle-specific path
         # under its profile slug, so two vehicles never share a corpus/models.
-        profile = resolve_active_profile(config, override_slug=args.profile)
+        profile = resolve_active_profile(
+            config, probe=probe_vehicle_info, override_slug=args.profile
+        )
         config = scope_config(config, profile)
         log.info(
             "active vehicle profile",

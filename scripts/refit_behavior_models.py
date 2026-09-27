@@ -69,10 +69,6 @@ from src.analysis.behavior_validation import (
     validation_document_path,
 )
 from src.analysis.refit import Recipe, attach_criteria, default_recipes, refit_all
-from src.analysis.tune_revisions import (
-    TuneRevisionRegistry,
-    resolve_session_revision,
-)
 from src.decode.behavior_models import (
     apply_behavior_policy,
     behavior_policy_path,
@@ -85,12 +81,13 @@ from src.decode.behavior_models import (
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.log import configure_logging
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH, build_feature_frame
-from src.profiles import active_registry, resolve_profile_for_tooling, scope_config
 from src.session import format_session_timestamp, session_sort_key
 from src.storage.capture_manifest import read_capture_manifest
 from src.storage.session_files import has_telemetry
 from src.storage.session_products import read_classification
 from src.storage.sessions import session_started_at
+from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
+from src.vehicle.tune_revisions import TuneRevisionRegistry, resolve_session_revision
 
 log = logging.getLogger(__name__)
 

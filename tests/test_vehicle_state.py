@@ -310,8 +310,8 @@ def test_one_parser_for_session_timestamps() -> None:
     Three separate copies of this parse had accumulated; a fourth was about
     to. Ordering sessions any other way is a bug waiting for a new prefix.
     """
-    from src.analysis.tune_revisions import session_started_at as via_revisions
     from src.storage.sessions import session_started_at
+    from src.vehicle.tune_revisions import session_started_at as via_revisions
 
     for name in (
         "2026-08-05T142720",

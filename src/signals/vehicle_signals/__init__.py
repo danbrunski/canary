@@ -4,7 +4,7 @@ A few ``derived:`` anomaly signals have a shared *formula* but
 vehicle-specific *inputs*: the bank-to-bank A/F sensor voltage balance reads
 whatever identifiers a vehicle's ECM exposes for those sensors. The formulas
 stay in :mod:`src.signals.derived`; each vehicle declares its channels in a
-module here named for its profile (:func:`src.profiles.profile_module_stem`),
+module here named for its profile (:func:`src.vehicle.profiles.profile_module_stem`),
 the same name its recipes use under :mod:`src.analysis.recipes`.
 
 A module defines either or both of:

@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker, TripEnd
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
@@ -21,6 +20,7 @@ from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_w
 from src.storage.monitor import warn_if_storage_low
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import DECODED_SOURCE, TelemetryRecord
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on

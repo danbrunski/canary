@@ -11,6 +11,7 @@ src/artifact_hash.py
 src/decode/on_read.py
 src/storage/session_files.py
 src/signals/
+src/vehicle/
 scripts/train_sequence.py
 scripts/train_lstm.py
 scripts/train_tcn.py

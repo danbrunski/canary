@@ -39,9 +39,9 @@ except ImportError:  # loaded as `scripts.catalog` — repo root on path, not sc
 
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
-from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.storage.catalog import SessionCatalog, rebuild_catalog  # noqa: E402
 from src.storage.session_files import has_telemetry  # noqa: E402
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 

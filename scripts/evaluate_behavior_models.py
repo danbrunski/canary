@@ -100,7 +100,6 @@ from src.analysis.behavior_validation import (
     validation_document_path,
 )
 from src.analysis.refit import default_recipes, legacy_reproduction_spec, recipe_serving_spec
-from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from src.columns import GAP_SUFFIX, MODE_COLUMN, ROC_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.decode.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
 from src.decode.behavior_models import (
@@ -112,13 +111,14 @@ from src.decode.behavior_models import (
 )
 from src.log import configure_logging
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
-from src.profiles import (
+from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
+from src.vehicle.profiles import (
     active_registry,
     active_registry_path,
     resolve_profile_for_tooling,
     scope_config,
 )
-from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
+from src.vehicle.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 
 log = logging.getLogger(__name__)
 

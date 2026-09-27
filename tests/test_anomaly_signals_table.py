@@ -114,8 +114,8 @@ def test_shared_derived_code_names_no_manufacturer_did() -> None:
 
 
 def test_the_xterra_supplies_its_did_inputs_from_its_vehicle_module() -> None:
-    from src.profiles import profile_module_stem
     from src.signals.vehicle_signals import af_sensor_voltage_columns, nissan_xterra_2008
+    from src.vehicle.profiles import profile_module_stem
 
     assert nissan_xterra_2008.__name__.rsplit(".", 1)[1] == profile_module_stem(
         "nissan-xterra-2008"

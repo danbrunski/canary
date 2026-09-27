@@ -36,7 +36,6 @@ from src.analysis.digest import (
     digest_span_budget_seconds,
 )
 from src.analysis.rom_trace import cell_residency, load_viewer_definition
-from src.analysis.tune_revisions import resolve_session_revision
 from src.analysis.tuning_context import context_fields
 from src.analysis.workbench import (
     Unavailable,
@@ -56,10 +55,11 @@ from src.control.trip_end import (
     any_digest_in_flight,
     limit_address_space,
 )
-from src.profiles import active_registry, profile_dir
 from src.session import session_sort_key
 from src.storage.session_files import count_session_rows, session_time_span_seconds
 from src.storage.sessions import is_session_dir_name, resolve_session, session_started_at
+from src.vehicle.profiles import active_registry, profile_dir
+from src.vehicle.tune_revisions import resolve_session_revision
 
 #: Most sessions one pooled request may name. Each is read in turn in the
 #: child, so this bounds wall time rather than memory.

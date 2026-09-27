@@ -34,7 +34,7 @@ from src.analysis.noise_floor import load_noise_floor, record_null_run, save_noi
 from src.analysis.tuning import GateError, compare_sessions, delivery_error
 from src.analysis.tuning_context import TuningContext
 from src.config import CanaryConfig
-from src.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 
 def _scoped(args: argparse.Namespace) -> CanaryConfig:

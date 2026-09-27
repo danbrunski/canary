@@ -827,7 +827,7 @@ def test_the_key_hashes_the_afr_calibration_featurization_reads(
     argv = _main_args(root, tmp_path / "absent.joblib", tmp_path)
     assert main([*argv, "--plan", "--out", str(tmp_path / "r.json")]) == 0
     from src.config import CanaryConfig
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     base = CanaryConfig.from_yaml(EXAMPLE_YAML)
     afr = scope_config(base, resolve_profile_for_tooling(base, None)).daemon.afr_calibration

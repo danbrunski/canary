@@ -29,8 +29,8 @@ from src.dashboard.ups import (
     write_keepalive,
 )
 from src.dashboard.version import _canary_version, _git_sha
-from src.profiles import load_registry, update_profile_name
 from src.storage.sessions import latest_session
+from src.vehicle.profiles import load_registry, update_profile_name
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -71,7 +71,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
     @router.get("/control/profiles")
     def get_control_profiles() -> dict[str, Any]:
         # The active profile's slug is the scoped storage path's final component
-        # (see src.profiles.scope_config).
+        # (see src.vehicle.profiles.scope_config).
         active_slug = config.collection.storage_path.name
         profiles = load_registry(config.profiles.registry_path)
         return {

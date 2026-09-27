@@ -372,7 +372,7 @@ def test_demoted_deviation_column_is_still_produced_but_not_selectable() -> None
 
 def test_tracked_manifests_consume_no_demoted_behavior_column(config: CanaryConfig) -> None:
     """B03.1 inventory fact the demotions rely on: nothing tracked is stranded."""
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     scoped = scope_config(config, resolve_profile_for_tooling(config, "nissan-xterra-2008"))
     assert scoped.daemon.behavior_models.resolve() == SHIPPED

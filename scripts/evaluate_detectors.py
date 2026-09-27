@@ -89,7 +89,6 @@ from src.analysis.labelled_events import (
     LabelledEvent,
     load_labelled_events,
 )
-from src.analysis.tune_revisions import load_tune_revisions
 from src.artifact_hash import sha256_file_or_none
 from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
@@ -179,9 +178,10 @@ from src.preprocessing.feature_pipeline import (
     load_resampled_session,
 )
 from src.preprocessing.resampler import resample_config_for
-from src.profiles import active_registry, active_registry_sources
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 from src.storage.sessions import recorded_sessions, session_started_at
+from src.vehicle.profiles import active_registry, active_registry_sources
+from src.vehicle.tune_revisions import load_tune_revisions
 
 log = logging.getLogger(__name__)
 
@@ -289,7 +289,7 @@ def _scoped(config: CanaryConfig, profile: str | None) -> CanaryConfig:
     """The profile-scoped config every read of this run goes through (P02.11):
     featurization's afr_calibration, the plausibility limits and the tune
     registry live in the profile's data directory."""
-    from src.profiles import resolve_profile_for_tooling, scope_config
+    from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
     if not config.profiles.enabled:
         return config
@@ -2195,7 +2195,7 @@ def _utc_date(value: str) -> datetime:
 
 def _profile_data_dir(config: CanaryConfig, profile: str | None) -> Path:
     """``data/<slug>/`` — the vehicle's labels, tune registry and fault roles."""
-    from src.profiles import resolve_profile_for_tooling
+    from src.vehicle.profiles import resolve_profile_for_tooling
 
     return DATA_DIR / resolve_profile_for_tooling(config, profile).slug
 

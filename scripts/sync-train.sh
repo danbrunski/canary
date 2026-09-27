@@ -122,7 +122,7 @@ resolve_out_dirs() {
 import sys
 from pathlib import Path
 from src.config import CanaryConfig
-from src.profiles import resolve_profile_for_tooling, scope_config
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
 if cfg.profiles.enabled:
     cfg = scope_config(cfg, resolve_profile_for_tooling(cfg, None))
@@ -154,7 +154,7 @@ resolve_train_sessions_root() {
 import sys
 from pathlib import Path
 from src.config import CanaryConfig
-from src.profiles import resolve_profile_for_tooling
+from src.vehicle.profiles import resolve_profile_for_tooling
 cfg = CanaryConfig.from_yaml(Path(sys.argv[1]))
 print(resolve_profile_for_tooling(cfg, None).slug if cfg.profiles.enabled else "")
 PY

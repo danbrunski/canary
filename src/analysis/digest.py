@@ -18,7 +18,7 @@ sidecars/logs the earlier phases of this doc already compute independently:
   already re-flags a code as "new" for every session it's seen in (its own
   per-session ``_seen`` baseline resets on a session change), so everything
   in that sidecar for THIS session is "new" by that module's own definition
-* new ledger events <- :class:`~src.analysis.vehicle_ledger.VehicleLedgerStore`
+* new ledger events <- :class:`~src.vehicle.vehicle_ledger.VehicleLedgerStore`
   entries recorded during the session's time window
 """
 
@@ -38,7 +38,6 @@ from src.alerts.event_logger import event_log_path, read_events
 from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
 from src.analysis.session_classifier import classify_session
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
@@ -47,6 +46,7 @@ from src.storage.session_products import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAM
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 log = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 ``FeedbackStore`` (``src.alerts.feedback``), ``TrainingLedger``
 (``src.models.training_ledger``), and ``VehicleLedgerStore``
-(``src.analysis.vehicle_ledger``) were three byte-for-byte identical
+(``src.vehicle.vehicle_ledger``) were three byte-for-byte identical
 implementations of the same shape: append one JSON line (mkdir + open
 ``"a"`` + write + flush), tolerantly re-read the whole file skipping
 blank/malformed lines, and — for two of the three — collapse repeated

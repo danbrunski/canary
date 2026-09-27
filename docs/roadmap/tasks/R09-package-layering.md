@@ -743,7 +743,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       differ, 5255 floats, max |delta| 0;
     - counters and meta identical.
 
-- [ ] **R09.5 `src/vehicle/`: the vehicle's own records.**
+- [x] **R09.5 `src/vehicle/`: the vehicle's own records.**
   - **Move into `src/vehicle/` (layer 1):** `analysis/tune_revisions.py`,
     `analysis/vehicle_ledger.py` and `src/profiles.py`. Nothing below
     `preprocessing` imports `profiles`.
@@ -764,6 +764,140 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - A replay gives an empty diff, since the collectors are on the serve path.
 
   Size **M**.
+  *Done 2026-09-27.* Every move is a `git mv` plus the probe injection below;
+  no other function body changed. `tune_revisions.py` is byte-identical to
+  `ed88454`, and `vehicle_ledger.py` differs only in one docstring path. An AST
+  comparison of the 47 top-level definitions of the old `src/profiles.py`
+  against `src/vehicle/profiles.py` + `src/collection/vehicle_probe.py`
+  finds 42 identical. The five that differ are `_resolve_active_profile` and
+  `resolve_active_profile` (the `probe` parameter), `VehicleInfoProbe` (its
+  docstring), and `_record_calibration_boundary`, `_registries_share_history`
+  and `active_registry`, whose lazy imports now name `src.vehicle.*`. No
+  old path re-exports; `src/profiles.py` and the two `analysis/` files are
+  gone.
+  - **What moved where** (`git mv`): `src/profiles.py` →
+    `src/vehicle/profiles.py`; `analysis/tune_revisions.py` and
+    `analysis/vehicle_ledger.py` → `src/vehicle/`. `src/vehicle/__init__.py`
+    is new: a docstring naming the package's three records and layer, and
+    re-exporting nothing. `LAYERS` loses `profiles` and gains `"vehicle": 1`.
+  - **The probe** moved to the new `src/collection/vehicle_probe.py`:
+    `probe_vehicle_info`, `read_vin`, `_normalize_vin` and `_MIN_VIN_LEN` /
+    `_MAX_VIN_LEN` (only the probe used them). The bodies are unchanged,
+    including the lazy `can_bus` / `can_obd_client` / `obd_registry` imports
+    that the tests patch through `src.collection.*` strings. The result type
+    `VehicleInfoProbe` stays in `vehicle.profiles`, because
+    `_apply_calibration_probe` takes it, and the probe imports it downward.
+  - **Probe route: (a), the resolution functions take the probe.**
+    `resolve_active_profile` and `_resolve_active_profile` gain a required
+    keyword-only `probe: VehicleInfoProber` (`Callable[[CanaryConfig],
+    VehicleInfoProbe]`), called at the same point as before (after the
+    override and `profiles.enabled` branches), so an override or a disabled
+    profile still never opens a bus. It has no default, since a default
+    would be an upward import. The one production caller, `src/main.py`,
+    passes `probe=probe_vehicle_info`.
+    - Why not (b): both routes change the same single production caller.
+      (b) changes fewer test lines, but it would move the registry writes
+      and the reflash ledger entry into `collection` and take four private
+      helpers with them (`_default_profile`, `_maybe_persist`,
+      `_new_profile_for_vin`, `_scope_file`). `resolve_profile_for_tooling`
+      shares `_default_profile` and stays, so those helpers would cross
+      modules or be renamed. Under (a) the registry logic stays whole, and
+      the three tests that monkeypatched `profiles.probe_vehicle_info` now
+      pass the fake probe directly.
+    - Test callers: `test_profiles` (7 calls; the 3
+      `mp.setattr(profiles_mod, "probe_vehicle_info", …)` became
+      `probe=lambda _config: probe`), `test_operational_calibration_scope`
+      (3 override calls) and the two `resolve_active_profile` fakes in
+      `test_main` / `test_startup_timeline`, which now accept `**_kwargs`.
+  - **`collection/collectors.py`** imports `active_registry` from
+    `src.vehicle.profiles`. `control/logs.py` and
+    `dashboard/routes/calibration.py` still import it through
+    `control.calibration`. That is downward and legal, so they were left.
+  - **Sweep.** The R09.4 AST rewriter (tables swapped, `data/` added)
+    retargeted 107 import statements in 79 files. `src.profiles` accounted
+    for 55 statements in 47 files (4 of them → `src.collection.vehicle_probe`),
+    `tune_revisions` for 30 in 27 files and `vehicle_ledger` for 22 in 21.
+    Module-level, lazy and `TYPE_CHECKING` imports were all covered. No file
+    under `data/` imported them. The rest was done by hand:
+    - `import src.profiles as profiles_mod` in `test_profiles`;
+    - the two `from src.profiles import …` lines inside the Python heredocs of
+      `scripts/sync-train.sh`, which neither the rewriter nor mypy sees;
+    - docstring and comment paths in 19 `src`/`scripts`/`tests` files, among
+      them `src/signals/vehicle_signals/__init__.py`'s `profile_module_stem`
+      reference, plus one frontend comment (`types/control.ts`);
+    - the `data/nissan-xterra-2008/accepted_baselines.yaml` comment.
+
+    `grep` over `src tests scripts tools` finds no `src.profiles`,
+    `src/profiles.py` or `src.analysis.{tune_revisions,vehicle_ledger}`. The
+    one hit left in `data/` is the dated `data/analyses/2026-09-23-behavior-corpus-manifest.yaml`
+    rule string, a record of that run, left as history.
+    - Current-code docs: README's and `CANary-overview.md`'s source trees,
+      `docs/{behavior-model-inference,diagnostic-discovery}.md` (the VIN probe
+      now points at `collection/vehicle_probe.py`),
+      `docs/roadmap/{capture-profiles,online-training-strategy}.md`, the
+      code-location table in `engine-analysis-and-mapping.md`, and the two
+      `.claude/skills` pages. AGENTS.md names none of these modules. Done-notes
+      (R02, R05, S01, P02, the W archive, 3.4 in `engine-analysis-and-mapping`)
+      keep the old paths as history.
+  - **Two visible text changes, both path names.** `config.UnscopedConfigError`'s
+    refusal now says `(src.vehicle.profiles.scope_config)` where it said
+    `(src.profiles.scope_config)`, as R09.4 did for `trainability`'s
+    refusal. No test matches that text. The module loggers follow their modules:
+    `src.vehicle.profiles` and `src.collection.vehicle_probe` (the VIN-probe
+    lines) replace `src.profiles`.
+  - **Patch targets retargeted:** the three `probe_vehicle_info`
+    module-attribute patches above (now injection), and the two `caplog`
+    logger names. `test_profiles`' S01.4 test listens on
+    `src.collection.vehicle_probe`, and `test_operational_calibration_scope`
+    listens on `src.vehicle.profiles`. No `mock.patch`/`monkeypatch` string
+    named a moved module.
+  - **Ledger.** `OWED` went from 24 to **15**, the 9 R09.5 entries exactly:
+    `collection/collectors → {analysis.tune_revisions, control.calibration}`,
+    `collection/tuning_profile → analysis.tune_revisions`,
+    `models/evaluation → analysis.tune_revisions` (now `models → vehicle`,
+    downward), and `profiles → {analysis.tune_revisions,
+    analysis.vehicle_ledger, collection.can_bus, collection.can_obd_client,
+    collection.obd_registry}`. No other entry cleared, `OWED_PAIRS` is
+    unchanged (2), and no new upward edge or pair appeared. `src/vehicle/*`
+    imports `atomic_write`, `config`, `jsonl_store`, `paths`,
+    `storage.{capture_manifest,sessions}` (lazy, in `tune_revisions`) and
+    itself. Nothing in `storage` imports `vehicle`.
+  - **`scripts/ml_paths.txt`** adds `src/vehicle/`. It feeds training:
+    `scripts/_cli.py`'s `scope_config` picks the trainers' models directory
+    and corpus paths, the vehicle ledger's boundary filters the corpus, and
+    `models/evaluation` reads `TuneRevisionRegistry`. `src/profiles.py` and
+    `src/analysis/` were not listed before, so this adds coverage.
+  - **Gate.**
+    - `ruff check .` and `ruff format --check .` are clean; `mypy` finds no
+      issues in 434 files.
+    - `tests/test_layering.py`: 9 passed.
+    - Targeted: the 81 test files that were edited or import a changed
+      module, `test_profile*`, the `--profile`/`_cli` tests,
+      `test_anomaly_signals_table`, `test_process_state_reset`. Fast tier:
+      2046 passed. Slow tier: 85 passed.
+    - Inner-loop tier (`-m "not integration and not slow"`): 6393 passed,
+      1 skipped.
+    - `-m integration tests/test_replay_isolation.py`: 1 passed.
+    - `-m ml_training`: 122 passed.
+    - Fresh interpreter: `import src.daemon.runtime, src.main` is clean.
+      `resolve_active_profile(probe=probe_vehicle_info)` on
+      `canary.dev.example.yaml` (canable/socketcan, registry and ledger in
+      scratch), with `bus_factory` swapped for `test_profiles`' scripted
+      ECU, sends Mode 09 0x02/0x04/0x06, registers slug
+      `5n1an08u08c123456` with CAL0001/0B4B7C60, and scopes `models_dir` to
+      `models/5n1an08u08c123456`.
+  - **Replay.** `tools/replay_event_diff.py ab`, `ed88454` (`git archive`)
+    against a copy of the working tree, session `2026-09-18T213818`, 900 s,
+    deployed IF `2026-09-20T054703` + LSTM `2026-09-20T064628`. The tool
+    reaches `scope_config` through `validation.harness` and imports no moved
+    path itself, so it drove both trees unchanged. The replay does not run
+    `resolve_active_profile` (the harness uses `resolve_profile_for_tooling`);
+    the fresh-interpreter check and `test_profiles` cover that path.
+    - 901 ticks, 18 events and 2645 score messages on both sides;
+    - events identical: 18 of 18 paired, 8316 floats, max |delta| 0;
+    - scores identical: IF 0 of 901, LSTM 0 of 872 and fused 0 of 872
+      differ, 5255 floats, max |delta| 0;
+    - counters and meta identical.
 
 - [ ] **R09.6 `src/behavior/` and `src/features/`, landed together.**
   - **Behaviour models** move to `src/behavior/` (layer 4):

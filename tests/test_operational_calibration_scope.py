@@ -17,8 +17,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from src.analysis.tune_revisions import TuneRevision, load_tune_revisions
 from src.collection import tuning_profile
+from src.collection.vehicle_probe import probe_vehicle_info
 from src.config import CanaryConfig
 from src.control.calibration import (
     active_memory_path,
@@ -30,7 +30,7 @@ from src.control.calibration import (
     seed_operational_memory,
 )
 from src.paths import DIDS_YAML
-from src.profiles import (
+from src.vehicle.profiles import (
     MIGRATION_MARKER,
     VehicleProfile,
     active_registry_path,
@@ -45,6 +45,7 @@ from src.profiles import (
     scope_config,
     source_registry_path,
 )
+from src.vehicle.tune_revisions import TuneRevision, load_tune_revisions
 
 XTERRA = "nissan-xterra-2008"
 FLASH = TuneRevision(revision="R05-15-flash", flashed_at=datetime(2026, 10, 2, tzinfo=UTC))
@@ -204,7 +205,8 @@ def test_a_verify_only_legacy_dir_is_migrated_for_the_only_registered_profile(
 ) -> None:
     base = _base(tmp_path)
     legacy, _channel = _verify_only_legacy(base)
-    profile = resolve_active_profile(base, override_slug=XTERRA)  # registers it, alone
+    # Registers it, alone.
+    profile = resolve_active_profile(base, probe=probe_vehicle_info, override_slug=XTERRA)
     xterra = scope_config(base, profile)
 
     own = operational_dir(xterra)
@@ -236,8 +238,8 @@ def test_an_unowned_legacy_dir_warns_and_is_surfaced(
         base.profiles.registry_path,
         [VehicleProfile(slug=XTERRA, vin="X"), VehicleProfile(slug="work-truck", vin="W")],
     )
-    with caplog.at_level("WARNING", logger="src.profiles"):
-        profile = resolve_active_profile(base, override_slug=XTERRA)
+    with caplog.at_level("WARNING", logger="src.vehicle.profiles"):
+        profile = resolve_active_profile(base, probe=probe_vehicle_info, override_slug=XTERRA)
     xterra = scope_config(base, profile)
 
     assert not (operational_dir(xterra) / "dids.yaml").exists()
@@ -272,7 +274,7 @@ def test_a_hand_added_tracked_flash_does_not_orphan_dashboard_flashes(tmp_path: 
     write(tracked, hand)  # a flash added to the tracked file by hand
     assert legacy_adoption(xterra).adopted
 
-    resolve_active_profile(base, override_slug=XTERRA)
+    resolve_active_profile(base, probe=probe_vehicle_info, override_slug=XTERRA)
     migrated = load_tune_revisions(active_registry_path(xterra))
     assert active_registry_path(xterra) == operational_registry_path(xterra)
     assert migrated is not None and FLASH.revision in {r.revision for r in migrated.revisions}

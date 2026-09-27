@@ -1153,7 +1153,7 @@ def build_live_feature_source(
     # finds bindings.yaml regardless of the daemon's launch cwd.
     bindings_path = bindings_path or DEFAULT_BINDINGS_PATH
     # Scoped per vehicle profile (config.daemon.behavior_models is rewritten to
-    # <base>/<slug>/behavior_models.yaml by src.profiles.scope_config).
+    # <base>/<slug>/behavior_models.yaml by src.vehicle.profiles.scope_config).
     behavior_models_path = behavior_models_path or components.config.daemon.behavior_models
     # Likewise profile-scoped (config.daemon.accepted_baselines); a missing
     # file is a valid, empty document (load_accepted_baselines handles that),

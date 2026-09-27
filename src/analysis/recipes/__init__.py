@@ -17,7 +17,7 @@ import importlib
 import importlib.util
 from typing import TYPE_CHECKING
 
-from src.profiles import profile_module_stem
+from src.vehicle.profiles import profile_module_stem
 
 if TYPE_CHECKING:
     from src.analysis.refit import Recipe

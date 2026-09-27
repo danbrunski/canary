@@ -59,11 +59,11 @@ from src.config import CanaryConfig  # noqa: E402
 from src.control.trends import corpus_trend_summary  # noqa: E402
 from src.log import configure_logging  # noqa: E402
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, use_store  # noqa: E402
-from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 from src.storage.session_products import (
     read_classification,  # noqa: E402
     read_fingerprint,
 )
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 

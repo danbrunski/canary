@@ -37,7 +37,7 @@ except ImportError:  # loaded as `scripts.trip_report` — repo root on path, no
 from src.analysis.trip_summary_sidecar import get_or_compute_trip_summary  # noqa: E402
 from src.config import CanaryConfig  # noqa: E402
 from src.log import configure_logging  # noqa: E402
-from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 

@@ -10,9 +10,9 @@ import pytest
 
 from src.analysis.tuning_digest import compute_tuning_digest
 from src.config import CanaryConfig
-from src.profiles import resolve_profile_for_tooling, scope_config
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
 T0 = datetime(2026, 8, 5, 14, 27, 20, tzinfo=UTC)
 
@@ -254,8 +254,8 @@ def test_previous_capture_orders_by_time_not_directory_name(
     picked as the previous run — silently comparing a drive against its own
     future.
     """
-    from src.analysis.tune_revisions import load_tune_revisions
     from src.analysis.tuning_digest import _previous_capture
+    from src.vehicle.tune_revisions import load_tune_revisions
 
     registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
     root = tmp_path / "vehicle"

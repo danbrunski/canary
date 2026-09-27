@@ -15,7 +15,7 @@ from src.decode.behavior_models import (
     unknown_operating_modes,
 )
 from src.models.manager import ModelManager
-from src.profiles import rescope_like
+from src.vehicle.profiles import rescope_like
 
 if TYPE_CHECKING:
     # Annotation only: it loads the feature pipeline, and this module is on
@@ -177,7 +177,7 @@ async def poll_config(
     previous config.
 
     P02.11: the reloaded YAML is re-scoped exactly as ``main`` scoped the
-    startup config (:func:`~src.profiles.rescope_like`: the same resolved
+    startup config (:func:`~src.vehicle.profiles.rescope_like`: the same resolved
     profile, registry vehicle parameters included). A bare ``from_yaml`` swapped
     in an unscoped config, and with profiles on every later live tick refused
     to featurize until a restart. A reload that cannot be scoped (profiles

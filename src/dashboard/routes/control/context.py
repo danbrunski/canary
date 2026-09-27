@@ -21,7 +21,6 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.obd_scheduler import ForcePollTrigger
 from src.config import CanaryConfig
@@ -34,6 +33,7 @@ from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.broadcast import Broadcaster
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.sessions import resolve_session
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 if TYPE_CHECKING:
     # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).

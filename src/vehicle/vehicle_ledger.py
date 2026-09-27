@@ -11,7 +11,7 @@ in.
 
 Storage mirrors :class:`~src.alerts.feedback.FeedbackStore`: append-only
 JSONL under ``data/control/`` (gitignored, profile-scoped via
-``src.profiles.scope_config``). Unlike feedback verdicts (keyed on the
+``src.vehicle.profiles.scope_config``). Unlike feedback verdicts (keyed on the
 anomaly they label), each ledger line is its own event — a correction is
 just another append with the same ``id``; :meth:`VehicleLedgerStore.records`
 collapses to the latest line per id while :meth:`VehicleLedgerStore.raw_records`

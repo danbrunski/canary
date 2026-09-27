@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from src.analysis.vehicle_ledger import VehicleEvent, VehicleLedgerStore
+from src.vehicle.vehicle_ledger import VehicleEvent, VehicleLedgerStore
 
 
 def test_store_starts_empty(tmp_path: Path) -> None:

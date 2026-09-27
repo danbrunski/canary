@@ -7,12 +7,12 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-import src.profiles as profiles_mod
-from src.analysis.vehicle_ledger import VehicleLedgerStore
+import src.vehicle.profiles as profiles_mod
+from src.collection.vehicle_probe import probe_vehicle_info
 from src.config import CanaryConfig, DaemonConfig
 from src.dashboard.api import create_app
 from src.paths import CONTROL_DIR
-from src.profiles import (
+from src.vehicle.profiles import (
     VehicleInfoProbe,
     VehicleProfile,
     load_registry,
@@ -23,6 +23,7 @@ from src.profiles import (
     slugify,
     update_profile_name,
 )
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO_ROOT / "canary.example.yaml"
@@ -73,14 +74,14 @@ def test_update_profile_name(tmp_path: Path):
 
 
 def test_read_vin_noop_when_not_canable(tmp_path: Path):
-    from src.profiles import read_vin
+    from src.collection.vehicle_probe import read_vin
 
     config = _base_config(tmp_path, obd_source="disabled")
     assert read_vin(config) is None  # never opens a bus
 
 
 def test_read_vin_noop_on_virtual_bus(tmp_path: Path):
-    from src.profiles import read_vin
+    from src.collection.vehicle_probe import read_vin
 
     config = _base_config(tmp_path, obd_source="canable")
     config = config.model_copy(
@@ -94,7 +95,7 @@ def test_read_vin_noop_on_virtual_bus(tmp_path: Path):
 
 
 def test_probe_vehicle_info_noop_when_not_canable(tmp_path: Path):
-    from src.profiles import probe_vehicle_info
+    from src.collection.vehicle_probe import probe_vehicle_info
 
     config = _base_config(tmp_path, obd_source="disabled")
     probe = probe_vehicle_info(config)
@@ -126,7 +127,7 @@ def test_probe_vehicle_info_reads_vin_calibration_id_and_cvn(tmp_path: Path, mon
     monkeypatch.setattr("src.collection.can_bus.bus_factory", lambda _can: _FakeBus())
     monkeypatch.setattr("src.collection.can_obd_client.CanObdClient", _FakeClient)
 
-    from src.profiles import probe_vehicle_info
+    from src.collection.vehicle_probe import probe_vehicle_info
 
     probe = probe_vehicle_info(config)
     assert probe.vin == "5N1AN08U08C123456"
@@ -214,7 +215,7 @@ def _probe_with(
     )
     monkeypatch.setattr("src.collection.can_bus.bus_factory", lambda _can: ecu)
     started = time.monotonic()
-    probe = profiles_mod.probe_vehicle_info(config)
+    probe = probe_vehicle_info(config)
     return probe, time.monotonic() - started
 
 
@@ -225,7 +226,7 @@ def test_probe_silent_ecu_costs_one_request_and_one_timeout(
     CVN come from the same module, so asking them too cost two more 2 s
     timeouts on every key-off boot (6 s on the 2026-09-22 cold trace)."""
     ecu = _ScriptedEcu({})
-    with caplog.at_level("INFO", logger="src.profiles"):
+    with caplog.at_level("INFO", logger="src.collection.vehicle_probe"):
         probe, elapsed = _probe_with(tmp_path, monkeypatch, ecu, timeout=0.3)
     assert probe == VehicleInfoProbe(vin=None, calibration_id=None, cvn=None)
     assert ecu.mode_09_requests() == [0x02]
@@ -288,7 +289,7 @@ def test_probe_partial_vin_answer_still_asks_the_others(
 
 def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):
     config = _base_config(tmp_path)  # probe disabled → VIN is None
-    profile = resolve_active_profile(config)
+    profile = resolve_active_profile(config, probe=probe_vehicle_info)
     # Default profile derived from the vehicle: block, with a sensible name.
     assert profile.slug == slugify(
         f"{config.vehicle.make}-{config.vehicle.model}-{config.vehicle.year}"
@@ -305,13 +306,13 @@ def test_resolve_override_returns_registry_entry(tmp_path: Path):
         config.profiles.registry_path,
         [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
     )
-    profile = resolve_active_profile(config, override_slug="work-truck")
+    profile = resolve_active_profile(config, probe=probe_vehicle_info, override_slug="work-truck")
     assert profile.name == "Work Truck"
 
 
 def test_resolve_override_unknown_slug_synthesizes(tmp_path: Path):
     config = _base_config(tmp_path)
-    profile = resolve_active_profile(config, override_slug="brand-new")
+    profile = resolve_active_profile(config, probe=probe_vehicle_info, override_slug="brand-new")
     assert profile.slug == "brand-new"
     assert any(p.slug == "brand-new" for p in load_registry(config.profiles.registry_path))
 
@@ -321,7 +322,7 @@ def test_resolve_disabled_does_not_write(tmp_path: Path):
     config = config.model_copy(
         update={"profiles": config.profiles.model_copy(update={"enabled": False})}
     )
-    resolve_active_profile(config)
+    resolve_active_profile(config, probe=probe_vehicle_info)
     assert not config.profiles.registry_path.exists()
 
 
@@ -345,9 +346,7 @@ def test_resolve_persists_calibration_id_and_cvn_on_first_probe(tmp_path: Path):
         [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
     )
     probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn="CVN0001")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
-        profile = resolve_active_profile(config)
+    profile = resolve_active_profile(config, probe=lambda _config: probe)
     assert profile.calibration_id == "CAL0001"
     assert profile.cvn == "CVN0001"
     reloaded = {p.slug: p for p in load_registry(config.profiles.registry_path)}
@@ -378,9 +377,7 @@ def test_resolve_flags_a_changed_calibration_id_as_a_corpus_boundary(tmp_path: P
         ],
     )
     probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0002", cvn="CVN0002")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
-        profile = resolve_active_profile(config)
+    profile = resolve_active_profile(config, probe=lambda _config: probe)
     assert profile.calibration_id == "CAL0002"
 
     ledger = VehicleLedgerStore(
@@ -405,9 +402,7 @@ def test_resolve_unchanged_calibration_id_does_not_flag_a_boundary(tmp_path: Pat
         ],
     )
     probe = VehicleInfoProbe(vin="VINWORK", calibration_id="CAL0001", cvn=None)
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setattr(profiles_mod, "probe_vehicle_info", lambda _config: probe)
-        resolve_active_profile(config)
+    resolve_active_profile(config, probe=lambda _config: probe)
     ledger = VehicleLedgerStore(
         profiles_mod._scope_file(config.daemon.vehicle_ledger, "work-truck")
     )

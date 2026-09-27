@@ -82,7 +82,7 @@ def test_main_restores_passive_before_the_vin_probe(
     )
     seen: dict[str, object] = {}
 
-    def _probe(_config: CanaryConfig, override_slug: str | None = None) -> object:
+    def _probe(_config: CanaryConfig, **_kwargs: object) -> object:
         seen["passive_at_probe"] = tx_gate.is_passive()
         raise SystemExit(0)  # stop before scope_config/run; the probe is the point
 

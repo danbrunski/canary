@@ -6,8 +6,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.dashboard.api import create_app
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 from tests.configs import isolated_config
 
 

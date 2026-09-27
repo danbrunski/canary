@@ -64,8 +64,8 @@ from src.analysis.refit import default_recipes
 from src.decode.behavior_models import CURRENT_SCHEMA_VERSION, BehaviorModels
 from src.log import configure_logging
 from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
-from src.profiles import active_registry, resolve_profile_for_tooling, scope_config
 from src.storage.session_files import has_telemetry
+from src.vehicle.profiles import active_registry, resolve_profile_for_tooling, scope_config
 
 log = logging.getLogger(__name__)
 

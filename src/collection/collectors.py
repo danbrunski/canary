@@ -21,7 +21,6 @@ from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.analysis.tune_revisions import RegistryConflictError
 from src.collection import tuning_profile
 from src.collection.can_collector import ReceiveStatsCallback, collect_can_from_config
 from src.collection.can_obd_collector import (
@@ -45,8 +44,9 @@ from src.collection.reconnect import ReconnectPolicy
 from src.collection.sensor_can_collector import collect_sensor_can_from_config
 from src.collection.supply_voltage_collector import collect_supply_voltage_from_config
 from src.config import CanaryConfig
-from src.control.calibration import active_registry
 from src.telemetry import TelemetryRecord
+from src.vehicle.profiles import active_registry
+from src.vehicle.tune_revisions import RegistryConflictError
 
 if TYPE_CHECKING:
     from src.collection.obd_collector import ObdSpec

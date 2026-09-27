@@ -14,15 +14,15 @@ from src.analysis.rom_trace import (
     load_viewer_definition,
     trace_payload,
 )
-from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.tuning_frame import load_provider_registry
 from src.config import CanaryConfig
 from src.dashboard.security import (
     control_auth_dependency,
 )
 from src.paths import DIDS_YAML
-from src.profiles import active_registry
-from src.profiles import profile_dir as vehicle_profile_dir
+from src.vehicle.profiles import active_registry
+from src.vehicle.profiles import profile_dir as vehicle_profile_dir
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 MAX_ROM_UPLOAD = 2 * 1024 * 1024
 
@@ -37,7 +37,7 @@ def inspect_rom(
     """Decode one uploaded ROM against the vehicle's map definitions.
 
     ``revisions`` is required, not derived from ``profile_dir``: the live
-    flash history is :func:`src.profiles.active_registry` — the operational
+    flash history is :func:`src.vehicle.profiles.active_registry` — the operational
     copy merged with the tracked file — and the tracked file alone would miss
     a flash recorded from the dashboard (R05.1, R05.17).
     """

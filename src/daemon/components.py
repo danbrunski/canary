@@ -16,7 +16,6 @@ from src.alerts.fusion import PersistenceGate
 from src.alerts.notifier import Notifier
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
-from src.analysis.vehicle_ledger import VehicleLedgerStore
 from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
 from src.config import CanaryConfig, DetectorRole
 from src.control.audit import ControlAuditLogger
@@ -39,6 +38,7 @@ from src.models.manager import ModelManager, manager_for_artifact
 from src.models.role_gate import DetectorRoleGate
 from src.models.sequence_registry import resolve_sequence_backend
 from src.storage.async_writer import AsyncParquetTelemetryWriter
+from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 if TYPE_CHECKING:
     from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession

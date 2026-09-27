@@ -62,7 +62,7 @@ from src.preprocessing.feature_pipeline import (  # noqa: E402
     candidate_feature_columns,
     disposition_screen_frames,
 )
-from src.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
+from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)
 

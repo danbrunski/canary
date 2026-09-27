@@ -13,13 +13,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.workbench import revision_boundaries, session_revision, session_span
 from src.config import CanaryConfig
 from src.control.calibration import active_registry
 from src.session import TAGS_FILENAME
 from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
 from src.storage.sessions import is_session_dir_name, session_started_at
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 #: Default page of the browser. Each row opens every chunk's footer, so an
 #: unbounded listing over months of ordinary sessions is not free.

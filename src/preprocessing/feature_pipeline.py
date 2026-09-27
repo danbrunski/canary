@@ -426,7 +426,7 @@ def resolve_feature_policy(
         )
     scoped = config
     if config.profiles.enabled:
-        from src.profiles import resolve_profile_for_tooling, scope_config
+        from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
 
         scoped = scope_config(config, resolve_profile_for_tooling(config, profile_slug))
     return FeaturePolicy(

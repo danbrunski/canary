@@ -249,7 +249,7 @@ def test_main_marks_the_stages_before_the_daemon(
     monkeypatch.setattr(
         main_mod,
         "resolve_active_profile",
-        lambda _config, override_slug=None: pytest.fail("profile probe must not run here"),
+        lambda _config, **_kwargs: pytest.fail("profile probe must not run here"),
     )
     loaded = CanaryConfig.from_yaml(example)
     loaded = loaded.model_copy(

@@ -2659,7 +2659,7 @@ def save_dyno_profile(path: Path, profile: DynoProfile) -> None:
 
 def dyno_profile_path(config: CanaryConfig) -> Path:
     """The active vehicle's ``dyno.yaml``, beside its other profile data."""
-    from src.profiles import profile_dir
+    from src.vehicle.profiles import profile_dir
 
     return profile_dir(config) / DYNO_FILENAME
 

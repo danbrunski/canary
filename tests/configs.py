@@ -23,7 +23,7 @@ from typing import Any, Literal
 import yaml
 
 from src.config import CanaryConfig, VehicleParameters, _daemon_path_fields, rebase_state_paths
-from src.profiles import VehicleProfile, scope_config
+from src.vehicle.profiles import VehicleProfile, scope_config
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE_YAML = REPO / "canary.example.yaml"

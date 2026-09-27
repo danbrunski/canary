@@ -33,8 +33,8 @@ log = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from src.alerts.emitter import AnomalyEventEmitter
-    from src.analysis.vehicle_ledger import VehicleLedgerStore
     from src.collection.obd_scheduler import FreezeFrameTrigger
+    from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 #: ``GET /obd/dtc`` treats the cached report stale after this many seconds
 #: with no poll landing. The daemon's default DTC-poll cadence is 300 s

@@ -545,7 +545,7 @@ def test_tune_revision_resolution_matches_the_campaign_timeline() -> None:
     The 2026-07-26 boundary is pinned by capture metadata rather than
     recollection: stock through 16:21 MDT, Osiris from the 16:31 session.
     """
-    from src.analysis.tune_revisions import load_tune_revisions
+    from src.vehicle.tune_revisions import load_tune_revisions
 
     registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
     assert registry is not None
@@ -565,7 +565,7 @@ def test_sessions_before_the_first_flash_have_no_revision() -> None:
     """Better `None` than forcing a session into a calibration that did not exist."""
     from datetime import UTC, datetime
 
-    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+    from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 
     registry = TuneRevisionRegistry(
         revisions=[
@@ -582,7 +582,7 @@ def test_registry_rejects_out_of_order_revisions() -> None:
 
     from pydantic import ValidationError
 
-    from src.analysis.tune_revisions import TuneRevision, TuneRevisionRegistry
+    from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 
     with pytest.raises(ValidationError, match="oldest-first"):
         TuneRevisionRegistry(
@@ -595,7 +595,7 @@ def test_registry_rejects_out_of_order_revisions() -> None:
 
 def test_comparison_flags_whether_both_sides_share_a_revision(tmp_path: Path) -> None:
     """Same revision means the spread IS noise; different means a flash is in it."""
-    from src.analysis.tune_revisions import load_tune_revisions
+    from src.vehicle.tune_revisions import load_tune_revisions
 
     registry = load_tune_revisions(Path("data/nissan-xterra-2008/tune_revisions.yaml"))
     samples = [(2000 + 100 * i, 50, 4, 1.2, 0.83) for i in range(30)]

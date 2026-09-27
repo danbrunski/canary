@@ -12,7 +12,7 @@ Loaded the same strict-Pydantic way as ``behavior_models.yaml``
 (``src.decode.behavior_models``), but **profile-scoped** — every override is
 a this-vehicle fact (a second vehicle profile must never inherit the
 Xterra's weak-injector override), so the path is resolved through
-``src.profiles.scope_config`` under the active vehicle's data tree, never a
+``src.vehicle.profiles.scope_config`` under the active vehicle's data tree, never a
 flat ``data/`` path. See ``DaemonConfig.accepted_baselines``.
 
 Phase 1 shipped the schema + loader only, with the shipped
@@ -44,7 +44,7 @@ from src.decode.behavior_models import DeviationConfig
 from src.paths import DATA_DIR
 
 #: Default (unscoped) location — always resolve the real path through
-#: ``src.profiles.scope_config`` (``DaemonConfig.accepted_baselines``); this
+#: ``src.vehicle.profiles.scope_config`` (``DaemonConfig.accepted_baselines``); this
 #: constant exists only as the field default / for tooling that runs with
 #: profiles disabled.
 DEFAULT_ACCEPTED_BASELINES_PATH = DATA_DIR / "accepted_baselines.yaml"

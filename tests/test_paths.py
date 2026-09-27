@@ -125,8 +125,8 @@ def test_runtime_state_defaults_do_not_depend_on_the_working_directory() -> None
     only agree when the process starts at the repo root."""
     from src.analysis.llm_assist.store import DEFAULT_LLM_ASSIST_CARDS_PATH
     from src.analysis.reference_epoch import DEFAULT_REFERENCE_EPOCH_PATH
-    from src.analysis.vehicle_ledger import DEFAULT_VEHICLE_LEDGER_PATH
     from src.config import DaemonConfig, LLMAssistConfig
+    from src.vehicle.vehicle_ledger import DEFAULT_VEHICLE_LEDGER_PATH
 
     daemon = DaemonConfig()
     runtime_state = {

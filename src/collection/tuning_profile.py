@@ -13,7 +13,6 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from src.analysis.tune_revisions import calibration_matches
 from src.collection import capture_generation, capture_lifetime
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.profile_view import (
@@ -22,6 +21,7 @@ from src.collection.profile_view import (
     request_channel_names,
 )
 from src.collection.request_eligibility import Eligibility, ProfileClass
+from src.vehicle.tune_revisions import calibration_matches
 
 if TYPE_CHECKING:
     from src.collection.obd_scheduler import PollRequest

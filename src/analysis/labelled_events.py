@@ -29,7 +29,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.analysis.tune_revisions import TuneRevisionRegistry
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 LabelKind = Literal["fault", "novelty", "intervention"]
 
@@ -130,7 +130,7 @@ def load_labelled_events(
     """Labels from ``path`` plus a flash per tune revision, oldest first.
 
     ``tune_registry`` is the flash history already read — normally
-    :func:`src.profiles.active_registry`, which merges the tracked and
+    :func:`src.vehicle.profiles.active_registry`, which merges the tracked and
     operational registries (R05.17); taking a single path let a caller read
     only one of them. ``tune_sources`` names the files it came from.
 

@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.models.evaluation import (
     Drive,
     Era,
@@ -34,6 +33,7 @@ from src.models.evaluation import (
     sustained_alerts,
     vus_pr,
 )
+from src.vehicle.tune_revisions import TuneRevisionRegistry
 from tests.builders import write_fixture_session
 
 T0 = datetime(2026, 9, 18, 12, 0, tzinfo=UTC)
