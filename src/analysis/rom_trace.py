@@ -25,7 +25,7 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.channels import ChannelSpecError, read_channels
+from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
 from src.decode.dids import MEMORY_SOURCE, load_did_map
 
@@ -277,6 +277,18 @@ def cell_residency(
                 "did not poll the trace channels, so there are no ECM coordinates to bin."
             ),
             "missing": missing,
+        }
+
+    # Samples are pairs of stored rows, counted and timed as dwell: a
+    # change-only broadcast channel (P02.10) stores one row per payload
+    # change, so its rows would bin how often it changed, not where it was.
+    change_only = as_of_refusal(long, reader="ROM trace cell binning", specs=specs)
+    if change_only is not None:
+        return {
+            **base,
+            "available": False,
+            "reason": "change_only_storage",
+            "message": change_only,
         }
 
     xs = long[long["spec"] == trace.x.channel].reset_index(drop=True)

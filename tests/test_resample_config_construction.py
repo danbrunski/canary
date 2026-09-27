@@ -162,6 +162,13 @@ def test_manifest_max_gap_seconds_honours_max_gap_factor(tuned: CanaryConfig) ->
     expected = resample_config_for(tuned).max_gap.total_seconds()
     assert spec["max_gap_seconds"] == pytest.approx(expected)
     assert spec["max_gap_seconds"] == pytest.approx(5.0 / tuned.preprocessing.resample_hz)
+    # P02.10: the broadcast stale class travels with the model beside it.
+    assert spec["broadcast_max_gap_seconds"] == pytest.approx(
+        tuned.collection.broadcast_stale_timeout_seconds
+    )
+    assert spec["broadcast_max_gap_seconds"] == pytest.approx(
+        resample_config_for(tuned).broadcast_max_gap_seconds
+    )
 
 
 def test_live_source_stale_ceilings_match_the_recipe(tuned: CanaryConfig) -> None:

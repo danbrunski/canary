@@ -39,6 +39,7 @@ from src.collection.capture_losses import (
     summarize_losses,
 )
 from src.paths import DIDS_YAML
+from src.storage.broadcast_storage import ChangeOnlyStorageError, refuse_change_only
 from src.telemetry import CAPTURED_SOURCES, DECODED_SOURCE
 from src.validation.harness import RunArtifacts
 from src.validation.synthetic_bus import (
@@ -201,7 +202,8 @@ def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str,
       decoder, which is how D02.9's doubling showed.
     - every captured source persisted == its count in the source, once a full
       pass completed with nothing dropped; any excess is listed as
-      ``foreign_rows`` (rows no recording contained).
+      ``foreign_rows`` (rows no recording contained). ``can`` counts the
+      frames the writer's change filter did not store as persisted (P02.10).
     """
     stats = artifacts.replay_emission
     if artifacts.scenario.kind != "replay" or stats is None or artifacts.replay_source is None:
@@ -229,19 +231,27 @@ def replay_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str,
         "note": "decoded rows are never stored (P02.8), whatever the replay emits",
     }
     if complete:
-        captured = sorted((set(source_by) | set(persisted_by)) & set(CAPTURED_SOURCES))
+        # P02.10: the writer stores a CAN frame only when its payload changes,
+        # so a source stored every frame persists fewer ``can`` rows; each one
+        # not stored is counted by the writer and closes the identity.
+        suppressed = int(artifacts.can_frames_suppressed)
+        accounted = dict(persisted_by)
+        if suppressed:
+            accounted["can"] = accounted.get("can", 0) + suppressed
+        captured = sorted((set(source_by) | set(accounted)) & set(CAPTURED_SOURCES))
         foreign = {
-            name: persisted_by.get(name, 0) - source_by.get(name, 0)
+            name: accounted.get(name, 0) - source_by.get(name, 0)
             for name in captured
-            if persisted_by.get(name, 0) > source_by.get(name, 0)
+            if accounted.get(name, 0) > source_by.get(name, 0)
         }
         missing = {
-            name: source_by.get(name, 0) - persisted_by.get(name, 0)
+            name: source_by.get(name, 0) - accounted.get(name, 0)
             for name in captured
-            if persisted_by.get(name, 0) < source_by.get(name, 0)
+            if accounted.get(name, 0) < source_by.get(name, 0)
         }
         out["captured"] = {
             "identity_holds": not foreign and not missing,
+            "can_frames_suppressed": suppressed,
             "foreign_rows": foreign,
             "missing_rows": missing,
         }
@@ -279,7 +289,10 @@ def loss_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str, A
         stage = "replay"
     storage_dropped = int(storage.get("dropped_records") or 0)
     raw_rows = int(frame["source"].isin(RAW_SOURCES).sum())
-    accounted = raw_rows + buffer_dropped + queue_dropped + storage_dropped
+    # P02.10: a CAN frame repeating its id's payload is not stored, by design;
+    # the writer counts each one, so the identity still closes exactly.
+    suppressed = int(artifacts.can_frames_suppressed)
+    accounted = raw_rows + suppressed + buffer_dropped + queue_dropped + storage_dropped
     delivered_frames = sum(len(bus.handed_out) for bus in artifacts.buses)
     readings = None
     if artifacts.scheduler_metrics is not None and artifacts.reconnect_attempts == 0:
@@ -301,13 +314,14 @@ def loss_accounting(frame: pd.DataFrame, artifacts: RunArtifacts) -> dict[str, A
         "stage": stage,
         "collector_pushed": pushed,
         "persisted_raw_rows": raw_rows,
+        "can_frames_suppressed": suppressed,
         "buffer_dropped": buffer_dropped,
         "queue_dropped": queue_dropped,
         "storage_dropped": storage_dropped,
         "accounted": accounted,
         "identity": (
-            "collector_pushed == persisted_raw_rows + buffer_dropped + queue_dropped"
-            " + storage_dropped"
+            "collector_pushed == persisted_raw_rows + can_frames_suppressed + buffer_dropped"
+            " + queue_dropped + storage_dropped"
         ),
         "identity_holds": pushed == accounted if pushed >= 0 else None,
         "adapter_delivered_frames": delivered_frames,
@@ -393,26 +407,43 @@ def channel_cadence(frame: pd.DataFrame, artifacts: RunArtifacts) -> list[dict[s
             }
         )
     can = capture[capture["source"] == "can"]
+    # P02.10: a change-only session stores a frame only when its payload
+    # changes, so its stored inter-arrival times are not the bus's. Each
+    # broadcast row says so instead of reporting a rate.
+    refusal = _change_only_refusal(capture, reader="validation channel_cadence")
     for channel, group in can.groupby(can["channel"].str.upper()):
         values = to_seconds(group["timestamp"])
         stats = _interarrival(values)
         median = stats["median_s"]
-        rows.append(
-            {
-                "channel": str(channel),
-                "kind": "broadcast",
-                "requested_hz": (
-                    artifacts.scenario.broadcast.rate_hz
-                    if str(channel) == BROADCAST_CHANNEL
-                    else None
-                ),
-                "achieved_hz": None if not median else round(1.0 / median, 3),
-                "observations": int(len(group)),
-                "clock": "stored_timestamp (adapter handout)",
-                "interarrival": stats,
-            }
-        )
+        row: dict[str, Any] = {
+            "channel": str(channel),
+            "kind": "broadcast",
+            "requested_hz": (
+                artifacts.scenario.broadcast.rate_hz if str(channel) == BROADCAST_CHANNEL else None
+            ),
+            "achieved_hz": None if not median else round(1.0 / median, 3),
+            "observations": int(len(group)),
+            "clock": "stored_timestamp (adapter handout)",
+            "interarrival": stats,
+        }
+        if refusal is not None:
+            row.update(achieved_hz=None, interarrival=None, refused=refusal)
+        rows.append(row)
     return sorted(rows, key=lambda r: (str(r["kind"]), r["channel"]))
+
+
+def _change_only_refusal(capture: pd.DataFrame, *, reader: str) -> str | None:
+    """The named refusal when any session dir in ``capture`` stores CAN frames
+    change-only (P02.10), else ``None``."""
+    if "session_dir" not in capture or capture.empty:
+        return None
+    try:
+        refuse_change_only(
+            [Path(p) for p in capture["session_dir"].dropna().unique()], reader=reader
+        )
+    except ChangeOnlyStorageError as exc:
+        return str(exc)
+    return None
 
 
 def service_accounting(artifacts: RunArtifacts) -> dict[str, Any]:

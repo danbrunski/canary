@@ -26,6 +26,11 @@ from src.atomic_write import atomic_write_text
 from src.collection.capture_profiles import CaptureProfile
 from src.collection.record_arming import RecordArmingGate
 from src.session import SessionPaths, make_session_dir, make_unique_session_dir, session_paths
+from src.storage.broadcast_storage import (
+    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+    CanChangeFilter,
+    CanStorage,
+)
 from src.storage.retention import (
     EmptySessionSweep as EmptySessionSweep,
 )
@@ -44,7 +49,7 @@ from src.storage.retention import (
 from src.storage.retention import (
     enforce_storage_cap as enforce_storage_cap,
 )
-from src.telemetry import DECODED_SOURCE, TelemetryRecord
+from src.telemetry import CAN_SOURCE, DECODED_SOURCE, TelemetryRecord
 
 log = logging.getLogger(__name__)
 
@@ -86,6 +91,7 @@ class ParquetTelemetryWriter:
         session_gap_seconds: float = 300.0,
         clock: Callable[[], datetime] | None = None,
         arming_gate: RecordArmingGate | None = None,
+        broadcast_stale_timeout_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
     ):
         self._clock: Callable[[], datetime] = (
             (lambda: datetime.now(UTC)) if clock is None else clock
@@ -121,6 +127,21 @@ class ParquetTelemetryWriter:
         #: waiting for a flush.
         self.rows_written = 0
         self.session_paths: list[SessionPaths] = [self.paths]
+        #: P02.10 (operator 2026-09-26): CAN frames are stored change-only, an
+        #: unchanged id re-written once per ``broadcast_stale_timeout_seconds``
+        #: (one second before it). ``can_storage`` is the current session's
+        #: mode, recorded in every chunk's footer; a capture profile with
+        #: ``store_every_frame`` switches its own session to every frame. The
+        #: filter's state is per session: every id's first frame in a session
+        #: is stored, so a session stands alone.
+        self._change_only = CanStorage.change_only(broadcast_stale_timeout_seconds)
+        self.can_storage: CanStorage = self._change_only
+        self._can_filter = CanChangeFilter(broadcast_stale_timeout_seconds)
+        #: CAN frames the filter did not store, in the current session, and
+        #: across every session this writer wrote. A frame count reconciles
+        #: against rows on disk plus the total.
+        self.can_frames_suppressed = 0
+        self.can_frames_suppressed_total = 0
 
     def write(self, record: TelemetryRecord) -> Path | None:
         """Append one record, flushing when row count or time threshold is reached.
@@ -129,6 +150,11 @@ class ParquetTelemetryWriter:
         are never stored, the readers decode the raw frames on read. The
         daemon's storage sink never hands one over (``drain.storable``); this
         makes any other writer of a session unable to either.
+
+        A CAN frame repeating its id's payload inside the re-write interval
+        is not stored while the session is change-only (P02.10); it still
+        counts towards the session's gap and run-time rotation and the arming
+        gate, which see every record.
         """
         if record.source == DECODED_SOURCE:
             raise ValueError(
@@ -139,6 +165,10 @@ class ParquetTelemetryWriter:
         self._rotate_if_engine_run_time_reset(record)
         if self.arming_gate is not None and not self.arming_gate.observe(record):
             return None
+        if self.can_storage.is_change_only and not self._can_filter.keep_record(record):
+            self.can_frames_suppressed += 1
+            self.can_frames_suppressed_total += 1
+            return self.flush() if self.flush_due() else None
         self._buffer.append(record)
         self.rows_written += 1
         if len(self._buffer) >= self.max_rows or self.flush_due():
@@ -164,7 +194,7 @@ class ParquetTelemetryWriter:
             return None
 
         rows = [record.parquet_row() for record in self._buffer]
-        table = _PA.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
+        table = _PA.Table.from_pylist(rows, schema=chunk_schema(self.can_storage, self._buffer))
         path = self.paths.root / f"telemetry-{self._chunk_index:05d}.parquet"
         _write_table_atomic(table, path, compression="snappy")
 
@@ -190,6 +220,7 @@ class ParquetTelemetryWriter:
         self._last_flush = self._clock()
         self._last_engine_run_time = None
         self._last_record_timestamp = None
+        self._start_session_storage(self._change_only)
         if self.arming_gate is not None:
             # New key cycle: gate again until this session sees its own
             # vehicle-active signal (Task 8.6).
@@ -238,6 +269,7 @@ class ParquetTelemetryWriter:
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_record_timestamp = None
+        self._start_session_storage(self._change_only)
         return flushed
 
     def _exit_isolated_dir(self, started_at: datetime | None = None) -> Path | None:
@@ -255,7 +287,14 @@ class ParquetTelemetryWriter:
         self._chunk_index = 0
         self._last_flush = self._clock()
         self._last_record_timestamp = None
+        self._start_session_storage(self._change_only)
         return flushed
+
+    def _start_session_storage(self, storage: CanStorage) -> None:
+        """A new session: its CAN storage mode, a fresh filter, no suppressions."""
+        self.can_storage = storage
+        self._can_filter.reset()
+        self.can_frames_suppressed = 0
 
     def enter_replay_mode(self, replay_id: str) -> Path | None:
         """Flush + redirect writes to ``<out_root>/_replay-<replay_id>/``."""
@@ -294,6 +333,9 @@ class ParquetTelemetryWriter:
             raise ValueError("default is normal collection, not a bounded capture")
         prefix = profile.storage_prefix or f"_capture-{profile.name}"
         flushed = self._enter_isolated_dir(f"{prefix}-{capture_id}")
+        if profile.store_every_frame:
+            # P02.10: the profile asks for sub-second timing and frame counts.
+            self._start_session_storage(CanStorage.every_frame())
         sidecar = {
             "schema_version": 2,
             "profile": profile.name,
@@ -339,6 +381,7 @@ def write_records_to_parquet(
     max_rows: int = 10_000,
     compression: str = "snappy",
     chunk_name: str = "telemetry",
+    can_storage: CanStorage | None = None,
 ) -> list[Path]:
     """Write telemetry records to chunked Parquet files in `out_dir`.
 
@@ -355,8 +398,21 @@ def write_records_to_parquet(
     as given: tests build sessions recorded before P02.8 (which stored them)
     with it, and ``tools/log_to_parquet.py`` converts raw logs, which have
     none.
+
+    ``can_storage`` (P02.10), when given, is recorded in the footer of every chunk
+    holding a CAN frame;
+    a change-only one also filters the CAN frames exactly as the daemon's
+    writer does, so a change-only footer can never sit on unfiltered frames.
+    ``None`` writes no footer: a session as recorded before P02.10.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
+    change_filter = (
+        CanChangeFilter(can_storage.stale_timeout_seconds)
+        if can_storage is not None
+        and can_storage.is_change_only
+        and can_storage.stale_timeout_seconds is not None
+        else None
+    )
     files: list[Path] = []
     buffer: list[TelemetryRecord] = []
     chunk_index = 0
@@ -366,7 +422,10 @@ def write_records_to_parquet(
         if not buffer:
             return
         rows = [r.parquet_row() for r in buffer]
-        table = _PA.Table.from_pylist(rows, schema=TELEMETRY_SCHEMA)
+        table = _PA.Table.from_pylist(
+            rows,
+            schema=TELEMETRY_SCHEMA if can_storage is None else chunk_schema(can_storage, buffer),
+        )
         path = out_dir / f"{chunk_name}-{chunk_index:05d}.parquet"
         _write_table_atomic(table, path, compression=compression)
         files.append(path)
@@ -374,11 +433,23 @@ def write_records_to_parquet(
         chunk_index += 1
 
     for record in records:
+        if change_filter is not None and not change_filter.keep_record(record):
+            continue
         buffer.append(record)
         if len(buffer) >= max_rows:
             flush()
     flush()  # final partial chunk
     return files
+
+
+def chunk_schema(can_storage: CanStorage, records: Iterable[TelemetryRecord]) -> Any:
+    """:data:`TELEMETRY_SCHEMA` with ``can_storage`` in its footer metadata,
+    when the chunk holds a CAN frame; a chunk without one (an UpRev import, a
+    GPS-only stretch) says nothing about CAN storage and gets no footer, so no
+    frame-count reader refuses it."""
+    if not any(record.source == CAN_SOURCE for record in records):
+        return TELEMETRY_SCHEMA
+    return TELEMETRY_SCHEMA.with_metadata(can_storage.footer())
 
 
 def _engine_run_time_seconds(record: TelemetryRecord) -> float | None:

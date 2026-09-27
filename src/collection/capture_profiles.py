@@ -266,6 +266,14 @@ class CaptureProfile(_Strict):
     #: IF/LSTM discovery and from every unlisted behavior model.
     behavior_model_recipes: tuple[str, ...] = ()
     storage_prefix: str = ""
+    #: P02.10 (operator 2026-09-26): store every broadcast CAN frame in this
+    #: capture's session. Normal collection stores a frame only when its
+    #: payload changes (an unchanged id re-written once per
+    #: ``collection.broadcast_stale_timeout_seconds``), which keeps every value
+    #: but not sub-second frame timing or per-id frame counts; a capture that
+    #: needs those (receive-loss accounting, broadcast byte discovery, frame
+    #: rates) sets this. The ``default`` profile may not: it is the corpus's.
+    store_every_frame: bool = False
 
     @field_validator("name")
     @classmethod
@@ -543,6 +551,11 @@ class CaptureProfile(_Strict):
             )
         elif not self.storage_prefix:
             raise ValueError("non-corpus profiles require a '_capture-<slug>' storage_prefix")
+        if self.name == DEFAULT_PROFILE_NAME and self.store_every_frame:
+            raise ValueError(
+                "the default profile stores CAN frames change-only (P02.10, operator "
+                "2026-09-26); every-frame storage belongs to a capture profile"
+            )
         return self
 
     # ------------------------------------------------------------------

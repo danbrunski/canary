@@ -10,6 +10,14 @@ import numpy as np
 import pandas as pd
 
 from src.dataframe_utils import require_columns as _require_columns
+from src.storage.broadcast_storage import (
+    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+    FRAME_ATTR,
+    change_only_timeout,
+    is_broadcast_channel,
+    refuse_shorter_stored_timeout,
+    validate_broadcast_stale_timeout,
+)
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -81,6 +89,17 @@ class ResampleConfig:
     #: channel past ``max_gap``.
     slow_channel_max_gap_seconds: float = DEFAULT_SLOW_CHANNEL_MAX_GAP_SECONDS
     session_gap_seconds: float = 300.0
+    #: P02.10 — the stale class of broadcast channels (``can:``/``decoded:``/
+    #: ``dbc:``), equal to ``collection.broadcast_stale_timeout_seconds``. A
+    #: frame is stored only when its payload changes and an unchanged id is
+    #: re-written one second before this timeout, so a broadcast channel's
+    #: newest stored row may be that old while the bus still carries it. A
+    #: broadcast channel's ceiling is the larger of this and its own class
+    #: (a slow broadcast channel keeps the slow ceiling), and its
+    #: ``__arrived`` flag reads "a stored row within this timeout": in a
+    #: change-only span no row means "the same payload again". Sessions stored
+    #: every frame read the same way, so old and new sessions give one grid.
+    broadcast_max_gap_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
 
     def __post_init__(self) -> None:
         if self.hz <= 0:
@@ -91,6 +110,7 @@ class ResampleConfig:
             raise ValueError("slow_channel_max_gap_seconds must be positive")
         if self.session_gap_seconds <= 0:
             raise ValueError("session_gap_seconds must be positive")
+        validate_broadcast_stale_timeout(self.broadcast_max_gap_seconds)
 
     @property
     def interval(self) -> pd.Timedelta:
@@ -118,9 +138,18 @@ class ResampleConfig:
             return channel in self.fast_channels
         return not is_slow_channel(channel, self.slow_channels)
 
+    @property
+    def broadcast_max_gap(self) -> pd.Timedelta:
+        return pd.Timedelta(seconds=self.broadcast_max_gap_seconds)
+
     def max_gap_for(self, channel: str) -> pd.Timedelta:
-        """The forward-fill ceiling for ``channel`` (see :meth:`is_fast`)."""
-        return self.max_gap if self.is_fast(channel) else self.slow_channel_max_gap
+        """The forward-fill ceiling for ``channel``: its fast/slow class
+        (:meth:`is_fast`), raised to :attr:`broadcast_max_gap` for a broadcast
+        channel (P02.10)."""
+        base = self.max_gap if self.is_fast(channel) else self.slow_channel_max_gap
+        if is_broadcast_channel(channel):
+            return max(base, self.broadcast_max_gap)
+        return base
 
     def max_gap_seconds_for(self, channel: str) -> float:
         """:meth:`max_gap_for` in seconds."""
@@ -151,6 +180,7 @@ def resample_config_for(config: CanaryConfig, *, hz: float | None = None) -> Res
         max_gap_factor=preprocessing.max_gap_factor,
         slow_channel_max_gap_seconds=preprocessing.slow_channel_max_gap_seconds,
         session_gap_seconds=preprocessing.session_gap_seconds,
+        broadcast_max_gap_seconds=config.collection.broadcast_stale_timeout_seconds,
     )
 
 
@@ -163,6 +193,7 @@ def resample_wide(
     """Resample a wide telemetry DataFrame without crossing session boundaries."""
     cfg = ResampleConfig() if config is None else config
     _require_columns(wide, [SESSION_COLUMN, TIMESTAMP_COLUMN])
+    _refuse_shorter_stored_timeout(wide, cfg)
     columns = _value_columns(wide, value_columns)
     if wide.empty:
         return _empty_resampled(columns, cfg)
@@ -197,6 +228,7 @@ def resample_long(
     """
     cfg = ResampleConfig() if config is None else config
     _require_columns(long, [SESSION_COLUMN, TIMESTAMP_COLUMN, channel_column, value_column])
+    _refuse_shorter_stored_timeout(long, cfg)
     if long.empty:
         return _empty_resampled([], cfg)
 
@@ -260,7 +292,9 @@ def _resample_one_long(
         stale = _gap_flags(series, sampled_times, config.max_gap_for(channel)).to_numpy()
         values[channel] = sampled.where(~stale, np.nan).to_numpy(dtype="float32")
         gaps[gap_column(channel)] = stale
-        arrivals[arrived_column(channel)] = _arrival_flags(series, sampled_times, config.interval)
+        arrivals[arrived_column(channel)] = _arrival_flags_for(
+            channel, series, sampled_times, config
+        )
 
     return pd.concat(
         [
@@ -275,6 +309,20 @@ def _resample_one_long(
             pd.DataFrame(arrivals),
         ],
         axis=1,
+    )
+
+
+def _refuse_shorter_stored_timeout(frame: pd.DataFrame, config: ResampleConfig) -> None:
+    """P02.10: a frame a session reader returned carries its change-only
+    storage in ``attrs``; a broadcast class shorter than the recorded timeout
+    would read every quiet id stale between its re-writes."""
+    info = frame.attrs.get(FRAME_ATTR)
+    if not isinstance(info, dict) or not info.get("change_only"):
+        return
+    refuse_shorter_stored_timeout(
+        change_only_timeout(frame),
+        config.broadcast_max_gap_seconds,
+        what=", ".join(info.get("change_only_sessions") or ["this frame"]),
     )
 
 
@@ -316,6 +364,24 @@ def _arrival_flags(
     return np.asarray(upto_now > upto_previous, dtype=bool)
 
 
+def _arrival_flags_for(
+    channel: str,
+    original: pd.Series,
+    sampled_index: pd.Series,
+    config: ResampleConfig,
+) -> np.ndarray:
+    """``channel``'s ``__arrived`` flags: :func:`_arrival_flags`, except for a
+    broadcast channel (P02.10), where a sample "arrived" at ``t`` when its
+    newest stored row is at most :attr:`ResampleConfig.broadcast_max_gap`
+    old. In a change-only span an unchanged frame is not stored, so the absence
+    of a row within the timeout is the same payload delivered again; a session
+    stored every frame is read by the same rule, so the two give one grid."""
+    if not is_broadcast_channel(channel):
+        return _arrival_flags(original, sampled_index, config.interval)
+    stale = _gap_flags(original, sampled_index, config.broadcast_max_gap)
+    return ~stale.to_numpy(dtype=bool)
+
+
 def is_slow_channel(channel: str, hints: Iterable[str] = DEFAULT_SLOW_CHANNEL_HINTS) -> bool:
     """Infer whether a channel is slow-moving from its source/channel name."""
     normalized = channel.upper()
@@ -354,10 +420,11 @@ def _resample_one_session(
         stale_mask = stale.to_numpy()
         gaps[gap_column(column)] = stale_mask
         masked[column] = sampled[column].where(~stale_mask, np.nan).to_numpy()
-        arrivals[arrived_column(column)] = _arrival_flags(
+        arrivals[arrived_column(column)] = _arrival_flags_for(
+            column,
             pd.to_numeric(indexed[column], errors="coerce"),
             sampled[TIMESTAMP_COLUMN],
-            config.interval,
+            config,
         )
 
     return pd.concat(

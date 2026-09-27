@@ -581,7 +581,7 @@ recomputes the rolling frame over the whole buffered window every tick.
 
   Size **M–L**. Built at the desk; measured on the Pi.
 
-- [ ] **P02.10 Store CAN frames on change; re-write an unchanged id once per
+- [~] **P02.10 Store CAN frames on change; re-write an unchanged id once per
   stale timeout (operator decision).** On the 09-20 drive, 41 % of CAN frames
   repeat their id's previous payload.
 
@@ -655,6 +655,259 @@ recomputes the rolling frame over the whole buffered window every tick.
   though, and would need its own verification.
 
   Size **M–L**. Built at the desk; measured on the Pi.
+
+  *Implemented and verified at the desk 2026-09-26. Remaining:* the Pi
+  measurement (rows, bytes and writer CPU before and after, last Accept
+  bullet); the retrain decision (count below); the optional IMU speed hold
+  (below).
+  - **One rule, one module.** `src/storage/broadcast_storage.py`:
+    `CanChangeFilter` (first frame of an id kept, a changed payload kept, an
+    unchanged id re-written at `timeout - 1` s, a backwards clock step kept),
+    `CanStorage` (the mode, in every chunk's parquet footer under
+    `canary.can_storage`; no key = stored every frame), `session_can_storage`,
+    `refuse_change_only` / `ChangeOnlyStorageError` (named cause, points at the
+    `broadcast-every-frame` starter), `change_only_copy` (derived copy, refuses
+    to write in place). Measured on `2026-09-20T152758` with the real filter:
+    12.52 M frames -> 7.36 M at 10 s (10,698 re-writes, +0.15 %); 7.44 M at the
+    2 s floor (94,820). Pure change-only 7.35 M. After the verifier's fixes
+    (slow-id re-write, diagnostic ids kept): 7.37 M at 10 s. The parity runs
+    below predate those fixes, which only add stored rows of unchanged values;
+    re-run after them, `_capture-fuel-target-research-2026-09-21T195844`
+    (2.87 M -> 2.26 M) is still identical in all three frames and
+    `2026-09-18T152144` (1.75 M -> 1.38 M) still differs only at its 4 / 14
+    silence-edge rows (0 unexplained, 0 reverse).
+  - **Config.** `collection.broadcast_stale_timeout_seconds`, default 10.
+    Under 2 s refused naming P02.10; at or past
+    `preprocessing.session_gap_seconds` refused (a quiet CAN-only session
+    would split at heartbeat gaps). Written in `canary.example.yaml` and
+    `canary.pi.example.yaml`. The feature-frame cache hashes it
+    (`FEATURE_FRAME_CACHE_VERSION` 6).
+  - **Storage sink.** The filter lives in `ParquetTelemetryWriter` (every
+    writer of a session, not only the daemon's sink), state reset on every
+    session change (rotation, capture, tuning, replay), so every session
+    stands alone. `can_frames_suppressed(_total)` count what it did not store.
+    `write_records_to_parquet(can_storage=...)` filters exactly as the writer
+    does, so a change-only footer never sits on unfiltered frames.
+  - **Every-frame profile.** `CaptureProfile.store_every_frame` (refused on
+    `default`), starter `broadcast-every-frame` in `data/capture_profiles.yaml`
+    (explicit Mode 01 list, not `AUTO`), editor checkbox + TS type. Saved
+    catalogs are not re-seeded: the Pi's catalog needs it added by hand.
+  - **Resampler.** `ResampleConfig.broadcast_max_gap_seconds` (from the one
+    setting via `resample_config_for`); a broadcast channel's ceiling is
+    max(own class, timeout), so slow broadcast channels keep 120 s, OBD keeps
+    2 s. A broadcast channel's `__arrived` reads "a stored row within the
+    timeout" (in change-only storage no row means the same payload again),
+    for old and new sessions alike. `refuse_shorter_read_timeout` refuses a
+    read with a shorter class than a session was stored with
+    (`reduce_numeric_session`, `DerivedStore.load/load_numeric`).
+  - **Live.** `LiveFeatureSource` runs its own `CanChangeFilter` (same
+    timeout, reset on `reset()`), so features see the stored stream; its
+    broadcast `__arrived` mirrors the resampler; `can_freshness_seconds` reads
+    the raw frame stamp.
+  - **Consumers, raw vs filtered.** Filtered (the stored stream): storage;
+    live decoded/DBC values, their gap/arrival flags, features, committees,
+    behavior deviations, plausibility `sample_observer`, the live IMU frame's
+    decoded speed. Raw (every frame): the dashboard broadcast sink (gauges),
+    the GPS/trip tracker (decimates road speed to 2 Hz itself), live CAN
+    freshness / `vehicle_state_inputs`, the lambda-delivery `record_observers`
+    (called before the filter), DTC/monitor sinks (OBD only), collector and
+    queue health counters, `can_activity` (reads the bus itself).
+  - **Readers.** `read_channels` marks change-only broadcast specs
+    (`attrs[AS_OF_ATTR]`, from the loader's per-chunk footer read);
+    `align_pairs`/`compare_channels` pair stored rows as before and give each
+    unmatched reference sample the held value (last stored row, within the
+    timeout; `held`, `n_held_pairs`); `align_long`/`read_aligned` hold cells
+    for the timeout and refuse `cell_agg="mean"`; `concat_channel_frames`
+    keeps the rule through the workbench's per-spec reads. `pull_report`
+    samples a change-only rpm as a step, not a line.
+    `dyno_inputs.read_motion_inputs` (H07.3, coordinator request) reads one
+    timeout further back and puts the held frames back (`held_series`).
+  - **Frame-count readers.** Refuse by name: broadcast discovery
+    (`sweep_session`), validation broadcast cadence (`channel_cadence`
+    `refused`). Identities close with the suppressed count: validation
+    `loss_accounting`, replay `replay_accounting`. Notes: raw SQL
+    (`query_telemetry` returns `can_storage_note` for `'can'`/`decoded`).
+    Refused at load: a plausibility stuck rule on a broadcast channel (counts
+    identical arrivals). Checked, unaffected: capture quality / C03 tuples
+    (OBD rows only), `drives.activity` (presence; heartbeats 9 s < the 300 s
+    drive gap; last active second up to 9 s early), dataset health (1 Hz
+    gaps via the resampler; `row_count` is stored rows), Parquet
+    `vehicle_state` (newest frame; heartbeat < its 10 s threshold at the
+    default), binned analysis / resampled time series (resampler).
+  - **Parity** (`check_exact`, HEAD-equivalent reads of the full-rate
+    original vs `change_only_copy` at 10 s, same session name; value_number
+    chain `resample_and_segment`, training chain `load_resampled_session` then
+    `featurize_wide_frame`):
+
+    | session | rows orig -> copy | value_number | training 1 Hz | features |
+    |---|---|---|---|---|
+    | `_capture-fuel-target-research-2026-09-21T195844` | 2.87 M -> 2.26 M | = (1,193 x 120) | = (1,192 x 335) | = (1,192 x 662) |
+    | `2026-09-18T144215` | 5.57 M -> 4.35 M | = (2,359 x 201) | = (2,358 x 419) | = (2,358 x 872) |
+    | `2026-09-18T152144` | 1.75 M -> 1.38 M | 16 cells, 4 rows | 248 cells, 14 rows | +698 downstream |
+    | `2026-09-20T152758` | 17.91 M -> 12.75 M | 16 cells, 4 rows | 194 cells, 11 rows | +592 downstream |
+
+    Every differing 1 Hz cell is a silence edge (0 unexplained, 0 reverse):
+    the id stopped transmitting (engine off at `152144` 15:34:02), its last
+    *stored* frame was up to 9 s before its last frame, so the copy reads
+    stale up to 9 s sooner, the operator's stated cost. Feature differences
+    all fall inside the rolling window after such a row. Exact without a
+    silence: `test_the_one_hz_grid_is_identical_for_full_rate_and_change_only`;
+    the edge pinned: `test_a_module_that_stops_differs_only_at_the_silence_edge`.
+  - **Retrain question (reported, not decided).** Over all 67 derived-store
+    frames (80,330 1 Hz rows, 15.27 M broadcast cells), P02.10's rules against
+    HEAD's change 16,359 value, 16,359 `__gap` and 23,789 `__arrived` cells, on
+    1,135 rows (1.41 %) in 28 sessions. The 2 -> 10 s class alone (old arrival
+    rule) touches 981 rows / 32,718 cells. Non-zero: by this item's rule a
+    feature-spec change, retrain before deploy.
+  - **Old sessions' digests, classification and labels shift too** (the
+    same rule change, on the `value_number` chain: `resample_and_segment` ->
+    trip-end digest, fingerprint, classification, `label_sessions` sidecars).
+    On `2026-09-20T205117` (stored every frame) this tree against the same
+    tree with the broadcast rules switched off (`is_broadcast_channel` ->
+    `False`, i.e. HEAD's 2 s class and arrival rule): the segmented frame
+    differs in 7 broadcast channels' values/`__gap` on 8 rows and `__arrived`
+    on 9 (21:03:59 onward, 2-10 s after the broadcast stopped), which moves
+    `operating_mode` on 5 rows (held `decoded:` values let the segmenter
+    label them `koeo`), and `compute_digest` differs only in `mode_seconds`:
+    koeo 7 -> 12, unknown 137 -> 132. Switched off, both equal HEAD's, as the
+    H02.4 verifier found HEAD + the H02.4 hunks alone equal. Consequences:
+    the Pi's trip-end digest and dashboard classification of a recording
+    read after this lands differ from the ones written before it, and label
+    sidecars recomputed on the laptop move by a few rows per drive; nothing
+    is rewritten, the sidecars change only when regenerated.
+  - **Ground truth.** `tests/test_analysis_ground_truth.py` 30 passed, with
+    `test_the_one_to_one_check_holds_on_the_change_only_copy` (8 cases: same
+    thresholds, same verdict, n within 2) and
+    `test_the_sweep_refuses_the_change_only_copy`.
+  - **`compare_channels` on three captures** (`_capture-fuel-target-research-2026-09-21T195844`,
+    `_capture-tuning-2026-09-21T223734`, `_capture-tuning-2026-09-21T232153`;
+    10 pairs each, 250 ms): 29 of 30 verdicts identical (refusals included),
+    n_pairs identical in all 30. One differs: `232153`
+    `can:ECM_COOLANT_TEMP_233 ~ obd:COOLANT_TEMP` `stable` (drift 1.38 %) ->
+    `unresolved` (4 held pairs), a quantised coolant beside the 1.5 % bar. The
+    held fill keeps the stored-row matcher first; inside a hold, a poll just
+    before the next change still pairs with that change. A period-aware
+    choice was tried and rejected (it moved verdicts on the decimated
+    ground-truth slice).
+  - **Live = replay.** `test_live_features_on_the_raw_stream_equal_a_replay_of_the_stored_session`
+    (live over the bus stream vs live over the stored rows: `check_exact`,
+    across a module stop; live gap/arrival flags = offline resampler on the
+    stored session, 85 ticks).
+  - **Mixed corpus.** `test_a_mixed_corpus_reads_and_says_which_sessions_are_change_only`,
+    `test_frame_count_readers_refuse_a_change_only_session_by_name`.
+  - **Tests:** `tests/test_change_only_can_storage.py` (36 after the second
+    verifier round), including the dyno steady-cruise leg
+    (`speed_too_coarse` without the hold, identical speed and acceleration
+    with it).
+  - **Verifier, 2026-09-26: FAIL on five defects and a minor one, since fixed.**
+    - *Error and remote frames were dropped as repeats.* SocketCAN's
+      `CAN_ERR_CRTL` arrives as id `0x4` (RX overflow `0001`, TX warning
+      `0008`); the filter dropped 52 of 178 on `152758`. `frame_to_record` now
+      tags them (`metadata.frame_kind`: `error`/`remote`, id spelling
+      unchanged; no code consumer read them), and the filter keeps every one.
+      So it does ISO 15765-4 diagnostic traffic (`0x7DF`, `0x7E0`-`0x7EF`,
+      `0x18DB33F1`, `0x18DAxxxx`): each frame is a message, and a sniffed
+      ISO-TP transfer needs every segment (+11,183 rows on `152758`; the 1 Hz
+      frames decode nothing from those ids). `test_error_frames_are_tagged_and_every_repeat_is_stored`.
+    - *The heartbeat lapsed for slow ids.* The re-write fired on the first
+      frame 9 s after the last stored one, so a period-P id reached 9 + P s.
+      The filter also keeps a frame when its age plus the id's longest recent
+      inter-arrival (16 gaps, each at most the timeout) reaches the timeout.
+      Lapses of a transmitting id, filter replayed over the stored drives:
+      `152144` 16 -> 1, `152758` 26 -> 3, every remaining one on `0x4`, which
+      those sessions stored untagged (a live recording tags it and keeps it).
+      `test_a_slow_id_never_lapses_while_it_transmits` (1.5/2.5/4/7 s ids:
+      1 Hz frames equal to full rate). `REWRITE_LEAD_SECONDS`'s comment says
+      what it covers.
+    - *A replay slower than real time read live ids as stale* (re-writes
+      arrive `(timeout - 1) / speed` apart). `refuse_slow_replay` refuses
+      speed < 1 for a source with change-only chunks, naming P02.10, in
+      `ReplayController.start` (`ReplayRefusedError`, HTTP 422) and
+      `replay_session` (the YAML collector logs it and idles). A replay that
+      falls behind real time through load stretches the gaps the same way;
+      documented at `refuse_slow_replay`, visible as `effective_speed`, not
+      scaled. `test_a_change_only_session_is_not_replayed_slower_than_real_time`.
+    - *The shorter-timeout refusal missed the training chain.* The recorded
+      timeout now travels with the data: `reduce_long_frames` takes a required
+      `can_storage` and `ReducedSession` carries it, so `resample_reduced` and
+      `resample_numeric_reduced` refuse whatever built the cells (bounded
+      chain, store, plausibility); `to_wide` carries the loader's attrs so
+      `resample_wide`/`resample_long` refuse; `resample_long_session` checks
+      before its decode. `test_every_training_read_path_refuses_a_shorter_read_timeout`.
+    - *Dropout paths.* `anomaly_injection.dropout` keeps a broadcast
+      `__arrived` true up to the ceiling (the resampler's rule);
+      `train_anomaly_model` takes the ceiling from `max_gap_seconds_for`.
+      `test_an_injected_broadcast_dropout_arrives_until_the_ceiling`.
+    - *Minor.* `binned_summary` refuses a change-only broadcast spec;
+      `tuning_digest._achieved_hz` omits it and `_rate_summary` reports
+      `refused` (`test_rows_of_a_change_only_spec_are_never_a_rate_or_a_bin_count`).
+      A chunk without CAN frames gets no storage footer, so UpRev imports read
+      as before (`test_a_session_without_can_frames_gets_no_storage_footer`).
+  - **Verifier, round 2 (2026-09-26): six fixes.**
+    - *Replay timeout mismatch.* A change-only session recorded with a longer
+      stale timeout than the daemon's re-wrote its quiet ids further apart
+      than the live pipeline holds a value, and its `_replay-*` copy would
+      carry gaps longer than its own footer says. `refuse_unfaithful_replay`
+      (slow replay + this check, one call) refuses it in
+      `ReplayController.start` (`ReplayRefusedError`, HTTP 422) and
+      `replay_session` (the YAML collector logs it and idles), raising
+      `ReplayTimeoutMismatchError` (an `UnfaithfulReplayError` and a
+      `BroadcastTimeoutMismatchError`). The daemon's timeout is now a
+      required argument of both (`broadcast_stale_timeout_seconds`, wired
+      from `collection.broadcast_stale_timeout_seconds` in `run_daemon` and
+      the validation harness), so no replay path can skip the check.
+      `test_a_session_stored_with_a_longer_timeout_than_the_daemons_is_not_replayed`
+      (function, `replay_session`, controller, HTTP 422, YAML collector).
+    - *Row-pairing and row-counting `read_channels` callers.* One helper,
+      `channels.as_of_refusal` / `refuse_as_of` (named cause, only the specs
+      with rows in the frame). Called by `tuning._check_clock` and `_attach`
+      (raise; the workbench reports `refused`), `lambda_delivery._long_values`
+      (every delivery path: target, measured, sentinel, target agreement),
+      `warmup_checks._series`, `rom_trace.cell_residency`
+      (`reason: change_only_storage`), `tuning_frame.build_tuning_frame` (the
+      role is unavailable with the reason), `tuning_digest` (tagged WOT
+      seconds -> `unavailable` with the reason, pull evidence rpm ->
+      unavailable, per-role evidence counts -> `None` plus `refused_counts`,
+      measured-AFR bank counts -> `refused`, rates as before) and
+      `compare.binned_summary` (now through the helper). Today's Xterra
+      providers are all `did:`/`mem:`, so nothing it runs changes; the
+      refusals guard a `decoded:` provider.
+      `test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider`
+      (each caller on a change-only copy refuses by name; the full-rate
+      original reads as before).
+    - *Fixture tool.* `tools/make_ground_truth_fixture.py` refuses a
+      change-only session (its per-id frame stride and its footer-less slice
+      both assume every frame; exit 2, cause on stderr, nothing written).
+      `test_the_ground_truth_fixture_tool_refuses_a_change_only_session`.
+    - *Plausibility freshness floor.* `resolve_limits` takes
+      `broadcast_stale_timeout_seconds` (`resolve_limits_for_config` passes
+      the config's); a broadcast channel whose tier threshold
+      (`interval_seconds x freshness_k`) is under it reports freshness
+      `unchecked` with the named reason, never a check that calls every hold
+      stale. The Xterra profile has no `broadcast` tier, so nothing it checks
+      changes.
+      `test_a_broadcast_freshness_threshold_under_the_stale_timeout_is_disabled_by_name`.
+    - *Synthetic fault injection is not comparable across this change.* A
+      synthetic dropout holds a channel for its class ceiling
+      (`synthetic_fault_eval._max_gap_seconds_for` ->
+      `ResampleConfig.max_gap_seconds_for`; `train_anomaly_model` the same).
+      For broadcast channels (`can:`/`decoded:`/`dbc:`) that ceiling is now
+      the stale timeout, 10 s, where it was 2 s (slow broadcast channels keep
+      120 s; OBD keeps 2 s). So an injected broadcast dropout is held, and
+      reads arrived, for 10 s before it goes stale. Harness, synthetic-fault
+      and benchmark numbers from before this change are not comparable with
+      those after it.
+    - *Feature spec.* `build_feature_spec` records
+      `broadcast_max_gap_seconds` beside `max_gap_seconds` and
+      `slow_channel_max_gap_seconds` (`test_manifest_max_gap_seconds_honours_max_gap_factor`,
+      the pinned spec in `test_train_anomaly_model.py`). Manifests written
+      before this lack the key.
+  - **Not done (optional, other work's files).** `imu_session._aligned` and
+    `LiveImuFrame.input_max_age_s` age a decoded speed out after 3 s; a vehicle
+    whose speed frame has no counter would lose quiescent windows on a steady
+    leg (the Xterra's `0x2D1` carries one: verified by the verifier). The live
+    frame's steadiness window and look-ahead also assume dense samples, so a
+    fix there is more than a longer age.
 
 ## Tracked elsewhere
 

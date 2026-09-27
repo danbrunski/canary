@@ -38,6 +38,7 @@ from src.config import CanaryConfig
 from src.dashboard.paths import DEFAULT_BINDINGS_PATH
 from src.decode.bindings import apply_scaling, load_bindings
 from src.preprocessing.decode import decode_on_read, on_read_catalog
+from src.storage.broadcast_storage import session_can_storage
 
 #: Fraction of the wideband's low rail treated as "pegged" (10.0 + margin).
 WIDEBAND_RAIL_CEILING = 10.05
@@ -95,9 +96,15 @@ class RpmSeries:
     rpm: np.ndarray
     t0: pd.Timestamp
     low_rate: bool = False
+    #: P02.10: the samples are a change-only broadcast channel's stored rows,
+    #: so between two of them the value *held* (an unchanged frame is not
+    #: stored). Sampled as a step, never interpolated: a straight line between
+    #: a held value and the next change would invent a ramp that was never on
+    #: the bus.
+    held: bool = False
 
 
-def _rpm_series(frame: pd.DataFrame, bindings_path: Path) -> RpmSeries:
+def _rpm_series(frame: pd.DataFrame, bindings_path: Path, *, held: bool = False) -> RpmSeries:
     decoded = frame[(frame["source"] == "decoded") & (frame["channel"] == "ECM_RPM")]
     if not decoded.empty and bindings_path.exists():
         bindings = load_bindings(bindings_path)
@@ -109,6 +116,14 @@ def _rpm_series(frame: pd.DataFrame, bindings_path: Path) -> RpmSeries:
                 [apply_scaling(sig, int(v)) for v in decoded["value_number"].to_numpy()],
                 dtype=float,
             )
+            if held:
+                return RpmSeries(
+                    "decoded:ECM_RPM (change-only storage, held between changes)",
+                    secs,
+                    scaled,
+                    t0,
+                    held=True,
+                )
             return RpmSeries("decoded:ECM_RPM (~100 Hz)", secs, scaled, t0)
 
     uprev = frame[(frame["source"] == "uprev") & (frame["channel"] == "RPM")]
@@ -154,7 +169,11 @@ def detect_pulls(
 ) -> list[Pull]:
     grid_s = grid_ms / 1000.0
     grid = np.arange(series.seconds[0], series.seconds[-1] + grid_s, grid_s)
-    rpm = np.interp(grid, series.seconds, series.rpm)
+    if series.held:
+        at = np.clip(np.searchsorted(series.seconds, grid, side="right") - 1, 0, None)
+        rpm = series.rpm[at]
+    else:
+        rpm = np.interp(grid, series.seconds, series.rpm)
     rpm = pd.Series(rpm).rolling(max(3, int(0.25 / grid_s)), center=True, min_periods=1).median()
     drdt = np.gradient(rpm.to_numpy(), grid)
 
@@ -235,7 +254,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             session_dir = matches[0]
 
         frame = _read_session_frame(session_dir)
-        series = _rpm_series(frame, args.bindings)
+        series = _rpm_series(
+            frame, args.bindings, held=session_can_storage(session_dir).any_change_only
+        )
         pulls = detect_pulls(
             series,
             grid_ms=args.grid_ms,

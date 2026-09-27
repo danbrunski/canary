@@ -47,6 +47,11 @@ from typing import TYPE_CHECKING, Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from src.storage.broadcast_storage import (
+    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+    is_broadcast_channel,
+)
+
 if TYPE_CHECKING:
     from src.config import CanaryConfig
     from src.decode.bindings import Bindings
@@ -553,6 +558,7 @@ def resolve_limits(
     include_physical_limits: bool = True,
     profile_path: Path | None = None,
     priority_channels: Iterable[str] | None = None,
+    broadcast_stale_timeout_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
 ) -> LimitsCatalog:
     """Resolve every known channel's limits; see the module docstring.
 
@@ -566,6 +572,14 @@ def resolve_limits(
     three minutes and more while its peers answered on clean drives. Only a
     guaranteed rate makes a missing sample evidence, so when given, a Mode 01
     channel outside it reports freshness ``unchecked`` with that reason.
+
+    ``broadcast_stale_timeout_seconds`` (``collection.
+    broadcast_stale_timeout_seconds``; :func:`resolve_limits_for_config`
+    passes it) is the floor of a broadcast channel's freshness threshold
+    (P02.10): its frames are stored, and seen by the live features, only when
+    the payload changes, with an unchanged id re-written just inside the
+    timeout, so a shorter threshold would call every hold stale. Such a
+    channel reports freshness ``unchecked`` with that reason.
     """
     builders: dict[str, _Builder] = {}
 
@@ -668,6 +682,16 @@ def resolve_limits(
                     update_interval_seconds=rules.slew.update_interval_seconds,
                 )
                 modes["slew"] = _modes(rules.slew.modes)
+            if rules.stuck is not None and _is_broadcast(channel):
+                # P02.10: a broadcast frame repeating its id's payload is not
+                # stored (nor seen by the live features), so "N identical
+                # arrived samples" is one re-write per stale timeout here.
+                raise ValueError(
+                    f"{channel}: a stuck rule counts identical arrived samples, and a "
+                    "broadcast channel stores (and observes) a frame only when its payload "
+                    "changes (P02.10); an unchanged value arrives once per stale timeout, "
+                    "so the count cannot measure a hold. Check it through a committee"
+                )
             if rules.stuck is not None:
                 stuck = StuckLimit(
                     rules.stuck.samples,
@@ -707,6 +731,16 @@ def resolve_limits(
         else:
             interval = profile.tiers[tier].interval_seconds
             threshold = interval * profile.freshness_k
+            if _is_broadcast(channel) and threshold < broadcast_stale_timeout_seconds:
+                disabled = (
+                    f"freshness threshold {threshold:g} s (tier {tier!r}: {interval:g} s x "
+                    f"freshness_k {profile.freshness_k:g}) is shorter than the broadcast "
+                    f"stale timeout {broadcast_stale_timeout_seconds:g} s "
+                    "(collection.broadcast_stale_timeout_seconds): a broadcast frame is "
+                    "stored and observed only when its payload changes (P02.10), an "
+                    "unchanged value once per re-write, so every hold would read stale"
+                )
+                interval = threshold = None
         channels[channel] = ChannelLimits(
             channel=channel,
             unit=entry.unit,
@@ -728,6 +762,10 @@ def resolve_limits(
         profile=profile,
         profile_path=str(profile_path) if profile_path is not None else None,
     )
+
+
+def _is_broadcast(channel: str) -> bool:
+    return is_broadcast_channel(channel)
 
 
 def _modes(modes: list[str] | None) -> frozenset[str] | None:
@@ -760,6 +798,7 @@ def resolve_limits_for_config(
         operating_modes=config.preprocessing.operating_modes,
         profile_path=path,
         priority_channels=config.collection.obd_priority_channels,
+        broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
     )
 
 

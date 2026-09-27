@@ -86,6 +86,11 @@ from src.preprocessing.segmenter import (
     SegmenterConfig,
     segment_operating_modes,
 )
+from src.storage.broadcast_storage import (
+    change_only_timeout,
+    refuse_shorter_stored_timeout,
+    session_can_storage,
+)
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
 
@@ -685,7 +690,9 @@ def reduce_session(
                 raw_channels.update(zip(pairs["source"], pairs["channel"], strict=True))
             yield _decode_long_frame(long, bindings, dbc_database, did_map)
 
-    return reduce_long_frames(session_dir.name, decoded(), interval_ns)
+    return reduce_long_frames(
+        session_dir.name, decoded(), interval_ns, can_storage=session_can_storage(session_dir)
+    )
 
 
 def resample_long_session(
@@ -706,6 +713,10 @@ def resample_long_session(
     whole session directory uses :func:`resample_session_bounded`, whose
     output is identical and whose memory is not.
     """
+    # P02.10: the decode drops ``attrs``, so the recorded timeout is checked here.
+    refuse_shorter_stored_timeout(
+        change_only_timeout(long), resample_config.broadcast_max_gap_seconds, what=session_name
+    )
     wide = to_wide(_decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
     gated, quality = apply_quality_gate(wide)
     if quality.total_rejected:
@@ -1930,6 +1941,14 @@ def build_feature_spec(
         # built ResampleConfig(hz=...) and so recorded the default factor 2.0
         # whatever the config said (D03.27).
         spec["max_gap_seconds"] = float(resample_config_for(config).max_gap.total_seconds())
+        # P02.10: broadcast channels (``can:``/``decoded:``/``dbc:``) have their
+        # own stale class, the broadcast stale timeout, which moved them from
+        # 2 s to 10 s; a model trained on one class and served with another
+        # reads different ``__gap``/``__arrived`` flags, so the class travels
+        # with the model beside the other two.
+        spec["broadcast_max_gap_seconds"] = float(
+            resample_config_for(config).broadcast_max_gap_seconds
+        )
         spec["slow_channel_max_gap_seconds"] = float(
             config.preprocessing.slow_channel_max_gap_seconds
         )

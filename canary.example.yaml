@@ -135,6 +135,14 @@ collection:
   # No decoded CAN rows are stored (P02.8): readers decode the raw frames on
   # read. The retired `persist_decoded_confidence` key is ignored with a
   # warning; delete it from a live config.
+  # P02.10 (operator 2026-09-26): a CAN frame is stored only when its payload
+  # changes; an unchanged id is re-written once per this timeout (1 s before
+  # it). The same number is the resampler's stale class for broadcast
+  # channels, so storage and every reader agree. Minimum 2 s; must stay under
+  # preprocessing.session_gap_seconds. Changing it is a feature-spec change.
+  # Frame counts and sub-second timing need a capture profile with
+  # store_every_frame: true.
+  broadcast_stale_timeout_seconds: 10.0
 
 preprocessing:
   resample_hz: 1

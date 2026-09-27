@@ -73,7 +73,7 @@ from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     featurize_wide_frame,
 )
-from src.preprocessing.resampler import is_slow_channel, resample_config_for
+from src.preprocessing.resampler import resample_config_for
 from src.telemetry import DECODED_SOURCE, source_of
 
 log = logging.getLogger(__name__)
@@ -133,11 +133,8 @@ def evaluate(
         timestamps.iloc[2 * len(timestamps) // 3 + 10],
     )
     spike_value = float(resampled[channel].dropna().max() * 5 + 1000)
-    max_gap_seconds = (
-        resample_config.slow_channel_max_gap_seconds
-        if is_slow_channel(channel)
-        else resample_config.max_gap.total_seconds()
-    )
+    # The recipe's one class rule (R04.7), broadcast class included (P02.10).
+    max_gap_seconds = resample_config.max_gap_seconds_for(channel)
     inj = AnomalyInjector(resampled)
     inj.spike(channel=channel, start=t_a, end=t_b, value=spike_value)
     inj.dropout(channel=channel, start=t_c, end=t_d, max_gap_seconds=max_gap_seconds)

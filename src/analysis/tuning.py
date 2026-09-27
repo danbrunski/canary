@@ -38,7 +38,12 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration
-from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_aligned, read_channels
+from src.analysis.channels import (
+    TIMESTAMP_BASIS_COLUMN,
+    read_aligned,
+    read_channels,
+    refuse_as_of,
+)
 from src.analysis.lambda_delivery import (
     ELIGIBLE,
     STATES,
@@ -451,13 +456,20 @@ def read_delivery_inputs(
 
 
 def _check_clock(inputs: DeliveryInputs, policy: PairingPolicy) -> None:
-    """Refuse a declared separation the stored timestamps cannot carry."""
+    """Refuse a declared separation the stored timestamps cannot carry.
+
+    Also refuses a change-only broadcast input (P02.10): every side is paired
+    row to row by acquisition time, and such a read's rows are its payload
+    changes, not its frames.
+    """
     sides = [("target", inputs.target), ("measured", inputs.measured), ("rpm", inputs.rpm)]
     sides += [
         (name, frame)
         for name, frame in (("fuel_status", inputs.fuel_status), ("load", inputs.load))
         if frame is not None
     ]
+    for name, frame in sides:
+        refuse_as_of(frame, reader=f"delivery error's {name} pairing")
     reference = inputs.target
     ref_basis = weakest_basis(reference.get(TIMESTAMP_BASIS_COLUMN, pd.Series([], dtype=object)))
     ref_times = to_seconds(pd.to_datetime(reference["timestamp"], utc=True))
@@ -477,11 +489,14 @@ def _attach(times: np.ndarray, frame: pd.DataFrame | None, policy: PairingPolicy
     """Each target row's paired value from ``frame`` (NaN where none is in tolerance).
 
     One-to-one acquisition pairing (:func:`match_ordered`), the same rule as
-    target against measurement: no reading is handed to two targets.
+    target against measurement: no reading is handed to two targets. So a
+    change-only broadcast read (P02.10), one row per payload change, is
+    refused rather than paired.
     """
     out = np.full(len(times), np.nan)
     if frame is None or frame.empty or not len(times):
         return out
+    refuse_as_of(frame, reader="delivery error's context pairing")
     ordered = frame.sort_values("timestamp", kind="stable")
     other = to_seconds(pd.to_datetime(ordered["timestamp"], utc=True))
     values = pd.to_numeric(ordered["value"], errors="coerce").to_numpy(dtype=float)

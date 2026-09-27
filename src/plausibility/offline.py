@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.plausibility.evaluator import EvidenceRecord, PlausibilityEvaluator
 from src.plausibility.limits import LimitsCatalog
+from src.storage.broadcast_storage import session_can_storage
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig
@@ -261,7 +262,12 @@ def load_stream(
         if sample_parts
         else samples_from_long(pd.DataFrame())
     )
-    reduced = reduce_long_frames(session_dir.name, segmenter_parts, grid_interval_ns(resample))
+    reduced = reduce_long_frames(
+        session_dir.name,
+        segmenter_parts,
+        grid_interval_ns(resample),
+        can_storage=session_can_storage(session_dir),
+    )
     modes = _modes_on_grid(reduced, samples, config, bindings=bindings)
     return SessionStream(session_dir.name, samples, modes)
 

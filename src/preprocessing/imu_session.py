@@ -32,6 +32,15 @@ refuses to replace a resolved frame with a different one unless asked, so a
 pitch offset measured against this reference cannot silently meet ``SF_*``
 from another.
 
+**Readers get ``ACCEL_LON/LAT`` from the sidecar, part by part.** The
+``value_number`` chain (``loader.resample_and_segment``: the digest,
+classification, ``scripts/autotag.py``) rebuilds the linear family from the
+recorded yaw, sign and low-pass initial state
+(``LinearAccelFrame.initial_gravity_body_g``) with
+``src.preprocessing.imu_stream``, bounded by part size, and equal to this
+module's frame (``tests/test_imu_stream.py``). A session with raw IMU rows
+and no sidecar gets none, and the chain names it ``unresolved``.
+
 **Refusals name their cause** (:class:`ImuFrameRefusal`): no telemetry, IMU
 rows missing, no speed source, no heading, no quiescent period, a reference
 that is not gravity, an unresolved yaw or sign. A refusal is written to the
@@ -59,6 +68,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from src.atomic_write import atomic_write_text
 from src.decode.bindings import Bindings
+from src.decode.engineering import is_decoded_column, repo_bindings
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
     GRAVITY_MAGNITUDE_RANGE_G,
@@ -74,7 +84,7 @@ from src.preprocessing.imu_frame import (
     straight_mask,
 )
 from src.storage.sidecar import read_json_object
-from src.telemetry import IMU_SOURCE, SOURCE_SEP, channel_key
+from src.telemetry import CAN_SOURCE, IMU_SOURCE, SOURCE_SEP, channel_key
 
 IMU_FRAME_FILENAME = "imu_frame.json"
 IMU_FRAME_SCHEMA_VERSION = 1
@@ -111,7 +121,9 @@ RESIDUAL_PITCH_OFFSET = (
     "vehicle pitch thr over the quiescent windows below: a constant offset mu ~ -thr "
     "(plus accelerometer bias) that this frame does NOT remove. Measure it with "
     "src.analysis.dyno.estimate_pitch_offset on a direction pair from this session "
-    "and pass it to correct_specific_force; valid only for this reference_id."
+    "(MotionSamples.imu_reference_id = this reference_id) and pass the PitchOffset to "
+    "correct_specific_force, which refuses samples from any other reference_id "
+    "(frame_mismatch)."
 )
 
 RefusalKind = Literal[
@@ -205,6 +217,15 @@ class LinearAccelFrame(_Strict):
     yaw_offset_rad: float
     sign_flipped: bool
     sign_votes: tuple[int, int]
+    #: The low-pass's first state: the raw sample at the first quiescent
+    #: instant, which every earlier sample subtracts as gravity
+    #: (``imu_frame.estimate_gravity`` back-fills it). With the yaw and sign
+    #: above it is all the offline stream (``imu_stream``) needs to rebuild
+    #: ``ACCEL_LON/LAT`` part by part; the rest of the low-pass is recomputed
+    #: from the rows. ``None`` in a sidecar written before 2026-09-26: the
+    #: stream then names it ``stale`` and does not apply it.
+    first_quiescent_sample: str | None = None
+    initial_gravity_body_g: Vector3 | None = None
 
 
 class ImuFrameInputs(_Strict):
@@ -269,8 +290,10 @@ class ImuSessionFrame:
 
     def rows(self, session: str) -> pd.DataFrame:
         """The families as long telemetry rows (``source`` ``imu``, unit g), in
-        :func:`src.preprocessing.loader.read_session`'s core columns, so a
-        reader can append them to a session's own rows."""
+        :func:`src.preprocessing.loader.read_session`'s core columns: the
+        whole-session reference the part-by-part rebuild
+        (``src.preprocessing.imu_stream``) is checked against. Readers of a
+        stored session go through that rebuild, which never holds the session."""
         melted = self.frame.melt(
             id_vars=["timestamp"],
             value_vars=list(FRAME_COLUMNS),
@@ -394,6 +417,7 @@ def resolve_imu_frame(
     *,
     bindings: Bindings | None = None,
     quiescent_seconds: float = DEFAULT_QUIESCENT_SECONDS,
+    speed_source: str | None = None,
     now: datetime | None = None,
 ) -> ImuSessionFrame | ImuFrameRefusal:
     """Resolve one session's IMU frame from its channels (no I/O).
@@ -403,6 +427,10 @@ def resolve_imu_frame(
     ``imu:ACCEL_X/Y/Z`` (g), one of ``imu_frame.SPEED_SOURCES`` and
     ``gps:heading``. Returns both families or the first refusal met, in this
     order: IMU rows, speed, heading, quiescent period, gravity, yaw, sign.
+
+    ``speed_source`` pins the speed to that one column (a frame of record
+    being re-resolved, :func:`resolve_session_imu_frame`); ``None`` takes the
+    best of ``SPEED_SOURCES``.
     """
     missing_axes = [c for c in RAW_ACCEL_COLUMNS if c not in channels or channels[c].empty]
     if missing_axes:
@@ -428,8 +456,9 @@ def resolve_imu_frame(
     window = max(2, round(quiescent_seconds * rate_hz))
     lookahead = max(1, round(QUIESCENT_LOOKAHEAD_SECONDS * rate_hz))
 
+    candidates = SPEED_SOURCES if speed_source is None else (speed_source,)
     speed_choice = None
-    for column in SPEED_SOURCES:
+    for column in candidates:
         if column in channels:
             speed_choice = select_speed(pd.DataFrame({column: channels[column]}), bindings=bindings)
             if speed_choice is not None:
@@ -437,7 +466,7 @@ def resolve_imu_frame(
     if speed_choice is None:
         return ImuFrameRefusal(
             "no_speed_source",
-            f"none of {', '.join(SPEED_SOURCES)} has a value (a decoded speed also needs a "
+            f"none of {', '.join(candidates)} has a value (a decoded speed also needs a "
             "pinned scale): quiescence and the longitudinal sign both need a speed",
         )
     speed_series, speed_source = speed_choice
@@ -544,6 +573,9 @@ def resolve_imu_frame(
             )
         )
     quiescent_speed = speed_values[quiescent_values]
+    # The linear family's low-pass starts here (resolve_frame computes the
+    # same mask from the same inputs; the stream checks it against the rows).
+    first_quiescent = int(np.flatnonzero(quiescent_values)[0])
     reference = PitchReference(
         gravity_body_g=_vector(sf.gravity_body_g),
         gravity_magnitude_g=magnitude,
@@ -586,6 +618,8 @@ def resolve_imu_frame(
             yaw_offset_rad=linear.yaw_offset_rad,
             sign_flipped=linear.sign_flipped,
             sign_votes=lin_votes,
+            first_quiescent_sample=_iso(base[first_quiescent]),
+            initial_gravity_body_g=_vector(accel_values[first_quiescent]),
         ),
     )
     return ImuSessionFrame(frame=frame, sidecar=sidecar)
@@ -667,16 +701,50 @@ def write_imu_frame_sidecar(
     return path
 
 
-def read_imu_inputs(session_dir: Path) -> dict[str, pd.Series]:
+def speed_decode_catalog(bindings: Bindings | None = None) -> Bindings | None:
+    """The catalog narrowed to the ``decoded:`` speed sources' signals
+    (``imu_frame.SPEED_SOURCES``), whatever their confidence; ``None`` when it
+    has none of them.
+
+    The loader decodes only ``confirmed`` or ``persist: true`` bindings on
+    read (P02.8, ``decode.on_read_catalog``), and ``VEHICLE_SPEED_2D1`` is
+    ``high``: read through it, a session has no ``0x2D1`` speed at all and the
+    resolver silently steered by Mode 01 or GPS. Every IMU reader decodes
+    these signals from the raw frames itself (:func:`read_imu_inputs`, and
+    ``imu_stream`` on the ``value_number`` chain), as the driving dyno does
+    (``analysis.dyno_inputs.read_motion_inputs``).
+    """
+    catalog = bindings if bindings is not None else repo_bindings()
+    if catalog is None:
+        return None
+    names = {c.split(SOURCE_SEP, 1)[1] for c in SPEED_SOURCES if is_decoded_column(c)}
+    signals = [signal for signal in catalog.signals if signal.name in names]
+    return catalog.model_copy(update={"signals": signals}) if signals else None
+
+
+def read_imu_inputs(session_dir: Path, *, bindings: Bindings | None = None) -> dict[str, pd.Series]:
     """The channels :func:`resolve_imu_frame` reads, from a session directory.
 
-    A filtered :func:`~src.preprocessing.loader.read_session` (``decoded``
-    rows decoded on read, so ``0x2D1`` speed exists for any session that
-    recorded its frames). Raises ``FileNotFoundError`` without telemetry.
+    One filtered :func:`~src.preprocessing.loader.read_session` of the IMU,
+    speed and course rows plus the raw frames of the ``decoded:`` speed
+    sources, which are decoded here (:func:`speed_decode_catalog`): any stored
+    ``decoded`` row is dropped and the frames decoded with the current catalog,
+    exactly as a decode on read would. Raises ``FileNotFoundError`` without
+    telemetry.
     """
+    from src.preprocessing.decode import can_channel_spellings, decode_on_read, on_read_can_ids
     from src.preprocessing.loader import read_session
 
-    return channels_from_long(read_session(Path(session_dir), filters=_read_filters()))
+    catalog = speed_decode_catalog(bindings)
+    filters = _read_filters()
+    if catalog is not None:
+        channels = can_channel_spellings(on_read_can_ids(catalog))
+        filters.append([("source", "==", CAN_SOURCE), ("channel", "in", channels)])
+    long = read_session(Path(session_dir), filters=filters, decoded="as_recorded")
+    long = decode_on_read(long, catalog)
+    long = long.loc[long["source"] != CAN_SOURCE].copy()
+    long["source_channel"] = long["source"].astype(str) + SOURCE_SEP + long["channel"].astype(str)
+    return channels_from_long(long)
 
 
 def resolve_session_imu_frame(
@@ -693,14 +761,33 @@ def resolve_session_imu_frame(
     The production offline caller (``scripts/resolve_imu_frame.py``). A
     refusal is written too. See :func:`write_imu_frame_sidecar` for when an
     existing sidecar blocks the write.
+
+    **A resolved frame of record keeps its speed source** unless ``replace``:
+    the speed decides the quiescent set, and so the reference. Sidecars
+    written before 2026-09-26 steered by ``obd:SPEED`` or GPS even where the
+    session recorded ``0x2D1``, which :func:`read_imu_inputs` could not decode
+    then. Re-resolving one pins that source, so it only backfills the
+    low-pass's initial state (``imu_stream`` reads it ``stale`` until then)
+    with the same ``reference_id``. A session with no sidecar, or with
+    ``replace=True``, takes the best source.
     """
+    existing = None if replace else read_imu_frame_sidecar(session_dir)
+    pinned = (
+        existing.inputs.speed_source
+        if existing is not None and existing.status == "resolved" and existing.inputs is not None
+        else None
+    )
     try:
-        channels = read_imu_inputs(session_dir)
+        channels = read_imu_inputs(session_dir, bindings=bindings)
     except FileNotFoundError as exc:
         result: ImuSessionFrame | ImuFrameRefusal = ImuFrameRefusal("no_telemetry", str(exc))
     else:
         result = resolve_imu_frame(
-            channels, bindings=bindings, quiescent_seconds=quiescent_seconds, now=now
+            channels,
+            bindings=bindings,
+            quiescent_seconds=quiescent_seconds,
+            speed_source=pinned,
+            now=now,
         )
     if write:
         sidecar = (
@@ -738,5 +825,6 @@ __all__ = [
     "resolve_imu_frame",
     "resolve_session_imu_frame",
     "specific_force_from_sidecar",
+    "speed_decode_catalog",
     "write_imu_frame_sidecar",
 ]

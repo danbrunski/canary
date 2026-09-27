@@ -12,7 +12,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.afr import AfrCalibration, voltage_to_afr
-from src.analysis.channels import ChannelSpecError, read_channels
+from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.control.capture_manifest import read_capture_manifest
 from src.paths import DIDS_YAML
 
@@ -244,6 +244,17 @@ def build_tuning_frame(
                 "available": False,
                 "provider": provider.spec,
                 "reason": "no samples",
+            }
+            continue
+        # The frame outer-joins roles on stored timestamps and its consumers
+        # pair and count rows; a change-only broadcast provider (P02.10) has a
+        # row only where its payload changed, so it is unavailable, by name.
+        change_only = as_of_refusal(series, reader=f"tuning frame role {role}")
+        if change_only is not None:
+            capability[role] = {
+                "available": False,
+                "provider": provider.spec,
+                "reason": change_only,
             }
             continue
         values = series.loc[:, ["timestamp", "value"]].rename(columns={"value": role})

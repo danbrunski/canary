@@ -106,6 +106,12 @@ GRAVITY_MAGNITUDE_RANGE_G = (0.8, 1.2)
 #: slowest speed source's period: GPS 1 Hz, Mode 01 speed ~0.7 Hz (1.43 s).
 QUIESCENT_LOOKAHEAD_SECONDS = 1.5
 
+#: The gravity low-pass's smoothing factor per quiescent sample
+#: (:func:`estimate_gravity`, ``adjust=False``: ``g ← α·a + (1 − α)·g``). Its
+#: whole state is the last estimate, which is what lets the offline stream
+#: (``imu_stream``) carry it across parts bit for bit.
+GRAVITY_LOW_PASS_ALPHA = 0.02
+
 #: Body-frame accel axis used as the initial horizontal reference when
 #: building the plane perpendicular to gravity (see ``_project_horizontal``).
 _REFERENCE_AXIS = np.array([1.0, 0.0, 0.0])
@@ -199,13 +205,31 @@ def quiescent_mask(
     ``lookahead`` rows extend each window past the row (see
     :data:`QUIESCENT_LOOKAHEAD_SECONDS`); ``0`` is a trailing window.
     """
-    span = window + max(lookahead, 0)
-    steady_speed = _looking_ahead(_rolling_std(speed_kph, span) <= speed_std_max_kph, lookahead)
+    steady_speed = steady_speed_mask(
+        speed_kph, window=window, speed_std_max_kph=speed_std_max_kph, lookahead=lookahead
+    )
     if heading_deg is None or pd.to_numeric(heading_deg, errors="coerce").isna().all():
         return steady_speed
     return steady_speed & straight_mask(
         heading_deg, window=window, heading_std_max_deg=heading_std_max_deg, lookahead=lookahead
     )
+
+
+def steady_speed_mask(
+    speed_kph: pd.Series,
+    *,
+    window: int,
+    speed_std_max_kph: float = 1.5,
+    lookahead: int = 0,
+) -> pd.Series:
+    """:func:`quiescent_mask`'s speed half: rolling speed std over
+    ``[i − window + 1, i + lookahead]`` at or under ``speed_std_max_kph``.
+
+    Split out so the offline stream (``imu_stream``) evaluates the same
+    windows part by part; row ``i`` depends only on the rows in its window.
+    """
+    span = window + max(lookahead, 0)
+    return _looking_ahead(_rolling_std(speed_kph, span) <= speed_std_max_kph, lookahead)
 
 
 def straight_mask(
@@ -244,7 +268,7 @@ def estimate_gravity(accel: pd.DataFrame, mask: pd.Series) -> pd.DataFrame:
         # rolling-std window) — assume a level mount so callers still get a
         # (uncorrected) linear-accel estimate instead of raising.
         return pd.DataFrame({"x": 0.0, "y": 0.0, "z": 1.0}, index=accel.index)
-    smoothed = quiescent_accel.ewm(alpha=0.02, adjust=False).mean()
+    smoothed = quiescent_accel.ewm(alpha=GRAVITY_LOW_PASS_ALPHA, adjust=False).mean()
     return smoothed.reindex(accel.index).ffill().bfill()
 
 

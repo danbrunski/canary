@@ -24,7 +24,14 @@ from typing import Any, Literal
 import pandas as pd
 
 from src.analysis.afr import AfrCalibration, TargetAfrMap, voltage_to_afr
-from src.analysis.channels import ChannelSpecError, read_aligned, read_channels
+from src.analysis.channels import (
+    AS_OF_ATTR,
+    ChannelSpecError,
+    as_of_refusal,
+    as_of_validity,
+    read_aligned,
+    read_channels,
+)
 from src.analysis.compare import align_pairs, compare_channels
 from src.analysis.noise_floor import FloorRefusal, Significance
 from src.analysis.pairing import ComparisonRefusedError, InputNotCapturedError, PairingPolicy
@@ -248,7 +255,20 @@ def _read_specs(
         return out
     if frame.empty:
         return {}
-    return {str(spec): rows for spec, rows in frame.groupby("spec", sort=False)}
+    held = as_of_validity(frame)
+    out = {str(spec): rows for spec, rows in frame.groupby("spec", sort=False)}
+    for spec, rows in out.items():
+        # P02.10: a change-only broadcast spec's rows are its payload changes;
+        # the split drops the reader's mark, so it is put back per spec.
+        rows.attrs.pop(AS_OF_ATTR, None)
+        if spec in held:
+            rows.attrs[AS_OF_ATTR] = {spec: held[spec]}
+    return out
+
+
+def _change_only_rate_refusal(spec: str, rows: pd.DataFrame) -> str | None:
+    """Why ``spec``'s stored rows are no rate (P02.10), or ``None``."""
+    return as_of_refusal(rows, reader="tuning digest rate", specs=[spec])
 
 
 def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
@@ -260,7 +280,9 @@ def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
     """
     out: dict[str, float] = {}
     for spec, rows in _read_specs(session_dir, specs).items():
-        if rows.empty:
+        # A change-only broadcast spec has no rate here: its rows are its
+        # payload changes (P02.10); ``_rate_summary`` names that.
+        if rows.empty or _change_only_rate_refusal(spec, rows) is not None:
             continue
         span = (rows["timestamp"].max() - rows["timestamp"].min()).total_seconds()
         if span > 0:
@@ -268,7 +290,9 @@ def _achieved_hz(session_dir: Path, specs: list[str]) -> dict[str, float]:
     return out
 
 
-def _rate_summary(session_dir: Path, specs: list[str]) -> dict[str, dict[str, float | int | None]]:
+def _rate_summary(
+    session_dir: Path, specs: list[str]
+) -> dict[str, dict[str, float | int | str | None]]:
     """Summarize persisted polling cadence and its worst gap by provider.
 
     A nominal target rate cannot tell a post-drive reader whether a channel
@@ -276,11 +300,15 @@ def _rate_summary(session_dir: Path, specs: list[str]) -> dict[str, dict[str, fl
     so these are deliberately wall-clock sample timings, not a claim about
     active scheduler time.
     """
-    out: dict[str, dict[str, float | int | None]] = {}
+    out: dict[str, dict[str, float | int | str | None]] = {}
     for spec, frame in _read_specs(session_dir, specs, acquired_time=True).items():
         timestamps = frame["timestamp"].dropna().sort_values().drop_duplicates()
         count = len(timestamps)
         if not count:
+            continue
+        refusal = _change_only_rate_refusal(spec, frame)
+        if refusal is not None:
+            out[spec] = {"stored_rows": int(count), "refused": refusal}
             continue
         intervals = timestamps.diff().dropna().dt.total_seconds()
         positive = intervals[intervals > 0]
@@ -422,6 +450,12 @@ def _measured_afr_summary(
             raise
         except Exception:  # noqa: BLE001 — capability report carries the ordinary reason
             continue
+        # Sample and censor counts count rows: P02.10 change-only rows are
+        # payload changes, so the bank is reported refused, by name.
+        change_only = as_of_refusal(samples, reader=f"measured AFR bank {bank} sample counts")
+        if change_only is not None:
+            banks.append({"bank": bank, "provider": provider, "refused": change_only})
+            continue
         afr = voltage_to_afr(samples["value"], transfer).dropna()
         if afr.empty:
             continue
@@ -441,7 +475,7 @@ def _measured_afr_summary(
         )
     provenance = calibration.provenance
     return {
-        "available": bool(banks),
+        "available": any("refused" not in bank for bank in banks),
         "instrument": "factory A/F voltage transformed to AFR",
         "independence_caveat": (
             "This is a calibrated transform of the ECU A/F voltage, not an independent wideband "
@@ -627,6 +661,13 @@ def _wot_inventory(
     if starts and rpm_spec is not None and load_wot is not None:
         try:
             rpm = read_channels(session_dir, [rpm_spec], acquired_time=True)
+            # Seconds are counted from stored rows (one per second that has
+            # one); a change-only broadcast rpm (P02.10) has rows only where
+            # it changed, so it would undercount held seconds. Refused by
+            # name, never left to the fallbacks below.
+            change_only = as_of_refusal(rpm, reader="tagged WOT seconds")
+            if change_only is not None:
+                return WotInventory(0, 0, [], "unavailable", reason=change_only)
             if not rpm.empty:
                 # Parquet can round-trip timestamps as microseconds rather
                 # than nanoseconds; ``astype(int64) / 1e9`` then puts every
@@ -793,6 +834,11 @@ def _did_pull_inventory(
         return {"available": False, "reason": "RPM provider could not be read"}
     if rpm.empty:
         return {"available": False, "reason": "RPM provider has no samples"}
+    # Samples and seconds below are stored rows; a change-only broadcast rpm
+    # (P02.10) stores one per payload change.
+    change_only = as_of_refusal(rpm, reader="pull evidence rpm seconds")
+    if change_only is not None:
+        return {"available": False, "reason": change_only}
 
     epoch = rpm["timestamp"].map(lambda value: value.timestamp())
     intervals: list[tuple[float, float]] = []
@@ -811,6 +857,7 @@ def _did_pull_inventory(
     # independent observations present during the physical pull; delivery
     # analysis still requires same-cell semantic alignment.
     evidence: dict[str, int | None] = {}
+    refused: dict[str, str] = {}
     for role, label in (
         ("operator_demand", "operator_demand_samples"),
         ("measured_afr_b1", "measured_afr_samples"),
@@ -829,6 +876,12 @@ def _did_pull_inventory(
             raise
         except Exception:  # noqa: BLE001 — optional evidence stays unavailable
             evidence[label] = None
+            continue
+        change_only = as_of_refusal(samples, reader=f"pull evidence {label}")
+        if change_only is not None:
+            # A count of payload changes, not of samples (P02.10).
+            evidence[label] = None
+            refused[label] = change_only
             continue
         evidence[label] = int(in_intervals(samples["timestamp"]).sum())
 
@@ -851,6 +904,7 @@ def _did_pull_inventory(
         "target_bearing_samples": 0 if target_lookup_ready else None,
         "target_lookup_ready": target_lookup_ready,
         **evidence,
+        **({"refused_counts": refused} if refused else {}),
     }
 
 

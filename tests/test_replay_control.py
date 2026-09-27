@@ -186,6 +186,7 @@ def _make_controller(tmp_path: Path) -> tuple[ReplayController, Path]:
         writer=writer,
         anomaly_logger=logger,
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
     )
     return controller, storage_root
 
@@ -218,6 +219,7 @@ def _make_isolated_controller(tmp_path: Path) -> _IsolatedController:
         writer=writer,
         anomaly_logger=anomaly_logger,
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
         live_source=live_source,
         persistence_gate=persistence_gate,
         emitter=emitter,
@@ -305,6 +307,7 @@ async def test_status_reports_what_the_replay_actually_emitted(tmp_path: Path) -
         writer=ParquetTelemetryWriter(storage_root),
         anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
     )
     base = datetime(2026, 5, 18, 12, tzinfo=UTC)
     write_records_to_parquet(
@@ -364,6 +367,7 @@ async def test_status_reports_effective_speed_and_source_time_progress(tmp_path:
         writer=ParquetTelemetryWriter(storage_root),
         anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
     )
     base = datetime(2026, 5, 18, 12, tzinfo=UTC)
     write_records_to_parquet(
@@ -605,6 +609,7 @@ def _journalled_controller(
         writer=writer,
         anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
         live_ingress=ingress,
         settle_pipeline=_settle,
     )
@@ -687,6 +692,7 @@ async def test_status_reports_the_directory_the_writer_opened(tmp_path: Path) ->
         writer=writer,
         anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
     )
     status = await controller.start("2026-05-18T120000", loop=False)
     assert status.output_session_dir == str(writer.paths.root)

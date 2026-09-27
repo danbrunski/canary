@@ -15,6 +15,10 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.paths import ANALYSES_DIR, ANOMALIES_DIR, CONTROL_DIR, DATA_DIR
+from src.storage.broadcast_storage import (
+    DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS,
+    validate_broadcast_stale_timeout,
+)
 
 log = logging.getLogger(__name__)
 
@@ -477,6 +481,18 @@ class CollectionConfig(_Strict):
     reconnect_max_delay_seconds: float = 60.0
     queue_max_size: int = 10_000
     queue_warning_fraction: float = 0.8
+    #: P02.10 (operator 2026-09-26): a broadcast CAN frame is stored only when
+    #: its payload differs from its id's previous frame, and an unchanged id is
+    #: re-written once per this timeout (one second before it: derived, not a
+    #: second knob), so its value never lapses. The same number is the 1 Hz
+    #: resampler's stale class for broadcast channels (``can:``/``decoded:``/
+    #: ``dbc:``) and the per-sample readers' as-of validity, so storage and
+    #: every reader agree on it. Under 2 s is refused
+    #: (:func:`src.storage.broadcast_storage.validate_broadcast_stale_timeout`);
+    #: it must also stay under ``preprocessing.session_gap_seconds``
+    #: (:class:`CanaryConfig` checks). Changing it changes the models'
+    #: broadcast ``__gap``/``__arrived`` features: a feature-spec change.
+    broadcast_stale_timeout_seconds: float = DEFAULT_BROADCAST_STALE_TIMEOUT_SECONDS
     #: Simulation backend: when set, the daemon replays this recorded
     #: session (dir path or id under storage) onto the telemetry queue
     #: *instead of* the real CAN/OBD collectors — no hardware needed, the
@@ -494,6 +510,11 @@ class CollectionConfig(_Strict):
     #: Operator-intent recording gate (Task 8.6). Defaults off.
     record_arming: RecordArmingConfig = RecordArmingConfig()
     idle_shutdown: IdleShutdownConfig = IdleShutdownConfig()
+
+    @field_validator("broadcast_stale_timeout_seconds")
+    @classmethod
+    def _broadcast_stale_timeout_floor(cls, value: float) -> float:
+        return validate_broadcast_stale_timeout(value)
 
     @model_validator(mode="before")
     @classmethod
@@ -1285,6 +1306,24 @@ class CanaryConfig(_Strict):
     llm_assist: LLMAssistConfig = LLMAssistConfig()
     plausibility: PlausibilityConfig = PlausibilityConfig()
     committees: CommitteesConfig = CommitteesConfig()
+
+    @model_validator(mode="after")
+    def _broadcast_timeout_inside_session_gap(self) -> Self:
+        """An unchanged CAN id is re-written only once per broadcast stale
+        timeout (P02.10). A timeout at or past ``session_gap_seconds`` would
+        let the gap between two stored frames of a quiet, CAN-only session
+        reach the resampler's segment split, cutting one recording into
+        segments that are not real discontinuities."""
+        timeout = self.collection.broadcast_stale_timeout_seconds
+        gap = self.preprocessing.session_gap_seconds
+        if timeout >= gap:
+            raise ValueError(
+                f"collection.broadcast_stale_timeout_seconds ({timeout:g} s) must be under "
+                f"preprocessing.session_gap_seconds ({gap:g} s): an unchanged CAN id is "
+                "re-written only once per timeout (P02.10), so a longer one would split "
+                "quiet recordings into segments at the heartbeat gaps"
+            )
+        return self
 
     @classmethod
     def from_yaml(cls, path: Path) -> Self:

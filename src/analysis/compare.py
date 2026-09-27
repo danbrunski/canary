@@ -57,7 +57,12 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_channels
+from src.analysis.channels import (
+    TIMESTAMP_BASIS_COLUMN,
+    as_of_validity,
+    read_channels,
+    refuse_as_of,
+)
 from src.analysis.pairing import (
     ComparisonRefusedError,
     InputNotCapturedError,
@@ -157,6 +162,12 @@ class ChannelComparison:
     #: residual by nothing.
     difference_bias: float
     difference_spread: float
+    #: Pairs whose partner was a held value (P02.10): the reference sample
+    #: found no stored partner within tolerance, and the other side, a
+    #: broadcast channel stored change-only, carried the value its last stored
+    #: row set (valid for the stale timeout) at that instant. Counted in
+    #: ``n_pairs``; their separation is 0 (the value as of the instant).
+    n_held_pairs: int = 0
 
     @property
     def stable(self) -> bool:
@@ -173,7 +184,8 @@ class ChannelComparison:
             f"sep(med/p95/max)={self.separation_median_s * 1000.0:.0f}/"
             f"{self.separation_p95_s * 1000.0:.0f}/{self.separation_max_s * 1000.0:.0f}ms "
             f"unmatched={self.unmatched_a}/{self.unmatched_b} "
-            f"basis={self.timestamp_basis_a}/{self.timestamp_basis_b} "
+            + (f"held={self.n_held_pairs} " if self.n_held_pairs else "")
+            + f"basis={self.timestamp_basis_a}/{self.timestamp_basis_b} "
             f"policy=({self.policy.describe()})"
         )
 
@@ -189,10 +201,19 @@ class AlignedPairs:
     """What :func:`align_pairs` returns: identifiable pairs plus their provenance.
 
     ``pairs`` has one row per accepted pair with columns ``timestamp_a``,
-    ``timestamp_b``, ``a``, ``b``, ``index_a``, ``index_b`` and
-    ``separation_s``. The indices are row labels of the long frame
+    ``timestamp_b``, ``a``, ``b``, ``index_a``, ``index_b``,
+    ``separation_s`` and ``held``. The indices are row labels of the long frame
     :func:`~src.analysis.channels.read_channels` produced for the two specs,
     so every pair can be traced back to the two rows it came from.
+
+    When the non-reference side is a broadcast channel stored change-only
+    (P02.10), a reference sample with no stored partner within tolerance is
+    paired with that side's value *as of* its instant: the last stored row at
+    or before it, valid for the stale timeout, because in that storage an
+    unchanged frame is not repeated. Such a pair is ``held``: its
+    ``timestamp`` on that side is the reference instant, its separation 0, and
+    its index names the stored row, which may therefore appear in several
+    pairs. Sessions stored every frame never produce a held pair.
     """
 
     a: str
@@ -206,6 +227,7 @@ class AlignedPairs:
     n_b: int
     unmatched_a: int
     unmatched_b: int
+    n_held: int = 0
 
     @property
     def n_pairs(self) -> int:
@@ -339,8 +361,83 @@ def _pairs_frame(
             "index_a": rows_a.index.to_numpy(),
             "index_b": rows_b.index.to_numpy(),
             "separation_s": matched.separation_s,
+            "held": np.zeros(len(matched.index_a), dtype=bool),
         }
     )
+
+
+def _held_fill(
+    pairs: pd.DataFrame,
+    side_a: pd.DataFrame,
+    side_b: pd.DataFrame,
+    times_a: np.ndarray,
+    times_b: np.ndarray,
+    matched: MatchedSamples,
+    *,
+    held_side: Literal["a", "b"],
+    validity_s: float,
+) -> tuple[pd.DataFrame, int, int, int]:
+    """``pairs`` plus a held pair for every reference sample left unmatched (P02.10).
+
+    The held side is a broadcast channel stored change-only: a frame is stored
+    only when its payload changes, and an unchanged id is re-written before
+    the stale timeout. So a reference sample with no stored row within
+    tolerance still had a frame beside it on the bus, carrying the value the
+    last stored row set; that row, if at most ``validity_s`` old, is its
+    partner. The stored rows are matched first exactly as a session stored
+    every frame is (nearest, each used once), so where nothing was dropped the
+    pairs are the ones that session gives.
+
+    Known corner: inside a hold, a reference sample within tolerance *before*
+    the next change pairs with that change (a stored row) rather than the
+    repeated frame beside it, which carried the held value. It is bounded by
+    the tolerance and the change's size, and is what a session stored every
+    frame gives whenever its own frame beside the sample was lost.
+
+    Returns the pairs in reference-time order, the held count, and both
+    sides' unmatched counts after the fill.
+    """
+    ref_is_a = held_side == "b"
+    ref_side, ref_times = (side_a, times_a) if ref_is_a else (side_b, times_b)
+    held_frame, held_times = (side_b, times_b) if ref_is_a else (side_a, times_a)
+    used_ref = matched.index_a if ref_is_a else matched.index_b
+    unmatched = np.setdiff1d(np.arange(len(ref_side)), used_ref)
+    order = np.argsort(held_times, kind="stable")
+    sorted_times = held_times[order]
+    slot = np.searchsorted(sorted_times, ref_times[unmatched], side="right") - 1
+    ok = slot >= 0
+    ages = np.full(len(unmatched), np.inf)
+    ages[ok] = ref_times[unmatched][ok] - sorted_times[slot[ok]]
+    ok &= ages <= validity_s
+    ref_pos = unmatched[ok].astype(np.intp)
+    held_pos = order[slot[ok]].astype(np.intp)
+    rows_ref = ref_side.iloc[ref_pos]
+    rows_held = held_frame.iloc[held_pos]
+    rows_a, rows_b = (rows_ref, rows_held) if ref_is_a else (rows_held, rows_ref)
+    stamps = rows_ref["timestamp"].to_numpy()
+    extra = pd.DataFrame(
+        {
+            "timestamp_a": stamps,
+            "timestamp_b": stamps,
+            "a": rows_a["value"].to_numpy(dtype=float),
+            "b": rows_b["value"].to_numpy(dtype=float),
+            "index_a": rows_a.index.to_numpy(),
+            "index_b": rows_b.index.to_numpy(),
+            "separation_s": np.zeros(len(ref_pos), dtype=np.float64),
+            "held": np.ones(len(ref_pos), dtype=bool),
+        }
+    )
+    combined = pd.concat([pairs, extra], ignore_index=True) if len(extra) else pairs
+    combined = combined.sort_values(
+        "timestamp_a" if ref_is_a else "timestamp_b", kind="stable"
+    ).reset_index(drop=True)
+    used_held = np.union1d(matched.index_b if ref_is_a else matched.index_a, held_pos)
+    unmatched_ref = int(len(unmatched) - len(ref_pos))
+    unmatched_held = int(len(held_frame) - len(used_held))
+    unmatched_a, unmatched_b = (
+        (unmatched_ref, unmatched_held) if ref_is_a else (unmatched_held, unmatched_ref)
+    )
+    return combined, len(ref_pos), unmatched_a, unmatched_b
 
 
 def align_pairs(
@@ -387,20 +484,63 @@ def align_pairs(
         label_a=a,
         label_b=b,
     )
-    matched = match_ordered(times_a, times_b, policy)
+    held = as_of_validity(long)
+    reference = _reference_for_held(policy, a, b, held, len(side_a), len(side_b))
+    matched = match_ordered(
+        times_a,
+        times_b,
+        PairingPolicy(
+            max_separation=policy.max_separation, reference=reference, tie_break=policy.tie_break
+        ),
+    )
+    pairs = _pairs_frame(side_a, side_b, matched)
+    unmatched_a, unmatched_b, n_held = matched.unmatched_a, matched.unmatched_b, 0
+    held_side: Literal["a", "b"] = "b" if reference == "a" else "a"
+    held_spec = b if held_side == "b" else a
+    if held_spec in held:
+        pairs, n_held, unmatched_a, unmatched_b = _held_fill(
+            pairs,
+            side_a,
+            side_b,
+            times_a,
+            times_b,
+            matched,
+            held_side=held_side,
+            validity_s=held[held_spec],
+        )
     return AlignedPairs(
         a=a,
         b=b,
-        pairs=_pairs_frame(side_a, side_b, matched),
+        pairs=pairs,
         policy=policy,
-        reference=matched.reference,
+        reference=reference,
         timestamp_basis_a=basis_a,
         timestamp_basis_b=basis_b,
         n_a=len(side_a),
         n_b=len(side_b),
-        unmatched_a=matched.unmatched_a,
-        unmatched_b=matched.unmatched_b,
+        unmatched_a=unmatched_a,
+        unmatched_b=unmatched_b,
+        n_held=n_held,
     )
+
+
+def _reference_for_held(
+    policy: PairingPolicy, a: str, b: str, held: dict[str, float], n_a: int, n_b: int
+) -> Literal["a", "b"]:
+    """Which side to walk as the reference (P02.10 adds the held case).
+
+    ``auto`` picks the sparser side, but a change-only broadcast side is
+    sparse because it stores only changes, not because it was sampled less:
+    its value is known at every instant within the timeout. So under ``auto``
+    the other side is the reference; with both held, or neither, the sparser
+    stored side is (``a`` on a tie). An explicit reference is kept as given,
+    and walks the held side's stored rows like any other.
+    """
+    if policy.reference != "auto":
+        return policy.reference
+    if (a in held) != (b in held):
+        return "b" if a in held else "a"
+    return "a" if n_a <= n_b else "b"
 
 
 def binned_summary(
@@ -420,10 +560,16 @@ def binned_summary(
     whether any sample of ``a`` was acquired near any sample of ``b`` — which
     is exactly how the C01 counterexample scored r²=1 while disagreeing at
     every instant. Feed this to a chart; never to :func:`regress`.
+
+    Refuses a change-only broadcast spec (P02.10): its rows are its payload
+    changes, so neither the bin means nor the counts describe the samples.
     """
     long = read_channels(
         session, [a, b], bindings_path=bindings_path, dids_path=dids_path, acquired_time=True
     )
+    # P02.10: a bin mean over a change-only broadcast channel's rows
+    # averages its payload changes, and ``n`` counts them, not samples.
+    refuse_as_of(long, reader="binned_summary")
     columns: dict[str, pd.Series] = {}
     for label, spec in (("a", a), ("b", b)):
         part = _side(long, spec)
@@ -531,6 +677,7 @@ def compare_channels(
         residual_spread=float(np.std(residual)),
         difference_bias=float(np.mean(difference)),
         difference_spread=float(np.std(difference)),
+        n_held_pairs=aligned.n_held,
     )
 
 

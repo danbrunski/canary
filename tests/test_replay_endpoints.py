@@ -61,6 +61,7 @@ def replay_controller(tmp_path: Path) -> ReplayController:
         writer=ParquetTelemetryWriter(storage),
         anomaly_logger=AnomalyEventLogger(anomalies),
         storage_root=storage,
+        broadcast_stale_timeout_seconds=10.0,
     )
 
 

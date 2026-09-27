@@ -52,6 +52,7 @@ from src.preprocessing.resampler import (
     arrived_column,
     gap_column,
 )
+from src.storage.broadcast_storage import is_broadcast_channel
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale", "intermittent"]
 
@@ -282,9 +283,17 @@ class AnomalyInjector:
         # A03.1: nothing arrives during a dropout. Without this an
         # ``arrived_sample`` artifact would see the held value keep arriving —
         # a stuck sensor, not a dropout — and derived channels would inherit it.
+        # A broadcast channel (P02.10) reads "arrived" while a stored row is
+        # within the stale timeout (``resampler._arrival_flags_for``), so a real
+        # dropout keeps it true up to the ceiling; the injection matches.
         arrived_col = arrived_column(channel)
         if arrived_col in self._df.columns:
-            self._df.loc[mask, arrived_col] = False
+            not_arrived = (
+                (beyond_ceiling if has_pre_observation else mask)
+                if is_broadcast_channel(channel)
+                else mask
+            )
+            self._df.loc[not_arrived, arrived_col] = False
 
         self._windows.append(InjectionWindow(channel=channel, kind="dropout", start=s, end=e))
         return self

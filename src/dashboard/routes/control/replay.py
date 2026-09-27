@@ -15,6 +15,7 @@ from src.control.replay_control import (
     ReplayController,
     ReplayNotFoundError,
     ReplayNotRunningError,
+    ReplayRefusedError,
 )
 from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
@@ -70,6 +71,8 @@ def build_router(ctx: ControlContext) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ReplayNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ReplayRefusedError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         publish_control_event("replay.start", "ok", status.to_dict())
         return {"replay": status.to_dict()}
 

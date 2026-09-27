@@ -109,6 +109,28 @@ def decoded_rows_note(sql: str, rows: Sequence[Mapping[str, Any]]) -> dict[str, 
     return fields
 
 
+#: A query that names the ``can`` source (``source = 'can'``) or ``decoded``
+#: rows, both of which follow the broadcast frames' storage (P02.10).
+_BROADCAST_MENTION = re.compile(r"'can'|\bdecoded\b", re.IGNORECASE)
+
+CAN_STORAGE_NOTE = (
+    "sessions recorded since P02.10 (2026-09-26) store a CAN frame only when its payload "
+    "changes, and re-write an unchanged id once per collection.broadcast_stale_timeout_seconds "
+    "(one second before it); a chunk's parquet footer key canary.can_storage says which. "
+    "In those sessions counts of can or decoded rows are payload changes, not frames, "
+    "and a broadcast value at an instant is the last row before it (valid for the "
+    "timeout). Frame counts and rates need a capture profile with store_every_frame."
+)
+
+
+def can_storage_note(sql: str) -> dict[str, str]:
+    """``can_storage_note`` for a raw query that reads broadcast rows (P02.10):
+    what a row count means depends on how the frames were stored."""
+    if not _BROADCAST_MENTION.search(sql):
+        return {}
+    return {"can_storage_note": CAN_STORAGE_NOTE}
+
+
 def _found_nothing(rows: Sequence[Mapping[str, Any]]) -> bool:
     """No rows, or one row whose every value is zero or null (an aggregate over
     nothing: ``count(*)`` is 0, ``avg``/``max`` are null)."""
@@ -486,6 +508,7 @@ __all__ = [
     "DECODED_ROWS_NOTE",
     "QueryValidationError",
     "TelemetryQuery",
+    "can_storage_note",
     "decoded_rows_note",
     "validate_query",
     "view_sql",

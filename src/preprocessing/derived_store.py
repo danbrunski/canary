@@ -55,6 +55,7 @@ from src.preprocessing.derived import CELL_COLUMNS, ReducedSession, grid_interva
 from src.preprocessing.feature_cache import _session_cache_entry
 from src.preprocessing.loader import PARQUET_PATTERN, SESSION_PART_ROWS
 from src.preprocessing.resampler import ResampleConfig
+from src.storage.broadcast_storage import refuse_shorter_read_timeout, session_can_storage
 from src.telemetry import DBC_SOURCE, DECODED_SOURCE, SOURCE_SEP
 
 log = logging.getLogger(__name__)
@@ -90,7 +91,11 @@ DERIVED_CODE_VERSION = 2
 #: (versioned by ``on_read_hash``), not taken from stored rows. A session that
 #: stored fewer bindings than the catalog now has (every recording before
 #: 2026-08-07) gains their channels.
-NUMERIC_CODE_VERSION = 1
+#: 2 -- H02.4: a session's resolved ``imu_frame.json`` adds ``imu:ACCEL_LON/LAT``
+#: (``imu_stream``), decimated to ``imu:ACCEL_LON_MAX`` etc. The sidecar's
+#: identity (``ImuFramePlan.key``) is versioned beside the chunks, so resolving
+#: or re-resolving a session rebuilds its frame.
+NUMERIC_CODE_VERSION = 2
 
 #: Gitignored (``data/cache/``) and outside every sessions tree, so training
 #: discovery never walks it.
@@ -237,6 +242,10 @@ class DerivedStore:
         started = time.monotonic()
         session_dir = Path(session_dir)
         interval_ns = grid_interval_ns(resample_config)
+        # P02.10: the cells are timeout-independent, but a frame resampled
+        # from them with a shorter broadcast class than the session was
+        # stored with would read every quiet id stale between re-writes.
+        refuse_shorter_read_timeout(session_dir, resample_config.broadcast_max_gap_seconds)
         frame_dir = self.frame_dir(session_dir)
         meta = _read_meta(frame_dir)
         stale = _whole_frame_staleness(meta, session_dir, interval_ns)
@@ -276,6 +285,9 @@ class DerivedStore:
                 )
             if report.status == "refreshed":
                 _write(frame_dir, reduced, meta)
+        reduced.broadcast_stale_timeout_seconds = session_can_storage(
+            session_dir
+        ).stale_timeout_seconds
         report.seconds = time.monotonic() - started
         log.info(
             "derived session frame %s",
@@ -292,21 +304,25 @@ class DerivedStore:
 
         Versioned as a whole: the chunk list, the grid interval (which is also
         the IMU decimation tick), :data:`DERIVED_CODE_VERSION`,
-        :data:`NUMERIC_CODE_VERSION` and the on-read catalog its ``decoded:``
+        :data:`NUMERIC_CODE_VERSION`, the on-read catalog its ``decoded:``
         rows are decoded with (P02.8; an edit to one of those bindings
-        rebuilds it, naming the cause).
+        rebuilds it, naming the cause) and the session's IMU frame
+        (``imu_frame.json``, H02.4).
         """
         from src.preprocessing.decode import on_read_catalog, on_read_hash
         from src.preprocessing.derived import reduce_numeric_session
+        from src.preprocessing.imu_stream import plan_imu_frame
 
         started = time.monotonic()
         session_dir = Path(session_dir)
         interval_ns = grid_interval_ns(resample_config)
+        refuse_shorter_read_timeout(session_dir, resample_config.broadcast_max_gap_seconds)
         frame_dir = self.frame_dir(session_dir) / _NUMERIC
         meta = _read_meta(frame_dir)
         catalog = on_read_catalog()
         decode_hash = on_read_hash(catalog)
-        stale = _numeric_staleness(meta, session_dir, interval_ns, decode_hash)
+        imu_plan = plan_imu_frame(session_dir)
+        stale = _numeric_staleness(meta, session_dir, interval_ns, decode_hash, imu_plan.key())
         cells: pd.DataFrame | None = None
         if stale is None:
             assert meta is not None
@@ -317,12 +333,15 @@ class DerivedStore:
             report = DerivedLoad(session_dir.name, "reused", "every input hash matches")
         else:
             refuse_on_the_pi()
-            reduced = reduce_numeric_session(session_dir, resample_config, on_read=catalog)
+            reduced = reduce_numeric_session(
+                session_dir, resample_config, on_read=catalog, imu_plan=imu_plan
+            )
             meta = {
                 "kind": _NUMERIC,
                 "code_version": DERIVED_CODE_VERSION,
                 "numeric_code_version": NUMERIC_CODE_VERSION,
                 "on_read_hash": decode_hash,
+                "imu_frame": imu_plan.key(),
                 "interval_ns": interval_ns,
                 "source": _source_entry(session_dir),
                 "timestamp_unit": reduced.timestamp_unit,
@@ -330,6 +349,9 @@ class DerivedStore:
             }
             _write(frame_dir, reduced, meta)
             report = DerivedLoad(session_dir.name, "built", stale)
+        reduced.broadcast_stale_timeout_seconds = session_can_storage(
+            session_dir
+        ).stale_timeout_seconds
         report.seconds = time.monotonic() - started
         log.info(
             "derived numeric session frame %s",
@@ -665,7 +687,11 @@ def _whole_frame_staleness(
 
 
 def _numeric_staleness(
-    meta: Mapping[str, Any] | None, session_dir: Path, interval_ns: int, decode_hash: str
+    meta: Mapping[str, Any] | None,
+    session_dir: Path,
+    interval_ns: int,
+    decode_hash: str,
+    imu_key: str,
 ) -> str | None:
     if meta is None:
         return "no derived frame yet"
@@ -677,6 +703,8 @@ def _numeric_staleness(
         return f"numeric code version {meta.get('numeric_code_version')} != {NUMERIC_CODE_VERSION}"
     if meta.get("on_read_hash") != decode_hash:
         return "the on-read decode catalog changed (a confirmed or persist: true binding)"
+    if meta.get("imu_frame") != imu_key:
+        return "the session's IMU frame (imu_frame.json) changed"
     if meta.get("interval_ns") != interval_ns:
         return f"grid interval {meta.get('interval_ns')} ns != {interval_ns} ns"
     if meta.get("source") != _source_entry(session_dir):

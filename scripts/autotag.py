@@ -15,10 +15,12 @@ doesn't duplicate tags that already fired last time).
 
 The GPS-only tags (``stopped``, ``highway_cruise``) work against any session
 that has ``gps:speed`` — real stored sessions today. The IMU-dependent tags
-(``hard_accel``/``hard_brake``/``cornering``/``launch``) are correctly wired
-but dormant until a session actually has ``imu:*`` columns (Phase 2b
-hardware) — running this against today's corpus simply produces none of
-those labels, not an error.
+(``hard_accel``/``hard_brake``/``cornering``/``launch``) read
+``imu:ACCEL_LON_MAX``/``imu:ACCEL_LAT_MAX``, which the loader rebuilds from
+the session's resolved ``imu_frame.json`` (H02.4, ``imu_stream``). A session
+recorded with the IMU but never resolved gets none of those labels and a
+warning naming the fix (``scripts/resolve_imu_frame.py``); a session with no
+IMU at all simply produces none, not an error.
 
 Usage:
 
@@ -55,6 +57,7 @@ from src.analysis.autotag import TagEvent, detect_tags
 from src.collection.tags import write_tag
 from src.config import CanaryConfig
 from src.log import configure_logging
+from src.preprocessing.imu_stream import IMU_FRAME_ATTR
 from src.preprocessing.loader import resample_and_segment
 from src.session import TAGS_FILENAME
 
@@ -149,6 +152,9 @@ def _already_tagged(existing: list[dict[str, object]], event: TagEvent) -> bool:
 def autotag_session(session_dir: Path, config: CanaryConfig, *, dry_run: bool = False) -> int:
     """Detect + write auto-tags for one session. Returns the count written."""
     frame = resample_and_segment([session_dir], config)
+    imu = frame.attrs.get(IMU_FRAME_ATTR, {}).get(session_dir.name)
+    if imu is not None and imu["status"] not in ("applied", "no_imu_rows"):
+        log.warning("%s: IMU tags dormant (%s): %s", session_dir.name, imu["status"], imu["reason"])
     if frame.empty:
         log.warning("no telemetry rows in %s; skipping", session_dir.name)
         return 0

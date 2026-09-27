@@ -129,7 +129,11 @@ def _dashboard_app(tmp_path: Path) -> FastAPI:
         emitter=AnomalyEventEmitter(logger),
         capture_controller=CaptureController(lambda: writer.paths.root),
         replay_controller=ReplayController(
-            queue=asyncio.Queue(), writer=writer, anomaly_logger=logger, storage_root=storage
+            queue=asyncio.Queue(),
+            writer=writer,
+            anomaly_logger=logger,
+            storage_root=storage,
+            broadcast_stale_timeout_seconds=10.0,
         ),
         audit_logger=ControlAuditLogger(tmp_path / "audit.jsonl"),
         control_token="secret",

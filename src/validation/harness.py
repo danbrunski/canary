@@ -459,6 +459,9 @@ class RunArtifacts:
     writer_flush: dict[str, Any] = field(default_factory=dict)
     writer_stalls: int = 0
     rows_written: int = 0
+    #: CAN frames the writer's change filter did not store (P02.10), over
+    #: every session of the run: part of the push identity, never loss.
+    can_frames_suppressed: int = 0
     generation_events: list[dict[str, Any]] = field(default_factory=list)
     reconnect_attempts: int = 0
     if_stub_calls: int | None = None
@@ -682,6 +685,7 @@ def _start_pipeline(
         stall=spec.storage_stall,
         flush_interval_seconds=2.0,
         max_rows=20_000,
+        broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
     )
     async_writer = ensure_async_writer(writer)
     components.storage_writer = async_writer
@@ -857,6 +861,7 @@ async def _start_collector(
             speed=spec.replay_speed,
             loop=False,
             stats=replay_stats,
+            broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
         ),
         name="c10-replay",
     )
@@ -962,6 +967,7 @@ async def _finish(
     artifacts.rows_written = writer.rows_written
     artifacts.writer_flush = writer.flush_samples.summary_ms()
     artifacts.writer_stalls = writer.stalls
+    artifacts.can_frames_suppressed = writer.can_frames_suppressed_total
     artifacts.heartbeat = pipeline.heartbeat.summary_ms()
     artifacts.wall_clock_steps = [
         {**step, "at_s_after_arm": round(step["at_monotonic"] - artifacts.armed_monotonic, 3)}

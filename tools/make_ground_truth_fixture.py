@@ -25,10 +25,13 @@ of it lives in git forever.
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 
 import duckdb
 import pandas as pd
+
+from src.storage.broadcast_storage import ChangeOnlyStorageError, refuse_change_only
 
 DEFAULT_OUT = Path("tests/fixtures/ground_truth/drive-slice")
 
@@ -47,6 +50,12 @@ KEEP_GPS = ("speed", "heading")
 def extract(
     session: Path, start: pd.Timestamp, seconds: float, out: Path, can_stride: int = 1
 ) -> pd.DataFrame:
+    """Write the slice. Refuses a session that stores CAN frames change-only
+    (P02.10): ``--can-stride`` keeps every Nth *frame* per id, which on
+    change-only rows would keep every Nth payload change, and the slice is
+    written without the source's storage footer, so it would read back as
+    stored every frame and its rows as the bus's frames."""
+    refuse_change_only(session, reader="ground-truth fixture slice")
     end = start + pd.Timedelta(seconds=seconds)
     pattern = str(session / "telemetry-*.parquet")
     con = duckdb.connect()
@@ -94,13 +103,17 @@ def main() -> int:
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
     args = parser.parse_args()
 
-    frame = extract(
-        args.session,
-        pd.Timestamp(args.start),
-        args.seconds,
-        args.out,
-        can_stride=args.can_stride,
-    )
+    try:
+        frame = extract(
+            args.session,
+            pd.Timestamp(args.start),
+            args.seconds,
+            args.out,
+            can_stride=args.can_stride,
+        )
+    except ChangeOnlyStorageError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
     size = sum(p.stat().st_size for p in args.out.glob("*.parquet"))
     print(f"wrote {args.out} — {len(frame):,} rows, {size / 1024:.0f} KiB")
     for (source, channel), rows in frame.groupby(["source", "channel"]):

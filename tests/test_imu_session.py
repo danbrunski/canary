@@ -8,6 +8,7 @@ forward, y left, z up); the chip sees ``M @ f_vehicle`` for specific force
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 from dataclasses import dataclass
@@ -19,7 +20,14 @@ import pandas as pd
 import pytest
 
 from src.analysis.committees import STANDARD_GRAVITY
-from src.analysis.dyno import Leg, MotionSamples, correct_specific_force, estimate_pitch_offset
+from src.analysis.dyno import (
+    DynoRefusal,
+    Leg,
+    MotionSamples,
+    PitchOffset,
+    correct_specific_force,
+    estimate_pitch_offset,
+)
 from src.preprocessing.imu_frame import QUIESCENT_LOOKAHEAD_SECONDS
 from src.preprocessing.imu_session import (
     IMU_FRAME_FILENAME,
@@ -323,26 +331,28 @@ def test_the_recorded_reference_composes_with_the_dyno_pitch_offset() -> None:
                 speed_mps=f["kph"].iloc[rows].to_numpy() / 3.6,
                 accel_mps2=f["a_g"].iloc[rows].to_numpy() * STANDARD_GRAVITY,
                 sf_lon_mps2=out.frame[SF_LON_COLUMN].iloc[rows].to_numpy() * STANDARD_GRAVITY,
+                imu_reference_id=sf_block.reference_id,
             ),
         )
 
     legs = [leg("eastbound", f["grade_rad"] > 0), leg("westbound", f["grade_rad"] < 0)]
     offset = estimate_pitch_offset(legs, squat=None)
-    assert not hasattr(offset, "kind"), offset
+    assert isinstance(offset, PitchOffset), offset
+    assert offset.reference_id == sf_block.reference_id
 
     up_vehicle = truth.mount.T @ np.array(sf_block.pitch_reference.gravity_body_g)
     theta_r_deg = math.degrees(math.atan2(up_vehicle[0], up_vehicle[2]))
     assert theta_r_deg > 0.3  # a real offset, not a vacuous zero
-    assert offset.deg == pytest.approx(-theta_r_deg, abs=0.01)  # type: ignore[union-attr]
+    assert offset.deg == pytest.approx(-theta_r_deg, abs=0.01)
     for one, sign in zip(legs, (1.0, -1.0), strict=True):
-        corrected = correct_specific_force(
-            one.samples.sf_lon_mps2,
-            one.samples.accel_mps2,
-            squat=None,
-            pitch_offset_deg=offset.deg,  # type: ignore[union-attr]
-        )
+        corrected = correct_specific_force(one.samples, squat=None, pitch_offset=offset)
+        assert not isinstance(corrected, DynoRefusal), corrected
         expected = one.samples.accel_mps2 + STANDARD_GRAVITY * math.sin(sign * math.atan(grade))
         np.testing.assert_allclose(corrected, expected, atol=0.005)
+    # The offset belongs to this reference: samples from another frame are refused.
+    other = dataclasses.replace(legs[0].samples, imu_reference_id="0123456789abcdef")
+    refused = correct_specific_force(other, squat=None, pitch_offset=offset)
+    assert isinstance(refused, DynoRefusal) and refused.kind == "frame_mismatch"
 
 
 # ---------------------------------------------------------------------------

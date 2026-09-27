@@ -193,3 +193,51 @@ profiles:
   - cam_primary_vs_command_rpm_did
   - cam_secondary_vs_command_rpm_did
   storage_prefix: _capture-tuning-did
+- name: broadcast-every-frame
+  description: Normal polling, every broadcast CAN frame stored
+  notes: 'Starter profile (P02.10, 2026-09-26). Normal collection stores a broadcast
+    CAN frame only when its payload differs from its id''s previous frame, and re-writes
+    an unchanged id once per collection.broadcast_stale_timeout_seconds. That keeps
+    every value but not sub-second frame timing or per-id frame counts, so the readers
+    that count frames (receive-loss accounting, broadcast byte discovery, frame rates)
+    refuse a change-only session and point here.
+
+
+    Polls the core Mode 01 channels plus the density and thermal context every capture
+    carries; only the storage differs from normal collection. Add the vehicle''s DIDs if
+    the capture should also carry them. Every-frame storage is about 1.7x the CAN rows
+    of a change-only drive (2026-09-20: 12.5 M frames against 7.36 M kept), so keep
+    these captures to the window that needs them.'
+  experimental: false
+  mode01:
+    RPM: 1.0
+    ENGINE_LOAD: 1.0
+    MAF: 1.0
+    THROTTLE_POS: 1.0
+    BAROMETRIC_PRESSURE: 1.0
+    INTAKE_TEMP: 1.0
+    SPEED: 1.0
+    COOLANT_TEMP: 1.0
+  mode01_batch_groups: []
+  mode22: []
+  mode22_rate_weights: {}
+  memory: []
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: null
+  round_timestamps: false
+  target_rate_hz: null
+  did_continuous: false
+  bus_budget_override: null
+  priority_channels: null
+  expected_total_demand_hz: null
+  capacity_evidence: ''
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: false
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-broadcast-every-frame
+  store_every_frame: true

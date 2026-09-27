@@ -279,7 +279,10 @@ def test_reduced_cells_rebuild_the_resampled_frame(hz: float) -> None:
     config = ResampleConfig(hz=hz)
     expected = resample_long_session(long, None, None, None, config, session_name="s")
     reduced = reduce_long_frames(
-        "2026-06-01T235800", [long.iloc[:3000], long.iloc[3000:]], grid_interval_ns(config)
+        "2026-06-01T235800",
+        [long.iloc[:3000], long.iloc[3000:]],
+        grid_interval_ns(config),
+        can_storage=None,
     )
 
     assert len(reduced.cells) < len(long) / 3  # it actually reduced
@@ -290,7 +293,7 @@ def test_reduced_cells_rebuild_the_resampled_frame(hz: float) -> None:
 def test_a_projected_frame_is_the_full_frame_cut_to_those_channels() -> None:
     long = _synthetic_long(3)
     config = ResampleConfig()
-    reduced = reduce_long_frames("s", [long], grid_interval_ns(config))
+    reduced = reduce_long_frames("s", [long], grid_interval_ns(config), can_storage=None)
     full = resample_reduced(reduced, config)
     wanted = ["obd:BURST", "obd:SPEED"]
     columns = [
@@ -307,7 +310,7 @@ def test_a_projected_frame_is_the_full_frame_cut_to_those_channels() -> None:
 
 def test_refusals_name_their_cause() -> None:
     long = _synthetic_long(4)
-    reduced = reduce_long_frames("s", [long], grid_interval_ns(ResampleConfig()))
+    reduced = reduce_long_frames("s", [long], grid_interval_ns(ResampleConfig()), can_storage=None)
     with pytest.raises(KeyError, match="obd:NOPE"):
         resample_reduced(reduced, ResampleConfig(), channels=["obd:NOPE"])
     with pytest.raises(ValueError, match="re-derive"):

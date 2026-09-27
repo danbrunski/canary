@@ -72,6 +72,11 @@ SENSOR_SOURCE: Final = "sensor"
 #: decides otherwise (H00: it exists only while a K-line session runs).
 KLINE_SOURCE: Final = "kline"
 
+#: Metadata key naming a CAN frame that is not a data frame (P02.10):
+#: ``"error"`` (a controller error frame, e.g. RX overflow) or ``"remote"``.
+CAN_FRAME_KIND_KEY: Final = "frame_kind"
+CanFrameKind = Literal["error", "remote"]
+
 TelemetrySource = Literal[
     "obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor", "kline"
 ]
@@ -286,13 +291,22 @@ class TelemetryRecord:
         payload: bytes,
         *,
         channel: str | None = None,
+        frame_kind: CanFrameKind | None = None,
     ) -> TelemetryRecord:
+        """``frame_kind`` marks a controller error frame or a remote request
+        (:data:`CAN_FRAME_KIND_KEY` in the metadata): they share the id
+        namespace (SocketCAN's ``CAN_ERR_CRTL`` arrives as id ``0x4``) but are
+        events, never a broadcast value, so change-only storage keeps every
+        one (P02.10). Absent for an ordinary data frame."""
+        metadata: dict[str, MetadataValue] = {"can_id": can_id, "dlc": len(payload)}
+        if frame_kind is not None:
+            metadata[CAN_FRAME_KIND_KEY] = frame_kind
         return cls.from_epoch(
             timestamp,
             source="can",
             channel=f"0x{can_id:X}" if channel is None else channel,
             payload=payload,
-            metadata={"can_id": can_id, "dlc": len(payload)},
+            metadata=metadata,
         )
 
     @classmethod

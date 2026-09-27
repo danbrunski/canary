@@ -30,6 +30,7 @@ from src.analysis.broadcast_discovery import credible_fits, sweep_session
 from src.analysis.compare import PairingPolicy, compare_channels
 from src.decode.bindings import load_bindings
 from src.preprocessing.loader import read_session
+from src.storage.broadcast_storage import ChangeOnlyStorageError, change_only_copy
 
 BINDINGS_PATH = Path("data/bindings.yaml")
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "ground_truth"
@@ -50,6 +51,17 @@ POLICY = PairingPolicy.within("250ms")
 @pytest.fixture(scope="module")
 def frame() -> pd.DataFrame:
     return read_session(SESSION)
+
+
+@pytest.fixture(scope="module")
+def change_only_frame(tmp_path_factory: pytest.TempPathFactory) -> pd.DataFrame:
+    """The same slice as the recorder stores it since P02.10: a CAN frame only
+    when its payload changes, an unchanged id re-written once per timeout.
+    Made by the real filter into a temporary copy; the fixture is only read."""
+    copy = tmp_path_factory.mktemp("change-only") / SESSION.name
+    read, written = change_only_copy(SESSION, copy)
+    assert written < read
+    return read_session(copy)
 
 
 def _ids(cases: list[dict[str, Any]]) -> list[str]:
@@ -115,6 +127,38 @@ def test_binding_agrees_with_its_independent_reference(
         f"reference; expected the two to agree 1:1"
     )
     assert abs(result.offset) <= case["max_offset"], result.describe()
+
+
+@pytest.mark.parametrize(
+    "case", EXPECTATIONS["unit_agreement"], ids=_ids(EXPECTATIONS["unit_agreement"])
+)
+def test_the_one_to_one_check_holds_on_the_change_only_copy(
+    case: dict[str, Any], frame: pd.DataFrame, change_only_frame: pd.DataFrame
+) -> None:
+    """P02.10: stored change-only, the same slice gives the same answer.
+
+    Between changes the broadcast value is held inside the reader (the last
+    stored row, valid for the stale timeout), so each PID reading still finds
+    its broadcast partner: the same thresholds hold and the verdict is the one
+    the full-rate slice gets.
+    """
+    full = compare_channels(frame, case["signal"], case["reference"], policy=POLICY)
+    result = compare_channels(change_only_frame, case["signal"], case["reference"], policy=POLICY)
+
+    assert result.scale_verdict == full.scale_verdict, result.describe()
+    assert result.n_pairs >= full.n_pairs - 2, (result.describe(), full.describe())
+    assert abs(result.difference_bias) <= case["max_residual_bias"], result.describe()
+    assert result.difference_spread <= case["max_residual_spread"], result.describe()
+    assert result.r_squared >= case["min_r_squared"], result.describe()
+    assert abs(result.slope - 1.0) * 100.0 <= case["max_scale_error_pct"], result.describe()
+    assert abs(result.offset) <= case["max_offset"], result.describe()
+
+
+def test_the_sweep_refuses_the_change_only_copy(change_only_frame: pd.DataFrame) -> None:
+    """Discovery pairs frames one-to-one; change-only frames are the changes,
+    so it refuses by name rather than rank a biased sample (P02.10)."""
+    with pytest.raises(ChangeOnlyStorageError, match="store_every_frame"):
+        sweep_session(change_only_frame, ["obd:RPM"], can_ids=[0x1F9], policy=POLICY)
 
 
 @pytest.mark.parametrize(

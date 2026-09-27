@@ -212,7 +212,7 @@ Control endpoints:
 | `GET /control/classifications/summary` | corpus-wide per-mode seconds + event counts |
 | `GET /control/classifications/events` | sessions containing a given derived event kind |
 | `GET /control/sequence-detector` / `POST /control/sequence-detector` | inspect / switch the live sequence backbone (lstm\|tcn) |
-| `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs |
+| `POST /control/replay` / `POST /control/replay/stop` / `GET /control/replay` | run a stored session through the live pipeline with isolated `_replay-*` outputs; start answers 422 when a change-only session (P02.10) cannot be replayed faithfully: slower than real time, or recorded with a longer `collection.broadcast_stale_timeout_seconds` than the daemon's |
 | `GET /control/profiles` / `POST /control/profiles/{slug}/name` | list vehicle profiles / set a profile display name |
 | `GET /control/power` / `POST /control/power/keepalive` | UPS watchdog status / set or cancel the keep-alive hold |
 | `GET /control/passive` / `POST /control/passive` | inspect / arm the CAN transmit gate (receive-only mode) — see [Passive mode](#passive-mode) |

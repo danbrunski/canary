@@ -66,6 +66,7 @@ from src.preprocessing.loader import (
     count_session_rows,
     session_time_span_seconds,
 )
+from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay
 from src.telemetry import (
     CAN_SOURCE,
     RE_DERIVED_SOURCES,
@@ -377,6 +378,7 @@ async def replay_session(
     speed: float = 1.0,
     loop: bool = True,
     stats: ReplayEmissionStats,
+    broadcast_stale_timeout_seconds: float,
 ) -> None:
     """Replay ``session_dir`` onto ``queue`` until ``stop_event`` is set.
 
@@ -385,12 +387,25 @@ async def replay_session(
 
     ``stats`` is required and mutated in place: every replay reports how many
     rows it read, emitted, skipped and dropped (D02.9).
+
+    ``broadcast_stale_timeout_seconds`` is the daemon's
+    ``collection.broadcast_stale_timeout_seconds``, required so no replay path
+    can skip P02.10's refusals: a change-only session replayed slower than
+    real time, or recorded with a longer timeout than this, raises
+    :class:`~src.storage.broadcast_storage.UnfaithfulReplayError` before a
+    row is emitted.
     """
     if not session_dir.exists():
         log.warning("replay session not found: %s", session_dir)
         await stop_event.wait()
         return
     speed = speed if speed > 0 else 1.0
+    # P02.10: slower than real time, or recorded with a longer stale timeout
+    # than the daemon's, a change-only session's re-writes arrive past the
+    # timeout the live pipeline holds a value for. Raised before a row.
+    refuse_unfaithful_replay(
+        session_dir, speed, stale_timeout_seconds=broadcast_stale_timeout_seconds
+    )
 
     # Decide once, before the first row: per-row guessing is what would let a
     # pre-2026-07-29 session silently lose its only copy of decoded signals.
@@ -483,6 +498,7 @@ def make_replay_collector(config: CanaryConfig) -> CollectorStarter:
     session = Path(config.collection.replay_session or "")
     speed = config.collection.replay_speed
     looping = config.collection.replay_loop
+    stale_timeout = config.collection.broadcast_stale_timeout_seconds
 
     async def starter(queue: asyncio.Queue[TelemetryRecord], stop_event: asyncio.Event) -> None:
         log.info(
@@ -491,14 +507,20 @@ def make_replay_collector(config: CanaryConfig) -> CollectorStarter:
         )
         # The YAML-knob path has no control-plane status to publish into, so
         # the counters live and die with the log lines replay_session writes.
-        await replay_session(
-            queue,
-            session,
-            stop_event,
-            speed=speed,
-            loop=looping,
-            stats=ReplayEmissionStats(),
-        )
+        try:
+            await replay_session(
+                queue,
+                session,
+                stop_event,
+                speed=speed,
+                loop=looping,
+                stats=ReplayEmissionStats(),
+                broadcast_stale_timeout_seconds=stale_timeout,
+            )
+        except UnfaithfulReplayError:
+            # Refused by name, like a missing session: log and idle.
+            log.exception("replay refused")
+            await stop_event.wait()
 
     return starter
 

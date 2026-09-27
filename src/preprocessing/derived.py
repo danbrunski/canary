@@ -54,6 +54,7 @@ import pandas as pd
 
 from src.analysis.fsm import PHYSICAL_LIMITS
 from src.decode.bindings import Bindings
+from src.preprocessing.imu_stream import ImuFramePlan, iter_framed_numeric_parts
 from src.preprocessing.loader import (
     INDEX_COLUMNS,
     coerce_numeric_columns,
@@ -67,6 +68,12 @@ from src.preprocessing.resampler import (
     arrived_column,
     gap_column,
     resample_wide,
+)
+from src.storage.broadcast_storage import (
+    SessionCanStorage,
+    refuse_shorter_read_timeout,
+    refuse_shorter_stored_timeout,
+    session_can_storage,
 )
 
 log = logging.getLogger(__name__)
@@ -167,6 +174,10 @@ class ReducedSession:
     timestamp_unit: str
     rejects_object: dict[str, int] = field(default_factory=dict)
     rejects_float: dict[str, int] = field(default_factory=dict)
+    #: P02.10 — the longest broadcast stale timeout the session's change-only
+    #: chunks were written with (``None``: stored every frame, or not from a
+    #: stored session). :func:`resample_reduced` refuses a shorter read class.
+    broadcast_stale_timeout_seconds: float | None = None
 
     @property
     def channels(self) -> list[str]:
@@ -206,6 +217,7 @@ def reduce_long_frames(
     parts: Iterable[pd.DataFrame],
     interval_ns: int,
     *,
+    can_storage: SessionCanStorage | None,
     limits: Mapping[str, Any] = PHYSICAL_LIMITS,
     value_column: str = "value",
 ) -> ReducedSession:
@@ -215,6 +227,12 @@ def reduce_long_frames(
     guarantees it) and be in the decoder's order (``_decode_long_frame``
     sorts it), because the pivot's ``aggfunc="last"`` picks, per timestamp and
     channel, the last non-null value in that order.
+
+    ``can_storage`` is required (P02.10): the session's CAN storage
+    (:func:`~src.storage.broadcast_storage.session_can_storage`), whose
+    recorded stale timeout the result carries so :func:`resample_reduced`
+    can refuse a shorter read class; ``None`` states the parts are not from a
+    stored session.
     """
     pieces: list[pd.DataFrame] = []
     non_numeric: set[str] = set()
@@ -244,6 +262,9 @@ def reduce_long_frames(
         timestamp_unit=_finest_unit(units),
         rejects_object=rejects_object,
         rejects_float=rejects_float,
+        broadcast_stale_timeout_seconds=(
+            None if can_storage is None else can_storage.stale_timeout_seconds
+        ),
     )
 
 
@@ -452,6 +473,11 @@ def resample_reduced(
     refused by name rather than returned all-NaN.
     """
     interval_ns = grid_interval_ns(resample_config)
+    refuse_shorter_stored_timeout(
+        reduced.broadcast_stale_timeout_seconds,
+        resample_config.broadcast_max_gap_seconds,
+        what=reduced.session,
+    )
     if interval_ns != reduced.interval_ns:
         raise ValueError(
             f"{reduced.session}: reduced on a {reduced.interval_ns} ns grid, asked to "
@@ -580,6 +606,11 @@ def resample_numeric_reduced(
     from src.preprocessing.resampler import resample_long
 
     grid_interval_ns(resample_config)
+    refuse_shorter_stored_timeout(
+        reduced.broadcast_stale_timeout_seconds,
+        resample_config.broadcast_max_gap_seconds,
+        what=reduced.session,
+    )
     cells = reduced.cells
     value = cells["vnum"].where(cells["vtype"].isin([_FLOAT, _INT]))
     long = pd.DataFrame(
@@ -602,32 +633,38 @@ def reduce_numeric_session(
     *,
     part_rows: int | None = None,
     on_read: Bindings | None | Literal["current"] = "current",
+    imu_plan: ImuFramePlan | None = None,
 ) -> ReducedSession:
     """Reduce a session for :func:`resample_numeric_reduced` (P01.2).
 
-    Reads ``value_number`` part by part on tick-aligned boundaries, decimates
-    raw IMU acceleration per tick exactly as ``resample_and_segment`` does, and
-    keeps the cells ``resample_long`` reads. No gate, and no decode beyond the
-    loader's decode on read of the ``decoded:`` rows (P02.8; ``on_read`` is
-    that catalog, ``loader.iter_session_numeric_parts``): that chain has
-    neither.
+    Reads ``value_number`` part by part on tick-aligned boundaries, adds the
+    session's resolved ``imu:ACCEL_LON/LAT`` from its ``imu_frame.json``
+    (``imu_stream``, H02.4; ``imu_plan`` is that sidecar's plan, read here
+    when ``None``), decimates them per tick exactly as ``resample_and_segment``
+    does, and keeps the cells ``resample_long`` reads. No gate, and no decode
+    beyond the loader's decode on read of the ``decoded:`` rows (P02.8;
+    ``on_read`` is that catalog, ``loader.iter_session_numeric_parts``): that
+    chain has neither. The one addition is the IMU frame's ``decoded:`` speed
+    source, decoded for the stream and dropped after it
+    (``imu_stream.iter_framed_numeric_parts``).
     """
-    from src.preprocessing.loader import (
-        SESSION_PART_ROWS,
-        _decimate_imu_long,
-        iter_session_numeric_parts,
-    )
+    from src.preprocessing.loader import SESSION_PART_ROWS, _decimate_imu_long
 
     interval_ns = grid_interval_ns(resample_config)
-    parts = (
-        _decimate_imu_long(part, hz=resample_config.hz)
-        for part in iter_session_numeric_parts(
-            session_dir,
-            target_rows=part_rows or SESSION_PART_ROWS,
-            align_ns=interval_ns,
-            on_read=on_read,
-        )
+    refuse_shorter_read_timeout(session_dir, resample_config.broadcast_max_gap_seconds)
+    framed = iter_framed_numeric_parts(
+        session_dir,
+        align_ns=interval_ns,
+        target_rows=part_rows or SESSION_PART_ROWS,
+        on_read=on_read,
+        plan=imu_plan,
     )
+    parts = (_decimate_imu_long(part, hz=resample_config.hz) for part in framed)
     return reduce_long_frames(
-        session_dir.name, parts, interval_ns, limits={}, value_column="value_number"
+        session_dir.name,
+        parts,
+        interval_ns,
+        can_storage=session_can_storage(session_dir),
+        limits={},
+        value_column="value_number",
     )

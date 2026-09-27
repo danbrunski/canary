@@ -142,6 +142,12 @@ export interface CaptureProfile {
   /** Exact behavior-surface recipes this isolated capture may train. */
   behavior_model_recipes: string[];
   storage_prefix: string;
+  /**
+   * Store every broadcast CAN frame (P02.10). Normal collection stores a frame
+   * only when its payload changes; frame counts and sub-second timing need this.
+   * Refused on the default profile.
+   */
+  store_every_frame?: boolean;
 }
 
 export interface CaptureProfileState {

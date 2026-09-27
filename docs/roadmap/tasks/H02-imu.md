@@ -97,7 +97,7 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
   (`drain.accepts_source`) before lowering the stored rate — storage is what
   the dyno reads. **Accept:** a table of the three runs here, and the
   default justified by it.
-- [~] **H02.4 Frame resolution with a production caller.** **Do:** give
+- [x] **H02.4 Frame resolution with a production caller.** **Do:** give
   `resolve_frame` a caller that runs per session offline (a sidecar, like
   `imu_yaw_offset.json`), producing two families:
   `imu:ACCEL_LON/LAT` (gravity removed — for tags and segmenting, as today)
@@ -170,32 +170,136 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
     Suites run: imu_frame, imu_session, imu_live, imu_decimation,
     imu_collector, autotag (3 files), segmenter, preprocessing_live and the
     other live suites, trainability and dyno. 334 passed.
-  - **Remaining (verifier, 2026-09-26; why this is `[~]`):** the offline
-    `ACCEL_LON/LAT` family has no consumer yet.
-    - `ImuSessionFrame.rows()` has no caller, and `imu_frame.json` stores
-      only the SF rotation and the linear yaw/sign. `ACCEL_LON/LAT` itself
-      cannot be rebuilt from the sidecar, because its low-pass depends on the
-      inputs.
-    - `scripts/autotag.py` and the offline segmenter read through
-      `loader.resample_and_segment`, whose IMU decimation sees only raw
-      `imu:ACCEL_LON` rows, which no session contains.
-    - So offline decimation, the segmenter's accel modes and the offline IMU
-      auto-tags stay dormant, while live `imu:ACCEL_*_MAX` does feed the
-      live segmenter.
-    - That split matters wherever accel-gated modes are configured
-      (`launch`, `hard_brake`, `cornering` in `canary.example.yaml`). No mode
-      divergence reproduced with the example config, but it is a real
-      live/offline difference for `operating_mode`.
-    - Owed: the loader appends the resolved frame's rows, or reads a persisted
-      per-session frame (the implementer recommends a parquet under the
-      derived-store cache), inside `read_sessions` / `resample_and_segment`.
-      P02.1 has landed (`b37e713`), so the loader is free. H02.7 depends on
-      this.
-  - **Follow-on, outside this item's acceptance:** the offline segmenter
-    and `scripts/autotag.py` read through `loader.resample_and_segment`, so
-    they see `ACCEL_LON` only once the loader appends
-    `ImuSessionFrame.rows()`. `loader.py` was held by the concurrent P02.1
-    work.
+  - **Offline readers see the frame (2026-09-26; closes the verifier's
+    remainder, which found the `ACCEL_LON/LAT` family had no offline
+    consumer).** `src/preprocessing/imu_stream.py` rebuilds
+    `imu:ACCEL_LON/LAT` from `imu_frame.json` inside the `value_number` chain,
+    part by part. `imu_stream.iter_framed_numeric_parts` is the only way
+    `derived.reduce_numeric_session` reads a session. So
+    `loader.resample_and_segment` (the digest, classification, fingerprints,
+    `scripts/autotag.py`) gets `imu:ACCEL_LON_MAX/_RMS`, `ACCEL_LAT_MAX` and
+    `JERK_MAX`, with or without the derived store. The Pi needs no store.
+    - The sidecar now records the low-pass's initial state
+      (`linear_accel.first_quiescent_sample`, `initial_gravity_body_g`).
+    - The rest is recomputed from the rows. Speed and course are aligned
+      with each input's last reading carried across parts. The quiescent mask
+      keeps `window − 1` rows of history and holds the last `lookahead` rows
+      back for the next part. The EWM carries its last estimate. Yaw and sign
+      come from the sidecar.
+    - Ticks stay whole. Only the ticks still holding unresolved IMU rows are
+      held back.
+  - **Equality with the whole-session frame.** Bit-exact
+    (`assert_array_equal`) against `resolve_imu_frame`'s `ACCEL_LON/LAT`
+    (`ImuSessionFrame.rows()`, now the reference) in four cases:
+    - 150-row parts (more than 10 part edges, several inside manoeuvres),
+      1,000-row parts, and one part;
+    - through a 40 s IMU dropout, where the held rows stay bounded by the
+      look-ahead's ticks;
+    - with 0x2D1 as the speed source.
+
+    Every other row passes through exactly once, and no tick is split. One
+    step is not bit-exact: pandas' rolling std drifts up to about 6.4e-10
+    (verifier's measurement) depending on where the series starts. So the mask can differ only where a window's
+    std is within that of 1.5 km/h or 3°. The stream checks its rows against
+    the sidecar: the first quiescent sample and its value, the sample count
+    and the span. On a mismatch it raises `ImuFrameStaleError`.
+  - **Every kind of absent frame is named.** The status goes to
+    `resample_and_segment(...).attrs["imu_frame"][session]` and the log, and
+    `autotag.py` warns:
+    - `applied`;
+    - `no_imu_rows`;
+    - `unresolved`: raw IMU rows but no sidecar. The accel channels stay
+      absent, and the reason names `scripts/resolve_imu_frame.py`. The frame
+      is **not** resolved on the fly. The whole-session resolver peaked at
+      1.53 GB (30 min) and 3.63 GB (90 min) of 208 Hz data, which the Pi's
+      capped digest child cannot hold;
+    - `refused`, with its kind;
+    - `stale`: a sidecar written before 2026-09-26. Re-run the CLI without
+      `--replace`: a re-resolve keeps the frame of record's speed source, so
+      the reference is unchanged. Without that pin, a HEAD-era sidecar that
+      steered by `obd:SPEED` on a session with 0x2D1 frames re-resolved onto
+      0x2D1, got another quiescent set and reference, and was refused
+      (verifier repro, 2026-09-26). `--replace`, or no sidecar, takes the best
+      source (`test_a_stale_sidecar_backfills_with_the_same_reference`).
+  - **0x2D1 speed, honestly.** `VEHICLE_SPEED_2D1` is a `high` binding,
+    outside the loader's on-read set. So `read_imu_inputs` never saw it, and
+    the resolver silently steered by Mode 01 or GPS. The "resolves from
+    0x2D1" test above passed a channel dict, not a stored session. A stored
+    session whose only speed was 0x2D1 refused `no_speed_source`.
+    - `imu_session.speed_decode_catalog` and `read_imu_inputs` now decode it
+      from the raw frames.
+    - The stream reads the same frames, by widening the catalog for itself
+      and dropping those rows after it reads them.
+    - `speed_source` records `decoded:VEHICLE_SPEED_2D1`
+      (`test_0x2d1_speed_is_decoded_from_the_stored_frames`).
+  - **Memory and time** (synthetic 208 Hz session, laptop, peak RSS):
+
+    | chain | 30 min | 90 min |
+    |---|---|---|
+    | no sidecar | 249 MB, 5.4 s | 260 MB, 14.2 s |
+    | frame applied | 320 MB, 14.5 s | 329 MB, 34.6 s |
+
+    Applying the frame adds about 70 MB, flat in session length, and about
+    0.23 s of CPU per minute of drive.
+  - **Store.** `NUMERIC_CODE_VERSION` goes from 1 to 2. The numeric frame is
+    versioned by `ImuFramePlan.key()`: the sidecar values the stream reads,
+    plus the speed binding's spec. Resolving or removing a sidecar rebuilds
+    the frame and says why ("the session's IMU frame (imu_frame.json)
+    changed"). Store and no store are `check_exact` equal.
+  - **H01.1: the training chain never reads through the stream.**
+    - `build_feature_frame` on two real non-IMU sessions
+      (`2026-05-24T193045`, `2026-05-24T190535`), before and after this
+      change: `check_exact` equal (3,420 × 672). The `value_number` frame
+      (3,422 × 135) is equal too.
+    - A synthetic IMU session with and without its sidecar gives the same
+      training frame, and no `imu:` column is trainable.
+  - **Live vs offline**, one synthetic drive
+    (`test_live_and_offline_agree_except_where_live_cannot_see_accel`):
+    - `imu:ACCEL_LON_MAX` agrees within 1.1 mg on all 56 ticks that both
+      paths have. Live has none for its first 17 ticks, because its yaw is
+      decided about 2 s into the first pull. Offline has it from the first
+      sample.
+    - `operating_mode`, with the accel modes placed first: 54 of 73 ticks
+      agree. All 19 disagreements are ticks offline puts in an accel mode:
+      cornering→city 9, hard_brake→city 5, hard_brake→highway 2,
+      launch→city 2, launch→stopped 1.
+    - With `canary.example.yaml` as shipped: 73 of 73 agree.
+  - **Found: the live segmenter never uses accel.**
+    - `feature_pipeline.segment_or_constant` segments with
+      `SEGMENTER_SIGNAL_COLUMNS`, which has no `accel_lon`/`accel_lat`. So
+      live, and the trainers, never enter `launch`, `hard_brake` or
+      `cornering`, even with `imu:ACCEL_*_MAX` on the operating point.
+    - The offline chain uses `segmenter.DEFAULT_SIGNAL_COLUMNS`, which does
+      have them.
+    - The verifier's premise, that live feeds the live segmenter, was wrong.
+      Before this change both paths were blind to accel by accident; now
+      offline sees it and live does not.
+    - Making live see accel changes training segmentation for IMU sessions,
+      which is an operator decision. `feature_pipeline.py` is also held by
+      a concurrent agent. Not in this item's acceptance; it is a follow-on.
+  - The `value_number` chain now passes `idle_transient_lookback_seconds` to
+    the segmenter, as the wide chain and live already did. It had used the
+    180 s default whatever the config said.
+  - `RESIDUAL_PITCH_OFFSET` and its composition test now use the frame-checked
+    `dyno.correct_specific_force(samples, squat=, pitch_offset=PitchOffset)`,
+    and a sample from another `reference_id` is refused (`frame_mismatch`).
+  - **Tests.** `tests/test_imu_stream.py` (16 tests). Suites run by path,
+    slow and integration included:
+    - imu_stream, imu_session, imu_frame, imu_live, imu_decimation,
+      imu_collector, autotag (4 files), segmenter, derived, derived_store,
+      trip_end_digest, digest, preprocessing_live, trainability,
+      preprocessing_loader, fingerprint, session_classifier,
+      sequence_dataset, dyno, dyno_inputs and the CLI snapshots: 530 passed,
+      1 skipped. The one failure is the `evaluate_detectors.py` CLI
+      snapshot; that script carries another agent's uncommitted change.
+    - bounded_session_resample, preprocessing_resampler, fingerprint_script
+      and tuning_digest: 54 passed.
+    - `-m ml_training` (`scripts/ml_paths.txt` covers `src/preprocessing/`):
+      122 passed.
+    - `ruff check .`, `ruff format --check .` and `mypy src` are clean.
+    - After the stale-sidecar fix (speed source pinned on re-resolve): imu_*
+      (6 files) and autotag (4 files), 109 passed; ruff, format and `mypy src`
+      clean.
 - [ ] **H02.5 Health on `/status`.** `imu` freshness, achieved sample rate,
   FIFO overruns and the drop counter, in `/status` and the MCP `get_status`
   payload, alongside the GPS fields. **Accept:** route test; the dashboard

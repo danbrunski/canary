@@ -32,6 +32,7 @@ import pandas as pd
 from src.analysis.channels import (
     ChannelSpecError,
     align_long,
+    concat_channel_frames,
     parse_spec,
     read_channels,
 )
@@ -377,7 +378,7 @@ def _read_optional(
             unresolved.append(spec)
     if not frames:
         return pd.DataFrame(columns=["timestamp", "spec", "value", "unit"]), unresolved
-    return pd.concat(frames, ignore_index=True), unresolved
+    return concat_channel_frames(frames), unresolved
 
 
 def session_frame(
@@ -416,7 +417,7 @@ def session_frame(
     regime_specs = _regime_specs(inputs)
     aux_specs = [spec for spec in regime_specs.values() if spec not in names]
     aux, _unresolved = _read_optional(session_dir, aux_specs, inputs)
-    long = pd.concat([requested, aux], ignore_index=True) if not aux.empty else requested
+    long = concat_channel_frames([requested, aux]) if not aux.empty else requested
     present = set(long["spec"].unique()) if not long.empty else set()
     missing = [name for name in names if name not in present]
 

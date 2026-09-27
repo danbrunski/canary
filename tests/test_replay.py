@@ -62,6 +62,7 @@ async def _drain(
             speed=10_000.0,
             loop=loop,
             stats=stats if stats is not None else ReplayEmissionStats(),
+            broadcast_stale_timeout_seconds=10.0,
         )
     )
     got: list[TelemetryRecord] = []
@@ -93,7 +94,14 @@ def test_replay_missing_session_idles_then_stops(tmp_path: Path) -> None:
         queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         stop = asyncio.Event()
         task = asyncio.create_task(
-            replay_session(queue, tmp_path / "nope", stop, loop=False, stats=ReplayEmissionStats())
+            replay_session(
+                queue,
+                tmp_path / "nope",
+                stop,
+                loop=False,
+                stats=ReplayEmissionStats(),
+                broadcast_stale_timeout_seconds=10.0,
+            )
         )
         await asyncio.sleep(0.05)
         assert queue.empty()
@@ -308,7 +316,15 @@ def test_a_clamped_gap_is_reported_as_effective_speed_not_hidden_behind_speed(
         queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
         stop = asyncio.Event()
         task = asyncio.create_task(
-            replay_session(queue, sdir, stop, speed=1.0, loop=False, stats=stats)
+            replay_session(
+                queue,
+                sdir,
+                stop,
+                speed=1.0,
+                loop=False,
+                stats=stats,
+                broadcast_stale_timeout_seconds=10.0,
+            )
         )
         got: list[TelemetryRecord] = []
         try:

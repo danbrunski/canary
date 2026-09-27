@@ -388,6 +388,8 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         },
         # GRU-D serve mirrors the resampler's max_gap = (1/hz) × factor (2.0).
         "max_gap_seconds": 2.0,
+        # P02.10 — the broadcast stale class (collection.broadcast_stale_timeout_seconds).
+        "broadcast_max_gap_seconds": 10.0,
         # 1.1/1.2 — slow-channel (coolant/IAT/baro) ffill/gap ceiling, default.
         "slow_channel_max_gap_seconds": 120.0,
     }

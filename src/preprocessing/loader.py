@@ -50,6 +50,7 @@ from src.preprocessing.resampler import (
     resample_wide,
 )
 from src.preprocessing.segmenter import MODE_COLUMN, segment_operating_modes
+from src.storage.broadcast_storage import FRAME_ATTR, frame_attrs, session_can_storage
 from src.telemetry import CAN_SOURCE, DECODED_SOURCE, SOURCE_SEP
 from src.telemetry import channel_key as channel_key
 
@@ -211,7 +212,17 @@ def read_session(
     _warn_skipped_chunks(session_dir, skipped)
     if not frames:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
-    return _finish_long_frame(frames, session_dir)
+    return _with_can_storage(_finish_long_frame(frames, session_dir), session_dir, candidates)
+
+
+def _with_can_storage(
+    frame: pd.DataFrame, session_dir: Path, chunks: Sequence[Path]
+) -> pd.DataFrame:
+    """``frame`` carrying its session's CAN storage mode (P02.10) in
+    ``attrs[FRAME_ATTR]``, from the chunks' footers: a reader handed the frame
+    rather than the path still knows which broadcast rows are change-only."""
+    frame.attrs[FRAME_ATTR] = frame_attrs(session_can_storage(session_dir, chunks))
+    return frame
 
 
 @dataclass(frozen=True)
@@ -458,7 +469,9 @@ def iter_session_parts(
         skipped.extend(unreadable)
         if frames:
             yielded = True
-            yield _finish_long_frame(frames, session_dir)
+            yield _with_can_storage(
+                _finish_long_frame(frames, session_dir), session_dir, candidates
+            )
     _warn_skipped_chunks(session_dir, sorted(skipped))
     if not yielded:
         raise FileNotFoundError(f"no readable {PARQUET_PATTERN} files in {session_dir}")
@@ -645,13 +658,16 @@ def read_sessions(
     session_dirs: Iterable[Path], *, decoded: DecodedRows = "on_read"
 ) -> pd.DataFrame:
     """Read several session directories into one long-format DataFrame."""
-    frames = [read_session(path, decoded=decoded) for path in session_dirs]
+    dirs = list(session_dirs)
+    frames = [read_session(path, decoded=decoded) for path in dirs]
     if not frames:
         return _empty_long_frame()
-    return pd.concat(frames, ignore_index=True).sort_values(
+    out = pd.concat(frames, ignore_index=True).sort_values(
         ["session", "timestamp", "source", "channel"],
         kind="stable",
     )
+    out.attrs[FRAME_ATTR] = frame_attrs([session_can_storage(path) for path in dirs])
+    return out
 
 
 def _decimate_imu_long(frame: pd.DataFrame, *, hz: float) -> pd.DataFrame:
@@ -749,7 +765,10 @@ def to_wide(
 
     if coerce_numeric:
         coerce_numeric_columns(wide, index_columns=index_columns)
-
+    # P02.10: the resampler refuses a broadcast class shorter than the timeout
+    # the rows were stored with; the pivot drops ``attrs``, so carry it.
+    if FRAME_ATTR in telemetry.attrs:
+        wide.attrs[FRAME_ATTR] = telemetry.attrs[FRAME_ATTR]
     return wide
 
 
@@ -860,25 +879,38 @@ def resample_and_segment(
         # instead of rebuilding them. It is never active on the Pi
         # (``active_store``), where the digest and classification children run
         # this same bounded chain.
+        # H02.4: each session's resolved imu_frame.json adds imu:ACCEL_LON/LAT
+        # inside that reduction (``imu_stream``), and ``attrs[IMU_FRAME_ATTR]``
+        # says per session whether it did and, if not, which kind of absent.
         from src.preprocessing.derived import reduce_numeric_session, resample_numeric_reduced
         from src.preprocessing.derived_store import active_store
+        from src.preprocessing.imu_stream import IMU_FRAME_ATTR, plan_imu_frame
 
         store = active_store()
-        reduced = [
-            resample_numeric_reduced(
+        reduced: list[pd.DataFrame] = []
+        imu_frames: dict[str, dict[str, Any]] = {}
+        for session in sessions:
+            plan = plan_imu_frame(session)
+            session_cells = (
                 store.load_numeric(session, resample_config)[0]
                 if store is not None
-                else reduce_numeric_session(session, resample_config),
-                resample_config,
+                else reduce_numeric_session(session, resample_config, imu_plan=plan)
             )
-            for session in sessions
-        ]
+            use = plan.use(session_cells.channels)
+            if use.status in ("unresolved", "stale", "refused"):
+                log.info("%s: IMU frame not applied (%s): %s", use.session, use.status, use.reason)
+            imu_frames[use.session] = use.as_dict()
+            reduced.append(resample_numeric_reduced(session_cells, resample_config))
+            del session_cells
         resampled = pd.concat(reduced, ignore_index=True) if reduced else pd.DataFrame()
-        return segment_operating_modes(
+        segmented = segment_operating_modes(
             resampled,
             config.preprocessing.operating_modes,
+            recent_motion_window_seconds=config.preprocessing.idle_transient_lookback_seconds,
             mode_dwell_ticks=config.preprocessing.mode_dwell_ticks,
         )
+        segmented.attrs[IMU_FRAME_ATTR] = imu_frames
+        return segmented
 
     long = read_sessions(sessions)
     wide = to_wide(long, value=value)

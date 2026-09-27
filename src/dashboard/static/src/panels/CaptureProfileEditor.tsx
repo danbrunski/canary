@@ -385,6 +385,15 @@ export function CaptureProfileEditor({
           />{" "}
           one timestamp per round (synchronous rows)
         </label>
+        <label title="Normal collection stores a broadcast CAN frame only when its payload changes (P02.10). Store every frame when the capture needs frame counts, frame rates or sub-second frame timing. Not available on the default profile.">
+          <input
+            type="checkbox"
+            checked={draft.store_every_frame ?? false}
+            disabled={draft.name === "default"}
+            onChange={(event) => setDraft({ ...draft, store_every_frame: event.target.checked })}
+          />{" "}
+          store every CAN frame
+        </label>
         <label title="Off by default: every selected channel is sampled each round, so a capture reads as synchronous rows. Uneven rates suit background monitoring, not tuning.">
           <input
             type="checkbox"

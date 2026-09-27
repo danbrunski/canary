@@ -29,10 +29,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.analysis.channels import refuse_as_of
 from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
 
 
 def _series(long: pd.DataFrame, spec: str) -> tuple[np.ndarray, np.ndarray]:
+    """``spec``'s rows as time-ordered arrays. Each row is a reading here
+    (counted, differenced, paired one-to-one), so a change-only broadcast
+    read (P02.10; one row per payload change) is refused."""
+    refuse_as_of(long, reader="warmup input check", specs=[spec])
     rows = long[long["spec"] == spec] if "spec" in long else long
     if rows.empty:
         return np.array([]), np.array([])

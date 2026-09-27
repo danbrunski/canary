@@ -35,10 +35,12 @@ is nothing to split into LON/LAT, so no aggregate is emitted and
 bit-identical to the offline frame (that one fits yaw over the whole
 session). ``imu:*`` never trains or scores a detector (H01.1), but the live
 ``imu:ACCEL_*_MAX`` channels do reach the segmenter's accel-gated modes
-(``launch``, ``hard_brake``, ``cornering`` where configured), and the offline
-segmenter does not see them until the loader reads the resolved frame (H02.4,
-remaining). Until then ``operating_mode`` can differ live vs offline on an IMU
-install.
+(``launch``, ``hard_brake``, ``cornering`` where configured). Offline, the
+``value_number`` chain rebuilds the same channels from the session's resolved
+``imu_frame.json`` (``imu_stream``); a session never resolved has none there,
+and says so. Where the two still differ is measured in
+``tests/test_imu_stream.py`` (live emits nothing until its first straight
+manoeuvre is decided).
 """
 
 from __future__ import annotations
@@ -57,6 +59,7 @@ from src.preprocessing.imu_decimation import (
     JERK_MAX_COLUMN,
 )
 from src.preprocessing.imu_frame import (
+    GRAVITY_LOW_PASS_ALPHA,
     HEADING_COLUMN,
     QUIESCENT_LOOKAHEAD_SECONDS,
     SPEED_SOURCES,
@@ -70,7 +73,7 @@ _AXES = {"ACCEL_X": 0, "ACCEL_Y": 1, "ACCEL_Z": 2}
 IMU_FRAME_INPUTS: frozenset[str] = frozenset({*SPEED_SOURCES, HEADING_COLUMN})
 
 #: Offline ``estimate_gravity``'s smoothing factor, per sample.
-GRAVITY_ALPHA = 0.02
+GRAVITY_ALPHA = GRAVITY_LOW_PASS_ALPHA
 #: Extra history a steadiness judgement spans beyond ``quiescent_seconds +
 #: lookahead``: a sample is decided at the first reading at least the
 #: look-ahead after it, up to one reading period (GPS 1 s, Mode 01 1.43 s)

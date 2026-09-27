@@ -53,6 +53,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.afr import AfrCalibration, voltage_to_afr
+from src.analysis.channels import refuse_as_of
 from src.analysis.compare import align_pairs
 from src.analysis.noise_floor import NoiseFloor
 from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
@@ -640,8 +641,16 @@ def regime_noise_floor(
 
 
 def _long_values(frame: pd.DataFrame | None) -> tuple[np.ndarray, np.ndarray]:
+    """A :func:`src.analysis.channels.read_channels` frame as time-ordered arrays.
+
+    Every row becomes an observation that is paired one-to-one, judged for
+    steadiness against its neighbours, or counted, so a change-only broadcast
+    read (P02.10; one row per payload change) is refused here, for every
+    delivery path at once.
+    """
     if frame is None or frame.empty:
         return np.array([], dtype=float), np.array([], dtype=float)
+    refuse_as_of(frame, reader="lambda delivery")
     ordered = frame.sort_values("timestamp", kind="stable")
     times = to_seconds(pd.to_datetime(ordered["timestamp"], utc=True))
     values = pd.to_numeric(ordered["value"], errors="coerce").to_numpy(dtype=float)

@@ -46,7 +46,11 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #: 5 — A03.1: the resampler (and derived channels) emit per-channel
 #:     ``__arrived`` flags. A cached frame without them would train a
 #:     sequence model whose "arrived" mask falls back to freshness everywhere.
-FEATURE_FRAME_CACHE_VERSION = 5
+#: 6 — P02.10: broadcast channels (``can:``/``decoded:``/``dbc:``) take the
+#:     broadcast stale class (``collection.broadcast_stale_timeout_seconds``,
+#:     10 s) instead of the fast 2 s one, and their ``__arrived`` flag reads "a
+#:     stored row within that timeout". Cached frames carry the old flags.
+FEATURE_FRAME_CACHE_VERSION = 6
 
 
 def build_feature_frame_cache_key(
@@ -84,6 +88,9 @@ def _feature_frame_cache_metadata(
         "cache_version": FEATURE_FRAME_CACHE_VERSION,
         "sessions": [_session_cache_entry(session_dir) for session_dir in session_dirs],
         "preprocessing": config.preprocessing.model_dump(mode="json"),
+        # P02.10: the broadcast stale class lives beside the storage setting it
+        # must equal, outside ``preprocessing``, so it is hashed by name.
+        "broadcast_stale_timeout_seconds": config.collection.broadcast_stale_timeout_seconds,
         "bindings": _file_cache_entry(bindings_path),
         "behavior_models": _file_cache_entry(behavior_models_path),
         "dbc": _directory_cache_entry(dbc_dir, pattern="*.dbc"),

@@ -277,6 +277,7 @@ def _replay_controller(tmp_path: Path) -> tuple[ReplayController, Path]:
         writer=ParquetTelemetryWriter(storage_root),
         anomaly_logger=AnomalyEventLogger(tmp_path / "anomalies"),
         storage_root=storage_root,
+        broadcast_stale_timeout_seconds=10.0,
     )
     return controller, storage_root
 

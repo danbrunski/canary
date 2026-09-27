@@ -44,6 +44,7 @@ from src.analysis.pairing import (
     weakest_basis,
 )
 from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.storage.broadcast_storage import refuse_change_only
 
 #: A probe must clear this to be worth a human's attention at all.
 MIN_R_SQUARED = 0.90
@@ -291,6 +292,10 @@ def sweep_session(
     Results are returned unfiltered and sorted by r² — screening is
     :func:`credible_fits`'s job, kept separate so a caller can inspect the
     near-misses that ranking alone would hide.
+
+    Refuses a session that stores CAN frames change-only (P02.10,
+    :class:`~src.storage.broadcast_storage.ChangeOnlyStorageError`): record the
+    sweep with a capture profile that stores every frame.
     """
     if grid is not None:
         raise TypeError(
@@ -298,6 +303,10 @@ def sweep_session(
             'policy=PairingPolicy.within("<tol>") — frames and references are paired '
             "one-to-one on the acquisition clock, not averaged onto a grid"
         )
+    # P02.10: the sweep pairs each id's frames one-to-one with the reference;
+    # a change-only session stores a frame only when its payload changes, so
+    # its frames are the changes, biased towards moments the bytes moved.
+    refuse_change_only(session, reader="broadcast discovery (sweep_session)")
     frame = read_acquisition_frame(
         session if isinstance(session, pd.DataFrame) else _load_session(session)
     )

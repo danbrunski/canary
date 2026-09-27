@@ -23,7 +23,7 @@ import can
 from src.collection.frame_time import frame_arrival
 from src.collection.queueing import flush_dropped_can_frame_log, log_dropped_can_frame
 from src.config import CanBusConfig
-from src.telemetry import TelemetryRecord
+from src.telemetry import CanFrameKind, TelemetryRecord
 
 FrameTap = Callable[[can.Message], None]
 ParseErrorTap = Callable[[Exception], None]
@@ -70,11 +70,20 @@ def frame_to_record(msg: can.Message) -> TelemetryRecord:
     Stamped by :func:`~src.collection.frame_time.frame_arrival`, the policy
     the OBD path uses, so a broadcast row and an OBD reading from the same
     instant carry the same clock even when the driver stamp is stale (R02.4).
+
+    Error and remote frames are tagged (``frame_kind``, P02.10): they keep
+    their id spelling (``CAN_ERR_CRTL`` is ``0x4``), and change-only storage
+    keeps every one, because each is an event (an RX overflow, a TX warning),
+    not a repeating value.
     """
+    kind: CanFrameKind | None = (
+        "error" if msg.is_error_frame else "remote" if msg.is_remote_frame else None
+    )
     return TelemetryRecord.can(
         frame_arrival(msg).at,
         int(msg.arbitration_id),
         bytes(msg.data),
+        frame_kind=kind,
     )
 
 

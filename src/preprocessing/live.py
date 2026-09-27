@@ -83,6 +83,7 @@ from src.preprocessing.session_context import (
     StartContextSpec,
     start_context_specs,
 )
+from src.storage.broadcast_storage import CanChangeFilter, is_broadcast_channel
 from src.telemetry import (
     DBC_SOURCE,
     DECODED_SOURCE,
@@ -224,6 +225,15 @@ class LiveFeatureSource:
     #: (``_max_gap_by_channel``) because ``_gap_flags`` runs every tick.
     _resample_config: ResampleConfig = field(init=False)
     _max_gap_by_channel: dict[str, float] = field(init=False, default_factory=dict)
+    #: P02.10 — the storage writer's change filter over the CAN frames this
+    #: source observes, with the same timeout, reset on the same replay/session
+    #: boundary as the rest of this source's state.
+    _can_filter: CanChangeFilter = field(init=False)
+    #: Newest raw CAN frame that decodes to a binding or DBC signal, kept by
+    #: the filter or not: ``can_freshness_seconds`` reads it, because freshness
+    #: is about the bus, not about what storage keeps.
+    _last_broadcast_frame_at: datetime | None = field(init=False, default=None)
+    _decodable_can_ids: frozenset[int] = field(init=False, default=frozenset())
     #: Replay/session reset generation. A feature process can finish after a
     #: reset because the loop remains responsive while it works; tagging the
     #: snapshot makes that stale result impossible to apply to the new run.
@@ -308,6 +318,7 @@ class LiveFeatureSource:
         # ``__gap`` flag would have been set offline.
         resample_config = resample_config_for(self.config)
         self._resample_config = resample_config
+        self._can_filter = CanChangeFilter(self.config.collection.broadcast_stale_timeout_seconds)
         self._max_gap_seconds = float(resample_config.max_gap.total_seconds())
         self._slow_max_gap_seconds = float(resample_config.slow_channel_max_gap.total_seconds())
         # The storage sink's decoder (pre-indexed by CAN ID, so decode is
@@ -325,6 +336,9 @@ class LiveFeatureSource:
                 self._dbc_message_by_id[msg.frame_id] = msg
         # DID map indexed by 4-char hex so a raw "DID_1208" reading resolves
         # to its DidEntry in O(1).
+        self._decodable_can_ids = frozenset(self._dbc_message_by_id) | frozenset(
+            signal.can_id for signal in (self.bindings.signals if self.bindings else ())
+        )
         self._did_by_hex = {}
         if self.did_map is not None:
             for entry in self.did_map.dids:
@@ -384,7 +398,19 @@ class LiveFeatureSource:
                 self._set_value(channel_key(OBD_SOURCE, record.channel), value, record.timestamp)
             return
         if record.source == "can":
-            self._apply_can_decode(record)
+            # Freshness reads the raw stream: every frame that decodes, kept
+            # or not, is the bus being alive (P02.10).
+            if self._decodes_frame(record):
+                ts = record.timestamp
+                self._last_broadcast_frame_at = (
+                    ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+                )
+            # The features read the stream storage keeps (P02.10): a frame
+            # repeating its id's payload inside the re-write interval is
+            # dropped here exactly as the storage writer drops it, so live,
+            # stored and replayed features see the same frames.
+            if self._can_filter.keep_record(record):
+                self._apply_can_decode(record)
             return
         if record.source == "gps":
             value = finite_float(record.value)
@@ -424,6 +450,13 @@ class LiveFeatureSource:
         if self._frame_decoder is None:
             return ()
         return self._frame_decoder.decode(record)
+
+    def _decodes_frame(self, record: TelemetryRecord) -> bool:
+        """Whether a raw CAN frame's id has a binding or a DBC message."""
+        if not self._decodable_can_ids:
+            return False
+        can_id = parse_can_channel(record.channel)
+        return can_id is not None and can_id in self._decodable_can_ids
 
     def _apply_can_decode(self, record: TelemetryRecord) -> None:
         for decoded in self.decode_for_telemetry(record):
@@ -551,7 +584,7 @@ class LiveFeatureSource:
             **gap_flags,
             # A03.1 — per-channel "a sample arrived this tick" flags; the
             # sequence mask of an artifact trained on them reads these.
-            **self._arrival_flags(previous_tick),
+            **self._arrival_flags(previous_tick, now_utc),
         }
         snapshot.update(self._start_context(snapshot, now_utc))
         self._buffer.append(snapshot)
@@ -713,7 +746,9 @@ class LiveFeatureSource:
             self._max_gap_by_channel[channel] = cached
         return cached
 
-    def _arrival_flags(self, previous_tick: datetime | None) -> dict[str, bool]:
+    def _arrival_flags(
+        self, previous_tick: datetime | None, now: datetime | None = None
+    ) -> dict[str, bool]:
         """Per-channel ``<channel>__arrived`` flags (A03.1).
 
         ``True`` when the channel's newest accepted observation was stamped
@@ -721,10 +756,22 @@ class LiveFeatureSource:
         since then. On the first tick after a reset every observed channel has
         arrived. Quality-gate rejects never stamp, so they never arrive — as
         offline, where the gate NaNs them before the resampler sees them.
+
+        A broadcast channel (P02.10) mirrors the resampler's broadcast rule
+        instead: it arrived when its newest observation is at most the
+        broadcast stale timeout old at ``now``, because this source sees the
+        change-only stream storage keeps, where an unchanged frame is not
+        repeated.
         """
         flags: dict[str, bool] = {}
+        broadcast_timeout = self._resample_config.broadcast_max_gap_seconds
         for channel in self._current_values:
             observed_at = self._last_observed_at.get(channel)
+            if observed_at is not None and now is not None and is_broadcast_channel(channel):
+                flags[arrived_column(channel)] = (
+                    now - observed_at
+                ).total_seconds() <= broadcast_timeout
+                continue
             flags[arrived_column(channel)] = observed_at is not None and (
                 previous_tick is None or observed_at > previous_tick
             )
@@ -765,9 +812,18 @@ class LiveFeatureSource:
             ]
             return min(ages) if ages else None
 
+        # The raw frame stamp, not the decoded channels' observation ages:
+        # those follow the change-only stream (P02.10), where an unchanged id
+        # is observed once per re-write interval.
+        frame_age = (
+            (now_utc - self._last_broadcast_frame_at).total_seconds()
+            if self._last_broadcast_frame_at is not None
+            else None
+        )
         can_ages = (
             age
             for age in (
+                frame_age,
                 _freshest_age(f"{DECODED_SOURCE}{SOURCE_SEP}"),
                 _freshest_age(f"{DBC_SOURCE}{SOURCE_SEP}"),
             )
@@ -810,6 +866,8 @@ class LiveFeatureSource:
         starts from an empty history, same as a freshly constructed one.
         """
         self._generation += 1
+        self._can_filter.reset()
+        self._last_broadcast_frame_at = None
         self._current_values = {}
         self._last_observed_at = {}
         self._last_tick_at = None

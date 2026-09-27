@@ -530,7 +530,11 @@ async def run_daemon(
         else None
     )
     storage_writer = ensure_async_writer(
-        ParquetTelemetryWriter(config.collection.storage_path, arming_gate=arming_gate)
+        ParquetTelemetryWriter(
+            config.collection.storage_path,
+            arming_gate=arming_gate,
+            broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
+        )
         if writer is None
         else writer
     )
@@ -707,6 +711,7 @@ async def run_daemon(
                 writer=storage_writer,
                 anomaly_logger=components.event_logger,
                 storage_root=config.collection.storage_path,
+                broadcast_stale_timeout_seconds=config.collection.broadcast_stale_timeout_seconds,
                 live_source=live_source,
                 persistence_gate=components.persistence_gate,
                 emitter=components.emitter,

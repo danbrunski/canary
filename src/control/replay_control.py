@@ -57,6 +57,7 @@ from src.collection.replay import ReplayEmissionStats, replay_session
 from src.control.capture_manifest import read_capture_manifest
 from src.session import SessionKind, issue_isolated_id, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
+from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord
 
@@ -98,6 +99,12 @@ class ReplayConflictError(ReplayError):
 
 class ReplayNotFoundError(ReplayError):
     """The requested source session doesn't exist."""
+
+
+class ReplayRefusedError(ReplayError):
+    """The requested replay cannot be faithful (a named cause, e.g. P02.10's
+    slower-than-real-time replay of a change-only session, or one recorded
+    with a longer broadcast stale timeout than the daemon's)."""
 
 
 class ReplayNotRunningError(ReplayError):
@@ -221,6 +228,7 @@ class ReplayController:
         writer: ParquetTelemetryWriter | AsyncParquetTelemetryWriter,
         anomaly_logger: AnomalyEventLogger,
         storage_root: Path,
+        broadcast_stale_timeout_seconds: float,
         live_source: LiveFeatureSource | None = None,
         persistence_gate: PersistenceGate | None = None,
         emitter: AnomalyEventEmitter | None = None,
@@ -236,6 +244,9 @@ class ReplayController:
         self._writer = ensure_async_writer(writer)
         self._anomaly_logger = anomaly_logger
         self._storage_root = Path(storage_root)
+        # The daemon's collection.broadcast_stale_timeout_seconds: required,
+        # so a controller cannot be built that skips P02.10's replay refusals.
+        self._broadcast_stale_timeout_seconds = broadcast_stale_timeout_seconds
         # In-memory state shared with live collection (Phase 7.1) — all
         # optional so tests/callers that don't wire live inference (e.g. no
         # model artifacts, storage-only checks) still work unchanged.
@@ -339,6 +350,13 @@ class ReplayController:
         if not source_dir.is_dir():
             raise ReplayNotFoundError(f"session {source_session_id!r} not found")
 
+        speed = speed if speed > 0 else 1.0
+        try:
+            refuse_unfaithful_replay(
+                source_dir, speed, stale_timeout_seconds=self._broadcast_stale_timeout_seconds
+            )
+        except UnfaithfulReplayError as exc:
+            raise ReplayRefusedError(str(exc)) from exc
         manifest = read_capture_manifest(source_dir)
         replay_id = issue_isolated_id(_utc_now())
         # D02.9: stop live input first, then let what is already queued land
@@ -375,7 +393,6 @@ class ReplayController:
                 log.exception("emitter.enter_replay_mode failed")
 
         stop_event = asyncio.Event()
-        speed = speed if speed > 0 else 1.0
         stats = ReplayEmissionStats()
         task = asyncio.create_task(
             replay_session(
@@ -385,6 +402,7 @@ class ReplayController:
                 speed=speed,
                 loop=loop,
                 stats=stats,
+                broadcast_stale_timeout_seconds=self._broadcast_stale_timeout_seconds,
             ),
             name=f"replay-{replay_id}",
         )
@@ -539,5 +557,6 @@ __all__ = [
     "ReplayError",
     "ReplayConflictError",
     "ReplayNotFoundError",
+    "ReplayRefusedError",
     "ReplayNotRunningError",
 ]

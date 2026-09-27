@@ -8,6 +8,7 @@ from src.mcp_server.client import DaemonClient
 from src.storage.telemetry_query import (
     QueryValidationError,
     TelemetryQuery,
+    can_storage_note,
     decoded_rows_note,
 )
 
@@ -84,7 +85,13 @@ def query_telemetry(
         rows = query_runner.run(sql, row_limit=row_limit, session=session, since=since, until=until)
     except QueryValidationError as exc:
         return {"ok": False, "error": str(exc), "rows": [], "count": 0}
-    return {"ok": True, "rows": rows, "count": len(rows), **decoded_rows_note(sql, rows)}
+    return {
+        "ok": True,
+        "rows": rows,
+        "count": len(rows),
+        **decoded_rows_note(sql, rows),
+        **can_storage_note(sql),
+    }
 
 
 __all__ = ["get_recent_telemetry", "query_telemetry"]
