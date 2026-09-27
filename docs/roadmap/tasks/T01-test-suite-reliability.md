@@ -409,3 +409,16 @@ measurement in hand.
   of five concurrent `pytest -n0` copies, 11–13 s each, 1-min load 4.8 and
   8.4 at the end of the short runs), and 15 of 15 sequential quiet runs,
   where the collision had hit 1 in 3 before.
+
+- [x] **T01.12 `tests/test_inference_scheduling.py::test_run_live_inference_records_timing_and_shuts_down`
+  fails under CI load and passes alone.** Seen 2026-09-27 in CI run
+  36311185614 (`34f9886`, which touched no inference code):
+  `assert snap.ticks_scheduled >= 3` got 2. Passed 5 of 5 alone (`-n0`). The
+  test slept a fixed 0.4 s after starting `run_live_inference` at a 50 ms
+  cadence, so the scheduler's startup (executor, first feature build) shared
+  the window, and a slow start left room for only two ticks. The test measured
+  the runner's startup speed, not the scheduler. Fix, test only: wait until
+  three ticks are scheduled (10 s deadline, failing at once with the task if
+  the pipeline dies first), then stop. The later assertions are unchanged.
+  Acceptance: 10 of 10 copies (two rounds of five concurrent `pytest -n0`)
+  beside 12 CPU burners, and the whole file 28 of 28.
