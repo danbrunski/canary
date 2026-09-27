@@ -37,7 +37,7 @@ the auto-tag pass. None of it is a rewrite.
 Two distinct payoffs, ranked:
 
 1. **Clean transient events.** `obd:SPEED` over the Canable OBD path is
-   ~1–5 Hz with jitter. `src/analysis/derived.py::_accel_metrics` already
+   ~1–5 Hz with jitter. `src/signals/derived.py::_accel_metrics` already
    has to scan launches and abandon noisy ones because it differentiates
    that coarse trace. A 100+ Hz accelerometer gives longitudinal/lateral
    g *directly* — no differentiation of a slow signal. Hard-accel /

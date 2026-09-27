@@ -14,8 +14,11 @@ R09.1 turns R01.8's `tests/test_layering.py` into a layer order and records
 today's 84 upward edges and 3 pairs in `OWED`, which stops the growth
 immediately. R09.2–R09.8 each move one group down and delete their entries.
 The operator adopted the strict order on 2026-09-27, replacing R01.8's
-named-edge rule, and R09.1 landed the same day. The overnight queue is
-unchanged.
+named-edge rule, and R09.1 landed the same day. R09.2–R09.5 landed the same
+evening, each verified separately, and took `OWED` from 84 to 15. Each was a
+pure move with an identical 900 s replay. The remaining work is R09.6 (the
+`behavior`/`features` split), R09.7, R09.8 and the R09.9 close-out. The
+overnight queue is unchanged.
 
 **Status 2026-09-26: P01 and P02, pipeline memory and time.**
 [`P01-derived-session-frames.md`](P01-derived-session-frames.md) took the

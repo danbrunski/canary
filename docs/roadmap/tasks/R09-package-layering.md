@@ -139,36 +139,41 @@ Under the map above, the tree has 85 upward file → module edges and 3
 same-layer pairs. One edge is the standing composition root, so R09.1 starts
 with 84 `OWED` edges plus the 3 pairs.
 
+**Status 2026-09-27:** R09.2–R09.5 have landed, and their rows are ticked (✓).
+`OWED` holds 15 entries (R09.6 ×5, R09.8 ×10), and `OWED_PAIRS` holds
+`alerts ↔ models` and `companion ↔ dashboard`. `tests/test_layering.py` is
+the live ledger, and this table is the starting snapshot.
+
 | from → to (modules imported) | item |
 |---|---|
-| `analysis` → `control.sessions`, `control.capture_manifest` | R09.3 |
-| `analysis` → `control.dtc_state`, `control.trip_end` | R09.2 |
-| `preprocessing` → `analysis.{derived,committees,afr,fsm,pairing,drives}` | R09.4 |
+| `analysis` → `control.sessions`, `control.capture_manifest` | R09.3 ✓ |
+| `analysis` → `control.dtc_state`, `control.trip_end` | R09.2 ✓ |
+| `preprocessing` → `analysis.{derived,committees,afr,fsm,pairing,drives}` | R09.4 ✓ |
 | `daemon` → `dashboard.{broadcast,behavior_live,ups}` | R09.8 |
 | `daemon/server.py` → `dashboard.api` | `STANDING` |
 | `decode` → `preprocessing.{features,local_range,session_context}` (R09.2 cleared `resampler`, `segmenter`) | R09.6 |
-| `models` → `analysis.drives` | R09.4 |
-| `models` → `analysis.session_classifier` | R09.3 |
-| `models` → `analysis.tune_revisions` | R09.5 |
-| `models` → `analysis.training_disposition` | R09.2 |
-| `models` → `control.{sessions,capture_manifest}` | R09.3 |
-| `profiles` → `analysis.{tune_revisions,vehicle_ledger}`, `collection.*` | R09.5 |
-| `collection` → `analysis.derived` | R09.4 |
-| `collection` → `analysis.tune_revisions`, `control.calibration` | R09.5 |
-| `collection` → `preprocessing.loader` | R09.3 |
-| `storage` → `collection.{capture_profiles,record_arming}` | R09.2 |
-| `storage` → `analysis.{digest,fingerprint,session_classifier}` | R09.3 |
-| `storage` → `preprocessing.{loader,decode}` | R09.3 |
-| `storage` → `control.dtc_state` | R09.2 |
-| `alerts` → `analysis.committees` (`TYPE_CHECKING`) | R09.4 |
+| `models` → `analysis.drives` | R09.4 ✓ |
+| `models` → `analysis.session_classifier` | R09.3 ✓ |
+| `models` → `analysis.tune_revisions` | R09.5 ✓ |
+| `models` → `analysis.training_disposition` | R09.2 ✓ |
+| `models` → `control.{sessions,capture_manifest}` | R09.3 ✓ |
+| `profiles` → `analysis.{tune_revisions,vehicle_ledger}`, `collection.*` | R09.5 ✓ |
+| `collection` → `analysis.derived` | R09.4 ✓ |
+| `collection` → `analysis.tune_revisions`, `control.calibration` | R09.5 ✓ |
+| `collection` → `preprocessing.loader` | R09.3 ✓ |
+| `storage` → `collection.{capture_profiles,record_arming}` | R09.2 ✓ |
+| `storage` → `analysis.{digest,fingerprint,session_classifier}` | R09.3 ✓ |
+| `storage` → `preprocessing.{loader,decode}` | R09.3 ✓ |
+| `storage` → `control.dtc_state` | R09.2 ✓ |
+| `alerts` → `analysis.committees` (`TYPE_CHECKING`) | R09.4 ✓ |
 | `control` → `daemon.{health,components}` (`TYPE_CHECKING`) | R09.8 |
-| `datasets` → `control.sessions` | R09.3 |
-| `trainability` → `analysis.{committees,derived}` | R09.4 |
-| `trainability` → `preprocessing.features` | R09.2 |
-| `config` → `storage.broadcast_storage`, `collection.lsm6dsox` | R09.2 |
-| `plausibility` → `analysis.fsm` | R09.4 |
-| `preprocessing` → `models.artifact_hash` | R09.2 |
-| pair `models ↔ plausibility` | R09.2 |
+| `datasets` → `control.sessions` | R09.3 ✓ |
+| `trainability` → `analysis.{committees,derived}` | R09.4 ✓ |
+| `trainability` → `preprocessing.features` | R09.2 ✓ |
+| `config` → `storage.broadcast_storage`, `collection.lsm6dsox` | R09.2 ✓ |
+| `plausibility` → `analysis.fsm` | R09.4 ✓ |
+| `preprocessing` → `models.artifact_hash` | R09.2 ✓ |
+| pair `models ↔ plausibility` | R09.2 ✓ |
 | pair `alerts ↔ models` | R09.7 |
 | pair `companion ↔ dashboard` | R09.8 |
 
@@ -619,6 +624,19 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       differ, 5255 floats, max |delta| 0;
     - counters and meta identical.
 
+  **Verified 2026-09-27 (verifier): earned, with nits.**
+  - Every moved definition is AST-identical, apart from the declared
+    renames.
+  - Every sidecar and session reader was run at `5f6717b` and `c9d11ab`
+    over about 188 real session directories in `~/canary-data`. The outputs
+    are byte-identical (1,112,975 bytes each), so session ordering and
+    sidecar parsing are unchanged on real data.
+  - The verifier's own 900 s replay was identical.
+  - All 256 ordered fresh-interpreter import pairs of 16 touched modules
+    load, with no cycle.
+  - Nits fixed after R09.5: D03.29's `session_started_at` path and this
+    ledger table.
+
 - [x] **R09.4 `src/signals/`: channel physics out of `analysis`.**
   - **Move to `src/signals/` (layer 0):** `derived`, `committees`, `afr`,
     `fsm`, `pairing` and the `vehicle_signals/` package. Once R09.2 has
@@ -647,9 +665,9 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   behind as a shim.
   - **What moved where** (`git mv`): `analysis/{derived,committees,afr,fsm,pairing}.py`
     → `src/signals/`; the `analysis/vehicle_signals/` package →
-    `src/signals/vehicle_signals/`, `nissan_xterra_2008.py` intact (it finds
-    its modules through `__name__`/`pkgutil`, so nothing in it names its
-    parent); `analysis/drives.py` → `preprocessing/drives.py`, byte-identical.
+    `src/signals/vehicle_signals/`, `nissan_xterra_2008.py` unchanged except its
+    one import (`from src.signals.vehicle_signals import InputGroups`; the
+    package finds its modules through `__name__`/`pkgutil`); `analysis/drives.py` → `preprocessing/drives.py`, byte-identical.
     `src/signals/__init__.py` is new: a docstring saying what the package is
     and that it re-exports nothing.
   - **No extra move was needed to keep `signals` at layer 0.** Walking every
@@ -743,6 +761,22 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       differ, 5255 floats, max |delta| 0;
     - counters and meta identical.
 
+  **Verified 2026-09-27 (verifier): earned, with nits.**
+  - All 8 moved files are AST-identical under the path substitution.
+  - `vehicle_modules()` discovers
+    `src.signals.vehicle_signals.nissan_xterra_2008` in a fresh interpreter.
+  - All 192 `"src.…"` string literals resolve, apart from the intended
+    fixture in `test_layering.py`.
+  - The ground-truth (30) and golden (2) suites pass unchanged, with their
+    fixtures unchanged.
+  - Nits fixed after R09.5: three "see analysis.committees" comments and
+    the planning docs' current-code paths.
+  - **Operator note:** `models/sequence_validation_split.VALIDATION_RULE_STATEMENT`
+    still names `src.analysis.drives.piece_units`. It is written into every
+    sequence manifest, and nothing compares it with live code. Fixing the
+    text means bumping `VALIDATION_RULE`; otherwise new manifests would
+    state different text under the same rule id.
+
 - [x] **R09.5 `src/vehicle/`: the vehicle's own records.**
   - **Move into `src/vehicle/` (layer 1):** `analysis/tune_revisions.py`,
     `analysis/vehicle_ledger.py` and `src/profiles.py`. Nothing below
@@ -769,7 +803,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   `ed88454`, and `vehicle_ledger.py` differs only in one docstring path. An AST
   comparison of the 47 top-level definitions of the old `src/profiles.py`
   against `src/vehicle/profiles.py` + `src/collection/vehicle_probe.py`
-  finds 42 identical. The five that differ are `_resolve_active_profile` and
+  finds 41 identical. The six that differ are `_resolve_active_profile` and
   `resolve_active_profile` (the `probe` parameter), `VehicleInfoProbe` (its
   docstring), and `_record_calibration_boundary`, `_registries_share_history`
   and `active_registry`, whose lazy imports now name `src.vehicle.*`. No
@@ -898,6 +932,27 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
     - scores identical: IF 0 of 901, LSTM 0 of 872 and fused 0 of 872
       differ, 5255 floats, max |delta| 0;
     - counters and meta identical.
+
+  **Verified 2026-09-27 (verifier): earned, with nits.**
+  - Twelve profile-resolution scenarios ran through both trees:
+    - override to a known slug, override to an unknown slug, override with
+      profiles disabled, and profiles disabled;
+    - VIN `None`, a known VIN, a known VIN with a new calibration ID, an
+      unknown VIN, and an unknown VIN with auto-register off;
+    - a probe that raises, alone, with an override and with profiles
+      disabled.
+
+    The old tree patched the probe and the new tree passed it as `probe=`.
+    The results (probe calls, resolved slug, registry and ledger content,
+    exceptions) are byte-identical: 0 probe calls on every override or
+    disabled path, and 1 otherwise.
+  - All 9,660 `src` import pairs resolve.
+  - Both `sync-train.sh` heredocs run.
+  - The test gap it found is closed. `tests/test_profiles.py`'s override and
+    disabled tests now pass `_must_not_probe`, which fails the test on any
+    call. The real probe is a no-op with OBD disabled and would not have
+    noticed a call. The helper was checked to fire on the probing path.
+  - The `test_can_collector` load flake it hit is T01.14.
 
 - [ ] **R09.6 `src/behavior/` and `src/features/`, landed together.**
   - **Behaviour models** move to `src/behavior/` (layer 4):

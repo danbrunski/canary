@@ -10,7 +10,7 @@ maps. A three-part capability review (derived/physics layer, PID/DID
 coverage, analysis surfacing) on 2026-07-18 found the foundations are
 substantially **built but unwired**:
 
-- `src/analysis/derived.py` already computes fuel flow (3-method
+- `src/signals/derived.py` already computes fuel flow (3-method
   fallback chain), instant/average economy, CO₂, boost/vacuum,
   estimated HP/torque, and a `TripSummary` with 0–60 and quarter-mile
   metrics — **called only from tests**. Nothing streams the derived
@@ -399,7 +399,7 @@ New channels go in `compute_derived_channels` (performance) or
 
 | Area | Anchor |
 |---|---|
-| Derived perf channels | `src/analysis/derived.py:216-282` (`compute_derived_channels`); fuel chain `:157-188`; power `:191-213` |
+| Derived perf channels | `src/signals/derived.py:216-282` (`compute_derived_channels`); fuel chain `:157-188`; power `:191-213` |
 | TripSummary (unwired) | `derived.py:379-517`; accel metrics `:400-447`; callers: tests only |
 | Live pipeline import gap | `src/preprocessing/feature_pipeline.py:26,461` (only `compute_anomaly_signals`) |
 | Poll set vs registry | `can_obd_client.py:517-556 PID_DECODERS` (~38 polled) vs `obd_registry.py:373-1150` (~90 decoded) |

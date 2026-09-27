@@ -30,6 +30,10 @@ measurement in hand.
   | `scripts/ci_gate.sh` vitest (full dashboard suite) | `92b5374` | not recorded | `src/panels/SessionsPanel.test.ts` › hosts SessionsCard and ReplayCard side by side; failed again in a full local `pnpm vitest run`, passed 3 of 3 alone — T01.10 |
   | `scripts/ci_gate.sh`, `-n auto` | `dda8835` | not recorded | `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`, passed serially in 7.5 s (a `test_daemon.py` test: T01.1's family, after its fix) |
 | `scripts/ci_gate.sh`, `-n auto` | `95eca7c` | 15.67 (1-min, at the serial re-run) | same test again, passed serially in 4.9 s; the commit touched only `tests/test_layering.py` and docs — T01.13 |
+| R09.2 verifier, `-m slow`, beside the R09.3 implementer | `5f6717b` | 9.77 (5-min) | `tests/test_daemon.py::test_run_daemon_end_to_end_inference_emits_anomaly`, 32.7 s against a normal 5–6 s; 8 of 9 alone |
+| R09.3 implementer, `-n 4` | `5f6717b` + R09.3 diff | not recorded | the same test again, passed alone and in the slow run |
+| R09.4 implementer, inner loop, beside a 31-min replay | `c9d11ab` + R09.4 diff | not recorded | `tests/test_daemon.py::test_run_live_inference_scores_during_replay_despite_engine_off_reading` (30 s hang-guard `CancelledError`), passed alone in 5.9 s |
+| R09.5 verifier, inner loop | `1df5e66` | not recorded | `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting` (`assert 3 == 4`), 3 of 3 alone — T01.14 |
 
   The pre-push hook now re-runs parallel-run failures serially once, and names
   a failure that passes serially as flaky. That keeps the gate usable. It is
@@ -446,3 +450,17 @@ measurement in hand.
      test fails, so the next flake keeps its traceback.
 
   **Acceptance:** 10 of 10 copies under the controlled load, as in T01.12.
+
+- [ ] **T01.14 `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting`
+  races its own stop condition.**
+  - **Seen** 2026-09-27 by the R09.5 verifier in an inner-loop run at
+    `1df5e66`, which touched nothing in `can_collector`. The failure was
+    `assert 3 == 4` on `parse_errors`. It passed 3 of 3 alone.
+  - **Diagnosis (verifier, not yet confirmed under controlled load).** The
+    test sets `stop` once the queue holds 8 frames, which can happen before
+    the collector reads the 4th malformed frame. The assertion then counts
+    three.
+  - **Do:** wait for `stats.parse_errors == 4`, or for all 12 bus calls to be
+    consumed, before setting `stop`, with a deadline in the style of
+    `tests/waits.py`. Fix the test only.
+  - **Acceptance:** 10 of 10 copies beside 12 CPU burners, as in T01.12.

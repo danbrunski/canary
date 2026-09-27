@@ -1638,7 +1638,7 @@ live here now, so the documents could be archived
     vehicle was last seen moving, if speed was lost). `handle_trip_end_off_loop(...,
     trip=)` writes a `trip` block into `digest.json` with `started_at`, `stopped_at`,
     `speed_source`, `end_session`, and `sessions`, captures included, ordered by
-    `src.control.sessions.session_started_at`, never by name. `coverage` is
+    `src.storage.sessions.session_started_at`, never by name. `coverage` is
     `end_session_only` when the trip spanned more than one session: the digest's
     statistics cover the end session only, and the block keeps the rest from being
     silently dropped. A multi-session digest (statistics over every spanned

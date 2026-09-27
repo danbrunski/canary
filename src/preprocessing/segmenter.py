@@ -39,7 +39,7 @@ DEFAULT_RECENT_MOTION_WINDOW_SECONDS = 180.0
 # absent — e.g. rolling with the engine off, or a PID dropout): it has a
 # stationary noise floor and over-reads on marginal fixes (observed 151 km/h vs
 # OBD's 110), so it corroborates rather than gates. GPS↔OBD *disagreement* is
-# surfaced separately as a sensor-committee residual (see analysis.committees),
+# surfaced separately as a sensor-committee residual (see signals.committees),
 # not by which one wins the coalesce.
 # The `decoded:` entries below are broadcast CAN, which arrives at ~98 Hz
 # against Mode 01's 0.26-0.93 Hz. They sit *after* the OBD PID because the

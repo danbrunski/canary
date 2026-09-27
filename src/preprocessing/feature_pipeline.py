@@ -1375,7 +1375,7 @@ def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.D
     # residuals of redundant sensors of one quantity (e.g. OBD↔GPS speed).
     # Committees are detectors, not features — they stay in the operating
     # frame for the committee evaluator and the fingerprint, and are never
-    # rolled into the feature frame (see analysis.committees).
+    # rolled into the feature frame (see signals.committees).
     framed = append_committee_residuals(framed)
     return framed
 
@@ -2108,7 +2108,7 @@ def candidate_feature_columns(
         if resolved_policy.exclusion_reason(base) is not None:
             continue
         # Committee divergence residuals marked non-trainable: computed and
-        # logged, but kept out of the trained set — see analysis.committees.
+        # logged, but kept out of the trained set — see signals.committees.
         if base_channel(col) in non_trainable_committees:
             continue
         if pd.api.types.is_numeric_dtype(features[col]):

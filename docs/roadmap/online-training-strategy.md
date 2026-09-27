@@ -43,7 +43,7 @@ and is out of scope until the guards below exist.
 | Side-by-side IF + LSTM retrain over recent sessions | `scripts/retrain.py` | Done — "Manual trigger in v1; cron later" |
 | Training run lineage + promotion lifecycle + rollback | `src/models/training_ledger.py` | Done — `unpublished → active`, latest-line-wins per `run_id` |
 | Reactive operator verdicts feeding retrain | `src/alerts/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
-| Observed-vs-FSM-spec range scoring | `src/analysis/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
+| Observed-vs-FSM-spec range scoring | `src/signals/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
 | Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `src.models.evaluation.pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
 | Per-vehicle data partitioning | `src/vehicle/profiles.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
 | Scheduled trigger + training-data validation | — | **Missing. This doc.** |
@@ -344,7 +344,7 @@ as separate stages; a row must pass both.
 |---|---|
 | Scheduler | daemon hook / systemd timer driving `scripts/retrain.py` (extend with `--since`) |
 | Data-quality gate | new module reusing `src/analysis/range_match.py` at physical limits |
-| FSM physical limits | `src/analysis/fsm.py` (extract abs min/max alongside nominal) |
+| FSM physical limits | `src/signals/fsm.py` (extract abs min/max alongside nominal) |
 | Disposition + overrides | `data/accepted_baselines.yaml` (new), loader beside `src/decode/behavior_models.py` |
 | Directional deviation | `src/decode/behavior_models.py` (`DeviationConfig` variant) |
 | Disposition lineage | `src/models/training_ledger.py` (add `dispositions` to the run record) |
@@ -470,7 +470,7 @@ verified against, as amended by the validity check above.
 ### Phase 1 — data-quality gate + disposition report (no auto-retrain)
 
 - [x] **1.1 — FSM physical limits.** Landed: curated `PHYSICAL_LIMITS`
-  table in `src/analysis/fsm.py`, each bound traced to the actual
+  table in `src/signals/fsm.py`, each bound traced to the actual
   decode formula (`src/collection/can_obd_client.py`) — e.g. RPM's
   16383.75 ceiling at raw 0xFFFF, coolant's -40°C sensor-open value at
   raw 0. FSM-text extraction fallback confirmed empty on the real

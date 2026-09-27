@@ -300,19 +300,29 @@ def test_resolve_falls_back_to_default_and_registers(tmp_path: Path):
     assert any(p.slug == profile.slug for p in registered)
 
 
+def _must_not_probe(_config: CanaryConfig) -> VehicleInfoProbe:
+    """A probe for paths that must never open a bus: an override or disabled profiles.
+
+    R09.5 made the probe a required argument of ``resolve_active_profile``; the
+    old code patched ``probe_vehicle_info``, and passing the real probe here
+    (a no-op with OBD disabled) would not notice a call.
+    """
+    pytest.fail("resolve_active_profile probed the bus on a path that must not")
+
+
 def test_resolve_override_returns_registry_entry(tmp_path: Path):
     config = _base_config(tmp_path)
     save_registry(
         config.profiles.registry_path,
         [VehicleProfile(slug="work-truck", vin="VINWORK", name="Work Truck")],
     )
-    profile = resolve_active_profile(config, probe=probe_vehicle_info, override_slug="work-truck")
+    profile = resolve_active_profile(config, probe=_must_not_probe, override_slug="work-truck")
     assert profile.name == "Work Truck"
 
 
 def test_resolve_override_unknown_slug_synthesizes(tmp_path: Path):
     config = _base_config(tmp_path)
-    profile = resolve_active_profile(config, probe=probe_vehicle_info, override_slug="brand-new")
+    profile = resolve_active_profile(config, probe=_must_not_probe, override_slug="brand-new")
     assert profile.slug == "brand-new"
     assert any(p.slug == "brand-new" for p in load_registry(config.profiles.registry_path))
 
@@ -322,7 +332,7 @@ def test_resolve_disabled_does_not_write(tmp_path: Path):
     config = config.model_copy(
         update={"profiles": config.profiles.model_copy(update={"enabled": False})}
     )
-    resolve_active_profile(config, probe=probe_vehicle_info)
+    resolve_active_profile(config, probe=_must_not_probe)
     assert not config.profiles.registry_path.exists()
 
 
