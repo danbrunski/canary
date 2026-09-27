@@ -26,8 +26,8 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
-from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
 from src.decode.dids import MEMORY_SOURCE, load_did_map
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 TableKind = Literal["fuel_targets", "fuel_compensation"]
 

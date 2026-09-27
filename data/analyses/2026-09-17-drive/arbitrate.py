@@ -13,7 +13,7 @@ import numpy as np
 
 from src.analysis.channels import read_channels
 from src.analysis.compare import align_pairs
-from src.analysis.pairing import PairingPolicy
+from src.signals.pairing import PairingPolicy
 
 sess = Path(sys.argv[1])
 TOL = PairingPolicy.within("300ms")

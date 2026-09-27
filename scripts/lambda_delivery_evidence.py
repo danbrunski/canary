@@ -37,9 +37,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from src.analysis.afr import AfrCalibration, load_afr_calibration  # noqa: E402
 from src.analysis.channels import read_channels  # noqa: E402
-from src.analysis.derived import FUEL_PROPERTIES  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
     DriveInputs,
     LambdaDeliveryDeclaration,
@@ -54,9 +52,11 @@ from src.analysis.lambda_delivery import (  # noqa: E402
     target_source_agreement,
 )
 from src.analysis.noise_floor import load_noise_floor  # noqa: E402
-from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds  # noqa: E402
 from src.paths import DIDS_YAML  # noqa: E402
 from src.preprocessing.loader import read_session  # noqa: E402
+from src.signals.afr import AfrCalibration, load_afr_calibration  # noqa: E402
+from src.signals.derived import FUEL_PROPERTIES  # noqa: E402
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds  # noqa: E402
 
 
 def _long(session: Path | pd.DataFrame, spec: str, **kw: Any) -> pd.DataFrame:

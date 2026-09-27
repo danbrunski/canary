@@ -1,6 +1,6 @@
 # Sensor-committee relations for the 2008 Nissan Xterra — H04.
 #
-# Loaded by src/analysis/committees.py (strict schema). A committee checks that
+# Loaded by src/signals/committees.py (strict schema). A committee checks that
 # two instruments of one quantity keep the relation measured on THIS vehicle,
 # and flags a sustained departure from it. It never flags the relation itself:
 # ECU speed reads ~8 % under GPS here, and that is a fact about the truck, not

@@ -149,7 +149,7 @@ MAX_RESOLVABILITY_FLAG_RATE = 0.05
 DEFAULT_EXCEEDANCE_EPISODE_GAP_SECONDS = 30.0
 
 #: A04.4 — a mode's threshold must rest on this many independent physical
-#: drives (``src.analysis.drives.count_drives``), per mode, not only globally: the
+#: drives (``src.preprocessing.drives.count_drives``), per mode, not only globally: the
 #: 2026-09-20 idle and warmup thresholds came entirely from one session at
 #: 71-73 kPa against a training median of 79. Same floor as the sequence
 #: detector's (``sequence_registry.MIN_CALIBRATION_SESSIONS``).
@@ -800,10 +800,10 @@ def exceedance_episodes(
 
 
 def _drive_count(rows: pd.DataFrame, *, timestamp_column: str, session_column: str) -> int:
-    """Independent physical drives among ``rows`` (:func:`src.analysis.drives.count_drives`:
+    """Independent physical drives among ``rows`` (:func:`src.preprocessing.drives.count_drives`:
     the frame's stamped physical drive, captures and in-recording pauses
     included; rows from one drive either side of a capture count once)."""
-    from src.analysis.drives import count_drives
+    from src.preprocessing.drives import count_drives
 
     return count_drives(rows, session_column=session_column, timestamp_column=timestamp_column)
 

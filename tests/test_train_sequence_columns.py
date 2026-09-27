@@ -118,7 +118,7 @@ def test_parked_rows_neither_train_nor_validate(
     """2026-09-23: the r2 sequence candidate validated on a parked tail the
     segmenter called ``city`` from GPS drift. Rows no vehicle activity lies
     near are dropped at the training entry, before the validation split."""
-    from src.analysis.drives import DRIVE_COLUMN
+    from src.preprocessing.drives import DRIVE_COLUMN
 
     data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})

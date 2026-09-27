@@ -6,7 +6,7 @@ Mode 22 DIDs (``did:ECM_*`` on the Xterra's VQ40 ECM) belong to the vehicle,
 so they live in one Python module per profile (operator decision
 2026-09-25): ``src/analysis/recipes/<module>.py``, where ``<module>`` is the
 profile slug with ``-`` as ``_`` (:func:`module_name`). The same vehicle's
-signal inputs live under the same name in :mod:`src.analysis.vehicle_signals`. The module defines
+signal inputs live under the same name in :mod:`src.signals.vehicle_signals`. The module defines
 ``recipes() -> list[Recipe]``. A second vehicle supplies its own surfaces by
 adding its module; a profile without one fits the shared catalog only.
 """

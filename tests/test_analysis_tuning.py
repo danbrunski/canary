@@ -15,7 +15,6 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from src.analysis.afr import AfrCalibration
 from src.analysis.lambda_delivery import load_lambda_delivery
 from src.analysis.noise_floor import (
     FloorRefusal,
@@ -32,6 +31,7 @@ from src.analysis.tuning import (
     semantic_route,
 )
 from src.analysis.tuning_frame import load_provider_registry
+from src.signals.afr import AfrCalibration
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 
@@ -232,7 +232,7 @@ def _all_did_session(tmp_path: Path, voltages: list[str]) -> Path:
 def test_the_semantic_route_converts_voltage_and_names_censored_samples(tmp_path: Path) -> None:
     """All-DID analysis pairs the declared RAM target with the declared A/F
     voltage source through the calibrated transfer, never the raw volts."""
-    from src.analysis.afr import load_afr_calibration
+    from src.signals.afr import load_afr_calibration
 
     calibration = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
     providers = load_provider_registry(Path("data/nissan-xterra-2008/tuning_providers.yaml"))
@@ -287,8 +287,8 @@ def test_the_semantic_route_refuses_a_load_floor(tmp_path: Path) -> None:
 def test_a_clock_that_cannot_carry_the_declared_separation_refuses() -> None:
     """A frame with no timestamp provenance may be a round stamp a second
     wide; pairing it at 250 ms would claim a simultaneity it cannot show."""
-    from src.analysis.pairing import ComparisonRefusedError
     from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
+    from src.signals.pairing import ComparisonRefusedError
 
     stamps = pd.to_datetime([T0 + timedelta(seconds=i) for i in range(5)], utc=True)
 

@@ -50,7 +50,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration
 from src.analysis.channels import parse_spec
 from src.analysis.lambda_delivery import (
     ELIGIBLE,
@@ -62,8 +61,9 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.lambda_delivery_stream import DEFAULT_SETTLE_S, DeliveryStream
 from src.analysis.noise_floor import NoiseFloor
-from src.analysis.pairing import to_seconds
 from src.decode.dids import FOREIGN_DID_SOURCES, DidEntry, DidMap, decode_raw_did_reading
+from src.signals.afr import AfrCalibration
+from src.signals.pairing import to_seconds
 from src.telemetry import TelemetryRecord
 
 if TYPE_CHECKING:

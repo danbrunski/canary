@@ -34,7 +34,8 @@ import pandas as pd
 
 from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_acquisition_frame, read_channels
 from src.analysis.compare import STABLE_DRIFT_PCT, ScaleVerdict, regress, scale_stability
-from src.analysis.pairing import (
+from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.signals.pairing import (
     ComparisonRefusedError,
     MatchedSamples,
     PairingPolicy,
@@ -43,7 +44,6 @@ from src.analysis.pairing import (
     to_seconds,
     weakest_basis,
 )
-from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.storage.broadcast_storage import refuse_change_only
 
 #: A probe must clear this to be worth a human's attention at all.
@@ -279,7 +279,7 @@ def sweep_session(
     engineering units and the returned ``slope``/``offset`` are directly the
     scaling a binding needs.
 
-    Pairing is the shared contract from :mod:`src.analysis.pairing`, not a
+    Pairing is the shared contract from :mod:`src.signals.pairing`, not a
     private one: frames and reference samples are matched one-to-one on the
     acquisition clock under ``policy``, so every ``n_pairs`` here is a count
     of real frame/reference observation pairs. The pairing depends only on

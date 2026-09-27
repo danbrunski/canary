@@ -84,7 +84,6 @@ except ImportError:  # loaded as `scripts.evaluate_detectors` — repo root on p
         scoped_models_dir,
     )
 
-from src.analysis.drives import parent_session
 from src.analysis.labelled_events import (
     LABELLED_EVENTS_FILENAME,
     LabelledEvent,
@@ -168,6 +167,7 @@ from src.preprocessing.anomaly_injection import (
     load_fault_channel_roles,
 )
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore, on_the_pi
+from src.preprocessing.drives import parent_session
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
     DEFAULT_DIDS_PATH,
@@ -2352,7 +2352,7 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
 
     no_span = [path.name for path in session_dirs if session_span(path) is None]
     # Physical drives: vehicle activity, sibling recordings (captures) bridging,
-    # and a pause inside one recording splitting it (src.analysis.drives).
+    # and a pause inside one recording splitting it (src.preprocessing.drives).
     drives = drives_of_sessions(
         [path for path in session_dirs if path.name not in set(no_span)], era_of=resolve_era
     )

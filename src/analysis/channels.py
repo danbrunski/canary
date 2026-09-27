@@ -55,11 +55,11 @@ from typing import Literal, get_args
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import DecodedRows, read_session
+from src.signals.afr import AfrCalibration
 from src.storage.broadcast_storage import (
     FRAME_ATTR,
     ChangeOnlyStorageError,
@@ -172,7 +172,7 @@ class _Catalogs:
 
 
 #: Column added by :func:`read_channels` when ``acquired_time=True``; values
-#: are :data:`src.analysis.pairing.TimestampBasis`.
+#: are :data:`src.signals.pairing.TimestampBasis`.
 TIMESTAMP_BASIS_COLUMN = "timestamp_basis"
 #: Round identity columns :func:`read_acquisition_frame` adds from
 #: ``metadata_json`` (``docs/capture-rounds.md``). Nullable: legacy rows and
@@ -320,7 +320,7 @@ def _round_stamped_sessions(frame: pd.DataFrame, session: Path | pd.DataFrame) -
 def _timestamp_basis(
     frame: pd.DataFrame, session: Path | pd.DataFrame, fields: _MetadataFields | None
 ) -> pd.Series:
-    """Per-row :data:`~src.analysis.pairing.TimestampBasis`.
+    """Per-row :data:`~src.signals.pairing.TimestampBasis`.
 
     ``acquired`` whenever ``acquired_at`` is present, whatever else the row
     or manifest says. ``round`` needs either the manifest's
@@ -655,7 +655,7 @@ def read_channels(
     use their persisted per-reading arrival time rather than a logical round
     timestamp, while sources without that field retain their stored time. The
     frame then also carries a ``timestamp_basis`` column per row
-    (:data:`src.analysis.pairing.TimestampBasis`) saying which of those
+    (:data:`src.signals.pairing.TimestampBasis`) saying which of those
     happened, so a comparison can refuse a tolerance the clock cannot carry.
 
     A broadcast spec read from a session that stores CAN frames change-only
@@ -820,7 +820,7 @@ def read_aligned(
     a synthetic value that was never observed. Its output is therefore not
     pairing evidence; a claim that two channels agree goes through
     :func:`src.analysis.compare.compare_channels`, which pairs individual
-    observations under an explicit :class:`~src.analysis.pairing.PairingPolicy`.
+    observations under an explicit :class:`~src.signals.pairing.PairingPolicy`.
 
     A row exists only where **every** requested channel has its own sample
     inside the grid cell (``require_all=True``). Nothing is forward-filled:

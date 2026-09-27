@@ -20,9 +20,9 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
     import pandas as pd
 
     from src.alerts.fusion import FusedResult
-    from src.analysis.committees import CommitteeFlag
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
+    from src.signals.committees import CommitteeFlag
 
 #: ``fused`` (Phase 7.2) is the agreement-aware calibrated severity over the
 #: per-tick IF + LSTM + behavior-residual sources. ``behavior`` (Phase 7.4)
@@ -36,7 +36,7 @@ if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import tim
 #: ``plausibility`` (A05.9) is a *confirmed* per-channel plausibility failure
 #: (range/slew/stuck/freshness) from ``src.plausibility`` — never a pending
 #: one. ``committee`` (H04.2) is a sustained departure between two instruments of
-#: one quantity from their measured relation (``src.analysis.committees``) — a
+#: one quantity from their measured relation (``src.signals.committees``) — a
 #: sensor fault, not an engine one. All are emitted alongside the per-detector
 #: events, not instead of them.
 AnomalySource = Literal[

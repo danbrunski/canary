@@ -22,8 +22,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from src.analysis.afr import AfrCalibration, load_afr_calibration
-from src.analysis.derived import fuel_properties
 from src.analysis.lambda_delivery import (
     LambdaDeliveryDeclaration,
     RegimeFloor,
@@ -34,6 +32,8 @@ from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.analysis.tuning_frame import LoadWotCriterion, ProviderRegistry, load_provider_registry
 from src.config import CanaryConfig
 from src.profiles import active_registry, profile_dir
+from src.signals.afr import AfrCalibration, load_afr_calibration
+from src.signals.derived import fuel_properties
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -42,7 +42,7 @@ class TuningContext:
 
     Plain data so it pickles into the analysis child. ``afr_stoich`` has no
     default on purpose: it comes from the configured fuel
-    (:func:`src.analysis.derived.fuel_properties`), and a gasoline literal is
+    (:func:`src.signals.derived.fuel_properties`), and a gasoline literal is
     wrong for every other profile.
     """
 

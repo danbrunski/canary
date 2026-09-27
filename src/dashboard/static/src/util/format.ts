@@ -62,7 +62,7 @@ export function toneClass(tone: Tone | undefined): string {
   return "";
 }
 
-/** Unit constants, defined once (R08.5). Mirror src/analysis/derived.py. */
+/** Unit constants, defined once (R08.5). Mirror src/signals/derived.py. */
 export const KM_PER_MILE = 1.609344;
 export const M_PER_FT = 0.3048;
 const CARDINALS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];

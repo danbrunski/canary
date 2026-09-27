@@ -311,7 +311,7 @@ def test_plausibility_streams_decode_every_decoded_sample(copies: dict[str, Path
 def test_drive_activity_counts_decoded_broadcast(copies: dict[str, Path], copy: str) -> None:
     import numpy as np
 
-    from src.analysis import drives
+    from src.preprocessing import drives
 
     stored = drives.activity_seconds(copies["stored"])
     obd_only = drives._read_seconds(sorted(copies["stored"].glob("*.parquet")), ("obd",))

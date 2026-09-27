@@ -109,9 +109,9 @@ retroactively to old captures.
 
 Values calculated from other columns, not read off the bus. Two producers:
 
-- `src/analysis/derived.py:compute_derived_channels` — trip-meter style
+- `src/signals/derived.py:compute_derived_channels` — trip-meter style
   outputs (fuel rate, economy, distance, CO₂) for the dashboard.
-- `src/analysis/derived.py:compute_anomaly_signals` — physical-residual
+- `src/signals/derived.py:compute_anomaly_signals` — physical-residual
   signals for anomaly detection: air mass per cycle, per-bank fuel-trim
   and AFR asymmetries, TPS-voltage-to-percent ratio. Each is gated on its
   inputs existing, so a session without the required PIDs/DIDs skips the

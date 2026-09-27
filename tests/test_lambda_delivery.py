@@ -15,7 +15,6 @@ import pandas as pd
 import pytest
 import yaml
 
-from src.analysis.afr import AfrCalibration, VoltageAfrPoint, VoltageAfrTransfer
 from src.analysis.behavior_validation import LeakedDriveError
 from src.analysis.lambda_delivery import (
     ELIGIBLE,
@@ -31,6 +30,7 @@ from src.analysis.lambda_delivery import (
 )
 from src.analysis.noise_floor import ChannelFloor, NoiseFloor
 from src.analysis.tuning import DeliveryInputs, gate_delivery_samples, mode01_route
+from src.signals.afr import AfrCalibration, VoltageAfrPoint, VoltageAfrTransfer
 
 T0 = datetime(2026, 9, 21, 12, 0, tzinfo=UTC)
 PROFILE = Path("data/nissan-xterra-2008")

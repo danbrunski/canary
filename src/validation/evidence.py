@@ -29,8 +29,8 @@ import pandas as pd
 from src.analysis.capture_coverage import recompute_capture_quality
 from src.analysis.channels import ACQUIRED_AT_COLUMN, read_acquisition_frame
 from src.analysis.compare import ComparisonRefusedError, compare_channels
-from src.analysis.pairing import PairingPolicy, to_seconds
 from src.paths import DIDS_YAML
+from src.signals.pairing import PairingPolicy, to_seconds
 from src.storage.broadcast_storage import ChangeOnlyStorageError, refuse_change_only
 from src.storage.capture_losses import (
     RECORDING,

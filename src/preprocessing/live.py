@@ -47,12 +47,6 @@ from typing import Any
 
 import pandas as pd
 
-from src.analysis.derived import (
-    IDLE_RPM_FLOOR,
-    IDLE_SPEED_CEIL_KPH,
-    MAX_INTEGRATION_DT_S,
-    fuel_properties,
-)
 from src.can_ids import parse_can_channel
 from src.coerce import finite_float
 from src.columns import arrived_column, gap_column
@@ -78,6 +72,12 @@ from src.preprocessing.session_context import (
     EngineStartTracker,
     StartContextSpec,
     start_context_specs,
+)
+from src.signals.derived import (
+    IDLE_RPM_FLOOR,
+    IDLE_SPEED_CEIL_KPH,
+    MAX_INTEGRATION_DT_S,
+    fuel_properties,
 )
 from src.storage.broadcast_storage import CanChangeFilter, is_broadcast_channel
 from src.telemetry import (
@@ -356,7 +356,7 @@ class LiveFeatureSource:
         never mixes naive/aware datetimes.
 
         Task 1.2 quality gate: a physically-impossible value (see
-        ``src.analysis.fsm.PHYSICAL_LIMITS``) is never stored — the channel
+        ``src.signals.fsm.PHYSICAL_LIMITS``) is never stored — the channel
         simply doesn't get a fresh observation this tick, so it ages out via
         the exact same staleness path (``_last_observed_at`` / ``_gap_flags``)
         a channel that stopped transmitting would. Counted, never swallowed.

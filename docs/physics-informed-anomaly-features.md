@@ -10,7 +10,7 @@ forcing it to rediscover engine equations from sparse, noisy PIDs.
 
 ## Current state
 
-`src/analysis/derived.py` already computes several physics-derived channels for
+`src/signals/derived.py` already computes several physics-derived channels for
 dashboard/export/trip review:
 
 - `derived:FUEL_RATE_LPH`
@@ -23,7 +23,7 @@ dashboard/export/trip review:
 
 The shared anomaly preprocessing path now **does** append an
 anomaly-oriented derived set before `compute_features`:
-`compute_anomaly_signals` (`src/analysis/derived.py`) contributes
+`compute_anomaly_signals` (`src/signals/derived.py`) contributes
 `derived:AIR_MASS_PER_CYCLE`, `derived:STFT_BANK_BALANCE` /
 `LTFT_BANK_BALANCE` / `AFR_BANK_BALANCE`, and
 `derived:TPS_VOLTAGE_PER_PCT`, followed by committee residuals and

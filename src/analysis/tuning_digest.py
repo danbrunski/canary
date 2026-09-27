@@ -23,7 +23,6 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration, TargetAfrMap, voltage_to_afr
 from src.analysis.channels import (
     AS_OF_ATTR,
     ChannelSpecError,
@@ -34,7 +33,6 @@ from src.analysis.channels import (
 )
 from src.analysis.compare import align_pairs, compare_channels
 from src.analysis.noise_floor import FloorRefusal, Significance
-from src.analysis.pairing import ComparisonRefusedError, InputNotCapturedError, PairingPolicy
 from src.analysis.pull_tags import is_pull_end, is_pull_start
 from src.analysis.tune_revisions import (
     resolve_session_revision,
@@ -57,6 +55,8 @@ from src.analysis.tuning_frame import (
 from src.collection.capture_profiles import FUEL_DELIVERY_TUPLE
 from src.config import CanaryConfig
 from src.session import load_tags
+from src.signals.afr import AfrCalibration, TargetAfrMap, voltage_to_afr
+from src.signals.pairing import ComparisonRefusedError, InputNotCapturedError, PairingPolicy
 from src.storage.capture_manifest import read_capture_manifest, read_capture_quality
 
 # The WOT load and rpm floors and the rpm band edges are vehicle facts: they

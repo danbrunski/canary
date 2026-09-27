@@ -6,14 +6,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.derived import (
+from src.config import VehicleParameters
+from src.signals.derived import (
     FUEL_PROPERTIES,
     compute_derived_channels,
     compute_instantaneous_channels,
     fuel_properties,
     summarize_trip,
 )
-from src.config import VehicleParameters
 
 GASOLINE = VehicleParameters()
 
@@ -359,13 +359,13 @@ def test_gear_estimate_masks_low_speed() -> None:
 
 
 def _phi_cal() -> object:
-    from src.analysis.afr import AfrCalibration
+    from src.signals.afr import AfrCalibration
 
     return AfrCalibration(commanded_equiv_ratio_convention="phi")
 
 
 def _lambda_cal() -> object:
-    from src.analysis.afr import AfrCalibration
+    from src.signals.afr import AfrCalibration
 
     return AfrCalibration(commanded_equiv_ratio_convention="lambda")
 

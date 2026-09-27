@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.committees import STANDARD_GRAVITY
 from src.config import CanaryConfig
 from src.preprocessing.derived import grid_interval_ns, reduce_numeric_session
 from src.preprocessing.derived_store import DerivedStore, use_store
@@ -43,6 +42,7 @@ from src.preprocessing.loader import (
     resample_and_segment,
 )
 from src.preprocessing.resampler import resample_config_for
+from src.signals.committees import STANDARD_GRAVITY
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config

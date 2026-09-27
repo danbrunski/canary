@@ -20,14 +20,6 @@ import pandas as pd
 import pytest
 
 from src.alerts.fusion import BandExcessAccumulator, PersistenceGate
-from src.analysis.afr import (
-    LAMBDA_BANK_BALANCE_AF_VOLTAGE,
-    LAMBDA_BANK_BALANCE_WIDEBAND,
-    AfrCalibration,
-    VoltageAfrTransfer,
-    WidebandPairVerification,
-    append_afr_channels,
-)
 from src.analysis.behavior_validation import (
     PERSISTENCE_NO_TRAINING_EXCURSION,
     EventPolicy,
@@ -57,6 +49,14 @@ from src.decode.behavior_models import (
     contract_fingerprint,
 )
 from src.paths import DATA_DIR
+from src.signals.afr import (
+    LAMBDA_BANK_BALANCE_AF_VOLTAGE,
+    LAMBDA_BANK_BALANCE_WIDEBAND,
+    AfrCalibration,
+    VoltageAfrTransfer,
+    WidebandPairVerification,
+    append_afr_channels,
+)
 
 T0 = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
 BALANCE = "derived:STFT_BANK_BALANCE"
@@ -407,7 +407,7 @@ def test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer() -> No
     calibration = AfrCalibration(voltage_transfer=_TRANSFER)
     out = append_afr_channels(_voltage_frame(), vehicle, calibration)
     balance = out[LAMBDA_BANK_BALANCE_AF_VOLTAGE]
-    from src.analysis.derived import fuel_properties
+    from src.signals.derived import fuel_properties
 
     afr_stoich = fuel_properties(vehicle).afr_stoich
     assert balance.iloc[0] == pytest.approx(0.0)

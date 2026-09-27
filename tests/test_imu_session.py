@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.committees import STANDARD_GRAVITY
 from src.analysis.dyno import (
     DynoRefusal,
     Leg,
@@ -46,6 +45,7 @@ from src.preprocessing.imu_session import (
     specific_force_from_sidecar,
     write_imu_frame_sidecar,
 )
+from src.signals.committees import STANDARD_GRAVITY
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from src.trainability import SOURCE_NOT_TRAINABLE, source_exclusion_reason

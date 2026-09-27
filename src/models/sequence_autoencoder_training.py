@@ -103,10 +103,10 @@ class CalibrationCoverageError(ValueError):
 
 def _calibration_drive_count(calibration: SequenceWindowDataset, sessions: Sequence[str]) -> int:
     """Physical drives the calibration windows come from
-    (:func:`src.analysis.drives.count_drives` over the rows of the windowed
+    (:func:`src.preprocessing.drives.count_drives` over the rows of the windowed
     pieces: the stamped drive where the frame carries one)."""
-    from src.analysis.drives import count_drives
     from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
+    from src.preprocessing.drives import count_drives
 
     frame = calibration.frame
     if SESSION_COLUMN not in frame.columns or TIMESTAMP_COLUMN not in frame.columns:
@@ -127,7 +127,7 @@ def calibration_coverage_violations(
     """What a calibration fails to cover, before anything is trained.
 
     * fewer than :data:`MIN_CALIBRATION_SESSIONS` *physical drives*
-      (:func:`src.analysis.drives.count_drives`) — held-out only;
+      (:func:`src.preprocessing.drives.count_drives`) — held-out only;
     * an operating mode the model will score (at least
       :data:`MIN_CALIBRATION_SAMPLES` independent training windows) that the
       calibration gives no band of its own — held-out only;

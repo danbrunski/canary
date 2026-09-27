@@ -31,17 +31,17 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import pandas as pd
 
-from src.analysis import vehicle_signals
-from src.analysis.committees import COMMITTEES
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.config import VehicleParameters
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
+from src.signals import vehicle_signals
+from src.signals.committees import COMMITTEES
 
 if TYPE_CHECKING:
-    # `src.analysis.afr` imports `fuel_properties` from this module, so the
+    # `src.signals.afr` imports `fuel_properties` from this module, so the
     # runtime import would be circular. Only the annotation is needed; the
     # code below reads one attribute and never constructs one.
-    from src.analysis.afr import AfrCalibration
+    from src.signals.afr import AfrCalibration
 
 log = logging.getLogger(__name__)
 
@@ -918,7 +918,7 @@ SHARED_ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
 )
 
 #: Shared formulas over vehicle-specific inputs (R05.4): each vehicle names
-#: its channels in :mod:`src.analysis.vehicle_signals`, so no manufacturer
+#: its channels in :mod:`src.signals.vehicle_signals`, so no manufacturer
 #: identifier sits in this module. A signal no vehicle declares is absent.
 VEHICLE_INPUT_SIGNALS: tuple[tuple[str, Callable[[SignalInputs], pd.Series | None]], ...] = (
     ("derived:AFR_BANK_BALANCE", _both(_difference)),
@@ -963,7 +963,7 @@ ANOMALY_SIGNALS: tuple[DerivedSignal, ...] = (
 DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     # --- compute_anomaly_signals: declared once, in ANOMALY_SIGNALS (R05.4) --
     **{signal.name: signal.input_groups for signal in ANOMALY_SIGNALS},
-    # --- src.analysis.afr.append_afr_channels ------------------------------
+    # --- src.signals.afr.append_afr_channels ------------------------------
     # Measured AFR: the bank's wideband lambda PID, else the AF-sensor voltage
     # DID through the profile's transfer (only when a calibration is loaded).
     **{
@@ -1038,7 +1038,7 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
     "derived:TRIP_DISTANCE_KM": (("obd:SPEED",),),
     "derived:AVG_ECONOMY_L_PER_100KM": (("derived:FUEL_USED_L",), ("derived:TRIP_DISTANCE_KM",)),
     "derived:IDLE_TIME_S": (("obd:RPM", "decoded:ECM_RPM"), ("obd:SPEED",)),
-    # --- src.analysis.committees: divergence residuals -----------------------
+    # --- src.signals.committees: divergence residuals -----------------------
     # Any ``min_members`` of the members, on rows where every gate holds.
     **{
         committee.output: (
@@ -1123,7 +1123,7 @@ def compute_anomaly_signals(
       difference between banks. Once the AF-sensor DIDs are polling
       (see ``obd_dids`` in ``canary.example.yaml``), this becomes the
       sharpest bank-asymmetry detector available. Inputs: the vehicle's
-      per-bank A/F sensor voltage channels (:mod:`src.analysis.vehicle_signals`).
+      per-bank A/F sensor voltage channels (:mod:`src.signals.vehicle_signals`).
 
     * ``derived:CAT_EFFICIENCY_B1`` / ``derived:CAT_EFFICIENCY_B2``
       (Task 4.4) — a bounded **0-1 heuristic index**, explicitly NOT a
@@ -1147,7 +1147,7 @@ def compute_anomaly_signals(
       ECM-calculated throttle percent. Expected to be linear (constant
       ratio) within the operating range. Drift means the calibration
       curve is shifting before any DTC. Inputs: the vehicle's raw TPS
-      voltage channel (:mod:`src.analysis.vehicle_signals`), ``obd:THROTTLE_POS``.
+      voltage channel (:mod:`src.signals.vehicle_signals`), ``obd:THROTTLE_POS``.
 
     The function is pure; caller is responsible for ordering it
     correctly in the feature pipeline (it expects mode segmentation

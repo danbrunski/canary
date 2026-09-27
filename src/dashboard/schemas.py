@@ -322,7 +322,7 @@ class DtcReportResponse(BaseModel):
 
 
 class TripSummaryFields(BaseModel):
-    """Matches ``TripSummary.to_dict()`` (``src/analysis/derived.py``)."""
+    """Matches ``TripSummary.to_dict()`` (``src/signals/derived.py``)."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -19,7 +19,6 @@ from typing import Any
 import httpx
 
 from src.alerts.event_logger import read_events_dir
-from src.analysis.committees import COMMITTEES_FILENAME, SPEED_COMMITTEE
 from src.collection import tuning_profile
 from src.collection.capture_profiles import CaptureProfile
 from src.config import CanaryConfig
@@ -30,6 +29,7 @@ from src.dashboard.api import create_app
 from src.mcp_server.client import DaemonClient
 from src.mcp_server.tools import anomalies as anomalies_tool
 from src.preprocessing.live import LiveFeatureSource
+from src.signals.committees import COMMITTEES_FILENAME, SPEED_COMMITTEE
 from src.telemetry import TelemetryRecord
 from tests.configs import isolated_config
 

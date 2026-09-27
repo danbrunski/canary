@@ -6,7 +6,7 @@ healthy system they keep a known relationship; a sustained **departure** from
 it means a sensor is faulting (VSS failure, GPS multipath, a loose IMU mount).
 
 This is deliberately distinct from the physical-relationship residuals in
-:mod:`src.analysis.derived` (bank-balance, AFR asymmetry, TPS-vs-%): those
+:mod:`src.signals.derived` (bank-balance, AFR asymmetry, TPS-vs-%): those
 compare *different* quantities whose expected relationship indicates an
 **engine/mechanical** fault while every sensor is working. A committee answers
 "do my redundant sensors agree?"; a physical residual answers "is the machine

@@ -7,8 +7,8 @@ import math
 import numpy as np
 import pandas as pd
 
-from src.analysis.fsm import PhysicalLimit
 from src.preprocessing.quality_gate import apply_quality_gate, is_physically_valid
+from src.signals.fsm import PhysicalLimit
 
 _LIMITS = {
     "obd:RPM": PhysicalLimit(min=0.0, max=10_000.0, unit="rpm", reason="test"),

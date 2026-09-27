@@ -128,7 +128,7 @@ J1979_ROLES: dict[str, ChannelRole] = {
     ),
 }
 
-#: Channels computed in code (``src.analysis.derived`` and the performance
+#: Channels computed in code (``src.signals.derived`` and the performance
 #: channels). Kept: the physical residuals and per-cycle quantities that say
 #: something no single PID does. Dropped: re-expressions of a kept target
 #: (fuel rate, economy, power and torque are MAF and speed rescaled), which

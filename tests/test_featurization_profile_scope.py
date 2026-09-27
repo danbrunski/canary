@@ -18,7 +18,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.afr import load_afr_calibration, target_afr
 from src.config import CanaryConfig, UnscopedConfigError
 from src.models.sequence_feature_set import sequence_roles_path
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
@@ -29,6 +28,7 @@ from src.preprocessing.feature_pipeline import (
 )
 from src.preprocessing.live import LiveFeatureSource
 from src.profiles import resolve_profile_for_tooling, scope_config
+from src.signals.afr import load_afr_calibration, target_afr
 from tests.configs import EXAMPLE_YAML, profiles_disabled
 
 SLUG = "nissan-xterra-2008"

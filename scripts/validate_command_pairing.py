@@ -63,10 +63,10 @@ from src.analysis.compare import (
     align_pairs,
     compare_channels,
 )
-from src.analysis.pairing import to_seconds
 from src.log import configure_logging
 from src.paths import DIDS_YAML
 from src.preprocessing.loader import read_session
+from src.signals.pairing import to_seconds
 from src.storage.session_files import has_telemetry
 
 log = logging.getLogger(__name__)

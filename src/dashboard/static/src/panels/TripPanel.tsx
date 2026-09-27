@@ -24,7 +24,7 @@ interface TripPanelProps {
   token: string;
 }
 
-// Mirrors src/analysis/derived.py's own unit constants exactly, so a
+// Mirrors src/signals/derived.py's own unit constants exactly, so a
 // display-only km->mi / L->gal / L-per-100km->mpg conversion here can never
 // drift from what the backend prints in the last-drive summary.
 const MI_PER_KM = 0.62137119;

@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-from src.analysis.afr import LAMBDA_BANK_BALANCE_AF_VOLTAGE
 from src.analysis.refit import (
     TOTAL_TRIM_STEADY_RATES,
     Recipe,
@@ -25,6 +24,7 @@ from src.analysis.refit import (
 )
 from src.decode.behavior_models import BandExcessPersistence, DeviationConfig
 from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.signals.afr import LAMBDA_BANK_BALANCE_AF_VOLTAGE
 
 #: B05.8 — the λ bank balance reads two instantaneous DID samples, so the
 #: accumulation's memory is the steady-state gate's own horizon: the rate

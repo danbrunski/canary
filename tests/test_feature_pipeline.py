@@ -15,11 +15,11 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from src.analysis.drives import DRIVE_COLUMN
 from src.columns import GAP_SUFFIX, MEAN_SUFFIX, MODE_COLUMN, ROC_SUFFIX, STD_SUFFIX
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
 from src.preprocessing.decode import decode_can_rows
+from src.preprocessing.drives import DRIVE_COLUMN
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     BELOW_ROW_COVERAGE,
@@ -461,7 +461,7 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     )
 
     # The batch path adds one bookkeeping column: each row's physical drive
-    # (src.analysis.drives), which no model reads as a feature.
+    # (src.preprocessing.drives), which no model reads as a feature.
     assert combined[DRIVE_COLUMN].notna().all()
     assert DRIVE_COLUMN not in candidate_feature_columns(combined)
     pd.testing.assert_frame_equal(standalone, combined.drop(columns=[DRIVE_COLUMN]))

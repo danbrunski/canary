@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.channels import refuse_as_of
-from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 
 def _series(long: pd.DataFrame, spec: str) -> tuple[np.ndarray, np.ndarray]:

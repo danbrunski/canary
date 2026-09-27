@@ -39,10 +39,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.pairing import to_seconds
 from src.dataframe_utils import numeric_values
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.session_context import EngineStartTracker, StartContextSpec
+from src.signals.pairing import to_seconds
 
 #: The serving contract's channels, thresholds and cold ceiling. Defaults
 #: match ``ColdStartRequirement`` and the warmup recipes' 40 °C ceiling; a
@@ -357,13 +357,13 @@ def group_into_drives(
 ) -> list[dict[str, Any]]:
     """Independent physical drives, oldest first, with their cold starts.
 
-    Uses the shared physical-drive definition (:mod:`src.analysis.drives`):
+    Uses the shared physical-drive definition (:mod:`src.preprocessing.drives`):
     vehicle activity, sibling captures as bridges, and a split at a long pause
     in activity *inside* a recording, so an overnight parked recording no
     longer joins the evening and morning cold starts into one drive (operator,
     2026-09-23). A cold start belongs to the drive whose span holds its start.
     """
-    from src.analysis.drives import DRIVE_GAP_SECONDS, physical_drives
+    from src.preprocessing.drives import DRIVE_GAP_SECONDS, physical_drives
 
     gap = DRIVE_GAP_SECONDS if join_gap_seconds is None else join_gap_seconds
     by_session = {inventory.session: inventory for inventory in inventories}

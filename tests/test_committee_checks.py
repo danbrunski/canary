@@ -21,7 +21,8 @@ from pydantic import ValidationError
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.analysis.committees import (
+from src.decode.bindings import load_bindings
+from src.signals.committees import (
     ACCEL_SPAN_SECONDS,
     COMMITTEES,
     GPS_SPEED_ACCEL_G,
@@ -41,7 +42,6 @@ from src.analysis.committees import (
     physical_committee_point,
     speed_accel_g,
 )
-from src.decode.bindings import load_bindings
 
 REPO = Path(__file__).resolve().parents[1]
 XTERRA_COMMITTEES = REPO / "data" / "nissan-xterra-2008" / "committees.yaml"

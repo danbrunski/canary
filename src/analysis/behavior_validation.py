@@ -58,8 +58,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.alerts.fusion import BandExcessAccumulator, PersistenceGate
-from src.analysis import drives as _drives
-from src.analysis.pairing import to_seconds
 from src.analysis.splits import (
     DEFAULT_JOIN_GAP_SECONDS,
     Drive,
@@ -100,12 +98,14 @@ from src.decode.behavior_models import (
     contract_fingerprint,
 )
 from src.decode.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
+from src.preprocessing import drives as _drives
 from src.preprocessing.session_context import (
     StartContextSpec,
     append_start_context,
     start_context_columns,
 )
 from src.session import SessionKind, session_kind
+from src.signals.pairing import to_seconds
 
 log = logging.getLogger(__name__)
 
@@ -1694,7 +1694,7 @@ def build_evaluation_frame(
         resampled, config, behavior_models=models, bindings=bindings
     ).operating_frame
     # Each row's physical drive, as build_feature_frame stamps it, so the
-    # evaluator's drive grouping is the trainers' (src.analysis.drives).
+    # evaluator's drive grouping is the trainers' (src.preprocessing.drives).
     stamped = _drives.stamp_physical_drives(operating, [Path(s) for s in sessions])
     if profile_scope == "every_recording":
         return stamped

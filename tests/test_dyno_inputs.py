@@ -18,8 +18,6 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from src.analysis.committees import STANDARD_GRAVITY as G
-from src.analysis.committees import load_committee_profile
 from src.analysis.dyno import (
     DYNO_FILENAME,
     DynoRefusal,
@@ -45,6 +43,8 @@ from src.preprocessing.imu_session import (
     reference_id,
     write_imu_frame_sidecar,
 )
+from src.signals.committees import STANDARD_GRAVITY as G
+from src.signals.committees import load_committee_profile
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 

@@ -26,7 +26,7 @@ consistent across sub-windows; the 1:1 claim fails on slope and r², and
 `binned_summary()` reproduces the old bin means (`a_mean == b_mean` in all 60
 bins) and is documented as a picture, never evidence.
 
-## The pairing contract (`src/analysis/pairing.py`)
+## The pairing contract (`src/signals/pairing.py`)
 
 `PairingPolicy` is a frozen dataclass and is **required** at every
 comparison call site — there is no default tolerance.

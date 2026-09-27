@@ -21,7 +21,7 @@ from typing import Any
 import pandas as pd
 
 from src.analysis.compare import compare_channels
-from src.analysis.pairing import ComparisonRefusedError, PairingPolicy
+from src.signals.pairing import ComparisonRefusedError, PairingPolicy
 from tools._bus_tool import record_kind
 
 

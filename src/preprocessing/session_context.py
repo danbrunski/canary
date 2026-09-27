@@ -37,12 +37,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from src.analysis.pairing import to_seconds
 from src.coerce import finite_float
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.dataframe_utils import numeric_values
 from src.decode.behavior_models import BehaviorModels, ColdStartRequirement
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
+from src.signals.pairing import to_seconds
 
 #: Prefix of serving-context columns. Excluded from rolling features (see
 #: ``features._value_columns``) and from every trainable feature selection.
@@ -232,7 +232,7 @@ def append_start_context(frame: pd.DataFrame, specs: Iterable[StartContextSpec])
     if TIMESTAMP_COLUMN in frame.columns:
         stamps = pd.to_datetime(frame[TIMESTAMP_COLUMN], utc=True)
         timestamps: np.ndarray | None = stamps.to_numpy(dtype="datetime64[ns]")
-        # The one timestamp-to-seconds conversion (src.analysis.pairing).
+        # The one timestamp-to-seconds conversion (src.signals.pairing).
         # `astype("int64") / 1e9` reads a `datetime64[us]` session frame
         # 1000x short, which would shrink the start window this tracker uses
         # to place a start to a millisecond (B04.3's evaluator bug, same

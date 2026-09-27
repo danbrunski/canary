@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from src.analysis.derived import DERIVED_CHANNEL_INPUTS
 from src.atomic_write import atomic_write_text
 from src.collection.bus_budget import (
     MAX_BUDGET_REQUESTS_PER_SECOND,
@@ -25,6 +24,7 @@ from src.collection.bus_budget import (
 from src.config import CollectionConfig
 from src.decode.behavior_eligibility import required_channel_groups
 from src.decode.behavior_models import load_behavior_models
+from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
     from src.collection.kline.plan import KlineCatalog

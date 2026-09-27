@@ -4,7 +4,7 @@ The 2026-09-23 verifier found drive grouping in three places, only one of
 which saw the captures: the retrained LSTM's validation drives shared
 physical drives with training, and the retrained IF's idle_transient "4
 training drives" were 2. These tests pin the shared definition
-(``src.analysis.drives``) through each caller that counts or splits drives.
+(``src.preprocessing.drives``) through each caller that counts or splits drives.
 """
 
 from __future__ import annotations
@@ -18,16 +18,11 @@ import pytest
 
 from scripts.evaluate_detectors import record_seen
 from src.analysis.behavior_validation import group_drives, piece_time_ranges
-from src.analysis.drives import (
-    DRIVE_COLUMN,
-    count_drives,
-    physical_drives,
-    piece_units,
-)
 from src.config import CanaryConfig
 from src.models.evaluation import drives_of_sessions, holdout_by_drive
 from src.models.isolation_forest import _drive_count
 from src.models.sequence_training import choose_validation_sessions
+from src.preprocessing.drives import DRIVE_COLUMN, count_drives, physical_drives, piece_units
 from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord

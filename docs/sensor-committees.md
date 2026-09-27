@@ -15,7 +15,7 @@ There are two different cross-check ideas in this codebase; keep them separate.
 | Inputs | Same quantity, *independent* sensors | *Different* quantities with an expected relationship |
 | Residual means | A **sensor** is wrong | The **machine** is misbehaving (sensors fine) |
 | Example | OBD VSS vs GPS speed | STFT bank1 vs bank2; MAF/RPM air-mass; TPS-V vs % |
-| Lives in | `analysis/committees.py` | `analysis/derived.py` (`compute_anomaly_signals`) |
+| Lives in | `signals/committees.py` | `signals/derived.py` (`compute_anomaly_signals`) |
 
 STFT_1 / STFT_2 are **two banks of the engine**, not two readings of one number —
 so bank balance is a physical residual, not a committee. The two are **not**
@@ -24,7 +24,7 @@ a physical residual answers "is the engine behaving?".
 
 ## The abstraction
 
-A `SensorCommittee` (see `src/analysis/committees.py`) declares:
+A `SensorCommittee` (see `src/signals/committees.py`) declares:
 
 - `members` — wide columns measuring the *same* quantity (≥ 2).
 - `gates` — instrument-quality row preconditions (e.g. GPS fix quality); a

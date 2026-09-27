@@ -45,10 +45,10 @@ from src.analysis.kline_exchanges import (
     pair_value,
     render_markdown,
 )
-from src.analysis.pairing import PairingPolicy
 from src.collection.kline.profile import load_kline_profile
 from src.paths import DATA_DIR
 from src.preprocessing.loader import read_session
+from src.signals.pairing import PairingPolicy
 
 DEFAULT_OUT_DIR = DATA_DIR / "analyses"
 

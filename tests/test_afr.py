@@ -3,7 +3,8 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.analysis.afr import (
+from src.config import VehicleParameters
+from src.signals.afr import (
     AfrCalibration,
     TargetAfrMap,
     VoltageAfrTransfer,
@@ -11,7 +12,6 @@ from src.analysis.afr import (
     append_afr_channels,
     target_afr,
 )
-from src.config import VehicleParameters
 
 
 def _calibration() -> AfrCalibration:

@@ -20,15 +20,15 @@ import pandas as pd
 import pytest
 
 import scripts.lambda_delivery_evidence as evidence
-from src.analysis.afr import load_afr_calibration  # noqa: E402
 from src.analysis.lambda_delivery import (  # noqa: E402
     ELIGIBLE,
     delivery_samples,
     load_lambda_delivery,
     target_source_agreement,
 )
-from src.analysis.pairing import PairingPolicy  # noqa: E402
 from src.preprocessing.loader import read_session  # noqa: E402
+from src.signals.afr import load_afr_calibration  # noqa: E402
+from src.signals.pairing import PairingPolicy  # noqa: E402
 
 PROFILE = Path("data/nissan-xterra-2008")
 SLICE = Path("tests/fixtures/lambda_delivery/_capture-tuning-2026-09-21T223734")

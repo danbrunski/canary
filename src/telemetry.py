@@ -130,7 +130,7 @@ assert not (RE_DERIVED_SOURCES & CAPTURED_SOURCES)
 TRAINABLE_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({OBD_SOURCE, DECODED_SOURCE})
 #: Sources that are not origins: a ``derived`` channel is trainable only when
 #: every input it is computed from is (``src.trainability``, reading
-#: ``src.analysis.derived.DERIVED_CHANNEL_INPUTS``). "Derived" says how a value
+#: ``src.signals.derived.DERIVED_CHANNEL_INPUTS``). "Derived" says how a value
 #: was made, not where it came from.
 INPUT_GATED_SOURCES: Final[frozenset[TelemetrySource]] = frozenset({DERIVED_SOURCE})
 #: Every other source, with the reason it never trains. Surfaced verbatim in

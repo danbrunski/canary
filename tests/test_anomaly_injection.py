@@ -631,8 +631,8 @@ def test_nothing_arrives_inside_an_injected_dropout():
     """A03.1: an ``arrived_sample`` artifact must see a dropout as silence, not
     as the held value arriving every tick (a stuck sensor). Derived channels
     inherit it, since their arrival is built from their inputs'."""
-    from src.analysis.derived import compute_anomaly_signals
     from src.columns import arrived_column, gap_column
+    from src.signals.derived import compute_anomaly_signals
 
     n = 12
     frame = _clean_frame(

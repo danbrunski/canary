@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract CONSULT-III Data Monitor parameter names from Xterra FSM PDFs.
 
-Runs the per-PDF page ranges below through src.analysis.fsm and writes
+Runs the per-PDF page ranges below through src.signals.fsm and writes
 data/fsm/signals.json — a per-module list of named parameters that
 CONSULT-III tools can display. Names are the FSM canonical names; binding
 them to Mode 22 DIDs happens at runtime via tagged-capture sessions.
@@ -27,7 +27,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypedDict
 
-from src.analysis.fsm import extract_pdf_section_with_specs
+from src.signals.fsm import extract_pdf_section_with_specs
 
 
 class FsmSource(TypedDict, total=False):

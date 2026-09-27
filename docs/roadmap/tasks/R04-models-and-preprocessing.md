@@ -752,7 +752,7 @@ about: a rule copied four times is a rule that four places can disagree on.
 - The two fault harnesses (`synthetic_fault_eval` + `detector_benchmark` vs
   A02's `evaluate_detectors`): the split is deliberate per A02. Retiring
   `detector_benchmark` is R06.5's operator question.
-- Drive grouping has one source, `analysis.drives`.
+- Drive grouping has one source, `preprocessing.drives`.
 - `validation/evidence.limiting_stage` (132 lines): an ordered, commented
   decision list.
 - `plausibility/limits.resolve_limits` (185 lines): it splits cleanly, but

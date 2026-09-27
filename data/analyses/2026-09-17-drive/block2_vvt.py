@@ -7,7 +7,7 @@ import numpy as np
 
 from src.analysis.channels import read_channels
 from src.analysis.compare import ComparisonRefusedError, compare_channels
-from src.analysis.pairing import PairingPolicy
+from src.signals.pairing import PairingPolicy
 
 sess = Path(sys.argv[1])
 specs = [

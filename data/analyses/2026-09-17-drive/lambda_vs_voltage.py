@@ -13,9 +13,9 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.compare import align_pairs
-from src.analysis.pairing import PairingPolicy
+from src.signals.afr import AfrCalibration, voltage_to_afr
+from src.signals.pairing import PairingPolicy
 
 sess = Path(sys.argv[1])
 cal = AfrCalibration(**yaml.safe_load(open(sys.argv[2])))

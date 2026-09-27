@@ -99,7 +99,6 @@ from src.analysis.behavior_validation import (
     transient_controls,
     validation_document_path,
 )
-from src.analysis.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
 from src.analysis.refit import default_recipes, legacy_reproduction_spec, recipe_serving_spec
 from src.analysis.tune_revisions import TuneRevisionRegistry, load_tune_revisions
 from src.columns import GAP_SUFFIX, MODE_COLUMN, ROC_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
@@ -119,6 +118,7 @@ from src.profiles import (
     resolve_profile_for_tooling,
     scope_config,
 )
+from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
 
 log = logging.getLogger(__name__)
 

@@ -21,7 +21,6 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.analysis.committees import STANDARD_GRAVITY as G
 from src.analysis.dyno import (
     DYNO_FILENAME,
     AltitudeNoise,
@@ -59,6 +58,7 @@ from src.analysis.dyno import (
 )
 from src.config import VehicleParameters
 from src.profiles import load_registry
+from src.signals.committees import STANDARD_GRAVITY as G
 
 REPO = Path(__file__).resolve().parents[1]
 

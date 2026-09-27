@@ -35,7 +35,6 @@ from pathlib import Path
 
 import pandas as pd
 
-from src.analysis.committees import COMMITTEES
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX
 from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
@@ -45,6 +44,7 @@ from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.operating import ENGINE_RUNNING_MIN_RPM
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.loader import resample_and_segment
+from src.signals.committees import COMMITTEES
 from src.storage.session_products import (
     FINGERPRINT_FILENAME,
     FINGERPRINT_SCHEMA_VERSION,
@@ -96,7 +96,7 @@ _VOLTAGE_COLUMN = "obd:CONTROL_MODULE_VOLTAGE"
 _STFT_COLUMNS = ("obd:SHORT_FUEL_TRIM_1", "obd:SHORT_FUEL_TRIM_2")
 _LTFT_COLUMNS = ("obd:LONG_FUEL_TRIM_1", "obd:LONG_FUEL_TRIM_2")
 
-#: ``derived:*`` bank-balance columns (src.analysis.derived.compute_anomaly_signals)
+#: ``derived:*`` bank-balance columns (src.signals.derived.compute_anomaly_signals)
 #: → the short stat-key suffix each rolls up to.
 _BANK_BALANCE_COLUMNS: dict[str, str] = {
     "derived:STFT_BANK_BALANCE": "stft",
@@ -381,7 +381,7 @@ def _add_cat_efficiency_stats(frame: pd.DataFrame, stats: dict[str, float]) -> N
     """Task 4.4 — trend the catalyst-efficiency heuristic index per bank.
 
     ``derived:CAT_EFFICIENCY_B{1,2}``
-    (``src.analysis.derived.compute_anomaly_signals``) is a bounded 0-1
+    (``src.signals.derived.compute_anomaly_signals``) is a bounded 0-1
     index, not a literal efficiency; the session mean is the natural
     session-over-session trend stat, same pattern as
     ``_add_bank_balance_stats`` above.

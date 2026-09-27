@@ -254,7 +254,7 @@ def test_start_context_measures_the_start_window_in_real_seconds() -> None:
     ``datetime64[us]`` stamps with ``astype("int64") / 1e9`` reads every
     interval 1000x short (B04.3 found the same shape in the evaluator), which
     would accept a reading taken two minutes after the start as the start
-    temperature. The conversion goes through ``src.analysis.pairing.to_seconds``.
+    temperature. The conversion goes through ``src.signals.pairing.to_seconds``.
     """
     from src.preprocessing.session_context import StartContextSpec, append_start_context
 

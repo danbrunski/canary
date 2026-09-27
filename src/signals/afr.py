@@ -12,9 +12,9 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.derived import _append_dependency_gap, _selected_input, fuel_properties
-from src.analysis.vehicle_signals import af_sensor_voltage_columns, wideband_lambda_columns
 from src.config import VehicleParameters
+from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
+from src.signals.vehicle_signals import af_sensor_voltage_columns, wideband_lambda_columns
 
 
 class _Strict(BaseModel):
@@ -300,7 +300,7 @@ def append_afr_channels(
             # working voltage DID.
             measured = candidate if candidate.notna().any() else None
         # The vehicle's A/F sensor voltage channel (R05.4: named by the
-        # vehicle in src.analysis.vehicle_signals, never here).
+        # vehicle in src.signals.vehicle_signals, never here).
         for voltage_column in af_sensor_voltage_columns(bank):
             if measured is not None or not transfer or voltage_column not in out:
                 continue

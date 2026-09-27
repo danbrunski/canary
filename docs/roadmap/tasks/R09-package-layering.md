@@ -619,7 +619,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
       differ, 5255 floats, max |delta| 0;
     - counters and meta identical.
 
-- [ ] **R09.4 `src/signals/`: channel physics out of `analysis`.**
+- [x] **R09.4 `src/signals/`: channel physics out of `analysis`.**
   - **Move to `src/signals/` (layer 0):** `derived`, `committees`, `afr`,
     `fsm`, `pairing` and the `vehicle_signals/` package. Once R09.2 has
     landed, they import only `config`, `decode.engineering`, `timefmt` and
@@ -637,6 +637,111 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - The `ml_training` tier passes.
 
   Size **M**.
+  *Done 2026-09-27.* Every move is a whole-module `git mv`; no function body
+  changed. An AST comparison of the 221 top-level definitions in the eight
+  moved files between `c9d11ab` and the working tree finds them identical,
+  apart from `compute_anomaly_signals`, whose docstring now names
+  `src.signals.vehicle_signals` (two lines). The other content changes in the
+  moved files are their own import lines and comments. No old path
+  re-exports: `src/analysis/` no longer has the files, and nothing was left
+  behind as a shim.
+  - **What moved where** (`git mv`): `analysis/{derived,committees,afr,fsm,pairing}.py`
+    → `src/signals/`; the `analysis/vehicle_signals/` package →
+    `src/signals/vehicle_signals/`, `nissan_xterra_2008.py` intact (it finds
+    its modules through `__name__`/`pkgutil`, so nothing in it names its
+    parent); `analysis/drives.py` → `preprocessing/drives.py`, byte-identical.
+    `src/signals/__init__.py` is new: a docstring saying what the package is
+    and that it re-exports nothing.
+  - **No extra move was needed to keep `signals` at layer 0.** Walking every
+    import in the moved files, lazy and `TYPE_CHECKING` included: `derived`
+    imports `columns`, `config`, `decode.engineering` and `signals.{committees,
+    vehicle_signals}` (`signals.afr` under `TYPE_CHECKING`); `committees`
+    imports `config` and `decode.bindings` (`TYPE_CHECKING`) and, lazily,
+    `decode.engineering` and `timefmt`; `afr` imports `config` and
+    `signals.{derived,vehicle_signals}`; `fsm` and `pairing` import nothing
+    from `src`. `committees`/`derived` imported no other `analysis` module.
+    Nothing below them imports back up: `signals` imports `columns`,
+    `config`, `decode`, `timefmt`, and no layer-0 unit imports `signals`
+    except `trainability`, which `signals` does not import — no pair.
+  - **Sweep.** The R09.3 AST rewriter (tables swapped) retargeted 127 import
+    statements in 91 files across `src tests scripts tools`: `afr` 29,
+    `pairing` 26, `derived` 22, `committees` 22, `drives` 11, `fsm` 7,
+    `vehicle_signals` 3, and 7 `from src.analysis import derived|afr|vehicle_signals|drives`
+    forms (4 → `src.signals`, 3 → `src.preprocessing`, including the two
+    `import drives as _drives` in `analysis/{splits,behavior_validation}`).
+    Module-level, lazy and `TYPE_CHECKING` imports were all covered, among
+    them the two `alerts/{emitter,events}` `TYPE_CHECKING` imports of
+    `CommitteeFlag` and `trainability`'s lazy pair. Four dated scripts under
+    `data/analyses/2026-09-17-drive/` imported `analysis.pairing`/`afr`; with
+    the modules gone, whole-repo `ruff check` mis-sorted them as third-party,
+    so their 5 import lines were retargeted too.
+    - Docstrings and comments naming the old paths were updated in 38 files.
+      Two historical sentences keep the old name on purpose:
+      `preprocessing/__init__` ("used to import … through
+      `src.analysis.derived`") and `nissan_xterra_2008` ("they sat in
+      `src.analysis.derived` until R05.4").
+    - Current-code docs: `.claude/skills/engine-management/references/canary-workflow.md`,
+      `docs/{analysis-pairing,data-sources,physics-informed-anomaly-features,sensor-committees}.md`,
+      H04's "Where it stands", R04's "not worth doing" list, the
+      `data/nissan-xterra-2008/committees.yaml` loader comment, and the
+      `src/analysis/derived.py` mentions in `dashboard/schemas.py` and three
+      frontend comments. AGENTS.md names none of these modules. Done-notes
+      elsewhere keep the old paths as history.
+  - **Patch targets.** No `mock.patch`/`monkeypatch` string named a moved
+    module. The module-attribute targets follow their import: the three
+    `monkeypatch.setattr(vehicle_signals, "vehicle_modules", …)` in
+    `test_anomaly_signals_table` (now `src.signals.vehicle_signals`), whose
+    fake vehicle module is renamed `src.signals.vehicle_signals.<name>`.
+    `test_epoch_seconds_conversion.ALLOWED` names `src/signals/pairing.py`.
+  - **Ledger.** `LAYERS` gains `"signals": 0`. `OWED` went from 45 to
+    **24**, the 21 R09.4 entries exactly: `alerts → committees` ×2
+    (`TYPE_CHECKING`), `collection/capture_profiles → derived`, `models →
+    drives` ×5, `plausibility → fsm`, `preprocessing → {fsm ×3, afr,
+    committees, derived ×2, drives, pairing ×2}`, `trainability →
+    {committees, derived}`. No other entry cleared, `OWED_PAIRS` is
+    unchanged, and no new upward edge or pair appeared. H01's
+    `trainability → derived/committees` is now `trainability → signals.*`,
+    inside layer 0.
+  - **`scripts/ml_paths.txt`** adds `src/signals/`. `preprocessing/drives.py`
+    is already covered by `src/preprocessing/`.
+  - **Left as it was, on purpose:** `models/sequence_validation_split.VALIDATION_RULE_STATEMENT`
+    still reads "sessions grouped as `src.analysis.drives.piece_units` groups
+    them". The statement is written into every sequence manifest's
+    `validation_holdout` and sits under the versioned `VALIDATION_RULE`, so
+    editing it is a manifest change, not a move. `trainability`'s refusal for
+    an undeclared derived channel now names `src.signals.derived.DERIVED_CHANNEL_INPUTS`.
+  - **Gate.**
+    - `ruff check .` and `ruff format --check .` are clean; `mypy` finds no
+      issues in 432 files.
+    - `tests/test_layering.py`: 9 passed.
+    - Targeted (the 41 edited test files plus H01's six:
+      `test_trainability`, `test_gps_feature_exclusion`,
+      `test_sequence_feature_set`, `test_sequence_dataset`,
+      `test_capture_profiles`, `test_preprocessing_normalization`, and
+      `test_analysis_ground_truth`, `test_recipe_catalog_golden`,
+      `test_process_state_reset`): 1072 passed, 1 skipped.
+    - `tests/test_analysis_ground_truth.py`: 30 passed, file and fixtures
+      unchanged. `tests/test_recipe_catalog_golden.py`: 2 passed, fingerprints
+      unchanged.
+    - Inner-loop tier (`-m "not integration and not slow"`): 6392 passed,
+      1 skipped, 1 failed. The failure was
+      `test_daemon::test_run_live_inference_scores_during_replay_despite_engine_off_reading`,
+      a 30 s hang-guard `CancelledError` while the A/B replay below ran
+      beside it; it passed alone (5.9 s). It is the daemon-test load flake T01
+      records.
+    - Slow tests in the 199 test files that import a changed module: 181
+      passed, 1 xfailed.
+    - `-m integration tests/test_replay_isolation.py`: 1 passed.
+    - `-m ml_training`: 122 passed.
+  - **Replay.** `tools/replay_event_diff.py ab`, `c9d11ab` (`git archive`)
+    against a copy of the working tree, session `2026-09-18T213818`, 900 s,
+    deployed IF `2026-09-20T054703` + LSTM `2026-09-20T064628`. The tool
+    imports no moved path, so it drove both trees unchanged.
+    - 901 ticks, 18 events and 2645 score messages on both sides;
+    - events identical: 18 of 18 paired, 8316 floats, max |delta| 0;
+    - scores identical: IF 0 of 901, LSTM 0 of 872 and fused 0 of 872
+      differ, 5255 floats, max |delta| 0;
+    - counters and meta identical.
 
 - [ ] **R09.5 `src/vehicle/`: the vehicle's own records.**
   - **Move into `src/vehicle/` (layer 1):** `analysis/tune_revisions.py`,

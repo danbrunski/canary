@@ -30,7 +30,6 @@ from src.analysis.channels import (
     round_skew,
 )
 from src.analysis.compare import compare_channels
-from src.analysis.pairing import ComparisonRefusedError, PairingPolicy
 from src.collection import capture_generation, tuning_profile, tx_gate
 from src.collection.can_obd_collector import run_can_obd_loop
 from src.collection.capture_profiles import CaptureProfile
@@ -47,6 +46,7 @@ from src.collection.obd_scheduler import (
 from src.config import CanBusConfig
 from src.preprocessing.loader import read_session, to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
+from src.signals.pairing import ComparisonRefusedError, PairingPolicy
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.capture_round_fakes import (

@@ -30,10 +30,10 @@ from collections.abc import Iterable
 import numpy as np
 import pandas as pd
 
-from src.analysis.pairing import to_seconds
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.decode.behavior_models import LocalRangeCondition
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX
+from src.signals.pairing import to_seconds
 
 
 def local_range_column(condition: LocalRangeCondition) -> str:

@@ -7,7 +7,7 @@ part is fitted) the HAT barometer disagreeing with OBD barometric pressure.
 
 ## Where it stands
 
-`src/analysis/committees.py` declares seven committees; only
+`src/signals/committees.py` declares seven committees; only
 `SPEED_COMMITTEE` has members that exist. All seven are `trainable=False`.
 Each emits a `derived:<NAME>` **residual**, the spread (max − min) across
 members on rows where the gates hold, designed as an IF/LSTM feature

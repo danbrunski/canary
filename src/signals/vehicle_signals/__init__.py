@@ -3,18 +3,18 @@
 A few ``derived:`` anomaly signals have a shared *formula* but
 vehicle-specific *inputs*: the bank-to-bank A/F sensor voltage balance reads
 whatever identifiers a vehicle's ECM exposes for those sensors. The formulas
-stay in :mod:`src.analysis.derived`; each vehicle declares its channels in a
+stay in :mod:`src.signals.derived`; each vehicle declares its channels in a
 module here named for its profile (:func:`src.profiles.profile_module_stem`),
 the same name its recipes use under :mod:`src.analysis.recipes`.
 
 A module defines either or both of:
 
 * ``SIGNAL_INPUTS: Mapping[str, tuple[tuple[str, ...], ...]]`` -- for an
-  output in :data:`src.analysis.derived.VEHICLE_INPUT_SIGNALS`, its ordered
+  output in :data:`src.signals.derived.VEHICLE_INPUT_SIGNALS`, its ordered
   input groups (one group = "any one of these").
 * ``AF_SENSOR_VOLTAGE: Mapping[int, str]`` -- the wideband A/F sensor voltage
   channel per bank, the measured-AFR fallback when the lambda PID is absent
-  (:func:`src.analysis.afr.append_afr_channels`).
+  (:func:`src.signals.afr.append_afr_channels`).
 * ``WIDEBAND_LAMBDA: Mapping[int, str]`` -- the upstream wide-range O2 lambda
   PID channel per bank. Which J1979 sensor number is bank 2 depends on the
   ECM's O2 sensor layout (PID 0x13: sensor 5; PID 0x1D: sensor 3), so only

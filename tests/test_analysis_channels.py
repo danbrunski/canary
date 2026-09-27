@@ -467,7 +467,7 @@ def test_missing_binding_names_the_catalog(tmp_path: Path) -> None:
 
 
 def _calibration(convention: str):
-    from src.analysis.afr import AfrCalibration
+    from src.signals.afr import AfrCalibration
 
     return AfrCalibration(commanded_equiv_ratio_convention=convention)  # type: ignore[arg-type]
 
@@ -582,7 +582,7 @@ def test_commanded_afr_without_a_stoich_says_so(tmp_path: Path) -> None:
 
 def test_the_xterra_profile_records_phi() -> None:
     """Regression guard: the shipped vehicle profile must keep the WOT verdict."""
-    from src.analysis.afr import load_afr_calibration
+    from src.signals.afr import load_afr_calibration
 
     cal = load_afr_calibration(Path("data/nissan-xterra-2008/afr_calibration.yaml"))
     assert cal.commanded_equiv_ratio_convention == "phi"

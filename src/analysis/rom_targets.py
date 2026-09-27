@@ -10,8 +10,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.analysis.afr import TargetAfrMap, load_afr_calibration
 from src.analysis.osiris import Container
+from src.signals.afr import TargetAfrMap, load_afr_calibration
 
 
 class Strict(BaseModel):

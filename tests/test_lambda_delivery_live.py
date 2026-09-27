@@ -26,7 +26,6 @@ import pandas as pd
 import pytest
 
 from src.alerts.event_logger import read_events_dir
-from src.analysis.afr import AfrCalibration, load_afr_calibration
 from src.analysis.lambda_delivery import (
     STATES,
     JudgedRows,
@@ -53,6 +52,7 @@ from src.decode.dids import load_did_map
 from src.paths import DIDS_YAML
 from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import read_session
+from src.signals.afr import AfrCalibration, load_afr_calibration
 from src.telemetry import TelemetryRecord
 from tests.configs import isolated_config
 

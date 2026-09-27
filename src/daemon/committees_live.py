@@ -3,7 +3,7 @@
 Each inference tick hands the feature source's newest operating point — the
 raw-channel row ``featurize_wide_frame`` produced, member transforms and
 ``__arrived`` flags included — to one
-:class:`~src.analysis.committees.CommitteeEvaluator`. A sustained departure
+:class:`~src.signals.committees.CommitteeEvaluator`. A sustained departure
 becomes an anomaly event through the emitter (``source: committee``), so
 tuning, dedupe, detector roles, the anomaly log and the push all apply, and a
 replay's events land in the replay's log (the logger's replay mode). The
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from src.analysis.committees import (
+from src.signals.committees import (
     CommitteeEvaluator,
     CommitteeFlag,
     physical_committee_point,

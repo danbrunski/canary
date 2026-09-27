@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.pairing import (
+from src.signals.pairing import (
     ComparisonRefusedError,
     PairingPolicy,
     basis_floor_s,

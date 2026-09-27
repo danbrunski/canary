@@ -27,7 +27,7 @@ contract that relationship has to satisfy before anything is fitted on it:
 * **Acquisition-time pairing.** Target and measurement are separate polls.
   Each target observation is paired with at most one measured observation
   within the declared acquisition tolerance
-  (:func:`src.analysis.pairing.match_ordered`); nothing is averaged onto a
+  (:func:`src.signals.pairing.match_ordered`); nothing is averaged onto a
   one-second grid, so no result here can claim instantaneous tracking from
   a mean.
 * **Transport delay without leakage.** Acquisition mismatch (how far apart
@@ -52,12 +52,12 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.channels import refuse_as_of
 from src.analysis.compare import align_pairs
 from src.analysis.noise_floor import NoiseFloor
-from src.analysis.pairing import PairingPolicy, match_ordered, to_seconds
 from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.signals.afr import AfrCalibration, voltage_to_afr
+from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
 
 Quantity = Literal["phi", "lambda", "afr"]
 Regime = Literal["closed_loop", "enrichment", "lean_target"]

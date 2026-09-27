@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from src.analysis.vehicle_signals import InputGroups
+from src.signals.vehicle_signals import InputGroups
 
 #: Inputs to the shared formulas whose inputs are vehicle-specific
-#: (:data:`src.analysis.derived.VEHICLE_INPUT_SIGNALS`).
+#: (:data:`src.signals.derived.VEHICLE_INPUT_SIGNALS`).
 SIGNAL_INPUTS: Mapping[str, InputGroups] = {
     # Wideband A/F sensor voltage, bank 1 minus bank 2.
     "derived:AFR_BANK_BALANCE": (("did:ECM_AF_SENSOR_V_B1",), ("did:ECM_AF_SENSOR_V_B2",)),

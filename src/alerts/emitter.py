@@ -40,10 +40,10 @@ from src.alerts.tuning import AlertTuner
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
     from src.alerts.fusion import FusedResult
     from src.alerts.notifier import Notifier
-    from src.analysis.committees import CommitteeFlag
     from src.config import DetectorRole
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
+    from src.signals.committees import CommitteeFlag
 
 log = logging.getLogger(__name__)
 

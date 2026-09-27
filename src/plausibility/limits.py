@@ -9,7 +9,7 @@ Every limit a check uses comes from data, never from shared code:
   registry's own decoder (``src.collection.obd_registry``) — a value outside
   it cannot have come off the wire;
 * the curated decode-level impossibilities in
-  :data:`src.analysis.fsm.PHYSICAL_LIMITS` (J1979 facts, not vehicle ones);
+  :data:`src.signals.fsm.PHYSICAL_LIMITS` (J1979 facts, not vehicle ones);
 * the vehicle's ``plausibility.yaml`` in its profile data directory: tighter
   per-channel limits, slew limits, stuck rules, enabled operating modes, poll
   tier intervals and the confirmation policy — the Xterra's numbers live in
@@ -596,7 +596,7 @@ def resolve_limits(
             entry.tier = pid_tier
             entry.tighten(low, high, f"J1979 PID 0x{pid:02X} encoding range")
     if include_physical_limits:
-        from src.analysis.fsm import PHYSICAL_LIMITS
+        from src.signals.fsm import PHYSICAL_LIMITS
 
         for channel, limit in PHYSICAL_LIMITS.items():
             entry = builder(channel)

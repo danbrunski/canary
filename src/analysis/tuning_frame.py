@@ -11,9 +11,9 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.afr import AfrCalibration, voltage_to_afr
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
 from src.paths import DIDS_YAML
+from src.signals.afr import AfrCalibration, voltage_to_afr
 from src.storage.capture_manifest import read_capture_manifest
 
 Role = Literal[

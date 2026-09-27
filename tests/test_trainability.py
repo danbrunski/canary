@@ -16,14 +16,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.afr import append_afr_channels, load_afr_calibration
-from src.analysis.committees import COMMITTEES, append_committee_residuals
-from src.analysis.derived import (
-    DERIVED_CHANNEL_INPUTS,
-    DERIVED_CHANNEL_OPTIONAL_INPUTS,
-    compute_anomaly_signals,
-    compute_derived_channels,
-)
 from src.analysis.refit import Surface1DRecipe, Surface2DRecipe
 from src.columns import is_flag_column
 from src.config import VehicleParameters
@@ -32,6 +24,14 @@ from src.preprocessing.feature_pipeline import (
     candidate_feature_columns,
     feature_policy_exclusions,
     featurize_wide_frame,
+)
+from src.signals.afr import append_afr_channels, load_afr_calibration
+from src.signals.committees import COMMITTEES, append_committee_residuals
+from src.signals.derived import (
+    DERIVED_CHANNEL_INPUTS,
+    DERIVED_CHANNEL_OPTIONAL_INPUTS,
+    compute_anomaly_signals,
+    compute_derived_channels,
 )
 from src.telemetry import (
     INPUT_GATED_SOURCES,
@@ -266,12 +266,12 @@ def test_committee_channels_leave_the_trained_feature_list_unchanged() -> None:
     into the feature frame, so the trained list is exactly what it is without
     them — committees were all non-trainable, so the corpus's lists do not move.
     The source gate refuses them anyway, should one ever reach a feature frame."""
-    from src.analysis.committees import (
+    from src.columns import base_channel
+    from src.signals.committees import (
         GPS_SPEED_ACCEL_G,
         OBD_SPEED_ACCEL_G,
         committee_channel_reason,
     )
-    from src.columns import base_channel
 
     config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())

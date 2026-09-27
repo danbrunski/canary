@@ -27,7 +27,6 @@ from typing import Any
 
 import pandas as pd
 
-from src.analysis.drives import DRIVE_COLUMN, drop_rows_without_drive
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import withheld_learned_feature_columns
@@ -72,6 +71,7 @@ from src.models.sequence_training import (
     session_envelopes,
     tail_block_validation_start,
 )
+from src.preprocessing.drives import DRIVE_COLUMN, drop_rows_without_drive
 from src.preprocessing.feature_pipeline import (
     COVERAGE_FLOOR_SCHEMA_KEY,
     DEFAULT_BINDINGS_PATH,
@@ -94,7 +94,7 @@ log = logging.getLogger(__name__)
 UNOBSERVED_IN_TRAINING_SCHEMA_KEY = "unobserved_in_training"
 
 #: Manifest ``schema`` key: training-frame rows dropped because no vehicle
-#: activity lay near them (parked time, ``src.analysis.drives``).
+#: activity lay near them (parked time, ``src.preprocessing.drives``).
 ROWS_WITHOUT_DRIVE_SCHEMA_KEY = "rows_without_physical_drive"
 
 #: Selectable sequence backbones by CLI/config selector.

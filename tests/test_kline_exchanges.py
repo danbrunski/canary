@@ -31,11 +31,11 @@ from src.analysis.kline_exchanges import (
     transitions_between,
     wire_frames,
 )
-from src.analysis.pairing import PairingPolicy
 from src.collection.kline.profile import load_kline_profile
 from src.collection.kline.sniff import FrameDecoder
 from src.collection.kline_collector import SniffRecorder
 from src.preprocessing.loader import read_session
+from src.signals.pairing import PairingPolicy
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.builders import ABS_SCREEN_CYCLE, abs_scan_tool_frames, kline_wire

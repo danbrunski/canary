@@ -299,7 +299,7 @@ PID_DECODERS: dict[int, tuple[str, Callable[[bytes], tuple[float, str] | None]]]
     0x25: ("O2_WR_LAMBDA_S2", decode_wide_lambda),
     # Sensor 5: bank 2 sensor 1 under the PID 0x13 O2 layout, bank 3 sensor 1
     # under 0x1D. Which bank it is belongs to the vehicle
-    # (``WIDEBAND_LAMBDA`` in src.analysis.vehicle_signals). Polled since
+    # (``WIDEBAND_LAMBDA`` in src.signals.vehicle_signals). Polled since
     # D03.34 (2026-09-26).
     0x28: ("O2_WR_LAMBDA_S5", decode_wide_lambda),
     0x2C: ("COMMANDED_EGR", decode_egr_percent),

@@ -84,9 +84,9 @@ def _frame_window_table(
 
 def _session_drives(frame: pd.DataFrame) -> list[tuple[str, ...]]:
     """Frame pieces that must be held out together: one physical drive
-    (:func:`src.analysis.drives.piece_units`), so validation can never share a
+    (:func:`src.preprocessing.drives.piece_units`), so validation can never share a
     drive with training, even across a capture the frame does not contain."""
-    from src.analysis.drives import piece_units
+    from src.preprocessing.drives import piece_units
 
     return piece_units(frame, session_column=SESSION_COLUMN, timestamp_column=TIMESTAMP_COLUMN)
 

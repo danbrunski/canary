@@ -978,7 +978,7 @@ def test_live_trip_integrals_match_batch_compute_derived_channels(
     batch ``compute_derived_channels`` (a full-session cumsum) and the live
     session-scoped accumulator must land on the same final cumulative
     values — not just "both increase", but numerically equal."""
-    from src.analysis.derived import compute_derived_channels
+    from src.signals.derived import compute_derived_channels
 
     n = 8
     start = datetime(2026, 5, 13, 12, 0, tzinfo=UTC)

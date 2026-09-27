@@ -7,7 +7,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.analysis.committees import (
+from src.signals.committees import (
     ALTITUDE_COMMITTEE,
     BARO_PRESSURE_COMMITTEE,
     COMMITTEES,

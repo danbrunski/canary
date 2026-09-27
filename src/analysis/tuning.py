@@ -37,7 +37,6 @@ from typing import Any, Literal, NoReturn
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import AfrCalibration
 from src.analysis.channels import (
     TIMESTAMP_BASIS_COLUMN,
     read_aligned,
@@ -54,17 +53,18 @@ from src.analysis.lambda_delivery import (
     delivery_samples,
 )
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor
-from src.analysis.pairing import (
+from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
+from src.analysis.tuning_frame import ProviderRegistry
+from src.decode.surface_eval import bin_indices
+from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.signals.afr import AfrCalibration
+from src.signals.pairing import (
     PairingPolicy,
     check_clock_support,
     match_ordered,
     to_seconds,
     weakest_basis,
 )
-from src.analysis.tune_revisions import TuneRevisionRegistry, resolve_session_revision
-from src.analysis.tuning_frame import ProviderRegistry
-from src.decode.surface_eval import bin_indices
-from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.storage.capture_manifest import read_capture_manifest
 
 #: Axes that must never grid a cross-flash comparison. ``CAL/LD`` is computed

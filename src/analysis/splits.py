@@ -1,7 +1,7 @@
 """Independent physical drives and the grouped train/calibration/test splits (B02.3).
 
 Moved out of :mod:`src.analysis.behavior_validation` (R05.13), which re-exports
-every name here, so the fold logic sits beside :mod:`src.analysis.drives` — the
+every name here, so the fold logic sits beside :mod:`src.preprocessing.drives` — the
 one physical-drive definition it groups by — rather than inside the 1,800-line
 evaluator. Pieces of one physical drive never cross folds; drives are ordered
 by parsed time, never by directory name.
@@ -16,9 +16,9 @@ from typing import Literal
 
 import pandas as pd
 
-from src.analysis import drives as _drives
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.decode.behavior_models import DriveRecord, DriveSplitRecord
+from src.preprocessing import drives as _drives
 from src.storage.sessions import session_started_at
 
 #: Default join gap between adjacent directories of one physical drive. A
@@ -49,7 +49,7 @@ def parent_session(piece: str) -> str:
 class Drive:
     """One independent physical drive: every piece recorded during it.
 
-    Deliberately not :class:`src.analysis.drives.PhysicalDrive` (R05.13
+    Deliberately not :class:`src.preprocessing.drives.PhysicalDrive` (R05.13
     looked, and kept both). The two answer different questions about the same
     drive. ``PhysicalDrive`` is built from recordings on disk: activity
     ``SessionSpan`` records and the recording names asked about. A split is built
@@ -82,7 +82,7 @@ class PieceRanges(dict[str, tuple[datetime | None, datetime | None]]):
 
     ``drive_rows`` (piece, epoch seconds, drive label) is what
     :func:`group_drives` groups on: the one physical-drive definition the
-    trainers use (``src.analysis.drives``), captures and activity pauses
+    trainers use (``src.preprocessing.drives``), captures and activity pauses
     included. A plain mapping (no rows) falls back to joining recordings by
     their ranges.
     """
@@ -141,7 +141,7 @@ def group_drives(
     """Group pieces into independent drives, oldest first.
 
     Ranges from a frame (:class:`PieceRanges` with rows) group by physical
-    drive, the definition every trainer uses (``src.analysis.drives``):
+    drive, the definition every trainer uses (``src.preprocessing.drives``):
     vehicle activity, captures bridging, a pause longer than the join gap
     splitting even one recording. Drives are then joined when one starts
     within ``join_gap_seconds`` of the previous one's end, and pieces sharing

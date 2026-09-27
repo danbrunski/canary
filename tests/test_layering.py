@@ -51,6 +51,7 @@ LAYERS: dict[str, int] = {
     "operating": 0,
     "paths": 0,
     "session": 0,
+    "signals": 0,
     "telemetry": 0,
     "timefmt": 0,
     "trainability": 0,
@@ -102,9 +103,6 @@ STANDING: dict[tuple[str, str], str] = {
 #: - R09.7 fusion and feedback into ``models``;
 #: - R09.8 daemon-owned objects out of ``dashboard``; Protocols for daemon types.
 OWED: dict[tuple[str, str], str] = {
-    ("alerts/emitter.py", "src.analysis.committees"): "R09.4",
-    ("alerts/events.py", "src.analysis.committees"): "R09.4",
-    ("collection/capture_profiles.py", "src.analysis.derived"): "R09.4",
     ("collection/collectors.py", "src.analysis.tune_revisions"): "R09.5",
     ("collection/collectors.py", "src.control.calibration"): "R09.5",
     ("collection/tuning_profile.py", "src.analysis.tune_revisions"): "R09.5",
@@ -123,30 +121,12 @@ OWED: dict[tuple[str, str], str] = {
     ("decode/behavior_decoder.py", "src.preprocessing.session_context"): "R09.6",
     ("decode/behavior_eligibility.py", "src.preprocessing.local_range"): "R09.6",
     ("decode/behavior_eligibility.py", "src.preprocessing.session_context"): "R09.6",
-    ("models/evaluation.py", "src.analysis.drives"): "R09.4",
     ("models/evaluation.py", "src.analysis.tune_revisions"): "R09.5",
-    ("models/isolation_forest.py", "src.analysis.drives"): "R09.4",
-    ("models/sequence_autoencoder_training.py", "src.analysis.drives"): "R09.4",
-    ("models/sequence_validation_split.py", "src.analysis.drives"): "R09.4",
-    ("models/training_entry.py", "src.analysis.drives"): "R09.4",
-    ("plausibility/limits.py", "src.analysis.fsm"): "R09.4",
-    ("preprocessing/derived.py", "src.analysis.fsm"): "R09.4",
-    ("preprocessing/derived_store.py", "src.analysis.fsm"): "R09.4",
-    ("preprocessing/feature_pipeline.py", "src.analysis.afr"): "R09.4",
-    ("preprocessing/feature_pipeline.py", "src.analysis.committees"): "R09.4",
-    ("preprocessing/feature_pipeline.py", "src.analysis.derived"): "R09.4",
-    ("preprocessing/feature_pipeline.py", "src.analysis.drives"): "R09.4",
-    ("preprocessing/live.py", "src.analysis.derived"): "R09.4",
-    ("preprocessing/local_range.py", "src.analysis.pairing"): "R09.4",
-    ("preprocessing/quality_gate.py", "src.analysis.fsm"): "R09.4",
-    ("preprocessing/session_context.py", "src.analysis.pairing"): "R09.4",
     ("profiles.py", "src.analysis.tune_revisions"): "R09.5",
     ("profiles.py", "src.analysis.vehicle_ledger"): "R09.5",
     ("profiles.py", "src.collection.can_bus"): "R09.5",
     ("profiles.py", "src.collection.can_obd_client"): "R09.5",
     ("profiles.py", "src.collection.obd_registry"): "R09.5",
-    ("trainability.py", "src.analysis.committees"): "R09.4",
-    ("trainability.py", "src.analysis.derived"): "R09.4",
 }
 
 #: Same-layer pairs present when the order was adopted, as sorted unit names.

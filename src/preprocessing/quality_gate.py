@@ -1,6 +1,6 @@
 """Physical-impossibility reject gate (Task 1.2, online-training-strategy.md).
 
-A channel reading outside its curated :data:`~src.analysis.fsm.PHYSICAL_LIMITS`
+A channel reading outside its curated :data:`~src.signals.fsm.PHYSICAL_LIMITS`
 (coolant at the sensor-open floor, a decode-rollover RPM, negative MAF, ...)
 is a data-quality failure — broken sensor / bad decode / bus glitch — never an
 unhealthy-engine state. It must never reach the scaler and must never be
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from src.analysis.fsm import PHYSICAL_LIMITS, PhysicalLimit
+from src.signals.fsm import PHYSICAL_LIMITS, PhysicalLimit
 
 log = logging.getLogger(__name__)
 

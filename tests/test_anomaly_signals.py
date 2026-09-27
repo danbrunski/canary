@@ -13,14 +13,14 @@ import math
 
 import pandas as pd
 
-from src.analysis.derived import (
+from src.config import VehicleParameters
+from src.signals.derived import (
     LEGACY_VE_CHANNEL,
     VE_AMBIENT_CHANNEL,
     VE_MANIFOLD_CHANNEL,
     compute_anomaly_signals,
     resolved_dependencies,
 )
-from src.config import VehicleParameters
 
 
 def _base(rows: int = 60) -> pd.DataFrame:

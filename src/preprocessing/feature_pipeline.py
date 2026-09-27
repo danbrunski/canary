@@ -24,14 +24,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analysis.afr import append_afr_channels, load_afr_calibration
-from src.analysis.committees import (
-    append_committee_residuals,
-    committee_channel_reason,
-    non_trainable_committee_outputs,
-)
-from src.analysis.derived import compute_anomaly_signals, compute_instantaneous_channels
-from src.analysis.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.collection.capture_profiles import MODE01_AUTO
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
 from src.columns import (
@@ -65,6 +57,7 @@ from src.preprocessing.derived import (
     resample_reduced,
 )
 from src.preprocessing.derived_store import DecodeInputs, DerivedStore, active_store
+from src.preprocessing.drives import DRIVE_COLUMN, stamp_physical_drives
 from src.preprocessing.feature_cache import (
     FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
 )
@@ -86,6 +79,13 @@ from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
+from src.signals.afr import append_afr_channels, load_afr_calibration
+from src.signals.committees import (
+    append_committee_residuals,
+    committee_channel_reason,
+    non_trainable_committee_outputs,
+)
+from src.signals.derived import compute_anomaly_signals, compute_instantaneous_channels
 from src.storage.broadcast_storage import (
     change_only_timeout,
     refuse_shorter_stored_timeout,
@@ -382,7 +382,7 @@ class FeaturePolicy:
     def _unserved_group(self, channel: str, seen: frozenset[str]) -> tuple[str, ...] | None:
         """The first required input group of derived ``channel`` with no served
         input, or ``None``. Undeclared channels are the source gate's business."""
-        from src.analysis.derived import DERIVED_CHANNEL_INPUTS
+        from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
         groups = DERIVED_CHANNEL_INPUTS.get(channel)
         if groups is None or channel in seen:
@@ -1085,7 +1085,7 @@ def _resample_sessions(
 
 
 def _with_physical_drives(features: pd.DataFrame, session_dirs: Sequence[Path]) -> pd.DataFrame:
-    """Label every row with its physical drive (``src.analysis.drives``).
+    """Label every row with its physical drive (``src.preprocessing.drives``).
 
     Stamped after the cache, never into it: which drive a row belongs to
     depends on the recordings beside it (captures bridge drives, quarantine
@@ -1494,7 +1494,7 @@ def derived_channel_inputs(channel: str) -> frozenset[str]:
     """Every channel a ``derived:`` channel's computation may read: each member
     of each declared input group (any may be the one chosen) plus its
     optional refinements. Empty for a channel that is not derived."""
-    from src.analysis.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
+    from src.signals.derived import DERIVED_CHANNEL_INPUTS, DERIVED_CHANNEL_OPTIONAL_INPUTS
 
     groups = DERIVED_CHANNEL_INPUTS.get(channel, ())
     return frozenset(
@@ -1510,7 +1510,7 @@ def derived_channels_reached(roots: Collection[str]) -> frozenset[str]:
     Sensor-committee outputs are left out: they are detectors, never features
     (H04.1), and their member transforms are not declared inputs.
     """
-    from src.analysis.derived import DERIVED_CHANNEL_INPUTS
+    from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
     features = [c for c in DERIVED_CHANNEL_INPUTS if committee_channel_reason(c) is None]
     reached: set[str] = set()

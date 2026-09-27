@@ -38,9 +38,9 @@ mere co-variation, and separates *unstable* from *unresolvable*.
 it: it averaged each side onto a one-second grid and inner-joined the bins.
 Two samples per second whose values disagreed by 100 at every acquired instant
 came back ``r2=1.0, slope=1.0, stable`` (roadmap task C01). Pairing now goes
-through :mod:`src.analysis.pairing`: real observations on the acquisition
+through :mod:`src.signals.pairing`: real observations on the acquisition
 clock, each used at most once, within an explicit
-:class:`~src.analysis.pairing.PairingPolicy` the caller must supply. The old
+:class:`~src.signals.pairing.PairingPolicy` the caller must supply. The old
 ``grid=`` keyword is rejected by name rather than reinterpreted, because a one
 second bin was never a statement about acquisition mismatch. Binned means are
 still available for *pictures* — :func:`binned_summary` — and are never fed to
@@ -63,7 +63,8 @@ from src.analysis.channels import (
     read_channels,
     refuse_as_of,
 )
-from src.analysis.pairing import (
+from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.signals.pairing import (
     ComparisonRefusedError,
     InputNotCapturedError,
     MatchedSamples,
@@ -74,7 +75,6 @@ from src.analysis.pairing import (
     to_seconds,
     weakest_basis,
 )
-from src.paths import BINDINGS_YAML, DIDS_YAML
 
 #: Sub-windows used for the scale-stability check. Three is the fewest that
 #: can distinguish "drifting" from "one noisy window".
@@ -463,7 +463,7 @@ def align_pairs(
 
     Refuses (:class:`ComparisonRefusedError`) when either side's timestamp
     provenance cannot support the tolerance asked for — see
-    :func:`src.analysis.pairing.check_clock_support`.
+    :func:`src.signals.pairing.check_clock_support`.
     """
     _refuse_grid(grid)
     long = read_channels(

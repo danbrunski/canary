@@ -71,8 +71,8 @@ retracted findings.
 | Which ROM cell is the ECM actually reading? | `src.analysis.rom_trace`: the ECM's own table coordinates (from RAM trace channels) beside the inferred rpm × load lookup. A disagreement between the two means a wrong axis decode or a wrong load scale. |
 | Bin anything by anything | `src.analysis.binned_analysis.compute_binned_analysis`. It uses the training pipeline's forward-fill resample, so it describes; it does not pair. |
 | Fit an expected-behavior surface over rpm × load | `src.analysis.surface_2d.fit_grid_binned_mean`: per-cell mean/std/**count**. Empty cells stay empty instead of getting a made-up value. |
-| Derived physics channels (fuel rate, air mass/cycle, bank balances) | `src.analysis.derived`: `compute_derived_channels`, `compute_anomaly_signals` |
-| Measured/target AFR reconstruction and the error surface | `src.analysis.afr`: `append_afr_channels`, `afr_error_surface` |
+| Derived physics channels (fuel rate, air mass/cycle, bank balances) | `src.signals.derived`: `compute_derived_channels`, `compute_anomaly_signals` |
+| Measured/target AFR reconstruction and the error surface | `src.signals.afr`: `append_afr_channels`, `afr_error_surface` |
 
 Before trusting a new analysis chain, run it where the answer is already known.
 `tests/test_analysis_ground_truth.py` runs the real chain over a committed slice

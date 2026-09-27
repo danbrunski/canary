@@ -1,6 +1,6 @@
 """``trip_summary.json`` session sidecar (Task 1.4, engine-analysis-and-mapping.md).
 
-:func:`~src.analysis.derived.summarize_trip` is pure (frame in, ``TripSummary``
+:func:`~src.signals.derived.summarize_trip` is pure (frame in, ``TripSummary``
 out); this module is the on-demand compute + persist wrapper the HTTP
 endpoint, MCP tool, and CLI (1.5/1.7) share. There is no session-close hook
 yet — the trip-end hook proposed in ``eval-longitudinal-and-dtc.md`` Phase 5.4
@@ -23,9 +23,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from src.analysis.derived import TripSummary, summarize_trip
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
+from src.signals.derived import TripSummary, summarize_trip
 from src.storage.sidecar import read_json_object, require_telemetry, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 

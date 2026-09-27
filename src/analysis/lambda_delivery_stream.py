@@ -38,7 +38,6 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from src.analysis.afr import AfrCalibration
 from src.analysis.lambda_delivery import (
     JudgedRows,
     LambdaDeliveryDeclaration,
@@ -48,6 +47,7 @@ from src.analysis.lambda_delivery import (
     resolve_quantity,
     target_side_from_arrays,
 )
+from src.signals.afr import AfrCalibration
 
 #: How far past a row's pairing window the data clock must be before the row
 #: is decided: reads reach the live sinks close to, but not exactly in,

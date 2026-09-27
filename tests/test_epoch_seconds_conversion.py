@@ -4,7 +4,7 @@ pandas 3 session frames carry ``datetime64[us]``. ``astype("int64") / 1e9``
 on such a column reads every interval 1000x short; the behavior evaluator's
 8 s persistence window once spanned hours of rows that way, and the same
 line sat in the engine-start tracker and the capture-rate evidence
-(2026-09-22). ``src.analysis.pairing.to_seconds`` pins nanoseconds first, and
+(2026-09-22). ``src.signals.pairing.to_seconds`` pins nanoseconds first, and
 this file refuses a second conversion anywhere else.
 """
 
@@ -17,10 +17,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.pairing import to_seconds
+from src.signals.pairing import to_seconds
 
 ROOT = Path(__file__).resolve().parents[1]
-ALLOWED = {ROOT / "src" / "analysis" / "pairing.py"}
+ALLOWED = {ROOT / "src" / "signals" / "pairing.py"}
 PATTERN = re.compile(r'astype\(\s*["\']int64["\']\s*\)[^\n]{0,80}(?:/\s*1e9|1_000_000_000)')
 
 
@@ -58,4 +58,4 @@ def test_no_other_int64_over_1e9_timestamp_conversion() -> None:
                     continue
                 if PATTERN.search(line):
                     offenders.append(f"{path.relative_to(ROOT)}:{number}: {line.strip()}")
-    assert not offenders, "use src.analysis.pairing.to_seconds instead:\n" + "\n".join(offenders)
+    assert not offenders, "use src.signals.pairing.to_seconds instead:\n" + "\n".join(offenders)

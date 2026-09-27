@@ -58,7 +58,6 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.analysis.committees import SPEED_COMMITTEE, STANDARD_GRAVITY
 from src.analysis.dyno import (
     GPS_SPEED_CHANNEL,
     DynoRefusal,
@@ -75,6 +74,7 @@ from src.preprocessing.imu_session import (
     read_imu_frame_sidecar,
     specific_force_from_sidecar,
 )
+from src.signals.committees import SPEED_COMMITTEE, STANDARD_GRAVITY
 from src.storage.broadcast_storage import held_series, session_can_storage
 from src.telemetry import CAN_SOURCE, SOURCE_SEP
 

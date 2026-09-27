@@ -139,7 +139,7 @@ def test_a_barely_moving_reference_is_unresolved_rather_than_drifting() -> None:
 
 def test_a_reference_that_was_never_captured_is_named_rather_than_swept_silently() -> None:
     """A sweep against an absent reference must say so, not return nothing."""
-    from src.analysis.pairing import ComparisonRefusedError
+    from src.signals.pairing import ComparisonRefusedError
 
     rpm = _rpm_walk(200)
     payloads = [bytes([0, 0, (int(v * 8) >> 8) & 0xFF, int(v * 8) & 0xFF, 0, 0, 0, 0]) for v in rpm]

@@ -8,10 +8,10 @@ import pytest
 import yaml
 
 from scripts.rom_targets import main
-from src.analysis.afr import TargetAfrMap, load_afr_calibration
 from src.analysis.osiris import SIGNATURE, Container, Section, transform
 from src.analysis.rom_targets import Definition, Patch, TargetEditor, sha256
 from src.analysis.tune_revisions import load_tune_revisions
+from src.signals.afr import TargetAfrMap, load_afr_calibration
 
 
 @pytest.fixture

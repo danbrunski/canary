@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.committees import committee_channel_reason
 from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models
@@ -35,6 +34,7 @@ from src.preprocessing.feature_pipeline import (
     featurize_wide_frame,
     load_resampled_session,
 )
+from src.signals.committees import committee_channel_reason
 from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
@@ -226,7 +226,7 @@ def test_every_derived_channel_reads_only_its_declared_inputs(
     framed = _full(frame, config, inputs).operating_frame
     wide = framed.loc[:, list(frame.columns) + ["operating_mode"]]
     clean = _append_derived_channels(wide, config)
-    from src.analysis.derived import DERIVED_CHANNEL_INPUTS
+    from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
     derived = sorted(
         str(c)

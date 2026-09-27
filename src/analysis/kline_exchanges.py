@@ -42,10 +42,10 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.compare import ChannelComparison, align_pairs, compare_channels
-from src.analysis.pairing import PairingPolicy
 from src.collection.kline import protocol as kp
 from src.collection.kline.names import FRAME_CHANNEL, LEGACY_DID_PREFIX, is_legacy
 from src.collection.kline.profile import KlineProfile
+from src.signals.pairing import PairingPolicy
 
 KLINE = "kline"
 ModuleBasis = Literal["recorded", "reconstructed", "unknown"]

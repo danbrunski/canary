@@ -7,13 +7,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from src.analysis.afr import load_afr_calibration
 from src.analysis.tuning_frame import (
     Provider,
     build_tuning_frame,
     load_provider_registry,
     section_capabilities,
 )
+from src.signals.afr import load_afr_calibration
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 

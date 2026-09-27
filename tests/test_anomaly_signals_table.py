@@ -16,14 +16,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analysis.derived import (
-    ANOMALY_SIGNALS,
-    DERIVED_CHANNEL_INPUTS,
-    compute_anomaly_signals,
-)
 from src.collection.capture_profiles import CaptureProfile, model_input_warnings
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import VehicleParameters
+from src.signals.derived import ANOMALY_SIGNALS, DERIVED_CHANNEL_INPUTS, compute_anomaly_signals
 
 BEHAVIOR_MODELS = Path("data/nissan-xterra-2008/behavior_models.yaml")
 
@@ -109,7 +105,7 @@ def test_a_profile_missing_the_stft_inputs_warns_for_the_bank_balance_models() -
 def test_shared_derived_code_names_no_manufacturer_did() -> None:
     import inspect
 
-    from src.analysis import afr, derived
+    from src.signals import afr, derived
 
     for module in (derived, afr):
         assert "did:" not in inspect.getsource(module), module.__name__
@@ -118,8 +114,8 @@ def test_shared_derived_code_names_no_manufacturer_did() -> None:
 
 
 def test_the_xterra_supplies_its_did_inputs_from_its_vehicle_module() -> None:
-    from src.analysis.vehicle_signals import af_sensor_voltage_columns, nissan_xterra_2008
     from src.profiles import profile_module_stem
+    from src.signals.vehicle_signals import af_sensor_voltage_columns, nissan_xterra_2008
 
     assert nissan_xterra_2008.__name__.rsplit(".", 1)[1] == profile_module_stem(
         "nissan-xterra-2008"
@@ -144,7 +140,7 @@ def test_the_xterra_supplies_its_did_inputs_from_its_vehicle_module() -> None:
 def _vehicle(name: str, **attrs: object) -> object:
     import types
 
-    module = types.ModuleType(f"src.analysis.vehicle_signals.{name}")
+    module = types.ModuleType(f"src.signals.vehicle_signals.{name}")
     for key, value in attrs.items():
         setattr(module, key, value)
     return module
@@ -153,7 +149,7 @@ def _vehicle(name: str, **attrs: object) -> object:
 def test_a_second_vehicle_adds_alternatives_not_replacements(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.analysis import vehicle_signals
+    from src.signals import vehicle_signals
 
     xterra = vehicle_signals.vehicle_modules()[0]
     other = _vehicle(
@@ -178,12 +174,7 @@ def test_a_second_vehicle_adds_alternatives_not_replacements(
     )
 
     # Its frames resolve to its own channels through the shared formula.
-    from src.analysis.derived import (
-        VEHICLE_INPUT_SIGNALS,
-        DerivedSignal,
-        SignalInputs,
-        _series,
-    )
+    from src.signals.derived import VEHICLE_INPUT_SIGNALS, DerivedSignal, SignalInputs, _series
 
     formulas = dict(VEHICLE_INPUT_SIGNALS)
     signal = DerivedSignal(
@@ -205,7 +196,7 @@ def test_a_second_vehicle_adds_alternatives_not_replacements(
 def test_a_vehicle_cannot_invent_a_signal_or_change_its_arity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from src.analysis import vehicle_signals
+    from src.signals import vehicle_signals
 
     invented = _vehicle("a", SIGNAL_INPUTS={"derived:NEW_THING": (("did:X",),)})
     monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (invented,))

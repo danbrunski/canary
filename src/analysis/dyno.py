@@ -59,9 +59,9 @@ import numpy.typing as npt
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.analysis.committees import STANDARD_GRAVITY
 from src.analysis.noise_floor import SIGMA_THRESHOLD
 from src.atomic_write import atomic_write_text
+from src.signals.committees import STANDARD_GRAVITY
 
 if TYPE_CHECKING:
     from src.config import CanaryConfig, VehicleParameters

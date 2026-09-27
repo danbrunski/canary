@@ -48,11 +48,6 @@ from src.analysis.behavior_validation import (
     piece_time_ranges,
     profile_refusals,
 )
-from src.analysis.derived import (
-    STFT_BANK_BALANCE_SMOOTHING_SECONDS,
-    VE_AMBIENT_CHANNEL,
-    VE_MANIFOLD_CHANNEL,
-)
 from src.analysis.surface_1d import fit_binned_lookup, fit_polynomial, fit_robust_baseline
 from src.analysis.surface_2d import fit_grid_binned_mean
 from src.columns import MODE_COLUMN, SESSION_COLUMN, roc_column
@@ -90,6 +85,11 @@ from src.preprocessing.session_context import (
     StartContextSpec,
     append_start_context,
     start_context_columns,
+)
+from src.signals.derived import (
+    STFT_BANK_BALANCE_SMOOTHING_SECONDS,
+    VE_AMBIENT_CHANNEL,
+    VE_MANIFOLD_CHANNEL,
 )
 from src.storage.sessions import session_started_at
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.analysis.fsm import (
+from src.signals.fsm import (
     PHYSICAL_LIMITS,
     PhysicalLimit,
     classify_spec,

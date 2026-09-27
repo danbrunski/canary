@@ -51,14 +51,6 @@ import numpy as np
 import pandas as pd
 
 from src.alerts.fusion import PersistenceGate
-from src.analysis.drives import (
-    DRIVE_GAP_SECONDS,
-    SessionSpan,
-    drive_id_for,
-    join_spans,
-    physical_drives,
-    recording_units,
-)
 from src.analysis.tune_revisions import TuneRevisionRegistry
 from src.config import CanaryConfig
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
@@ -66,6 +58,14 @@ from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
 from src.models.sequence_calibration import block_maxima as max_finite_per_block
 from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS
 from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.preprocessing.drives import (
+    DRIVE_GAP_SECONDS,
+    SessionSpan,
+    drive_id_for,
+    join_spans,
+    physical_drives,
+    recording_units,
+)
 from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 from src.session import SessionKind, session_kind, session_sort_key
 from src.storage.session_files import PARQUET_PATTERN
@@ -300,7 +300,7 @@ def drives_of_sessions(
     sessions: Sequence[Path], *, era_of: EraResolver | None = None
 ) -> list[Drive]:
     """Physical drives among session directories, as units a holdout can take
-    whole (:func:`src.analysis.drives.physical_drives`, oldest first).
+    whole (:func:`src.preprocessing.drives.physical_drives`, oldest first).
 
     Drives are vehicle activity joined across recordings, with every sibling
     recording (captures included) as evidence, and split where the activity

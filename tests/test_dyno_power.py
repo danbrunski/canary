@@ -22,7 +22,6 @@ import pandas as pd
 import pytest
 from pydantic import ValidationError
 
-from src.analysis.committees import STANDARD_GRAVITY as G
 from src.analysis.dyno import (
     ENGINE_ESTIMATE_LABEL,
     Driveline,
@@ -50,6 +49,7 @@ from src.analysis.dyno_inputs import (
     build_motion_inputs,
 )
 from src.config import VehicleParameters
+from src.signals.committees import STANDARD_GRAVITY as G
 
 # Known answers. None is read from a profile; the computation must recover the
 # torque curve, not echo it.

@@ -888,7 +888,6 @@ def test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider(
 
     from src.analysis.channels import as_of_refusal, refuse_as_of
     from src.analysis.lambda_delivery import target_source_agreement
-    from src.analysis.pairing import to_seconds
     from src.analysis.rom_trace import AxisTrace, TableInfo, TableTrace, cell_residency
     from src.analysis.tuning import DeliveryInputs, _attach, _check_clock
     from src.analysis.tuning_digest import (
@@ -898,6 +897,7 @@ def test_row_pairing_and_counting_callers_refuse_a_change_only_decoded_provider(
     )
     from src.analysis.tuning_frame import LoadWotCriterion, build_tuning_frame
     from src.analysis.warmup_checks import runtime_clock_report
+    from src.signals.pairing import to_seconds
 
     full, changed = _pair(tmp_path, _drive(60.0))
     rpm, poll = "decoded:ECM_RPM", "obd:RPM"
