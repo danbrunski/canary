@@ -473,6 +473,30 @@ def test_retrain_no_sessions_returns_error(tmp_path: Path, monkeypatch: pytest.M
     assert rc == 1
 
 
+def test_retrain_refuses_a_named_tuning_session_before_building_a_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """R03.12 (P02.12): a ``_tuning-*`` recording named on the command line is
+    refused at session selection, with exit 2, and no trainer or frame build
+    runs. Training discovery never offers one, so only an explicit path could."""
+    root = tmp_path / "sessions"
+    live = root / "2026-09-20T152758"
+    tuning = root / "_tuning-2026-09-19T120000"
+    for session in (live, tuning):
+        session.mkdir(parents=True)
+
+    def _must_not_run(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("refused sessions reached a frame build or trainer")
+
+    monkeypatch.setattr(retrain, "build_feature_frame", _must_not_run)
+    monkeypatch.setattr(training_entry, "train_isolation_forest", _must_not_run)
+    rc = retrain.main(retrain_argv(tmp_path, str(live), str(tuning)))
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "R03.12" in err
+    assert tuning.name in err and live.name not in err.split("R03.12", 1)[1]
+
+
 def test_retrain_continues_after_first_trainer_fails(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -850,7 +874,9 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     # any scored artifact trained on (A02.1).
     training = write_fixture_session(tmp_path / "train", "2026-05-11T000000", seed=2, n=120)
     session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
-    features = featurize_wide_frame(load_resampled_session(training, config), config).features
+    features = featurize_wide_frame(
+        load_resampled_session(training, config), config, behavior_models=None
+    ).features
     trained = fit_isolation_forest(
         features,
         IFConfig(n_estimators=40),

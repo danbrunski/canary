@@ -102,9 +102,11 @@ from src.models.benchmark_gate import (
 from src.models.evaluation import (
     MIN_CALIBRATION_HOLDOUT_SESSIONS,
     HoldoutSplit,
+    NonDefaultProfileTrainingError,
     holdout_by_drive,
     pick_calibration_holdouts,
     pick_evaluation_holdouts,
+    refuse_non_default_profile_sessions,
 )
 from src.models.golden_baselines import (
     GoldenBaselines,
@@ -642,6 +644,13 @@ def _select_sessions(run: RetrainRun) -> int | None:
             file=sys.stderr,
         )
         return 1
+    # R03.12: a non-default-profile recording named explicitly is refused
+    # here, before the frame build, as the trainers would refuse it after.
+    try:
+        refuse_non_default_profile_sessions(sessions, purpose="retrain the detectors")
+    except NonDefaultProfileTrainingError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
     run.sessions = list(sessions)
     return None
 

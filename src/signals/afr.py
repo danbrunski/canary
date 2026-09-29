@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
@@ -14,7 +15,21 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.config import VehicleParameters
 from src.signals.derived import _append_dependency_gap, _selected_input, fuel_properties
-from src.signals.vehicle_signals import af_sensor_voltage_columns, wideband_lambda_columns
+from src.signals.vehicle_signals import (
+    LoadAxisChannel,
+    af_sensor_voltage_columns,
+    load_axis_channels,
+    wideband_lambda_columns,
+)
+
+#: The target-map lookup's output and the per-bank errors built on it.
+TARGET_AFR = "derived:TARGET_AFR"
+AFR_ERROR_CHANNELS: tuple[str, ...] = ("derived:AFR_ERROR_B1", "derived:AFR_ERROR_B2")
+#: Every channel whose value depends on the target map's load axis (P02.13).
+TARGET_AFR_CHANNELS: tuple[str, ...] = (TARGET_AFR, *AFR_ERROR_CHANNELS)
+#: Stable prefix of every load-axis refusal: in ``FeaturePolicy`` exclusions,
+#: manifests and the lookup's own error.
+LOAD_AXIS_UNVERIFIED = "load_axis_unverified"
 
 
 class _Strict(BaseModel):
@@ -61,10 +76,20 @@ class TargetMapProvenance(_Strict):
     notes: str = ""
 
 
+#: The load axis every target map declares today, and its unit. The lookup
+#: resolves its load input from the vehicle's verified channel for this axis
+#: (``src.signals.vehicle_signals.LOAD_AXIS_CHANNELS``), never from a column
+#: name in shared code.
+TargetLoadAxis = Literal["base_fuel_schedule"]
+TargetLoadAxisUnit = Literal["ms"]
+DEFAULT_TARGET_LOAD_AXIS: TargetLoadAxis = "base_fuel_schedule"
+DEFAULT_TARGET_LOAD_AXIS_UNIT: TargetLoadAxisUnit = "ms"
+
+
 class TargetAfrMap(_Strict):
     revision: str
-    load_axis_name: Literal["base_fuel_schedule"] = "base_fuel_schedule"
-    load_axis_unit: Literal["ms"] = "ms"
+    load_axis_name: TargetLoadAxis = DEFAULT_TARGET_LOAD_AXIS
+    load_axis_unit: TargetLoadAxisUnit = DEFAULT_TARGET_LOAD_AXIS_UNIT
     rpm_breakpoints: list[float] = Field(min_length=2)
     load_breakpoints: list[float] = Field(min_length=2)
     afr: list[list[float]]
@@ -240,10 +265,119 @@ def voltage_to_afr(voltage: pd.Series, transfer: VoltageAfrTransfer) -> pd.Serie
     return pd.Series(values, index=voltage.index, dtype=float)
 
 
-def target_afr(rpm: pd.Series, load: pd.Series, target: TargetAfrMap) -> pd.Series:
-    """Bilinear lookup; rows outside the exported ROM grid stay unknown."""
+class LoadAxisUnavailableError(ValueError):
+    """The target map's load axis has no verified channel in its unit (P02.13).
+
+    ``reason`` starts with :data:`LOAD_AXIS_UNVERIFIED`; it is the text the
+    feature policy records for :data:`TARGET_AFR_CHANNELS`.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+#: The unit a wide-frame column's values are in, per the repo's channel
+#: catalogs, or ``None`` when no catalog gives one. The catalogs (``dids.yaml``,
+#: the Mode 01 registry) sit above this layer, so the caller resolves the unit
+#: and hands the resolver in: ``src.preprocessing.channel_units.catalog_channel_unit``.
+ChannelUnits = Callable[[str], str | None]
+
+#: Catalog placeholders that are not a unit.
+_NO_UNIT: frozenset[str] = frozenset({"", "unknown"})
+
+
+def load_axis_refusal(
+    axis: str = DEFAULT_TARGET_LOAD_AXIS,
+    unit: str = DEFAULT_TARGET_LOAD_AXIS_UNIT,
+    *,
+    channel_units: ChannelUnits | None,
+) -> str | None:
+    """Why no channel may feed a table lookup on ``axis`` (in ``unit``), or
+    ``None`` when a vehicle declares one whose *catalog* unit is ``unit``.
+
+    The unit is never taken from the declaration. ``channel_units`` resolves it
+    from the channel's own catalog entry. A declared channel the catalog gives
+    no unit (absent, ``unknown``, or no catalog passed: ``None``) is refused, and
+    so is one in another unit. This is the P02.13 defect (calculated load in %
+    on a base-fuel-schedule axis in ms), and a declaration alone cannot relabel
+    it.
+    """
+    declared = load_axis_channels(axis)
+    if not declared:
+        return (
+            f"{LOAD_AXIS_UNVERIFIED}: no channel is verified to report the target map's "
+            f"load axis {axis} ({unit}) on any vehicle "
+            "(src.signals.vehicle_signals LOAD_AXIS_CHANNELS; P02.13, operator decision "
+            "2026-09-27). Calculated load (obd:ENGINE_LOAD, %) is not this axis"
+        )
+    refused: list[str] = []
+    for channel in declared:
+        catalog_unit = None if channel_units is None else channel_units(channel.channel)
+        if catalog_unit is None or catalog_unit.strip().lower() in _NO_UNIT:
+            refused.append(f"{channel.channel} (the channel catalog gives it no unit)")
+        elif catalog_unit != unit:
+            refused.append(f"{channel.channel} (catalog unit {catalog_unit})")
+    if refused:
+        return (
+            f"{LOAD_AXIS_UNVERIFIED}: the {axis} axis is in {unit}, and the declared "
+            f"{', '.join(refused)} is not (P02.13)"
+        )
+    return None
+
+
+def target_afr_refusal(
+    target: TargetAfrMap | None, *, channel_units: ChannelUnits | None
+) -> str | None:
+    """Why ``derived:TARGET_AFR`` cannot be looked up on ``target``, or ``None``."""
+    if target is None:
+        return "no target AFR map is recorded for this tune revision"
+    return load_axis_refusal(
+        target.load_axis_name, target.load_axis_unit, channel_units=channel_units
+    )
+
+
+def target_load_axis(
+    target: TargetAfrMap, frame: pd.DataFrame, *, channel_units: ChannelUnits | None
+) -> LoadAxisChannel:
+    """The verified channel that carries ``target``'s load axis in ``frame``.
+
+    The only way the lookup gets its load input. Raises
+    :class:`LoadAxisUnavailableError` when no vehicle declares a channel whose
+    catalog unit is the axis unit (:func:`load_axis_refusal`), and ``KeyError``
+    when the declared channel is not in ``frame``. There is no argument through
+    which another column could be passed in.
+    """
+    refusal = target_afr_refusal(target, channel_units=channel_units)
+    if refusal is not None:
+        raise LoadAxisUnavailableError(refusal)
+    for channel in load_axis_channels(target.load_axis_name):
+        if channel.channel in frame:
+            return channel
+    raise KeyError(
+        f"no verified {target.load_axis_name} channel is in the frame "
+        f"({', '.join(c.channel for c in load_axis_channels(target.load_axis_name))})"
+    )
+
+
+def target_afr(
+    frame: pd.DataFrame,
+    target: TargetAfrMap,
+    *,
+    channel_units: ChannelUnits | None,
+    rpm_column: str = "obd:RPM",
+) -> pd.Series:
+    """Bilinear lookup; rows outside the exported ROM grid stay unknown.
+
+    The load input is the vehicle's verified channel for ``target``'s load axis
+    (:func:`target_load_axis`), read from ``frame`` here. A caller cannot hand
+    in a load series of its own, so the map is never looked up in a unit its
+    axis is not in (P02.13).
+    """
+    axis = target_load_axis(target, frame, channel_units=channel_units)
+    rpm = frame[rpm_column]
     rpm_values = pd.to_numeric(rpm, errors="coerce").to_numpy(dtype=float)
-    load_values = pd.to_numeric(load, errors="coerce").to_numpy(dtype=float)
+    load_values = pd.to_numeric(frame[axis.channel], errors="coerce").to_numpy(dtype=float)
     result = np.full(len(rpm_values), np.nan, dtype=float)
     grid = np.asarray(target.afr, dtype=float)
     rpm_axis = np.asarray(target.rpm_breakpoints, dtype=float)
@@ -278,9 +412,17 @@ def append_afr_channels(
     vehicle: VehicleParameters,
     calibration: AfrCalibration | None = None,
     *,
+    channel_units: ChannelUnits | None,
     tune_revision: str | None = None,
 ) -> pd.DataFrame:
-    """Append measured AFR, censor flags, target AFR and per-bank error."""
+    """Append measured AFR, censor flags, target AFR and per-bank error.
+
+    ``derived:TARGET_AFR`` and ``derived:AFR_ERROR_B*`` exist only where the
+    map's load axis has a declared channel whose catalog unit (resolved by
+    ``channel_units``) is the axis unit (:func:`target_afr_refusal` names why
+    not, P02.13). They are absent otherwise, never computed from another
+    load-like column. ``channel_units=None`` means no catalog, so no target.
+    """
     out = frame.copy()
     stoich = fuel_properties(vehicle).afr_stoich
     transfer = calibration.voltage_transfer if calibration else None
@@ -313,14 +455,23 @@ def append_afr_channels(
     _append_lambda_bank_balances(out, calibration, stoich=stoich, floor=floor, ceiling=ceiling)
 
     target = calibration.target_map(tune_revision) if calibration else None
-    if target and "obd:RPM" in out and "obd:ENGINE_LOAD" in out:
-        out["derived:TARGET_AFR"] = target_afr(out["obd:RPM"], out["obd:ENGINE_LOAD"], target)
-        for bank in (1, 2):
-            measured_column = f"derived:AFR_B{bank}"
-            if measured_column in out:
-                out[f"derived:AFR_ERROR_B{bank}"] = (
-                    out[measured_column] - out["derived:TARGET_AFR"]
-                ).where(~out[f"derived:AFR_CENSORED_B{bank}"])
+    if (
+        target is None
+        or target_afr_refusal(target, channel_units=channel_units) is not None
+        or "obd:RPM" not in out
+    ):
+        return out
+    try:
+        out[TARGET_AFR] = target_afr(out, target, channel_units=channel_units)
+    except KeyError:
+        # The verified axis channel was not captured on this frame.
+        return out
+    for bank, error_column in zip((1, 2), AFR_ERROR_CHANNELS, strict=True):
+        measured_column = f"derived:AFR_B{bank}"
+        if measured_column in out:
+            out[error_column] = (out[measured_column] - out[TARGET_AFR]).where(
+                ~out[f"derived:AFR_CENSORED_B{bank}"]
+            )
     return out
 
 
@@ -374,12 +525,26 @@ def afr_error_surface(
     target: TargetAfrMap,
     *,
     bank: int,
+    channel_units: ChannelUnits | None,
     min_samples: int = 5,
 ) -> list[dict[str, Any]]:
-    """RPM x load error cells; censored observations never enter statistics."""
+    """RPM x load error cells; censored observations never enter statistics.
+
+    Cells are binned on the map's own load axis, read from its verified
+    channel (:func:`target_load_axis`). Raises :class:`LoadAxisUnavailableError`
+    when there is none, rather than return an empty surface that reads as
+    "no errors".
+    """
     error_column = f"derived:AFR_ERROR_B{bank}"
     censored_column = f"derived:AFR_CENSORED_B{bank}"
-    required = ["obd:RPM", "obd:ENGINE_LOAD", error_column]
+    refusal = target_afr_refusal(target, channel_units=channel_units)
+    if refusal is not None:
+        raise LoadAxisUnavailableError(refusal)
+    present = [c for c in load_axis_channels(target.load_axis_name) if c.channel in frame]
+    if not present:
+        return []
+    load_column = present[0].channel
+    required = ["obd:RPM", load_column, error_column]
     if any(column not in frame for column in required):
         return []
     columns = [*required, *([censored_column] if censored_column in frame else [])]
@@ -391,7 +556,7 @@ def afr_error_surface(
         clean["obd:RPM"], target.rpm_breakpoints, include_lowest=True, right=True
     )
     clean["load_bin"] = pd.cut(
-        clean["obd:ENGINE_LOAD"], target.load_breakpoints, include_lowest=True, right=True
+        clean[load_column], target.load_breakpoints, include_lowest=True, right=True
     )
     rows: list[dict[str, Any]] = []
     grouped = clean.groupby(["rpm_bin", "load_bin"], observed=True)[error_column]
@@ -417,9 +582,17 @@ def afr_error_surface(
 
 
 __all__ = [
+    "AFR_ERROR_CHANNELS",
+    "DEFAULT_TARGET_LOAD_AXIS",
+    "DEFAULT_TARGET_LOAD_AXIS_UNIT",
     "LAMBDA_BANK_BALANCE_AF_VOLTAGE",
     "LAMBDA_BANK_BALANCE_WIDEBAND",
+    "LOAD_AXIS_UNVERIFIED",
+    "TARGET_AFR",
+    "TARGET_AFR_CHANNELS",
     "AfrCalibration",
+    "ChannelUnits",
+    "LoadAxisUnavailableError",
     "TargetAfrMap",
     "TargetMapProvenance",
     "VoltageAfrTransfer",
@@ -427,6 +600,9 @@ __all__ = [
     "append_afr_channels",
     "afr_error_surface",
     "load_afr_calibration",
+    "load_axis_refusal",
     "target_afr",
+    "target_afr_refusal",
+    "target_load_axis",
     "voltage_to_afr",
 ]

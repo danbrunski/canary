@@ -17,6 +17,7 @@ from scripts.train_anomaly_model import (
 from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
 from src.preprocessing import feature_pipeline
+from src.preprocessing.channel_units import catalog_channel_unit
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     build_feature_frame,
@@ -29,6 +30,7 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
+from src.signals.afr import TARGET_AFR_CHANNELS, load_axis_refusal
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 from tests.configs import example_config
 
@@ -372,6 +374,11 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         },
         # No decoded:/did: channel in this fixture, so policy gated nothing.
         "feature_policy_exclusions": {},
+        # P02.13 — refused by name whether or not the frame carries them: no
+        # channel is verified for the target map's load axis.
+        "feature_policy_standing_exclusions": dict.fromkeys(
+            TARGET_AFR_CHANNELS, load_axis_refusal(channel_units=catalog_channel_unit)
+        ),
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,
@@ -397,6 +404,8 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         # P02.11 — the calibration the derived AFR channels read; a
         # profile-less example config names the absent top-level file.
         "afr_calibration": {"path": str(_config().daemon.afr_calibration), "sha256": None},
+        # P02.12 — the behavior models the frame's deviation columns came from.
+        "behavior_models": {"path": str(_config().daemon.behavior_models), "sha256": None},
     }
 
 

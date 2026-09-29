@@ -1318,7 +1318,7 @@ recomputes the rolling frame over the whole buffered window every tick.
       `AFR_ERROR_B*` inherits the error. This was already true on the daemon;
       this change makes offline frames match it.
 
-- [ ] **P02.12 Behavior deviations reach training, as they reach serving.**
+- [x] **P02.12 Behavior deviations reach training, as they reach serving.**
   Operator decision 2026-09-27: yes. `build_feature_frame`'s
   `behavior_models_path` defaults to the unscoped `data/behavior_models.yaml`,
   which does not exist, and no trainer passes one. So trainer frames carry no
@@ -1336,7 +1336,117 @@ recomputes the rolling frame over the whole buffered window every tick.
   - Feature cache and spec keys must cover the behavior-model file actually
     read.
 
-- [ ] **P02.13 `derived:TARGET_AFR` refuses a load channel in the wrong
+  *Done 2026-09-28.*
+  - **The default is the config's file.** `build_feature_frame(...,
+    behavior_models_path=None)` reads the scoped `config.daemon.behavior_models`.
+    The override remains only for `refit_behavior_models --out`, whose subject is
+    another artifact. `DEFAULT_BEHAVIOR_MODELS_PATH` (the repo-level
+    `data/behavior_models.yaml`) is deleted, so it cannot be defaulted to again.
+  - **`featurize_wide_frame` / `featurize_perturbed_frame` take
+    `behavior_models` with no default** (keyword-only). A `None` default was the
+    same trap one layer down. Each caller now states its set, through the new
+    `configured_behavior_models(config)` (scoped; refuses unscoped) or the
+    live source's hot-reloaded copy.
+  - **Callers swept** (`grep` for `build_feature_frame`,
+    `featurize_wide_frame`, `featurize_perturbed_frame`, `behavior_models_path`,
+    `load_behavior_models`, `DEFAULT_BEHAVIOR_MODELS_PATH`, `read_behavior_models`).
+    - *Were missing the deviations, fixed:*
+      - the trainers' `build_feature_frame` calls in `training_entry` and
+        `retrain.py`, and `datasets/export.py` (the new default);
+      - `models/synthetic_fault_eval.py`, nominal and injected frames, with
+        the models loaded once;
+      - the `train_anomaly_model --evaluate` injection;
+      - `scripts/replay.py` (`replay_sessions` defaulted to the repo file);
+      - `scripts/analyze_session.py`, which fell back to the repo file when the
+        scoped one was absent. It now errors, naming the scoped path;
+      - `dashboard.api.create_app`, which now defaults to
+        `config.daemon.behavior_models`, and `read_behavior_models`, which now
+        has no default path. The daemon already passed the scoped path.
+    - *Already right:* `live.py`, `evaluate_detectors` (both featurize paths),
+      `behavior_validation`, `session_deviations`, `fingerprint`,
+      `spec_producibility`, `daemon/inference`, the MCP tool and
+      `check_manifest_producibility`.
+  - **Keys.** The feature-frame cache key hashes the file the build reads,
+    which is now the scoped file by default. `FEATURE_FRAME_CACHE_VERSION` goes
+    7 → 8, which also covers P02.13. `build_feature_spec` records
+    `behavior_models: {path, sha256}` beside `afr_calibration`. B03.4's
+    per-model fingerprints are unchanged.
+  - **Default profile only (R03.12/R04.6).** Training discovery already drops
+    every `_`-prefixed recording. Nothing refused an explicitly named one, so
+    the trainers now refuse it too, before any frame build:
+    - the new `models.evaluation.refuse_non_default_profile_sessions` names each
+      offending recording and cites R03.12;
+    - it is called by `train_isolation_forest` and `train_sequence_detector`,
+      for training and calibration sessions alike;
+    - `retrain.py` calls it at session selection, exit 2.
+
+    It uses `default_profile_exclusion`: a `_tuning-*` recording, or a capture
+    whose manifest is not corpus-eligible. `refit_behavior_models` keeps its
+    own stamping. It needs tuning recordings for drive grouping and refuses
+    their rows by name.
+  - **Measured** with `canary.yaml`, scoped, on the laptop. Built with
+    `build_feature_frame`, old default (absent file) against the scoped one.
+
+    | drive | rows | columns | shared columns changed |
+    |---|---|---|---|
+    | `2026-09-20T152758` | 8,570 | 899 → 959 | none |
+    | `2026-08-03T163440` | 1,883 | 899 → 959 | none |
+
+    The +60 columns are the 12 served models × (raw, `__gap`, `__mean`,
+    `__std`, `__roc`). Coverage over all rows, then over classified rows:
+
+    | model | 152758 | 163440 |
+    |---|---|---|
+    | `warm_idle_rpm_baseline` | 43.1 / 50.1 % | 0 / 0 % |
+    | `timing_advance_vs_rpm_load` | 47.6 / 55.2 % | 41.4 / 49.7 % |
+    | `timing_advance_vs_rpm_iat` | 26.3 / 30.6 % | 42.3 / 50.9 % |
+    | `fuel_trim_vs_rpm_load` | 35.7 / 41.4 % | 21.2 / 25.6 % |
+    | `air_mass_per_cycle_vs_rpm_load` | 53.3 / 61.9 % | 38.9 / 46.7 % |
+    | `ve_vs_rpm_load` | 53.3 / 61.8 % | 38.7 / 46.5 % |
+    | `total_trim_vs_rpm_load_b1` | 26.9 / 31.2 % | 3.2 / 3.9 % |
+    | `total_trim_vs_rpm_load_b2` | 23.5 / 27.3 % | 3.1 / 3.7 % |
+    | `stft_bank_balance_city` | 1.6 / 1.8 % | 8.5 / 10.2 % |
+    | `stft_bank_balance_highway` | 0.0 / 0.0 % | 2.1 / 2.6 % |
+    | `cat_warmup` | 0.9 / 1.1 % | 0 / 0 % |
+    | `air_charge_vs_rpm_throttle_did` | 1.5 / 1.7 % | 1.7 / 2.0 % |
+  - **Next-retrain verdict.** Selection was run on the two drives pooled,
+    with `resolve_feature_policy(scoped)`.
+    - *IF:* the selection goes from 178 to 189 columns, and nothing drops out.
+      The eleven new columns are the families of `air_mass_per_cycle_vs_rpm_load`
+      and `ve_vs_rpm_load` (4 each) and `timing_advance_vs_rpm_load` (3; its
+      `__roc` is under `MIN_DETECTOR_COVERAGE` on the pool).
+      `withheld_learned_feature_columns` then removes the
+      `timing_advance_vs_rpm_load` three, because `behavior_policy.yaml` has that
+      model as `exploratory`. **Net +8 IF features.**
+    - Every other deviation column fails the 0.5 floor (`sparse_for_grid` or
+      `below_row_coverage`), is all-NaN, or is withheld (`timing_advance_vs_rpm_iat`
+      is demoted, `cat_warmup` quarantined).
+    - *Sequence detector: +0.* `sequence_feature_selection` drops the whole
+      `deviation:` family by design.
+    - Two drives are not the corpus. The coverage floor is judged over whatever
+      the retrain pools, so the admitted set can differ.
+  - **Deployed manifests: unchanged.** `models/nissan-xterra-2008/isolation_forest`
+    has 295 feature columns and `lstm_autoencoder` 361. Neither names a
+    `deviation:` column, so nothing is served differently until a retrain. No
+    retrain was run.
+  - **Tests.**
+    - `tests/test_behavior_deviations_reach_training.py` (9):
+      - the default reads the configured file (known answer: Δ = +5 °);
+      - the real scoped Xterra frame carries every served model's column with
+        no path passed;
+      - `configured_behavior_models` refuses an unscoped config;
+      - both featurize functions have no default;
+      - the cache key moves on a model edit, and default equals explicit;
+      - the spec records the sha256;
+      - `refuse_non_default_profile_sessions` names `_tuning-*` and ineligible
+        captures and passes an eligible one;
+      - both trainers refuse, for training and calibration.
+    - The golden spec contract in `test_train_anomaly_model.py` gains the two
+      new keys.
+    - 31 test call sites now pass `behavior_models=None`, their old implicit
+      value.
+
+- [x] **P02.13 `derived:TARGET_AFR` refuses a load channel in the wrong
   unit.** Operator decision 2026-09-27: keep it out of detector features now,
   fix the input next. `append_afr_channels` looks the target map up with
   `obd:ENGINE_LOAD` (%). The map declares `load_axis_name:
@@ -1354,6 +1464,160 @@ recomputes the rolling frame over the whole buffered window every tick.
   - Survey every consumer of `derived:TARGET_AFR` / `AFR_ERROR_B*` (dashboard,
     tuning pages, workbench, MCP, digest) and report what goes absent.
     Commanded AFR from PID 0x44 (φ) is a different quantity and is unaffected.
+
+  *Done 2026-09-28.*
+  - **How an axis resolves to a channel: vehicle data.**
+    `src.signals.vehicle_signals` gains `LoadAxisChannel(axis, channel,
+    evidence)`, a vehicle module's `LOAD_AXIS_CHANNELS`, and
+    `load_axis_channels(axis)`. `evidence` is required: an unverified channel on
+    a table axis is the defect. The declaration has **no unit field**; the
+    unit is the channel catalog's (below). The Xterra module declares `()`, with the
+    reason. 0x1208 is only a candidate; `dids.yaml` leaves it unscaled
+    (`unit: unknown`, raw counts in the frame); its ms scale exists only in the
+    workbench's `tuning_providers.yaml`, which featurization does not read. No
+    channel name is in `afr.py`.
+  - **The lookup cannot be handed a load.**
+    - `target_afr(frame, target, *, channel_units, rpm_column)` reads the load
+      column itself, through `target_load_axis(target, frame, channel_units=)`.
+      The old `(rpm, load, target)` signature, which `append_afr_channels` fed
+      `obd:ENGINE_LOAD`, is gone.
+    - `target_afr_refusal` / `load_axis_refusal` return
+      `load_axis_unverified: ...` when no vehicle declares the axis.
+      `LoadAxisUnavailableError` carries the reason.
+    - **The unit is resolved from the catalog at runtime** (verifier round 1,
+      MEDIUM). The first version compared the declaration's own `unit`
+      string; the catalog cross-check existed only in a test that failed open.
+      So `obd:ABSOLUTE_LOAD` or a `mem:` channel declared "ms" passed both.
+      - `load_axis_refusal` now takes a required `channel_units` resolver and
+        refuses each declared channel whose catalog unit is missing, `unknown`,
+        or not the map's `load_axis_unit`. No resolver (`None`) means every
+        declaration is refused.
+      - The catalogs sit above `src.signals` (the Mode 01 registry is in
+        `collection`). So the resolver is the new
+        `src/preprocessing/channel_units.py:catalog_channel_unit`, and the layer
+        that may import them passes it in: `_append_derived_channels` and
+        `FeaturePolicy.standing_exclusions`. `append_afr_channels`,
+        `target_afr`, `target_load_axis` and `afr_error_surface` all require
+        the argument, so no call can leave it out.
+      - Sources: `obd:` from `MODE01_REGISTRY`; `did:` and `mem:` from
+        `dids.yaml` `dids:` / `memory:`. Everything else is `None`: `decoded:`
+        rows are raw counts by design, and `derived:` has no catalog.
+    - `append_afr_channels` emits `TARGET_AFR` / `AFR_ERROR_B*` only when there
+      is no refusal and the declared channel is in the frame. They are never
+      computed from another column.
+    - `afr_error_surface` bins on the axis channel and raises the refusal
+      rather than return an empty surface.
+    - `DERIVED_CHANNEL_INPUTS["derived:TARGET_AFR"]` is `(("obd:RPM",),
+      load_axis_columns("base_fuel_schedule"))`. That group is empty today,
+      so it is unsatisfiable, which `capture_profiles.model_input_warnings`
+      would report for any model that read it.
+  - **Feature-policy exclusion, on the manifest.**
+    - `FeaturePolicy.standing_exclusions()` refuses `TARGET_AFR_CHANNELS`
+      (`TARGET_AFR`, `AFR_ERROR_B1`, `AFR_ERROR_B2`) with the
+      `load_axis_unverified` reason while
+      `load_axis_refusal(channel_units=catalog_channel_unit)` holds. It lifts
+      itself once a vehicle declares a channel whose catalog unit is the axis
+      unit.
+    - `exclusion_reason` returns it, before the source gate, so a present
+      column lands in `feature_policy_exclusions` with this reason and never
+      in `candidate_feature_columns`.
+    - *The source gate agrees* (verifier round 1, LOW).
+      `trainability._derived_detail` flattened the input groups, so the empty
+      load group vanished and `TARGET_AFR` read as trainable on `obd:RPM`
+      alone. A required group with no member now makes the channel
+      non-trainable. For `TARGET_AFR_CHANNELS` it names the load-axis refusal,
+      and `AFR_ERROR_B*` inherit it through their `TARGET_AFR` input.
+    - `build_feature_spec` records `feature_policy_standing_exclusions` on
+      every manifest, frame column or not. This is where the refusal is
+      discoverable, beside the other policy refusals.
+  - **Measured on the same two drives.** New code, new default, against the
+    P02.12 "after" frames: 959 → 947 columns on both. Only the `TARGET_AFR` and
+    `AFR_ERROR_B1/B2` families (raw, `__mean`, `__std`, `__roc`) go, and no
+    other column changes. Their pre-fix coverage, all rows / classified rows:
+
+    | column | 152758 | 163440 |
+    |---|---|---|
+    | `TARGET_AFR` | 3.6 / 4.1 % | 14.4 / 17.4 % |
+    | `AFR_ERROR_B1` | 1.6 / 1.9 % | 6.5 / 7.8 % |
+    | `AFR_ERROR_B2` | 0.0 / 0.0 % | 0.2 / 0.2 % |
+
+    None would have passed the 0.5 coverage floor. Neither deployed manifest
+    names them.
+  - **Consumer survey.** `grep` over `src`, `src/dashboard/static/src`,
+    `scripts`, `tools`, `tests`, `data` and `models` for `TARGET_AFR`,
+    `AFR_ERROR`, `target_afr(`, `afr_error_surface` and `target_map(`.
+    - *Producers, changed:* `signals/afr.py` and `signals/derived.py`
+      (registry). `feature_pipeline.py` (policy) and the `feature_cache.py`
+      comment and version.
+    - *Dashboard* (Python and `static/src`): no reference. A generic
+      live-channel listing just loses the two channels.
+    - *Tuning pages and workbench* (`tuning_digest`, `rom_trace`,
+      `tuning_frame`, `rom_targets`): these read the map's axes and resolve
+      BFS through `tuning_providers.yaml` roles, never through
+      `derived:TARGET_AFR`. Unaffected.
+    - *MCP, trip digest, behavior models, sequence roles, committees,
+      plausibility:* no reference.
+    - *Fixtures and golden files:* none.
+    - *Deployed manifests:* IF (295) and LSTM (361) name neither channel.
+    - *Same name, different quantity:* `tools/pull_report.py`'s `TARGET_AFR` is
+      UpRev's own `uprev:` channel, and `test_memory_channels`'
+      `test_known_answer_target_afr` is the RAM φ word. Both unaffected.
+    - *Commanded AFR:* PID 0x44 φ (`AfrCalibration.commanded_afr_series`) and
+      `mem:ECM_TARGET_EQUIV_RATIO` do not touch the target map. Unaffected.
+    - *Tests updated:*
+      - `test_afr.py`, with a synthetic declared axis channel and a stub
+        catalog;
+      - `test_trainability.py`, which declares one so the registry-coverage
+        check still sees both channels emitted. This stays after the source
+        gate fix, which concerns trainability, not emission;
+      - `test_bank_balance_persistence.py` (`channel_units=None`);
+      - the P02.11 known answer in
+      `test_featurization_profile_scope.py`, which now uses the voltage
+      transfer's `AFR_B1`.
+    - *Docs:* `docs/roadmap/capture-profiles.md` gains notes on items 4.3 and 4.5.
+  - **What goes absent for the operator.** After the next Pi deploy and
+    restart, `derived:TARGET_AFR` and `derived:AFR_ERROR_B1/B2`, with their
+    rolling siblings, leave the live operating and feature frames. Nothing
+    reads them by name, and no model was trained on them.
+  - **Tests.**
+    - `tests/test_target_afr_load_axis.py` (23 cases):
+      - the registry resolves the map's default axis;
+      - no `TARGET_AFR_CHANNELS` input group holds `obd:ENGINE_LOAD`;
+      - `derived_channels_reached({TARGET_AFR}) ⊆ TARGET_AFR_CHANNELS`;
+      - no vehicle declares an axis today;
+      - the policy refuses by name, is absent from candidates, and is recorded
+        on the spec even for a frame without the columns;
+      - the exclusion lifts for a declaration the real catalog puts in ms
+        (`did:ECM_INJECTOR_PULSE_1`, a stand-in), and stays refused with no
+        catalog or on `obd:ENGINE_LOAD` (catalog `%`);
+      - `catalog_channel_unit` per namespace: `obd:ENGINE_LOAD` and
+        `obd:ABSOLUTE_LOAD` `%`, `did:ECM_AIR_CHARGE` `unknown`,
+        `did:ECM_INJECTOR_PULSE_1` `ms`, `mem:ECM_ENGINE_PERIOD` `unknown`,
+        `mem:ECM_TARGET_EQUIV_RATIO` `phi`, and `decoded:`/`derived:`/unknown
+        DID `None`;
+      - declaring any of `obd:ENGINE_LOAD`, `obd:ABSOLUTE_LOAD`,
+        `did:ECM_AIR_CHARGE`, `mem:ECM_ENGINE_PERIOD` or
+        `mem:ECM_TARGET_EQUIV_RATIO` is refused at runtime, and the manifest
+        exclusion carries the same reason. `LoadAxisChannel` has no `unit`
+        field;
+      - the source gate refuses `TARGET_AFR` naming `load_axis_unverified`, and
+        `AFR_ERROR_B*` through it.
+    - `tests/test_afr.py`, 13 new cases (22 in the file):
+      - `obd:ENGINE_LOAD` never reaches the lookup, and `target_afr` and
+        `afr_error_surface` refuse;
+      - `target_afr` has no load parameter;
+      - through the real catalog, a declaration of `obd:ENGINE_LOAD`,
+        `obd:ABSOLUTE_LOAD`, `did:ECM_AIR_CHARGE`, `mem:ECM_ENGINE_PERIOD`,
+        `mem:ECM_TARGET_EQUIV_RATIO`, `decoded:ECM_RPM` or a `derived:` channel
+        is refused, and yields no target;
+      - the check can pass: a catalog-ms DID produces a target;
+      - no catalog means no target;
+      - a declared channel absent from the frame yields nothing;
+      - a declaration must name its evidence.
+    - `tests/test_retrain_script.py::test_retrain_refuses_a_named_tuning_session_before_building_a_frame`
+      (verifier round 1, LOW) covers P02.12's retrain refusal. A named
+      `_tuning-*` session gives exit 2 and names R03.12 and the session. The
+      frame build and the trainer are patched to fail if reached.
 
 ## Tracked elsewhere
 

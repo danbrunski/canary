@@ -79,7 +79,7 @@ from src.models.isolation_forest import (
 )
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.preprocessing.anomaly_injection import AnomalyInjector, AnomalyKind
-from src.preprocessing.feature_pipeline import featurize_wide_frame
+from src.preprocessing.feature_pipeline import configured_behavior_models, featurize_wide_frame
 from src.preprocessing.resampler import resample_config_for
 
 DEFAULT_FAULT_KINDS: tuple[AnomalyKind, ...] = (
@@ -520,9 +520,14 @@ def evaluate_detectors(
             signals["sequence"] = _sequence_verdicts(results, featurized.index)
         return signals
 
+    # The served behavior models (P02.12): a model trained on deviation
+    # columns is graded on frames that carry them, as the daemon serves it.
+    behavior_models = configured_behavior_models(config)
     # Nominal: one featurize + score pass — this is the FP rate every other
     # injection run is measured against.
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=behavior_models
+    ).features
     nominal_scored = trained_if.score(nominal_features)
     nominal_signals = _persistence_gated_nominal(
         _signals(nominal_scored, nominal_features),
@@ -553,7 +558,9 @@ def evaluate_detectors(
         late_flags: dict[str, list[bool]] = {name: [] for name in detector_names}
         for _ in range(n_injections):
             inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
-            featurized = featurize_wide_frame(inj.df, config).features
+            featurized = featurize_wide_frame(
+                inj.df, config, behavior_models=behavior_models
+            ).features
             scored = trained_if.score(featurized)
             timestamps = pd.to_datetime(featurized[TIMESTAMP_COLUMN], utc=True)
             window = inj.windows[0]

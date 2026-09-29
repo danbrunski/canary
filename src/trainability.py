@@ -115,6 +115,14 @@ def _derived_detail(channel: str, seen: frozenset[str]) -> str | None:
         )
     if channel in seen:
         return f"{channel} depends on itself"
+    # A required group with no member can never be satisfied, so the channel is
+    # never produced from trainable inputs. Flattening the groups used to skip
+    # it and call the channel trainable on its other inputs alone (P02.13:
+    # ``derived:TARGET_AFR``'s load-axis group is empty until a vehicle
+    # verifies an axis channel).
+    if any(not group for group in groups):
+        reason = _empty_group_reason(channel)
+        return f"{channel} has a required input group no vehicle supplies ({reason})"
     nested = seen | {channel}
     inputs = [column for group in groups for column in group]
     inputs.extend(DERIVED_CHANNEL_OPTIONAL_INPUTS.get(channel, ()))
@@ -123,6 +131,18 @@ def _derived_detail(channel: str, seen: frozenset[str]) -> str | None:
         if detail is not None:
             return f"{channel} is computed from {column} ({detail})"
     return None
+
+
+def _empty_group_reason(channel: str) -> str:
+    """Why ``channel``'s declared input group is empty, where a module says so."""
+    from src.signals.afr import TARGET_AFR_CHANNELS, load_axis_refusal
+
+    if channel in TARGET_AFR_CHANNELS:
+        # No declaration means no unit to check, so no catalog is needed here.
+        reason = load_axis_refusal(channel_units=None)
+        if reason is not None:
+            return reason
+    return "the vehicle modules declare no channel for it"
 
 
 def non_trainable_inputs(columns: Iterable[str]) -> dict[str, str]:

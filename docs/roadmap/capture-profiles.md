@@ -200,6 +200,12 @@ The first real profile, closing the UpRev-replacement gaps identified
   lookup, and emits `derived:TARGET_AFR` plus per-bank error. The actual ROM
   target grid has not been exported into the scoped calibration file, so no
   target values are invented from the opportunistic log.
+  **P02.13 (2026-09-28): `derived:TARGET_AFR` and `AFR_ERROR_B*` are absent.**
+  The lookup read calculated load (`obd:ENGINE_LOAD`, %) on a map whose axis is
+  base fuel schedule (ms). It now reads only the vehicle's verified channel for
+  the map's axis (`vehicle_signals.LOAD_AXIS_CHANNELS`), and the Xterra has none.
+  Commanded AFR comes from PID 0x44 / `mem:ECM_TARGET_EQUIV_RATIO` and is
+  unaffected.
   **Closed 2026-09-21 by a different route than the one written here.** The
   parenthesis above was right: the target is reachable by ReadMemoryByAddress,
   and it needed no security access. The ECM's FINAL commanded equivalence
@@ -236,6 +242,8 @@ The first real profile, closing the UpRev-replacement gaps identified
   UpRev log analysis.
   **Software complete; data blocked.** `afr_error_surface` produces per-bank
   RPM × load median/IQR/count/sparse cells and excludes censored samples.
+  Since P02.13 it bins on the map's own load axis channel and refuses
+  (`LoadAxisUnavailableError`) while none is verified.
   End-to-end execution waits on 4.3's ROM grid and 4.4's first real
   `_capture-fuel-map-*` session.
   **4.3 no longer blocks this (2026-09-21).** With the commanded target read

@@ -840,7 +840,7 @@ def _fitted_models(config: CanaryConfig, tmp_path: Path) -> BehaviorModels:
         _parity_drive(f"train-{i}", seed=i, started=T0 + timedelta(hours=3 * i)) for i in range(3)
     ]
     wide = pd.concat([_with_gap_flags(d, _CHANNELS) for d in drives], ignore_index=True)
-    features = featurize_wide_frame(wide, config).features
+    features = featurize_wide_frame(wide, config, behavior_models=None).features
     recipes = [
         Surface1DRecipe(
             name="steady_timing_vs_rpm",

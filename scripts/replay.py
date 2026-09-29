@@ -38,7 +38,7 @@ from src.columns import (
     is_flag_column,
 )
 from src.config import CanaryConfig
-from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
+from src.decode.behavior_models import load_behavior_models
 from src.models.isolation_forest import (
     LABEL_COLUMN,
     SCORE_COLUMN,
@@ -77,7 +77,7 @@ def replay_sessions(
     *,
     value: TelemetryValueKind = "value_number",
     model_path: Path | None = None,
-    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    behavior_models_path: Path | None = None,
 ) -> ReplayResult:
     """Run recorded sessions through preprocessing and optional IF scoring.
 
@@ -88,6 +88,10 @@ def replay_sessions(
     model actually saw, instead of an open-coded subset (2.1: this used to
     call ``compute_features`` directly and silently dropped the
     anomaly-signal / committee / behavior-deviation columns).
+
+    ``behavior_models_path`` defaults to the scoped ``config.daemon.behavior_models``
+    (P02.12): the repo-level default it had named a file that does not exist,
+    so a replay featurized without the deviations the daemon serves.
     """
     sessions = [Path(path) for path in session_dirs]
     if not sessions:
@@ -97,6 +101,8 @@ def replay_sessions(
     wide = to_wide(long, value=value)
     numeric_columns = _numeric_value_columns(wide)
     resampled = _resample_numeric(wide, numeric_columns, config)
+    if behavior_models_path is None:
+        behavior_models_path = config.daemon.behavior_models
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )

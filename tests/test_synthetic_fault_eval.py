@@ -93,7 +93,7 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     config = _config()
     resampled = _two_mode_resampled()
     # featurize → fit IF on the clean frame; calibration enabled in IFConfig.
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
     trained = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -202,7 +202,7 @@ def test_if_feature_subset_trains_and_evaluates_through_the_benchmark_harness(
 
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
     full_columns = [
         c
         for c in trainable_feature_columns(nominal_features)
@@ -243,7 +243,7 @@ def test_evaluate_detectors_skips_sequence_metrics_when_no_artifact_supplied() -
     not crash and not fabricate a ``sequence`` entry."""
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
     trained_if = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -279,7 +279,7 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
 
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
     trained_if = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -514,7 +514,7 @@ def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() 
     existing CI-floor test's job)."""
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config).features
+    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
     trained = fit_isolation_forest(
         nominal_features,
         IFConfig(target_flag_rate=0.15),

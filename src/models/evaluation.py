@@ -839,6 +839,36 @@ def default_profile_exclusion(session_dir: Path) -> str | None:
     return None
 
 
+class NonDefaultProfileTrainingError(ValueError):
+    """A non-default-profile recording was handed to a detector trainer."""
+
+
+def refuse_non_default_profile_sessions(sessions: Sequence[Path], *, purpose: str) -> None:
+    """Refuse to train or calibrate a detector on a non-default-profile recording.
+
+    Operator decision 2026-09-24/25 (R03.12/R04.6): tuning captures never
+    train, calibrate, evaluate or score the IF, the sequence detector or the
+    behavior deviations those detectors read as features. Training discovery
+    already leaves every ``_``-prefixed recording out
+    (``preprocessing.loader.discover_sessions``); this is the same rule at the
+    trainer, so an explicitly named capture cannot bring its rows in. Since
+    P02.12 the training frame carries ``deviation:*`` columns, and this keeps
+    their training rows default-profile only, as the daemon's gate keeps their
+    served rows.
+    """
+    refused = {
+        Path(session).name: reason
+        for session in sessions
+        if (reason := default_profile_exclusion(Path(session))) is not None
+    }
+    if refused:
+        raise NonDefaultProfileTrainingError(
+            f"refusing to {purpose} on non-default-profile recordings (R03.12, operator "
+            "decision 2026-09-24): "
+            + "; ".join(f"{name}: {reason}" for name, reason in sorted(refused.items()))
+        )
+
+
 def engine_running(frame: pd.DataFrame) -> np.ndarray[Any, np.dtype[np.bool_]]:
     """Rows with the engine running (RPM at or above the running floor).
 
@@ -1546,6 +1576,7 @@ __all__ = [
     "MIN_CALIBRATION_HOLDOUT_BYTES",
     "MIN_CALIBRATION_HOLDOUT_SESSIONS",
     "MIN_HOLDOUT_MODE_SECONDS",
+    "NonDefaultProfileTrainingError",
     "PersistenceSpec",
     "RatioEstimate",
     "ScoreTrace",
@@ -1571,6 +1602,7 @@ __all__ = [
     "observed_median",
     "pick_calibration_holdouts",
     "pick_evaluation_holdouts",
+    "refuse_non_default_profile_sessions",
     "session_holdout_health",
     "session_mode_coverage",
     "session_parquet_bytes",

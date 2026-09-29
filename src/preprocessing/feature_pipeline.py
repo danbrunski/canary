@@ -39,7 +39,6 @@ from src.columns import (
 from src.config import CanaryConfig, require_profile_scoped
 from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
 from src.decode.behavior_models import (
-    DEFAULT_BEHAVIOR_MODELS_PATH,
     BehaviorModels,
     artifact_fingerprint,
     load_behavior_models,
@@ -49,6 +48,7 @@ from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
 from src.decode.dids import decode_did_rows, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
+from src.preprocessing.channel_units import catalog_channel_unit
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.derived import (
     ReducedSession,
@@ -79,7 +79,12 @@ from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
-from src.signals.afr import append_afr_channels, load_afr_calibration
+from src.signals.afr import (
+    TARGET_AFR_CHANNELS,
+    append_afr_channels,
+    load_afr_calibration,
+    load_axis_refusal,
+)
 from src.signals.committees import (
     append_committee_residuals,
     committee_channel_reason,
@@ -325,6 +330,12 @@ class FeaturePolicy:
         the manifest, never to this policy); the load audit names it as a
         policy violation until the retrain replaces it.
         """
+        # P02.13 first: the source gate also refuses TARGET_AFR (its load input
+        # group is empty), and the load-axis reason is the one that says why.
+        if base in TARGET_AFR_CHANNELS:
+            standing = self.standing_exclusions().get(base)
+            if standing is not None:
+                return standing
         source_reason = source_exclusion_reason(base)
         if source_reason is not None:
             return source_reason
@@ -363,6 +374,25 @@ class FeaturePolicy:
                     "capture profile does not poll"
                 )
         return None
+
+    def standing_exclusions(self) -> dict[str, str]:
+        """``{channel: reason}`` the policy refuses by name, whether or not a
+        frame carries the channel.
+
+        P02.13 (operator decision 2026-09-27): ``derived:TARGET_AFR`` and
+        ``derived:AFR_ERROR_B*`` stay out of detector features until a channel
+        is verified to report the target map's load axis in its unit. They
+        were looked up with calculated load (%) on a base-fuel-schedule axis
+        (ms). The refusal lifts itself once a vehicle declares that channel
+        (``src.signals.vehicle_signals`` ``LOAD_AXIS_CHANNELS``) whose catalog
+        unit is the axis unit (:mod:`src.preprocessing.channel_units`). Recorded on
+        every manifest (:func:`build_feature_spec`), so an artifact answers
+        why the channels are absent even from a frame that never had them.
+        """
+        axis_refusal = load_axis_refusal(channel_units=catalog_channel_unit)
+        if axis_refusal is None:
+            return {}
+        return dict.fromkeys(TARGET_AFR_CHANNELS, axis_refusal)
 
     def _served(self, column: str, seen: frozenset[str]) -> bool:
         """Will the serving profile supply ``column``? Namespaces other than
@@ -863,7 +893,7 @@ def build_feature_frame(
     config: CanaryConfig,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    behavior_models_path: Path | None = None,
     dbc_dir: Path = DEFAULT_DBC_DIR,
     dids_path: Path = DEFAULT_DIDS_PATH,
     cache_dir: Path | None = None,
@@ -888,10 +918,19 @@ def build_feature_frame(
     rolling mean/std/roc derivatives just like raw / decoded channels. The
     ``ZScoreScaler`` then normalizes them through ``trainable_feature_columns``
     without changes to either module.
+
+    P02.12 — the behavior models are the scoped ``config.daemon.behavior_models``,
+    the file the daemon serves. The default was the repo's unscoped
+    ``data/behavior_models.yaml``, which does not exist, and no trainer passed
+    a path, so trainer frames carried no ``deviation:*`` columns while the
+    served frames did. ``behavior_models_path`` overrides it only for a caller
+    whose subject is another artifact (``refit_behavior_models --out``).
     """
     # Before the cache: a hit would otherwise hand back a frame an unscoped
     # config could never have built correctly (P02.11).
     require_profile_scoped(config, reader="build_feature_frame")
+    if behavior_models_path is None:
+        behavior_models_path = config.daemon.behavior_models
     session_dirs = [Path(session_dir) for session_dir in session_dirs]
     cache_path: Path | None = None
     cache_metadata: dict[str, Any] | None = None
@@ -1269,11 +1308,23 @@ class FeaturizedFrame:
 _drop_fully_stale_rows = drop_fully_stale_rows
 
 
+def configured_behavior_models(config: CanaryConfig) -> BehaviorModels | None:
+    """The behavior models the daemon serves for ``config``: its scoped
+    ``daemon.behavior_models``, or ``None`` when that file is absent (P02.12).
+
+    The value every offline :func:`featurize_wide_frame` caller passes unless it
+    means a different artifact set. Read once per call; hoist it out of loops.
+    """
+    require_profile_scoped(config, reader="behavior models (featurization)")
+    path = config.daemon.behavior_models
+    return load_behavior_models(path) if path.exists() else None
+
+
 def featurize_wide_frame(
     wide: pd.DataFrame,
     config: CanaryConfig,
     *,
-    behavior_models: BehaviorModels | None = None,
+    behavior_models: BehaviorModels | None,
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
 ) -> FeaturizedFrame:
@@ -1314,6 +1365,11 @@ def featurize_wide_frame(
     P02.11 — ``config`` must be profile-scoped while profiles are enabled
     (:func:`~src.config.require_profile_scoped`): the derived channels read the
     vehicle's ``afr_calibration.yaml``, which only the scoped config names.
+
+    P02.12 — ``behavior_models`` has no default. A default of ``None`` let the
+    offline callers featurize without the deviations the daemon appends, so
+    each caller states its set: :func:`configured_behavior_models` for the
+    served one, the live source's hot-reloaded copy, or ``None`` on purpose.
     """
     require_profile_scoped(config, reader="featurize_wide_frame")
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
@@ -1353,7 +1409,14 @@ def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.D
         if config.daemon.afr_calibration.exists()
         else None
     )
-    framed = append_afr_channels(framed, config.vehicle.parameters, afr_calibration)
+    # P02.13: the load axis's unit comes from the channel catalogs, which
+    # src.signals cannot import, so it is resolved here.
+    framed = append_afr_channels(
+        framed,
+        config.vehicle.parameters,
+        afr_calibration,
+        channel_units=catalog_channel_unit,
+    )
     framed = compute_anomaly_signals(framed, config.vehicle.parameters)
     # Performance channels (Task 1.1): fuel rate, instant economy,
     # boost/vacuum, estimated power/torque. Row-local only — the cumulative
@@ -1555,7 +1618,7 @@ def featurize_perturbed_frame(
     wide: pd.DataFrame,
     config: CanaryConfig,
     *,
-    behavior_models: BehaviorModels | None = None,
+    behavior_models: BehaviorModels | None,
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
 ) -> pd.DataFrame:
@@ -2233,7 +2296,17 @@ def _afr_calibration_provenance(config: CanaryConfig) -> dict[str, str | None]:
     """The ``afr_calibration.yaml`` featurization reads for ``config``, by path
     and content hash (``None`` when absent)."""
     require_profile_scoped(config, reader="feature spec (afr_calibration)")
-    path = config.daemon.afr_calibration
+    return _file_provenance(config.daemon.afr_calibration)
+
+
+def _behavior_models_provenance(config: CanaryConfig) -> dict[str, str | None]:
+    """The ``behavior_models.yaml`` :func:`build_feature_frame` reads for
+    ``config`` by default, by path and content hash (P02.12)."""
+    require_profile_scoped(config, reader="feature spec (behavior_models)")
+    return _file_provenance(config.daemon.behavior_models)
+
+
+def _file_provenance(path: Path) -> dict[str, str | None]:
     digest = hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
     return {"path": str(path), "sha256": digest}
 
@@ -2284,6 +2357,9 @@ def build_feature_spec(
         # as it stood at training time (binding confidence / opt-out, DID not
         # served). Empty when nothing was gated.
         "feature_policy_exclusions": feature_policy_exclusions(features, resolved_policy),
+        # P02.13: channels the policy refuses by name, present in the frame or
+        # not, so the manifest says why ``derived:TARGET_AFR`` is absent.
+        "feature_policy_standing_exclusions": resolved_policy.standing_exclusions(),
     }
     if behavior_models is not None:
         spec["behavior_model_fingerprints"] = consumed_behavior_fingerprints(
@@ -2317,6 +2393,9 @@ def build_feature_spec(
         # by content. ``sha256: None`` says "featurized without one" — the
         # state every pre-P02.11 trainer frame was in, silently.
         spec["afr_calibration"] = _afr_calibration_provenance(config)
+        # P02.12: the behavior-model file the frame's ``deviation:*`` columns
+        # came from, by content (``sha256: None``: none was read).
+        spec["behavior_models"] = _behavior_models_provenance(config)
     if sequence_length is not None:
         spec["sequence_length"] = sequence_length
     if sequence_stride is not None:

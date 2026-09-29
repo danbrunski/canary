@@ -47,7 +47,7 @@ from src.analysis.session_deviations import (
     analyze_session,
     compare_session_deviations,
 )
-from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH, load_behavior_models
+from src.decode.behavior_models import load_behavior_models
 from src.log import configure_logging
 from src.storage.sessions import resolve_session
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config
@@ -192,9 +192,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    # The scoped file only (P02.12): the repo-level data/behavior_models.yaml
+    # is no vehicle's artifact, and falling back to it analyzed a session
+    # against models the daemon never served.
     behavior_models_path = args.behavior_models or config.daemon.behavior_models
-    if not behavior_models_path.exists():
-        behavior_models_path = DEFAULT_BEHAVIOR_MODELS_PATH
     if not behavior_models_path.exists():
         print(f"error: no behavior_models.yaml found ({behavior_models_path})", file=sys.stderr)
         return 1

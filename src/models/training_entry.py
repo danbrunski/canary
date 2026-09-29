@@ -31,6 +31,7 @@ from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_c
 from src.config import CanaryConfig
 from src.decode.behavior_decoder import withheld_learned_feature_columns
 from src.decode.behavior_models import load_behavior_models
+from src.models.evaluation import refuse_non_default_profile_sessions
 from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
     benchmark_false_positives,
@@ -261,7 +262,14 @@ def train_sequence_detector(
     The validation drives are chosen by the stated rule before the scaler is
     fit (A03.5), and the scaler is fit on the remaining training rows only, so
     validation statistics never leak into the scaling (A03.4).
+
+    Non-default-profile recordings are refused, for training and calibration
+    alike (R03.12; :func:`~src.models.evaluation.refuse_non_default_profile_sessions`).
     """
+    refuse_non_default_profile_sessions(session_dirs, purpose="train the sequence detector")
+    refuse_non_default_profile_sessions(
+        calibration_sessions or (), purpose="calibrate the sequence detector"
+    )
     policy = (
         feature_policy
         if feature_policy is not None
@@ -620,7 +628,14 @@ def train_isolation_forest(
     scores — disjoint from calibration — recorded in the manifest.
     ``quarantined_cells`` / ``calibration_policy`` / ``calibration_override``
     pass through to :func:`fit_isolation_forest` (A04.3, A04.4).
+
+    Non-default-profile recordings are refused, for training and calibration
+    alike (R03.12; :func:`~src.models.evaluation.refuse_non_default_profile_sessions`).
     """
+    refuse_non_default_profile_sessions(session_dirs, purpose="train the Isolation Forest")
+    refuse_non_default_profile_sessions(
+        calibration_sessions or (), purpose="calibrate the Isolation Forest"
+    )
     policy = (
         feature_policy
         if feature_policy is not None

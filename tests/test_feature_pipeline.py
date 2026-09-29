@@ -165,7 +165,7 @@ def test_featurize_wide_frame_appends_rolling_features_and_mode(
 ) -> None:
     wide = _wide(5)
 
-    result = featurize_wide_frame(wide, config)
+    result = featurize_wide_frame(wide, config, behavior_models=None)
 
     assert isinstance(result, FeaturizedFrame)
     feats = result.features
@@ -202,7 +202,7 @@ def test_featurize_wide_frame_does_not_flag_fallback_with_real_segmentation(
             "obd:COOLANT_TEMP": [85.0] * n,
         }
     )
-    result = featurize_wide_frame(wide, config)
+    result = featurize_wide_frame(wide, config, behavior_models=None)
     assert not result.segmenter_fell_back
 
 
@@ -213,7 +213,9 @@ def test_featurize_wide_frame_honors_feature_config_override(
     # override actually drives compute_features (std/roc disabled here).
     cfg = FeatureConfig(window_seconds=30, include_std=False, include_roc=False)
 
-    feats = featurize_wide_frame(wide := _wide(4), config, feature_config=cfg).features
+    feats = featurize_wide_frame(
+        wide := _wide(4), config, feature_config=cfg, behavior_models=None
+    ).features
 
     assert "obd:RPM__mean" in feats.columns
     assert "obd:RPM__std" not in feats.columns
@@ -254,7 +256,7 @@ def test_featurize_wide_frame_appends_instantaneous_derived_channels(
             "obd:BAROMETRIC_PRESSURE": [80.0] * n,
         }
     )
-    result = featurize_wide_frame(wide, config)
+    result = featurize_wide_frame(wide, config, behavior_models=None)
     op = result.operating_frame
     assert "derived:FUEL_RATE_LPH" in op.columns
     assert (op["derived:FUEL_RATE_LPH"] > 0).all()
@@ -450,7 +452,7 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     )
     resampled = _decode_session_to_resampled(session, None, None, None, resample_config)
     resampled = _drop_fully_stale_rows(resampled)
-    standalone = featurize_wide_frame(resampled, config).features
+    standalone = featurize_wide_frame(resampled, config, behavior_models=None).features
 
     combined = build_feature_frame(
         [session],

@@ -161,7 +161,9 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     root = tmp_path / "sessions"
     seen = _write_session(root, "2026-05-12T000000", start=1_778_544_000.0, seed=1)
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
-    features = featurize_wide_frame(load_resampled_session(seen, config), config).features
+    features = featurize_wide_frame(
+        load_resampled_session(seen, config), config, behavior_models=None
+    ).features
     trained = fit_isolation_forest(
         features,
         IFConfig(n_estimators=40),
@@ -338,7 +340,9 @@ def _unseen_drive_fixture(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "sessions"
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
     trained = fit_isolation_forest(
-        featurize_wide_frame(load_resampled_session(training, config), config).features,
+        featurize_wide_frame(
+            load_resampled_session(training, config), config, behavior_models=None
+        ).features,
         IFConfig(n_estimators=40),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",
@@ -488,7 +492,9 @@ def _fit_if(session: Path, artifact: Path, *, seed: int) -> None:
 
     config = example_config(EXAMPLE_YAML)
     trained = fit_isolation_forest(
-        featurize_wide_frame(load_resampled_session(session, config), config).features,
+        featurize_wide_frame(
+            load_resampled_session(session, config), config, behavior_models=None
+        ).features,
         IFConfig(n_estimators=40, random_state=seed),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",

@@ -14,7 +14,6 @@ import pandas as pd
 
 from src.artifact_hash import sha256_file
 from src.config import CanaryConfig, require_profile_scoped
-from src.decode.behavior_models import DEFAULT_BEHAVIOR_MODELS_PATH
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.storage.session_files import PARQUET_PATTERN
@@ -55,7 +54,13 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     through the unscoped one, without the calibration (no ``TARGET_AFR`` /
 #:     ``AFR_ERROR_B*``) and with the ``vehicle:`` block's parameters; the key
 #:     now hashes both, and frames cached before it are not reused.
-FEATURE_FRAME_CACHE_VERSION = 7
+#: 8 — P02.12: the behavior models default to the scoped
+#:     ``daemon.behavior_models``. Trainer frames were built against the absent
+#:     repo ``data/behavior_models.yaml``, with no ``deviation:*`` columns.
+#:     P02.13: ``derived:TARGET_AFR`` / ``AFR_ERROR_B*`` are no longer looked up
+#:     with ``obd:ENGINE_LOAD``, so cached frames carry values the code no
+#:     longer produces.
+FEATURE_FRAME_CACHE_VERSION = 8
 
 
 def build_feature_frame_cache_key(
@@ -63,17 +68,26 @@ def build_feature_frame_cache_key(
     config: CanaryConfig,
     *,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
-    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    behavior_models_path: Path | None = None,
     dbc_dir: Path = DEFAULT_DBC_DIR,
     dids_path: Path = DEFAULT_DIDS_PATH,
 ) -> str:
-    """Return the deterministic cache key for a feature-frame build."""
+    """Return the deterministic cache key for a feature-frame build.
+
+    ``behavior_models_path`` defaults, as :func:`build_feature_frame`'s does,
+    to the scoped ``config.daemon.behavior_models`` (P02.12).
+    """
+    require_profile_scoped(config, reader="feature-frame cache key")
     return str(
         _feature_frame_cache_metadata(
             [Path(session_dir) for session_dir in session_dirs],
             config,
             bindings_path=bindings_path,
-            behavior_models_path=behavior_models_path,
+            behavior_models_path=(
+                config.daemon.behavior_models
+                if behavior_models_path is None
+                else behavior_models_path
+            ),
             dbc_dir=dbc_dir,
             dids_path=dids_path,
         )["cache_key"]
@@ -100,6 +114,8 @@ def _feature_frame_cache_metadata(
         # must equal, outside ``preprocessing``, so it is hashed by name.
         "broadcast_stale_timeout_seconds": config.collection.broadcast_stale_timeout_seconds,
         "bindings": _file_cache_entry(bindings_path),
+        # P02.12: the file the build actually reads, which by default is the
+        # scoped ``daemon.behavior_models``.
         "behavior_models": _file_cache_entry(behavior_models_path),
         "dbc": _directory_cache_entry(dbc_dir, pattern="*.dbc"),
         # Hash the DID map so editing dids.yaml (new DID, fixed scale)

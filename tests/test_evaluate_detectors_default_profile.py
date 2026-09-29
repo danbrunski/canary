@@ -90,7 +90,9 @@ def test_tuning_capture_rows_reach_no_metric(tmp_path: Path) -> None:
     training = _write(tmp_path / "training", "2026-05-01T000000", start=DAY - 12 * 86_400,
                       n=120, rpm=1500.0, seed=1)  # fmt: skip
     trained = fit_isolation_forest(
-        featurize_wide_frame(load_resampled_session(training, config), config).features,
+        featurize_wide_frame(
+            load_resampled_session(training, config), config, behavior_models=None
+        ).features,
         _IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED"],
         fitted_at="2026-05-12T00:00:00Z",

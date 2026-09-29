@@ -69,12 +69,12 @@ log = logging.getLogger(__name__)
 CURRENT_SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS: frozenset[int] = frozenset({1, 2})
 
-#: Default location of the hand-edited / refit-written behavior-model file.
-#: Anchored to this file's repo (``src/decode/`` → up 3), not the process
-#: cwd: the daemon must find this version-controlled file no matter where it
-#: was launched (systemd ``cd``s to the clone, but Docker/other entrypoints
-#: must not silently get an empty model set).
-DEFAULT_BEHAVIOR_MODELS_PATH = Path(__file__).resolve().parents[2] / "data" / "behavior_models.yaml"
+#: There is deliberately no module-level default path (P02.12). The one that
+#: stood here named the repo-level ``data/behavior_models.yaml``, which no
+#: vehicle profile has: the artifact lives at the profile-scoped
+#: ``config.daemon.behavior_models``. Trainers, replay and the dashboard fell
+#: back to it, and trainer frames carried no ``deviation:*`` columns while the
+#: daemon's did. Read the path from the (scoped) config.
 
 
 class _Strict(BaseModel):

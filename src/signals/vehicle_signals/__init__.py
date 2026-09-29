@@ -20,6 +20,13 @@ A module defines either or both of:
   ECM's O2 sensor layout (PID 0x13: sensor 5; PID 0x1D: sensor 3), so only
   the vehicle can say. Sensor 1 is bank 1 under both layouts, so bank 1 needs
   no declaration (:func:`wideband_lambda_columns`).
+* ``LOAD_AXIS_CHANNELS: tuple[LoadAxisChannel, ...]`` -- the channel verified
+  to report a ROM table's load axis (P02.13); its unit is read from its own
+  catalog entry and must be the axis's. The target
+  AFR lookup reads its load input from here and nowhere else
+  (:func:`src.signals.afr.target_load_axis`), so a vehicle with no verified
+  channel for an axis gets no ``derived:TARGET_AFR``, rather than one looked
+  up with whatever load-like channel happens to be in the frame.
 
 The derived-channel registry is module-level (trainability and capture-profile
 validation read it without a config in hand), so it is built from **every**
@@ -36,6 +43,7 @@ from __future__ import annotations
 import importlib
 import pkgutil
 from collections.abc import Mapping
+from dataclasses import dataclass
 from functools import cache
 from types import ModuleType
 
@@ -114,10 +122,61 @@ def wideband_lambda_columns(bank: int) -> tuple[str, ...]:
     return tuple(columns)
 
 
+@dataclass(frozen=True)
+class LoadAxisChannel:
+    """A channel verified to report a ROM table's load axis (P02.13).
+
+    ``axis`` is the table's axis name (``TargetAfrMap.load_axis_name``).
+    There is deliberately no unit field. The lookup takes the channel's unit
+    from its own catalog entry (``dids.yaml``, the Mode 01 registry) and refuses
+    the declaration unless that is the map's ``load_axis_unit``. A declaration
+    therefore cannot relabel calculated load (%) as milliseconds. ``evidence``
+    is where the verification is recorded: a same-instant
+    ``compare_channels`` against an instrument that reads the axis directly,
+    never an aggregate match. The load axis is where a wrong channel does the
+    most harm. ``derived:TARGET_AFR`` was looked up with calculated load (%)
+    on a map whose axis is base fuel schedule (ms) from B05 until P02.13, and
+    every value was dimensionally wrong.
+    """
+
+    axis: str
+    channel: str
+    evidence: str
+
+    def __post_init__(self) -> None:
+        if ":" not in self.channel:
+            raise ValueError(f"load-axis channel {self.channel!r} names no source namespace")
+        if not self.axis.strip():
+            raise ValueError(f"load-axis channel {self.channel!r} has an empty axis")
+        if not self.evidence.strip():
+            raise ValueError(
+                f"load-axis channel {self.channel!r} names no verification evidence: an "
+                "unverified channel on a table axis is the P02.13 defect"
+            )
+
+
+def load_axis_channels(axis: str) -> tuple[LoadAxisChannel, ...]:
+    """Every vehicle's declared channel for the table load axis ``axis``, in
+    module order. Empty when no vehicle has verified one."""
+    declared: list[LoadAxisChannel] = []
+    for module in vehicle_modules():
+        channels: tuple[LoadAxisChannel, ...] = getattr(module, "LOAD_AXIS_CHANNELS", ())
+        declared.extend(channel for channel in channels if channel.axis == axis)
+    return tuple(declared)
+
+
+def load_axis_columns(axis: str) -> tuple[str, ...]:
+    """The wide-frame columns of :func:`load_axis_channels`, deduplicated."""
+    return tuple(dict.fromkeys(channel.channel for channel in load_axis_channels(axis)))
+
+
 __all__ = [
     "BANK_1_WIDEBAND_LAMBDA",
     "InputGroups",
+    "LoadAxisChannel",
     "af_sensor_voltage_columns",
+    "load_axis_channels",
+    "load_axis_columns",
     "signal_inputs",
     "vehicle_modules",
     "wideband_lambda_columns",

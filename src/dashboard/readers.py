@@ -17,7 +17,6 @@ from src.decode.accepted_baselines import (
     load_accepted_baselines,
 )
 from src.decode.behavior_models import (
-    DEFAULT_BEHAVIOR_MODELS_PATH,
     artifact_identity,
     behavior_policy_path,
     load_behavior_models,
@@ -363,8 +362,13 @@ def read_can_coverage(
     }
 
 
-def read_behavior_models(path: Path = DEFAULT_BEHAVIOR_MODELS_PATH) -> dict[str, Any]:
-    """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard."""
+def read_behavior_models(path: Path) -> dict[str, Any]:
+    """Return ``behavior_models.yaml`` as a JSON-safe payload for the dashboard.
+
+    ``path`` has no default (P02.12): the repo-level ``data/behavior_models.yaml``
+    it used to default to is no vehicle's artifact. Callers pass the scoped
+    ``config.daemon.behavior_models``.
+    """
     policy_path = behavior_policy_path(path)
     policy_block: dict[str, Any] = {
         "path": str(policy_path),

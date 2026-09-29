@@ -71,6 +71,7 @@ from src.preprocessing import (
 )
 from src.preprocessing.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
+    configured_behavior_models,
     featurize_wide_frame,
 )
 from src.preprocessing.resampler import resample_config_for
@@ -141,7 +142,9 @@ def evaluate(
 
     # Same shared wide→features builder the trainer/serve paths use, so the
     # injected-fault evaluation scores the model on byte-identical schema (7.1).
-    features = featurize_wide_frame(inj.df, config).features
+    features = featurize_wide_frame(
+        inj.df, config, behavior_models=configured_behavior_models(config)
+    ).features
     labels = inj.labels()
     # featurize_wide_frame may reorder by session/timestamp; realign labels.
     labels = labels.reindex(features.index, fill_value=False)

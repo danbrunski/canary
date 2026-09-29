@@ -1,17 +1,49 @@
 from __future__ import annotations
 
+import inspect
+import types
+
 import pandas as pd
 import pytest
 
 from src.config import VehicleParameters
+from src.preprocessing.channel_units import catalog_channel_unit
+from src.signals import vehicle_signals
 from src.signals.afr import (
+    AFR_ERROR_CHANNELS,
+    LOAD_AXIS_UNVERIFIED,
+    TARGET_AFR,
     AfrCalibration,
+    LoadAxisUnavailableError,
     TargetAfrMap,
     VoltageAfrTransfer,
     afr_error_surface,
     append_afr_channels,
     target_afr,
 )
+from src.signals.vehicle_signals import LoadAxisChannel
+
+#: A synthetic vehicle's verified channel for the target map's load axis. The
+#: real vehicle modules declare none (P02.13), so every test that needs the
+#: lookup to run declares this one through :func:`_declare_axis`.
+AXIS = "did:TEST_BASE_FUEL_SCHEDULE_MS"
+#: The synthetic channel's catalog unit. Real channels resolve through
+#: ``catalog_channel_unit``; this one is in no catalog.
+UNITS = {AXIS: "ms"}.get
+
+
+def _declare_axis(monkeypatch: pytest.MonkeyPatch, *channels: LoadAxisChannel) -> None:
+    """Add a vehicle module declaring ``channels`` (default: :data:`AXIS` in ms)."""
+    declared = channels or (
+        LoadAxisChannel(
+            axis="base_fuel_schedule",
+            channel=AXIS,
+            evidence="synthetic test vehicle",
+        ),
+    )
+    module = types.SimpleNamespace(LOAD_AXIS_CHANNELS=declared)
+    real = vehicle_signals.vehicle_modules()
+    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (*real, module))
 
 
 def _calibration() -> AfrCalibration:
@@ -38,29 +70,31 @@ def _calibration() -> AfrCalibration:
     )
 
 
-def test_target_afr_bilinear_and_out_of_domain() -> None:
+def test_target_afr_bilinear_and_out_of_domain(monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare_axis(monkeypatch)
     target = _calibration().target_map()
     assert target is not None
     values = target_afr(
-        pd.Series([1000.0, 2000.0, 9999.0]),
-        pd.Series([20.0, 60.0, 60.0]),
+        pd.DataFrame({"obd:RPM": [1000.0, 2000.0, 9999.0], AXIS: [20.0, 60.0, 60.0]}),
         target,
+        channel_units=UNITS,
     )
     assert values.iloc[0] == pytest.approx(14.7)
     assert values.iloc[1] == pytest.approx((14.7 + 13.0 + 14.0 + 12.0) / 4)
     assert pd.isna(values.iloc[2])
 
 
-def test_lambda_to_afr_target_error_and_censoring() -> None:
+def test_lambda_to_afr_target_error_and_censoring(monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare_axis(monkeypatch)
     frame = pd.DataFrame(
         {
             "obd:RPM": [1000.0, 3000.0],
-            "obd:ENGINE_LOAD": [20.0, 100.0],
+            AXIS: [20.0, 100.0],
             "obd:O2_WR_LAMBDA_S1": [1.0, 0.5],
             "obd:O2_WR_LAMBDA_S2": [1.01, 0.5],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
     assert out["derived:AFR_B1"].iloc[0] == pytest.approx(14.7)
     assert bool(out["derived:AFR_CENSORED_B1"].iloc[1]) is True
     assert pd.isna(out["derived:AFR_ERROR_B1"].iloc[1])
@@ -69,7 +103,7 @@ def test_lambda_to_afr_target_error_and_censoring() -> None:
 
 def test_voltage_transfer_is_used_when_lambda_is_absent() -> None:
     frame = pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.0]})
-    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
     assert out["derived:AFR_B1"].iloc[0] == pytest.approx(14.0)
 
 
@@ -83,18 +117,19 @@ def test_target_grid_is_strictly_shaped() -> None:
         )
 
 
-def test_afr_error_surface_excludes_censored_samples() -> None:
+def test_afr_error_surface_excludes_censored_samples(monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare_axis(monkeypatch)
     target = _calibration().target_map()
     assert target is not None
     frame = pd.DataFrame(
         {
             "obd:RPM": [1500, 1500, 1500],
-            "obd:ENGINE_LOAD": [40, 40, 40],
+            AXIS: [40, 40, 40],
             "derived:AFR_ERROR_B1": [0.2, 0.4, -4.0],
             "derived:AFR_CENSORED_B1": [False, False, True],
         }
     )
-    rows = afr_error_surface(frame, target, bank=1, min_samples=3)
+    rows = afr_error_surface(frame, target, bank=1, min_samples=3, channel_units=UNITS)
     assert rows[0]["count"] == 2
     assert rows[0]["median_error_afr"] == pytest.approx(0.3)
     assert rows[0]["sparse"] is True
@@ -109,17 +144,20 @@ def test_afr_error_surface_excludes_censored_samples() -> None:
         )
 
 
-def test_decel_fuel_cut_is_censored_like_the_rich_floor() -> None:
+def test_decel_fuel_cut_is_censored_like_the_rich_floor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Overrun is no injection at all, not a lean mixture to correct."""
+    _declare_axis(monkeypatch)
     frame = pd.DataFrame(
         {
             "obd:RPM": [2000.0, 2000.0, 2000.0],
-            "obd:ENGINE_LOAD": [60.0, 60.0, 60.0],
+            AXIS: [60.0, 60.0, 60.0],
             # Stoich, pegged rich, and decel fuel cut.
             "obd:O2_WR_LAMBDA_S1": [1.0, 0.6, 2.2],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
     censored = out["derived:AFR_CENSORED_B1"].tolist()
     assert censored == [False, True, True]
 
@@ -129,7 +167,7 @@ def test_decel_fuel_cut_is_censored_like_the_rich_floor() -> None:
 
     target = _calibration().target_map()
     assert target is not None
-    cells = afr_error_surface(out, target, bank=1, min_samples=1)
+    cells = afr_error_surface(out, target, bank=1, min_samples=1, channel_units=UNITS)
     assert sum(cell["count"] for cell in cells) == 1
 
 
@@ -143,7 +181,7 @@ def test_bank_falls_back_to_voltage_when_lambda_column_is_empty() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
     assert "derived:AFR_B2" in out
     assert out["derived:AFR_B2"].tolist() == pytest.approx([14.0, 14.0])
 
@@ -173,10 +211,140 @@ def test_bank_2_lambda_is_the_vehicle_declared_sensor_not_sensor_2() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration())
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
     assert out["derived:AFR_B2"].tolist() == pytest.approx([14.7, 14.7])
 
     without_s5 = append_afr_channels(
-        frame.drop(columns=["obd:O2_WR_LAMBDA_S5"]), VehicleParameters(), _calibration()
+        frame.drop(columns=["obd:O2_WR_LAMBDA_S5"]),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
     )
     assert without_s5["derived:AFR_B2"].tolist() == pytest.approx([14.0, 14.0])
+
+
+# ---------------------------------------------------------------------------
+# P02.13: the lookup's load input is the map's declared axis, nothing else
+# ---------------------------------------------------------------------------
+
+
+def _engine_load_frame() -> pd.DataFrame:
+    """Rows whose calculated load (%) sits inside the test map's load grid, as
+    obd:ENGINE_LOAD did inside the Xterra's 8.76-21.57 ms grid."""
+    return pd.DataFrame(
+        {
+            "obd:RPM": [1500.0, 2500.0],
+            "obd:ENGINE_LOAD": [40.0, 60.0],
+            "obd:O2_WR_LAMBDA_S1": [1.0, 0.95],
+        }
+    )
+
+
+def test_engine_load_never_reaches_the_target_lookup() -> None:
+    """With the real vehicle modules no channel is verified for the axis, so
+    calculated load in the frame produces no target and no error, and the
+    lookup refuses by name rather than computing one from it."""
+    frame = _engine_load_frame()
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    assert "derived:AFR_B1" in out, "measured AFR is unaffected"
+    for column in (TARGET_AFR, *AFR_ERROR_CHANNELS):
+        assert column not in out
+    target = _calibration().target_map()
+    assert target is not None
+    with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
+        target_afr(frame, target, channel_units=catalog_channel_unit)
+    assert "base_fuel_schedule (ms)" in refused.value.reason
+    with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED):
+        afr_error_surface(out, target, bank=1, channel_units=catalog_channel_unit)
+
+
+def test_the_lookup_takes_no_load_series_of_its_own() -> None:
+    """``target_afr`` used to take ``(rpm, load, target)``, and the caller fed
+    it ``obd:ENGINE_LOAD``. The load now comes only from the frame, through
+    the vehicle's declaration, so there is no argument to put a load in."""
+    assert list(inspect.signature(target_afr).parameters) == [
+        "frame",
+        "target",
+        "channel_units",
+        "rpm_column",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("channel", "why"),
+    [
+        # Calculated load, and the absolute load this truck also polls: % in
+        # the Mode 01 registry, whatever a declaration claims.
+        ("obd:ENGINE_LOAD", "catalog unit %"),
+        ("obd:ABSOLUTE_LOAD", "catalog unit %"),
+        # The BFS candidate: unscaled in dids.yaml, so its frame values are counts.
+        ("did:ECM_AIR_CHARGE", "gives it no unit"),
+        # RAM channels: one unscaled, one in another unit.
+        ("mem:ECM_ENGINE_PERIOD", "gives it no unit"),
+        ("mem:ECM_TARGET_EQUIV_RATIO", "catalog unit phi"),
+        # decoded: rows are raw counts; derived: has no unit catalog.
+        ("decoded:ECM_RPM", "gives it no unit"),
+        ("derived:BASE_FUEL_SCHEDULE_MS", "gives it no unit"),
+    ],
+)
+def test_an_axis_channel_is_refused_unless_its_catalog_unit_is_the_axis_unit(
+    monkeypatch: pytest.MonkeyPatch, channel: str, why: str
+) -> None:
+    """The unit is the channel catalog's, never the declaration's (verifier,
+    P02.13): a declaration alone cannot put a % load or raw counts on a ms axis."""
+    _declare_axis(
+        monkeypatch, LoadAxisChannel(axis="base_fuel_schedule", channel=channel, evidence="x")
+    )
+    frame = _engine_load_frame().assign(**{channel: [15.0, 16.0]})
+    target = _calibration().target_map()
+    assert target is not None
+    with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
+        target_afr(frame, target, channel_units=catalog_channel_unit)
+    assert channel in refused.value.reason and why in refused.value.reason
+    out = append_afr_channels(
+        frame, VehicleParameters(), _calibration(), channel_units=catalog_channel_unit
+    )
+    assert TARGET_AFR not in out
+
+
+def test_the_catalog_check_passes_a_channel_the_catalog_puts_in_ms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The refusal can pass: a DID the catalog scales to ms is admitted. (The
+    injector pulse is not the load axis; it only shows the check is not a
+    constant refusal.)"""
+    channel = "did:ECM_INJECTOR_PULSE_1"
+    assert catalog_channel_unit(channel) == "ms"
+    _declare_axis(
+        monkeypatch, LoadAxisChannel(axis="base_fuel_schedule", channel=channel, evidence="x")
+    )
+    frame = _engine_load_frame().assign(**{channel: [40.0, 60.0]})
+    out = append_afr_channels(
+        frame, VehicleParameters(), _calibration(), channel_units=catalog_channel_unit
+    )
+    assert out[TARGET_AFR].notna().all()
+
+
+def test_no_catalog_means_no_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    _declare_axis(monkeypatch)
+    frame = _engine_load_frame().assign(**{AXIS: [15.0, 16.0]})
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=None)
+    assert TARGET_AFR not in out
+
+
+def test_a_verified_axis_channel_absent_from_the_frame_yields_no_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Declared but not captured: absent, and calculated load does not stand in."""
+    _declare_axis(monkeypatch)
+    out = append_afr_channels(
+        _engine_load_frame(), VehicleParameters(), _calibration(), channel_units=UNITS
+    )
+    assert TARGET_AFR not in out
+
+
+def test_an_axis_declaration_must_name_its_evidence() -> None:
+    with pytest.raises(ValueError, match="verification evidence"):
+        LoadAxisChannel(axis="base_fuel_schedule", channel=AXIS, evidence=" ")
+    with pytest.raises(ValueError, match="source namespace"):
+        LoadAxisChannel(axis="base_fuel_schedule", channel="BFS", evidence="x")

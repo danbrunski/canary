@@ -987,7 +987,14 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         vehicle_signals.wideband_lambda_columns(1),
         vehicle_signals.wideband_lambda_columns(2),
     ),
-    "derived:TARGET_AFR": (("obd:RPM",), ("obd:ENGINE_LOAD",)),
+    # P02.13 — the load input is the vehicle's verified channel for the target
+    # map's axis (``afr.DEFAULT_TARGET_LOAD_AXIS``). No vehicle declares one
+    # yet, so the group is empty: unsatisfiable, and the channel is never
+    # produced. It read obd:ENGINE_LOAD (%) on a ms axis until 2026-09-28.
+    "derived:TARGET_AFR": (
+        ("obd:RPM",),
+        vehicle_signals.load_axis_columns("base_fuel_schedule"),
+    ),
     **{
         f"derived:AFR_ERROR_B{bank}": ((f"derived:AFR_B{bank}",), ("derived:TARGET_AFR",))
         for bank in (1, 2)

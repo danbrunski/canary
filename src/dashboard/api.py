@@ -71,9 +71,6 @@ from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PAT
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
-from src.decode.behavior_models import (
-    DEFAULT_BEHAVIOR_MODELS_PATH,
-)
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
@@ -100,7 +97,7 @@ def create_app(
     anomalies_broadcaster: Broadcaster | None = None,
     scores_broadcaster: Broadcaster | None = None,
     emitter: AnomalyEventEmitter | None = None,
-    behavior_models_path: Path = DEFAULT_BEHAVIOR_MODELS_PATH,
+    behavior_models_path: Path | None = None,
     accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
     bindings_path: Path = DEFAULT_BINDINGS_PATH,
     dids_path: Path = DEFAULT_DIDS_PATH,
@@ -147,7 +144,13 @@ def create_app(
     WebSocket streams (5.4); pass ``None`` and those endpoints will
     accept connections but never emit (useful in tests or when the
     daemon isn't producing yet).
+
+    ``behavior_models_path`` defaults to ``config.daemon.behavior_models``
+    (P02.12), which the daemon has scoped to the vehicle, never the repo-level
+    ``data/behavior_models.yaml``.
     """
+    if behavior_models_path is None:
+        behavior_models_path = config.daemon.behavior_models
     app = FastAPI(title="CANary", version=_canary_version())
     if enable_dev_cors:
         # `pnpm dev` serves the SPA on :5173 and proxies the backend.

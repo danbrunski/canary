@@ -56,7 +56,7 @@ def _config() -> CanaryConfig:
 
 def test_without_a_sequence_model_fused_is_withheld_not_zero() -> None:
     config = _config()
-    features = featurize_wide_frame(_resampled(), config).features
+    features = featurize_wide_frame(_resampled(), config, behavior_models=None).features
     trained_if = fit_isolation_forest(
         features,
         IFConfig(n_estimators=40),
@@ -85,7 +85,9 @@ def test_batched_sequence_scoring_matches_the_served_engine() -> None:
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()
-    features = featurize_wide_frame(_resampled(gap_after=100), config).features
+    features = featurize_wide_frame(
+        _resampled(gap_after=100), config, behavior_models=None
+    ).features
     columns = sequence_feature_columns(features)
     lstm_config = config.models.lstm_autoencoder.model_copy(
         update={
@@ -191,7 +193,7 @@ def test_sequential_frames_of_equal_length_and_start_never_share_windows() -> No
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()
-    base = featurize_wide_frame(_resampled(), config).features
+    base = featurize_wide_frame(_resampled(), config, behavior_models=None).features
     columns = sequence_feature_columns(base)
     scaler = ZScoreScaler.fit(base, columns=columns)
     trained = train_lstm_autoencoder(
@@ -218,7 +220,7 @@ def test_sequential_frames_of_equal_length_and_start_never_share_windows() -> No
     def frame_for(offset: float) -> pd.DataFrame:
         shifted = raw.copy()
         shifted["obd:RPM"] = shifted["obd:RPM"] + offset
-        return featurize_wide_frame(shifted, config).features
+        return featurize_wide_frame(shifted, config, behavior_models=None).features
 
     # Deterministic form: one object scored, changed in place, scored again.
     # Same id, length, columns and first timestamp — every key the old cache
@@ -366,7 +368,9 @@ def test_batched_scoring_follows_the_artifacts_mask_rule_and_context_columns() -
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()
-    features = featurize_wide_frame(_resampled(gap_after=100), config).features
+    features = featurize_wide_frame(
+        _resampled(gap_after=100), config, behavior_models=None
+    ).features
     columns = sequence_feature_columns(features)
     lstm_config = config.models.lstm_autoencoder.model_copy(
         update={
