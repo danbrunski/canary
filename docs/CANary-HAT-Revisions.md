@@ -1388,13 +1388,22 @@ recorded elsewhere were premised on hand assembly and change here.
    Carry this into [`CANary-HAT-Rev2.1.md`](CANary-HAT-Rev2.1.md) §13.5.6's
    investigation list.
 
-#### 13.3.12 USB: firmware only, and the header keeps the data
+#### 13.3.12 USB: an option on the module path; the header does data and programming
 
 **Operator decision, 2026-10-01.** Rev 3.0 stays a HAT: **every host
-communication path is the 40-pin header**, and the board carries a **USB port
-for firmware only**. The alternative considered and declined was a dual-transport
-board where USB also carried data — §13.3.5's `gs_usb` route, the MCU's own
+communication path is the 40-pin header**, and **programming is over the header
+too** (§13.3.12's item-14 rewrite below). The board still carries a **USB
+port**, but for one reason only — it makes a future USB *data* path pure
+firmware. The alternative considered and declined was a dual-transport board
+where USB carried data from the start: §13.3.5's `gs_usb` route, the MCU's own
 channels, and eventually CAN.
+
+*Corrected the same day.* This section first justified the port as the
+programming path, on the argument that USB DFU is in ROM and so can flash a
+virgin part with no probe. True, but **SWD flashes a virgin part too** — the
+debug port is in silicon and live from reset, and the Pi is the probe. Bring-up
+from the assembler is fully covered by the header, so that argument supports no
+part of the port. What survives is the deferred-option argument alone.
 
 **Why this is the simpler board, and not just the smaller one.** Four
 complications disappear together:
@@ -1435,45 +1444,65 @@ needs no HS PHY and no high-speed differential routing on a board whose single
 1.575 GHz launch cost two rounds (§3.6.1). For a firmware-only port even that
 headroom is irrelevant.
 
-**Placement.** §13.3.9 item 5 leaves J3's ~10 mm as the only slack on J2's edge,
-so the receptacle goes on a different edge and must stay reachable with the HAT
-mounted on the Pi. One for §13.5.7.
+**Placement, and the ranking that goes with it.** §13.3.9 item 5 leaves J3's
+~10 mm as the only slack on J2's edge, so the receptacle goes on a different
+edge and must stay reachable with the HAT mounted. One for §13.5.7 — and §13.3.13.
 
-##### Item 14 rewritten: four paths, three costing no Pi GPIO
+**USB is the designated cut if the edge does not close.** Every other new part
+on this revision is required: the MCU, the always-on buck, the crossing-net
+components, the four ADC dividers, the SWD header. USB's benefit is optional and
+deferred, and it wants scarce *edge* area on a board §13.5.7 already thinks may
+push passives to B.Cu. So rank it last, and if layout runs out of perimeter,
+drop it — nothing else depends on it, and the module data experiment then waits
+for a module board.
+
+**The de-risking argument does not add anything**, and should not be used to
+defend the port. A USB-C receptacle, two 5.1 kΩ `Rd` resistors and an ESD array
+is not hard to get right first time, Full Speed routing is forgiving, and these
+parts need no crystal for USB at all — the Clock Recovery System trims the
+internal 48 MHz oscillator off SOF packets. Practising it here teaches little.
+The port earns its place on the deferred-firmware-option argument or not at all.
+
+##### Item 14 rewritten: SWD is the whole programming story
 
 Item 14 was "a hard requirement, not a convenience" satisfied in its weakest
 form — a UART bootloader, no debugger — under a pin budget §13.3.6 now shows
-does not bind. Replace it with:
+does not bind. With the budget corrected, SWD covers **flash and debug** from
+both the Pi and the bench, which makes **both bootloaders redundant**: SWD
+recovers a bricked part unconditionally, so nothing needs the ROM bootloader and
+`BOOT0` needs no pin, jumper or button.
 
 | Need | Path | Cost |
 |---|---|---|
-| Routine update | Pi sends "enter DFU" over `uart4`; firmware jumps to the ROM bootloader; the board re-enumerates as DFU and the image goes over USB | none beyond item 4's handshake |
-| Recovery from bricked firmware | `BOOT0` asserted at reset + USB DFU | a jumper or tact switch |
-| In-vehicle debugging | **SWD on Pi GPIO**, OpenOCD + gdb over the network, board still under the dash | 2–3 crossing nets |
-| Bench debugging, Pi-independent | 4-pin 1.27 mm SWD header | ~30 mm², no Pi GPIO |
+| In-vehicle flash + debug, over the network, board still under the dash | **SWD on Pi GPIO**, OpenOCD + gdb | 2–3 crossing nets |
+| Bench flash + debug, Pi-independent | 4-pin 1.27 mm SWD header | ~30 mm², no Pi GPIO |
+| `BOOT0` | **strapped low**, resistor to GND | none |
+
+Two paths instead of four, and strictly *more* capable than the version this
+replaces: a bootloader only flashes, where SWD also sets breakpoints, inspects
+registers and reads a hung MCU post mortem — which is the case that matters,
+since the MCU holds the load switch and the watchdog and §13.3.3(e) exists to
+recover hangs.
 
 - **SWD, not JTAG** — two pins against four or five, and full JTAG only buys
-  boundary scan and chaining.
+  boundary scan and chaining, neither of which applies to a single Cortex-M.
 - **On a Pi 5, OpenOCD's driver is `linuxgpiod`, not `bcm2835gpio`**: the latter
   pokes BCM registers directly and Pi 5 GPIO sits behind RP1. Bit-banged SWD is
-  slow — debug over it, flash over DFU.
-- **`BOOT0` leaves the header**, which frees **GPIO21**, and the **UART
-  bootloader is dropped** as redundant. `uart4` keeps item 4's handshake and
-  gains the "enter DFU" command.
+  slow, which is fine for debugging and tolerable for flashing at this image
+  size; the bench probe is the fast path.
+- **`BOOT0` and the UART bootloader both leave the header**, freeing **GPIO21**
+  and leaving `uart4` to item 4's handshake alone.
 - **SWDIO/SWCLK/nRST are one net set with two consumers** (Pi GPIO and the bench
   header). Series resistance per §13.3.2, and the procedural rule that a probe
   is not attached while OpenOCD runs on the Pi. These are Pi→MCU crossings, so
   they take §13.3.2's pulls: an undriven SWD line with the Pi dark must not hold
-  the MCU in reset or in its bootloader.
+  the MCU in reset.
 - **This closes a loop with §13.3.3(e).** Because a crashed MCU leaves the *Pi*
   powered, the Pi is alive and able to halt, inspect and reflash the supervisor
   that crashed. The fail-safe direction and Pi-as-probe reinforce each other.
-- **Bring-up argument, concrete:** boards arrive from the assembler with blank
-  MCUs. USB DFU is ROM, so `dfu-util` programs a virgin part with no probe and
-  no Pi — and on parts with an empty-flash check it enumerates as DFU without
-  `BOOT0` being touched. Confirm per part that the candidate has USB plus a ROM
-  DFU bootloader; on STM32G4 the USB peripheral is present on fewer variants
-  than on H5 or U5.
+- One consequence for the part search in §13.3.10: since no ROM bootloader is
+  relied on, **USB-plus-DFU stops being a selection criterion**. Judge candidates
+  on FDCAN count, SRAM and ADC alone.
 
 ##### Not adopted: AND-gate TXD merge, fitted DNP
 
@@ -1500,6 +1529,94 @@ dumps, K-line, GNSS, IMU, ADC telemetry, received CAN with MCU timestamps — is
 This also confirms §13.3.10's framing: the MCU's FDCAN peripherals stay
 **listen-only**, so two silent instances remain the natural requirement and the
 STM32U5's single FDCAN remains the caveat recorded there.
+
+#### 13.3.13 Placement: rev 3.0 goes double-sided
+
+**Operator expectation, 2026-10-01: rev 3.0 will have to put components on
+B.Cu.** §13.5.7 already reached that conclusion for rev 2.1's ~82 footprints,
+and rev 3.0 adds an MCU, an always-on buck, crossing-net components, four ADC
+dividers and an SWD header on top of it. Two things come back the other way —
+rev 3.0 **deletes the ADS1015** (§13.3.9 item 2 moves the ADC to the MCU) and
+rev 2.1 already **deletes Y1 and C5/C6** for a single oscillator (§13.3.9 item
+8) — but not enough to avoid the second side. Now that the fab places the parts
+(§13.3.11), double-sided assembly is a cost line rather than a skill question.
+
+##### The gating measurement: what is actually under the board
+
+**Settle this before any placement.** Two facts in §13.1.1 make the bottom-side
+envelope an open question rather than a known quantity: the stack needs the
+**13.5 mm stacking header** (the assembler fitted a standard-height part, which
+is the J1 BOM defect), and **X1202 coexistence is "not tested — UPS not
+stacked."** So:
+
+1. **What is the stack order** — Pi, X1202, HAT, or Pi, HAT, X1202? If the HAT
+   sits above the UPS, its bottom face looks at the UPS's components and cells,
+   not at the Pi, and the envelope is a different shape entirely. An X1202
+   carries 18650 cells, which are tall.
+2. **Is a Pi 5 active cooler fitted?** The compute roadmap's thermal section
+   assumes active cooling and progressive throttling from 80 °C, so presumably
+   yes — and a cooler occupies the Pi's centre, which makes the usable
+   bottom-side area a **ring around the middle**, not the whole face.
+3. **Measure the clearance with the real stack.** 13.5 mm is the gap between
+   boards; what is left for components is that minus the tallest thing
+   underneath, in each zone.
+
+If the answer is "cells or a cooler under most of the board", the plan changes
+from *move subsystems down* to *move only passives down, in named zones*. Ten
+minutes with calipers decides which document this section becomes.
+
+##### Divide by transient path, not by subsystem
+
+The operator's first cut was "MCU on top, all K-line and CAN ICs to the bottom
+with their passives". Directionally right, but the transceivers and the
+controllers want opposite things, so split those ICs in two:
+
+- **Transceivers stay on T.Cu.** They land on J2, a through-hole terminal block
+  mounted from the top, and they sit in the path that sees ISO 7637-2 pulses —
+  the +100 V/−150 V that §3.1.1 specifies C4's 100 V C0G against. Routing that
+  from J2 on top, through vias, to a transceiver on the bottom adds via
+  inductance exactly where it is least wanted, and splits the protection
+  topology (TVS, PTC, series R) across layers. Keep the protected-to-unprotected
+  boundary short and on one side.
+- **Controllers go to B.Cu, and take the oscillator with them.** Both
+  MCP2518FDs are purely digital — SPI to the header, TXD/RXD to the
+  transceivers — with no vehicle connection and nothing to see or probe. Rev
+  2.1's single X1 drives both OSC1 pins (§13.3.9 item 8), so keeping X1 and both
+  controllers on one side keeps that clock routing short. The
+  controller↔transceiver digital nets cross on vias happily at these rates.
+
+##### Must stay on T.Cu
+
+- **The GNSS RF path** — J4, L1 and the antenna-supervisor parts. This is the
+  one to insist on. §13.3.6 already calls the RF region the most constrained
+  area on the board, and §13.1 **measurement 4 is specifically GNSS desense
+  under the Pi's own WiFi hotspot**. Putting the antenna path on the bottom aims
+  it at the Pi as an EMI source and makes that measurement worse. RF stays top,
+  as far from the Pi as the outline allows.
+- **J2 and J3** — through-hole, and the transient entry point.
+- **The 12 V input stage** — the SMB TVS is physically chunky and this is the
+  transient path; keep it near J2/J3.
+- **Status LEDs** (§13.3.6 item 15) must be visible; the **SWD header** needs
+  probe access; the **USB receptacle** needs a reachable edge (§13.3.12).
+- **The MCU** — as the operator placed it. It is the part most likely to want
+  rework, and its SWD and programming access is on top.
+
+##### Good B.Cu candidates
+
+The MCP2518FDs and X1 per above; **most passives**, which is §13.5.7's existing
+plan and what §13.3.11's move to 0402 makes cheaper; the **IMU**, since a 6-axis
+part on the bottom only flips a sign in the axis transform — a config constant,
+not a problem; and the **barometer**, which needs open air rather than a sealed
+cavity and still has it under a 13.5 mm stack.
+
+##### One sequencing rule for the fab
+
+Double-sided assembly is two passes, so **heavy parts go on the side reflowed
+last, and light SMD rides the first pass held by solder surface tension.** 0402,
+SOIC-8 and QFN are fine inverted; connectors, the terminal blocks, the GNSS
+module and the buck inductor want T.Cu anyway. Tell PCBWay which side is which
+so they sequence it correctly rather than inferring it — and note J1's
+through-hole pin field must stay clear of bottom-side parts regardless.
 
 ### 13.4 Lessons from the Macchina M2
 
