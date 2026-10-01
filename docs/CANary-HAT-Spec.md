@@ -11,7 +11,8 @@
 >
 > Board state: **rev 1.0 was submitted to PCBWay 2026-08-11 and never
 > fabricated** — the quote stalled, and the submission was withdrawn 2026-08-22
-> in favour of **rev 2.0**, which is now the board that will be built first
+> in favour of **rev 2.0**, which **was fabricated and assembled, brought up
+> 2026-09-23 (§13.1.1), and is the board now collecting data in the vehicle**
 > (§13.2). Rev 1.0 remains the reference design this document describes: it is
 > complete and fully routed, 0 unconnected items, 0 DRC violations, 0
 > schematic-parity issues, ERC **0 errors / 3 benign warnings**, and no schematic
@@ -21,9 +22,14 @@
 > edits alike — reports 3. Corrected rather than re-derived next time.)* Rev 2.0 is a delta against it, so §2–§12 stay accurate
 > for everything rev 2.0 does not change.
 >
-> **Nothing was ever measured on a physical board.** §8.3's "confirm before
-> fabrication" list and §13.1's bring-up measurements now both land on rev 2.0,
-> which changes how several rev-2.0 items had to be decided — see §13.2.
+> **Rev 2.0 has been measured.** One assembled board was brought up on
+> 2026-09-23 and the results are in §13.1.1: ID EEPROM, CAN, 12V input and
+> sense, K-line (including commander mode), IMU and GNSS/PPS all pass; the
+> **barometer (U5) failed** (temperature ADC pinned at code 0), and the GNSS
+> backup cell polarity and the J1 header height are a design and a BOM defect
+> respectively — all three carried into rev 2.1 (§13.5.6). §13.1 measurements
+> 4–9 and 11–12 are still open. §8.3's "confirm before fabrication" list
+> changed how several rev-2.0 items had to be decided — see §13.2.
 
 > **Part of the CANary-HAT board documentation**, split across four files.
 > Section numbers are **stable across the split** — a bare `§3.7.5` means the

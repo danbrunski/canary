@@ -777,6 +777,27 @@ Three mitigations. Rev 3.0 should state which one it uses **per crossing net**:
   regardless, and prefer a hardware default (crossing nets idle low, MCU drives
   only when it must) over a firmware promise.
 
+**Decided 2026-10-01: take all three, on every crossing net.** This section has
+stood open as "settle before drawing anything" while listing its own answer. The
+three mitigations are not alternatives — series resistance is a few parts, the
+I/O check is a datasheet read, and the tri-state rule is firmware that wants the
+hardware default behind it anyway. Adopt the lot: series resistance on 4, 5, 6
+and 14; crossing nets pulled to their safe state in hardware so an undriven net
+is harmless; item 6's rail sense as the firmware belt on top. Nothing here is
+worth a second round of deliberation.
+
+**Item 14 is a crossing net too, in the other direction, and was missing from
+the list.** Items 4, 5 and 6 are MCU→Pi. Item 14 is **Pi→MCU**: `BOOT0` and
+reset driven from a Pi GPIO. In the fourth row above — the state the rig lives
+in — that GPIO is an unpowered output facing an MCU input that is awake. If the
+MCU's `BOOT0`/`nRST` float to the wrong level there, the supervisor sits in its
+bootloader or in reset while parked, which disables wake, the watchdog and the
+boot-gap buffer at once: every always-on capability, lost to a pull-down that
+was never fitted. **Both nets get their pull in the MCU domain**, sized against
+the Pi GPIO's leakage, so the safe level holds when the Pi side is dark. This is
+the §13.3.2 hazard in the direction the section's framing ("the MCU must not
+drive a Pi-domain net high") does not cover.
+
 **HAT+ conformance becomes something to argue rather than inherit.** §3.7.5
 quotes the spec: HAT+ boards "must be electrically compatible with the STANDBY
 power state, where the 5V power rail is powered, but the 3.3V rail is not
@@ -864,6 +885,24 @@ parasitic drain, or someone in the truck.
 **(e) A watchdog with power-cycle authority.** The MCU already holds the load
 switch; a heartbeat line plus a timeout means a hung Pi recovers without someone
 under the dash — currently the failure mode with the worst manual cost.
+
+**The load switch must fail safe toward Pi-on** (added 2026-10-01). One MCU
+carries two jobs whose failure requirements are opposite: the supervisor side
+(this item, the load switch, safe-state ownership in item 13, wake) wants to be
+boring and bulletproof, while the coprocessor side (§13.3.3a's ring buffer,
+item 5's SPI bulk dump, kHz ADC sequencing, timestamp discipline) is the most
+complex firmware on the board. Sharing one image makes the recovery path for the
+worst-manual-cost failure depend on the most failure-prone code here.
+
+A second MCU is the wrong fix — §13.3.6 already says area is tight. Fix the
+*direction* instead: pull the load switch's enable so an MCU in reset, in its
+bootloader, or hung leaves the **Pi powered**. A dead supervisor then degrades
+the rig to rev 2.1 behaviour — always-on Pi, the ~250 mA/3-day drain of §13.3.1's
+table, fully functional — rather than a dark board under the dash. Item 4's UART
+handshake is what keeps that from being silent: the Pi sees no supervisor and
+says so. Note the standing cost of this choice, and accept it — a crashed MCU
+silently reintroduces the battery drain rev 3.0 exists to remove, which is
+recoverable, where a rig that will not boot is a trip under the dash.
 
 #### 13.3.4 Hardware-side benefits, by subsystem
 
@@ -1086,6 +1125,35 @@ MCU-side pins and cost no header GPIO. Note that item 8 *frees* `uart0`
 (GPIO14/15) on the Pi side — a net simplification of §11's K-line software work
 rather than an addition to it.
 
+**Recount, 2026-10-01 — that budget double-counts, and item 14 is not actually
+blocked.** The count above debits GPIO19, 22, 23 and 24 as "spent by rev 2.0/2.1"
+for U4 STB, U11 STB, INT2 and the K-line FET gate — but items 10 and 13 move
+exactly those four functions to the MCU, and item 8 moves K-line off `uart0`.
+On a rev 3.0 *re-layout* those traces are simply not drawn to the header, so the
+pins come back: **19, 22, 23, 24 plus `uart0`'s 14/15 return, against 12, 13, 20
+and 21 spent.** Rev 3.0 is pin-*positive*, by about six, not at zero spare —
+which removes the stated reason §13.3.9 ruled out the bit-banged SWD form of
+item 14.
+
+Two caveats before spending the headroom. **(a)** A pin only returns if rev 3.0
+declines to route it, so this is a layout commitment, not free inventory; decide
+per pin at schematic entry. **(b)** There is a real argument for keeping one or
+two as a **Pi-side fallback** — a Pi that can still drive U4's STB directly is a
+Pi that can put the vehicle transceiver in a safe state with the supervisor dead,
+which pairs with the fail-safe-to-Pi-on rule in §13.3.3(e). If a pin is retained
+for that, it is retained *deliberately* and the net carries two drivers, so it
+needs the arbitration spelled out. What is not defensible is treating those pins
+as unavailable by accident.
+
+**And SWD does not need header GPIO at all.** Item 14 is called a hard
+requirement, then satisfied in its weakest form — a UART bootloader, no debugger
+— because of a budget that turns out not to bind. The cheaper reading: put SWD on
+its own 4-pin 1.27 mm header, programmed from a laptop at the bench, costing zero
+Pi GPIO and the area §8.4 already wants for test points, and keep the Pi's UART
+bootloader for unattended in-vehicle updates. Both, not either. For a part whose
+firmware "grows for years after fabrication", shipping without a debugger is the
+wrong economy.
+
 Physical: 65 × 56mm carries **57 footprints as built in rev 2.0** and about
 **82 after rev 2.1** (§13.5.7), which may already push passives onto B.Cu. An
 MCU, an always-on buck, crossing-net components and a programming header are
@@ -1230,6 +1298,96 @@ nothing here. If the MCU's own clock needs are compatible, X1 can supply it as
 well — one clock domain for CAN and the MCU timebase is exactly what
 §13.3.3(c) wants.
 
+#### 13.3.10 MCU part selection
+
+The §13.3.2 note that "the regulator's quiescent current drives the sleep budget,
+not the MCU's sleep mode" is what makes this a free choice rather than a
+µA-first one. Collecting the requirements this section has accumulated:
+
+- **≥2 CAN decode paths** — item 7's two RXD fan-outs (U4 vehicle, U11 aux),
+  with headroom for the channels §13.5.4 would put here.
+- **Several hundred KB SRAM** — §13.3.3(a)'s boot-gap buffer. *Unmeasured; see
+  the gating item below.*
+- **Four ADC channels on one converter with one reference** — §13.3.9 item 2's
+  ratiometric MAP/IAT against `5V_SENS`. Split across converters and the ratio
+  stops cancelling what it exists to cancel.
+- **µs-deterministic UART gating** — §13.3.4's K-line table.
+- **SPI slave** for item 5's bulk dump; **LQFP**; able to take 40 MHz from rev
+  2.1's X1 (§13.3.9 item 8).
+
+| Part | FDCAN | SRAM | ADC | Standby |
+|---|---|---|---|---|
+| STM32G4 (G474) | **3×** | **128 KB** | 5× 12-bit, 4 Msps, HW oversampling | — |
+| STM32H563/573 | 2× | 640 KB | good | 3.5 µA |
+| STM32U575/585 | **1×** | **786 KB** | 2× 14-bit @ 2.5 Msps, HW oversampling | 210 nA |
+
+Three things that table settles, all verified against datasheets 2026-10-01:
+
+- **The STM32U5 has one FDCAN.** It is the part "ultra-low-power plus big RAM"
+  leads to, and it cannot decode both fan-outs in hardware. The aux line carries
+  one node (the AEM gauge) at low rate, so software decode there is defensible
+  — but it is a second CAN implementation in firmware, which §13.3.7 is
+  rightly allergic to.
+- **The standby column is a red herring.** §13.3.2's own arithmetic puts 200 µA
+  at over a decade on 20 Ah, so 3.5 µA and 210 nA are indistinguishable here.
+  Do not let low-power marketing pick this part; **RAM and FDCAN count decide it.**
+- **Decode the fan-outs with FDCAN peripherals in silent/listen-only mode**, not
+  by bit-banging. Silent mode never drives TX, so §13.3.5's receive-only rule is
+  enforced in *hardware* rather than by firmware discipline, and hardware RX
+  timestamps and ID filtering come free — which is §13.3.3(a) and (c) together.
+
+**The gating open item: compute the boot-gap buffer size before choosing.**
+§13.3.3(a)'s "a few hundred KB" is an estimate, and §13.1 measurement 12 (boot
+time) is still open — yet that number is exactly what separates the 128 KB part
+from the 786 KB part. It does not need measurement 12 to start: the broadcast
+frame rate is already in captures on disk, so *rate × window × bytes-per-stored-frame*
+is an hour's arithmetic. At ~1500 frames/s and 20 B/frame, 40 s is over 1 MB; at
+~500 frames/s it is ~400 KB; with per-ID delta encoding — most broadcast traffic
+is the same IDs repeating — it could land under 100 KB. **Do this first.** If it
+fits in 128 KB, the STM32G4 wins on every other axis (3× FDCAN, the best ADCs of
+the three, cheapest, and the part this section already named). If it needs
+hundreds of KB, the **STM32H563 in LQFP64** matches the two fan-outs exactly.
+
+**Rejected: the Teensy / i.MX RT1062 class.** Raised 2026-10-01 from the
+coprocessor idea, and it belongs to a different architecture — an external box on
+a cable to an unmodified Pi, not a part on this board. The i.MX RT1062 is a
+196-ball BGA with no internal flash, draws ~100 mA active with weak low-power
+modes on a board whose premise is µA standby, and the Teensy module itself is
+61 × 18 mm against a 65 × 56 mm board already near ~82 footprints. Its 600 MHz M7
+answers a question §13.3.7 declines to ask.
+
+**One cross-reference to tidy.** §13.3.5 rejects "an MCU with an integrated CAN FD
+controller replacing the MCP2518FD"; §13.5.4 calls the MCU "the principled home
+for three or more on-board channels". These are compatible — CAN0 stays on the
+MCP2518FD behind the mainline driver; the MCU's FDCAN peripherals are for
+listen-only decode and for future channels — but they read as contradictory, so
+say so where either is quoted.
+
+#### 13.3.11 Assembly: ICs placed by the fab
+
+**Operator decision, 2026-10-01: PCBWay assembles the board, at least every IC.
+Headers and resistors may be reworked by hand afterwards.** Three constraints
+recorded elsewhere were premised on hand assembly and change here.
+
+1. **§13.4.3's "keep 0603" loses its premise.** That bullet reasons from "a
+   hand-assembled single research board where hand-rework is routine", and even
+   then conceded "§13.3.6 notes area gets tight once an MCU arrives" — which it
+   now has, alongside an always-on buck, crossing-net parts and a programming
+   header, on a board §13.5.7 already thinks may push passives to B.Cu.
+   **Shop-placed passives go 0402; keep 0603 only where hand-rework is actually
+   expected.** This is the cheapest area the revision will find.
+2. **BGA stops being ruled out by assembly — and is still declined.** Every part
+   in §13.3.10 ships in LQFP, BGA needs X-ray to inspect and cannot be reworked
+   in place, and nothing here needs the pin density. No upside; the answer is
+   unchanged, but the *reason* is now inspectability rather than hand-soldering.
+3. **§13.1.1's U5 ruling no longer binds.** "Hand replacement of U5 is ruled out
+   (operator, 2026-09-23: too small to rework by hand)" was a hand-assembly
+   constraint. A shop can replace the BMP384, so the rev 2.0 barometer failure
+   becomes a rework rather than a dead subsystem, and §13.1 measurement 9 —
+   currently blocked by it — becomes reachable without waiting for rev 2.1.
+   Carry this into [`CANary-HAT-Rev2.1.md`](CANary-HAT-Rev2.1.md) §13.5.6's
+   investigation list.
+
 ### 13.4 Lessons from the Macchina M2
 
 Read out of the M2-B interface schematic (`SCH-01006 R2` / `PCB-01006 R2`, dated
@@ -1370,6 +1528,8 @@ is the third terminator §3.2 refuses, and §3.2's reasoning stands regardless.
 - **0603 vs the M2's 0402 passives.** Rev 1.0 is a hand-assembled single research
   board where hand-rework is routine; 0402 buys area this board does not need
   (though §13.3.6 notes area gets tight once an MCU arrives). Keep 0603.
+  **Superseded for rev 3.0 (§13.3.11): the fab places the parts, so shop-placed
+  passives go 0402 and 0603 survives only where hand-rework is expected.**
 - **1% as the default resistor tolerance.** The M2 uses 1% throughout and reaches
   for E96 values wherever the value matters (60.4, 240, 374, 866, 2.00K, 6.49K,
   8.06K, 8.87K, 22.1K, 124K), reserving 5% for 0Ω jumpers. Rev 1.0's pull-ups and
@@ -1377,6 +1537,55 @@ is the third terminator §3.2 refuses, and §3.2's reasoning stands regardless.
   12V sense divider (§13.2) genuinely does want it.
 - **Test points and solder bridges everywhere.** Already wanted by §8.4 and
   queued in §13.2; the M2 simply confirms the habit is worth the area.
+
+#### 13.4.3a Fabricating an M2 is possible — what that does and does not buy
+
+Checked 2026-10-01, because "buy an M2 to prototype on" runs into stock (out of
+stock on Tindie; a Macchina forum thread asks for one) and the question becomes
+whether to build one.
+
+**The repo carries fabrication outputs, not just the PDFs §13.4 was read from.**
+`M2/Gerbers/` holds RS-274X sets plus drill files for **`PCB-01005 R3`**
+(processor board) and **`PCB-01006 R3`** (interface board) — GTL/GBL/G1/G2, so
+4-layer — and `M2/Interface Board/BOM-PCB-01016 R1.csv` and
+`M2/Processor Board/BOM-PCB-01015 R1.csv` are full BOMs. That is a turnkey
+submission as-is: gerbers, drills and a BOM CSV are exactly PCBWay's inputs.
+Licence is CC BY-SA 4.0. Note it is **two boards that stack**, so two runs.
+`M2-B/` has PDFs only — no gerbers — so what is buildable is the *original* M2,
+not the M2-B whose schematic §13.4 analysed.
+
+**Verify the revision pairing before paying.** The gerbers are R3 and the BOMs
+are R1. §13.4's caveat about BOM-vs-schematic disagreement was across two
+*different boards* (an original-M2 BOM against the M2-B schematic), which does
+not apply here — gerbers and BOMs are both original-M2 — but an R1 BOM against
+R3 artwork is still unconfirmed, and a designator that moved between revisions
+is a mis-stuffed board.
+
+**Two of §13.4.2's three defects are BOM substitutions, not re-layouts** — which
+matters, because without editable CAD a layout change is not available:
+
+| §13.4.2 finding | Fix available? |
+|---|---|
+| `SMBJ14A` TVS, 14V standoff under a 13.8–14.4V charging system | **Yes** — `SMBJ24A`, same SMB footprint, drop-in |
+| `SP1002-02` 6V bus ESD array against ISO 11898-2's −27/+40V | **Probably** — NUP2105L / PESD2CAN family in SOT-23; confirm footprint |
+| `C4` at 50V against ISO 7637-2's +100/−150V K-line pulses | **Check** — 100V C0G at that value may not fit the fitted footprint |
+
+**What fabrication cannot fix** is the reason the M2 is prior art rather than the
+answer: 96 KB SRAM against §13.3.3(a)'s buffer, no GNSS so no PPS for
+§13.3.3(c), no IMU for §13.3.3(d)'s motion wake, no barometer, no µA-class sleep
+design, classic CAN only, a single XBee socket contended between BLE and GNSS,
+and SAM3X8E sourcing for a 2017 part. Four of the five §13.3.3 capabilities are
+out of reach on it.
+
+**So the honest use is a prototype, and it is an expensive one.** The questions a
+module architecture actually leaves open are firmware and protocol — does
+`gs_usb` leave `src/collection/` untouched, does a module-as-system-of-record
+handover work, is the jitter measurably better than MCP2518FD-over-SPI — and a
+Teensy 4.1 plus a transceiver breakout answers all of them for the price of
+neither fab run. **Build an M2 only for what nothing else offers: J1850 VPW/PWM,
+single-wire CAN and all 16 OBD pins**, i.e. the multi-vehicle bus breadth
+AGENTS.md's generalisation intent would eventually want and §13.1's M2 note
+already flagged as "not an unserved gap in the market".
 
 #### 13.4.4 Scope: rev 2.0 or rev 3.0
 
