@@ -1388,6 +1388,119 @@ recorded elsewhere were premised on hand assembly and change here.
    Carry this into [`CANary-HAT-Rev2.1.md`](CANary-HAT-Rev2.1.md) §13.5.6's
    investigation list.
 
+#### 13.3.12 USB: firmware only, and the header keeps the data
+
+**Operator decision, 2026-10-01.** Rev 3.0 stays a HAT: **every host
+communication path is the 40-pin header**, and the board carries a **USB port
+for firmware only**. The alternative considered and declined was a dual-transport
+board where USB also carried data — §13.3.5's `gs_usb` route, the MCU's own
+channels, and eventually CAN.
+
+**Why this is the simpler board, and not just the smaller one.** Four
+complications disappear together:
+
+1. **No application USB stack.** DFU lives in the MCU's ROM, so a firmware-only
+   USB port means *zero* USB code: no descriptors, no endpoint handling, no
+   `gs_usb` protocol, no enumeration, suspend/resume or re-attach edge cases.
+   That matters most on the part that also holds the load switch and the
+   watchdog — §13.3.3(e) wants the supervisor boring.
+2. **No transport arbitration.** The "which link is authoritative" question does
+   not arise, so there is no host election, no VBUS-presence logic and no
+   both-attached case to define.
+3. **No TXD merge, so no bus-jam failure mode.** Two CAN controllers behind one
+   transceiver need their TXD lines combined (an AND gate works — dominant-low,
+   recessive-high), and a TXD stuck dominant **jams the whole vehicle bus**, not
+   just this rig. That would have been the first failure mode on this board
+   reaching outside it, and it is now simply absent.
+4. **§13.3.5 stays a wiring guarantee.** With no USB data path there is no
+   reason for the MCU to transmit, so receive-only remains enforced by what is
+   connected rather than by a firmware invariant — the distinction AGENTS.md
+   cares about.
+
+**What this defers costs almost nothing.** The open questions about a module
+architecture are firmware and protocol — does a `gs_usb` endpoint leave
+`src/collection/` untouched, does a module-as-system-of-record handover work, is
+the jitter measurably better than MCP2518FD-over-SPI. Those belong on a Teensy
+4.1 plus a transceiver breakout, which answers them sooner and cheaper than any
+board spin. Rev 3.0 was never the right vehicle for that experiment.
+
+**The port, and the one hard rule.** USB-C receptacle, device-only: `Rd` 5.1 kΩ
+to GND on both CC lines, an ESD array on D+/D−. The board is powered from
+`+12V_RAW` and is therefore a **self-powered device — never draw from VBUS and
+never back-feed it.** Note this is also why USB adds no §13.3.2 crossing: a
+self-powered device facing an unpowered host is USB's ordinary case, designed
+for, not a hazard to mitigate. **Full Speed is sufficient and preferred** —
+§13.3.8 puts total ingest at ~120 kB/s ≈ 1 Mbit/s against FS's 12 Mbit/s, and FS
+needs no HS PHY and no high-speed differential routing on a board whose single
+1.575 GHz launch cost two rounds (§3.6.1). For a firmware-only port even that
+headroom is irrelevant.
+
+**Placement.** §13.3.9 item 5 leaves J3's ~10 mm as the only slack on J2's edge,
+so the receptacle goes on a different edge and must stay reachable with the HAT
+mounted on the Pi. One for §13.5.7.
+
+##### Item 14 rewritten: four paths, three costing no Pi GPIO
+
+Item 14 was "a hard requirement, not a convenience" satisfied in its weakest
+form — a UART bootloader, no debugger — under a pin budget §13.3.6 now shows
+does not bind. Replace it with:
+
+| Need | Path | Cost |
+|---|---|---|
+| Routine update | Pi sends "enter DFU" over `uart4`; firmware jumps to the ROM bootloader; the board re-enumerates as DFU and the image goes over USB | none beyond item 4's handshake |
+| Recovery from bricked firmware | `BOOT0` asserted at reset + USB DFU | a jumper or tact switch |
+| In-vehicle debugging | **SWD on Pi GPIO**, OpenOCD + gdb over the network, board still under the dash | 2–3 crossing nets |
+| Bench debugging, Pi-independent | 4-pin 1.27 mm SWD header | ~30 mm², no Pi GPIO |
+
+- **SWD, not JTAG** — two pins against four or five, and full JTAG only buys
+  boundary scan and chaining.
+- **On a Pi 5, OpenOCD's driver is `linuxgpiod`, not `bcm2835gpio`**: the latter
+  pokes BCM registers directly and Pi 5 GPIO sits behind RP1. Bit-banged SWD is
+  slow — debug over it, flash over DFU.
+- **`BOOT0` leaves the header**, which frees **GPIO21**, and the **UART
+  bootloader is dropped** as redundant. `uart4` keeps item 4's handshake and
+  gains the "enter DFU" command.
+- **SWDIO/SWCLK/nRST are one net set with two consumers** (Pi GPIO and the bench
+  header). Series resistance per §13.3.2, and the procedural rule that a probe
+  is not attached while OpenOCD runs on the Pi. These are Pi→MCU crossings, so
+  they take §13.3.2's pulls: an undriven SWD line with the Pi dark must not hold
+  the MCU in reset or in its bootloader.
+- **This closes a loop with §13.3.3(e).** Because a crashed MCU leaves the *Pi*
+  powered, the Pi is alive and able to halt, inspect and reflash the supervisor
+  that crashed. The fail-safe direction and Pi-as-probe reinforce each other.
+- **Bring-up argument, concrete:** boards arrive from the assembler with blank
+  MCUs. USB DFU is ROM, so `dfu-util` programs a virgin part with no probe and
+  no Pi — and on parts with an empty-flash check it enumerates as DFU without
+  `BOOT0` being touched. Confirm per part that the candidate has USB plus a ROM
+  DFU bootloader; on STM32G4 the USB peripheral is present on fewer variants
+  than on H5 or U5.
+
+##### Not adopted: AND-gate TXD merge, fitted DNP
+
+Weighed and declined. §13.3.6's "a missing net is a re-spin, unused firmware is
+free" argues for landing the footprints, and §13.4.1 item 4's "fit the
+footprint, gate the connection" is the matching habit — but both have a
+boundary, and this is past it. The gate is **a part in the vehicle-bus transmit
+path**, so fitting it demands getting the hazard right now (always-on rail, so
+the Pi being off cannot leave it unpowered; TXD pulled recessive when undriven,
+confirmed against the TCAN1042's internal pull-up) for a capability just
+deprioritised.
+
+**The decisive argument is that the gate serves a waypoint, not a destination.**
+It exists only for a transitional state where the Pi and the MCU *both* own CAN
+transmit. If a module board is ever built, CAN is MCU-owned from the start and
+there is no MCP2518FD to merge with — so the merge is never needed there either.
+Omit it.
+
+**What stays open at zero cost, and what closes.** Because the connector and the
+MCU's USB pins exist, adding the MCU's *own* data over USB later — boot-gap
+dumps, K-line, GNSS, IMU, ADC telemetry, received CAN with MCU timestamps — is
+**pure firmware, no board change.** The only thing this revision forecloses is
+**CAN transmit over USB**, which is what the declined gate would have bought.
+This also confirms §13.3.10's framing: the MCU's FDCAN peripherals stay
+**listen-only**, so two silent instances remain the natural requirement and the
+STM32U5's single FDCAN remains the caveat recorded there.
+
 ### 13.4 Lessons from the Macchina M2
 
 Read out of the M2-B interface schematic (`SCH-01006 R2` / `PCB-01006 R2`, dated
