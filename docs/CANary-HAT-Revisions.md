@@ -1541,29 +1541,92 @@ rev 2.1 already **deletes Y1 and C5/C6** for a single oscillator (§13.3.9 item
 8) — but not enough to avoid the second side. Now that the fab places the parts
 (§13.3.11), double-sided assembly is a cost line rather than a skill question.
 
-##### The gating measurement: what is actually under the board
+##### The stack, and the height budget it leaves
 
-**Settle this before any placement.** Two facts in §13.1.1 make the bottom-side
-envelope an open question rather than a known quantity: the stack needs the
-**13.5 mm stacking header** (the assembler fitted a standard-height part, which
-is the J1 BOM defect), and **X1202 coexistence is "not tested — UPS not
-stacked."** So:
+**Settled by the operator, 2026-10-01**, which closes what §13.1.1 left open
+("X1202 coexistence — not tested, UPS not stacked"):
 
-1. **What is the stack order** — Pi, X1202, HAT, or Pi, HAT, X1202? If the HAT
-   sits above the UPS, its bottom face looks at the UPS's components and cells,
-   not at the Pi, and the envelope is a different shape entirely. An X1202
-   carries 18650 cells, which are tall.
-2. **Is a Pi 5 active cooler fitted?** The compute roadmap's thermal section
-   assumes active cooling and progressive throttling from 80 °C, so presumably
-   yes — and a cooler occupies the Pi's centre, which makes the usable
-   bottom-side area a **ring around the middle**, not the whole face.
-3. **Measure the clearance with the real stack.** 13.5 mm is the gap between
-   boards; what is left for components is that minus the tallest thing
-   underneath, in each zone.
+**X1202 at the bottom, Pi above it, CANary-HAT on top via extended headers.** So
+the HAT's bottom face looks at **the Pi and its fan**, not at the UPS or its
+18650 cells. Clearance is tight but real: **low-profile ICs and small SMD fit;
+bulk capacitors and connectors do not.**
 
-If the answer is "cells or a cooler under most of the board", the plan changes
-from *move subsystems down* to *move only passives down, in named zones*. Ten
-minutes with calipers decides which document this section becomes.
+Translated into part classes, so placement does not have to re-derive it:
+
+| Fits on B.Cu | Height | Must stay T.Cu |
+|---|---|---|
+| 0402 / 0603 passives | ~0.5 mm | bulk electrolytic / tantalum caps |
+| QFN | ~0.9 mm | buck inductor |
+| 2.5 × 2.0 mm oscillator (rev 2.1's X1) | ~0.9 mm | GNSS module |
+| SOT-23 | ~1.1–1.45 mm | every connector — J1–J4, USB, SWD header |
+| SOIC-8 / SOIC-14, LQFP | ~1.6–1.75 mm | — |
+
+**This confirms the controllers-and-oscillator plan above.** Both MCP2518FDs are
+QFN/SOIC and X1 is a 2.5 × 2.0 mm oscillator at ~0.9 mm — squarely inside the
+envelope, which is the whole reason that grouping works. **The one number still
+worth a caliper** is the usable height directly over the cooler, since a
+1.75 mm SOIC clearing there is the difference between "controllers on the
+bottom" and "only passives on the bottom."
+
+##### The fan is under the board, which has four consequences
+
+1. **Keep the region over the fan inlet clear rather than cutting a hole.** The
+   HAT restricts the cooler's intake, and the compute roadmap already worries
+   about throttling from 80 °C with the stock fan at 100 % by 75 °C — in a
+   sealed in-vehicle enclosure that matters. A ventilation cutout would help
+   most but costs area this board does not have, so the cheaper move is a
+   **component keep-out over the fan footprint**: no bottom-side parts there,
+   tall or otherwise.
+2. **The barometer moves back to T.Cu — retracting the recommendation made
+   earlier in this section.** It was placed on B.Cu because it needs open air
+   rather than a sealed cavity, which is true and is the wrong reading of the
+   geometry. Two reasons, the operator's first and the more basic of the two
+   (2026-10-01):
+
+   - **The gap between the boards is an enclosed air space**, not open air. A
+     restricted volume between two PCBs equalises with ambient slowly and
+     stratifies thermally, so a sensor there reads a micro-environment coupled
+     to the Pi rather than to the vehicle.
+   - **And the fan actively biases it.** A pressure sensor in a fan's *intake*
+     stream reads a static pressure depressed by its suction — tens of pascals,
+     and **1 Pa ≈ 8 cm of apparent altitude**, so a 50 Pa offset is metres,
+     switching in and out with fan speed. That is a sensor artifact correlated
+     with another subsystem's state, in a channel feeding physics-derived
+     values: precisely the shape of the findings this project has retracted six
+     times.
+
+   **The sharper requirement this exposes: the barometer needs a vent to
+   ambient, not a side assignment.** T.Cu fixes the fan bias, but the compute
+   roadmap assumes a sealed in-vehicle enclosure, and a sealed box gives a
+   low-pass-filtered ambient pressure whose time constant is set by its leak
+   rate. Static readings survive that; the altitude and grade transients during
+   a drive — the reason to carry the channel at all — do not. So place U5 near a
+   deliberate enclosure vent, and record the vent as an enclosure requirement
+   rather than leaving it to whoever builds the box. Worth settling alongside
+   §13.5.6's investigation of why rev 2.0's part reads a pinned temperature
+   channel: a baro whose readings are untrustworthy for *mechanical* reasons is
+   the same dead channel as one with a dead ADC.
+3. **The four ADC dividers stay on T.Cu.** The bottom face looks at the Pi's
+   SoC, RAM and RP1 — the noisiest region on the host. §13.3.9 item 2 requires
+   MAP and IAT to cancel as ratios against `5V_SENS`; do not ask that
+   cancellation to fight broadband noise from a SoC 5 mm away. Digital parts are
+   indifferent and belong there instead.
+4. **Characterise the fan tone against the IMU at bring-up.** A fan at
+   5,000–8,000 rpm is a ~85–135 Hz mechanical tone coupled through the
+   standoffs, and it is present whenever the Pi is powered. The IMU sees it from
+   either side of the board, so this is not a placement argument — it is a
+   measurement to take once and record, so the tone is never mistaken for a
+   vehicle signal. Motion-wake (§13.3.3d) is unaffected, since the fan is off
+   whenever that matters.
+
+##### Rework and probing
+
+Bottom-side parts are inaccessible without unstacking, so **§8.4's test points
+go on T.Cu** — a test point that cannot be reached with the stack assembled is
+not a test point. Same for anything expected to need a scope during bring-up.
+This is a weaker constraint than it was: §13.3.11 means the fab reworks ICs, so
+the U5-class "cannot be replaced by hand" problem no longer argues for
+accessibility — but a probe still cannot reach through the Pi.
 
 ##### Divide by transient path, not by subsystem
 
@@ -1604,10 +1667,12 @@ controllers want opposite things, so split those ICs in two:
 ##### Good B.Cu candidates
 
 The MCP2518FDs and X1 per above; **most passives**, which is §13.5.7's existing
-plan and what §13.3.11's move to 0402 makes cheaper; the **IMU**, since a 6-axis
-part on the bottom only flips a sign in the axis transform — a config constant,
-not a problem; and the **barometer**, which needs open air rather than a sealed
-cavity and still has it under a 13.5 mm stack.
+plan and what §13.3.11's move to 0402 makes cheaper; and the **IMU**, since a
+6-axis part on the bottom only flips a sign in the axis transform — a config
+constant, not a problem.
+
+Not the barometer, and not the ADC dividers or test points — see the fan
+consequences below, which revise this list.
 
 ##### One sequencing rule for the fab
 
