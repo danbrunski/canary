@@ -1595,17 +1595,30 @@ bottom" and "only passives on the bottom."
      values: precisely the shape of the findings this project has retracted six
      times.
 
-   **The sharper requirement this exposes: the barometer needs a vent to
-   ambient, not a side assignment.** T.Cu fixes the fan bias, but the compute
-   roadmap assumes a sealed in-vehicle enclosure, and a sealed box gives a
-   low-pass-filtered ambient pressure whose time constant is set by its leak
-   rate. Static readings survive that; the altitude and grade transients during
-   a drive — the reason to carry the channel at all — do not. So place U5 near a
-   deliberate enclosure vent, and record the vent as an enclosure requirement
-   rather than leaving it to whoever builds the box. Worth settling alongside
-   §13.5.6's investigation of why rev 2.0's part reads a pinned temperature
-   channel: a baro whose readings are untrustworthy for *mechanical* reasons is
-   the same dead channel as one with a dead ADC.
+   **Retracted, same day: the "needs a deliberate vent" requirement.** This
+   first went on to argue that a sealed enclosure low-passes ambient pressure
+   with a time constant set by its leak rate, killing the altitude and grade
+   transients the channel exists for, and that U5 therefore had to sit beside a
+   purpose-made vent. **The enclosure already has vent holes and other openings**
+   (operator, 2026-10-01), so pressure tracks ambient fast enough that drive-rate
+   transients are never the limit, and no new enclosure requirement follows. The
+   word "sealed" came from the compute roadmap's thermal note, where it is loose
+   shorthand; it is not a description of the box.
+
+   **What survives is narrower and still worth drawing to.** Venting the
+   enclosure does nothing for the few-millimetre volume between the HAT and the
+   Pi, which is the operator's point above and the reason U5 stays on T.Cu. Two
+   refinements:
+
+   - **Keep U5 out of the fan's flow path through the box, not merely off the
+     fan footprint.** Vents plus a fan means the fan can drive flow across the
+     enclosure interior, and the resulting gradient is small but still
+     fan-speed-correlated — the same artifact, displaced.
+   - **Its temperature channel reads enclosure air, not ambient**, vented or
+     not. Label it that way wherever it is consumed rather than letting a
+     reader assume ambient: AGENTS.md's rule is that a measured constraint
+     belongs in a schema, not a comment. The vehicle already has the precedent —
+     the Xterra's IAT reads engine-bay air at idle.
 3. **The four ADC dividers stay on T.Cu.** The bottom face looks at the Pi's
    SoC, RAM and RP1 — the noisiest region on the host. §13.3.9 item 2 requires
    MAP and IAT to cancel as ratios against `5V_SENS`; do not ask that
