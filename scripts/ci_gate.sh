@@ -44,6 +44,18 @@ range="${base:+$base..}$sha"
 stamp_dir="$(git rev-parse --path-format=absolute --git-common-dir)/ci-gate"
 mkdir -p "$stamp_dir"
 
+# A failed run's log lives in the worktree, which is deleted on exit, so the
+# traceback of a test that flaked under load was lost (T01.13). Copy it out;
+# keep the newest 20.
+kept_logs="$stamp_dir/failed-logs"
+keep_log() {
+  mkdir -p "$kept_logs"
+  local dest
+  dest="$kept_logs/$(date -u +%Y%m%dT%H%M%SZ)-${sha:0:7}-$2.log"
+  cp "$1" "$dest" && echo "  full log kept: $dest" >&2
+  ls -1t "$kept_logs" | tail -n +21 | sed "s|^|$kept_logs/|" | xargs -r rm -f
+}
+
 wt="$(mktemp -d "${TMPDIR:-/tmp}/canary-gate-XXXXXX")"
 cleanup() { git -C "$repo_root" worktree remove --force "$wt" >/dev/null 2>&1; rm -rf "$wt"; }
 trap cleanup EXIT
@@ -68,6 +80,7 @@ start=$(date +%s)
     prc=$?
     tail -4 "$log"
     if [[ $prc -ne 0 ]]; then
+      keep_log "$log" pytest
       # Several agent sessions share this laptop, and a parallel run under
       # someone else's load has failed tests that pass alone (tests/test_daemon.py
       # starts a real daemon and allows 1-5 s of wall clock; 2026-09-23 at load
@@ -130,6 +143,7 @@ start=$(date +%s)
       vrc=$?
       tail -6 "$vlog"
       if [[ $vrc -ne 0 ]]; then
+        keep_log "$vlog" vitest
         # Same rule as the pytest step (T01.10): a vitest file that failed
         # beside every other jsdom worker is re-run alone, files one at a time,
         # once. Failing again blocks the push; passing is named as flaky.

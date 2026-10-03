@@ -1191,16 +1191,28 @@ async def test_run_live_inference_sequence_detector_emits_on_full_window(
     inf_mod.SequenceInferenceEngine = _FakeLSTMEngine  # type: ignore[assignment,misc]
     try:
         source = build_live_feature_source(components)
-        source.observe(TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 700.0, "rpm"))
+        stop = asyncio.Event()
+
+        async def _engine_running() -> None:
+            # T01.13: a running engine keeps reporting. One record goes stale
+            # after FRESHNESS_THRESHOLD_SECONDS, which a loaded startup can
+            # outlast; the vehicle then reads engine_off, scoring is gated,
+            # and the test waits out the hang guard.
+            while not stop.is_set():
+                source.observe(
+                    TelemetryRecord.obd(datetime.now(UTC).timestamp(), "RPM", 700.0, "rpm")
+                )
+                await asyncio.sleep(0.2)
 
         sub = components.anomalies_broadcaster.subscribe()
-        stop = asyncio.Event()
+        feeder = asyncio.create_task(_engine_running())
         task = asyncio.create_task(run_live_inference(source, components, stop, tick_seconds=0.05))
         try:
             msg = await settle(sub.get())
         finally:
             stop.set()
             await settle(task)
+            await settle(feeder)
     finally:
         if original is not None:
             inf_mod.SequenceInferenceEngine = original  # type: ignore[assignment]

@@ -428,7 +428,7 @@ measurement in hand.
   Acceptance: 10 of 10 copies (two rounds of five concurrent `pytest -n0`)
   beside 12 CPU burners, and the whole file 28 of 28.
 
-- [ ] **T01.13 `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`
+- [x] **T01.13 `tests/test_daemon.py::test_run_live_inference_sequence_detector_emits_on_full_window`
   fails under gate load and passes alone.**
   - **Seen twice in the parallel push gate:** at `dda8835`, and again on
     2026-09-27 at `95eca7c` (load average 15.67, with another session running).
@@ -450,6 +450,30 @@ measurement in hand.
      test fails, so the next flake keeps its traceback.
 
   **Acceptance:** 10 of 10 copies under the controlled load, as in T01.12.
+
+  *Fixed 2026-10-03, test only.* The failure was the hang, not an assertion.
+  Beside 12 burners (load average 13.8), 7 of 20 copies failed after ~37 s
+  with `TimeoutError` in `settle(sub.get())`. The passing copies took 9–10 s.
+  - **Cause.** The test fed the live source a single `obd:RPM` record and
+    then waited. Scoring needs `vehicle_state` `engine_running`, which needs
+    OBD fresher than `FRESHNESS_THRESHOLD_SECONDS` (10 s,
+    `src/vehicle_state.py`). A loaded startup (the captured log shows
+    "overran 14 deadline(s)" first) could take the first scoreable tick past
+    10 s. The vehicle then read `engine_off`, every tick counted
+    `skipped_vehicle_state`, nothing fed RPM again, and the test waited out
+    the 30 s guard.
+  - **Mutation.** The old one-record shape, stamped 11 s old, never emits on
+    a quiet machine (`TimeoutError` at an 8 s cap).
+  - **Fix.** A feeder task keeps observing RPM every 0.2 s until `stop`, as a
+    running engine does. It is awaited with the inference task. The
+    assertions are unchanged.
+  - **Acceptance.** 20 of 20 copies (four rounds of five concurrent
+    `pytest -n0`) beside 12 burners, load average 12.2. The whole
+    `tests/test_daemon.py` passed 69 of 69.
+  - **Gate log (Do 3).** `scripts/ci_gate.sh` now copies a failed pytest or
+    vitest log out of the worktree to `.git/ci-gate/failed-logs/` before the
+    serial re-run, keeps the newest 20, and prints the path. The next flake
+    keeps its traceback.
 
 - [x] **T01.14 `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting`
   races its own stop condition.**
