@@ -215,9 +215,11 @@ training envelope". That is useful to know. It is not a diagnosis.
     (`c77165ad…1112`) is backed up at
     `models/nissan-xterra-2008/_prior/2026-09-24-pre-r2/`. `/status`:
     no version mismatches; both detectors effectively `evidence`.
-  - **Remaining:** the IF replay diff (D03.25), and the next IF retrain once
-    idle and highway clear the 3-drive floor. The 600-tree tick cost waits
-    for an IF that is deployed.
+  - **Remaining:** the next IF retrain once idle and highway clear the
+    3-drive floor. The 600-tree tick cost waits for an IF that is deployed.
+    The IF replay diff is done (D03.25, 2026-10-03). On D6 the candidate scores
+    422 of 782 ticks and none on highway, against the deployed IF's 748.
+    Events are identical, and neither IF crosses its threshold.
 
   The retrain was owed
   for three reasons: the binding retraction, the mode labels, and the new

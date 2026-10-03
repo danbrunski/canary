@@ -1460,9 +1460,25 @@ live here now, so the documents could be archived
     (A06.3).
   - **Remaining:**
     - the Pi side of D03.22 (`label_sessions.py` there, with the Pi idle);
-    - the IF-side replay diff (the IF is not being redeployed);
     - an IF retrain once idle and highway clear the 3-drive floor on this
       calibration.
+  - **IF-side replay diff, done 2026-10-03 (desk).** Deployed IF
+    `isolation_forest_2026-09-20T054703` (`af1720e7…`) against the
+    2026-09-23 candidate (`69463c07…`), each beside the served r2 LSTM
+    (`f7389acf…`). `tools/replay_event_diff.py run`, same tree, held-out D6
+    live session `2026-09-23T150658` (1,142 s, 782 IF ticks):
+    - **Events identical:** 5 LSTM `evidence` events on both sides, and no IF
+      event from either.
+    - **Coverage.** The candidate scores **422 of 782** ticks, the deployed IF
+      748. The candidate has no highway model (refused at training on the
+      3-drive floor), so all **242 highway ticks** are missing features, and
+      it misses 103 city ticks against 20.
+    - **Margins.** Neither crosses its threshold. The deployed IF's closest
+      approach is 0.002 below (p99 0.010 below), the candidate's 0.019 below.
+    - **Reading.** This supports keeping the deployed IF (operator,
+      2026-09-23). The candidate would blind the IF on highway for any drive
+      like D6. The IF retrain stays owed until idle and highway clear the
+      floor on this calibration.
 - [~] **D03.26 Backfill the vehicle ledger.** *From
   `../archive/eval-longitudinal-and-dtc.md` 3.6.* The ledger has one placeholder
   entry; real entries need the operator's history and go in through
