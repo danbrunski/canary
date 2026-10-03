@@ -169,7 +169,7 @@ rewritten nor migrated.
 
 | consumer | reads | effect |
 |---|---|---|
-| `LiveFeatureSource` / `/status` freshness (`src/preprocessing/live.py`, `src/dashboard/status.py` — C08-owned, not edited) | `TelemetryRecord.timestamp` | presentation stamp; during a round-stamped capture freshness lags acquisition by at most one round period (≤ the fastest configured interval), previously unbounded. No change needed. |
+| `LiveFeatureSource` / `/status` freshness (`src/features/live.py`, `src/dashboard/status.py` — C08-owned, not edited) | `TelemetryRecord.timestamp` | presentation stamp; during a round-stamped capture freshness lags acquisition by at most one round period (≤ the fastest configured interval), previously unbounded. No change needed. |
 | storage rotation (`parquet_writer`) | `timestamp` gaps, `RUN_TIME` value | unaffected: rotation thresholds are seconds to minutes, round quantisation is ≤ 1 period |
 | preprocessing pivot / resampler / gap flags | `timestamp` | identical output for round-stamped and plain rows with the same stamps — `test_resampler_and_gap_flags_see_the_presentation_stamp_unchanged` |
 | derived rows (`preprocessing.decode`) | broadcast `can:` rows | untouched; their `metadata_json` never carried acquisition fields |

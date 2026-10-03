@@ -17,18 +17,18 @@ import scripts.evaluate_behavior_models as eval_cli
 import scripts.refit_behavior_models as refit_cli
 from src.analysis.behavior_validation import session_content_identity  # noqa: E402
 from src.analysis.refit import Surface2DRecipe, fit_recipe  # noqa: E402
-from src.columns import (  # noqa: E402
-    MODE_COLUMN,  # noqa: E402
-    SESSION_COLUMN,
-    TIMESTAMP_COLUMN,
-)
-from src.decode.behavior_models import (  # noqa: E402
+from src.behavior.behavior_models import (  # noqa: E402
     BehaviorModels,
     DeviationConfig,
     NoiseFloor,
     SyntheticFault,
     ValidationCriteria,
     dump_behavior_models,
+)
+from src.columns import (  # noqa: E402
+    MODE_COLUMN,  # noqa: E402
+    SESSION_COLUMN,
+    TIMESTAMP_COLUMN,
 )
 from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry  # noqa: E402
 

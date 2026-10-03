@@ -21,14 +21,9 @@ import pandas as pd
 import pytest
 
 from src.analysis.refit import Surface1DRecipe, fit_recipe, refit_all
-from src.columns import SESSION_COLUMN
-from src.config import CanaryConfig
-from src.daemon import _observe_behavior
-from src.daemon.behavior_live import BehaviorLiveState
-from src.daemon.inference import BehaviorDetector, _BehaviorResidual
-from src.decode.behavior_decoder import deviation, explain_expected_column
-from src.decode.behavior_eligibility import point_eligibility, required_channel_groups
-from src.decode.behavior_models import (
+from src.behavior.behavior_decoder import deviation, explain_expected_column
+from src.behavior.behavior_eligibility import point_eligibility, required_channel_groups
+from src.behavior.behavior_models import (
     CURRENT_SCHEMA_VERSION,
     STATUS_EVIDENCE_CONTRACT_MISMATCH,
     STATUS_LEGACY_NO_CONTRACT,
@@ -55,16 +50,21 @@ from src.decode.behavior_models import (
     load_behavior_models,
     serving_status,
 )
-from src.decode.dids import load_repo_did_map
-from src.preprocessing.feature_pipeline import featurize_wide_frame
-from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
-from src.preprocessing.local_range import local_range_column
-from src.preprocessing.session_context import (
+from src.behavior.local_range import local_range_column
+from src.behavior.session_context import (
     EngineStartTracker,
     StartContextSpec,
     append_start_context,
     start_context_columns,
 )
+from src.columns import SESSION_COLUMN
+from src.config import CanaryConfig
+from src.daemon import _observe_behavior
+from src.daemon.behavior_live import BehaviorLiveState
+from src.daemon.inference import BehaviorDetector, _BehaviorResidual
+from src.decode.dids import load_repo_did_map
+from src.features.feature_pipeline import featurize_wide_frame
+from src.features.live import LiveFeatureSource, build_prepared_live_tick
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 
@@ -1014,7 +1014,7 @@ def test_b01_7_fit_serialize_load_parity_batch_live_replay(
 def test_append_deviation_columns_builds_prerequisites_without_mutating_input() -> None:
     """B01.2 — the prerequisite context is built inside the shared decoder,
     so a direct caller (fingerprinting, analysis) cannot forget it."""
-    from src.decode.behavior_decoder import append_deviation_columns
+    from src.behavior.behavior_decoder import append_deviation_columns
 
     wide = _constant_rpm_wide()
     before = list(wide.columns)

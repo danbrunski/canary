@@ -63,6 +63,8 @@ LAYERS: dict[str, int] = {
     # 3 pipeline
     "preprocessing": 3,
     # 4 detection
+    "behavior": 4,
+    "features": 4,
     "models": 4,
     "alerts": 4,
     "plausibility": 4,
@@ -102,13 +104,7 @@ STANDING: dict[tuple[str, str], str] = {
 #: - R09.6 ``src/behavior/`` + ``src/features/``, landed together;
 #: - R09.7 fusion and feedback into ``models``;
 #: - R09.8 daemon-owned objects out of ``dashboard``; Protocols for daemon types.
-OWED: dict[tuple[str, str], str] = {
-    ("decode/behavior_decoder.py", "src.preprocessing.features"): "R09.6",
-    ("decode/behavior_decoder.py", "src.preprocessing.local_range"): "R09.6",
-    ("decode/behavior_decoder.py", "src.preprocessing.session_context"): "R09.6",
-    ("decode/behavior_eligibility.py", "src.preprocessing.local_range"): "R09.6",
-    ("decode/behavior_eligibility.py", "src.preprocessing.session_context"): "R09.6",
-}
+OWED: dict[tuple[str, str], str] = {}
 
 #: Same-layer pairs present when the order was adopted, as sorted unit names.
 OWED_PAIRS: dict[tuple[str, str], str] = {}

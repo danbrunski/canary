@@ -22,12 +22,12 @@ from src.collection.capture_profiles import (
     CaptureProfileCatalog,
     CaptureProfileStore,
     load_capture_profiles,
-    model_input_warnings,
     save_capture_profiles,
     seed_catalog,
 )
 from src.config import CanaryConfig
 from src.dashboard.api import create_app
+from src.features.capture_inputs import model_input_warnings
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.storage.sessions import list_sessions
@@ -138,7 +138,8 @@ def test_default_cannot_be_deleted_and_profile_crud_round_trips(tmp_path: Path) 
         corpus_eligible=False,
         storage_prefix="_capture-diagnostic",
     )
-    assert store.save(profile) == []
+    store.save(profile)
+    assert model_input_warnings(profile, store.behavior_models_path) == []
     saved = store.load().by_name("diagnostic")
     assert saved == profile
     store.delete("diagnostic")
@@ -886,7 +887,8 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
         },
         corpus_eligible=True,
     )
-    warnings = store.save(profile)
+    store.save(profile)
+    warnings = model_input_warnings(profile, behavior_models)
     flagged = {warning["model"] for warning in warnings}
     missing = {channel for warning in warnings for channel in warning["missing_channels"]}
 
@@ -915,7 +917,10 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
         mode01={"RPM": 1.0, "ENGINE_LOAD": 1.0, "MAF": 1.0, "INTAKE_TEMP": 1.0},
         corpus_eligible=True,
     )
-    starved = {w["model"]: w["missing_channels"] for w in store.save(no_baro)}
+    store.save(no_baro)
+    starved = {
+        w["model"]: w["missing_channels"] for w in model_input_warnings(no_baro, behavior_models)
+    }
     assert starved.get("ve_vs_rpm_load") == ["derived:VE_AMBIENT_PERCENT"]
 
     # No profile can starve a ``decoded:`` input: every one records the

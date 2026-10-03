@@ -120,7 +120,7 @@ Values calculated from other columns, not read off the bus. Two producers:
 ### `deviation:` — behavior-model residuals
 
 The difference between a behavior model's expected value and the actual
-reading, per tick. Produced by `src/decode/behavior_decoder.py` from the
+reading, per tick. Produced by `src/behavior/behavior_decoder.py` from the
 surfaces in `behavior_models.yaml` (profile-scoped when vehicle profiles
 are enabled, e.g. `data/nissan-xterra-2008/behavior_models.yaml`). These feed both the direct
 behavior anomaly events and the IF/LSTM feature set (the unsupervised
@@ -131,7 +131,7 @@ detectors learn the normal residual distribution). See
 
 All sources converge through one preprocessing path so the offline trainer
 and the live daemon can never schema-diverge
-(`src/preprocessing/feature_pipeline.py`):
+(`src/features/feature_pipeline.py`):
 
 ```
 read raw rows (Parquet offline / queue live)
@@ -147,7 +147,7 @@ read raw rows (Parquet offline / queue live)
   → compute_features        (rolling __mean / __std / __roc per column)
 ```
 
-The live path (`src/preprocessing/live.py:LiveFeatureSource`) mirrors this
+The live path (`src/features/live.py:LiveFeatureSource`) mirrors this
 exactly on a per-tick basis — every decode step above has a streaming
 counterpart so the live feature row carries the same columns the model was
 trained on. A mismatch would fail the model's feature-spec check.

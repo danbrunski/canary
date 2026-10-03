@@ -9,7 +9,7 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from src.decode.accepted_baselines import (
+from src.behavior.accepted_baselines import (
     AcceptedBaselineOverride,
     AcceptedBaselines,
     DirectionalBand,

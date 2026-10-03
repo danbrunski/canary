@@ -47,8 +47,7 @@ from src.analysis.refit import (
     fit_recipe,
     refit_all,
 )
-from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     STATUS_NO_HELD_OUT_VALIDATION,
     Axis1D,
     BehaviorModel1D,
@@ -63,6 +62,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
     serving_status,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from tests.configs import example_config
 
 T0 = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
@@ -702,7 +702,7 @@ def test_identical_rows_with_a_changed_decoder_bump_the_version() -> None:
 
 def test_load_and_hot_reload_agree_with_the_fit(tmp_path: Path) -> None:
     from src.daemon import poll_behavior_models
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     _recipe, model, _frame = _passed_model()
     path = tmp_path / "behavior_models.yaml"
@@ -756,7 +756,7 @@ def test_drive_split_records_every_fold() -> None:
 def test_first_runtime_answer_after_the_first_running_rows_places_the_start() -> None:
     """RPM and RUN_TIME are separate polls; the 2026-09-18 cold start had five
     running rows before the first RUN_TIME (20 s). That reading is evidence."""
-    from src.preprocessing.session_context import EngineStartTracker, StartContextSpec
+    from src.behavior.session_context import EngineStartTracker, StartContextSpec
 
     spec = StartContextSpec("obd:RPM", "obd:RUN_TIME", "obd:COOLANT_TEMP", 400.0, 60.0)
     tracker = EngineStartTracker(spec)

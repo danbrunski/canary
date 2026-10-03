@@ -16,6 +16,7 @@ from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.models.sequence_calibration import MIN_CALIBRATION_SAMPLES
 from src.models.sequence_dataset import SequenceWindowDataset
 from src.models.sequence_device import torch_training_modules
+from src.preprocessing.drives import piece_units
 
 #: A03.5 — the stated rule validation sessions are chosen by, recorded in the
 #: manifest's ``validation_holdout``.
@@ -86,7 +87,6 @@ def _session_drives(frame: pd.DataFrame) -> list[tuple[str, ...]]:
     """Frame pieces that must be held out together: one physical drive
     (:func:`src.preprocessing.drives.piece_units`), so validation can never share a
     drive with training, even across a capture the frame does not contain."""
-    from src.preprocessing.drives import piece_units
 
     return piece_units(frame, session_column=SESSION_COLUMN, timestamp_column=TIMESTAMP_COLUMN)
 

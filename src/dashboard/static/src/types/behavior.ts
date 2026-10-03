@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------------
 // Behavior models — Task 4.E.9 dashboard performance feed.
-// Mirrors src/decode/behavior_models.py.
+// Mirrors src/behavior/behavior_models.py.
 // ---------------------------------------------------------------------------
 
 export interface BehaviorAxis1D {
@@ -45,7 +45,7 @@ export interface LookupTableFit extends BehaviorFitBase {
 
 /** Mode-conditioned location/spread with no claimed x relationship — the
  *  expectation is flat across the domain (`RobustBaselineFit`, backend
- *  `src/decode/behavior_models.py`). */
+ *  `src/behavior/behavior_models.py`). */
 export interface RobustBaselineFit extends BehaviorFitBase {
   kind: "robust_baseline";
   median: number;
@@ -68,7 +68,7 @@ export interface GridBinnedMeanFit extends BehaviorFitBase {
 export interface DeviationConfig {
   // 9.4: backend normalizes the deprecated "relative" alias to "sigma" at
   // config load, so the API never actually serves "relative" — see
-  // DeviationConfig in src/decode/behavior_models.py.
+  // DeviationConfig in src/behavior/behavior_models.py.
   kind: "absolute" | "sigma";
   warning_band: number | null;
   critical_band: number | null;
@@ -78,7 +78,7 @@ export interface DeviationConfig {
 // ---------------------------------------------------------------------------
 // B03.8 — serving status, artifact identity and validation scope. Additive
 // fields on `GET /models/behavior`; mirrors `serving_status`,
-// `artifact_identity` and `validation_scope` in src/decode/behavior_models.py.
+// `artifact_identity` and `validation_scope` in src/behavior/behavior_models.py.
 // ---------------------------------------------------------------------------
 
 /** Why a model may or may not alert. Only `validated` alerts. */

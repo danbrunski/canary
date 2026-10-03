@@ -22,11 +22,11 @@ import yaml
 from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileCatalog,
-    model_input_warnings,
 )
 from src.collection.obd_registry import MODE01_REGISTRY, PollTier
 from src.collection.obd_scheduler.cadence import TIER_RATE_FACTORS
 from src.collection.pid_decoders import PID_DECODERS
+from src.features.capture_inputs import model_input_warnings
 
 CATALOG = Path("data/nissan-xterra-2008/capture_profiles.yaml")
 BEHAVIOR_MODELS = Path("data/nissan-xterra-2008/behavior_models.yaml")

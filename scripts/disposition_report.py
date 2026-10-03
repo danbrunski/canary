@@ -54,14 +54,14 @@ from src.analysis.training_disposition import (  # noqa: E402
     DispositionSummary,
     classify_dispositions,
 )
-from src.decode.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
-from src.log import configure_logging  # noqa: E402
-from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
-from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
-from src.preprocessing.feature_pipeline import (  # noqa: E402
+from src.behavior.accepted_baselines import AcceptedBaselines, load_accepted_baselines  # noqa: E402
+from src.features.feature_pipeline import (  # noqa: E402
     candidate_feature_columns,
     disposition_screen_frames,
 )
+from src.log import configure_logging  # noqa: E402
+from src.models.golden_baselines import golden_baselines_path, read_golden_baselines  # noqa: E402
+from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH  # noqa: E402
 from src.vehicle.profiles import resolve_profile_for_tooling, scope_config  # noqa: E402
 
 log = logging.getLogger(__name__)

@@ -3,7 +3,7 @@
 The static surfaces served by ``GET /models/behavior`` answer "what does
 normal look like?". This module answers "where is the engine *right now*
 relative to those surfaces?" — the per-tick expected / actual / deviation /
-severity the daemon already computes via :mod:`src.decode.behavior_decoder`,
+severity the daemon already computes via :mod:`src.behavior.behavior_decoder`,
 plus a short rolling trail so the UI can draw a trajectory and a Δ sparkline.
 
 Design mirrors :class:`src.daemon.health.HealthMonitor`: a single-writer
@@ -25,7 +25,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from src.decode.behavior_eligibility import OPERATING_MODE_MISMATCH
+from src.behavior.behavior_eligibility import OPERATING_MODE_MISMATCH
 
 #: Rolling trail length. ~4 min at 1 Hz live-inference cadence (the default
 #: ``1 / preprocessing.resample_hz``); higher resample rates shorten the

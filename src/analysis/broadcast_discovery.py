@@ -35,6 +35,7 @@ import pandas as pd
 from src.analysis.channels import TIMESTAMP_BASIS_COLUMN, read_acquisition_frame, read_channels
 from src.analysis.compare import STABLE_DRIFT_PCT, ScaleVerdict, regress, scale_stability
 from src.paths import BINDINGS_YAML, DIDS_YAML
+from src.preprocessing.decode import decode_on_read
 from src.signals.pairing import (
     ComparisonRefusedError,
     MatchedSamples,
@@ -391,7 +392,6 @@ def _load_session(session: Path) -> pd.DataFrame:
     import duckdb
 
     from src.decode.on_read import on_read_catalog
-    from src.preprocessing.decode import decode_on_read
 
     pattern = str(session / "telemetry-*.parquet")
     frame = duckdb.connect().execute(f"SELECT * FROM read_parquet('{pattern}')").df()

@@ -36,6 +36,13 @@ import yaml
 from src.analysis.tuning_frame import build_tuning_frame, load_provider_registry
 from src.config import CanaryConfig
 from src.decode.dids import DidMap, decode_raw_did_reading, did_entries_by_hex, load_did_map
+from src.features.feature_pipeline import (
+    DID_VIEW_EXCLUSION,
+    FeaturePolicy,
+    build_feature_frame,
+    featurize_wide_frame,
+    load_resampled_session,
+)
 from src.paths import DIDS_YAML
 from src.preprocessing.channel_units import (
     append_did_views,
@@ -43,13 +50,6 @@ from src.preprocessing.channel_units import (
     channel_units_for,
     did_view_refusal,
     did_view_scale,
-)
-from src.preprocessing.feature_pipeline import (
-    DID_VIEW_EXCLUSION,
-    FeaturePolicy,
-    build_feature_frame,
-    featurize_wide_frame,
-    load_resampled_session,
 )
 from src.signals import vehicle_signals
 from src.signals.afr import (
@@ -310,7 +310,7 @@ def test_featurization_has_no_default_catalog() -> None:
     import dataclasses
     import inspect
 
-    from src.preprocessing.feature_pipeline import featurize_perturbed_frame
+    from src.features.feature_pipeline import featurize_perturbed_frame
 
     for function in (featurize_wide_frame, featurize_perturbed_frame):
         parameter = inspect.signature(function).parameters["did_map"]

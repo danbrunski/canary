@@ -12,8 +12,7 @@ from src.analysis.session_deviations import (
     analyze_session,
     compare_session_deviations,
 )
-from src.config import CanaryConfig
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     Axis2D,
     BehaviorModel1D,
@@ -24,6 +23,7 @@ from src.decode.behavior_models import (
     GridCell,
     PolynomialFit,
 )
+from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
@@ -488,7 +488,7 @@ def test_analyze_session_resamples_with_the_training_recipe(
     fit on. Non-default values here make that divergence visible.
     """
     import src.analysis.session_deviations as session_deviations
-    from src.preprocessing.feature_pipeline import resample_config_for
+    from src.features.feature_pipeline import resample_config_for
 
     tuned = config.model_copy(
         update={

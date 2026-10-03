@@ -13,7 +13,7 @@ from src.analysis.surface_1d import (
     fit_polynomial,
     fit_robust_baseline,
 )
-from src.decode.behavior_models import LookupTableFit, PolynomialFit, RobustBaselineFit
+from src.behavior.behavior_models import LookupTableFit, PolynomialFit, RobustBaselineFit
 
 
 def _warmup_frame(noise: float = 0.5, n: int = 200, seed: int = 0) -> pd.DataFrame:
@@ -216,7 +216,7 @@ def test_relative_deviation_reference_std_auto_fills_from_residuals() -> None:
     import numpy as np
     import pandas as pd
 
-    from src.decode.behavior_models import DeviationConfig
+    from src.behavior.behavior_models import DeviationConfig
 
     rng = np.random.default_rng(7)
     x = rng.uniform(0, 100, 500)

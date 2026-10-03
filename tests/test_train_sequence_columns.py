@@ -239,7 +239,7 @@ def test_both_trainers_exclude_a_once_a_minute_channel_and_name_why(
     """D03.34: a channel read once per ~60 s is too sparse for the 1 Hz grid.
     Neither detector trains on it, and each manifest names it under the same
     reason; the 1 Hz channels are kept by both."""
-    from src.preprocessing.feature_pipeline import COVERAGE_FLOOR_SCHEMA_KEY, SPARSE_FOR_GRID
+    from src.features.feature_pipeline import COVERAGE_FLOOR_SCHEMA_KEY, SPARSE_FOR_GRID
 
     data = yaml.safe_load((REPO_ROOT / "canary.example.yaml").read_text())
     data["models"]["lstm_autoencoder"].update({"sequence_length": 6, "validation_fraction": 0.3})

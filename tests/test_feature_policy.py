@@ -34,7 +34,7 @@ from src.decode.bindings import (
     load_bindings,
 )
 from src.decode.dids import load_repo_did_map
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     _SEGMENTER_SIGNAL_COLUMNS,
     FeaturePolicy,
     build_feature_spec,

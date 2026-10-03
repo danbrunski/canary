@@ -43,7 +43,7 @@ from src.vehicle.vehicle_ledger import VehicleLedgerStore
 
 if TYPE_CHECKING:
     from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 
@@ -410,7 +410,7 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
             )
             from src.decode.dids import load_repo_did_map
             from src.decode.engineering import repo_bindings
-            from src.preprocessing.feature_pipeline import FeaturePolicy
+            from src.features.feature_pipeline import FeaturePolicy
 
             policy = FeaturePolicy(
                 bindings=repo_bindings(),

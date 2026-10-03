@@ -7,7 +7,7 @@ from pathlib import Path
 
 from scripts.disposition_report import build_report_markdown, main
 from src.analysis.training_disposition import ChannelDisposition, DispositionSummary
-from src.decode.accepted_baselines import (
+from src.behavior.accepted_baselines import (
     AcceptedBaselineOverride,
     AcceptedBaselines,
     DirectionalBand,

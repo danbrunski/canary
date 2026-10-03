@@ -152,11 +152,11 @@ def _freeze_golden_baselines(
         import pandas as pd
 
         from src.analysis.training_disposition import compute_golden_baselines
-        from src.models.golden_baselines import golden_baselines_path, write_golden_baselines
-        from src.preprocessing.feature_pipeline import (
+        from src.features.feature_pipeline import (
             candidate_feature_columns,
             disposition_screen_frames,
         )
+        from src.models.golden_baselines import golden_baselines_path, write_golden_baselines
 
         config = _cli.load_config(args)
         sessions = [Path(s) for s in updated.input_sessions if Path(s).exists()]

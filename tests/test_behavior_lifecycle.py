@@ -28,16 +28,11 @@ from pydantic import ValidationError
 import scripts.refit_behavior_models as refit_cli
 from src.analysis.behavior_inventory import build_inventory, compare_deployed
 from src.analysis.refit import default_recipes, refit_all
-from src.config import CanaryConfig
-from src.daemon import _observe_behavior, poll_behavior_models
-from src.daemon.behavior_live import BehaviorLiveState
-from src.daemon.inference import BehaviorDetector
-from src.dashboard.readers import read_behavior_models
-from src.decode.behavior_decoder import (
+from src.behavior.behavior_decoder import (
     append_deviation_columns,
     withheld_learned_feature_columns,
 )
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BEHAVIOR_POLICY_FILENAME,
     Axis1D,
     BehaviorModel1D,
@@ -59,14 +54,19 @@ from src.decode.behavior_models import (
     policy_unmatched_entries,
     serving_status,
 )
+from src.config import CanaryConfig
+from src.daemon import _observe_behavior, poll_behavior_models
+from src.daemon.behavior_live import BehaviorLiveState
+from src.daemon.inference import BehaviorDetector
+from src.dashboard.readers import read_behavior_models
+from src.features.feature_pipeline import build_feature_spec, consumed_behavior_fingerprints
+from src.features.live import LiveFeatureSource
 from src.models.spec_producibility import (
     behavior_feature_conflicts,
     behavior_fingerprint_mismatches,
     behavior_fingerprint_provenance,
     manifest_behavior_fingerprints,
 )
-from src.preprocessing.feature_pipeline import build_feature_spec, consumed_behavior_fingerprints
-from src.preprocessing.live import LiveFeatureSource
 from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]

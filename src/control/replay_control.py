@@ -64,7 +64,7 @@ from src.telemetry import TelemetryRecord
 if TYPE_CHECKING:
     # Annotation only: importing it loads the feature pipeline, and this
     # module is on the daemon's path to recording (S01.3).
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
 log = logging.getLogger(__name__)
 

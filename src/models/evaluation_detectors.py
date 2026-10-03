@@ -36,6 +36,7 @@ import pandas as pd
 
 from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, base_channel
 from src.config import CanaryConfig
+from src.features.feature_pipeline import align_features_to_schema, expand_suppress_channels
 from src.models.fusion import FusionScorer
 from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import (
@@ -58,7 +59,14 @@ from src.models.synthetic_fault_eval import (
     _if_anomalous,
     fusion_withheld_reason,
 )
-from src.preprocessing.feature_pipeline import align_features_to_schema, expand_suppress_channels
+from src.plausibility.evaluator import PlausibilityEvaluator
+from src.plausibility.limits import channel_group, resolve_limits_for_config
+from src.plausibility.offline import (
+    epoch_seconds,
+    inject_realistic_samples,
+    load_stream,
+    run_evaluator,
+)
 from src.preprocessing.normalization import ZScoreScaler
 
 
@@ -912,7 +920,6 @@ class PlausibilityDetector:
     name = "plausibility"
 
     def __init__(self, config: CanaryConfig, *, bindings: Any, did_map: Any) -> None:
-        from src.plausibility.limits import resolve_limits_for_config
 
         self.config = config
         self.bindings = bindings
@@ -924,7 +931,6 @@ class PlausibilityDetector:
         return (self.name,)
 
     def load(self, session_dir: Path) -> Any:
-        from src.plausibility.offline import load_stream
 
         return load_stream(
             session_dir,
@@ -935,8 +941,6 @@ class PlausibilityDetector:
         )
 
     def score_stream(self, stream: Any, timestamps: pd.Series) -> dict[str, DetectorOutput]:
-        from src.plausibility.evaluator import PlausibilityEvaluator
-        from src.plausibility.offline import epoch_seconds, run_evaluator
 
         n = len(timestamps)
         evaluator = PlausibilityEvaluator(self.catalog, session=str(stream.name))
@@ -967,7 +971,6 @@ class PlausibilityDetector:
         groups — nothing else can change a detection on them (A05.8's own
         restriction), and without broadcast frames it is a tenth of the
         samples."""
-        from src.plausibility.limits import channel_group
 
         times = stream.samples["t"].to_numpy()
         keep = (times >= start.timestamp()) & (times < end.timestamp())
@@ -993,7 +996,6 @@ class PlausibilityDetector:
         end: pd.Timestamp,
         roles: Mapping[str, Sequence[str]],
     ) -> Any:
-        from src.plausibility.offline import inject_realistic_samples
 
         faulted, _report = inject_realistic_samples(
             stream,

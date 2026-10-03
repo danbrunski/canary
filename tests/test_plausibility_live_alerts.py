@@ -20,8 +20,8 @@ from src.config import CanaryConfig
 from src.daemon import build_components
 from src.daemon.inference import _build_plausibility
 from src.daemon.inference_metrics import InferenceTimingRecorder
+from src.features.live import LiveFeatureSource
 from src.plausibility.limits import PLAUSIBILITY_FILENAME
-from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 from tests.configs import isolated_config
 

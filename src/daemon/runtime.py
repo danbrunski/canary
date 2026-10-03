@@ -48,7 +48,7 @@ if TYPE_CHECKING:
     from src.collection.can_collector import CanReceiveStats
     from src.collection.queueing import CollectorHandoffStats
     from src.daemon.health import HealthMonitor
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
     from src.startup import StartupTimeline
 
 log = logging.getLogger(__name__)

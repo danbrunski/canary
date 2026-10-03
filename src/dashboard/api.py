@@ -21,6 +21,7 @@ from fastapi.staticfiles import StaticFiles
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
+from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.imu_collector import ImuHealth
 from src.collection.kline.plan import KlineCatalog
@@ -70,7 +71,6 @@ from src.dashboard.status import (
 )
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
-from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore

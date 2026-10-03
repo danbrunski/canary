@@ -34,8 +34,8 @@ from src.decode.engineering import (
     assert_scalable,
     physical_series,
 )
-from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS, segment_or_constant
-from src.preprocessing.live import LiveFeatureSource
+from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS, segment_or_constant
+from src.features.live import LiveFeatureSource
 from src.preprocessing.segmenter import (
     DEFAULT_SIGNAL_COLUMNS,
     SegmenterConfig,

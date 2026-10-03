@@ -5,11 +5,11 @@ hand with DuckDB over SSH: for a given drive, how did each behavior surface's
 actual telemetry compare to what the learned model expects? Runs the *exact*
 same decode → segment → derive → evaluate pipeline the daemon uses live and
 the refit CLI uses to fit the surfaces
-(:func:`src.preprocessing.feature_pipeline.featurize_wide_frame`), so results
+(:func:`src.features.feature_pipeline.featurize_wide_frame`), so results
 here are directly comparable to ``GET /models/behavior/live`` — just computed
 over a whole stored session instead of the current live tick.
 
-Severity is graded via the scalar :func:`src.decode.behavior_decoder.deviation`
+Severity is graded via the scalar :func:`src.behavior.behavior_decoder.deviation`
 per row (not the vectorized ``deviation:<name>`` column, which only carries the
 raw delta) — that keeps this module's severity math byte-identical to the
 live/daemon path by construction, at the cost of a Python-level loop over
@@ -28,21 +28,21 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.noise_floor import FloorRefusal, NoiseFloor, Significance
-from src.columns import MODE_COLUMN
-from src.config import CanaryConfig
-from src.decode.behavior_decoder import deviation as evaluate_deviation
-from src.decode.behavior_models import (
+from src.behavior.behavior_decoder import deviation as evaluate_deviation
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
     serving_status,
     unknown_operating_modes,
 )
+from src.behavior.surface_eval import bin_index
+from src.columns import MODE_COLUMN
+from src.config import CanaryConfig
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
-from src.decode.surface_eval import bin_index
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
     _decode_session_to_resampled,
@@ -508,7 +508,7 @@ def analyze_session(
     """Diff one stored session's telemetry against ``models``.
 
     Runs the identical decode/segment/derive pipeline
-    :func:`~src.preprocessing.feature_pipeline.build_feature_frame` uses for
+    :func:`~src.features.feature_pipeline.build_feature_frame` uses for
     training (same bindings/dbc/DID decode, same
     ``compute_anomaly_signals``/committee-residual derived channels, same
     operating-mode segmenter) so results are apples-to-apples with what the

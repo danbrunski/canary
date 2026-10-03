@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     NON_TRAINABLE_GPS_CHANNELS,
     candidate_feature_columns,
     trainable_feature_columns,

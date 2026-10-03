@@ -18,6 +18,7 @@ from src.columns import (  # noqa: E402
 )
 from src.config import CanaryConfig  # noqa: E402
 from src.decode.dids import load_repo_did_map
+from src.features.feature_pipeline import featurize_wide_frame  # noqa: E402
 from src.models.evaluation_detectors import (  # noqa: E402
     DeployedStack,
     PCABaseline,
@@ -26,7 +27,6 @@ from src.models.evaluation_detectors import (  # noqa: E402
     raw_channels,
 )
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
-from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E402
 from tests.builders import IFConfig
 from tests.configs import example_config
 
@@ -81,10 +81,10 @@ def test_batched_sequence_scoring_matches_the_served_engine() -> None:
     ``SequenceInferenceEngine.observe`` window for window — including across
     a time gap, where both restart the window."""
     pytest.importorskip("torch")
+    from src.features.feature_pipeline import sequence_feature_columns
     from src.models.evaluation_detectors import BatchedSequenceScorer, sequence_parity
     from src.models.lstm_training import train_lstm_autoencoder
     from src.models.sequence_dataset import SequenceWindowDataset
-    from src.preprocessing.feature_pipeline import sequence_feature_columns
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()
@@ -189,10 +189,10 @@ def test_sequential_frames_of_equal_length_and_start_never_share_windows() -> No
     pytest.importorskip("torch")
     import gc
 
+    from src.features.feature_pipeline import sequence_feature_columns
     from src.models.evaluation_detectors import BatchedSequenceScorer
     from src.models.lstm_training import train_lstm_autoencoder
     from src.models.sequence_dataset import SequenceWindowDataset
-    from src.preprocessing.feature_pipeline import sequence_feature_columns
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()
@@ -363,6 +363,7 @@ def test_batched_scoring_follows_the_artifacts_mask_rule_and_context_columns() -
     pytest.importorskip("torch")
     from dataclasses import replace as dc_replace
 
+    from src.features.feature_pipeline import sequence_feature_columns
     from src.models.evaluation_detectors import BatchedSequenceScorer, sequence_parity
     from src.models.lstm_training import train_lstm_autoencoder
     from src.models.sequence_dataset import (
@@ -371,7 +372,6 @@ def test_batched_scoring_follows_the_artifacts_mask_rule_and_context_columns() -
         SequenceWindowDataset,
     )
     from src.models.sequence_feature_set import FEATURE_SET_SCHEMA_KEY
-    from src.preprocessing.feature_pipeline import sequence_feature_columns
     from src.preprocessing.normalization import ZScoreScaler
 
     config = _config()

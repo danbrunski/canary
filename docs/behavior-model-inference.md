@@ -218,7 +218,7 @@ limits are documented in `docs/physics-informed-anomaly-features.md`.
 
 ### Directional deviation and accepted-baseline overrides
 
-`DeviationConfig.kind` (`src/decode/behavior_models.py`) has a third variant
+`DeviationConfig.kind` (`src/behavior/behavior_models.py`) has a third variant
 alongside `absolute` and `sigma`: `directional` — a one-sided band around a
 center, for a known, *accepted* fault that shouldn't be muted, only
 recentered (see `docs/roadmap/online-training-strategy.md`, "Directional
@@ -233,7 +233,7 @@ improvement/measurement noise from generating false alarms.
 
 A model's own `deviation:` can be authored `directional` directly, but the
 common path is `data/<vehicle-slug>/accepted_baselines.yaml`
-(`src/decode/accepted_baselines.py`) — an operator-authored, provenanced
+(`src/behavior/accepted_baselines.py`) — an operator-authored, provenanced
 override (who/when/why/`review_by`), never an unattended one. Each
 override targets either a raw `channel` (needs `accepted_center` — there's
 no fitted surface to read a center from) or a `behavior_model` by name (the
@@ -241,7 +241,7 @@ center is always that surface's own fit; the override contributes only the
 band).
 `AcceptedBaselineOverride.to_deviation_config()` converts an override into
 the runtime `DeviationConfig` shape so one severity-grading implementation
-(`src.decode.behavior_decoder`) serves both statically-authored directional
+(`src.behavior.behavior_decoder`) serves both statically-authored directional
 models and dynamically-applied overrides.
 
 The live behavior detector (`src.daemon.inference._observe_behavior`)
@@ -299,7 +299,7 @@ the runtime surface's RPM mode is 750 rpm, those should agree.
 These correspond to Phase 4.E in `docs/implementation-tasks.md`.
 
 - [x] **4.E.1 — Behavior-model schema.** Implemented in
-  `src/decode/behavior_models.py` with `data/behavior_models.yaml` as the
+  `src/behavior/behavior_models.py` with `data/behavior_models.yaml` as the
   sibling artifact.
 - [x] **4.E.2 — 1D surface inferer.** Implemented in
   `src/analysis/surface_1d.py`.
@@ -313,7 +313,7 @@ These correspond to Phase 4.E in `docs/implementation-tasks.md`.
   `tools/scan_constant_dids.py` / `src/analysis/did_scan.py` for the legacy ELM
   path.
 - [x] **4.E.6 — Behavior-model decoder integration.** Implemented in
-  `src/decode/behavior_decoder.py`.
+  `src/behavior/behavior_decoder.py`.
 - [x] **4.E.7 — Deviation features in preprocessing.** Implemented via
   `append_deviation_columns` and `build_feature_frame`.
 - [x] **4.E.8 — Refit CLI.** Implemented in `scripts/refit_behavior_models.py`.

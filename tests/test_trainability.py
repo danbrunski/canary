@@ -17,16 +17,16 @@ import pandas as pd
 import pytest
 
 from src.analysis.refit import Surface1DRecipe, Surface2DRecipe
+from src.behavior.behavior_models import load_behavior_models
 from src.columns import is_flag_column
 from src.config import VehicleParameters
-from src.decode.behavior_models import load_behavior_models
 from src.decode.dids import load_repo_did_map
-from src.preprocessing.channel_units import append_did_views, channel_units_for
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     candidate_feature_columns,
     feature_policy_exclusions,
     featurize_wide_frame,
 )
+from src.preprocessing.channel_units import append_did_views, channel_units_for
 from src.signals.afr import append_afr_channels, load_afr_calibration
 from src.signals.committees import COMMITTEES, append_committee_residuals
 from src.signals.derived import (

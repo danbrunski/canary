@@ -26,20 +26,20 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.fit_provenance import fitted_now, training_data_hash
-from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis2D,
     BehaviorModel2D,
     DeviationConfig,
     GridBinnedMeanFit,
     GridCell,
 )
-from src.decode.surface_eval import (
+from src.behavior.surface_eval import (
     bin_indices,
     containing_cell_indices,
     evaluate_2d,
     trusted_cell_mask,
 )
+from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 
 log = logging.getLogger(__name__)
 
@@ -235,7 +235,7 @@ def _clean_xyz(
     )
 
 
-#: The serve-path evaluators live in :mod:`src.decode.surface_eval` (R05.10);
+#: The serve-path evaluators live in :mod:`src.behavior.surface_eval` (R05.10);
 #: re-exported so analysis callers keep one import for a surface family.
 __all__ = [
     "containing_cell_indices",

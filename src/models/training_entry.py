@@ -27,10 +27,23 @@ from typing import Any
 
 import pandas as pd
 
+from src.behavior.behavior_decoder import withheld_learned_feature_columns
+from src.behavior.behavior_models import load_behavior_models
 from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, is_flag_column
 from src.config import CanaryConfig
-from src.decode.behavior_decoder import withheld_learned_feature_columns
-from src.decode.behavior_models import load_behavior_models
+from src.features.feature_pipeline import (
+    COVERAGE_FLOOR_SCHEMA_KEY,
+    DEFAULT_BINDINGS_PATH,
+    FeaturePolicy,
+    align_features_to_schema,
+    build_feature_frame,
+    build_feature_spec,
+    expand_suppress_channels,
+    isolation_forest_feature_selection,
+    resolve_feature_policy,
+    sequence_feature_columns,
+    sequence_feature_selection,
+)
 from src.models.evaluation import refuse_non_default_profile_sessions
 from src.models.false_positive_benchmark import (
     FalsePositiveBenchmarkReport,
@@ -73,19 +86,6 @@ from src.models.sequence_training import (
     tail_block_validation_start,
 )
 from src.preprocessing.drives import DRIVE_COLUMN, drop_rows_without_drive
-from src.preprocessing.feature_pipeline import (
-    COVERAGE_FLOOR_SCHEMA_KEY,
-    DEFAULT_BINDINGS_PATH,
-    FeaturePolicy,
-    align_features_to_schema,
-    build_feature_frame,
-    build_feature_spec,
-    expand_suppress_channels,
-    isolation_forest_feature_selection,
-    resolve_feature_policy,
-    sequence_feature_columns,
-    sequence_feature_selection,
-)
 from src.preprocessing.normalization import ZScoreScaler
 
 log = logging.getLogger(__name__)

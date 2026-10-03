@@ -104,6 +104,7 @@ import pandas as pd
 
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, physical_series
+from src.decode.on_read import on_read_catalog
 from src.decode.slices import sentinel_channel
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
@@ -305,7 +306,6 @@ def iter_framed_numeric_parts(
     defaults to :func:`plan_imu_frame`; the parts are the reader's own when it
     does not apply.
     """
-    from src.decode.on_read import on_read_catalog
     from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_numeric_parts
 
     plan = plan_imu_frame(session_dir) if plan is None else plan

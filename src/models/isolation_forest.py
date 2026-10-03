@@ -34,6 +34,7 @@ from src.columns import (
     is_flag_column,
 )
 from src.dataframe_utils import require_columns as _require_columns
+from src.features.feature_pipeline import build_feature_spec
 from src.models.manifest import (
     manifest_path_for,
     read_artifact,
@@ -41,7 +42,7 @@ from src.models.manifest import (
     write_artifact,
 )
 from src.models.sequence_calibration import coerce_timestamp
-from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.drives import count_drives
 from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp as _format_timestamp
 from src.trainability import source_exclusion_reason
@@ -803,7 +804,6 @@ def _drive_count(rows: pd.DataFrame, *, timestamp_column: str, session_column: s
     """Independent physical drives among ``rows`` (:func:`src.preprocessing.drives.count_drives`:
     the frame's stamped physical drive, captures and in-recording pauses
     included; rows from one drive either side of a capture count once)."""
-    from src.preprocessing.drives import count_drives
 
     return count_drives(rows, session_column=session_column, timestamp_column=timestamp_column)
 

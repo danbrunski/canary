@@ -47,12 +47,17 @@ from typing import Any
 
 import pandas as pd
 
+from src.behavior.accepted_baselines import AcceptedBaselines
+from src.behavior.behavior_models import BehaviorModels
+from src.behavior.session_context import (
+    EngineStartTracker,
+    StartContextSpec,
+    start_context_specs,
+)
 from src.can_ids import parse_can_channel
 from src.coerce import finite_float
 from src.columns import arrived_column, gap_column
 from src.config import CanaryConfig, require_profile_scoped
-from src.decode.accepted_baselines import AcceptedBaselines
-from src.decode.behavior_models import BehaviorModels
 from src.decode.bindings import Bindings
 from src.decode.dids import (
     DID_SOURCE,
@@ -63,16 +68,11 @@ from src.decode.dids import (
 )
 from src.decode.engineering import physical_value
 from src.decode.frame_decoder import FrameDecoder
-from src.preprocessing.feature_pipeline import FeaturizedFrame, featurize_wide_frame
+from src.features.feature_pipeline import FeaturizedFrame, featurize_wide_frame
 from src.preprocessing.features import FeatureConfig
 from src.preprocessing.imu_live import IMU_FRAME_INPUTS, LiveImuFrame
 from src.preprocessing.quality_gate import is_physically_valid
 from src.preprocessing.resampler import ResampleConfig, resample_config_for
-from src.preprocessing.session_context import (
-    EngineStartTracker,
-    StartContextSpec,
-    start_context_specs,
-)
 from src.signals.afr import FlashHistory, RecordedClockFlashHistory
 from src.signals.derived import (
     IDLE_RPM_FLOOR,

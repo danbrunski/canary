@@ -36,9 +36,7 @@ from src.analysis.refit import (
     fit_recipe,
     recipe_contract_fingerprint,
 )
-from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
-from src.config import VehicleParameters
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BandExcessPersistence,
     DeviationConfig,
     FittedBandExcessPersistence,
@@ -47,6 +45,8 @@ from src.decode.behavior_models import (
     ValidationCriteria,
     contract_fingerprint,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
+from src.config import VehicleParameters
 from src.models.fusion import BandExcessAccumulator, PersistenceGate
 from src.paths import DATA_DIR
 from src.signals.afr import (

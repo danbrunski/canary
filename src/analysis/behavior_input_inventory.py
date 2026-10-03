@@ -34,21 +34,20 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.refit import RPM_COLUMN, Recipe, recipe_serving_spec
-from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
-from src.dataframe_utils import numeric_values
-from src.decode.behavior_eligibility import (
+from src.behavior.behavior_eligibility import (
     eligibility_reasons,
     reason_code,
     required_channel_groups,
 )
-from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES, fuel_status_name
-from src.operating import ENGINE_RUNNING_MIN_RPM
-from src.preprocessing.features import compute_rate_of_change
-from src.preprocessing.session_context import (
+from src.behavior.session_context import (
     StartContextSpec,
     append_start_context,
     start_context_columns,
 )
+from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
+from src.dataframe_utils import numeric_values
+from src.operating import CLOSED_LOOP_FUEL_STATES, ENGINE_RUNNING_MIN_RPM, fuel_status_name
+from src.preprocessing.features import compute_rate_of_change
 
 #: Per-bank trim channels (J1979 PIDs 0x06-0x09).
 TRIM_BANKS: Mapping[str, tuple[str, str]] = {

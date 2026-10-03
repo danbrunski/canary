@@ -72,10 +72,10 @@ from src.daemon.runtime import (
     drain_kwargs,
     obd_handoff_stats_observer,
 )
+from src.features.live import LiveFeatureSource
 from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
 from src.paths import BINDINGS_YAML
-from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.parquet_writer import ParquetTelemetryWriter
 from src.telemetry import TelemetryRecord

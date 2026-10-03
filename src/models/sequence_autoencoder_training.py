@@ -32,6 +32,7 @@ from typing import Any, Protocol
 
 import pandas as pd
 
+from src.features.feature_pipeline import build_feature_spec
 from src.models.manifest import (
     manifest_path_for,
     read_artifact,
@@ -74,7 +75,7 @@ from src.models.sequence_training import (
     window_modes,
 )
 from src.models.sequence_training import EpochLoss as _EpochLoss
-from src.preprocessing.feature_pipeline import build_feature_spec
+from src.preprocessing.drives import count_drives
 from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp as _format_timestamp
 
@@ -106,7 +107,6 @@ def _calibration_drive_count(calibration: SequenceWindowDataset, sessions: Seque
     (:func:`src.preprocessing.drives.count_drives` over the rows of the windowed
     pieces: the stamped drive where the frame carries one)."""
     from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
-    from src.preprocessing.drives import count_drives
 
     frame = calibration.frame
     if SESSION_COLUMN not in frame.columns or TIMESTAMP_COLUMN not in frame.columns:

@@ -20,7 +20,7 @@ namespaces are enumerated from the same catalogs the live source loads
 (bindings → ``decoded:``, DBC → ``dbc:``, dids.yaml → ``did:``, the Mode 01
 registry → ``obd:``, the GPS record builder → ``gps:``); then one synthetic
 frame carrying every one of those columns is pushed through
-:func:`src.preprocessing.feature_pipeline.featurize_wide_frame` — the single
+:func:`src.features.feature_pipeline.featurize_wide_frame` — the single
 wide → model-ready transform both train and serve call. Whatever it emits is
 producible, including ``derived:``/``deviation:`` channels and the
 ``__mean``/``__std``/``__roc`` expansion, so a derived channel whose *input*
@@ -44,7 +44,7 @@ from src.paths import BINDINGS_YAML, DBC_DIR, DIDS_YAML
 from src.telemetry import SOURCE_SEP
 
 if TYPE_CHECKING:
-    from src.decode.behavior_models import BehaviorModels
+    from src.behavior.behavior_models import BehaviorModels
 
 #: Catalog locations, anchored to the repo root (the live source loads the
 #: same files; see ``src.daemon.inference.build_live_feature_source``).
@@ -197,8 +197,8 @@ def behavior_fingerprint_provenance(
 
     Empty when no feature column consumes a behavior model.
     """
-    from src.decode.behavior_decoder import deviation_model_name
-    from src.decode.behavior_models import artifact_fingerprint
+    from src.behavior.behavior_decoder import deviation_model_name
+    from src.behavior.behavior_models import artifact_fingerprint
 
     consumed = sorted(
         {
@@ -334,8 +334,8 @@ def build_producible_catalog(
     vehicle parameters, AFR calibration and behavior models all decide which
     ``derived:``/``deviation:`` channels exist.
     """
-    from src.decode.behavior_models import load_behavior_models
-    from src.preprocessing.feature_pipeline import featurize_wide_frame
+    from src.behavior.behavior_models import load_behavior_models
+    from src.features.feature_pipeline import featurize_wide_frame
 
     captured = captured_channels(bindings_path=bindings_path, dids_path=dids_path, dbc_dir=dbc_dir)
     raw_columns = sorted(set().union(*captured.values()))
@@ -374,7 +374,7 @@ def behavior_feature_conflicts(
     is refit or retired. A missing column is reported by
     :func:`unproducible_feature_columns` instead, never here.
     """
-    from src.decode.behavior_decoder import withheld_learned_feature_columns
+    from src.behavior.behavior_decoder import withheld_learned_feature_columns
 
     return withheld_learned_feature_columns(
         (str(column) for column in feature_columns), behavior_models

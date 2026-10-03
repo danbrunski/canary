@@ -2152,7 +2152,7 @@ async def test_build_live_feature_source_loads_accepted_baselines_when_present(
 
 async def test_drain_feeds_live_source_when_passed(tmp_path: Path) -> None:
     """The full producer → drain → live_source path with no separate observer."""
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     config = example_config(Path("canary.example.yaml"))
     source = LiveFeatureSource(config=config)

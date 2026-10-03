@@ -55,6 +55,7 @@ from typing import Any, Literal, get_args
 import numpy as np
 import pandas as pd
 
+from src.collection.kline.names import is_legacy
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
 from src.decode.on_read import can_channel_spellings
@@ -104,7 +105,7 @@ def parse_spec(text: str) -> ChannelSpec:
     """Parse ``"obd:RPM"`` / ``"did:0x1225"`` / ``"can:ECM_RPM"``.
 
     A bare name with no namespace is read as ``obd:`` — that is the namespace
-    the rest of the codebase already defaults to (``_channel_satisfied`` in
+    the rest of the codebase already defaults to (``channel_satisfied`` in
     capture_profiles does the same), so the shorthand does not surprise.
     """
     raw = text.strip()
@@ -540,7 +541,6 @@ def _kline_series(frame: pd.DataFrame, spec: ChannelSpec) -> pd.DataFrame:
     A legacy name (``DID_1202``, stored before K01.1) is refused: it names no
     module, and the ABS's 0x1202 is not the ECM's.
     """
-    from src.collection.kline.names import is_legacy
 
     if is_legacy(spec.name):
         raise ChannelSpecError(

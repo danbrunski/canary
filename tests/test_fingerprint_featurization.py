@@ -17,7 +17,7 @@ import pytest
 
 from src.analysis import fingerprint
 from src.config import CanaryConfig
-from src.preprocessing import feature_pipeline
+from src.features import feature_pipeline
 from src.storage.parquet_writer import write_records_to_parquet
 from src.storage.session_products import FINGERPRINT_SCHEMA_VERSION, SessionFingerprint
 from src.telemetry import TelemetryRecord

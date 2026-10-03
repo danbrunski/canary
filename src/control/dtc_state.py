@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from src.collection.obd_scheduler import FREEZE_FRAME_CHANNEL_PREFIX
 from src.decode.dtc_catalog import DtcReport, build_dtc_report, describe_dtc
 from src.session import DTC_SIDECAR_FILENAME
+from src.storage.catalog import record_session_best_effort
 from src.storage.sidecar import write_json_sidecar
 from src.telemetry import TelemetryRecord
 
@@ -171,8 +172,6 @@ class DtcState:
         if session_dir is not None and signature != self._last_persisted_signature:
             _write_sidecar(session_dir, report)
             self._last_persisted_signature = signature
-            # Lazy: src.storage.catalog imports this module's package at module level.
-            from src.storage.catalog import record_session_best_effort
 
             record_session_best_effort(self.catalog_db, session_dir)
 

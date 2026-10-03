@@ -141,7 +141,7 @@ def test_serve_imports_nothing_from_the_training_module() -> None:
     code = (
         "import sys\n"
         "import src.models.inference, src.models.sequence_scoring\n"
-        "import src.models.sequence_feature_set, src.preprocessing.feature_pipeline\n"
+        "import src.models.sequence_feature_set, src.features.feature_pipeline\n"
         "import src.models.isolation_forest, src.models.sequence_registry\n"
         "import src.daemon.inference, src.daemon.inference_worker, src.daemon.health\n"
         "import src.control.sequence_detector\n"

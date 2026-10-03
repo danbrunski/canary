@@ -84,8 +84,8 @@ def test_default_profile_exclusion_names_each_kind(tmp_path: Path) -> None:
 
 
 def test_tuning_capture_rows_reach_no_metric(tmp_path: Path) -> None:
+    from src.features.feature_pipeline import featurize_wide_frame, load_resampled_session
     from src.models.isolation_forest import default_manifest_path, fit_isolation_forest
-    from src.preprocessing.feature_pipeline import featurize_wide_frame, load_resampled_session
 
     config = example_config(EXAMPLE_YAML)
     training = _write(tmp_path / "training", "2026-05-01T000000", start=DAY - 12 * 86_400,

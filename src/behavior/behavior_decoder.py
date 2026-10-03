@@ -31,10 +31,8 @@ from typing import Literal, cast
 import numpy as np
 import pandas as pd
 
-from src.coerce import finite_float
-from src.columns import GAP_SUFFIX, ROC_SUFFIX, base_channel, gap_column
-from src.decode.accepted_baselines import AcceptedBaselineOverride
-from src.decode.behavior_eligibility import (
+from src.behavior.accepted_baselines import AcceptedBaselineOverride
+from src.behavior.behavior_eligibility import (
     ACTUAL_MISSING,
     ACTUAL_STALE,
     OFF_MAP,
@@ -45,7 +43,7 @@ from src.decode.behavior_eligibility import (
     resolve_output_column,
     serving_spec,
 )
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
@@ -54,10 +52,12 @@ from src.decode.behavior_models import (
     PermittedUse,
     serving_status,
 )
-from src.decode.surface_eval import evaluate_1d, evaluate_2d
+from src.behavior.local_range import append_local_ranges, local_range_column
+from src.behavior.session_context import append_start_context, start_context_specs
+from src.behavior.surface_eval import evaluate_1d, evaluate_2d
+from src.coerce import finite_float
+from src.columns import GAP_SUFFIX, ROC_SUFFIX, base_channel, gap_column
 from src.preprocessing.features import FeatureConfig, compute_rate_of_change
-from src.preprocessing.local_range import append_local_ranges, local_range_column
-from src.preprocessing.session_context import append_start_context, start_context_specs
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ class DeviationResult:
     severity: Severity
     #: B01.4 — why no deviation was produced (``None`` when one was): the
     #: first unmet eligibility condition from
-    #: ``src.decode.behavior_eligibility``, ``off_map``, or a missing/stale
+    #: ``src.behavior.behavior_eligibility``, ``off_map``, or a missing/stale
     #: actual. An ineligible point is never an ``ok`` measurement: callers
     #: that count or alert must check this, not ``severity`` alone.
     reason: str | None = None
@@ -329,11 +329,11 @@ def append_behavior_prerequisites(
       left to refuse as ``rate_unavailable``.
     * ``context:*`` engine-start evidence for cold-start contracts when
       ``frame`` lacks it (batch), folded per session by
-      :func:`~src.preprocessing.session_context.append_start_context`. The
+      :func:`~src.behavior.session_context.append_start_context`. The
       live source supplies its own, which outlives its ring buffer.
     * ``context:range_*`` local-range steady context (B07.6) for every
-      :class:`~src.decode.behavior_models.LocalRangeCondition` a contract
-      names, via :func:`~src.preprocessing.local_range.append_local_ranges`,
+      :class:`~src.behavior.behavior_models.LocalRangeCondition` a contract
+      names, via :func:`~src.behavior.local_range.append_local_ranges`,
       on the batch frame and the live ring buffer alike.
 
     Returns ``frame`` itself when nothing is needed.

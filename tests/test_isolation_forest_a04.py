@@ -421,8 +421,8 @@ def test_structural_blindness_verdict_is_per_mode_for_a_loaded_if(tmp_path: Path
     """A04.5: once the loaded IF registered its mode feature sets, the
     blindness verdict says which modes are blind instead of dividing by the
     union."""
+    from src.features.feature_pipeline import FeatureSpecReconciliation
     from src.models.feature_spec_health import observe_reconciliation
-    from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
 
     reset_blindness_tracking()
     frame = _drive_frame(sessions=THREE_DRIVES)
@@ -491,7 +491,7 @@ def test_the_occlusion_reference_says_mode_median_or_pooled_mean() -> None:
 
 
 def _reconciliation(expected: tuple[str, ...], absent: tuple[str, ...]):  # type: ignore[no-untyped-def]
-    from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
+    from src.features.feature_pipeline import FeatureSpecReconciliation
 
     return FeatureSpecReconciliation(
         row_count=1,

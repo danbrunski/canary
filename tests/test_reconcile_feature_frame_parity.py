@@ -24,7 +24,7 @@ import pandas as pd
 import pytest
 
 from src.columns import MODE_COLUMN
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     FeatureSpecReconciliation,
     _resolve_structural_columns,
     candidate_feature_columns,

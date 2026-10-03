@@ -29,8 +29,8 @@ from src.control.replay_control import (
     ReplayNotFoundError,
     ReplayNotRunningError,
 )
+from src.features.live import LiveFeatureSource
 from src.models.fusion import PersistenceGate
-from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import (
     ParquetTelemetryWriter,

@@ -14,7 +14,7 @@ import hashlib
 import logging
 import multiprocessing
 import os
-from collections.abc import Collection, Iterator, Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -24,6 +24,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from src.behavior.behavior_decoder import append_deviation_columns, deviation_model_name
+from src.behavior.behavior_models import (
+    BehaviorModels,
+    artifact_fingerprint,
+    load_behavior_models,
+)
 from src.collection.capture_profiles import MODE01_AUTO
 from src.collection.obd_registry import MISFIRE_COUNT_CHANNEL_PREFIX, MODE01_REGISTRY
 from src.columns import (
@@ -37,41 +43,30 @@ from src.columns import (
     split_rolling,
 )
 from src.config import CanaryConfig, require_profile_scoped
-from src.decode.behavior_decoder import append_deviation_columns, deviation_model_name
-from src.decode.behavior_models import (
-    BehaviorModels,
-    artifact_fingerprint,
-    load_behavior_models,
-)
 from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
-from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
-from src.decode.dids import DidMap, decode_did_rows, load_did_map
+from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
+from src.decode.dids import DidMap, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
+from src.features.feature_cache import (
+    FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
+)
+from src.features.feature_cache import (
+    _feature_frame_cache_metadata,
+    _write_feature_frame_cache,
+)
+from src.features.feature_cache import (
+    build_feature_frame_cache_key as build_feature_frame_cache_key,
+)
 from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
 from src.preprocessing.channel_units import append_did_views, channel_units_for
-from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.derived import (
-    ReducedSession,
-    grid_interval_ns,
-    reduce_long_frames,
     resample_reduced,
 )
 from src.preprocessing.derived_store import DecodeInputs, DerivedStore, active_store
 from src.preprocessing.drives import DRIVE_COLUMN, stamp_physical_drives
-from src.preprocessing.feature_cache import (
-    FEATURE_FRAME_CACHE_VERSION as FEATURE_FRAME_CACHE_VERSION,
-)
-from src.preprocessing.feature_cache import (
-    _feature_frame_cache_metadata,
-    _write_feature_frame_cache,
-)
-from src.preprocessing.feature_cache import (
-    build_feature_frame_cache_key as build_feature_frame_cache_key,
-)
 from src.preprocessing.features import CONTEXT_COLUMN_PREFIX, FeatureConfig, compute_features
 from src.preprocessing.loader import (
     SESSION_PART_ROWS,
-    iter_session_parts,
     read_session,
     to_wide,
 )
@@ -79,6 +74,7 @@ from src.preprocessing.quality_gate import apply_quality_gate
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.preprocessing.resampler import resample_config_for as resample_config_for
 from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
+from src.preprocessing.session_decode import decode_long_frame, reduce_session
 from src.signals.afr import (
     TARGET_AFR_CHANNELS,
     FlashHistory,
@@ -96,7 +92,6 @@ from src.signals.vehicle_signals import did_views
 from src.storage.broadcast_storage import (
     change_only_timeout,
     refuse_shorter_stored_timeout,
-    session_can_storage,
 )
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
@@ -555,86 +550,6 @@ def _init_feature_worker(
     _FEATURE_WORKER_STATE["resample"] = resample_config
 
 
-#: Raw CAN rows fed through the decoders per chunk. Decoding is row-local (each
-#: CAN row yields its own decoded rows; no cross-row state), so chunking is
-#: exactly equivalent to decoding the frame in one pass — it only bounds peak
-#: memory. Sized so one chunk plus its decoded output stays in the low hundreds
-#: of MB at the ~2.2 signals/frame this vehicle's bindings+DBC produce.
-_CAN_DECODE_CHUNK_ROWS = 250_000
-
-#: Canonical long-frame ordering, matching ``read_session``'s own sort. The
-#: chunked decode reassembles rows out of order, and ``to_wide``'s
-#: ``aggfunc="last"`` is order-sensitive, so the pieces are re-sorted on this
-#: key before the pivot.
-_LONG_SORT_COLUMNS = ["session", "timestamp", "source", "channel"]
-
-
-def _decode_long_frame(
-    long: pd.DataFrame,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-) -> pd.DataFrame:
-    """Decode one session's long frame, chunking the CAN decode.
-
-    Raw CAN frames are ~99% of the rows and carry no numeric value (their bytes
-    live in ``payload``); they exist only to be decoded into ``decoded:*`` /
-    ``dbc:*`` rows. Decoding them in a single pass holds every raw row *and*
-    every decoded row at once — on one dense 45-minute drive that is ~4.5M raw
-    plus ~10M decoded object-dtype rows, which OOM-killed feature-build workers
-    at ~7.6 GB RSS (2026-07-26, both the 4-worker and the 2-worker attempt).
-    Decoding in chunks and keeping only each chunk's decoded output bounds peak
-    memory by the chunk instead of the session.
-
-    Equivalent to the old single-pass decode, not an approximation: both
-    decoders emit one row per (CAN row × matching signal) with no dependence on
-    neighbouring rows, and the result is re-sorted on ``_LONG_SORT_COLUMNS``
-    before it reaches the order-sensitive pivot.
-    """
-    if long.empty or "source" not in long.columns:
-        return long
-    is_can = long["source"] == "can"
-    # DID decoding reads Mode-22 ``DID_<hex>`` OBD rows, never CAN rows, so it
-    # runs once on the non-CAN side rather than per chunk.
-    rest = long.loc[~is_can]
-    if did_map is not None:
-        rest = decode_did_rows(rest, did_map)
-    if bindings is None and dbc_database is None:
-        return rest.sort_values(_LONG_SORT_COLUMNS, kind="stable")
-
-    # Every binding is recomputed from the raw frames here. A session this
-    # chain reads (``decoded="as_recorded"``) may still carry the ``decoded:*``
-    # rows the daemon stored before P02.8 (2026-09-26); the chunks below hold
-    # CAN rows alone, so both copies reach the pivot and the recomputed row
-    # (sorted after the stored one) is the ``last`` it keeps. That is the live
-    # path's answer (``FrameDecoder`` decodes every frame with the current
-    # bindings), and on real sessions the two copies agree: 0 of 2.70M
-    # same-instant pairs differed across 2026-07-29T205841,
-    # 2026-08-07T161543, 2026-09-18T160921 and
-    # _capture-fuel-target-research-2026-09-21T195844 (2026-09-26). After a
-    # binding edit the recomputed value is the current decode, as live.
-    # Reading sessions on read instead would change no frame, only add a
-    # second decode of the on-read signals that loses to this one; a session
-    # recorded after P02.8 has no stored row to lose.
-    can_rows = long.loc[is_can]
-    pieces: list[pd.DataFrame] = [rest]
-    for start in range(0, len(can_rows), _CAN_DECODE_CHUNK_ROWS):
-        chunk = can_rows.iloc[start : start + _CAN_DECODE_CHUNK_ROWS]
-        if bindings is not None:
-            chunk = decode_can_rows(chunk, bindings)
-        if dbc_database is not None:
-            chunk = decode_can_rows_dbc(chunk, dbc_database)
-        # Keep only what the decode produced; the raw CAN rows that seeded it
-        # are dead weight downstream (all-NaN pivot columns) and dropping them
-        # here is what keeps the accumulated pieces small.
-        decoded = chunk.loc[chunk["source"] != "can"]
-        if not decoded.empty:
-            pieces.append(decoded)
-        del chunk, decoded
-    combined = pd.concat(pieces, ignore_index=True) if len(pieces) > 1 else pieces[0]
-    return combined.sort_values(_LONG_SORT_COLUMNS, kind="stable")
-
-
 def _decode_session_to_wide(
     session_dir: Path,
     bindings: Any,
@@ -646,7 +561,7 @@ def _decode_session_to_wide(
     reject counts stay inspectable per-session (``scripts/disposition_report.py``)
     without duplicating the decode steps.
     """
-    long = _decode_long_frame(
+    long = decode_long_frame(
         read_session(session_dir, decoded="as_recorded"), bindings, dbc_database, did_map
     )
     return to_wide(long, coerce_numeric=True)
@@ -728,45 +643,6 @@ def resample_session_bounded(
     return resample_reduced(reduced, resample_config, channels=channels)
 
 
-def reduce_session(
-    session_dir: Path,
-    bindings: Any,
-    dbc_database: Any,
-    did_map: Any,
-    resample_config: ResampleConfig,
-    *,
-    part_rows: int = SESSION_PART_ROWS,
-    filters: Any = None,
-    raw_channels: set[tuple[str, str]] | None = None,
-) -> ReducedSession:
-    """Decode a session part by part and reduce it (P01.1).
-
-    Each time-disjoint part (:func:`iter_session_parts`) is decoded on its own,
-    which is exact: decoding is row-local and no pivot cell spans two parts.
-    ``filters`` narrows the raw read (a per-channel re-derive reads only the
-    rows its decoder needs). ``raw_channels``, when given, collects every
-    recorded ``(source, channel)`` pair before decoding (the derived store
-    versions its decode units against them).
-    """
-    interval_ns = grid_interval_ns(resample_config)
-
-    def decoded() -> Iterator[pd.DataFrame]:
-        # As recorded: this chain recomputes every binding itself, and the
-        # recomputed row wins over a stored one (``_decode_long_frame``).
-        parts = iter_session_parts(
-            session_dir, target_rows=part_rows, filters=filters, decoded="as_recorded"
-        )
-        for long in parts:
-            if raw_channels is not None and not long.empty:
-                pairs = long[["source", "channel"]].astype(str).drop_duplicates()
-                raw_channels.update(zip(pairs["source"], pairs["channel"], strict=True))
-            yield _decode_long_frame(long, bindings, dbc_database, did_map)
-
-    return reduce_long_frames(
-        session_dir.name, decoded(), interval_ns, can_storage=session_can_storage(session_dir)
-    )
-
-
 def resample_long_session(
     long: pd.DataFrame,
     bindings: Any,
@@ -789,7 +665,7 @@ def resample_long_session(
     refuse_shorter_stored_timeout(
         change_only_timeout(long), resample_config.broadcast_max_gap_seconds, what=session_name
     )
-    wide = to_wide(_decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
+    wide = to_wide(decode_long_frame(long, bindings, dbc_database, did_map), coerce_numeric=True)
     gated, quality = apply_quality_gate(wide)
     if quality.total_rejected:
         log.info(
@@ -1193,7 +1069,7 @@ def drop_fully_stale_rows(resampled: pd.DataFrame) -> pd.DataFrame:
     poisons the affected mode (a 12 h gap forward-fills into tens of thousands
     of identical "warmup" rows). Rows with only *some* channels stale (a slow
     PID between updates) are real observations and kept. ``LiveFeatureSource.tick``
-    (src/preprocessing/live.py) applies the same all-gap-flags-set rule per tick
+    (src/features/live.py) applies the same all-gap-flags-set rule per tick
     and returns ``None`` instead of emitting a row — dropping here moves training
     rows toward "seconds actually observed", which is what serve scores.
     """
@@ -1406,7 +1282,7 @@ def featurize_wide_frame(
     ``append_deviation_columns`` builds the context their serving contracts
     read first (``__roc`` derivatives at this transform's rolling horizon,
     ``context:*`` engine-start evidence). The live path's
-    :class:`~src.preprocessing.live.LiveFeatureSource` carries start
+    :class:`~src.features.live.LiveFeatureSource` carries start
     evidence across ticks itself (its ring buffer is far shorter than a
     warmup) and has already written those columns into ``wide``.
 
@@ -1547,7 +1423,7 @@ def behavior_model_input_roots(model: Any) -> frozenset[str]:
     the schema is covered without this list being edited. Any string holding a
     source separator counts; a timestamp string is harmlessly over-included.
     """
-    from src.decode.behavior_eligibility import resolve_output_column
+    from src.behavior.behavior_eligibility import resolve_output_column
 
     held = _MODEL_ROOTS.get(id(model))
     if held is not None and held[0] is model:
@@ -2408,7 +2284,7 @@ def build_feature_spec(
 
     ``behavior_models`` is the artifact set that produced the frame's
     ``deviation:*`` columns. When given, the spec records the
-    :func:`~src.decode.behavior_models.artifact_fingerprint` of every model a
+    :func:`~src.behavior.behavior_models.artifact_fingerprint` of every model a
     consumed deviation column came from (``behavior_model_fingerprints``), so
     a later refit that changes that column's meaning is caught by the
     producibility check instead of being fed to this artifact (B03.4). Left

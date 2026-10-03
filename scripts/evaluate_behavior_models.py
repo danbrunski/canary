@@ -100,17 +100,17 @@ from src.analysis.behavior_validation import (
     validation_document_path,
 )
 from src.analysis.refit import default_recipes, legacy_reproduction_spec, recipe_serving_spec
-from src.columns import GAP_SUFFIX, MODE_COLUMN, ROC_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.decode.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
-from src.decode.behavior_models import (
+from src.behavior.behavior_eligibility import ServingSpec, required_channel_groups, serving_spec
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     BehaviorModels,
     load_behavior_models,
     serving_status,
 )
+from src.columns import GAP_SUFFIX, MODE_COLUMN, ROC_SUFFIX, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.features.feature_pipeline import DEFAULT_DIDS_PATH
 from src.log import configure_logging
-from src.preprocessing.feature_pipeline import DEFAULT_DIDS_PATH
 from src.signals.derived import DERIVED_CHANNEL_INPUTS, resolved_dependencies
 from src.vehicle.profiles import (
     active_registry,

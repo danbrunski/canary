@@ -26,8 +26,8 @@ import pytest
 
 from src.columns import gap_column, roc_column
 from src.config import CanaryConfig
+from src.features.live import LiveFeatureSource
 from src.preprocessing.features import compute_features
-from src.preprocessing.live import LiveFeatureSource
 from src.preprocessing.loader import to_wide
 from src.preprocessing.resampler import ResampleConfig, resample_wide
 from src.telemetry import TelemetryRecord

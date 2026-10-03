@@ -28,6 +28,7 @@ from src.dashboard.schemas import (
     CaptureProfileSaveRequest,
     CaptureProfileStartRequest,
 )
+from src.features.capture_inputs import model_input_warnings
 
 
 def build_router(ctx: ControlContext) -> APIRouter:
@@ -54,11 +55,12 @@ def build_router(ctx: ControlContext) -> APIRouter:
         request: CaptureProfileSaveRequest,
     ) -> dict[str, Any]:
         try:
-            warnings = profile_store.save(request.profile, previous_name=request.previous_name)
+            profile_store.save(request.profile, previous_name=request.previous_name)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if request.profile.name == "default" and not tuning_profile.is_active():
             tuning_profile.activate(request.profile, source="capture-profile-save")
+        warnings = model_input_warnings(request.profile, profile_store.behavior_models_path)
         payload = {"profile": request.profile.model_dump(mode="json"), "warnings": warnings}
         publish_control_event("capture_profile.save", "ok", payload)
         return payload

@@ -49,14 +49,13 @@ import yaml
 
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, arrived_column, gap_column
 from src.dataframe_utils import require_columns as _require_columns
-from src.decode.behavior_models import CLOSED_LOOP_FUEL_STATES
 from src.decode.bindings import Bindings
 from src.decode.engineering import (
     UnscaledDecodedChannelError,
     decoded_factors,
     is_decoded_column,
 )
-from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.operating import CLOSED_LOOP_FUEL_STATES, ENGINE_RUNNING_MIN_RPM
 from src.storage.broadcast_storage import is_broadcast_channel
 
 AnomalyKind = Literal["spike", "drift", "dropout", "stuck", "scale", "intermittent"]

@@ -882,7 +882,7 @@ async def test_feature_builder_runs_in_spawned_process_without_blocking_loop(
 ) -> None:
     """D01.4 production boundary: spawned execution is pickle-safe and awaited."""
     from src.daemon.inference import _start_feature_executor
-    from src.preprocessing.live import build_prepared_live_tick
+    from src.features.live import build_prepared_live_tick
 
     config.models.out_of_process_feature_build = True
     components = build_components(config)

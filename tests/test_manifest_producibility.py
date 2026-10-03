@@ -235,7 +235,7 @@ def test_cli_flags_a_refit_behavior_artifact_and_reports_unknown_provenance(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """B03.4: a consumed column pinned to a different artifact fails; no pin is unknown."""
-    from src.decode.behavior_models import artifact_fingerprint, load_behavior_models
+    from src.behavior.behavior_models import artifact_fingerprint, load_behavior_models
     from tools.check_manifest_producibility import main
 
     base = ["--config", str(EXAMPLE_YAML), "--profile", "nissan-xterra-2008"]

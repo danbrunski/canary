@@ -1,6 +1,6 @@
 """Decode raw CAN frames into ``decoded:*`` TelemetryRecords, one frame at a time.
 
-The live path's decoder: :class:`src.preprocessing.live.LiveFeatureSource`
+The live path's decoder: :class:`src.features.live.LiveFeatureSource`
 holds a :class:`FrameDecoder` over *every* binding and publishes exactly these
 records to the dashboard stream and its own current-value dict (R04.4). Until
 P02.8 (operator decision 2026-09-26) the storage sink had one too and stored

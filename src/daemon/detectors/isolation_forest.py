@@ -22,6 +22,10 @@ from src.daemon.detectors.common import (
     log,
 )
 from src.daemon.health import HealthMonitor
+from src.features.feature_pipeline import (
+    FeatureSpecReconciliation,
+    reconcile_feature_frame_to_spec,
+)
 from src.models.fusion import (
     FusionSource,
     PersistenceGate,
@@ -29,10 +33,6 @@ from src.models.fusion import (
     isolation_forest_source,
 )
 from src.models.inference import IsolationForestInferenceEngine
-from src.preprocessing.feature_pipeline import (
-    FeatureSpecReconciliation,
-    reconcile_feature_frame_to_spec,
-)
 from src.timefmt import format_timestamp
 
 

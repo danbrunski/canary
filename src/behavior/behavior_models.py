@@ -45,7 +45,10 @@ from pydantic import (
     model_validator,
 )
 
-from src.operating import ENGINE_RUNNING_MIN_RPM
+from src.operating import (
+    ENGINE_RUNNING_MIN_RPM,
+    FUEL_STATUS_STATES,
+)
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
 
@@ -59,7 +62,7 @@ log = logging.getLogger(__name__)
 #: * ``2`` — every refit-written model persists a typed
 #:   :class:`ServingEligibility` contract that fitting, held-out scoring,
 #:   batch decoding, live decoding and replay all evaluate through
-#:   ``src.decode.behavior_eligibility``.
+#:   ``src.behavior.behavior_eligibility``.
 #:
 #: Both load. A model without an ``eligibility`` contract (every schema-1
 #: model, and any hand-written one) still evaluates with its legacy gates so
@@ -298,7 +301,7 @@ class DeviationConfig(_Strict):
     case for a ``behavior_model``-targeted override, whose center is the
     surface's own fitted expectation, not a fixed number) the caller
     supplies the delta already recentered by the model's ``expected_value``
-    — see ``src.decode.behavior_decoder``. ``std_scaled`` opts a directional
+    — see ``src.behavior.behavior_decoder``. ``std_scaled`` opts a directional
     band into the same local-std scaling ``sigma`` uses (and then requires
     the same positive ``sigma_floor``); the default (``False``) grades in
     plain output units, matching ``accepted_baselines.yaml``'s
@@ -412,33 +415,6 @@ class RateOfChangeCondition(_Strict):
     max_abs_per_second: float = Field(gt=0)
 
 
-#: SAE J1979 Mode 01 PID 0x03 fuel-system status (first byte), by the single
-#: bit a conforming ECU sets. Standard, not vehicle-specific. Membership is
-#: always an explicit allowlist of these codes: a nonzero status is not
-#: "closed loop" (0x04 is open loop for load *or* decel fuel cut, 0x10 is
-#: closed loop with a feedback fault).
-FUEL_STATUS_STATES: dict[int, str] = {
-    0x01: "open_loop_insufficient_temperature",
-    0x02: "closed_loop",
-    0x04: "open_loop_load_or_fuel_cut",
-    0x08: "open_loop_system_failure",
-    0x10: "closed_loop_feedback_fault",
-}
-
-#: Healthy closed-loop feedback only. ``0x10`` is excluded on purpose: a
-#: model of normal trims must not learn from, or grade, rows the ECU itself
-#: reports as having a faulty feedback loop.
-CLOSED_LOOP_FUEL_STATES: tuple[int, ...] = (0x02,)
-
-
-def fuel_status_name(code: float) -> str:
-    """Stable name for a fuel-status value (``invalid(<n>)`` if not J1979)."""
-    as_int = int(code)
-    if float(as_int) == float(code) and as_int in FUEL_STATUS_STATES:
-        return FUEL_STATUS_STATES[as_int]
-    return f"invalid({code:g})"
-
-
 class EngineStateRequirement(_Strict):
     """Which engine state a model may be served in (B01.3).
 
@@ -477,7 +453,7 @@ class ColdStartRequirement(_Strict):
     """Served rows must belong to an *observed* engine start that began cold.
 
     The initial temperature is session context, not a row value: it comes
-    from ``src.preprocessing.session_context``, which records the coolant
+    from ``src.behavior.session_context``, which records the coolant
     reading at an engine start it actually saw (an RPM transition from
     stopped to running, or a run-time clock no older than
     ``max_start_runtime_s``). A mid-drive daemon start, a replay that begins
@@ -514,7 +490,7 @@ class LocalRangeCondition(_Strict):
     graded as warm-idle deviations through a 10 rpm/s gate. This condition
     bounds ``max - min`` of ``channel`` over the trailing ``window_seconds``
     (rows with ``t - window < t_row <= t``). The value is serving context,
-    built by :mod:`src.preprocessing.local_range` on the batch and the live
+    built by :mod:`src.behavior.local_range` on the batch and the live
     paths alike, and refuses when the window is not fully observed.
     """
 
@@ -542,7 +518,7 @@ class TrainingSelection(_Strict):
 class ServingEligibility(_Strict):
     """The typed per-observation serving contract (B01.3, schema 2).
 
-    Evaluated by ``src.decode.behavior_eligibility`` — the single evaluator
+    Evaluated by ``src.behavior.behavior_eligibility`` — the single evaluator
     used for fitting rows, held-out scoring, vectorized and scalar decoding
     and replay. Rate-of-change limits remain on the model's ``conditions``
     list (unchanged API field) and are part of the same evaluation.

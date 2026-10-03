@@ -27,7 +27,7 @@ anomaly-oriented derived set before `compute_features`:
 `derived:AIR_MASS_PER_CYCLE`, `derived:STFT_BANK_BALANCE` /
 `LTFT_BANK_BALANCE` / `AFR_BANK_BALANCE`, and
 `derived:TPS_VOLTAGE_PER_PCT`, followed by committee residuals and
-behavior-model deviation columns (`src/preprocessing/feature_pipeline.py`,
+behavior-model deviation columns (`src/features/feature_pipeline.py`,
 `featurize_wide_frame` tail). Still open from the plan below: the
 explicit `physics_residual:` / `relational:` equation-backed columns
 (MAF vs speed-density, fuel-rate vs MAF, power vs fuel, MAP vs baro) and

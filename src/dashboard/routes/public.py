@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.llm_assist import LlmAssistCardStore, card_to_dict
+from src.behavior.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
 from src.control.dtc_state import DtcState
@@ -34,7 +35,6 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
-from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies

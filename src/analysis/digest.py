@@ -41,8 +41,10 @@ from src.analysis.session_classifier import classify_session
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
 from src.session import DTC_SIDECAR_FILENAME
+from src.storage.catalog import record_session_best_effort
 from src.storage.session_files import count_session_rows, session_time_span_seconds
 from src.storage.session_products import DIGEST_FILENAME, DIGEST_SKIPPED_FILENAME, read_digest
+from src.storage.sessions import is_session_dir_name, session_started_at
 from src.storage.sidecar import read_json_object, write_json_sidecar
 from src.timefmt import format_timestamp as _format_timestamp
 from src.timefmt import parse_iso_utc
@@ -99,7 +101,7 @@ REASON_NO_SPEED_SOURCE = "no_speed_source"
 _TOP_N = 5
 
 #: Prefix fingerprint stats append for behavior-surface deviations
-#: (mirrors ``src.decode.behavior_decoder.DEVIATION_COLUMN_PREFIX`` stripped
+#: (mirrors ``src.behavior.behavior_decoder.DEVIATION_COLUMN_PREFIX`` stripped
 #: of its ``deviation:`` wide-column form — see
 #: ``fingerprint._add_behavior_deviation_stats``).
 _BEHAVIOR_DEVIATION_STAT_PREFIX = "behavior_deviation_abs_mean:"
@@ -410,7 +412,6 @@ def digest_preflight(
       2,622,370 rows, and the 8 GB Pi's cliff was bracketed between ~4.5 M
       rows (completed) and ~5.9 M rows (OOM-killed).
     """
-    from src.storage.sessions import is_session_dir_name
 
     if not is_session_dir_name(session_dir.name):
         # Derived from the child's address-space ceiling when unset, so a
@@ -477,7 +478,6 @@ def clear_digest_skipped(session_dir: Path) -> None:
 
 
 def _session_start(session_dir: Path) -> datetime | None:
-    from src.storage.sessions import session_started_at
 
     return session_started_at(session_dir)
 
@@ -702,8 +702,6 @@ def persist_digest(
     """
     write_digest(session_dir, digest)
     clear_digest_skipped(session_dir)
-    # Lazy: src.storage.catalog imports this module's package at module level.
-    from src.storage.catalog import record_session_best_effort
 
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)

@@ -20,9 +20,7 @@ import numpy as np
 import pandas as pd
 
 from src.analysis.refit import Surface2DRecipe
-from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
-from src.config import CanaryConfig
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     DeviationConfig,
     NoiseFloor,
     ResolutionSpec,
@@ -30,6 +28,8 @@ from src.decode.behavior_models import (
     TransientControl,
     ValidationCriteria,
 )
+from src.columns import MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import READ_ONLY_INPUTS, isolated_config

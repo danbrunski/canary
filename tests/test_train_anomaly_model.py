@@ -16,17 +16,17 @@ from scripts.train_anomaly_model import (
 )
 from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
-from src.preprocessing import feature_pipeline
-from src.preprocessing.feature_pipeline import (
+from src.features import feature_pipeline
+from src.features.feature_pipeline import (
     ALL_MODE,
     build_feature_frame,
     build_feature_spec,
     reconcile_feature_frame_to_spec,
 )
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     segment_or_constant as _segment_or_constant,
 )
-from src.preprocessing.feature_pipeline import (
+from src.features.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
 from src.storage.parquet_writer import TELEMETRY_SCHEMA

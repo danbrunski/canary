@@ -104,7 +104,7 @@ assert set(get_args(TelemetrySource)) == {
 
 #: Sources the live pipeline **re-derives from a raw row** rather than
 #: receiving from a collector: ``decoded`` comes from a raw ``can`` frame
-#: (:meth:`src.preprocessing.live.LiveFeatureSource._apply_can_decode` for the
+#: (:meth:`src.features.live.LiveFeatureSource._apply_can_decode` for the
 #: detectors; the session readers decode it on read, and nothing stores it
 #: since P02.8) and ``derived`` from the inference tick's computed channels
 #: (:mod:`src.daemon.inference`). Anything that re-injects stored rows into the

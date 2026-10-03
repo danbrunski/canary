@@ -417,7 +417,7 @@ if __name__ == "__main__":  # pragma: no cover
 
 
 def _reconciliation(*, expected: int, absent: int):
-    from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
+    from src.features.feature_pipeline import FeatureSpecReconciliation
 
     columns = tuple(f"decoded:CH_{i}" for i in range(expected))
     return FeatureSpecReconciliation(
@@ -463,7 +463,7 @@ def test_a_satisfiable_spec_reports_nothing() -> None:
 
 
 def _report_missing(expected: tuple[str, ...], missing: tuple[str, ...]):
-    from src.preprocessing.feature_pipeline import FeatureSpecReconciliation
+    from src.features.feature_pipeline import FeatureSpecReconciliation
 
     return FeatureSpecReconciliation(
         row_count=1,

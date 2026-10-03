@@ -55,17 +55,17 @@ from typing import Protocol
 import numpy as np
 import pandas as pd
 
-from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
-from src.dataframe_utils import numeric_values
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     BehaviorModel1D,
     BehaviorModel2D,
     RateOfChangeCondition,
     ServingEligibility,
-    fuel_status_name,
 )
-from src.preprocessing.local_range import local_range_column
-from src.preprocessing.session_context import start_context_columns
+from src.behavior.local_range import local_range_column
+from src.behavior.session_context import start_context_columns
+from src.columns import MODE_COLUMN, ROC_SUFFIX, gap_column
+from src.dataframe_utils import numeric_values
+from src.operating import fuel_status_name
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key
 
 OPERATING_MODE_MISMATCH = "operating_mode_mismatch"

@@ -52,7 +52,7 @@ def segmenter_channels() -> tuple[str, ...]:
     (``feature_pipeline.segmenter_input_columns``), so offline mode labels
     cannot diverge from it. Imported here, not at module load: the feature
     pipeline stays off every path that only needs the evaluator."""
-    from src.preprocessing.feature_pipeline import segmenter_input_columns
+    from src.features.feature_pipeline import segmenter_input_columns
 
     return segmenter_input_columns()
 
@@ -169,7 +169,7 @@ def sample_modes(
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """Operating mode in force at each sample (``None`` before the first tick)."""
     from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
-    from src.preprocessing.feature_pipeline import resample_long_session, segment_or_constant
+    from src.features.feature_pipeline import resample_long_session, segment_or_constant
     from src.preprocessing.resampler import resample_config_for
 
     modes = np.full(len(samples), None, dtype=object)
@@ -231,9 +231,9 @@ def load_stream(
     """
     from src.preprocessing.decode import decoded_subset_plan, keep_can_ids
     from src.preprocessing.derived import grid_interval_ns, reduce_long_frames
-    from src.preprocessing.feature_pipeline import _decode_long_frame
     from src.preprocessing.loader import SESSION_PART_ROWS, iter_session_parts
     from src.preprocessing.resampler import resample_config_for
+    from src.preprocessing.session_decode import decode_long_frame
 
     wanted = _checked_decoded(catalog) | set(segmenter_decoded())
     filters, subset, ids = decoded_subset_plan(bindings, wanted)
@@ -255,7 +255,7 @@ def load_stream(
         keys = long["source"].astype(str) + ":" + long["channel"].astype(str)
         rows = long.loc[keys.isin(segmenter).to_numpy()]
         if not rows.empty:
-            segmenter_parts.append(_decode_long_frame(rows, None, None, None))
+            segmenter_parts.append(decode_long_frame(rows, None, None, None))
 
     samples = (
         pd.concat(sample_parts, ignore_index=True)
@@ -281,8 +281,8 @@ def _modes_on_grid(
 ) -> np.ndarray[Any, np.dtype[np.object_]]:
     """:func:`sample_modes` from a reduced segmenter frame."""
     from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
+    from src.features.feature_pipeline import segment_or_constant
     from src.preprocessing.derived import resample_reduced
-    from src.preprocessing.feature_pipeline import segment_or_constant
     from src.preprocessing.resampler import resample_config_for
 
     modes = np.full(len(samples), None, dtype=object)

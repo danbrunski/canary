@@ -73,8 +73,8 @@ from typing import Any
 
 import pandas as pd
 
+from src.behavior.accepted_baselines import AcceptedBaselines
 from src.columns import is_flag_column
-from src.decode.accepted_baselines import AcceptedBaselines
 from src.models.golden_baselines import ChannelBaseline, GoldenBaselines
 
 #: Rows in a (channel, operating_mode) group below this count can't support

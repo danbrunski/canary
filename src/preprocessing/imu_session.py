@@ -69,6 +69,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from src.atomic_write import atomic_write_text
 from src.decode.bindings import Bindings
 from src.decode.engineering import is_decoded_column, repo_bindings
+from src.decode.on_read import can_channel_spellings
 from src.preprocessing.imu_decimation import ACCEL_LAT_COLUMN, ACCEL_LON_COLUMN
 from src.preprocessing.imu_frame import (
     GRAVITY_MAGNITUDE_RANGE_G,
@@ -732,7 +733,6 @@ def read_imu_inputs(session_dir: Path, *, bindings: Bindings | None = None) -> d
     exactly as a decode on read would. Raises ``FileNotFoundError`` without
     telemetry.
     """
-    from src.decode.on_read import can_channel_spellings
     from src.preprocessing.decode import decode_on_read, on_read_can_ids
     from src.preprocessing.loader import read_session
 

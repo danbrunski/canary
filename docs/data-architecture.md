@@ -41,7 +41,7 @@ tick — same column the IF / LSTM consume as a feature, same column the
 dashboard renders in engineering units.
 
 **Production code path:** `record.py` (or `src/main.py` daemon) →
-`src/collection/can_collector.py` → `src/preprocessing/live.py` →
+`src/collection/can_collector.py` → `src/features/live.py` →
 inference.
 
 **Strengths:** zero polling cost, no contention, deterministic cadence,
@@ -410,13 +410,13 @@ from candidate to confirmed in one rev-protocol session).
 | Layer | Modules |
 |---|---|
 | Canable sniff | `src/collection/can_collector.py`, `scripts/record.py` |
-| Broadcast decode (the production primary) | `src/decode/bindings.py`, `src/preprocessing/decode.py`, `src/preprocessing/live.py` |
+| Broadcast decode (the production primary) | `src/decode/bindings.py`, `src/preprocessing/decode.py`, `src/features/live.py` |
 | ELM327 Mode 01 polling | `src/collection/obd_collector.py`, `tools/obd_coverage.py` |
 | Canable-native OBD Mode 01/03/09/22 | `src/collection/can_obd_client.py`, `src/collection/can_obd_collector.py`, `tools/can_obd_probe.py`, `scripts/record.py --obd-source canable` |
 | Mode 22 DID sweep | `src/analysis/did_scan.py`, `tools/scan_constant_dids.py` (legacy ELM transport; Canable-native replacement pending) |
 | NT510 RE protocol | `scripts/guided_session.py` (operator side; the NT510 itself is the device) |
 | RE analysis pipeline | `tools/inventory_broadcast.py`, `tools/broadcast_signals.py`, `tools/cross_reference_broadcast.py`, `tools/corpus_report.py` |
-| Production daemon | `src/main.py`, `src/daemon.py`, `src/preprocessing/live.py`, `src/models/inference.py`, `src/alerts/emitter.py`, `src/dashboard/api.py` |
+| Production daemon | `src/main.py`, `src/daemon.py`, `src/features/live.py`, `src/models/inference.py`, `src/alerts/emitter.py`, `src/dashboard/api.py` |
 
 ## What this implies for the road ahead
 

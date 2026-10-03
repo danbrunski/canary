@@ -2,7 +2,7 @@
 
 ``compute_anomaly_signals`` used to restate each signal's inputs inline, and
 ``DERIVED_CHANNEL_INPUTS`` declared only four of them, so
-``capture_profiles._channel_satisfied`` treated the unmapped rest as satisfied
+``capture_profiles.channel_satisfied`` treated the unmapped rest as satisfied
 and ``model_input_warnings`` could never warn for the bank-balance and
 total-trim models. The table is now the single declaration; the dependency
 registry, the freshness gaps and the computation all read it.
@@ -16,9 +16,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.collection.capture_profiles import CaptureProfile, model_input_warnings
+from src.collection.capture_profiles import CaptureProfile
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN, gap_column
 from src.config import VehicleParameters
+from src.features.capture_inputs import model_input_warnings
 from src.signals.derived import ANOMALY_SIGNALS, DERIVED_CHANNEL_INPUTS, compute_anomaly_signals
 
 BEHAVIOR_MODELS = Path("data/nissan-xterra-2008/behavior_models.yaml")

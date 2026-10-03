@@ -643,7 +643,7 @@ def test_training_pipeline_signal_columns_track_the_segmenter_defaults() -> None
     full candidate map including optional `imu:` signals. A fallback added to
     one and not the other silently does nothing on the training path.
     """
-    from src.preprocessing.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
+    from src.features.feature_pipeline import _SEGMENTER_SIGNAL_COLUMNS
     from src.preprocessing.segmenter import DEFAULT_SIGNAL_COLUMNS
 
     for signal, required in _SEGMENTER_SIGNAL_COLUMNS.items():

@@ -26,7 +26,7 @@ from src.analysis.behavior_validation import (
     load_validation_document,
 )
 from src.analysis.refit import _check_publish_gate, default_recipes, legacy_reproduction_spec
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     STATUS_LEGACY_NO_CONTRACT,
     STATUS_NO_HELD_OUT_VALIDATION,
     BehaviorModel1D,

@@ -327,6 +327,19 @@ reported `started: 0` for a 25-minute all-DID capture with 18k samples per
 channel — the `tuning-did` profile disables Mode 01, so commanded AFR was
 absent by construction. It now refuses and names the cause.
 
+## Package layers
+
+Imports between `src/` packages run one way, down the layers.
+`tests/test_layering.py` is the source of truth: its `LAYERS` map gives each
+package its layer, and it fails on any upward import or any same-layer pair
+that imports both ways. Function-level and `TYPE_CHECKING` imports count.
+`OWED` and `OWED_PAIRS` are empty (R09, closed 2026-10-03); `STANDING` holds
+the one deliberate exception, the daemon serving the dashboard app. A new
+package needs a layer there before anything imports it. When the test
+refuses an import, move the code to the layer it belongs to rather than
+deferring the import into a function to hide the cycle; that habit is what
+R09 spent nine items undoing.
+
 ## RAM (memory) channels
 
 `data/dids.yaml` has a `memory:` catalog beside `dids:` — service-0x23

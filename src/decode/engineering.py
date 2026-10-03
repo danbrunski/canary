@@ -2,7 +2,7 @@
 
 ``decoded:<SIGNAL>`` channels hold the **raw integer** from a binding's byte
 range, by contract: the models' feature columns are trained and served on those
-counts (:mod:`src.decode.frame_decoder`, :meth:`src.preprocessing.live.
+counts (:mod:`src.decode.frame_decoder`, :meth:`src.features.live.
 LiveFeatureSource.decode_for_telemetry`, :func:`src.preprocessing.decode.
 decode_can_rows`). That contract is right for features and wrong for anything
 that treats the value as a physical quantity. ``decoded:ECM_RPM`` is 8 counts

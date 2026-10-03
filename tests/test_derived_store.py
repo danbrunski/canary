@@ -21,8 +21,10 @@ import pytest
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import DidMap, load_did_map
+from src.features import feature_pipeline
+from src.features.feature_pipeline import resample_long_session, resample_session_bounded
 from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
-from src.preprocessing import derived_store, feature_pipeline
+from src.preprocessing import derived_store
 from src.preprocessing.derived_store import (
     DEFAULT_DERIVED_DIR,
     DERIVED_DIR_ENV,
@@ -30,7 +32,6 @@ from src.preprocessing.derived_store import (
     DerivedStore,
     active_store,
 )
-from src.preprocessing.feature_pipeline import resample_long_session, resample_session_bounded
 from src.preprocessing.loader import read_session
 from src.preprocessing.resampler import ResampleConfig
 
@@ -111,14 +112,14 @@ def _through(store: DerivedStore, session: Path, decoders: DecodeInputs) -> pd.D
 def reduce_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Every ``reduce_session`` call (what was decoded, and from which rows)."""
     calls: list[dict[str, Any]] = []
-    real = feature_pipeline.reduce_session
+    real = derived_store.reduce_session
 
     def spy(session_dir: Path, *decoders: Any, **kwargs: Any) -> Any:
         bindings, dbc, did_map, _resample = decoders
         calls.append({"bindings": bindings, "dbc": dbc, "did_map": did_map, **kwargs})
         return real(session_dir, *decoders, **kwargs)
 
-    monkeypatch.setattr(feature_pipeline, "reduce_session", spy)
+    monkeypatch.setattr(derived_store, "reduce_session", spy)
     return calls
 
 

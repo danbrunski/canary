@@ -17,9 +17,9 @@ from scripts.train_lstm import (
     train,
 )
 from src.config import CanaryConfig
+from src.features.feature_pipeline import build_feature_frame
 from src.models.false_positive_benchmark import FalsePositiveBenchmarkReport
 from src.models.lstm_training import load_lstm_autoencoder_model
-from src.preprocessing.feature_pipeline import build_feature_frame
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.builders import write_obd_session

@@ -24,4 +24,38 @@ ENGINE_RUNNING_MIN_RPM = 400.0
 #: segmenter's highway band starts at 80.
 HIGHWAY_MODE = "highway"
 
-__all__ = ["ENGINE_RUNNING_MIN_RPM", "HIGHWAY_MODE"]
+
+#: SAE J1979 Mode 01 PID 0x03 fuel-system status (first byte), by the single
+#: bit a conforming ECU sets. Standard, not vehicle-specific. Membership is
+#: always an explicit allowlist of these codes: a nonzero status is not
+#: "closed loop" (0x04 is open loop for load *or* decel fuel cut, 0x10 is
+#: closed loop with a feedback fault).
+FUEL_STATUS_STATES: dict[int, str] = {
+    0x01: "open_loop_insufficient_temperature",
+    0x02: "closed_loop",
+    0x04: "open_loop_load_or_fuel_cut",
+    0x08: "open_loop_system_failure",
+    0x10: "closed_loop_feedback_fault",
+}
+
+#: Healthy closed-loop feedback only. ``0x10`` is excluded on purpose: a
+#: model of normal trims must not learn from, or grade, rows the ECU itself
+#: reports as having a faulty feedback loop.
+CLOSED_LOOP_FUEL_STATES: tuple[int, ...] = (0x02,)
+
+
+def fuel_status_name(code: float) -> str:
+    """Stable name for a fuel-status value (``invalid(<n>)`` if not J1979)."""
+    as_int = int(code)
+    if float(as_int) == float(code) and as_int in FUEL_STATUS_STATES:
+        return FUEL_STATUS_STATES[as_int]
+    return f"invalid({code:g})"
+
+
+__all__ = [
+    "CLOSED_LOOP_FUEL_STATES",
+    "ENGINE_RUNNING_MIN_RPM",
+    "FUEL_STATUS_STATES",
+    "HIGHWAY_MODE",
+    "fuel_status_name",
+]

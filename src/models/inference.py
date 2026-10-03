@@ -30,6 +30,7 @@ from src.models.sequence_dataset import (
 )
 from src.models.sequence_protocol import TrainedSequenceModel
 from src.models.sequence_scoring import SequenceScoringRule, score_exclusions
+from src.preprocessing.normalization import ZScoreScaler
 from src.timefmt import format_timestamp
 
 log = logging.getLogger(__name__)
@@ -724,8 +725,6 @@ class SequenceInferenceEngine:
         self._scaler_means: np.ndarray[Any, np.dtype[np.float64]] | None
         self._scaler_stds: np.ndarray[Any, np.dtype[np.float64]] | None
         if trained.manifest.scaler is not None:
-            from src.preprocessing.normalization import ZScoreScaler
-
             scaler = ZScoreScaler.from_dict(dict(trained.manifest.scaler))
             # R04.15: the scaler's own denominator rule (std, or 1.0 under the
             # floor), never a re-derivation of it.

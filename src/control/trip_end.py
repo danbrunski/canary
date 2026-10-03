@@ -91,6 +91,7 @@ from src.analysis.digest import (
 from src.config import CanaryConfig
 from src.control import child_pool
 from src.storage.session_products import read_digest, read_digest_skipped
+from src.storage.sessions import is_session_dir_name
 from src.timefmt import format_timestamp
 
 if TYPE_CHECKING:
@@ -467,7 +468,6 @@ def record_trip_end_unobservable(
     directory that is not a session (replay output describes no drive).
     Returns what it wrote, or ``None``.
     """
-    from src.storage.sessions import is_session_dir_name
 
     if not is_session_dir_name(session_dir.name) or not session_dir.is_dir():
         return None

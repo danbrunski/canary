@@ -90,11 +90,21 @@ from src.analysis.labelled_events import (
     load_labelled_events,
 )
 from src.artifact_hash import sha256_file_or_none
+from src.behavior.behavior_models import BehaviorModels, load_behavior_models
 from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
-from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.decode.bindings import Bindings, load_bindings
 from src.decode.dids import DidMap, load_did_map
+from src.features.feature_cache import build_feature_frame_cache_key
+from src.features.feature_pipeline import (
+    DEFAULT_DIDS_PATH,
+    FeaturizedFrame,
+    _available_memory_bytes,
+    default_decode_inputs,
+    featurize_perturbed_frame,
+    featurize_wide_frame,
+    load_resampled_session,
+)
 from src.log import configure_logging
 from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
@@ -167,16 +177,6 @@ from src.preprocessing.anomaly_injection import (
 )
 from src.preprocessing.derived_store import DEFAULT_DERIVED_DIR, DerivedStore, on_the_pi
 from src.preprocessing.drives import parent_session
-from src.preprocessing.feature_cache import build_feature_frame_cache_key
-from src.preprocessing.feature_pipeline import (
-    DEFAULT_DIDS_PATH,
-    FeaturizedFrame,
-    _available_memory_bytes,
-    default_decode_inputs,
-    featurize_perturbed_frame,
-    featurize_wide_frame,
-    load_resampled_session,
-)
 from src.preprocessing.resampler import resample_config_for
 from src.session import RECORDED_SESSION_KINDS, SessionKind, session_sort_key
 from src.storage.sessions import recorded_sessions, session_started_at
@@ -2273,7 +2273,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, str | None]) -> int:
     started = time.time()
-    logging.getLogger("src.preprocessing.feature_pipeline").setLevel(logging.WARNING)
+    logging.getLogger("src.features.feature_pipeline").setLevel(logging.WARNING)
     # Scoped once, here (P02.11): featurization, the plausibility limits and
     # the tune registry all read the vehicle's data directory. This harness
     # used to featurize through the unscoped config — without the vehicle's

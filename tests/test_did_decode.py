@@ -22,7 +22,7 @@ from src.decode.dids import (
     DidMap,
     decode_did_rows,
 )
-from src.preprocessing.live import LiveFeatureSource
+from src.features.live import LiveFeatureSource
 from src.telemetry import TelemetryRecord
 from tests.configs import example_config
 

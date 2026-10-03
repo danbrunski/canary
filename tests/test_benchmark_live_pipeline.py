@@ -263,7 +263,7 @@ def test_partially_empty_run_is_rejected_and_quotes_no_hz(
     stage's cost. Every measured tick must complete, or the run is invalid and
     no Hz figure is reported.
     """
-    from src.preprocessing.live import LiveFeatureSource
+    from src.features.live import LiveFeatureSource
 
     real_tick = LiveFeatureSource.tick
     calls = {"n": 0}

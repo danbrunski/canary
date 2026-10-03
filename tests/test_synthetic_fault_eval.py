@@ -28,6 +28,7 @@ from src.columns import (  # noqa: E402
 )
 from src.config import CanaryConfig  # noqa: E402
 from src.decode.dids import load_repo_did_map
+from src.features.feature_pipeline import featurize_wide_frame  # noqa: E402
 from src.models.fusion import PersistenceGate  # noqa: E402
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.models.synthetic_fault_eval import (  # noqa: E402
@@ -36,7 +37,6 @@ from src.models.synthetic_fault_eval import (  # noqa: E402
     _if_anomalous,
     evaluate_detectors,
 )
-from src.preprocessing.feature_pipeline import featurize_wide_frame  # noqa: E402
 from tests.builders import IFConfig
 from tests.configs import example_config
 
@@ -199,7 +199,7 @@ def test_if_feature_subset_trains_and_evaluates_through_the_benchmark_harness(
     Proves the plumbing works for every candidate subset (not that any one of
     them wins — that's a real-data call documented in the roadmap doc, not a
     test assertion)."""
-    from src.preprocessing.feature_pipeline import (
+    from src.features.feature_pipeline import (
         restrict_isolation_forest_expansion,
         trainable_feature_columns,
     )
@@ -281,11 +281,11 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
     shows up per fault kind, gated through its own fresh ``PersistenceGate``
     key, with the same latency/late-flag bookkeeping as IF/fused."""
     pytest.importorskip("torch")
+    from src.features.feature_pipeline import sequence_feature_columns
     from src.models.inference import SequenceInferenceEngine
     from src.models.lstm_training import train_lstm_autoencoder
     from src.models.sequence_dataset import SequenceWindowDataset
     from src.models.synthetic_fault_eval import _sequence_anomalous
-    from src.preprocessing.feature_pipeline import sequence_feature_columns
 
     config = _config()
     resampled = _two_mode_resampled()

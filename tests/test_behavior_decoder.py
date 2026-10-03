@@ -9,12 +9,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.decode.accepted_baselines import (
+from src.behavior.accepted_baselines import (
     AcceptedBaselineOverride,
     DirectionalBand,
     Provenance,
 )
-from src.decode.behavior_decoder import (
+from src.behavior.behavior_decoder import (
     DEVIATION_COLUMN_PREFIX,
     append_deviation_columns,
     deviation,
@@ -22,7 +22,7 @@ from src.decode.behavior_decoder import (
     expected_value,
     expected_value_column,
 )
-from src.decode.behavior_models import (
+from src.behavior.behavior_models import (
     Axis1D,
     Axis2D,
     BehaviorModel1D,
@@ -601,7 +601,7 @@ def test_expired_override_is_inert_via_active_override_for() -> None:
     """An override past review_by is inert (2.2) — active_override_for
     already returns None for it, so the caller falls back to the model's
     own (here: no) deviation config, never applying a stale recentering."""
-    from src.decode.accepted_baselines import AcceptedBaselines
+    from src.behavior.accepted_baselines import AcceptedBaselines
 
     model = _make_coolant_model(None)
     point = {"obd:RUN_TIME": 100.0}

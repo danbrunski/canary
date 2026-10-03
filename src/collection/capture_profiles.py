@@ -22,8 +22,6 @@ from src.collection.bus_budget import (
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
 from src.config import CollectionConfig
-from src.decode.behavior_eligibility import required_channel_groups
-from src.decode.behavior_models import load_behavior_models
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
@@ -782,7 +780,7 @@ def _mode01_selection(profile: CaptureProfile) -> frozenset[str]:
     return frozenset(name.upper() for name in profile.mode01)
 
 
-def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:
+def channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str]) -> bool:
     """Can ``profile`` supply ``channel``, following derived inputs?
 
     Namespaces reach the vehicle by different routes, and flattening them to a
@@ -810,32 +808,10 @@ def _channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[st
             return True
         nested = seen | {channel}
         return all(
-            any(_channel_satisfied(candidate, profile, nested) for candidate in group)
+            any(channel_satisfied(candidate, profile, nested) for candidate in group)
             for group in groups
         )
     return True
-
-
-def model_input_warnings(
-    profile: CaptureProfile,
-    behavior_models_path: Path,
-) -> list[dict[str, Any]]:
-    """Name active behavior models starved by a saved default profile."""
-    if profile.name != DEFAULT_PROFILE_NAME or not behavior_models_path.exists():
-        return []
-    warnings: list[dict[str, Any]] = []
-    for model in load_behavior_models(behavior_models_path).models:
-        # Every channel the serving contract reads (B01.4): axes, output,
-        # rate-gate bases, engine-state/fuel-status/cold-start channels and
-        # any-of required context groups.
-        missing = sorted(
-            "|".join(group)
-            for group in required_channel_groups(model)
-            if not any(_channel_satisfied(channel, profile, frozenset()) for channel in group)
-        )
-        if missing:
-            warnings.append({"model": model.name, "missing_channels": missing})
-    return warnings
 
 
 class CaptureProfileStore:
@@ -883,7 +859,10 @@ class CaptureProfileStore:
         profile: CaptureProfile,
         *,
         previous_name: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> None:
+        """Save ``profile``. Which behavior models it would starve is
+        :func:`src.features.capture_inputs.model_input_warnings`'s to say: the
+        behavior models sit above collection (R09.6)."""
         catalog = self.load()
         target = (previous_name or profile.name).strip().lower()
         profiles = [item for item in catalog.profiles if item.name != target]
@@ -899,7 +878,6 @@ class CaptureProfileStore:
         profiles.append(profile)
         profiles.sort(key=lambda item: (item.name != DEFAULT_PROFILE_NAME, item.name))
         save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
-        return model_input_warnings(profile, self.behavior_models_path)
 
     def _check_kline(self, profile: CaptureProfile) -> None:
         """Resolve ``profile.kline`` exactly as the K-line collector will
@@ -935,6 +913,7 @@ class CaptureProfileStore:
 
 
 __all__ = [
+    "channel_satisfied",
     "CAPTURE_CONTEXT_MODE01",
     "DEFAULT_PROFILE_NAME",
     "STARTER_CATALOG_PATH",
@@ -945,6 +924,5 @@ __all__ = [
     "FUEL_DELIVERY_TUPLE",
     "default_profile",
     "load_capture_profiles",
-    "model_input_warnings",
     "seed_catalog",
 ]

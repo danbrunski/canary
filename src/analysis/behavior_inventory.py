@@ -5,7 +5,7 @@ may each model do, and which detectors consume its columns?" — the record a
 demotion, refit or rollout starts from:
 
 * the local artifact (path, content hash, per-model identity from
-  :func:`src.decode.behavior_models.artifact_identity`, serving status with
+  :func:`src.behavior.behavior_models.artifact_identity`, serving status with
   lifecycle and permitted uses, validation scope);
 * the profile policy governing it (``behavior_policy.yaml``), the validation
   criteria and accepted-baseline overrides beside it, and the calibration in
@@ -28,10 +28,9 @@ from pathlib import Path
 from typing import Any
 
 from src.analysis.behavior_validation import file_sha256, validation_document_path
-from src.config import CanaryConfig
-from src.decode.accepted_baselines import load_accepted_baselines
-from src.decode.behavior_decoder import deviation_model_name
-from src.decode.behavior_models import (
+from src.behavior.accepted_baselines import load_accepted_baselines
+from src.behavior.behavior_decoder import deviation_model_name
+from src.behavior.behavior_models import (
     BehaviorModels,
     artifact_identity,
     behavior_policy_path,
@@ -40,6 +39,7 @@ from src.decode.behavior_models import (
     serving_status,
     validation_scope,
 )
+from src.config import CanaryConfig
 from src.models.spec_producibility import (
     behavior_feature_conflicts,
     behavior_fingerprint_provenance,
