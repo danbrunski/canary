@@ -594,7 +594,7 @@ recomputes the rolling frame over the whole buffered window every tick.
     loading worker otherwise. Test:
     `test_decode_catalogs_load_once_per_process_and_reload_on_an_edit`.
 
-- [ ] **P02.6 Re-measure the slow tier.**
+- [~] **P02.6 Re-measure the slow tier.**
   - Run `scripts/mark_slow_tests.py` on a fresh full timing log and regenerate
     `tests/slow_tests.txt`.
   - Check that this week's new tests land where their measured times put them:
@@ -607,6 +607,36 @@ recomputes the rolling frame over the whole buffered window every tick.
   budget, with the time recorded, and CI still runs the slow tier.
 
   Size **S**.
+
+  *Re-measured 2026-10-03; the list is regenerated, the budget is not met at
+  2 s.*
+  - **Measured from the main checkout** on a quiet laptop (1-min load
+    1.05 at start), the CI tier with `--durations=0`, 474 s. It has to be the
+    checkout: corpus-backed tests read `sessions/...` relative to the repo
+    root and skip in any worktree, the gate's included. The first worktree
+    measurement missed the reference digest that way.
+  - **The new list:** `tests/slow_tests.txt` has **261 tests, 2041 s**,
+    against 134 on 2026-09-24. The suite grew, and many tests got slower. Two
+    quiet runs differ on ~40 tests near the 2 s line, which is boundary
+    jitter, so the generator's list stands unedited.
+  - **This week's tests land by their measured time:**
+    - the derived store: 13 tests at 2.9–13.3 s;
+    - bounded resample: 9.1 and 3.6 s;
+    - committees live: 5.5 s;
+    - lambda-delivery live parity: 45.7 and 89.2 s, and the cadence cases
+      6.0–10.3 s;
+    - the passive restart and K-line foreign-tester status tests at ~2 s;
+    - `test_digest_reproduces_the_reference_capture`: **240 s**, now `slow`.
+      It skips in the gate and CI, which have no corpus, but it was the
+      largest single cost of a local bare `pytest`.
+  - **Gate time.** The gate's own selection (`not integration and not
+    ml_training and not slow`, in a worktree, 12 workers, quiet) took
+    **121 s with the new list against 172 s with the old one**, 6,359 tests.
+  - **Why not ~90 s.** Tests between 0.5 and 2 s total ~737 CPU-seconds
+    (716 tests), about 60 s across 12 workers before collection and worker
+    start. Reaching ~90 s needs a lower threshold. 1.5 s moves 106 more tests
+    to CI-only for roughly 15 s. That is the operator's call, because AGENTS.md
+    defines `slow` as "measured at 2 s or more".
 
 ## Pi (measure with the Pi connected)
 
