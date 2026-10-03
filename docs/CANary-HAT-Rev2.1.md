@@ -68,7 +68,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6) | BT1 (net change) |
 | 13 | **U5 barometer: fix whatever the rev 2.0 investigation finds** (§13.5.6) | U5 — TBD |
 | 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
-| 15 | **Swap edges: GNSS (U7 + J4 SMA) moves to the terminal-block edge, some terminals move to the right edge** — rev 2.0's edge-mount SMA collides with the Pi 5's USB ports (§13.5.7) | U7, J4, J2/J3 (placement) |
+| 15 | **Fix J4 colliding with the Pi 5's USB ports** (§13.5.7): either swap edges (U7 + J4 to the terminal-block edge, some terminals to the right edge) or replace J4 with a U.FL and a U.FL→SMA pigtail, leaving everything in place | J4; U7, J2/J3 if edges swap |
 
 Roughly **+25 components** on a 65 × 56 mm board that already carries 57 — see
 §13.5.7 for where they go.
@@ -743,11 +743,41 @@ oscillator and passives — minus Y1 and C5/C6, which gives back the HC49's
 - **Try single-sided first**, with CAN1 packed near U3 so SPI0 stays short.
   Move to B.Cu only when the placement actually fails to close.
 
-#### J4 (SMA) collides with the Pi 5's USB ports — swap the GNSS and terminal edges
+#### J4 (SMA) collides with the Pi 5's USB ports — two ways out
 
 Found on the rev 2.0 stack (operator, 2026-10-02): **J4, the edge-mount SMA on
 the right edge (x ≈ 160.5, y ≈ 68.3, launching outward), physically collides
-with the Pi 5's USB ports** below it. Rev 2.1 fixes it by swapping edges:
+with the Pi 5's USB ports** below it. Two options, not yet decided:
+
+| Option | What changes | Cost |
+|---|---|---|
+| **A. Swap edges** (below) | U7 + J4 move to the bottom edge; some terminals move to the right edge | Re-layout of both edges; re-lands the harness; puts U7 next to the 12 V/K-line/CAN entry |
+| **B. U.FL on the board, U.FL→SMA pigtail** | J4 becomes a U.FL receptacle in place; U7, J2, J3 and the harness stay where they are | A pigtail and a place to mount its SMA bulkhead; U.FL's retention in vibration |
+
+**Option B — keep everything where it is.** Replace the edge-mount SMA with a
+U.FL (IPEX MHF1-class) receptacle at the same launch, and run a short U.FL→SMA
+bulkhead pigtail to the enclosure wall or a bracket. The SMA then sits wherever
+it clears, not where the board edge happens to be.
+- **What it keeps:** U7, BT1, the bias network, the K-line switch and both
+  terminal blocks stay in place, and §13.5.5's harness pin map stands as
+  written. This is the smaller change by far.
+- **The RF launch gets simpler, not harder.** A U.FL pad is much smaller than
+  the edge-mount SMA's footprint. Rework §3.6.1's launch (pads, anti-pad
+  notch, solid-ground connection) for the U.FL footprint, keeping the 50 Ω
+  trace to `U7-RF_IN` over solid In1.Cu.
+- **Loss is small.** A ~10 cm 1.13 mm pigtail costs a few tenths of a dB at
+  L1, which the active antenna's gain covers. The antenna bias passes
+  through a pigtail unchanged.
+- **Vibration is the real risk.** U.FL holds by friction and is rated for
+  only about 30 mating cycles. In a vehicle, secure it: a retention clip or
+  latching U.FL variant, or the pigtail tied down near the connector so cable
+  strain never reaches the receptacle. Mate it once at assembly and leave it;
+  connect and disconnect the antenna at the SMA bulkhead instead.
+- **Needs a home for the bulkhead.** An enclosure hole or a small bracket off
+  a standoff, clear of the USB ports.
+
+**Option A — swap edges:**
+
 
 - **GNSS moves to where the Phoenix terminals are now** (the bottom edge,
   y ≈ 93–96.5, J2 at x ≈ 109–139.5 and J3 at x ≈ 143–153 in rev 2.0). **U7
@@ -824,4 +854,4 @@ join the MCU's safe-state nets, and the header closes with no spare GPIO.
 | 15 | U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
 | 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided | Measure on the rev 2.0 stack (item 4), order to MPN |
-| 16 | Edge swap (§13.5.7): which terminal positions move to the right edge; U7 spacing from the 12 V/K-line/CAN entry | Placement, then a fit check on the rev 2.0 stack |
+| 16 | J4 fix (§13.5.7): edge swap or U.FL pigtail. If swap: which terminals move, U7 spacing from the 12 V/K-line/CAN entry. If U.FL: receptacle + retention part number, pigtail length, bulkhead mount | Decide, then placement and a fit check on the rev 2.0 stack |
