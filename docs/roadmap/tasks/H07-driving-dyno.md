@@ -587,6 +587,21 @@ under GPS. Defects a dyno would inherit:
   with less margin (H07.3's scaled speed removes it). Still owed on the truck:
   hand-selected steady cruise in each gear, to confirm 1st, 2nd, 4th and 6th
   and explain 4th's 2 %.
+  *2026-10-03 (desk, every September drive on disk):*
+  [`2026-10-03-gear-ratios-steady-cruise.md`](../../../data/analyses/2026-10-03-gear-ratios-steady-cruise.md).
+  - **Method.** Same-instant `decoded:ECM_RPM` / `gps:speed` pairs
+    (`align_pairs`, 60 ms) on steady cruise.
+  - **2nd–6th: confirmed.** Relative to 5th, the gears are 2.528 / 1.745 /
+    1.282 / 0.769 against published 2.518 / 1.743 / 1.283 / 0.769 (2nd
+    +0.4 % on 24 pairs; 3rd, 4th and 6th within 0.1 % on 412–5,952 pairs).
+  - **4th's 2 % is explained.** Every gear reads +1.85–2.34 % against the
+    profile, by one common factor in final drive × tyre, not the gearbox. With
+    the 4.08 regear, these drives imply a loaded circumference of about
+    **2.660 m**, not the profile's 2.609 m (5th: 9,611 pairs, 22 sessions,
+    p10–p90 ±1.1 %).
+  - **Operator decision owed:** whether to change
+    `tyre_loaded_circumference_m` (it moves the dyno's wheel force by ~2 %).
+  - **Still owed (truck):** 1st, which has 2 steady pairs on disk.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
   pairs in 3rd from ≤ 2,500 rpm to the limiter (supercharger NA1/NA5).
