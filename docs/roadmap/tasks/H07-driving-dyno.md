@@ -420,6 +420,42 @@ under GPS. Defects a dyno would inherit:
     job needs both.
   - the truck's curve (H07.12).
 
+  *Finding pulls: done at the desk 2026-10-03.*
+  - **`src/analysis/pulls.py`** holds `RpmSeries`, `Pull` and `detect_pulls`,
+    moved verbatim from `tools/pull_report.py`. The tool imports them back,
+    and its 14 tests pass unchanged.
+  - **`src/analysis/dyno_pulls.find_power_pulls(session, sources, driveline,
+    demand_channel)`** returns every rpm rise found, each as a `FoundPull`
+    with its window, rpm span and GPS course, and either a `PowerPull` or the
+    refusal:
+    - `lift_or_shift`: the detector's dip flag, refused before anything is
+      read;
+    - any `read_motion_inputs` or `DynoInputs.motion()` refusal, handed on
+      unchanged;
+    - `gear_unresolved`: the window's median implied overall ratio
+      (rpm·2πr/60v) is more than `POWER_GEAR_TOLERANCE` from every gear.
+      `compute_power` still checks every sample.
+
+    An empty list means no rpm rise, never candidates quietly dropped. The
+    rpm source is the profile's first `motion_sources.rpm`, held between
+    changes in a change-only session.
+  - **`label_headings`** groups pulls whose courses are within 30° (circular,
+    so 358° and 5° are one direction) into `course-<deg>` labels, which is
+    what `compute_power` pairs. A pull with no course is its own direction,
+    `course-unknown`.
+  - Refusal kinds `gear_unresolved` and `lift_or_shift` were added to
+    `RefusalKind`.
+  - `tests/test_dyno_pulls.py` (6): two opposite pulls found in gear with
+    their courses and labels, a part lift refused by name and never read, a
+    clutch-slip window refused rather than rounded to a gear, a motion
+    refusal handed on, heading grouping across north, and no rpm meaning no
+    pulls (a vehicle with no rpm source is a `ValueError`).
+  - **Not used:** `WotInventory`. WOT is `compute_power`'s own check on the
+    demand channel (`not_wot`), so this needs no digest provenance.
+  - **H07.9** can now go session → `find_power_pulls` → `label_headings` →
+    `compute_power`. Its job kind and page remain, and real coefficients
+    wait on H07.12.
+
   `src/analysis/dyno.py` `compute_power(pulls, *, driveline, test_mass_kg,
   road_load, squat, pitch_offset, wot, conditions, correction=None)` returns
   `DynoPower` or a `DynoRefusal`.

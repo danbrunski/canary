@@ -186,6 +186,9 @@ RefusalKind = Literal[
     "rpm_span_too_small",
     "too_few_bins",
     "correction_refused",
+    # dyno_pulls (H07.7): a found window that is no single-gear pull
+    "gear_unresolved",
+    "lift_or_shift",
 ]
 
 
