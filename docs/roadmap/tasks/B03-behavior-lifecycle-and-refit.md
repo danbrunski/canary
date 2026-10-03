@@ -289,7 +289,7 @@ Follow [B00](B00-behavior-models-README.md).
     `pnpm format:check` green.
   - **Remaining:** pull the build on the Pi and confirm a live off-map row reads
     `severity: null` with its `not_scored` kind.
-- [~] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
+- [x] **B03.10 — Retain a recoverable prior and close exact debts.** Preserve
   the previous compatible artifact set and its evidence; exercise existing
   rollback/loading behavior locally. Update D03 only for overlapping work
   actually completed. Record outstanding hardware/data checks explicitly.
@@ -305,6 +305,15 @@ Follow [B00](B00-behavior-models-README.md).
   (deployed identity unknown), and the outstanding hardware/data checks —
   deployed hash verification, live observation of demoted models staying
   non-alerting, D03.22 relabel.
+  *Closed 2026-10-03; the B03.9 deploy recorded every remaining check.*
+  - The Pi's pre-refresh set is preserved. It was git-tracked, so `2971d79^`
+    holds it, and the laptop also keeps
+    `data/nissan-xterra-2008/_prior/2026-09-24T024700/`.
+  - The deployed hash was verified on the Pi (`816c150b…e565`, 2026-09-24).
+  - Demoted models were seen staying non-alerting live, all 12
+    `diagnostic_only` with their reasons (2026-09-24 ~16:07Z, B03.9).
+  - The D03.22 relabel on the Pi is a D03.22 debt and is tracked there, as
+    this item asks.
 
 **Done when:** the chosen qualified set is deployed with measured replay/live
 evidence, demotions cannot silently reverse, and dependent models remain

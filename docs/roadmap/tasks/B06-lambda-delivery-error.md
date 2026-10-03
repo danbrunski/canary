@@ -24,7 +24,7 @@ a residual alone.
   Propagate fuel-cut sentinels, zero/invalid targets, sensor rails, missing
   channels and unknown calibration as named ineligible states, never numbers
   that manufacture a delivery error. Include negative-control channels.
-- [~] **B06.3 — Handle transport delay without test leakage.** Start with a
+- [x] **B06.3 — Handle transport delay without test leakage.** Start with a
   justified steady-target/steady-operation eligibility rule. Estimate any
   later lag model only from training/calibration drives, conditioned on
   relevant flow/regime if supported; freeze it before test evaluation.
@@ -60,6 +60,19 @@ a residual alone.
   constraint in a comment, so freezing one needs that schema field. A lag
   worth freezing needs a faster target read or sustained enrichment (still
   0–1 eligible enrichment rows per drive).
+  *Closed 2026-10-03; the remainder landed with R05.16 (`fb47212`,
+  2026-09-25).* The declaration became per regime and per commanded source:
+  `RegimeDelay` (`src/analysis/lambda_delivery.py`) has `status`, `seconds`,
+  `bracket_s`, `fitted_on` and `method`, and its validator refuses a frozen
+  delay that lacks any of them or lies outside its bracket.
+  `lambda_delivery.yaml` freezes the enrichment RAM-target route at **0.10 s,
+  bracket 0.0–0.5 s**, fitted on five named 2026-09-20..21 captures. Closed
+  loop (no target steps to resolve) and PID 0x44 (batch-locked to 0x24) are
+  `not_estimated`, each with its reason. The delay is weakly supported (sign
+  test p = 0.11, quantised to ~0.15 s by the ~0.9 Hz target poll; D04.3).
+  That is a statement about the value, and the bracket records it, so a
+  consumer can rerun at both ends. The leakage machinery above is unchanged.
+  A 50 ms answer is D04.3's job, not this one.
 - [x] **B06.4 — Share analysis and serving semantics.** Implement the
   relationship in the existing derived/model pipeline with B01's persisted
   eligibility. Reconcile analysis and live paths, including differing stored

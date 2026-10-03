@@ -46,6 +46,19 @@ once that stall is found.
   `::test_an_unverified_axis_cannot_carry_a_scale`, `::test_a_verified_axis_must_state_its_scale`,
   `::test_request_channel_names_the_memory_window_that_carries_the_trace`,
   `test_rom_maps_api.py::test_profile_driven_slots_and_unverified_tables`.
+  *2026-10-03 correction and lead:* the note above says no UpRev log carries
+  the X trace. One does:
+  `~/canary-data/kline-compare-20260924/UpRev_Log9-24-2026_10-10-51_AM.csv`
+  (650 rows, 2026-09-24) logs `Fuel Target X Trace` beside
+  `B-FUEL SCHDL (ms)`. Their ratio has a median of 1.446 (p25–p75
+  1.434–1.477, range 1.16–1.56), BFS 1.7–13.9 ms, and only 21 rows are past
+  the first load column (8.76 ms). That supports a proportional X ↔ BFS
+  relation, but it cannot flip `axis_mapping` on its own. UpRev reads its
+  channels one after another on the K-line, so the two are not same-instant.
+  The spread around 1.45 has not been separated into read skew and a real
+  offset. Coverage above the first column is thin. The capture asked for
+  above still decides. This log is the prior that capture should confirm or
+  refute.
 - [x] **W05.2 — Draw the ECM's cell.** From the live telemetry stream
   (`useTelemetryStream`), outline the cell the trace channels point at. Keep
   today's nearest-breakpoint / dashed-neighbour rendering for the *inferred*

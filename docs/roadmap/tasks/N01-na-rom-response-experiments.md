@@ -114,14 +114,19 @@ block wider than where the truck operates, not by knowing which cell it sits in.
   - Timing at matched rpm × MAF may advance slightly, because a lower fuel
     compensation lowers BFS, and the timing table is indexed on BFS. Predicted
     < 1°; measure it, don't assume it.
-  - **0x1208 discriminator.** DID 0x1208 (`ECM_AIR_CHARGE` in
-    `data/dids.yaml`) is catalogued as air per event × K. It stepped with K at
-    the 07-27 reflash, and its name waits on a same-instant comparison with
-    UpRev's BFS. Raising fuel compensation raises BFS (the shared-axis walk
-    measured in August). So if 0x1208 falls ~4 % at matched rpm × MAF, it
-    includes fuel compensation and behaves as BFS. If it does not move, it is
-    the K × air term upstream of fuel compensation. Either answer narrows the
-    candidate without UpRev.
+  - **BFS moves with the edit.** *Rewritten 2026-10-03, before any
+    prediction was frozen.* The earlier version asked whether 0x1208 was BFS.
+    P02.14 answered that (`ca80026`): 0x1208 is the base fuel schedule
+    (`derived:BASE_FUEL_SCHEDULE`, ms), verified against UpRev's own stream
+    definition. The August shared-axis walk measured raising fuel
+    compensation raising BFS, so at matched rpm × MAF in the edited cells,
+    `derived:BASE_FUEL_SCHEDULE` falls by about the edit (−3.9 %). The
+    control cells don't move. No fall means fuel compensation applies
+    downstream of BFS on this program, which is worth knowing before
+    N01.2's timing reading. BFS also indexes both the timing table and the
+    target-AFR map's load axis, so a falling BFS can move a row to a
+    neighbouring target cell. Score target-AFR cells on the BFS each row
+    actually read, not the pre-edit one.
 - [ ] **Outcome:** pass / fail / unresolved for each prediction, with n per cell.
   A pass says a fuel-table edit reaches delivered fuel 1:1 through closed loop.
   It cannot fix the bank 1 / bank 2 difference, which this table does not

@@ -312,6 +312,15 @@ estimated signal; they cannot establish how UpRev calculates its display.
   the operator's corpus choice. Also the Pi side: pull + restart, then
   `label_sessions.py` (the version bump makes it relabel) and a trip-sidecar
   read-through there, landing with or after the retrain.
+  **2026-10-03 status:** (3) is done. `refit_behavior_models.py` ran on
+  2026-09-23 on the relabelled corpus, and the set was promoted
+  diagnostic-only and deployed 2026-09-24 (B03.9, `a733430`). The sequence
+  half of (2) is done too: the r2 LSTM was retrained on 2026-09-23 and
+  calibrated on two held-out drives, a thin set the operator accepted. It has
+  served since 2026-09-24 (A06.3). **Still
+  owed:** the IF half of (2), which is D03.25 / A06.3, blocked on the
+  idle/highway drive floor; and the Pi-side `label_sessions.py` plus the
+  trip-sidecar read.
   _Found while checking a false "coolant decode" alarm during the 2026-09-18
   evening drive._
 
@@ -851,6 +860,15 @@ promote unverified bindings or to change a tune.
   **Waits on the truck:** a load step that actually drops system voltage by
   ≥ 0.4 V (or a KOEO/cranking window), and closed-loop holds overlapping WOT
   air charge in one session.
+  **2026-10-03, naming:** P02.14 (`ca80026`, operator decision 2026-10-02)
+  verified 0x1208 as the ECM's **base fuel schedule**: raw × 0.00049 ms,
+  405/405 rows against UpRev's own stream definition. The "air charge"
+  findings above still describe its behaviour. BFS is computed from air per
+  event and ignores enrichment and DFCO, which is exactly what those fits
+  measured. The channel keeps the name `did:ECM_AIR_CHARGE` and still decodes
+  raw, because it is a deployed IF/LSTM feature. `derived:BASE_FUEL_SCHEDULE`
+  is the same quantity in ms. Read "WOT air charge" in the remaining clause as
+  "WOT BFS".
 
 - [ ] **D03.10 Capture the missing UpRev instrument reference.** Today's two
   CANary paths already show a rich-side discrepancy: bank-1 voltage converted
@@ -920,6 +938,16 @@ promote unverified bindings or to change a tune.
     - the 409-on-tag-without-capture check;
     - effective MemoryMax, which isn't enforced (D03.21).
 
+  **2026-10-03:** two of those three are closed.
+  - MemoryMax is enforced: D03.21 is `[x]`, with
+    `/status.health.system.memory_limits_enforced` as the live check.
+  - A small session produced `digest.json` at trip end:
+    `2026-09-23T150658` (1,142 s). Its `computed_at` is 15:26:05Z, which is
+    the session end, so the GPS trip-end path wrote it; it was not read on
+    demand.
+  - **Still open:** the 409 on tag-without-capture, through the control
+    surface. A parked Pi is enough to check it; no drive is needed.
+
 - [ ] **D03.12 Follow up the secondary DID candidates if drive time remains.**
   Use short, focused profiles after D03.8, with provisional raw decodes and
   measured response widths; do not expand a 138-DID survey just to repeat it.
@@ -978,7 +1006,7 @@ explicit acquisition-time tolerances and no pre-averaging. Normalize raw probe
 logs into timestamped observations first if necessary; a sweep/pass number is
 not a common sampling instant.
 
-- [ ] **D03.14 Test whether calculated load provides a reconstructible BFS
+- [x] **D03.14 Test whether calculated load provides a reconstructible BFS
   axis.** **New question:** can the CAN load signal plus RPM replace a missing
   BFS read, rather than re-fit the injector constant? The proposed relationship
   is `BFS_ms = load_percent / 100 × reference_BFS_ms(RPM)`. It is a hypothesis
@@ -1016,8 +1044,16 @@ not a common sampling instant.
   estimated, never a ROM value. The evaluate and capture steps wait on the
   truck (a hybrid block with ENGINE_LOAD, RPM, MAF, INTAKE_TEMP and repeat
   plateaus).
+  *Closed 2026-10-03, superseded by P02.14 (`ca80026`).* The question assumed
+  BFS could not be read directly. It can: DID 0x1208 is the ECM's base fuel
+  schedule, raw × 0.00049 ms, matching UpRev's displayed B-FUEL SCHDL on
+  405/405 rows (operator decision 2026-10-02). `derived:BASE_FUEL_SCHEDULE`
+  carries it in ms and is the Xterra's target-map load axis. A load-based
+  reconstruction would only estimate a quantity that is now measured, so the
+  capture and evaluate steps are not owed. A load ↔ air-per-event consistency
+  check remains possible on `default` sessions, but nothing waits on it.
 
-- [ ] **D03.15 Search for a BFS-like DID by separating airflow, base schedule
+- [x] **D03.15 Search for a BFS-like DID by separating airflow, base schedule
   and actual injection.** **New question:** which remaining registers survive
   conditions that break the ordinary RPM/MAF/PW correlation? The earlier
   [BFS search](../../../data/analyses/bfs-provider-search-20260805.md) rejected
@@ -1054,6 +1090,12 @@ not a common sampling instant.
   to 1,861, only at high load and cruise
   ([evidence](../../../data/analyses/2026-09-22-d03-d04-desk-pass.md)). The
   capture and the positive-control comparison wait on the truck.
+  *Closed 2026-10-03, answered by P02.14 (`ca80026`).* The BFS register is
+  0x1208 itself, verified against UpRev's own stream definition (raw ×
+  0.00049 ms, 405/405 rows) rather than by correlation, so the search has its
+  answer. 0x122B and 0x122C stay unexplained load-sensitive registers. They
+  are no longer BFS candidates, and a future K-line reference can name them
+  without reopening this item.
 
 - [ ] **D03.16 Check known Mode 21 blocks for live data absent from the DID
   search.** **New question:** did Mode 22-only discovery miss an independently

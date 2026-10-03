@@ -84,6 +84,15 @@ what the code says it means.
       retrained artifact on the Pi.
     - The A02 harness follows the manifest's mask rule (A04, pending its
       commit).
+  - *2026-10-03:* both are done except the drive.
+    - **Retrain:** the r2 LSTM was trained with `observation_mask:
+      arrived_sample` (250 columns, `model.pt` `3edfd8fe…99f2`). It was
+      deployed and hash-checked on the Pi on 2026-09-24 (A06.3).
+    - **Harness:** `BatchedSequenceScorer` reads the artifact's rule
+      through `observation_mask_from_schema`
+      (`src/models/evaluation_detectors.py`).
+    - **Still owed (truck):** serving validation on an engine-running,
+      non-passive drive. It is the same drive as A06.2 and A01.7.
 - [~] **A03.2 — Condition on driving conditions; reconstruct engine
   responses.** Split the columns into:
   - *inputs*: operator commands and environment, such as rpm, throttle or

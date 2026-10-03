@@ -224,6 +224,17 @@ opportunistic on any sustained climb.
   - Still waits on a capture with 0x44 and 0x24 in separate batches (or the
     RAM target polled faster) for a 50 ms answer. Reproduce the above with
     `scripts/lambda_delivery_evidence.py --fit-enrichment-delay`.
+  **2026-10-03 correction to the 09-22 "waits on" note:** the schema already
+  had per-batch grouping when that note was written. `mode01_batch_groups`
+  (`src/collection/capture_profiles.py`, validated as a disjoint subset)
+  landed in `7ad695c` on 2026-09-20. The `afr-delay-research` profile uses
+  it, putting 0x44 and 0x24 in different partitions with
+  `max_tuple_skew_s: 0.05`. That profile was retired into
+  `capture_profiles.archive.yaml` on 2026-09-21 without ever being captured,
+  and neither live profile (`default`, `tuning`) splits the pair. So the
+  blocker is a capture, not a feature. Either restore `afr-delay-research` to
+  the catalog for one drive, or give `tuning` the same two groups. That is an
+  operator choice, because `tuning` is the one tuning profile by design.
 
 - [x] **D04.4 Where is `ECM_MAF_GPS` linear against Mode 01 MAF?** Block 6
   gave the whole-session answer — slope 0.934, r² 0.909, `drifting`, with the

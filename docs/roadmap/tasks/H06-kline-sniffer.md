@@ -124,11 +124,23 @@ starts mid-stream loses the definition, as UpRev's ignition capture did on
   (`tools/import_uprev_log.py`) and compare each sniffed channel with the CSV
   channel of the same quantity through `compare_channels`. **Accept:** 1:1
   for every channel the definition names; recorded in the research doc.
-- [ ] **H06.6 A scan tool's protocol.** **Do (truck):** edge-capture an
+- [x] **H06.6 A scan tool's protocol.** **Do (truck):** edge-capture an
   NT510 (or another scan tool) session on this truck with `kline_edges.py`,
   decode it, and record the protocol (baud, init, addresses) in the vehicle
   skill. If it is KWP at 10400, H06.1 covers it; if not, add its framing to
   the decoder. **Accept:** one decoded session in `data/analyses/`.
+  *Done 2026-09-24, ticked 2026-10-03:*
+  [`2026-09-24-abs-kline-scan-tool.md`](../../../data/analyses/2026-09-24-abs-kline-scan-tool.md)
+  decodes the operator's scan tool on the ABS live-data screen, KOEO, session
+  `2026-09-24T162507`. It is KWP2000 at 10,400 baud: StartCommunication
+  `81 28 FC 81 26` to ABS address 0x28 from tester 0xFC, then length-only
+  headers, `1A 80`, and a `22 <DID>` cycle at ~2 req/s. So the existing
+  decoder (H06.1) covers it, and no new framing was needed. The vehicle
+  skill's `references/diagnostic-access.md` records the ABS module at 0x28.
+  It was sniffed at the UART, not edge-captured with `kline_edges.py`. Edges
+  are only needed when the framing is unknown, and here it decoded. The
+  tooling gap it exposed (bare `DID_xxxx` names colliding with the ECM's) is
+  K01's.
 - [ ] **H06.7 HAT measurement 2, remainder.** Sniff UpRev with the pull-up
   **on**, once, deliberately, to answer whether the 1 kΩ disturbs a foreign
   session. Whatever the answer, the rule above stands; the measurement decides
