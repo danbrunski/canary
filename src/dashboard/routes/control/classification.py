@@ -118,7 +118,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         # request if the trip-end hook (Task 5.4) hasn't already written
         # digest.json for this session.
         from src.control.digest import get_session_digest_refusal
-        from src.control.trip_end import handle_trip_end_off_loop
+        from src.control.trip_end import handle_trip_end_off_loop, refresh_stale_tuning_off_loop
         from src.storage.session_products import read_digest
 
         try:
@@ -156,7 +156,14 @@ def build_router(ctx: ControlContext) -> APIRouter:
                     },
                 )
             raise HTTPException(status_code=404, detail=f"no digest for session {session_id!r}")
-        return result
+        # R05.16: a tuning section from an older delivery engine is recomputed
+        # in the same bounded child before it is served. When it cannot be
+        # (a capture is recording, another request has it, the child failed),
+        # the stored digest is served with ``tuning_refresh`` saying so.
+        result, note = await refresh_stale_tuning_off_loop(
+            session_dir, config, result, catalog_db=config.daemon.catalog_db
+        )
+        return result if note is None else {**result, "tuning_refresh": note}
 
     @router.get("/control/classifications/summary")
     def get_corpus_classification_summary() -> dict[str, Any]:

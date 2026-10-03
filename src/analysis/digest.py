@@ -707,6 +707,65 @@ def persist_digest(
     return read_digest(session_dir)
 
 
+def tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] | None:
+    """:func:`_tuning_section` for the digest child's tuning refresh (R05.16)."""
+    return _tuning_section(session_dir, config)
+
+
+def stale_tuning_version(payload: dict[str, Any]) -> int | None:
+    """The stored tuning section's schema version when it predates
+    :data:`~src.analysis.tuning_digest.TUNING_SCHEMA_VERSION`, else ``None``.
+
+    Nothing re-reads a digest once it is written (A06.5), so a section
+    computed by an older engine stays on disk: a section without
+    ``schema_version`` is 1, the 1 s last-cell delivery engine, whose numbers
+    are not comparable with the acquisition-paired 2 (R05.16). Only the tuning
+    section may be refreshed. It reads nothing but the session, whereas a
+    whole recompute's anomaly window would end at "now" (A06.5). A recorded
+    section failure is a failure, not stale numbers, and is not retried here.
+    """
+    from src.analysis.tuning_digest import TUNING_SCHEMA_VERSION
+
+    section = payload.get("tuning")
+    if not isinstance(section, dict) or section.get("kind") == "failed":
+        return None
+    version = section.get("schema_version", 1)
+    if not isinstance(version, int) or version >= TUNING_SCHEMA_VERSION:
+        return None
+    return version
+
+
+def write_refreshed_tuning(
+    session_dir: Path,
+    payload: dict[str, Any],
+    section: dict[str, Any] | None,
+    *,
+    from_version: int,
+    now: datetime | None = None,
+    catalog_db: Path | None = None,
+) -> dict[str, Any] | None:
+    """Replace a stale tuning section in ``digest.json``, and say so.
+
+    Everything else in the stored digest is kept as written at trip end.
+    ``tuning_refreshed`` records which section version was replaced and
+    when, so a refreshed digest never passes for one computed whole.
+    """
+    from src.analysis.tuning_digest import TUNING_SCHEMA_VERSION
+
+    refreshed = {
+        **payload,
+        "tuning": section,
+        "tuning_refreshed": {
+            "from_schema_version": from_version,
+            "to_schema_version": TUNING_SCHEMA_VERSION,
+            "refreshed_at": _format_timestamp(datetime.now(UTC) if now is None else now),
+        },
+    }
+    write_json_sidecar(session_dir / DIGEST_FILENAME, refreshed, default=_json_default)
+    record_session_best_effort(catalog_db, session_dir)
+    return read_digest(session_dir)
+
+
 def get_or_compute_digest(
     session_dir: Path,
     config: CanaryConfig,
