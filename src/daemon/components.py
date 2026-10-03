@@ -15,6 +15,7 @@ from src.alerts.events import AnomalyEvent
 from src.alerts.notifier import Notifier
 from src.alerts.tuning import AlertTuner, load_tuning_config
 from src.analysis.gps_tracker import GpsTracker
+from src.collection.imu_collector import ImuHealth
 from src.collection.obd_scheduler import ForcePollTrigger, FreezeFrameTrigger
 from src.config import CanaryConfig, DetectorRole
 from src.control.audit import ControlAuditLogger
@@ -113,6 +114,9 @@ class DaemonComponents:
     replay_controller: ReplayController | None = None
     #: GPS live-state + trip odometer, or ``None`` when no GPS is enabled.
     gps_tracker: GpsTracker | None = None
+    #: The IMU collector's counters for ``/status.imu`` (H02.5), or ``None``
+    #: when no IMU is configured.
+    imu_health: ImuHealth | None = None
     #: Live read/swap of the active sequence-detector backbone (set in
     #: ``build_components`` once the component record exists).
     sequence_detector_controller: SequenceDetectorController | None = None
@@ -227,6 +231,7 @@ def build_components(config: CanaryConfig, *, load_models: bool = True) -> Daemo
             # from vehicle speed first, so a GPS-less install still digests.
             GpsTracker(state_path=config.daemon.trip_state)
         ),
+        imu_health=ImuHealth() if config.hardware.imu.enabled else None,
         idle_shutdown=(
             IdleShutdownMonitor.from_config(config.collection.idle_shutdown)
             if config.collection.idle_shutdown.enabled

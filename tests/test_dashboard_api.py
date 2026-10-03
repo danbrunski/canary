@@ -1553,3 +1553,60 @@ def test_status_view_rejects_an_unknown_projection(
     trying to avoid."""
     response = _client(config, anomalies_dir).get("/status", params={"view": "brief"})
     assert response.status_code == 422
+
+
+def _with_imu(config: CanaryConfig) -> CanaryConfig:
+    return config.model_copy(
+        update={
+            "hardware": config.hardware.model_copy(
+                update={"imu": config.hardware.imu.model_copy(update={"source": "lsm6dsox"})}
+            )
+        }
+    )
+
+
+def test_status_route_carries_imu_health(config: CanaryConfig, tmp_path: Path) -> None:
+    """H02.5: freshness, achieved rate, FIFO overruns and queue drops beside GPS."""
+    import time
+
+    from src.collection.imu_collector import ImuHealth
+
+    health = ImuHealth(configured_hz=104.0, overruns=2, queue_dropped=5, undated=1)
+    now = time.time()
+    # 104 Hz on the samples' own clock, read in two late FIFO drains.
+    stamps = [now - 1.0 + i / 104.0 for i in range(105)]
+    health.observe_samples(stamps[:60])
+    health.observe_samples(stamps[60:])
+
+    app = create_app(_with_imu(config), anomalies_dir=tmp_path / "anomalies-imu", imu_health=health)
+    imu = TestClient(app).get("/status").json()["imu"]
+
+    assert imu["fresh"] is True
+    assert imu["achieved_hz"] == pytest.approx(104.0, abs=0.1)
+    assert imu["configured_hz"] == 104.0
+    assert imu["samples"] == 105
+    assert (imu["overruns"], imu["queue_dropped"], imu["undated"]) == (2, 5, 1)
+    assert imu["age_seconds"] is not None and imu["age_seconds"] < 5.0
+    # Full view only, like GPS: the compact view stays scalar counters.
+    assert "imu" not in TestClient(app).get("/status?view=compact").json()
+
+
+def test_status_imu_is_stale_past_the_bus_freshness_bound(config: CanaryConfig) -> None:
+    from src.collection.imu_collector import ImuHealth
+    from src.dashboard.status import FRESHNESS_THRESHOLD_SECONDS, imu_status
+
+    health = ImuHealth()
+    health.observe_samples([1000.0, 1000.01])
+    assert imu_status(health, now=1000.01 + FRESHNESS_THRESHOLD_SECONDS)["fresh"] is True
+    stale = imu_status(health, now=1000.01 + FRESHNESS_THRESHOLD_SECONDS + 1.0)
+    assert stale["fresh"] is False
+    # Before any sample there is no age and no rate, which is not zero.
+    empty = imu_status(ImuHealth(), now=1000.0)
+    assert (empty["fresh"], empty["age_seconds"], empty["achieved_hz"]) == (False, None, None)
+
+
+def test_status_imu_is_absent_without_an_imu(config: CanaryConfig, tmp_path: Path) -> None:
+    from src.collection.imu_collector import ImuHealth
+
+    app = create_app(config, anomalies_dir=tmp_path / "anomalies-no-imu", imu_health=ImuHealth())
+    assert TestClient(app).get("/status").json()["imu"] is None

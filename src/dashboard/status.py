@@ -11,6 +11,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
 from src.collection import bus_budget as bus_budget_gate
 from src.collection import tuning_profile, tx_gate
+from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.control.tuning_readiness import build_tuning_readiness
@@ -76,6 +77,9 @@ class StatusSnapshot:
     #: Latest GPS fix snapshot (fix quality, satellites, lat/long/alt/speed/
     #: heading, age) or ``None`` when no GPS is configured/observed.
     gps: dict[str, Any] | None = None
+    #: IMU collector health (H02.5) — :meth:`ImuHealth.snapshot` plus
+    #: ``fresh`` — or ``None`` when no IMU is configured.
+    imu: dict[str, Any] | None = None
     #: Cumulative trip odometer (distance + moving time) from the GPS stream,
     #: or ``None`` when no GPS is configured.
     trip: dict[str, Any] | None = None
@@ -147,6 +151,7 @@ class StatusSnapshot:
             "health": self.health,
             "vehicle_state": (None if self.vehicle_state is None else self.vehicle_state.to_dict()),
             "gps": self.gps,
+            "imu": self.imu,
             "trip": self.trip,
             "profile": self.profile,
             "detectors": self.detectors,
@@ -380,6 +385,21 @@ class StatusSources:
     #: S01.1 — ``StartupTimeline.snapshot()`` (seconds from process start per
     #: startup stage), or ``None`` when no monitor is wired.
     startup: dict[str, Any] | None = None
+    #: H02.5 — the IMU collector's counters (:func:`imu_status`), or ``None``
+    #: when no IMU is configured. Full view only, like GPS.
+    imu: dict[str, Any] | None = None
+
+
+def imu_status(health: ImuHealth, *, now: float | None = None) -> dict[str, Any]:
+    """``/status.imu``: the collector's counters plus ``fresh``.
+
+    ``fresh`` uses :data:`FRESHNESS_THRESHOLD_SECONDS`, the same bound the
+    bus freshness behind ``vehicle_state`` uses, so "the IMU is live" and
+    "the bus is live" mean the same thing.
+    """
+    snapshot = health.snapshot(now=datetime.now(UTC).timestamp() if now is None else now)
+    age = snapshot["age_seconds"]
+    return {"fresh": age is not None and age <= FRESHNESS_THRESHOLD_SECONDS, **snapshot}
 
 
 def gather_status_sources(
@@ -392,6 +412,7 @@ def gather_status_sources(
     inference_timing: InferenceTimingRecorder | None = None,
     vehicle_state_cache: VehicleStateCache | None = None,
     live_source: Any = None,
+    imu_health: ImuHealth | None = None,
 ) -> StatusSources:
     """Read every source both ``/status`` views need, exactly once.
 
@@ -421,6 +442,11 @@ def gather_status_sources(
         capture_profile=_capture_snapshot(storage_writer),
         bus_budget=bus_budget_gate.snapshot(),
         startup=health_monitor.startup.snapshot() if health_monitor is not None else None,
+        imu=(
+            imu_status(imu_health)
+            if imu_health is not None and config.hardware.imu.enabled
+            else None
+        ),
     )
 
 
@@ -632,6 +658,7 @@ def build_status(
         # from vehicle speed), but its fix snapshot and GPS-integrated
         # odometer mean nothing there — report them as absent, not as 0 km.
         gps=gps_tracker.gps_status() if gps_tracker is not None and gps_on else None,
+        imu=sources.imu,
         trip=gps_tracker.trip_status() if gps_tracker is not None and gps_on else None,
         profile=_active_profile(config),
         detectors=detectors,

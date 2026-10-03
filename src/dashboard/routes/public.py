@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from src.alerts.emitter import AnomalyEventEmitter
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.llm_assist import LlmAssistCardStore, card_to_dict
+from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
 from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
@@ -60,6 +61,7 @@ def register_public_routes(
     dtc_state: DtcState | None = None,
     monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
+    imu_health: ImuHealth | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
     accepted_baselines_path: Path = DEFAULT_ACCEPTED_BASELINES_PATH,
     storage_writer: Any = None,
@@ -96,6 +98,7 @@ def register_public_routes(
             inference_timing=inference_timing,
             vehicle_state_cache=vehicle_state_cache,
             live_source=live_source,
+            imu_health=imu_health,
         )
         if view == "compact":
             return compact_status(sources)

@@ -19,9 +19,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import Protocol
+from collections import deque
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Protocol
 
 from src.collection.i2c_dev import LinuxI2cBus, RegisterBus
 from src.collection.lsm6dsox import FifoBatch, Lsm6dsox
@@ -61,14 +62,66 @@ def linux_bus_factory(config: ImuConfig) -> RegisterBus:
     return LinuxI2cBus(config.i2c_bus, config.i2c_address)
 
 
+#: The achieved rate is measured over the samples' own timestamps in this
+#: trailing window. Sample time, not read time: a FIFO drained late still dates
+#: its samples correctly, where a count over wall clock would read the drain
+#: schedule (AGENTS.md, ``achieved_hz_capture``).
+RATE_WINDOW_SECONDS = 5.0
+
+
 @dataclass
 class ImuHealth:
-    """Cumulative counters, exposed for ``/status`` (H02.5)."""
+    """Cumulative counters and the achieved rate, exposed on ``/status`` (H02.5)."""
 
     samples: int = 0
     overruns: int = 0
     undated: int = 0
+    #: Records the ingest queue refused (``QueueDropCounter``), cumulative.
+    queue_dropped: int = 0
     last_sample_at: float | None = None
+    #: The ODR the chip was configured for, so the achieved rate has a reference.
+    configured_hz: float | None = None
+    _recent: deque[float] = field(default_factory=deque, repr=False)
+
+    def observe_samples(self, stamps: Sequence[float]) -> None:
+        """Count dated samples and keep the trailing window of their stamps."""
+        if not stamps:
+            return
+        self.samples += len(stamps)
+        self.last_sample_at = stamps[-1]
+        self._recent.extend(stamps)
+        oldest = stamps[-1] - RATE_WINDOW_SECONDS
+        while self._recent and self._recent[0] < oldest:
+            self._recent.popleft()
+
+    def achieved_hz(self) -> float | None:
+        """Samples per second of sample time over the trailing window.
+
+        ``None`` with fewer than two samples in the window: there is no
+        interval to divide by, which is not a rate of zero.
+        """
+        if len(self._recent) < 2:
+            return None
+        span = self._recent[-1] - self._recent[0]
+        if span <= 0:
+            return None
+        return (len(self._recent) - 1) / span
+
+    def snapshot(self, *, now: float) -> dict[str, Any]:
+        """The ``/status.imu`` counters; ``now`` is host epoch seconds."""
+        achieved = self.achieved_hz()
+        return {
+            "age_seconds": (
+                None if self.last_sample_at is None else round(now - self.last_sample_at, 1)
+            ),
+            "configured_hz": self.configured_hz,
+            "achieved_hz": None if achieved is None else round(achieved, 1),
+            "rate_window_seconds": RATE_WINDOW_SECONDS,
+            "samples": self.samples,
+            "overruns": self.overruns,
+            "undated": self.undated,
+            "queue_dropped": self.queue_dropped,
+        }
 
 
 def batch_to_records(batch: FifoBatch) -> list[TelemetryRecord]:
@@ -124,11 +177,10 @@ async def collect_imu(
                     extra={"imu_overruns": stats.overruns},
                 )
             stats.undated += batch.undated
-            stats.samples += len(batch.samples)
-            if batch.samples:
-                stats.last_sample_at = batch.samples[-1].timestamp
+            stats.observe_samples([sample.timestamp for sample in batch.samples])
             for record in batch_to_records(batch):
                 put_nowait_or_drop(queue, record, on_drop=on_drop)
+            stats.queue_dropped = on_drop.dropped
     finally:
         await asyncio.to_thread(device.stop)
 
@@ -152,6 +204,7 @@ async def collect_imu_from_config(
     settings = settings_from_config(config)
     drop_counter = QueueDropCounter("imu")
     stats = ImuHealth() if health is None else health
+    stats.configured_hz = settings.odr_hz
 
     async def _attempt(capture: Callable[[RegisterBus], None]) -> None:
         bus = bus_factory(config)

@@ -591,6 +591,7 @@ async def run_daemon(
             force_poll_trigger=components.force_poll_trigger,
             can_receive_stats_callback=can_receive_stats_observer(components.health_monitor),
             obd_handoff_stats_callback=obd_handoff_stats_observer(components.health_monitor),
+            imu_health=components.imu_health,
         )
 
     # The trip tracker (D03.29) reads the binding declared ``quantity:

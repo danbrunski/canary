@@ -99,6 +99,8 @@ export interface StatusResponse {
   gps?: GpsStatus | null;
   /** Cumulative GPS trip odometer; null when no GPS is configured. */
   trip?: TripStats | null;
+  /** HAT IMU collector health (H02.5); null when no IMU is configured. */
+  imu?: ImuStatus | null;
   /** Active sequence-detector backbone + what's available to switch to (9.6). */
   sequence_detector?: SequenceDetectorStatus | null;
   /** Active vehicle profile {slug, name, vin}; null on a non-scoped daemon. */
@@ -273,6 +275,23 @@ export interface GpsStatus {
   speed: number | null;
   heading: number | null;
   hdop: number | null;
+}
+
+/** `/status.imu` — the IMU collector's counters (H02.5). `achieved_hz` is
+ *  measured over the samples' own timestamps in the trailing
+ *  `rate_window_seconds`, and is null with fewer than two samples there.
+ *  `age_seconds` is null until the first sample; `fresh` uses the same
+ *  threshold as the bus freshness behind `vehicle_state`. */
+export interface ImuStatus {
+  fresh: boolean;
+  age_seconds: number | null;
+  configured_hz: number | null;
+  achieved_hz: number | null;
+  rate_window_seconds: number;
+  samples: number;
+  overruns: number;
+  undated: number;
+  queue_dropped: number;
 }
 
 /** `/status.trip` — cumulative trip odometer integrated from GPS speed,

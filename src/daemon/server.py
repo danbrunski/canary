@@ -65,6 +65,7 @@ def _build_app(components: DaemonComponents) -> Any:
         dtc_state=components.dtc_state,
         monitor_state=components.monitor_state,
         gps_tracker=components.gps_tracker,
+        imu_health=components.imu_health,
         sequence_detector_controller=components.sequence_detector_controller,
         force_poll_trigger=components.force_poll_trigger,
         inference_timing=components.inference_timing,

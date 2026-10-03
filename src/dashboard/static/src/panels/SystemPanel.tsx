@@ -8,7 +8,7 @@ import {
   definitionValueClass,
   placeholderClass,
 } from "../styles";
-import type { GpsStatus, PowerStatus, StatusResponse, WorkbenchItem } from "../types";
+import type { GpsStatus, ImuStatus, PowerStatus, StatusResponse, WorkbenchItem } from "../types";
 import { STALE_THRESHOLD_MS, computeFreshness } from "../util/freshness";
 import {
   type Tone,
@@ -80,6 +80,18 @@ function gpsFix(g: GpsStatus): { label: string; tone: Tone | undefined } {
   return { label: acquiring, tone: "warn" };
 }
 
+/** IMU collector → label + tone (H02.5). Like GPS, the IMU is optional, so a
+ *  missing or stale stream warns rather than errs. FIFO overruns and queue
+ *  drops are lost samples, so any since start also warns. */
+export function imuHealth(imu: ImuStatus): { label: string; tone: Tone | undefined } {
+  if (imu.age_seconds == null) return { label: "no samples", tone: "warn" };
+  if (!imu.fresh) return { label: `stale · ${imu.age_seconds.toFixed(1)} s`, tone: "warn" };
+  const configured = imu.configured_hz != null ? ` / ${imu.configured_hz.toFixed(0)}` : "";
+  const label =
+    imu.achieved_hz == null ? "rate —" : `${imu.achieved_hz.toFixed(1)}${configured} Hz`;
+  return { label, tone: imu.overruns + imu.queue_dropped > 0 ? "warn" : "ok" };
+}
+
 /** System health: storage, host vitals (Pi temp/CPU/memory), latest
  *  session, vehicle line, data freshness.
  *
@@ -100,6 +112,8 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
   const powerEvents = pastPowerEvents(power);
   const gps = status?.gps ?? null;
   const gpsFixState = gps ? gpsFix(gps) : null;
+  const imu = status?.imu ?? null;
+  const imuState = imu ? imuHealth(imu) : null;
   const blindModes = status?.detectors?.isolation_forest.blind_modes ?? [];
   const can0 = status?.health?.can0 ?? null;
   const can0Growth = can0 ? can0.since_start.rx_over_errors + can0.since_start.rx_dropped : 0;
@@ -176,6 +190,18 @@ export function SystemPanel({ status, channels, statusError, onNavigate }: Syste
                 <span className="text-fg-dim">
                   {" "}
                   (+{can0.since_start.rx_over_errors} / +{can0.since_start.rx_dropped} since start)
+                </span>
+              </dd>
+            </div>
+          )}
+          {imu && imuState && (
+            <div className={definitionRowClass}>
+              <dt className={definitionTermClass}>imu</dt>
+              <dd className={cn(definitionValueClass, toneClass(imuState.tone))}>
+                {imuState.label}
+                <span className="text-fg-dim">
+                  {" "}
+                  · {imu.overruns} overrun / {imu.queue_dropped} dropped
                 </span>
               </dd>
             </div>

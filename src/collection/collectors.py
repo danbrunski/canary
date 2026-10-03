@@ -31,7 +31,7 @@ from src.collection.can_obd_collector import (
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
-from src.collection.imu_collector import collect_imu_from_config
+from src.collection.imu_collector import ImuHealth, collect_imu_from_config
 from src.collection.kline_collector import KlineCollector
 from src.collection.obd_scheduler import (
     ForcePollTrigger,
@@ -66,6 +66,7 @@ def default_collectors(
     force_poll_trigger: ForcePollTrigger | None = None,
     can_receive_stats_callback: ReceiveStatsCallback | None = None,
     obd_handoff_stats_callback: Callable[[CollectorHandoffStats], None] | None = None,
+    imu_health: ImuHealth | None = None,
 ) -> list[CollectorStarter]:
     """Config -> collector starters.
 
@@ -73,6 +74,8 @@ def default_collectors(
     path's cumulative counters — used by the two branches that run the
     standalone sniffer (OBD ``disabled``, and legacy ELM327 beside passive
     CAN); the ``canable`` branch's combined collector has its own loop.
+    ``imu_health`` (H02.5) is the record the IMU collector keeps its counters
+    in, so ``/status`` can read them.
     """
     capture_store = CaptureProfileStore(
         config.daemon.capture_profiles,
@@ -101,7 +104,7 @@ def default_collectors(
     aux_collectors = [
         *_gps_collectors(config, reconnect_policy),
         *_sensor_collectors(config, reconnect_policy),
-        *_imu_collectors(config, reconnect_policy),
+        *_imu_collectors(config, reconnect_policy, health=imu_health),
         *_supply_voltage_collectors(config, reconnect_policy),
         *_kline_collectors(config),
     ]
@@ -263,6 +266,8 @@ def _sensor_collectors(
 def _imu_collectors(
     config: CanaryConfig,
     reconnect_policy: ReconnectPolicy,
+    *,
+    health: ImuHealth | None = None,
 ) -> list[CollectorStarter]:
     """The IMU collector, or empty when no IMU is configured.
 
@@ -280,7 +285,9 @@ def _imu_collectors(
         )
 
     async def imu_collector(queue: asyncio.Queue[TelemetryRecord], stop: asyncio.Event) -> None:
-        await collect_imu_from_config(imu, queue, stop, reconnect_policy=reconnect_policy)
+        await collect_imu_from_config(
+            imu, queue, stop, reconnect_policy=reconnect_policy, health=health
+        )
 
     return [imu_collector]
 

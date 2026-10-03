@@ -300,10 +300,44 @@ Nothing in `src/` reads it. Three gaps beyond the collector:
     - After the stale-sidecar fix (speed source pinned on re-resolve): imu_*
       (6 files) and autotag (4 files), 109 passed; ruff, format and `mypy src`
       clean.
-- [ ] **H02.5 Health on `/status`.** `imu` freshness, achieved sample rate,
+- [x] **H02.5 Health on `/status`.** `imu` freshness, achieved sample rate,
   FIFO overruns and the drop counter, in `/status` and the MCP `get_status`
   payload, alongside the GPS fields. **Accept:** route test; the dashboard
   shows it where it shows GPS health.
+  *Done 2026-10-03.*
+  - **Counters.** `ImuHealth` (`src/collection/imu_collector.py`) now also
+    carries `queue_dropped` (the collector's `QueueDropCounter`) and
+    `configured_hz` (the ODR it set). It measures the **achieved rate on the
+    samples' own timestamps** over a trailing `RATE_WINDOW_SECONDS` (5 s):
+    `(n − 1) / span`. A FIFO drained late still dates its samples, where a
+    count over wall clock would measure the drain schedule (AGENTS.md,
+    `achieved_hz_capture`). With fewer than two samples the rate is `None`,
+    not 0.
+  - **Wiring.** `DaemonComponents.imu_health` is built when an IMU is
+    configured. It is passed through `default_collectors(imu_health=)` to the
+    collector, and through `create_app` / the public routes to
+    `gather_status_sources`.
+  - **Payload.** `/status.imu` is `{fresh, age_seconds, configured_hz,
+    achieved_hz, rate_window_seconds, samples, overruns, undated,
+    queue_dropped}`. `fresh` uses `FRESHNESS_THRESHOLD_SECONDS`, the bound
+    behind `vehicle_state`'s bus freshness, and the block is `null` without
+    an IMU. It is full view only, like GPS: the compact view leaves GPS out
+    for the same reason. MCP `get_status` proxies `/status`, so it carries
+    the block unchanged.
+  - **Dashboard.** System panel: an `imu` row above the GPS rows, showing
+    "achieved / configured Hz", "stale · N s" or "no samples", plus overrun
+    and dropped counts. It warns on any overrun or drop (`imuHealth`,
+    `ImuStatus` in `types/live.ts`).
+  - **Tests.**
+    - `test_dashboard_api.py::test_status_route_carries_imu_health` (through
+      `TestClient`, two late drains at 104 Hz), `::test_status_imu_is_stale_past_the_bus_freshness_bound`
+      and `::test_status_imu_is_absent_without_an_imu`.
+    - `test_imu_collector.py::test_achieved_rate_is_measured_on_sample_time_over_a_trailing_window`.
+    - `SystemPanel.test.ts` (4).
+    - The route-table, MCP tool and status suites pass (335).
+
+  Not checked on the Pi: the first HAT drive's `/status.imu` reading, which
+  H02.3's rate choice wants anyway.
 
 ## Truck
 

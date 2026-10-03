@@ -158,3 +158,19 @@ def test_a_pre_hat_chip_is_refused_at_startup_not_silently_skipped() -> None:
     )
     with pytest.raises(ValueError, match="lsm6dsox"):
         _imu_collectors(config, ReconnectPolicy())
+
+
+def test_achieved_rate_is_measured_on_sample_time_over_a_trailing_window() -> None:
+    """H02.5: a FIFO drained late still dates its samples, so the rate comes
+    from their stamps; samples older than the window stop counting."""
+    from src.collection.imu_collector import RATE_WINDOW_SECONDS
+
+    health = ImuHealth()
+    assert health.achieved_hz() is None
+    health.observe_samples([100.0 + i / 52.0 for i in range(52 * 20)])  # 20 s at 52 Hz
+    assert health.achieved_hz() == pytest.approx(52.0, rel=1e-6)
+    # A later stretch at 104 Hz: the window holds only the newest samples.
+    start = 100.0 + 20.0
+    health.observe_samples([start + i / 104.0 for i in range(int(104 * RATE_WINDOW_SECONDS) + 10)])
+    assert health.achieved_hz() == pytest.approx(104.0, rel=1e-3)
+    assert health.samples == 52 * 20 + int(104 * RATE_WINDOW_SECONDS) + 10

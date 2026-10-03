@@ -22,6 +22,7 @@ from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
 from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.imu_collector import ImuHealth
 from src.collection.kline.plan import KlineCatalog
 from src.collection.obd_scheduler import ForcePollTrigger
 from src.config import CanaryConfig
@@ -118,6 +119,8 @@ def create_app(
     dtc_state: DtcState | None = None,
     monitor_state: MonitorState | None = None,
     gps_tracker: GpsTracker | None = None,
+    #: The IMU collector's counters for ``/status.imu`` (H02.5).
+    imu_health: ImuHealth | None = None,
     sequence_detector_controller: SequenceDetectorController | None = None,
     #: Bridges `trigger_poll` into the OBD collector loop (`None` in tests
     #: that don't wire the live collector — the route reports 503).
@@ -220,6 +223,7 @@ def create_app(
         dtc_state=dtc_state,
         monitor_state=monitor_state,
         gps_tracker=gps_tracker,
+        imu_health=imu_health,
         sequence_detector_controller=sequence_detector_controller,
         inference_timing=inference_timing,
         live_source=live_source,
