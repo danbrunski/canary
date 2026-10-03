@@ -24,8 +24,8 @@ from src.analysis.refit import Surface1DRecipe, fit_recipe, refit_all
 from src.columns import SESSION_COLUMN
 from src.config import CanaryConfig
 from src.daemon import _observe_behavior
+from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.inference import BehaviorDetector, _BehaviorResidual
-from src.dashboard.behavior_live import BehaviorLiveState
 from src.decode.behavior_decoder import deviation, explain_expected_column
 from src.decode.behavior_eligibility import point_eligibility, required_channel_groups
 from src.decode.behavior_models import (

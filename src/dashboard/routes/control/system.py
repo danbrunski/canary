@@ -16,17 +16,17 @@ from src.control.sequence_detector import (
     SequenceDetectorController,
     SequenceDetectorUnavailableError,
 )
+from src.daemon.ups import (
+    build_power_snapshot,
+    read_keepalive_remaining,
+    read_watchdog_status,
+    write_keepalive,
+)
 from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
     ProfileNameUpdateRequest,
     SequenceDetectorRequest,
     UpsKeepaliveRequest,
-)
-from src.dashboard.ups import (
-    build_power_snapshot,
-    read_keepalive_remaining,
-    read_watchdog_status,
-    write_keepalive,
 )
 from src.dashboard.version import _canary_version, _git_sha
 from src.storage.sessions import latest_session

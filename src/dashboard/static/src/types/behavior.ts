@@ -186,7 +186,7 @@ export interface BehaviorModelsResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Behavior live overlay — mirrors src/dashboard/behavior_live.py. The daemon
+// Behavior live overlay — mirrors src/daemon/behavior_live.py. The daemon
 // evaluates every surface each inference tick; this is the "you are here"
 // feed the Models▸Behavior overlay draws on top of the static surfaces.
 // ---------------------------------------------------------------------------

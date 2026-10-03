@@ -22,7 +22,6 @@ from src.companion.schemas import (
     TrainingRunApprovalRequest,
 )
 from src.companion.services import (
-    _artifact_path,
     _base_url,
     _dataset_row_to_dict,
     _download_session_export,
@@ -32,19 +31,9 @@ from src.companion.services import (
     _manifest_version,
     _model_id,
     _require_optional_bearer,
-    cancel_job_response,
-    dataset_health_response,
     feedback_list_response,
-    get_job_response,
-    get_model_manifest_response,
-    job_logs_response,
-    job_result_response,
-    list_jobs_response,
     run_queued_action,
-    set_training_run_approval_response,
     submit_feedback_response,
-    submit_job_response,
-    training_runs_response,
 )
 from src.config import CanaryConfig
 from src.control.jobs import JobController
@@ -53,6 +42,19 @@ from src.dashboard.readers import (
     read_anomalies_since,
     read_latest_per_channel,
     read_latest_telemetry_rows,
+)
+from src.dashboard.routes.control.responses import (
+    cancel_job_response,
+    dataset_health_response,
+    get_job_response,
+    get_model_manifest_response,
+    http_artifact_path,
+    job_logs_response,
+    job_result_response,
+    list_jobs_response,
+    set_training_run_approval_response,
+    submit_job_response,
+    training_runs_response,
 )
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.routes.stored_sessions import (
@@ -378,7 +380,9 @@ def register_companion_routes(
         Pi-only) so the same endpoint has a local fixture to test against."""
         return get_model_manifest_response(
             model_type,
-            resolve_manifest_path=lambda mt: manifest_path_for(_artifact_path(local_config, mt)),
+            resolve_manifest_path=lambda mt: manifest_path_for(
+                http_artifact_path(local_config, mt)
+            ),
         )
 
     @app.post("/companion/models/{model_type}/publish")
@@ -394,7 +398,7 @@ def register_companion_routes(
         artifact_path = (
             Path(request.artifact_path)
             if request.artifact_path
-            else _artifact_path(local_config, model_type)
+            else http_artifact_path(local_config, model_type)
         )
         manifest_path = (
             Path(request.manifest_path)

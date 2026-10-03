@@ -10,6 +10,7 @@ from typing import Any
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.tuning import AlertTuner
+from src.daemon.broadcast import Broadcaster
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
     TickContext,
@@ -21,7 +22,6 @@ from src.daemon.detectors.common import (
     log,
 )
 from src.daemon.health import HealthMonitor
-from src.dashboard.broadcast import Broadcaster
 from src.models.fusion import (
     FusionSource,
     PersistenceGate,

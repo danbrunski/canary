@@ -5,7 +5,7 @@
 // message via callback, reconnect on close/error with exponential backoff
 // capped at a few seconds. Pages don't usually stay live long enough to
 // need anything fancier; the daemon's emitter side already drops oldest
-// messages on backpressure (see src/dashboard/broadcast.py), so a brief
+// messages on backpressure (see src/daemon/broadcast.py), so a brief
 // disconnect → reconnect just lands the dashboard back where the live data
 // is now.
 

@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from src.dashboard.schemas import TrainingRunApprovalRequest as TrainingRunApprovalRequest
+
 
 class _ApiRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -29,11 +31,6 @@ class SyncSessionRequest(_ApiRequest):
 class JobSubmitRequest(_ApiRequest):
     kind: str
     params: dict[str, Any] = Field(default_factory=dict)
-
-
-class TrainingRunApprovalRequest(_ApiRequest):
-    approved: bool = True
-    notes: str | None = None
 
 
 class SessionMetadataRequest(_ApiRequest):

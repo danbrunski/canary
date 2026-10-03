@@ -33,8 +33,9 @@ from src.control.jobs import JobController
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
-from src.dashboard.behavior_live import BehaviorLiveState
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.behavior_live import BehaviorLiveState
+from src.daemon.broadcast import Broadcaster
+from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.paths import (
     DEFAULT_BINDINGS_PATH,
     DEFAULT_DIDS_PATH,
@@ -67,7 +68,6 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
-from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH

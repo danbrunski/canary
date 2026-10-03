@@ -10,18 +10,18 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from src.companion.schemas import TrainingRunApprovalRequest
-from src.companion.services import (
-    _artifact_path,
+from src.control.models import publish_model_artifact
+from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.routes.control.responses import (
     dataset_health_response,
     get_model_manifest_response,
+    http_artifact_path,
     set_training_run_approval_response,
     training_runs_response,
 )
-from src.control.models import publish_model_artifact
-from src.dashboard.routes.control.context import ControlContext
 from src.dashboard.schemas import (
     ModelUploadRequest,
+    TrainingRunApprovalRequest,
 )
 from src.models.manifest import manifest_path_for
 from src.preprocessing.loader import discover_sessions
@@ -59,7 +59,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
         before uploading a candidate."""
         return get_model_manifest_response(
             model_type,
-            resolve_manifest_path=lambda mt: manifest_path_for(_artifact_path(config, mt)),
+            resolve_manifest_path=lambda mt: manifest_path_for(http_artifact_path(config, mt)),
         )
 
     @router.get("/control/training-runs")

@@ -270,7 +270,7 @@ def build_status_record(
     """Build the JSON-serializable heartbeat record written to ``UPS_STATUS_FILE``.
 
     Pure (no I/O) so it's unit-testable; ``write_status`` does the atomic write.
-    Consumed by the daemon's power reader (``src/dashboard/ups.py``) so the
+    Consumed by the daemon's power reader (``src/daemon/ups.py``) so the
     dashboard/MCP can show live UPS state without talking to GPIO/I2C directly
     (those require root; the daemon runs as ``canary``).
     """

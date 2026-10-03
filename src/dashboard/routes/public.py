@@ -14,7 +14,8 @@ from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
-from src.dashboard.behavior_live import BehaviorLiveState
+from src.daemon.behavior_live import BehaviorLiveState
+from src.daemon.ups import DEFAULT_UPS_STATUS_PATH
 from src.dashboard.readers import (
     echo_config,
     read_accepted_baselines,
@@ -33,7 +34,6 @@ from src.dashboard.status import (
     compact_status,
     gather_status_sources,
 )
-from src.dashboard.ups import DEFAULT_UPS_STATUS_PATH
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
 from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 

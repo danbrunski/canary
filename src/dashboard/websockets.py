@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
 
 
 async def _run_websocket(websocket: WebSocket, bus: Broadcaster) -> None:

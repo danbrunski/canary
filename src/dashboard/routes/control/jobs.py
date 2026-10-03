@@ -10,7 +10,8 @@ from typing import Any
 
 from fastapi import APIRouter
 
-from src.companion.services import (
+from src.dashboard.routes.control.context import ControlContext
+from src.dashboard.routes.control.responses import (
     cancel_job_response,
     get_job_response,
     job_logs_response,
@@ -18,7 +19,6 @@ from src.companion.services import (
     list_jobs_response,
     submit_job_response,
 )
-from src.dashboard.routes.control.context import ControlContext
 from src.dashboard.schemas import (
     JobSubmitRequest,
 )

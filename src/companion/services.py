@@ -21,7 +21,7 @@ import sys
 import tempfile
 import zipfile
 from collections.abc import Callable, Mapping
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -35,7 +35,6 @@ from src.config import CanaryConfig
 from src.control.jobs import JobController
 from src.mcp_server.client import DaemonClient, DaemonError
 from src.models.feedback import FEEDBACK_LABELS, FeedbackStore
-from src.models.training_ledger import TrainingLedger
 from src.storage.sessions import summarize_session
 
 
@@ -327,16 +326,6 @@ def run_queued_action(
     return {**result, "action_id": action_id}
 
 
-def _artifact_path(config: CanaryConfig, model_type: str) -> Path:
-    if model_type == "isolation_forest":
-        return config.daemon.models_dir / config.daemon.isolation_forest_artifact
-    if model_type == "lstm_autoencoder":
-        return config.daemon.models_dir / config.daemon.lstm_artifact
-    if model_type == "tcn_autoencoder":
-        return config.daemon.models_dir / config.daemon.tcn_artifact
-    raise HTTPException(status_code=400, detail=f"unsupported model type: {model_type}")
-
-
 def _model_id(model_type: str, manifest: Mapping[str, Any]) -> str:
     for key in ("run_id", "model_version", "version"):
         value = manifest.get(key)
@@ -367,155 +356,6 @@ def _unlink_path(path: Path) -> None:
 # of being written twice. The per-session routes (read, metadata, pin, unpin,
 # delete, export, checksum) are no longer here: both apps include one router,
 # `src.dashboard.routes.stored_sessions` (R03.7).
-
-
-def get_model_manifest_response(
-    model_type: str,
-    *,
-    resolve_manifest_path: Callable[[str], Path],
-) -> dict[str, Any]:
-    """Shared body of `GET /control/models/{model_type}/manifest` (6.37).
-
-    Lets a publisher read the *target's* currently-active manifest before
-    uploading, so a compatibility report (`src.models.manifest.compatibility_report`)
-    can be built client-side. 404s (no manifest written yet — first install)
-    are the caller's to interpret, not an error here.
-    """
-    manifest_path = resolve_manifest_path(model_type)
-    if not manifest_path.exists():
-        raise HTTPException(
-            status_code=404, detail=f"no manifest on file for model type: {model_type}"
-        )
-    try:
-        manifest = json.loads(manifest_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"unreadable manifest: {exc}") from exc
-    return {"model_type": model_type, "manifest": manifest}
-
-
-def submit_job_response(
-    jobs: JobController,
-    kind: str,
-    params: dict[str, Any],
-    *,
-    on_submit: Callable[[dict[str, Any]], None] | None = None,
-) -> dict[str, Any]:
-    try:
-        job = jobs.submit(kind, params)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    record = job.to_dict()
-    if on_submit is not None:
-        on_submit(record)
-    return {"job": record}
-
-
-def list_jobs_response(jobs: JobController) -> dict[str, Any]:
-    records = [job.to_dict() for job in jobs.list_jobs()]
-    return {"jobs": records, "count": len(records)}
-
-
-def job_logs_response(jobs: JobController, job_id: str) -> dict[str, Any]:
-    logs = jobs.logs(job_id)
-    if logs is None:
-        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    return {"job_id": job_id, "log": logs}
-
-
-def get_job_response(jobs: JobController, job_id: str) -> dict[str, Any]:
-    job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    return {"job": job.to_dict()}
-
-
-#: Job kinds that write a structured result JSON, and the suffix it lands
-#: under (``<jobs_dir>/<job_id>.<suffix>.json``) — see
-#: ``JobController._replay_window_command``/``_did_sweep_command``.
-_RESULT_SUFFIX_BY_KIND: dict[str, str] = {
-    "replay_window": "replay",
-    "did_sweep": "did_sweep",
-}
-
-
-def job_result_response(jobs: JobController, job_id: str) -> dict[str, Any]:
-    """`GET /control/jobs/{id}/result` (docs/roadmap/archive/dashboard-ux.md Task 4.1).
-
-    Only some job kinds write a structured report (`_RESULT_SUFFIX_BY_KIND`)
-    — that's the same `<jobs_dir>/<job_id>.<suffix>.json` path each kind's
-    MCP tool resolves on its own (`src/mcp_server/tools/replay.py`,
-    `src/mcp_server/tools/did_sweep.py`), so the dashboard can render the
-    identical result an agent would get. `result` is `null` while the job
-    is still queued/running rather than a 404 — the caller (job's own
-    status) is the honest "not ready yet" signal, not a hard error.
-    """
-    job = jobs.get(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    suffix = _RESULT_SUFFIX_BY_KIND.get(job.kind)
-    if suffix is None:
-        raise HTTPException(
-            status_code=404,
-            detail=f"job {job_id} has no result (kind={job.kind!r} does not produce one)",
-        )
-    result_path = job.log_path.parent / f"{job.job_id}.{suffix}.json"
-    if not result_path.exists():
-        return {"job": job.to_dict(), "result": None}
-    try:
-        result = json.loads(result_path.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
-        raise HTTPException(status_code=500, detail=f"unreadable job result: {exc}") from exc
-    return {"job": job.to_dict(), "result": result}
-
-
-def cancel_job_response(
-    jobs: JobController,
-    job_id: str,
-    *,
-    on_cancel: Callable[[dict[str, Any]], None] | None = None,
-) -> dict[str, Any]:
-    job = jobs.cancel(job_id)
-    if job is None:
-        raise HTTPException(status_code=404, detail=f"job not found: {job_id}")
-    record = job.to_dict()
-    if on_cancel is not None:
-        on_cancel(record)
-    return {"job": record}
-
-
-def training_runs_response(
-    training_ledger_path: Path,
-    *,
-    on_run: Callable[[dict[str, Any]], None] | None = None,
-) -> dict[str, Any]:
-    ledger = TrainingLedger(training_ledger_path)
-    runs = [r.to_dict() for r in ledger.records()]
-    if on_run is not None:
-        for run in runs:
-            on_run(run)
-    return {"runs": runs, "count": len(runs)}
-
-
-def set_training_run_approval_response(
-    training_ledger_path: Path,
-    run_id: str,
-    *,
-    approved: bool,
-    notes: str | None = None,
-) -> dict[str, Any]:
-    """Shared body of `POST /control/training-runs/{id}/approve` (6.36).
-
-    The operator's "this run is good" decision, persisted in the same
-    shared JSONL ledger as everything else about the run (compute target,
-    metrics, artifacts) rather than a side table — so approval state travels
-    with the run record wherever it's read (companion's local ledger, the
-    Pi's, `scripts/ledger.py`).
-    """
-    ledger = TrainingLedger(training_ledger_path)
-    record = ledger.set_approved(run_id, approved, notes=notes)
-    if record is None:
-        raise HTTPException(status_code=404, detail=f"training run not found: {run_id}")
-    return {"run": record.to_dict()}
 
 
 def feedback_list_response(feedback_log_path: Path) -> dict[str, Any]:
@@ -558,22 +398,10 @@ def submit_feedback_response(
     return {"feedback": record}
 
 
-def dataset_health_response(
-    sessions: list[Path],
-    config: CanaryConfig,
-    *,
-    corpus_boundary: date | None = None,
-) -> dict[str, Any]:
-    from src.datasets.health import analyze_corpus
-
-    return analyze_corpus(sessions, config, corpus_boundary=corpus_boundary).to_dict()
-
-
 __all__ = [
     "companion_config",
     "import_session_archive",
     "write_companion_config",
-    "_artifact_path",
     "_base_url",
     "_dataset_row_to_dict",
     "_download_session_export",
@@ -587,16 +415,7 @@ __all__ = [
     "_request_json",
     "_require_optional_bearer",
     "_unlink_path",
-    "cancel_job_response",
-    "dataset_health_response",
     "feedback_list_response",
-    "get_job_response",
-    "get_model_manifest_response",
-    "job_logs_response",
-    "list_jobs_response",
     "run_queued_action",
-    "set_training_run_approval_response",
     "submit_feedback_response",
-    "submit_job_response",
-    "training_runs_response",
 ]

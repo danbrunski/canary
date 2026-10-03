@@ -20,7 +20,7 @@ from __future__ import annotations
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from src.models.manager import manager_for_artifact
 from src.models.manifest import manifest_path_for
@@ -28,7 +28,18 @@ from src.models.sequence_registry import SEQUENCE_BACKENDS
 from src.storage.sidecar import read_json_object
 
 if TYPE_CHECKING:
-    from src.daemon.components import DaemonComponents
+    from src.config import CanaryConfig
+    from src.models.manager import ModelManager
+
+
+class SequenceComponents(Protocol):
+    """The members of the daemon's component record this controller reads and
+    swaps (R09.8): ``control`` sits below ``daemon``, so it names what it uses
+    instead of importing ``DaemonComponents``."""
+
+    config: CanaryConfig
+    model_managers: dict[str, ModelManager[Any]]
+    sequence_model_type: str | None
 
 
 class SequenceDetectorUnavailableError(RuntimeError):
@@ -61,7 +72,7 @@ class SequenceDetectorStatus:
 class SequenceDetectorController:
     """Read + live-swap the active sequence-detector backbone."""
 
-    def __init__(self, components: DaemonComponents) -> None:
+    def __init__(self, components: SequenceComponents) -> None:
         self._components = components
         self._lock = threading.Lock()
 

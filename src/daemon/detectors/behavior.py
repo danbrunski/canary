@@ -8,6 +8,7 @@ from typing import Any
 
 from src.coerce import finite_float
 from src.columns import MODE_COLUMN
+from src.daemon.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
     TickContext,
@@ -15,7 +16,6 @@ from src.daemon.detectors.common import (
     gate_and_collect,
     gate_band_excess_and_collect,
 )
-from src.dashboard.behavior_live import BehaviorLiveState, BehaviorObservation
 from src.decode.behavior_decoder import band_half_widths, deviation, deviation_for_override
 from src.decode.behavior_eligibility import resolve_output_column
 from src.decode.behavior_models import (

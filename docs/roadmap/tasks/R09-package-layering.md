@@ -1028,7 +1028,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - **Tests.** Every file importing either module (16 files, 337 tests)
     passes, and `mypy` is clean.
 
-- [ ] **R09.8 Top of the stack: `daemon`, `dashboard`, `companion`.**
+- [x] **R09.8 Top of the stack: `daemon`, `dashboard`, `companion`.**
   - **Daemon-owned objects move into `src/daemon/`:** `dashboard/broadcast.py`
     (no imports), `dashboard/behavior_live.py` and `dashboard/ups.py`. The
     dashboard then reads them downward, and these are the home decisions
@@ -1052,6 +1052,50 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - The route-table snapshot (R03.4) is unchanged.
 
   Size **M**.
+
+  *Done 2026-10-03.*
+  - **Daemon-owned objects.** `git mv` of `dashboard/{broadcast,behavior_live,ups}.py`
+    → `daemon/` with bodies unchanged; 27 importers rewritten, and the path
+    mentions in the dashboard TS comments, `ups_shutdown_watch.py`,
+    `daemon-architecture.md`, the two HAT docs and the MCP tool snapshot (a
+    docstring names `src.daemon.behavior_live`). The 8 `daemon → dashboard`
+    `OWED` rows are gone.
+  - **`control → daemon`.** `control/sequence_detector.py` types its
+    component record as `SequenceComponents` (a Protocol with `config`,
+    `model_managers`, `sequence_model_type`, the three members it reads and
+    swaps). `control/profile_capture.py` types its monitor as
+    `CaptureHealth`, the Protocol `capture_finalize` already used privately
+    (`_Health`), now public, so there is one. `mypy` accepts
+    `DaemonComponents` and `HealthMonitor` against them. Both `OWED` rows are
+    gone.
+  - **`companion ↔ dashboard`.** The job, model-manifest, training-run and
+    dataset-health response bodies moved out of `companion/services.py`
+    into `src/dashboard/routes/control/responses.py`, **not into
+    `control`**. They raise FastAPI's `HTTPException`, and `control` has no
+    HTTP layer, so moving them there would have pulled one in. The
+    companion already imports the dashboard's session routers, so it now
+    imports these from there too, and nothing imports back.
+    `TrainingRunApprovalRequest` moved to `dashboard/schemas.py`;
+    `companion.schemas` re-exports it. `OWED_PAIRS` is `{}`.
+  - **Found and fixed: two `artifact_path`s.** `control.models` and the
+    companion each had one. The daemon's did not know `tcn_autoencoder`, and
+    neither did `MODEL_TYPES`, so a TCN artifact could have its manifest read
+    but could not be published to the daemon. There is now one public
+    `control.models.artifact_path` covering every served backbone
+    (`MODEL_TYPES == KNOWN_MODEL_TYPES`, asserted). The routes wrap it as
+    `http_artifact_path`, so an unknown type stays a 400.
+    `test_control_api.py::test_every_served_model_type_has_one_watched_artifact_path`.
+  - **Accept.** `STANDING` is exactly `daemon/server.py → dashboard.api`.
+    `test_layering.py` passes. The route-table and MCP tool snapshots match.
+    - **Replay:** `tools/replay_event_diff.py run` on `12fcba9` (`git
+      archive`) and on it plus this change, in parallel, then `diff`.
+      Session `2026-09-18T213818`, 900 s.
+      - 18 events on both sides, identical: 8,316 floats, max |delta| 0.
+      - Scores identical: IF 0 of 901, LSTM 0 of 872, fused 0 of 872 differ.
+      - Counters and meta identical.
+    - **Inner-loop tier:** 6,392 passed. The one failure, with two replays
+      running beside it, passed alone and under load; it is recorded as
+      T01.15.
 
 - [ ] **R09.9 Close-out: measure, then remove the workarounds.**
   - **`OWED` is `{}`.**

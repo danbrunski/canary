@@ -18,12 +18,12 @@ from fastapi.testclient import TestClient
 
 from src.config import CanaryConfig
 from src.daemon import _observe_behavior
-from src.dashboard.api import create_app
-from src.dashboard.behavior_live import (
+from src.daemon.behavior_live import (
     TRAIL_MAXLEN,
     BehaviorLiveState,
     BehaviorObservation,
 )
+from src.dashboard.api import create_app
 from src.decode.accepted_baselines import (
     AcceptedBaselineOverride,
     AcceptedBaselines,

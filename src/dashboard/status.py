@@ -15,7 +15,7 @@ from src.collection.imu_collector import ImuHealth
 from src.config import CanaryConfig
 from src.control.replay_control import ReplayController
 from src.control.tuning_readiness import build_tuning_readiness
-from src.dashboard.ups import (
+from src.daemon.ups import (
     DEFAULT_UPS_STATUS_PATH,
     build_power_snapshot,
     read_keepalive_remaining,

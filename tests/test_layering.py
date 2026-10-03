@@ -103,16 +103,6 @@ STANDING: dict[tuple[str, str], str] = {
 #: - R09.7 fusion and feedback into ``models``;
 #: - R09.8 daemon-owned objects out of ``dashboard``; Protocols for daemon types.
 OWED: dict[tuple[str, str], str] = {
-    ("control/profile_capture.py", "src.daemon.health"): "R09.8",
-    ("control/sequence_detector.py", "src.daemon.components"): "R09.8",
-    ("daemon/components.py", "src.dashboard.behavior_live"): "R09.8",
-    ("daemon/components.py", "src.dashboard.broadcast"): "R09.8",
-    ("daemon/detectors/behavior.py", "src.dashboard.behavior_live"): "R09.8",
-    ("daemon/detectors/common.py", "src.dashboard.broadcast"): "R09.8",
-    ("daemon/detectors/isolation_forest.py", "src.dashboard.broadcast"): "R09.8",
-    ("daemon/drain.py", "src.dashboard.broadcast"): "R09.8",
-    ("daemon/idle_shutdown.py", "src.dashboard.ups"): "R09.8",
-    ("daemon/inference.py", "src.dashboard.broadcast"): "R09.8",
     ("decode/behavior_decoder.py", "src.preprocessing.features"): "R09.6",
     ("decode/behavior_decoder.py", "src.preprocessing.local_range"): "R09.6",
     ("decode/behavior_decoder.py", "src.preprocessing.session_context"): "R09.6",
@@ -121,9 +111,7 @@ OWED: dict[tuple[str, str], str] = {
 }
 
 #: Same-layer pairs present when the order was adopted, as sorted unit names.
-OWED_PAIRS: dict[tuple[str, str], str] = {
-    ("companion", "dashboard"): "R09.8",
-}
+OWED_PAIRS: dict[tuple[str, str], str] = {}
 
 
 #: Fields that hold nested statements. Imports are statements, so walking only

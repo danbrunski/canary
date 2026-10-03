@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.coerce import finite_float
 from src.collection import tuning_profile
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
 from src.decode.accepted_baselines import load_accepted_baselines
 from src.decode.behavior_models import (
     diagnostic_only_models,

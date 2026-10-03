@@ -40,9 +40,6 @@ from src.companion.schemas import (
     SyncSessionRequest as SyncSessionRequest,
 )
 from src.companion.services import (
-    _artifact_path as _artifact_path,
-)
-from src.companion.services import (
     _base_url as _base_url,
 )
 from src.companion.services import (

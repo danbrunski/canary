@@ -92,7 +92,9 @@ class CaptureQualityUnavailableError(RuntimeError):
     which cross the process boundary unchanged."""
 
 
-class _Health(Protocol):
+class CaptureHealth(Protocol):
+    """What capture finalisation reads from the daemon's health monitor."""
+
     def capture_quality_inputs(self, *, now: float | None = None) -> Any: ...
 
     def loss_epoch(self, *, now: float | None = None) -> LossEpoch: ...
@@ -129,7 +131,7 @@ class StartEpoch:
         }
 
 
-def record_capture_start(session_dir: Path, health: _Health | None) -> StartEpoch | None:
+def record_capture_start(session_dir: Path, health: CaptureHealth | None) -> StartEpoch | None:
     """Snapshot the loss and batching counters at arm and persist them beside
     the manifest."""
     if health is None:
@@ -333,7 +335,7 @@ _discard_pool = child_pool.discard_pool
 async def live_capture_quality(
     session_dir: Path,
     *,
-    health: _Health,
+    health: CaptureHealth,
     writer: _Writer | None,
     start: StartEpoch | None,
     executor: Executor | None = None,
@@ -366,7 +368,7 @@ async def live_capture_quality(
 async def finalize_capture(
     session_dir: Path,
     *,
-    health: _Health | None,
+    health: CaptureHealth | None,
     writer: _Writer | None,
     start: StartEpoch | None,
     drain_timeout: float = DRAIN_TIMEOUT_SECONDS,
@@ -400,7 +402,7 @@ async def finalize_capture(
 async def _finalize(  # noqa: PLR0913
     session_dir: Path,
     *,
-    health: _Health,
+    health: CaptureHealth,
     writer: _Writer | None,
     start: StartEpoch | None,
     boundary: int,

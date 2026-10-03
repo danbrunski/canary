@@ -30,8 +30,8 @@ from src.analysis.behavior_inventory import build_inventory, compare_deployed
 from src.analysis.refit import default_recipes, refit_all
 from src.config import CanaryConfig
 from src.daemon import _observe_behavior, poll_behavior_models
+from src.daemon.behavior_live import BehaviorLiveState
 from src.daemon.inference import BehaviorDetector
-from src.dashboard.behavior_live import BehaviorLiveState
 from src.dashboard.readers import read_behavior_models
 from src.decode.behavior_decoder import (
     append_deviation_columns,

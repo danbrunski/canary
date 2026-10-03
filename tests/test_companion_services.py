@@ -17,6 +17,7 @@ import pytest
 
 from src.companion import services
 from src.companion.library import CanaryLibrary
+from src.dashboard.routes.control import responses
 
 
 class _FakeDaemonClient:
@@ -250,7 +251,7 @@ def test_get_model_manifest_response_404_when_missing(tmp_path: Path) -> None:
 
     missing = tmp_path / "model.manifest.json"
     with pytest.raises(HTTPException) as excinfo:
-        services.get_model_manifest_response(
+        responses.get_model_manifest_response(
             "isolation_forest", resolve_manifest_path=lambda _mt: missing
         )
     assert excinfo.value.status_code == 404
@@ -260,7 +261,7 @@ def test_get_model_manifest_response_reads_json(tmp_path: Path) -> None:
     manifest_path = tmp_path / "model.manifest.json"
     manifest_path.write_text(json.dumps({"model_version": "if_v1"}))
 
-    result = services.get_model_manifest_response(
+    result = responses.get_model_manifest_response(
         "isolation_forest", resolve_manifest_path=lambda _mt: manifest_path
     )
     assert result["manifest"]["model_version"] == "if_v1"
@@ -269,10 +270,10 @@ def test_get_model_manifest_response_reads_json(tmp_path: Path) -> None:
 def test_training_runs_response_on_run_hook_is_optional(tmp_path: Path) -> None:
     ledger_path = tmp_path / "training_runs.jsonl"
 
-    no_hook = services.training_runs_response(ledger_path)
+    no_hook = responses.training_runs_response(ledger_path)
     assert no_hook == {"runs": [], "count": 0}
 
     recorded: list[dict[str, Any]] = []
-    with_hook = services.training_runs_response(ledger_path, on_run=recorded.append)
+    with_hook = responses.training_runs_response(ledger_path, on_run=recorded.append)
     assert with_hook == {"runs": [], "count": 0}
     assert recorded == []

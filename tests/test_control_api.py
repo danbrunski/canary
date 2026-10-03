@@ -19,8 +19,8 @@ from src.config import CanaryConfig
 from src.control.audit import ControlAuditLogger
 from src.control.capture import CaptureController
 from src.control.jobs import JobController
+from src.daemon.broadcast import Broadcaster
 from src.dashboard.api import create_app
-from src.dashboard.broadcast import Broadcaster
 from src.storage.sessions import filter_sessions, list_sessions
 from tests.configs import write_isolated_config
 
@@ -990,3 +990,19 @@ async def test_control_websocket_rule_matches_the_http_rule() -> None:
     await unconfigured(_ws("127.0.0.1", b""))
     with pytest.raises(WebSocketException):
         await unconfigured(_ws("10.0.0.5", b""))
+
+
+def test_every_served_model_type_has_one_watched_artifact_path(tmp_path: Path) -> None:
+    """R09.8: one ``artifact_path`` for the daemon and the companion. The
+    daemon's copy lacked the TCN backbone, so a TCN could be read but never
+    published; the set it serves is the manifest's set."""
+    from src.control.models import MODEL_TYPES, artifact_path
+    from src.models.manifest import KNOWN_MODEL_TYPES
+
+    config = CanaryConfig.from_yaml(_write_config(tmp_path, tmp_path / "storage"))
+    assert MODEL_TYPES == set(KNOWN_MODEL_TYPES)
+    paths = {model_type: artifact_path(config, model_type) for model_type in MODEL_TYPES}
+    assert paths["tcn_autoencoder"] == config.daemon.models_dir / config.daemon.tcn_artifact
+    assert len(set(paths.values())) == len(paths)
+    with pytest.raises(ValueError, match="unsupported model type"):
+        artifact_path(config, "random_forest")

@@ -1,10 +1,10 @@
-"""Tests for src/dashboard/ups.py — the file-backed UPS status reader."""
+"""Tests for src/daemon/ups.py — the file-backed UPS status reader."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from src.dashboard.ups import (
+from src.daemon.ups import (
     build_power_snapshot,
     read_keepalive_remaining,
     read_watchdog_status,

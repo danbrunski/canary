@@ -4,7 +4,7 @@ import asyncio
 
 from fastapi import Depends, FastAPI, WebSocket
 
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
 from src.dashboard.security import websocket_control_auth_dependency
 from src.dashboard.websockets import _run_websocket
 

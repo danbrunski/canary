@@ -14,6 +14,14 @@ class _ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class TrainingRunApprovalRequest(_ControlRequest):
+    """``POST /control/training-runs/{id}/approve`` (6.36); the companion app
+    registers the same route with this body."""
+
+    approved: bool = True
+    notes: str | None = None
+
+
 class SequenceDetectorRequest(_ControlRequest):
     #: Selector value for the backbone to activate (registry: lstm | tcn).
     backbone: Literal["lstm", "tcn"]

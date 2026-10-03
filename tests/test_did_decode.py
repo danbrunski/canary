@@ -238,8 +238,8 @@ async def test_broadcast_sink_publishes_decoded_did_rows() -> None:
     """The dashboard keys channels by ``<source>:<channel>``, so a raw
     ``obd:DID_1225`` poll is useless to it — the decoded ``did:<NAME>`` row
     published alongside is what renders a gauge."""
+    from src.daemon.broadcast import Broadcaster
     from src.daemon.drain import run_telemetry_broadcast_sink
-    from src.dashboard.broadcast import Broadcaster
 
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
@@ -273,8 +273,8 @@ async def test_broadcast_sink_publishes_decoded_did_rows() -> None:
 
 
 async def test_broadcast_sink_without_did_map_publishes_raw_only() -> None:
+    from src.daemon.broadcast import Broadcaster
     from src.daemon.drain import run_telemetry_broadcast_sink
-    from src.dashboard.broadcast import Broadcaster
 
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
     stop = asyncio.Event()
@@ -299,8 +299,8 @@ async def test_broadcast_sink_without_did_map_publishes_raw_only() -> None:
 
 async def test_broadcast_sink_skips_decode_without_subscribers() -> None:
     """A closed dashboard must add no decode work to the collection path."""
+    from src.daemon.broadcast import Broadcaster
     from src.daemon.drain import run_telemetry_broadcast_sink
-    from src.dashboard.broadcast import Broadcaster
 
     class _DecodeSpy:
         def decode_for_telemetry(self, _record: TelemetryRecord) -> list[TelemetryRecord]:

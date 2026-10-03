@@ -13,8 +13,8 @@ from src.analysis.gps_tracker import GpsTracker, TripEnd
 from src.collection.queueing import QueueDepthMonitor
 from src.control.dtc_state import DtcState
 from src.control.monitor_state import MonitorState
+from src.daemon.broadcast import Broadcaster
 from src.daemon.health import HealthMonitor
-from src.dashboard.broadcast import Broadcaster
 from src.decode.dids import DID_SOURCE, DecodedDid
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.monitor import warn_if_storage_low

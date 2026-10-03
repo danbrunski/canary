@@ -669,7 +669,7 @@ None of this is blocking for fabrication.
   the parked case from `vehicle_state` alone. A Pi on USB-C at a desk with the
   X1202's barrel jack out reads `no_data` — exactly an idle state — so a naive
   timeout powers off the operator's bench rig. The discriminator is the X1202
-  watchdog's `input_lost` heartbeat field, read via `src/dashboard/ups.py`
+  watchdog's `input_lost` heartbeat field, read via `src/daemon/ups.py`
   (never GPIO6 directly — the watchdog owns that line and a second `lgpio`
   claimant collides with EBUSY). That makes the two shutdown paths mutually
   exclusive rather than redundant:

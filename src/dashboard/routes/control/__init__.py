@@ -31,10 +31,10 @@ from src.control.jobs import JobController
 from src.control.profile_capture import CaptureAutostart, ProfileCaptureSession
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
+from src.daemon.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
-from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
 from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore

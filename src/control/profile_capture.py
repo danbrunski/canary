@@ -26,13 +26,14 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from src.collection import bus_budget, tuning_profile
 from src.collection.capture_profiles import CaptureProfileStore
 from src.control.capture import CaptureController, CaptureState
 from src.control.capture_autostart import CaptureAutostartDecider, CaptureAutostartRule
 from src.control.capture_finalize import (
+    CaptureHealth,
     StartEpoch,
     finalize_capture,
     live_capture_quality,
@@ -42,10 +43,6 @@ from src.session import issue_isolated_id
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.capture_manifest import read_capture_manifest, stamp_capture_end
 from src.vehicle_state import ReplayStatusSource, derive_from_live_source
-
-if TYPE_CHECKING:
-    # Annotation only: importing it at runtime loads the whole src.daemon package (R04.8).
-    from src.daemon.health import HealthMonitor
 
 log = logging.getLogger(__name__)
 
@@ -97,7 +94,7 @@ class ProfileCaptureSession:
         storage_writer: AsyncParquetTelemetryWriter | None,
         capture_controller: CaptureController | None,
         profile_store: CaptureProfileStore,
-        health_monitor: HealthMonitor | None,
+        health_monitor: CaptureHealth | None,
     ) -> None:
         self.storage_writer = storage_writer
         self.capture_controller = capture_controller

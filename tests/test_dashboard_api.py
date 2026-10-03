@@ -937,7 +937,7 @@ def test_telemetry_latest_rejects_silly_n(config: CanaryConfig, anomalies_dir: P
 
 
 def test_ws_telemetry_pushes_published_messages(config: CanaryConfig, anomalies_dir: Path) -> None:
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     bus = Broadcaster()
     app = create_app(config, anomalies_dir=anomalies_dir, telemetry_broadcaster=bus)
@@ -957,7 +957,7 @@ def test_ws_telemetry_pushes_published_messages(config: CanaryConfig, anomalies_
 
 
 def test_ws_anomalies_pushes_published_events(config: CanaryConfig, anomalies_dir: Path) -> None:
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     bus = Broadcaster()
     app = create_app(config, anomalies_dir=anomalies_dir, anomalies_broadcaster=bus)
@@ -975,7 +975,7 @@ def test_ws_anomalies_pushes_published_events(config: CanaryConfig, anomalies_di
 
 
 def test_ws_scores_pushes_published_scores(config: CanaryConfig, anomalies_dir: Path) -> None:
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     bus = Broadcaster()
     app = create_app(config, anomalies_dir=anomalies_dir, scores_broadcaster=bus)
@@ -1005,7 +1005,7 @@ def test_ws_scores_pushes_published_scores(config: CanaryConfig, anomalies_dir: 
 
 
 def test_ws_disconnect_removes_subscriber(config: CanaryConfig, anomalies_dir: Path) -> None:
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     bus = Broadcaster()
     app = create_app(config, anomalies_dir=anomalies_dir, telemetry_broadcaster=bus)

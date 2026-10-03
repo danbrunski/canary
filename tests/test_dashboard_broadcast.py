@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
 
 
 async def test_publish_delivers_to_every_subscriber() -> None:

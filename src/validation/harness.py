@@ -62,6 +62,7 @@ from src.collection.reconnect import ReconnectPolicy
 from src.collection.replay import ReplayEmissionStats, replay_session
 from src.config import CanaryConfig, rebase_state_paths
 from src.control.capture_finalize import StartEpoch, finalize_capture, record_capture_start
+from src.daemon.broadcast import Broadcaster, Subscription
 from src.daemon.components import DaemonComponents, build_components
 from src.daemon.drain import drain_queue_with_broadcast
 from src.daemon.inference import build_live_feature_source, run_live_inference
@@ -71,7 +72,6 @@ from src.daemon.runtime import (
     drain_kwargs,
     obd_handoff_stats_observer,
 )
-from src.dashboard.broadcast import Broadcaster, Subscription
 from src.models.manager import LoadedModel, default_manifest_sidecar
 from src.models.manifest import ModelManifestCommon
 from src.paths import BINDINGS_YAML

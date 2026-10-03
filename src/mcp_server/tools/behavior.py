@@ -28,7 +28,7 @@ async def get_behavior_live(
     tool-result size cap; pass ``True`` only when you actually need the
     trajectory (e.g. plotting a Δ sparkline), not for a one-shot status check.
     Equivalent to ``GET /models/behavior/live?series=...`` — see
-    :mod:`src.dashboard.behavior_live` for the schema.
+    :mod:`src.daemon.behavior_live` for the schema.
     """
     return await client.get_json("/models/behavior/live", params={"series": include_series})
 

@@ -959,7 +959,7 @@ sensors** — and leave CAN alone.
 **IMU and barometer (U6/U5) — real gains, and one trap not to walk into.**
 
 > **Do not put the MCU on I2C1.** §5 records the X1202 fuel gauge at **0x36 on
-> bus 1**, and `scripts/ups_shutdown_watch.py` / `src/dashboard/ups.py` depend on
+> bus 1**, and `scripts/ups_shutdown_watch.py` / `src/daemon/ups.py` depend on
 > it. Multi-master I2C between Linux and an MCU is a reliability hazard even
 > where it is legal, and what it would put at risk here is the UPS shutdown
 > path — the one subsystem on the rig that must not become flaky.

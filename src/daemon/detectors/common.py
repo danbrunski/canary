@@ -12,7 +12,7 @@ from typing import Any, Generic, Protocol, TypeVar
 from src.alerts.emitter import EmitterCounters
 from src.alerts.tuning import AlertTuner
 from src.coerce import finite_float
-from src.dashboard.broadcast import Broadcaster
+from src.daemon.broadcast import Broadcaster
 from src.models.feature_spec_health import observe_reconciliation
 from src.models.fusion import (
     FusionSource,

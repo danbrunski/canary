@@ -24,8 +24,8 @@ from src.daemon import (
     run_storage_sink,
     run_telemetry_fanout,
 )
+from src.daemon.broadcast import Broadcaster
 from src.daemon.health import HealthMonitor
-from src.dashboard.broadcast import Broadcaster
 from src.models.manager import ModelManager
 from src.models.manifest import CURRENT_MANIFEST_FORMAT_VERSION
 from src.paths import ANOMALIES_DIR
@@ -279,7 +279,7 @@ async def test_storage_sink_coalesces_records_arriving_just_after_first() -> Non
 
 
 async def test_drain_publishes_each_record_to_broadcaster(tmp_path: Path) -> None:
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     writer = ParquetTelemetryWriter(tmp_path / "storage")
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
@@ -367,7 +367,7 @@ async def test_drain_keeps_publishing_even_under_subscriber_backpressure(
     tmp_path: Path,
 ) -> None:
     """A slow WebSocket client must not stall the writer."""
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     writer = ParquetTelemetryWriter(tmp_path / "storage")
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
@@ -1783,7 +1783,7 @@ def test_finite_or_none() -> None:
 
 def test_publish_score_payload_shape_and_none_is_noop() -> None:
     from src.daemon import _publish_score
-    from src.dashboard.broadcast import Broadcaster
+    from src.daemon.broadcast import Broadcaster
 
     # None broadcaster must be a silent no-op (don't crash live inference).
     _publish_score(

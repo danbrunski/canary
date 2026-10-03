@@ -86,7 +86,7 @@ from typing import Any
 
 from src.collection import tuning_profile, tx_gate
 from src.config import IdleShutdownConfig
-from src.dashboard.ups import read_keepalive_remaining, read_watchdog_status
+from src.daemon.ups import read_keepalive_remaining, read_watchdog_status
 
 log = logging.getLogger(__name__)
 
