@@ -9,12 +9,10 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from src.alerts.emitter import (
-    AnomalyEventEmitter,
-    IsolationForestInferenceEngine,
-)
+from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
+from src.models.inference import IsolationForestInferenceEngine
 
 # ---------------------------------------------------------------------------
 # Fake result types — kept lightweight to avoid torch / sklearn imports here

@@ -1004,9 +1004,11 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
     unchanged. 41 importers across `src`, `scripts` and `tests` were
     rewritten, and the import blocks re-sorted.
   - **Re-export.** The emitter's lazy `__getattr__` re-export of
-    `IsolationForestInferenceEngine` is deleted. Its one user,
-    `tests/test_daemon.py`'s end-to-end IF test, imports it from
-    `src.models.inference`. `typing.Any` was then unused in the emitter.
+    `IsolationForestInferenceEngine` is deleted. Its two users,
+    `tests/test_daemon.py`'s end-to-end IF test and
+    `tests/test_alerts_emitter.py`, import it from `src.models.inference`.
+    The second was a multi-line import that a one-line grep missed; the push
+    gate caught it as a collection error. `typing.Any` was then unused in the emitter.
   - **Layering.** `("alerts", "models")` is out of `OWED_PAIRS`.
     `tests/test_layering.py` passes, so `alerts → models` is one-way: what
     is left are the emitter's and `events.py`'s `TYPE_CHECKING` imports of
