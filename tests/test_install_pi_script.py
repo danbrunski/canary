@@ -91,6 +91,7 @@ _INSTALLED_UNIT_FILES = (
     "canary-modules.conf",
     "tmpfiles-canary.conf",
     "canary-gpsd@.service",
+    "canary-gpsd-pps.service",
 )
 
 
@@ -450,12 +451,30 @@ def test_a_canary_hat_gets_a_stable_pps_name_but_no_fatal_refclock(
     assert 'ATTR{name}=="canary-pps*", SYMLINK+="pps-canary"' in rule
 
 
+def test_a_canary_hat_feeds_pps_to_chrony_through_a_gpsd_socket(installer: Installer) -> None:
+    """H03.3: the pulse reaches chrony as `refclock SOCK`, which chronyd creates
+    itself, so a missing overlay costs a source and never chronyd. gpsd names
+    the socket after the path it was handed, so the attach unit hands it the
+    stable symlink."""
+    installer.run(CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
+    assert "refclock SOCK /run/chrony.pps-canary.sock refid PPS lock GPS" in chrony
+    rule = (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").read_text()
+    assert 'ENV{SYSTEMD_WANTS}+="canary-gpsd-pps.service"' in rule
+    unit = (installer.root / "etc" / "systemd" / "system" / "canary-gpsd-pps.service").read_text()
+    assert "ExecStart=/usr/sbin/gpsdctl add /dev/pps-canary" in unit
+    assert "BindsTo=dev-pps\\x2dcanary.device" in unit
+
+
 def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:
     installer.run()
 
     chrony = (installer.root / "etc" / "chrony" / "conf.d" / "canary-gps.conf").read_text()
     assert "refclock PPS" not in chrony
+    assert "refclock SOCK" not in chrony
     assert not (installer.root / "etc" / "udev" / "rules.d" / "70-canary-pps.rules").exists()
+    assert not (installer.root / "etc" / "systemd" / "system" / "canary-gpsd-pps.service").exists()
 
 
 def test_fitting_a_hat_later_restarts_chrony_once(installer: Installer) -> None:

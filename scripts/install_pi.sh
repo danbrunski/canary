@@ -331,13 +331,26 @@ EOF
   # when a configured PPS device does not exist, so a missing overlay or a
   # udev race at boot would take all time sync down. It did, on 2026-09-23,
   # the first time this shipped (the rule matched `canary-pps` exactly and
-  # never fired). The safe path is a SOCK refclock fed by gpsd (H03.3).
+  # never fired). The safe path is a SOCK refclock fed by gpsd (H03.3): chronyd
+  # creates /run/chrony.pps-canary.sock itself, and canary-gpsd-pps.service
+  # hands /dev/pps-canary to gpsd, which writes each pulse there with the time
+  # it belongs to. No pulse, no samples; chronyd keeps running either way.
+  CHRONY_PPS_LINE=""
   if [[ "${hat_product:-}" == CANary-HAT* ]]; then
+    write_managed chrony "$(dirname "${CANARY_SERVICE}")/canary-gpsd-pps.service" \
+      <"${CANARY_HOME}/systemd/canary-gpsd-pps.service"
     write_managed chrony "${ROOT}/etc/udev/rules.d/70-canary-pps.rules" <<'EOF'
-# Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS.
-SUBSYSTEM=="pps", ATTR{name}=="canary-pps*", SYMLINK+="pps-canary"
+# Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS,
+# and canary-gpsd-pps.service attaches it to gpsd for chrony's SOCK refclock (H03.3).
+SUBSYSTEM=="pps", ATTR{name}=="canary-pps*", SYMLINK+="pps-canary", TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd-pps.service"
 EOF
+    CHRONY_PPS_LINE='
+# CANary-HAT TIMEPULSE through gpsd (H03.3). SOCK, never a direct PPS device: chronyd
+# exits when a configured PPS device is missing, and it did on 2026-09-23.
+# Locked to the NMEA source above, which numbers each pulse.
+refclock SOCK /run/chrony.pps-canary.sock refid PPS lock GPS'
     if [[ -n "${CONFIG_CHANGED[chrony]:-}" ]]; then
+      systemctl daemon-reload
       udevadm control --reload || true
       udevadm trigger --subsystem-match=pps --action=add || true
     fi
@@ -362,6 +375,7 @@ refclock SHM 0 refid GPS precision 5e-1 offset 0.0
 # this box is safety-critical or ordering-sensitive w.r.t. wall clock.
 makestep 1 -1
 EOF
+    [[ -n "${CHRONY_PPS_LINE}" ]] && printf '%s\n' "${CHRONY_PPS_LINE}"
   )
 
   # Debian's chrony.conf pulls in conf.d by default; older configs may not.

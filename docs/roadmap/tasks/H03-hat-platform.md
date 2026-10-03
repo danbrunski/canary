@@ -100,7 +100,7 @@ other checklist leans on.
   session_dir=active_session_dir(writer))` (now row-intact) with this
   function. Until H03.1's collector is enabled on the Pi, the OBD fallback is
   the source that answers.
-- [ ] **H03.3 PPS as a chrony refclock.** **Do:** feed the HAT's PPS to
+- [~] **H03.3 PPS as a chrony refclock.** **Do:** feed the HAT's PPS to
   chrony through gpsd and a `refclock SOCK` (chrony creates the socket; gpsd
   writes pulses to it when it has them), **not** `refclock PPS`: chronyd exits
   fatally when a configured PPS device is missing, so a direct refclock ties
@@ -121,6 +121,33 @@ other checklist leans on.
   the direct refclock, locked to GPS, took no samples in over a minute — to
   understand with the SOCK path; (4) the HAT's NMEA runs +154..161 ms late
   (std dev < 1 ms) at 9600 baud, inside the ±0.5 s a lock needs.
+  *Desk part done 2026-10-03; the Pi checks are owed.* On a HAT install:
+  - `canary-gps.conf` gains `refclock SOCK /run/chrony.pps-canary.sock refid
+    PPS lock GPS`. chronyd creates that socket itself, so a missing overlay
+    leaves an unusable source and never stops chronyd.
+  - `70-canary-pps.rules` now also pulls in the new
+    `systemd/canary-gpsd-pps.service`, which runs `gpsdctl add
+    /dev/pps-canary`. gpsd names the chrony socket after the path it is
+    handed, so the unit hands it the stable symlink. The template
+    `canary-gpsd@` cannot do this: its instance is either the moving `ppsN`
+    or, unescaped, `/dev/pps/canary`. `BindsTo=dev-pps\x2dcanary.device`
+    ties the attachment to the device.
+  - Without a HAT there is no SOCK line, no rule and no unit, and the
+    no-HAT chrony file is byte-identical to before.
+
+  Tests in `test_install_pi_script.py`:
+  `test_a_canary_hat_feeds_pps_to_chrony_through_a_gpsd_socket` and
+  `test_without_a_hat_chrony_has_no_pps_source` (now also asserts no SOCK
+  line and no unit). The existing no-`refclock PPS` guard still passes; the
+  file is 27 of 27.
+
+  **Pi, unverified:** gpsd must still hold the privileges to open the chrony
+  socket after it starts (Debian runs gpsd as root, then drops privileges).
+  The socket name must match what this gpsd version writes for a bare
+  `/dev/pps*` device. `chronyc sources` should then show `#* PPS` with a
+  sub-ms offset, and chrony must still start with the overlay removed. If
+  gpsd writes nothing, the H03.3 note above about the direct refclock taking
+  no samples applies here too.
 
 - [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
