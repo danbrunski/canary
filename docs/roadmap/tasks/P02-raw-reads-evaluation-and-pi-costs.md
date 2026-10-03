@@ -2062,20 +2062,24 @@ recomputes the rolling frame over the whole buffered window every tick.
         cells in the map) and narrows the step between the two rows. It is
         consistent with the registry's "smoothed AFR targets". Rows 0–5 are
         unchanged.
-    - **Stock ZS04C stays unrecorded.**
-      - The factory dumps (`ROM Backup/23710 - ZS04C_VIN Not Found*.bin`, both
-        sha256 `01cf15e7…abe0`, 1,048,592 bytes) are not plain images. The
-        first bytes are high-entropy, and neither the base table nor either
-        axis appears anywhere in them.
-      - The repo has no decoder for UpRev's backup format and no ZS04C table
-        address.
-      - Needed: that decoder, or a ZS04C definition, plus a known answer.
-    - **Corroboration** (the ZS04C dump cannot be compared directly). UpRev's
-      companion `ZS44A Back To Stock.OsirisROM` (sha `cad91369…a133`) has
-      0xFF in UpRev's map slots, and the base's exact 64-byte table at
-      **0xA169**. The base holds that table at 0xA169 too, and copies it into
-      its map slots 1–5. So the base's map is the ZS44A calibration's own
-      table. Whether ZS04C's equals it is not shown.
+    - **Stock ZS04C stays unrecorded.** Operator, 2026-10-03: the
+      `ROM Backup/23710 - ZS04C_VIN Not Found*.bin` dumps (both sha256
+      `01cf15e7…abe0`, 1,048,592 bytes) are the true factory data, read from
+      the Xterra's ECU before any UpRev flash. `ZS44A.OsirisROM` is the
+      "stock" ROM UpRev supplies to flash before tuning; how it relates to the
+      factory ZS04C data is unknown, so neither is evidence for the other.
+      - The dumps are not plain images: high entropy throughout, no erased
+        (0xFF) runs, and neither the base table nor its axes appear in them.
+        They also do not decode with the Osiris container's scheme
+        (`src/analysis/osiris.py`: CRC-keyed XOR and the 16-bit word
+        transform), tried with every candidate key from the leading and
+        trailing 16 bytes, the ZS44A key and the CRCs (2026-10-03, desk).
+        UpRev's backup format is different, likely real encryption.
+      - UpRev support will not help (operator). Reverse-engineering the
+        backup format is not planned. The remaining route is Osiris itself
+        opening the backup and saving it as an `.OsirisROM`, if it can.
+      - UpRev's `* Back To Stock.OsirisROM` files are not used: UpRev says
+        flashing one clears the license (operator, 2026-10-03).
   - **Measured: corpus revision assignment.** `discover_sessions` gives 116
     sessions.
     - **90 of 116 change assignment** from ZS44A-20260920: 46 to k106 (one
