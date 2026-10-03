@@ -1199,7 +1199,15 @@ def build_live_feature_source(
         accepted_baselines=accepted_baselines,
         dbc_database=dbc_database,
         did_map=did_map,
+        session_identity=lambda: _writer_recording(components.storage_writer),
     )
+
+
+def _writer_recording(storage_writer: Any) -> Path | None:
+    """The directory the daemon's writer is filling now, or ``None`` before
+    it exists (``run_daemon`` sets ``components.storage_writer`` late)."""
+    root = getattr(getattr(storage_writer, "paths", None), "root", None)
+    return root if isinstance(root, Path) else None
 
 
 __all__ = [

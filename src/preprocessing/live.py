@@ -197,6 +197,13 @@ class LiveFeatureSource:
     #: text value included — rather than the latest numeric per channel. A
     #: list, so one consumer cannot displace another.
     record_observers: list[Callable[[TelemetryRecord], None]] = field(default_factory=list)
+    #: B07.7 — the recording the rows are being written to, read each tick
+    #: (the daemon passes its writer's directory). The batch fold ends a start
+    #: at every recording, and a writer rotation inside one process (a capture
+    #: arming or disarming, a record gap, an engine-run reset) is a recording
+    #: boundary the live source would otherwise never see. ``None`` (replay
+    #: tools, tests) leaves the trackers to :meth:`reset` alone.
+    session_identity: Callable[[], object] | None = None
 
     _current_values: dict[str, float] = field(default_factory=dict)
     #: Per-channel wall-clock timestamp of the last fresh ``observe()``. GRU-D
@@ -265,6 +272,8 @@ class LiveFeatureSource:
     _start_trackers: dict[StartContextSpec, EngineStartTracker] = field(
         init=False, default_factory=dict
     )
+    #: The recording the trackers' evidence belongs to (B07.7).
+    _start_context_recording: object = field(init=False, default=None)
     #: H02.4 — raw ``imu:ACCEL_X/Y/Z`` → per-tick ``imu:ACCEL_LON_MAX``-style
     #: aggregates (what ``LiveAutoTagHook`` and the segmenter's accel modes
     #: read). Idle, and emitting nothing, while no IMU records arrive.
@@ -679,6 +688,7 @@ class LiveFeatureSource:
         Fed the same bounded (stale → NaN) values the batch fold sees on a
         resampled row, so live, replay and batch reach the same evidence.
         """
+        self._end_start_context_at_a_new_recording()
         specs = start_context_specs(self.behavior_models)
         live = set(specs)
         for stale_spec in [spec for spec in self._start_trackers if spec not in live]:
@@ -698,6 +708,25 @@ class LiveFeatureSource:
             out[spec.observed_column] = observed
             out[spec.start_coolant_column] = start_coolant
         return out
+
+    def _end_start_context_at_a_new_recording(self) -> None:
+        """Forget start evidence when the writer has moved to a new recording.
+
+        Batch cannot tell a daemon restart (whose fresh source has no
+        evidence) from a rotation inside one process: both are just a new
+        directory. So the start ends at every recording on both paths, the
+        conservative side: a warmup model refuses
+        ``cold_start_no_start_evidence`` for the rest of that run rather than
+        live serving rows the evaluation refuses.
+        """
+        if self.session_identity is None:
+            return
+        current = self.session_identity()
+        if current is None or current == self._start_context_recording:
+            return
+        if self._start_context_recording is not None:
+            self._start_trackers = {}
+        self._start_context_recording = current
 
     def _accumulate_derived_integrals(
         self, now: datetime, point: dict[str, Any]

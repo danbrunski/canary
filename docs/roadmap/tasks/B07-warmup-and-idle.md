@@ -279,6 +279,34 @@ review's catalyst exceedances establish a failed expectation, not a failed cat.
   fix belongs with the drive-grouping change (continuity across pieces of
   one engine run), which another implementer owns.
   **Remaining:** that rotation parity; publication once a model qualifies.
+  *Rotation parity fixed 2026-10-03; publication still waits on a qualified
+  model.*
+  - **Which side moves.** Carrying the start across directories in batch
+    was tried and rejected. Physical-drive grouping bridges a daemon restart
+    and a capture rotation alike, and batch cannot tell them apart: no
+    process identity is recorded per recording, and after a capture disarms
+    the writer resumes in a plain timestamped directory, just as after a
+    restart. A restarted daemon's fresh live source has no evidence, so
+    batch carrying would serve warmup rows that live (correctly) refuses.
+    That is the same bug in the other direction, and the existing
+    `::test_start_context_boundaries_session_replay_and_mid_drive_daemon_start`
+    pins it.
+  - **So live ends the start at every recording, as batch does.**
+    `LiveFeatureSource.session_identity` is read each tick, and the daemon
+    passes its writer's current directory. When it changes (a capture arm or
+    disarm, a record-gap or engine-run rotation), the start trackers are
+    dropped. A warmup model then refuses `cold_start_no_start_evidence` for
+    the rest of that run. This is the conservative side, and it costs little:
+    tuning captures withhold behavior deviations anyway (R03.12). Without a
+    writer to read (replay tools, tests), nothing changes. Replay entry and
+    exit still go through `reset()`.
+  - **Tests.** The strict xfail is now a passing test:
+    `::test_start_context_live_matches_batch_across_a_writer_rotation` feeds
+    live with the writer's directory following each row and asserts
+    `live == batch`. The start is watched in the first recording and ends at
+    the rotation; the unwired source keeps it. With the hook disabled the
+    test fails (mutation checked). Live, behavior, daemon, replay and
+    inference suites pass (656).
 
 **Done when:** the retained idle baseline has a measured applicability envelope,
 each warmup candidate either meets held-out criteria or remains visibly withheld,

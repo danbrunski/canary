@@ -527,16 +527,11 @@ def test_start_context_boundaries_session_replay_and_mid_drive_daemon_start(
     assert all(point[observed_col] == 0.0 for point in resumed)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "B07.7 known gap: the batch fold resets the start context at every "
-        "session directory (a capture rotating the writer mid-warmup), while "
-        "the live source is never told about a writer rotation and keeps it. "
-        "Live serves a warmup model on rows the evaluation refuses."
-    ),
-)
 def test_start_context_live_matches_batch_across_a_writer_rotation(config: CanaryConfig) -> None:
+    """B07.7: a capture rotating the writer mid-run ends the start on both
+    paths. Batch cannot tell that rotation from a daemon restart (both are a
+    new directory), so live reads the writer's recording and ends the start
+    there too, rather than serving rows the evaluation refuses."""
     models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[_cold_model()])
     observed_col, _ = start_context_columns(_COLD)
     first = _drive("2026-09-21T120000", initial_coolant=20.0, run_seconds=90)
@@ -552,11 +547,22 @@ def test_start_context_live_matches_batch_across_a_writer_rotation(config: Canar
     second["timestamp"] = second["timestamp"] + timedelta(seconds=95)
     both = pd.concat([first, second], ignore_index=True)
     batch = append_start_context(both, [_SPEC])[observed_col].tolist()
-    live = [
-        point[observed_col]
-        for point in _feed_live(LiveFeatureSource(config=config, behavior_models=models), both)
-    ]
+    writing = {"dir": None}
+    source = LiveFeatureSource(
+        config=config, behavior_models=models, session_identity=lambda: writing["dir"]
+    )
+    live = []
+    for _, row in both.iterrows():
+        writing["dir"] = row[SESSION_COLUMN]
+        live.extend(point[observed_col] for point in _feed_live(source, row.to_frame().T))
     assert live == batch
+    # The start was watched in the first recording, and ends at the rotation.
+    assert batch[len(first) - 1] == 1.0
+    assert batch[len(first) :] == [0.0] * len(second)
+
+    # Without a writer to read (replay tools, tests), nothing changes.
+    unwired = _feed_live(LiveFeatureSource(config=config, behavior_models=models), both)
+    assert unwired[-1][observed_col] == 1.0
 
 
 # ---------------------------------------------------------------------------
