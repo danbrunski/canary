@@ -26,6 +26,7 @@ from src.collection.can_collector import (
 from src.collection.reconnect import ReconnectPolicy
 from src.config import CanBusConfig, VehicleConfig
 from src.session import make_session_dir
+from tests.waits import settle, wait_until
 
 VIRTUAL_CHANNEL = "canary-test"
 
@@ -1014,11 +1015,12 @@ async def test_collect_can_counts_malformed_frames_without_aborting() -> None:
     queue: asyncio.Queue = asyncio.Queue()
     stop = asyncio.Event()
     task = asyncio.create_task(collect_can(bus, queue, stop, poll_interval=0.01))  # type: ignore[arg-type]
-    deadline = time.perf_counter() + 5.0
-    while queue.qsize() < 8 and time.perf_counter() < deadline:
-        await asyncio.sleep(0.005)
+    # T01.14: wait until the reader has asked past the script, not until 8
+    # frames are queued. The 8th good frame is call 11; the 4th malformed one
+    # is call 12, so stopping on the queue could miss it under load.
+    await wait_until(lambda: bus.calls > bus.total_calls, what="every scripted recv consumed")
     stop.set()
-    stats = await asyncio.wait_for(task, timeout=2.0)
+    stats = await settle(task)
 
     assert stats.frames == 8
     assert stats.parse_errors == 4

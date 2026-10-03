@@ -451,7 +451,7 @@ measurement in hand.
 
   **Acceptance:** 10 of 10 copies under the controlled load, as in T01.12.
 
-- [ ] **T01.14 `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting`
+- [x] **T01.14 `tests/test_can_collector.py::test_collect_can_counts_malformed_frames_without_aborting`
   races its own stop condition.**
   - **Seen** 2026-09-27 by the R09.5 verifier in an inner-loop run at
     `1df5e66`, which touched nothing in `can_collector`. The failure was
@@ -464,3 +464,18 @@ measurement in hand.
     consumed, before setting `stop`, with a deadline in the style of
     `tests/waits.py`. Fix the test only.
   - **Acceptance:** 10 of 10 copies beside 12 CPU burners, as in T01.12.
+
+  *Fixed 2026-10-03, test only.* The diagnosis is confirmed. `FlakyBus`
+  serves good frames on calls 1, 2, 4, 5, 7, 8, 10 and 11 and raises on 3, 6,
+  9 and 12. So the queue reaches 8 at call 11's push, and `CanReader` checks
+  `stop` before call 12. If the reader loses the CPU between that push and
+  that check, the loop sees 8 frames, sets `stop`, and the 4th malformed
+  frame is never read. Under plain load the window is too narrow to hit: the
+  old test passed 40 of 40 beside 12 burners. Deterministic reproduction: a
+  scratch fixture wrapping `ThreadHandoff.push` to sleep 0.2 s after the 8th
+  push. The old condition then fails with exactly `assert (8, 3, 8) == (8, 4,
+  8)`, and the new one passes. The test now waits with `wait_until(bus.calls >
+  bus.total_calls)`: the reader has asked past the script, so all 12 scripted
+  results were consumed. It then `settle`s the task. Acceptance: 10 of 10
+  copies (two rounds of five concurrent `pytest -n0`) beside 12 burners, load
+  average 9.4. The whole file passed 29 of 29 under the same load.
