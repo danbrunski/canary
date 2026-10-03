@@ -189,6 +189,26 @@ members on rows where the gates hold, designed as an IF/LSTM feature
     **Remaining:** the `imu:ACCEL_LON` member (H02.4) and the relation +
     tolerance in `committees.yaml`, measured on the H02.6 known-answer drive;
     until then `LON_ACCEL_SOURCE_DIVERGENCE` reports `not_configured`.
+  - [ ] **Found 2026-10-03 (desk): the IMU member can never reach the
+    committee, on either path.** The committee names `imu:ACCEL_LON`, but
+    nothing delivers that column to the committee seam in
+    `featurize_wide_frame`:
+    - **Offline:** `imu_stream` resolves a signed `imu:ACCEL_LON`. Then
+      `_decimate_imu_long` (`src/preprocessing/loader.py`; `decimate_imu_wide`
+      on the wide path) replaces it with `ACCEL_LON_MAX`/`_RMS`/`JERK_MAX`
+      and drops the raw column, before resampling.
+    - **Live:** `imu_live` emits only those aggregates, and its docstring
+      says it resolves no sign ("every live output is a magnitude").
+
+    Adding the relation to `committees.yaml` would therefore not compare the
+    IMU at all. It would run OBD against the GPS derivative, which the speed
+    committee already does. The member needs a **signed** per-tick channel
+    (for example `imu:ACCEL_LON_MEAN`), produced offline by the decimation
+    and live by an `imu_live` that resolves sign, with a live/offline parity
+    test. The member name should follow it. Also add a refusal so a committee
+    member that no path produces cannot be declared silently. Desk work, but
+    live sign resolution is a design change to H02.4's frame. Do it before
+    the H02.6 drive, so that drive can set the tolerance.
 
 ## Hardware
 
