@@ -38,7 +38,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -46,6 +46,7 @@ from src.atomic_write import atomic_write_text
 from src.config import CanaryConfig, VehicleParameters
 
 if TYPE_CHECKING:
+    from src.signals.afr import FlashHistory
     from src.vehicle.tune_revisions import TuneRevisionRegistry
 
 log = logging.getLogger(__name__)
@@ -784,3 +785,48 @@ def active_registry(config: CanaryConfig) -> TuneRevisionRegistry | None:
     return merge_tune_registries(
         load_tune_revisions(operational_path), operational_path, tracked, tracked_path
     )
+
+
+#: ``active_flash_history`` by the identity of the files it read. The live path
+#: featurizes every tick, and parsing the registry costs ~2.5 ms on the laptop.
+_flash_history_cache: dict[tuple[tuple[str, int], ...], Any] = {}
+
+
+def active_flash_history(config: CanaryConfig) -> FlashHistory:
+    """The flash history ``derived:TARGET_AFR`` resolves each row's revision
+    from (P02.16): :func:`active_registry`, or a :class:`NoFlashHistory`
+    naming why there is none.
+
+    One function for the live tick and every offline frame, since both run
+    ``feature_pipeline._append_derived_channels``. The live rows are stamped
+    "now", so they resolve to the revision currently flashed, by the same rule
+    (``TuneRevisionRegistry.at``) ``/control/calibration`` reports as
+    ``running_revision``. Re-read when either registry file changes.
+    """
+    from src.signals.afr import NoFlashHistory
+    from src.vehicle.tune_revisions import RegistryConflictError
+
+    sources = active_registry_sources(config)
+    try:
+        key = tuple((str(path), path.stat().st_mtime_ns) for path in sources)
+    except OSError:
+        key = ()
+    cached = _flash_history_cache.get(key) if key else None
+    if cached is not None:
+        return cast("FlashHistory", cached)
+    history: FlashHistory
+    try:
+        registry = active_registry(config)
+    except (RegistryConflictError, OSError, ValueError, yaml.YAMLError) as exc:
+        history = NoFlashHistory(f"the vehicle's flash history could not be read: {exc}")
+    else:
+        missing = source_registry_path(config)
+        history = (
+            NoFlashHistory(f"no tune_revisions.yaml is recorded for this vehicle ({missing})")
+            if registry is None
+            else registry
+        )
+    if key:
+        _flash_history_cache.clear()
+        _flash_history_cache[key] = history
+    return history

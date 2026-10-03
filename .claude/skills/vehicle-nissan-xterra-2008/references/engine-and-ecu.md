@@ -124,8 +124,18 @@ this truck:
   K 1.07), in lock-step with UpRev's own BFS/air. The DID stays in raw counts
   (a deployed-model feature). `derived:BASE_FUEL_SCHEDULE` is the ms channel,
   and `derived:TARGET_AFR` is looked up on it. Idle and light cruise sit at
-  ~2.7–4 ms, below the table's first BFS breakpoint (8.76 ms), so the lookup
-  leaves those rows empty. UpRev's "Fuel Target X Trace" reads ≈ 1.48 × BFS
+  ~2.7–4 ms, below the table's first BFS breakpoint (8.76 ms). **The ECM reads
+  a BFS below 8.76 ms as the first column, and an rpm above 5,200 as the last
+  row** (UpRev's own TARGET AFR, 2026-08-04 logs: 32 of 46 and 62 of 105 rows
+  within 0.05 AFR; extrapolation matches 2 and 0). The lookup clamps there
+  (`afr_calibration.yaml` `load_axis_out_of_range` / `rpm_axis_out_of_range`,
+  P02.15). Rows below 1,200 rpm and above 21.57 ms stay empty, with no
+  evidence either way, and so do rows in decel fuel cut (PID 0x44 reads exactly
+  0; PID 0x03's 0x04 also covers power enrichment, so it cannot mark cut). Each
+  row is looked up on the map of the revision flashed at its timestamp
+  (P02.16). The first two UpRev flashes (K edits only) carry UpRev's base map,
+  and the stock ZS04C map is not recorded.
+  UpRev's "Fuel Target X Trace" reads ≈ 1.48 × BFS
   − 0.09 on six logs (2026-08-08..09-24), so it is not BFS ms. How it lands
   on the table axis is still unverified (`rom_viewer.yaml`).
 - **Changing K (or the MAF table) walks every operating point across the BFS

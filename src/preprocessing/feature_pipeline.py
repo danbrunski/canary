@@ -81,6 +81,7 @@ from src.preprocessing.resampler import resample_config_for as resample_config_f
 from src.preprocessing.segmenter import SegmenterConfig, segment_operating_modes
 from src.signals.afr import (
     TARGET_AFR_CHANNELS,
+    FlashHistory,
     append_afr_channels,
     load_afr_calibration,
     load_axis_refusal,
@@ -99,6 +100,7 @@ from src.storage.broadcast_storage import (
 )
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
+from src.vehicle.profiles import active_flash_history
 
 log = logging.getLogger(__name__)
 
@@ -1372,6 +1374,7 @@ def featurize_wide_frame(
     did_map: DidMap | None,
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
+    flash_history: FlashHistory | None = None,
 ) -> FeaturizedFrame:
     """The single wide → model-ready feature transform (7.1 keystone).
 
@@ -1422,10 +1425,16 @@ def featurize_wide_frame(
     file instead, a frame decoded with a catalog that scales 0x1208 got a base
     fuel schedule scaled twice, silently. ``None``: no DID catalog decoded the
     frame, so no view and no DID-backed load axis.
+
+    P02.16 — ``flash_history`` is where ``derived:TARGET_AFR`` reads each
+    row's tune revision. ``None`` is the vehicle's own
+    (:func:`~src.vehicle.profiles.active_flash_history`) at the row's stamp,
+    right for every frame stamped when it was recorded. The live tick passes
+    its source's, which reads a replayed row at its recorded instant.
     """
     require_profile_scoped(config, reader="featurize_wide_frame")
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
-    framed = _append_derived_channels(framed, config, did_map=did_map)
+    framed = _append_derived_channels(framed, config, did_map=did_map, flash_history=flash_history)
     cfg = _feature_config(config, feature_config)
     if behavior_models is not None and behavior_models.models:
         framed = append_deviation_columns(
@@ -1444,7 +1453,11 @@ def _feature_config(config: CanaryConfig, feature_config: FeatureConfig | None) 
 
 
 def _append_derived_channels(
-    framed: pd.DataFrame, config: CanaryConfig, *, did_map: DidMap | None
+    framed: pd.DataFrame,
+    config: CanaryConfig,
+    *,
+    did_map: DidMap | None,
+    flash_history: FlashHistory | None = None,
 ) -> pd.DataFrame:
     """Every derived channel :func:`featurize_wide_frame` appends between
     segmentation and the behavior deviations, in order: the one list both it
@@ -1469,11 +1482,16 @@ def _append_derived_channels(
     framed = append_did_views(framed, did_map=did_map)
     # P02.13: the load axis's unit comes from the channel catalogs, which
     # src.signals cannot import, so it is resolved here.
+    # P02.16: each row's target map is the one flashed when the row was
+    # recorded, from the vehicle's flash history. One resolver for the live
+    # tick (rows stamped now: the running revision) and offline frames that
+    # concatenate sessions from either side of a flash.
     framed = append_afr_channels(
         framed,
         config.vehicle.parameters,
         afr_calibration,
         channel_units=channel_units_for(did_map),
+        flash_history=active_flash_history(config) if flash_history is None else flash_history,
     )
     framed = compute_anomaly_signals(framed, config.vehicle.parameters)
     # Performance channels (Task 1.1): fuel rate, instant economy,

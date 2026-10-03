@@ -495,6 +495,17 @@ def _target_map_summary(
     role_capabilities: dict[str, Any],
 ) -> dict[str, Any]:
     """Identify the target artifact and say explicitly whether its load is observable."""
+    if revision is None:
+        # P02.16: no revision resolves for this session, so which map it ran
+        # on is unknown. Never the calibration's active revision.
+        return {
+            "available": False,
+            "revision": None,
+            "reason": (
+                "revision_unknown: no tune revision resolves for this session (capture "
+                "manifest or flash history), so its target map is unknown"
+            ),
+        }
     if target is None:
         return {
             "available": False,
@@ -1410,7 +1421,11 @@ def compute_tuning_digest(
     measured_afr = _measured_afr_summary(
         session_dir, calibration=calibration, role_capabilities=inputs.roles
     )
-    target = None if calibration is None else calibration.target_map(inputs.revision)
+    target = (
+        None
+        if calibration is None or inputs.revision is None
+        else calibration.target_map(inputs.revision)
+    )
     target_map = _target_map_summary(
         target, revision=inputs.revision, role_capabilities=inputs.roles
     )

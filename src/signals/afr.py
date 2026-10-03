@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 import pandas as pd
@@ -21,6 +23,8 @@ from src.signals.vehicle_signals import (
     load_axis_channels,
     wideband_lambda_columns,
 )
+
+log = logging.getLogger(__name__)
 
 #: The target-map lookup's output and the per-bank errors built on it.
 TARGET_AFR = "derived:TARGET_AFR"
@@ -86,6 +90,59 @@ DEFAULT_TARGET_LOAD_AXIS: TargetLoadAxis = "base_fuel_schedule"
 DEFAULT_TARGET_LOAD_AXIS_UNIT: TargetLoadAxisUnit = "ms"
 
 
+class AxisEdgeClamp(_Strict):
+    """Evidence that the ECM reads a point beyond one edge of the map's axis as
+    that edge's row or column (P02.15).
+
+    A declaration cannot exist without its evidence: every field but ``notes``
+    is required. The check that earns one is the ECM's own target, logged
+    beside the load and rpm (UpRev's TARGET AFR), matched against the edge on
+    rows past it, and the same rows *failing* the obvious alternatives (linear
+    extrapolation from the two edge rows or columns, the next one in), so that
+    a constant matching a constant is not the evidence.
+    """
+
+    behaviour: Literal["clamp"]
+    method: Literal["uprev_target_afr_log_match"]
+    #: The logs (session directories) the rows came from.
+    logs: list[str] = Field(min_length=1)
+    #: The revision whose map the logged target was matched against.
+    revision: str = Field(min_length=1)
+    #: The rpm band of the rows counted.
+    rpm_min: float
+    rpm_max: float
+    rows: int = Field(ge=1)
+    rows_within_tolerance: int = Field(ge=0)
+    tolerance_afr: float = Field(gt=0)
+    max_error_afr: float = Field(ge=0)
+    median_error_afr: float = Field(ge=0)
+    #: How the alternatives scored on the same rows.
+    alternatives: str = Field(min_length=1)
+    verified_on: date
+    notes: str = ""
+
+    @model_validator(mode="after")
+    def _counts(self) -> AxisEdgeClamp:
+        if self.rows_within_tolerance > self.rows:
+            raise ValueError("rows_within_tolerance cannot exceed rows")
+        if self.rpm_min > self.rpm_max:
+            raise ValueError("rpm_min must not exceed rpm_max")
+        if self.median_error_afr > self.max_error_afr:
+            raise ValueError("median_error_afr cannot exceed max_error_afr")
+        return self
+
+
+class AxisOutOfRange(_Strict):
+    """What the ECM does with a point beyond each edge of one of the map's axes.
+
+    An edge with no evidence record is ``None``, and rows past it get no
+    target (NaN), which is also what a map without the block does.
+    """
+
+    below_first: AxisEdgeClamp | None = None
+    above_last: AxisEdgeClamp | None = None
+
+
 class TargetAfrMap(_Strict):
     revision: str
     load_axis_name: TargetLoadAxis = DEFAULT_TARGET_LOAD_AXIS
@@ -97,6 +154,29 @@ class TargetAfrMap(_Strict):
     raw_load_breakpoints: list[int] | None = None
     raw_values: list[list[int]] | None = None
     provenance: TargetMapProvenance | None = None
+    #: P02.15. ``None``: a point off that axis has no target, at either edge.
+    load_axis_out_of_range: AxisOutOfRange | None = None
+    rpm_axis_out_of_range: AxisOutOfRange | None = None
+
+    @property
+    def clamps_below_first_load(self) -> bool:
+        edges = self.load_axis_out_of_range
+        return edges is not None and edges.below_first is not None
+
+    @property
+    def clamps_above_last_load(self) -> bool:
+        edges = self.load_axis_out_of_range
+        return edges is not None and edges.above_last is not None
+
+    @property
+    def clamps_below_first_rpm(self) -> bool:
+        edges = self.rpm_axis_out_of_range
+        return edges is not None and edges.below_first is not None
+
+    @property
+    def clamps_above_last_rpm(self) -> bool:
+        edges = self.rpm_axis_out_of_range
+        return edges is not None and edges.above_last is not None
 
     @model_validator(mode="after")
     def _rectangular(self) -> TargetAfrMap:
@@ -238,9 +318,14 @@ class AfrCalibration(_Strict):
             return afr_stoich / valid
         return afr_stoich * valid
 
-    def target_map(self, revision: str | None = None) -> TargetAfrMap | None:
-        selected = revision or self.active_revision
-        return next((item for item in self.target_maps if item.revision == selected), None)
+    def target_map(self, revision: str) -> TargetAfrMap | None:
+        """The map recorded for exactly ``revision``, or ``None``.
+
+        No fallback (P02.16): ``active_revision`` used to stand in for a missing
+        or unknown revision, which labelled the active map as any session's.
+        A caller with no revision has no map, and must say so.
+        """
+        return next((item for item in self.target_maps if item.revision == revision), None)
 
 
 def load_afr_calibration(path: Path) -> AfrCalibration:
@@ -374,6 +459,11 @@ def target_afr(
     (:func:`target_load_axis`), read from ``frame`` here. A caller cannot hand
     in a load series of its own, so the map is never looked up in a unit its
     axis is not in (P02.13).
+
+    A point past an edge of either axis is read as that edge's row or column
+    only where the map declares, with evidence, that the ECM does so
+    (``load_axis_out_of_range`` / ``rpm_axis_out_of_range``, P02.15).
+    Otherwise the row stays unknown.
     """
     axis = target_load_axis(target, frame, channel_units=channel_units)
     rpm = frame[rpm_column]
@@ -386,18 +476,21 @@ def target_afr(
     inside = (
         np.isfinite(rpm_values)
         & np.isfinite(load_values)
-        & (rpm_values >= rpm_axis[0])
-        & (rpm_values <= rpm_axis[-1])
-        & (load_values >= load_axis[0])
-        & (load_values <= load_axis[-1])
+        & ((rpm_values >= rpm_axis[0]) | target.clamps_below_first_rpm)
+        & ((rpm_values <= rpm_axis[-1]) | target.clamps_above_last_rpm)
+        & ((load_values >= load_axis[0]) | target.clamps_below_first_load)
+        & ((load_values <= load_axis[-1]) | target.clamps_above_last_load)
     )
     if not inside.any():
         return pd.Series(result, index=rpm.index, dtype=float)
     # Bilinear in two vectorized passes: interpolate every rpm row along the
     # load axis at once, then blend the two bracketing rows per sample. A
     # per-row Python loop here costs ~20 s on a 40-minute drive.
-    selected_rpm = rpm_values[inside]
-    selected_load = load_values[inside]
+    # Only a declared edge lets a point past it through ``inside``; clipping
+    # makes the edge row or column explicit rather than leaning on the
+    # interpolation's own end behaviour.
+    selected_rpm = np.clip(rpm_values[inside], rpm_axis[0], rpm_axis[-1])
+    selected_load = np.clip(load_values[inside], load_axis[0], load_axis[-1])
     along_load = np.column_stack([np.interp(selected_load, load_axis, row) for row in grid])
     upper = np.clip(np.searchsorted(rpm_axis, selected_rpm, side="left"), 1, len(rpm_axis) - 1)
     lower = upper - 1
@@ -408,13 +501,217 @@ def target_afr(
     return pd.Series(result, index=rpm.index, dtype=float)
 
 
+class FlashHistory(Protocol):
+    """A vehicle's flash history, as the target lookup reads it (P02.16).
+
+    ``revisions_at`` maps a timestamp series to the name of the revision in
+    force at each instant, ``None`` where none is recorded. The registry lives
+    above this layer: :class:`src.vehicle.tune_revisions.TuneRevisionRegistry`
+    implements it, and so does :class:`NoFlashHistory`.
+    """
+
+    def revisions_at(self, timestamps: pd.Series) -> pd.Series: ...
+
+
+@dataclass(frozen=True)
+class NoFlashHistory:
+    """No flash history can be read, and why. Every row's revision is unknown."""
+
+    reason: str
+
+    def revisions_at(self, timestamps: pd.Series) -> pd.Series:
+        return pd.Series([None] * len(timestamps), index=timestamps.index, dtype=object)
+
+
+@dataclass(frozen=True)
+class RecordedClockFlashHistory:
+    """``base`` read at each row's *recorded* instant, for rows stamped on
+    another clock (P02.16).
+
+    A replay rebases every row to wall-clock at emit, so a replayed k106
+    session would otherwise resolve to the revision flashed today. The live
+    source records, per buffered row, how far its stamp is ahead of the
+    instant the data was recorded (``shift_s``: emit epoch minus recorded
+    epoch, from :data:`src.telemetry.REPLAY_SOURCE_AT_KEY`). A timestamp maps
+    back through the shift of the newest row stamped at or before it (the
+    first row's for an earlier one). Pickle-safe: the live tick carries it to
+    the feature process.
+    """
+
+    base: FlashHistory
+    #: Row stamps, epoch nanoseconds, non-decreasing.
+    stamped_ns: tuple[int, ...]
+    #: Per row, stamp minus recorded instant, in seconds.
+    shift_s: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.stamped_ns) != len(self.shift_s) or not self.stamped_ns:
+            raise ValueError("stamped_ns and shift_s must be equal-length and non-empty")
+
+    def revisions_at(self, timestamps: pd.Series) -> pd.Series:
+        stamps = pd.to_datetime(timestamps, utc=True, errors="coerce")
+        stamped = np.asarray(self.stamped_ns, dtype=np.int64)
+        present = stamps.notna().to_numpy()
+        values = stamps.dt.tz_convert(None).to_numpy(dtype="datetime64[ns]").astype(np.int64)
+        # The newest row stamped at or before each instant (the first row's
+        # shift for an earlier one).
+        position = np.clip(np.searchsorted(stamped, values, side="right") - 1, 0, len(stamped) - 1)
+        shift_ns = np.rint(np.asarray(self.shift_s, dtype=float)[position] * 1e9).astype(np.int64)
+        recorded = pd.Series(pd.to_datetime(values - shift_ns, utc=True), index=timestamps.index)
+        return self.base.revisions_at(recorded.where(present))
+
+
+#: Stable prefixes of the reasons a row gets no target from its revision (P02.16).
+TUNE_REVISION_UNKNOWN = "tune_revision_unknown"
+TARGET_MAP_UNRECORDED = "target_map_unrecorded"
+
+
+@dataclass(frozen=True)
+class TargetRevisionRefusal:
+    """Rows left without a target because of their tune revision."""
+
+    #: The revision those rows ran on; ``None`` when none resolves.
+    revision: str | None
+    rows: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class TargetAfrLookup:
+    """``derived:TARGET_AFR`` per row, each on its own revision's map."""
+
+    values: pd.Series
+    #: The revisions that produced a value on at least one row.
+    revisions_used: tuple[str, ...]
+    refusals: tuple[TargetRevisionRefusal, ...]
+    #: Rows a map would have given a value but the ECM was in fuel cut
+    #: (:func:`fuel_cut_rows`), so they have none.
+    fuel_cut_rows: int = 0
+
+
+#: J1979 PID 0x44, commanded equivalence ratio. Exactly zero is the ECM
+#: commanding no fuel at all: decel fuel cut (``AfrCalibration.commanded_afr_series``
+#: reads it the same way), whatever the vehicle's phi/lambda convention.
+COMMANDED_EQUIV_RATIO_COLUMN = "obd:COMMANDED_EQUIV_RATIO"
+
+
+def fuel_cut_rows(frame: pd.DataFrame) -> pd.Series:
+    """Rows on which the ECM reports decel fuel cut: its commanded
+    equivalence ratio (PID 0x44) reads exactly zero (P02.15).
+
+    A sentinel is a state, not a number: the ECM has no target then (UpRev
+    displays its TARGET AFR as 30.00), so the target map has nothing to say.
+    PID 0x03 ``FUEL_STATUS`` cannot stand in. Its fuel-cut code (0x04) is
+    "open loop for load *or* decel fuel cut" by J1979. On the Xterra's two
+    default drives it reads 0x04 on 154 rows that also carry phi: 114 at
+    phi 0, 35 near stoich, 3 under enrichment (phi 1.15-1.16), so it would
+    withhold real targets. Phi 0 agrees with it the other way (114 of 117
+    phi-0 rows read 0x04). A row with no commanded ratio is not in fuel cut as
+    far as this knows: absent, the state is unknown, not "cut".
+    """
+    if COMMANDED_EQUIV_RATIO_COLUMN not in frame:
+        return pd.Series(False, index=frame.index, dtype=bool)
+    ratio = pd.to_numeric(frame[COMMANDED_EQUIV_RATIO_COLUMN], errors="coerce")
+    return ratio.eq(0.0).fillna(False).astype(bool)
+
+
+def target_map_refusal(calibration: AfrCalibration, revision: str | None) -> str | None:
+    """Why rows on ``revision`` get no target map, or ``None`` when one is recorded.
+
+    Exact match only: a revision with no map of its own is refused, never
+    given ``active_revision``'s or a neighbour's (P02.16).
+    """
+    if revision is None:
+        return f"{TUNE_REVISION_UNKNOWN}: the flash history records no revision for these rows"
+    if any(item.revision == revision for item in calibration.target_maps):
+        return None
+    recorded = ", ".join(item.revision for item in calibration.target_maps) or "none"
+    return (
+        f"{TARGET_MAP_UNRECORDED}: tune revision {revision} has no target AFR map in the "
+        f"vehicle's afr_calibration.yaml (recorded: {recorded}). Its rows get no target "
+        "rather than another revision's map (P02.16)"
+    )
+
+
+def target_afr_by_revision(
+    frame: pd.DataFrame,
+    calibration: AfrCalibration,
+    flash_history: FlashHistory,
+    *,
+    channel_units: ChannelUnits | None,
+    rpm_column: str = "obd:RPM",
+    timestamp_column: str = "timestamp",
+) -> TargetAfrLookup:
+    """Look every row up on the map of the revision flashed when it was recorded.
+
+    The revision is resolved per row, from the row's own timestamp, so a frame
+    that concatenates sessions, or one session that spans a flash, gets each
+    side's map. There is no argument through which a single revision could be
+    applied to the whole frame. A row whose revision has no map, or that
+    resolves to no revision, stays NaN and is named in
+    :attr:`TargetAfrLookup.refusals`. A row in decel fuel cut
+    (:func:`fuel_cut_rows`) has no target either, and is counted in
+    :attr:`TargetAfrLookup.fuel_cut_rows`.
+
+    Raises like :func:`target_afr` when the load axis is refused or its channel
+    is not in ``frame``.
+    """
+    values = pd.Series(np.nan, index=frame.index, dtype=float)
+    if timestamp_column not in frame:
+        refusal = TargetRevisionRefusal(
+            None,
+            len(frame),
+            f"{TUNE_REVISION_UNKNOWN}: the frame has no {timestamp_column!r} column, so no "
+            "row's tune revision can be resolved",
+        )
+        return TargetAfrLookup(values, (), (refusal,) if len(frame) else ())
+    resolved = flash_history.revisions_at(frame[timestamp_column])
+    labels = pd.Series(resolved.to_numpy(dtype=object), index=frame.index, dtype=object)
+    known = labels.notna()
+    used: list[str] = []
+    refusals: list[TargetRevisionRefusal] = []
+    if not known.all():
+        # A replay wraps the history in RecordedClockFlashHistory; the cause of
+        # an unreadable registry is on the history it wraps.
+        underlying = (
+            flash_history.base
+            if isinstance(flash_history, RecordedClockFlashHistory)
+            else flash_history
+        )
+        reason = (
+            f"{TUNE_REVISION_UNKNOWN}: {underlying.reason}"
+            if isinstance(underlying, NoFlashHistory)
+            else target_map_refusal(calibration, None)
+        )
+        refusals.append(TargetRevisionRefusal(None, int((~known).sum()), str(reason)))
+    maps = {item.revision: item for item in calibration.target_maps}
+    for revision in dict.fromkeys(str(label) for label in labels[known]):
+        rows = labels == revision
+        why = target_map_refusal(calibration, revision)
+        if why is not None:
+            refusals.append(TargetRevisionRefusal(revision, int(rows.sum()), why))
+            continue
+        values.loc[rows] = target_afr(
+            frame.loc[rows], maps[revision], channel_units=channel_units, rpm_column=rpm_column
+        )
+        used.append(revision)
+    cut = fuel_cut_rows(frame) & values.notna()
+    values = values.where(~cut)
+    return TargetAfrLookup(values, tuple(used), tuple(refusals), int(cut.sum()))
+
+
+#: Refusals already logged in this process: the live path featurizes every
+#: tick, and one revision's refusal is news once.
+_logged_refusals: set[str] = set()
+
+
 def append_afr_channels(
     frame: pd.DataFrame,
     vehicle: VehicleParameters,
     calibration: AfrCalibration | None = None,
     *,
     channel_units: ChannelUnits | None,
-    tune_revision: str | None = None,
+    flash_history: FlashHistory,
 ) -> pd.DataFrame:
     """Append measured AFR, censor flags, target AFR and per-bank error.
 
@@ -423,6 +720,13 @@ def append_afr_channels(
     ``channel_units``) is the axis unit (:func:`target_afr_refusal` names why
     not, P02.13). They are absent otherwise, never computed from another
     load-like column. ``channel_units=None`` means no catalog, so no target.
+
+    P02.16 — each row is looked up on the map of the revision ``flash_history``
+    says was flashed at that row's timestamp (:func:`target_afr_by_revision`),
+    on the live path and offline alike. It has no default: a calibration's
+    ``active_revision`` applied to every session gave pre-flash sessions the
+    wrong map. Rows whose revision has no map stay NaN, and the reason is
+    logged once per process; the channels are absent when no row resolves one.
     """
     out = frame.copy()
     stoich = fuel_properties(vehicle).afr_stoich
@@ -455,18 +759,29 @@ def append_afr_channels(
 
     _append_lambda_bank_balances(out, calibration, stoich=stoich, floor=floor, ceiling=ceiling)
 
-    target = calibration.target_map(tune_revision) if calibration else None
-    if (
-        target is None
-        or target_afr_refusal(target, channel_units=channel_units) is not None
-        or "obd:RPM" not in out
+    if calibration is None or not calibration.target_maps or "obd:RPM" not in out:
+        return out
+    # Every recorded map shares one load axis today; a refused axis refuses
+    # them all, before any revision is resolved.
+    if any(
+        target_afr_refusal(target, channel_units=channel_units) is not None
+        for target in calibration.target_maps
     ):
         return out
     try:
-        out[TARGET_AFR] = target_afr(out, target, channel_units=channel_units)
+        lookup = target_afr_by_revision(
+            out, calibration, flash_history, channel_units=channel_units
+        )
     except KeyError:
         # The verified axis channel was not captured on this frame.
         return out
+    for refusal in lookup.refusals:
+        if refusal.reason not in _logged_refusals:
+            _logged_refusals.add(refusal.reason)
+            log.warning("derived:TARGET_AFR withheld on %d rows: %s", refusal.rows, refusal.reason)
+    if not lookup.revisions_used:
+        return out
+    out[TARGET_AFR] = lookup.values
     for bank, error_column in zip((1, 2), AFR_ERROR_CHANNELS, strict=True):
         measured_column = f"derived:AFR_B{bank}"
         if measured_column in out:
@@ -584,6 +899,7 @@ def afr_error_surface(
 
 __all__ = [
     "AFR_ERROR_CHANNELS",
+    "COMMANDED_EQUIV_RATIO_COLUMN",
     "DEFAULT_TARGET_LOAD_AXIS",
     "DEFAULT_TARGET_LOAD_AXIS_UNIT",
     "LAMBDA_BANK_BALANCE_AF_VOLTAGE",
@@ -591,19 +907,31 @@ __all__ = [
     "LOAD_AXIS_UNVERIFIED",
     "TARGET_AFR",
     "TARGET_AFR_CHANNELS",
+    "TARGET_MAP_UNRECORDED",
+    "TUNE_REVISION_UNKNOWN",
     "AfrCalibration",
+    "AxisEdgeClamp",
+    "AxisOutOfRange",
     "ChannelUnits",
+    "FlashHistory",
     "LoadAxisUnavailableError",
+    "NoFlashHistory",
+    "RecordedClockFlashHistory",
+    "TargetAfrLookup",
     "TargetAfrMap",
     "TargetMapProvenance",
+    "TargetRevisionRefusal",
     "VoltageAfrTransfer",
     "WidebandPairVerification",
     "append_afr_channels",
     "afr_error_surface",
+    "fuel_cut_rows",
     "load_afr_calibration",
     "load_axis_refusal",
     "target_afr",
+    "target_afr_by_revision",
     "target_afr_refusal",
     "target_load_axis",
+    "target_map_refusal",
     "voltage_to_afr",
 ]

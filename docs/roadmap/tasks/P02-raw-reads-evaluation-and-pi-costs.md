@@ -1820,6 +1820,367 @@ recomputes the rolling frame over the whole buffered window every tick.
       so it is not BFS ms. `rom_viewer.yaml` keeps its axis mapping
       `unverified`.
 
+- [x] **P02.15 The target map clamps to its edges like the ECM, and has no
+  value in fuel cut.** Operator-approved 2026-10-03, from the P02.14 finding:
+  UpRev's own TARGET AFR shows the ECM reads a BFS below 8.76 ms as the first
+  load column, and `target_afr` left those rows NaN. The rpm clamp above
+  5,200 was approved the same day, after the verifier found its evidence.
+
+  *Done 2026-10-03; verifier round 1 fixes folded in.*
+  - **Declared, evidenced properties of the map.**
+    - `TargetAfrMap` gains `load_axis_out_of_range` and
+      `rpm_axis_out_of_range`. Each is an `AxisOutOfRange` with one record per
+      edge (`below_first`, `above_last`).
+    - A record is an `AxisEdgeClamp`, and every field but `notes` is
+      required: `behaviour: clamp`, `method`, `logs`, `revision`,
+      `rpm_min`/`rpm_max`, `rows`, `rows_within_tolerance`, `tolerance_afr`,
+      `max_error_afr`, `median_error_afr`, `alternatives` and `verified_on`.
+      A clamp cannot be declared without its evidence.
+    - A map without the blocks, or an edge without a record, keeps NaN.
+      `target_afr` clips a point only past a declared edge. No numbers are in
+      shared code.
+  - **The data declares two edges.** Both sit on the k106 anchor in
+    `afr_calibration.yaml`, and the 2026-09-20 map inherits them. They are
+    ECM program behaviour, and that flash changed one cell.
+    - BFS below 8.76 ms reads the first column. BFS above 21.57 ms has no
+      record: no logged row has BFS above 21.57 ms (UpRev max 18.70 ms,
+      CANary max ~18).
+    - rpm above 5,200 reads the last row. rpm below 1,200 has no record:
+      every cell there would be 14.7, so a clamp and anything else read
+      the same.
+    - *Correction (verifier round 1, LOW).* The first version said "the logs
+      cannot show whether the ECM clamps rpm" for both rpm edges. That holds
+      only below 1,200. Above 5,200 the evidence exists (below), and the
+      operator approved the clamp.
+  - **Re-verified on the 2026-08-04 UpRev logs**
+    (`data/sessions/_uprev/2026-08-04T{163645,164301,232712}`, ZS44A-k106).
+    - **BFS below the axis**, at 4,400–5,200 rpm, with 5 fuel-cut rows (30.00)
+      excluded:
+      - the clamp matches **32 of 46** within 0.05 AFR and 44 within 0.10,
+        max error **0.178**, median 0.031;
+      - strictly inside the band it is **30 of 44**, P02.14's figure;
+      - the relation can fail: linear extrapolation from the first two
+        columns matches 2 of 46 (median 2.23), and the second column 0
+        (median 0.99);
+      - below 4,400 rpm all 404 non-cut rows read 14.70. They cannot tell a
+        clamp from extrapolation, since both columns are 14.7.
+    - **rpm above the axis**: 105 rows at 5,213–5,950 rpm, all from
+      `2026-08-04T164301`, none of them fuel cut.
+      - The last rpm row, at the row's BFS, matches **62 of 105** within
+        0.05 and 90 within 0.10. The max error is **0.307**, the median 0.035.
+      - Linear extrapolation along rpm from the last two rows matches
+        **0 of 105** (3 within 0.10, median 0.277, max 1.691).
+      - 40 of the 43 misses read 11.83, the last load column at 5,200 rpm.
+        Near-WOT pedal enrichment selects that column whatever the BFS (vehicle
+        skill), so they disagree about the column, not the row.
+    - For scale, on-map rows match the plain lookup no better: 275 of 582
+      within 0.05, median 0.061, max 2.07. UpRev reads rpm, BFS and target one
+      after another over K-line, so they are not same-instant.
+  - **Fuel cut: a sentinel is a state, not a number** (verifier round 1,
+    MEDIUM).
+    - All 374 fuel-cut rows in the fixture (UpRev 30.00, BFS 1.7–2.1 ms) are
+      below the BFS axis. They were NaN, and the clamp gave them 14.7 or the
+      first column.
+    - `src.signals.afr.fuel_cut_rows(frame)` marks rows whose commanded
+      equivalence ratio (J1979 PID 0x44, `obd:COMMANDED_EQUIV_RATIO`) reads
+      exactly 0. That is the ECM commanding no fuel, the state UpRev shows as
+      30.00, and `AfrCalibration.commanded_afr_series` already reads it that
+      way.
+    - `target_afr_by_revision` withholds the target there and counts the rows
+      (`TargetAfrLookup.fuel_cut_rows`). `DERIVED_CHANNEL_OPTIONAL_INPUTS`
+      declares the ratio as a `TARGET_AFR` input, so a perturbed or
+      incremental featurization recomputes the target when the ratio changes.
+    - A row with no commanded ratio is not marked: its state is unknown, not
+      "cut". The DID-only `tuning-did` profile polls no Mode 01, so its
+      fuel-cut rows keep a target. AFR_ERROR there is still censored at the
+      lean ceiling (18 AFR).
+  - **FUEL_STATUS (PID 0x03) cannot separate cut.**
+    - Its 0x04 code is "open loop for load *or* decel fuel cut" by J1979.
+    - On the two default drives it reads 0x04 on 154 rows that also carry phi:
+      114 at phi 0, 35 near stoich (0.97–1.03), 2 lean and 3 under
+      enrichment (phi 1.15–1.16, `2026-08-03T163440`). Using it would withhold
+      real targets.
+    - The other way round, phi 0 agrees with it: 114 of the 117 phi-0 rows
+      that carry a status read 0x04, and the 3 others are closed-loop rows on
+      `2026-09-20T152758`, which is polling skew.
+    - The lambda sensor lags but agrees: phi 0 has PID 0x24 on the 2.0 rail on
+      87 of 98 rows (152758) and 36 of 40 (163440).
+    - **"BFS < 2.1 ms means cut" is false.** Across the corpus (40 sessions
+      poll 0x1208), 57 BFS reads below 2.1 ms at ≥ 1,200 rpm have a status
+      within 1.5 s on 20. 10 of those read closed loop and 10 read 0x04. Of
+      the 19 with phi, 7 are 0, 10 are 0 < phi ≤ 1 and 2 are above 1. No BFS
+      threshold was used.
+  - **Known answers.** The committed slice is
+    `tests/fixtures/load_axis_clamp/uprev_2026-08-04_target_afr.csv`: every
+    08-04 row holding rpm, BFS and target, 1,585 rows, 95 KB.
+    `tests/test_target_afr_load_clamp.py` (11 tests):
+    - the BFS clamp reproduces its declaration (46 rows, 32 within 0.05, max
+      0.178, median 0.031), plus 44 within 0.10 and the strict 30 of 44; the
+      alternatives score 2 and 0;
+    - **the rpm clamp reproduces its declaration** (105 rows, 62 within 0.05,
+      max 0.307, median 0.035, 40 of 43 misses at 11.83), and extrapolation
+      scores 0;
+    - all 404 rows below 4,400 rpm give 14.7;
+    - **below 1,200 rpm stays NaN**: 74 logged rows, 68 of them also below the
+      BFS axis;
+    - the undeclared BFS upper edge stays NaN;
+    - a map without the declarations keeps NaN off both axes;
+    - k106 and 2026-09-20 declare exactly the two edges, and the UpRev base
+      map none;
+    - **fuel cut**: through `append_afr_channels`, all 374 fuel-cut rows (ratio
+      0) get no target. Without the ratio column the clamp would give all 374
+      a value, and non-cut rows are unchanged. Exact zero is cut; 1e-6, NaN
+      and a missing column are not;
+    - a clamp without evidence, or with impossible counts, is refused by the
+      schema.
+
+    `test_base_fuel_schedule.py`'s independent bilinear formula applies both
+    declared clamps. Its known answer still holds at `rtol` 1e-9.
+  - **Coverage on the two default drives**, all rows / classified rows /
+    grid density, from `featurize_wide_frame` with `canary.yaml` scoped. HEAD
+    is emulated as no clamps, `active_revision` on every row and no fuel-cut
+    mask.
+
+    | column | 152758 HEAD | 152758 after | 163440 HEAD | 163440 after |
+    |---|---|---|---|---|
+    | `TARGET_AFR` | 2 rows, 0.02 / 0.03 / 0.03 % | 16 rows, 0.19 / 0.22 / 0.22 % | 8 rows, 0.42 / 0.51 / 0.51 % | 19 rows, 1.01 / 1.22 / 1.22 % |
+    | `AFR_ERROR_B1` | 1, 0.01 % | 12, 0.14 / 0.16 / 0.16 % | 3, 0.16 / 0.19 % | 10, 0.53 / 0.64 / 0.64 % |
+    | `AFR_ERROR_B2` | 2, 0.02 / 0.03 % | 12, 0.14 / 0.16 / 0.16 % | 5, 0.27 / 0.32 % | 13, 0.69 / 0.83 / 0.83 % |
+
+    - With the clamps alone, 152758 had 18 rows. The fuel-cut mask removes 2:
+      phi 0, lambda on the rail, BFS 1.78 and 1.75 ms.
+    - The rpm clamp adds no row on these drives: no 0x1208 read above
+      5,200 rpm.
+    - **Floor verdict: still below `MIN_DETECTOR_COVERAGE` 0.5 on both drives,
+      by a factor of about 40–230.** 0x1208 is read once a minute on
+      `default` (P02.14: 60.6 s and 60.9 s).
+  - **Deployed manifests are unaffected.** On both drives the only columns
+    that change are the `TARGET_AFR` / `AFR_ERROR_B1/B2` raw, `__mean` and
+    `__std` columns. No column is added or removed. The IF (295) and LSTM
+    (361) manifests in `models/nissan-xterra-2008/` name none of them.
+    `FEATURE_FRAME_CACHE_VERSION` 9 → 10.
+
+- [x] **P02.16 Target AFR uses the map revision flashed when the row was
+  recorded.** Operator-approved 2026-10-03. `append_afr_channels` applied the
+  calibration's `active_revision` (ZS44A-20260920) to every session, so
+  pre-flash sessions got the wrong map.
+
+  *Done 2026-10-03; verifier round 1 fixes and the operator's ROM provenance
+  (2026-10-03) folded in.*
+  - **Per row, from the row's own timestamp.** It is not resolved per session.
+    - `TuneRevisionRegistry.revisions_at(timestamps)` is `at()` vectorised,
+      by the same rule: flashed at or before the instant, `None` before the
+      first flash or for NaT, naive stamps read as UTC.
+    - A frame that concatenates sessions, or one session that spans a flash,
+      gets each side's map. That is stricter than `resolve_session_revision`,
+      which assigns by session start. No session is ordered by name.
+  - **The lookup cannot be handed one revision.**
+    - `append_afr_channels(..., flash_history: FlashHistory)` is required; the
+      old `tune_revision` parameter is gone.
+    - `target_afr_by_revision` reads `frame["timestamp"]` itself.
+    - `FlashHistory` is a protocol in `src.signals.afr` (layer 0), which the
+      registry (`src.vehicle`, layer 1) implements structurally.
+      `NoFlashHistory(reason)` stands in when there is none.
+  - **No `active_revision` fallback anywhere** (verifier round 1, LOW).
+    - `AfrCalibration.target_map(revision: str)` is exact-match only, with no
+      default. The fallback used to make `target_map()` or `target_map(None)`
+      return the active map.
+    - The 6 test call sites pass their revision.
+    - `tuning_digest` refuses a session with no resolvable revision by name
+      (`revision_unknown: ...`, `available: false`). It no longer labels the
+      active map as that session's.
+    - `test_tuning_digest.py::test_a_capture_with_no_resolvable_revision_names_it_and_gets_no_map`.
+  - **Live, offline and replay call the same function.**
+    - `src.vehicle.profiles.active_flash_history(config)` returns
+      `active_registry(config)`. It returns a `NoFlashHistory` naming the
+      cause for a missing file or a `RegistryConflictError`. It is cached on
+      the registry files' mtimes.
+    - Offline, `featurize_wide_frame` uses it by default.
+    - Live rows are stamped now, so they resolve to the revision currently
+      flashed. That is the rule `/control/calibration` reports as
+      `running_revision`, and a test checks the two agree.
+  - **Runtime replay reads the recorded instant** (verifier round 1, MEDIUM).
+    - `replay_session` rebases every row to wall-clock at emit. So a replayed
+      k106 or pre-flash session resolved to ZS44A-20260920, while the same
+      session offline gave k106 or a refusal.
+    - The fix is on the record. Every record a replay emits carries its
+      recorded epoch under `src.telemetry.REPLAY_SOURCE_AT_KEY`
+      (`replay_source_at`). This covers every replay entry point: the control
+      plane, the YAML knob and the validation harness.
+    - `LiveFeatureSource.observe` keeps the newest emit-minus-recorded shift,
+      and a parallel deque holds it per buffered row. `reset()`, the replay
+      boundary, clears it.
+    - `prepare_tick` puts a `flash_history` on the `PreparedLiveTick`
+      (required, no default). It is the vehicle's history, or a
+      `RecordedClockFlashHistory(base, stamped_ns, shift_s)` that maps each
+      row back to its recorded instant when any buffered row came from a
+      replay. `build_prepared_live_tick` passes it to `featurize_wide_frame`.
+      It is pickle-safe and crosses to the feature process.
+  - **Refusals are named, never another revision's map.**
+    `target_map_refusal` matches exactly.
+    - A revision with no map gives `target_map_unrecorded: ...`.
+    - A row with no revision gives `tune_revision_unknown: ...`.
+    - `append_afr_channels` logs each reason once per process.
+  - **Target maps now recorded: the UpRev base, for the first two flashes**
+    (operator, 2026-10-03).
+    - **What the files are, per the operator.** The `ROM Store/ZS44A.OsirisROM`
+      is UpRev's own stock ZS44A ROM, the base every edit started from. The
+      first flash (K 1.07) and k105 were never saved as separate files: each
+      went into `ZS44A-Tuned.OsirisROM`, later overwritten by k106. The
+      operator edited no fuel-target cell before k106, only K. So both
+      revisions carry the base's map.
+    - **The base decodes with the same definition as k106.**
+      - `src.analysis.osiris.Container` parses it and round-trips it
+        byte-exact.
+      - The decoded image is 1,048,576 bytes, SHA-256 `8201208033e0926b…`.
+      - Its BE32 sum/XOR checksum passes under `rom_targets.yaml`.
+      - Its raw rpm axis (0xCAA5) and BFS axis (0xC894) equal k106's.
+      - Container SHA-256 `8468e11b…b292`, mtime 2026-07-26 14:40:53 MDT,
+        byte-identical to `~/Uprev/ROMs/ZS44A.OsirisROM`.
+      - The base's K was not read: the repo has no verified K address
+        (`docs/uprev-rom-table-verification.md`, remaining work).
+    - **Recorded** in `afr_calibration.yaml` as `ZS44A-osiris-initial` with
+      `verified_rom_decode` provenance: file, sha256, decoded hash, method,
+      and the operator's statement. `ZS44A-k105` is the same map through a
+      YAML merge (`<<: *targets_uprev_base`), so it cannot drift. Only its
+      provenance notes differ.
+      - The registry is not edited. Its `rom_sha256` names the flashed file,
+        and the base is not that file.
+      - In this registry "osiris" is UpRev's file format, not a kind of map.
+    - **No clamp declarations on the base map.** The edge evidence was logged
+      on k106, so this map stays NaN off both axes.
+      - The decoded base and k106 differ only in 248 bytes in 9 regions:
+        checksums at 0x9598, 15 bytes at 0xCB2A, and UpRev's map slots at
+        0xE00xx–0xE27xx. That suggests the same lookup code, but it is not a
+        logged match, so it is not used as evidence.
+    - **k106 against the base: 10 target cells, all in the two top rpm rows.**
+      - Row 6 (4,400 rpm), columns 4–7, go 2 counts richer: 12.14/12.30 →
+        11.98/12.14.
+      - Row 7 (5,200 rpm), columns 2–7, go leaner: 11.83 / 11.27 / 11.27 /
+        11.47 / 11.47 / 11.47 → 11.98 / 11.76 / 11.61 / 11.83 / 11.83 / 11.83.
+      - That removes the base's dip at row 7 columns 3–4 (A7, the richest
+        cells in the map) and narrows the step between the two rows. It is
+        consistent with the registry's "smoothed AFR targets". Rows 0–5 are
+        unchanged.
+    - **Stock ZS04C stays unrecorded.**
+      - The factory dumps (`ROM Backup/23710 - ZS04C_VIN Not Found*.bin`, both
+        sha256 `01cf15e7…abe0`, 1,048,592 bytes) are not plain images. The
+        first bytes are high-entropy, and neither the base table nor either
+        axis appears anywhere in them.
+      - The repo has no decoder for UpRev's backup format and no ZS04C table
+        address.
+      - Needed: that decoder, or a ZS04C definition, plus a known answer.
+    - **Corroboration** (the ZS04C dump cannot be compared directly). UpRev's
+      companion `ZS44A Back To Stock.OsirisROM` (sha `cad91369…a133`) has
+      0xFF in UpRev's map slots, and the base's exact 64-byte table at
+      **0xA169**. The base holds that table at 0xA169 too, and copies it into
+      its map slots 1–5. So the base's map is the ZS44A calibration's own
+      table. Whether ZS04C's equals it is not shown.
+  - **Measured: corpus revision assignment.** `discover_sessions` gives 116
+    sessions.
+    - **90 of 116 change assignment** from ZS44A-20260920: 46 to k106 (one
+      cell differs), 25 to the UpRev base map (24 osiris-initial, 1 k105),
+      and 19 to ZS04C-stock, which gets no target.
+    - One session straddles a flash: `2026-07-26T214348`, stock to
+      osiris-initial. Its 64 0x1208 reads give no target either side: the
+      stock rows have no map, and no osiris-initial read lands on the map.
+  - **Measured: the 25 base-map sessions.**
+    - 5 regain `TARGET_AFR`: 26 rows in all. `2026-07-30T210101` has 12
+      (density 0.87 %), `07-29T002731` 7, `07-28T164657` 5, `07-26T225058` 1,
+      and `07-31T145209` (k105) 1.
+    - 15 poll 0x1208 but no read lands on the map. With no clamp declarations,
+      a BFS below 8.76 ms stays NaN.
+    - 5 never polled 0x1208.
+    - None reaches the coverage floor.
+    - The A/F sensors' 10.0 floor: no CANary row in these sessions reads
+      ≤ 10.0 AFR. The pegged 7-29 logs are UpRev's K-line logs, not CANary
+      sessions. The censor mask (`AFR_CENSORED_B*` at ≤ 10.0 or ≥ 18.0 → no
+      `AFR_ERROR`) is pinned by
+      `test_afr.py::test_decel_fuel_cut_is_censored_like_the_rich_floor`, and
+      no floor row carries an error.
+  - **Measured: the two drives.** No `TARGET_AFR` value changes from the
+    revision change. Both run entirely on k106 by row timestamps, and no row
+    touches the one cell the maps differ in. The changes are the clamp and the
+    fuel-cut rows above.
+  - **Tests.** `tests/test_target_afr_revision.py` (16):
+    - the k106 and 2026-09-20 maps differ in exactly cell [7][4];
+    - a two-session frame straddling the 2026-09-20 flash gets 11.6148 before
+      and 11.5436 after. This holds through `append_afr_channels` and through
+      the production featurizer;
+    - one session spanning the flash changes map at the flash;
+    - a synthetic stock-era instant is refused as `target_map_unrecorded`,
+      naming ZS04C-stock;
+    - osiris-initial and k105 share the base map: 11.267 at row 7 col 3,
+      against k106's 11.760;
+    - `active_revision` is never a fallback;
+    - the three `tune_revision_unknown` cases;
+    - `revisions_at` equals `at`;
+    - the live tick uses the revision flashed at "now", and agrees with
+      `running_revision`;
+    - an edited registry is re-read;
+    - **replaying a k106 session through `replay_session` gets the k106 map**.
+      Its emit stamps alone resolve to ZS44A-20260920. After `reset()`, live
+      rows read the flash of now;
+    - **replaying a stock-era session gives no target and logs
+      `target_map_unrecorded` naming ZS04C-stock**;
+    - `RecordedClockFlashHistory` maps each row through its own shift.
+
+    `test_replay.py` pins the new metadata key, which every replayed record
+    carries and which adds nothing else.
+  - **Gate, after the round-1 fixes.**
+    - 1,499 passed (1 xfailed) over 69 test files. They are every file that
+      mentions the target lookup, tune revisions, the AFR calibration, the
+      feature cache, `target_map(`, `replay_session`, `LiveFeatureSource` or
+      the replay key, plus `test_layering.py`, `test_script_cli_snapshot.py`,
+      `test_analysis_ground_truth.py`, `test_feature_pipeline*.py` and
+      `test_profiles.py`.
+    - `-m ml_training -x`: 122 passed.
+    - `-m "not integration and not slow"`, after the last fix: 6,464 passed,
+      1 skipped. One collection error, `tests/test_alerts_emitter.py`
+      (`IsolationForestInferenceEngine` no longer in `src.alerts.emitter`),
+      belongs to a concurrent session's uncommitted alerts → models move, not
+      to this change; ml_training ran with that file ignored.
+    - ruff, format and mypy are clean.
+  - **Behaviour changes (verifier round 2, LOW).**
+    - The feature-frame cache key now hashes both `tune_revisions.yaml` files
+      (`active_registry_sources`). Recording any flash, including a dashboard
+      `append_flash` to the operational copy, invalidates every cached
+      feature frame, and the next build re-featurizes everything.
+    - Fuel-cut masking follows φ's as-of hold (1 Hz grid, `max_gap` 2 s, φ
+      polled every ~3 s on default). A target can be withheld for up to ~2 s
+      after fuel resumes, and a cut can go unmasked for the same window at
+      its start.
+    - A replay whose registry cannot be read logs the registry's own cause
+      (the wrapped `NoFlashHistory.reason`), not the generic refusal.
+    - Open, informational: `TargetEditor.from_bytes` refuses the UpRev base
+      ROM because two revisions (first flash, k105) now match it; before,
+      none did, so the refusal is not new, but its "exactly one" message is
+      now misleading. `AfrCalibration.active_revision` has no reader left
+      and is provenance only.
+  - Verified by an independent verifier (round 2): all acceptance holds,
+    and HEAD plus these files alone pass mypy and 926 targeted tests.
+
+- [ ] **P02.17 Session-name time and first-row time disagree on some
+  sessions.** Low priority. Found by the P02.16 verifier, 2026-10-03.
+  - 7 of 150 sessions have a first row more than 2 minutes after their
+    directory name:
+
+    | session | first row after name |
+    |---|---|
+    | 07-22T143129 | +978 s |
+    | 07-27T010704 | +8,070 s |
+    | 07-28T011050 | +5,473 s |
+    | 07-29T002731 | +372 s |
+    | 07-29T205841 | +11,413 s |
+    | 08-03T163440 | +23,834 s |
+    | 08-06T002019 | +434 s |
+  - Only `2026-08-03T163440` crosses a flash. `resolve_session_revision`, by
+    name, says k105, while P02.16's per-row lookup says k106. The two maps
+    differ (k105 carries the UpRev base map), so the tuning tools and
+    `TARGET_AFR` disagree about this session.
+  - Proposed: resolve a session by its first row, or flag the disagreement
+    where they differ. Not implemented.
+
 ## Tracked elsewhere
 
 - **The sequence detector's tick cost is A06.6's.** It is not duplicated

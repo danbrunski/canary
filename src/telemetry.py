@@ -77,6 +77,13 @@ KLINE_SOURCE: Final = "kline"
 CAN_FRAME_KIND_KEY: Final = "frame_kind"
 CanFrameKind = Literal["error", "remote"]
 
+#: Metadata key on every record a replay emits: the epoch seconds the row was
+#: *recorded* at, before its timestamp was rebased to wall-clock (P02.16). A
+#: consumer that must know when the data was recorded, not when it arrived
+#: (which calibration was flashed then), reads it from the record itself, so
+#: no replay entry point has to tell it a replay is running.
+REPLAY_SOURCE_AT_KEY: Final = "replay_source_at"
+
 TelemetrySource = Literal[
     "obd", "can", "decoded", "gps", "derived", "imu", "uprev", "sensor", "kline"
 ]

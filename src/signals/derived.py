@@ -168,6 +168,9 @@ DERIVED_CHANNEL_OPTIONAL_INPUTS: dict[str, tuple[str, ...]] = {
         "obd:INTAKE_TEMP",
         "decoded:IAT",
     ),
+    # P02.15: the target map has no value while the ECM commands fuel cut
+    # (commanded equivalence ratio exactly 0, src.signals.afr.fuel_cut_rows).
+    "derived:TARGET_AFR": ("obd:COMMANDED_EQUIV_RATIO",),
 }
 
 #: B04.5 — manifold-referenced VE: measured air mass over the ideal-gas fill

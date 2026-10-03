@@ -73,6 +73,7 @@ from src.preprocessing.session_context import (
     StartContextSpec,
     start_context_specs,
 )
+from src.signals.afr import FlashHistory, RecordedClockFlashHistory
 from src.signals.derived import (
     IDLE_RPM_FLOOR,
     IDLE_SPEED_CEIL_KPH,
@@ -86,10 +87,12 @@ from src.telemetry import (
     GPS_SOURCE,
     IMU_SOURCE,
     OBD_SOURCE,
+    REPLAY_SOURCE_AT_KEY,
     SOURCE_SEP,
     TelemetryRecord,
     channel_key,
 )
+from src.vehicle.profiles import active_flash_history
 
 log = logging.getLogger(__name__)
 
@@ -113,6 +116,12 @@ class PreparedLiveTick:
     #: featurizer judges DID views and the load-axis unit against it (P02.14).
     #: About 68 KB pickled, 0.6 ms a tick across the process boundary.
     did_map: DidMap | None
+    #: P02.16 — the flash history ``derived:TARGET_AFR`` resolves each row's
+    #: revision from: the vehicle's (``active_flash_history``), read at each
+    #: row's *recorded* instant when the rows came from a replay
+    #: (:class:`~src.signals.afr.RecordedClockFlashHistory`). No default, so
+    #: the worker cannot featurize a replayed tick against today's flash.
+    flash_history: FlashHistory
 
 
 @dataclass(frozen=True)
@@ -140,6 +149,7 @@ def build_prepared_live_tick(prepared: PreparedLiveTick) -> BuiltLiveTick:
         behavior_models=prepared.behavior_models,
         did_map=prepared.did_map,
         feature_config=prepared.feature_config,
+        flash_history=prepared.flash_history,
     )
     operating_point = {
         str(key): value for key, value in result.operating_frame.iloc[-1].to_dict().items()
@@ -204,6 +214,15 @@ class LiveFeatureSource:
     #: on :meth:`reset` like every other observation-derived state.
     _reject_counts: dict[str, int] = field(default_factory=dict)
     _buffer: deque[dict[str, Any]] = field(init=False)
+    #: P02.16 — per ``_buffer`` row: its stamp (epoch ns) and how far that
+    #: stamp is ahead of the instant the data was recorded (``None`` for live
+    #: data). Replay rebases rows to wall-clock; this maps them back so the
+    #: target map is the revision flashed when the session was recorded.
+    _buffer_clock: deque[tuple[int, float | None]] = field(init=False)
+    #: Newest replayed record's emit-minus-recorded offset (seconds), from
+    #: :data:`~src.telemetry.REPLAY_SOURCE_AT_KEY`; ``None`` until a replayed
+    #: record arrives, and again after :meth:`reset` (the replay boundary).
+    _replay_shift_s: float | None = field(init=False, default=None)
     #: R04.4 — the storage sink's decoder over every confidence, so the
     #: ``decoded:`` record this source publishes (and observes) is the record
     #: storage writes. ``None`` without bindings.
@@ -316,6 +335,7 @@ class LiveFeatureSource:
         recent_motion_s = self.config.preprocessing.idle_transient_lookback_seconds
         self._max_rows = max(32, int(window_s * hz * 2), int(recent_motion_s * hz) + int(hz))
         self._buffer = deque(maxlen=self._max_rows)
+        self._buffer_clock = deque(maxlen=self._max_rows)
         self._feature_config = FeatureConfig(window_seconds=window_s)
         # Mirror the resampler's max_gap (interval × max_gap_factor) used at
         # training time, so a channel reads stale at serve exactly when its
@@ -388,6 +408,12 @@ class LiveFeatureSource:
         """
         for record_observer in self.record_observers:
             record_observer(record)
+        recorded_at = record.metadata.get(REPLAY_SOURCE_AT_KEY)
+        if isinstance(recorded_at, (int, float)) and not isinstance(recorded_at, bool):
+            stamped = record.timestamp
+            if stamped.tzinfo is None:
+                stamped = stamped.replace(tzinfo=UTC)
+            self._replay_shift_s = stamped.timestamp() - float(recorded_at)
         if record.source == "obd":
             # Raw Mode-22 DID poll responses arrive as obd-source records with
             # channel "DID_<hex>" and a hex-string payload value. Decode them
@@ -592,6 +618,7 @@ class LiveFeatureSource:
         }
         snapshot.update(self._start_context(snapshot, now_utc))
         self._buffer.append(snapshot)
+        self._buffer_clock.append((pd.Timestamp(now_utc).value, self._replay_shift_s))
 
         wide = pd.DataFrame(list(self._buffer))
         wide["timestamp"] = pd.to_datetime(wide["timestamp"], utc=True)
@@ -603,6 +630,20 @@ class LiveFeatureSource:
             feature_config=self._feature_config,
             generation=self._generation,
             did_map=self.did_map,
+            flash_history=self._tick_flash_history(),
+        )
+
+    def _tick_flash_history(self) -> FlashHistory:
+        """The vehicle's flash history, read at each buffered row's recorded
+        instant when any row came from a replay (P02.16). Live rows are
+        stamped now, so live reads the revision flashed now."""
+        history = active_flash_history(self.config)
+        if all(shift is None for _stamp, shift in self._buffer_clock):
+            return history
+        return RecordedClockFlashHistory(
+            base=history,
+            stamped_ns=tuple(stamp for stamp, _shift in self._buffer_clock),
+            shift_s=tuple(0.0 if shift is None else shift for _stamp, shift in self._buffer_clock),
         )
 
     def apply_built_tick(
@@ -878,6 +919,8 @@ class LiveFeatureSource:
         self._last_tick_at = None
         self._reject_counts = {}
         self._buffer = deque(maxlen=self._max_rows)
+        self._buffer_clock = deque(maxlen=self._max_rows)
+        self._replay_shift_s = None
         self.latest_operating_point = None
         self.last_segmenter_fallback = False
         # Replay entry/exit is a session boundary: no start evidence carries.

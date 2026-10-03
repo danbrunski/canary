@@ -43,6 +43,7 @@ from src.telemetry import (
     require_trainability_classified,
 )
 from src.trainability import SOURCE_NOT_TRAINABLE, source_exclusion_reason
+from src.vehicle.tune_revisions import load_tune_revisions
 from tests.configs import example_config
 
 REPO = Path(__file__).resolve().parents[1]
@@ -224,8 +225,15 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
                 frame[member] = np.linspace(0.0, 1.0, ROWS)
     frame["did:ECM_AIR_CHARGE"] = np.linspace(9.0, 21.0, ROWS) / 0.00049
     frame = append_did_views(frame, did_map=load_repo_did_map())
+    # The frame is dated 2026-09-24, on ZS44A-20260920, which has a map.
+    registry = load_tune_revisions(XTERRA / "tune_revisions.yaml")
+    assert registry is not None
     frame = append_afr_channels(
-        frame, vehicle, calibration, channel_units=channel_units_for(load_repo_did_map())
+        frame,
+        vehicle,
+        calibration,
+        channel_units=channel_units_for(load_repo_did_map()),
+        flash_history=registry,
     )
     frame = compute_anomaly_signals(frame, vehicle)
     frame = compute_derived_channels(frame, vehicle, calibration=calibration)

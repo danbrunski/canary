@@ -15,6 +15,11 @@ is exhausted. Timestamps are rebased to wall-clock at emit time so
 data-freshness reads "now". Chunk files are read one at a time so a
 multi-hundred-MB session replays in bounded memory.
 
+Every emitted record also carries its recorded instant (epoch seconds) under
+:data:`src.telemetry.REPLAY_SOURCE_AT_KEY`, so a consumer that needs the
+recording's time rather than the emit time (the live source resolving which
+tune revision was flashed, P02.16) reads it off the record.
+
 ``metadata_json`` rides along (C02.6). The acquisition clock inside it,
 ``acquired_at``, is shifted by the same offset as the row's timestamp so the
 replayed row stays internally consistent (presentation stamp and acquisition
@@ -66,6 +71,7 @@ from src.storage.session_files import PARQUET_PATTERN, count_session_rows, sessi
 from src.telemetry import (
     CAN_SOURCE,
     RE_DERIVED_SOURCES,
+    REPLAY_SOURCE_AT_KEY,
     MetadataValue,
     TelemetryRecord,
     TelemetrySource,
@@ -452,10 +458,15 @@ async def replay_session(
                 value=cast(TelemetryValue, fields["value"]),
                 unit=str(fields["unit"]),
                 payload=cast("bytes | None", fields["payload"]),
-                metadata=rebase_metadata(
-                    cast("dict[str, MetadataValue]", fields["metadata"]),
-                    emitted_at - orig_epoch,
-                ),
+                metadata={
+                    **rebase_metadata(
+                        cast("dict[str, MetadataValue]", fields["metadata"]),
+                        emitted_at - orig_epoch,
+                    ),
+                    # P02.16: the recorded instant rides on the record, so the
+                    # live source resolves the tune revision flashed *then*.
+                    REPLAY_SOURCE_AT_KEY: orig_epoch,
+                },
             )
             try:
                 queue.put_nowait(record)

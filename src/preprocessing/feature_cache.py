@@ -17,6 +17,7 @@ from src.config import CanaryConfig, require_profile_scoped
 from src.decode.dbc import DEFAULT_DBC_DIR
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.storage.session_files import PARQUET_PATTERN
+from src.vehicle.profiles import active_registry_sources
 
 log = logging.getLogger(__name__)
 
@@ -64,7 +65,11 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     Xterra's verified load axis, so frames gain it and, where ``obd:RPM`` is
 #:     present, ``derived:TARGET_AFR`` / ``AFR_ERROR_B*``. The vehicle module
 #:     that declares it is not a hashed input, so the version carries it.
-FEATURE_FRAME_CACHE_VERSION = 9
+#: 10 — P02.15 / P02.16: ``derived:TARGET_AFR`` clamps a load below the map's
+#:     first breakpoint where the map declares it, and each row's map is the
+#:     revision flashed at its timestamp, not ``active_revision``. The key now
+#:     hashes the flash-history files too (``tune_revisions``).
+FEATURE_FRAME_CACHE_VERSION = 10
 
 
 def build_feature_frame_cache_key(
@@ -130,6 +135,9 @@ def _feature_frame_cache_metadata(
         # hashed at the scoped path, so a frame built without it (or with a
         # since-edited one) is never served.
         "afr_calibration": _file_cache_entry(config.daemon.afr_calibration),
+        # P02.16: each row's target map is the revision these files say was
+        # flashed when it was recorded.
+        "tune_revisions": [_file_cache_entry(path) for path in active_registry_sources(config)],
         "vehicle_parameters": config.vehicle.parameters.model_dump(mode="json"),
     }
     return {**payload, "cache_key": _stable_hash(payload)}

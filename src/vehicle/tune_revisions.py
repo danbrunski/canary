@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
+import numpy as np
+import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -70,6 +72,28 @@ class TuneRevisionRegistry(_Strict):
             else:
                 break
         return found
+
+    def revisions_at(self, timestamps: pd.Series) -> pd.Series:
+        """:meth:`at` for every timestamp: the revision name in force at each.
+
+        ``None`` before the first flash and for a missing timestamp. Naive
+        timestamps are UTC, as in :meth:`at`. The same rule as :meth:`at`
+        (flashed at or before the instant), vectorised: this is how
+        ``derived:TARGET_AFR`` picks each row's map, on the live path (rows
+        stamped "now", so the revision currently flashed) and offline alike
+        (P02.16), satisfying :class:`src.signals.afr.FlashHistory`.
+        """
+        stamps = pd.to_datetime(timestamps, utc=True, errors="coerce")
+        values = np.full(len(stamps), None, dtype=object)
+        if not self.revisions or stamps.empty:
+            return pd.Series(values, index=timestamps.index, dtype=object)
+        flashed = pd.DatetimeIndex([_aware(r.flashed_at) for r in self.revisions]).as_unit("ns")
+        present = stamps.notna().to_numpy()
+        instants = pd.DatetimeIndex(stamps[present]).as_unit("ns")
+        position = flashed.searchsorted(instants, side="right") - 1
+        names = np.array([None, *(r.revision for r in self.revisions)], dtype=object)
+        values[present] = names[position + 1]
+        return pd.Series(values, index=timestamps.index, dtype=object)
 
     def for_session(self, session: str | Path) -> TuneRevision | None:
         """The revision in force when a session (by directory name) started."""

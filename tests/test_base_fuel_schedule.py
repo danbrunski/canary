@@ -379,9 +379,16 @@ def test_the_target_exclusion_lifts_and_the_view_is_refused_as_a_duplicate() -> 
 
 def _bilinear(target: TargetAfrMap, rpm: float, load: float) -> float:
     """The four-cell bilinear formula, written out independently of
-    ``src.signals.afr.target_afr``. NaN off the map, as the lookup does."""
+    ``src.signals.afr.target_afr``. NaN off the map, as the lookup does, except
+    that a load below the first breakpoint is the first column, and an rpm
+    above the last the last row, where the map declares the ECM's clamp
+    (P02.15)."""
     rpms = list(target.rpm_breakpoints)
     loads = list(target.load_breakpoints)
+    if target.clamps_below_first_load and load < loads[0]:
+        load = loads[0]
+    if target.clamps_above_last_rpm and rpm > rpms[-1]:
+        rpm = rpms[-1]
     if not (rpms[0] <= rpm <= rpms[-1] and loads[0] <= load <= loads[-1]):
         return float("nan")
     i = max(k for k in range(len(rpms) - 1) if rpms[k] <= rpm)
@@ -408,8 +415,9 @@ def slice_operating() -> pd.DataFrame:
 
 def test_target_afr_is_the_maps_lookup_on_bfs_in_ms(slice_operating: pd.DataFrame) -> None:
     calibration = load_afr_calibration(AFR_CALIBRATION)
-    target = calibration.target_map()
-    assert target is not None and target.revision == "ZS44A-20260920"
+    # The slice was recorded 2026-09-23, on the 2026-09-20 flash (P02.16).
+    target = calibration.target_map("ZS44A-20260920")
+    assert target is not None and target.clamps_below_first_load
     rows = slice_operating[["obd:RPM", "did:ECM_AIR_CHARGE", TARGET_AFR]]
     expected = np.array(
         [
@@ -433,7 +441,7 @@ def test_bfs_in_ms_lands_on_the_maps_axis_where_the_map_applies(
     bfs = slice_operating[BASE_FUEL_SCHEDULE].dropna()
     assert len(bfs) > 100
     assert 1.0 < bfs.min() and bfs.max() < 25.0
-    target = load_afr_calibration(AFR_CALIBRATION).target_map()
+    target = load_afr_calibration(AFR_CALIBRATION).target_map("ZS44A-20260920")
     assert target is not None
     high_load = bfs[slice_operating.loc[bfs.index, "obd:RPM"] >= target.rpm_breakpoints[3]]
     on_axis = high_load.between(target.load_breakpoints[0], target.load_breakpoints[-1])

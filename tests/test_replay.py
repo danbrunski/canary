@@ -17,7 +17,7 @@ from src.collection.replay import (
 )
 from src.config import CanaryConfig
 from src.storage.parquet_writer import write_records_to_parquet
-from src.telemetry import RE_DERIVED_SOURCES, TelemetryRecord
+from src.telemetry import RE_DERIVED_SOURCES, REPLAY_SOURCE_AT_KEY, TelemetryRecord
 
 
 def _session(tmp_path: Path) -> Path:
@@ -185,7 +185,13 @@ def test_replay_carries_acquisition_metadata_rebased_with_the_row(tmp_path: Path
     assert rpm.metadata["ts_schema"] == 2 and rpm.metadata["acquired_clock"] == "kernel"
     acquired = float(rpm.metadata["acquired_at"])  # type: ignore[arg-type]
     assert acquired - rpm.timestamp.timestamp() == pytest.approx(0.031, abs=1e-3)
-    assert got[1].metadata == {} and got[2].metadata == {}
+    # P02.16: every replayed record also carries the instant it was recorded,
+    # and nothing else is added.
+    recorded = [base, base + timedelta(seconds=0.01), base + timedelta(seconds=0.02)]
+    for record, at in zip(got, recorded, strict=True):
+        assert record.metadata[REPLAY_SOURCE_AT_KEY] == pytest.approx(at.timestamp())
+    assert got[1].metadata == {REPLAY_SOURCE_AT_KEY: pytest.approx(recorded[1].timestamp())}
+    assert set(got[2].metadata) == {REPLAY_SOURCE_AT_KEY}
 
 
 def test_iter_rows_handles_nullable_bool_columns_in_the_ground_truth_slice() -> None:

@@ -96,6 +96,74 @@ target_maps:
     # as raw values rather than treated as a cross-vehicle decoder.
     load_breakpoints: [8.76, 11.46, 15.67, 16.85, 18.20, 18.54, 21.40, 21.57]
     raw_load_breakpoints: [0x34, 0x44, 0x5D, 0x64, 0x6C, 0x6E, 0x7F, 0x80]
+    # P02.15. The ECM reads a point past an edge of the map as that edge's
+    # column or row, where the record below shows it: a base fuel schedule
+    # below the first BFS breakpoint reads the first column, and an rpm above
+    # the last rpm breakpoint (5,200) reads the last row. This is ECM program
+    # behaviour, not calibration, so the 2026-09-20 revision inherits both
+    # through the anchor (its flash changed one cell). Two edges have no
+    # record, so rows past them stay NaN:
+    #   - BFS above 21.57 ms: no logged row reaches it (UpRev max 18.70,
+    #     CANary max ~18);
+    #   - rpm below 1,200: every cell there is 14.7, so a clamp and anything
+    #     else read the same and the logs cannot tell them apart.
+    load_axis_out_of_range:
+      below_first:
+        behaviour: clamp
+        method: uprev_target_afr_log_match
+        logs:
+          - data/sessions/_uprev/2026-08-04T164301
+          - data/sessions/_uprev/2026-08-04T232712
+        revision: ZS44A-k106
+        rpm_min: 4400
+        rpm_max: 5200
+        rows: 46
+        rows_within_tolerance: 32
+        tolerance_afr: 0.05
+        max_error_afr: 0.178
+        median_error_afr: 0.031
+        alternatives: >-
+          Same 46 rows: linear extrapolation from the first two columns 2
+          within 0.05 AFR (median error 2.23), the second column 0 within 0.05
+          (median 0.99), the clamp 32 (median 0.031, 44 within 0.10).
+        verified_on: 2026-10-03
+        notes: >-
+          Rows with BFS < 8.76 ms at 4,400-5,200 rpm in the 2026-08-04 UpRev
+          logs, excluding 5 rows where UpRev displays fuel cut (TARGET AFR
+          30.00). Only that band separates a clamp from extrapolation: below
+          4,400 rpm the first two columns are both 14.7, and there all 404
+          non-fuel-cut rows read 14.70. For scale, on-map rows match the
+          bilinear lookup no better (275 of 582 within 0.05, median 0.061):
+          UpRev reads its channels one after another over K-line, so rpm,
+          BFS and target are not same-instant. Committed slice:
+          tests/fixtures/load_axis_clamp/uprev_2026-08-04_target_afr.csv.
+    rpm_axis_out_of_range:
+      above_last:
+        behaviour: clamp
+        method: uprev_target_afr_log_match
+        logs:
+          - data/sessions/_uprev/2026-08-04T164301
+        revision: ZS44A-k106
+        rpm_min: 5213
+        rpm_max: 5950
+        rows: 105
+        rows_within_tolerance: 62
+        tolerance_afr: 0.05
+        max_error_afr: 0.307
+        median_error_afr: 0.035
+        alternatives: >-
+          Same 105 rows: linear extrapolation along rpm from the last two
+          rows 0 within 0.05 AFR (3 within 0.10, median error 0.277, max
+          1.691); the clamp 62 (90 within 0.10).
+        verified_on: 2026-10-03
+        notes: >-
+          Every row above 5,200 rpm in the 2026-08-04 UpRev logs (none is fuel
+          cut), looked up on the last rpm row at the row's BFS, with the load
+          clamp above applied to the 30 rows below 8.76 ms. Of the 43 misses,
+          40 read 11.83, the last load column at 5,200 rpm: near-WOT pedal
+          enrichment selects that column whatever the BFS (see the vehicle
+          skill), so they disagree about the column, not the row. Operator
+          approval 2026-10-03.
     # AFR = 14.7 * 128 / raw cell count.
     afr:
       - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.887671]
@@ -165,3 +233,67 @@ target_maps:
         flashing. Only row 7 / column 4 changes (A2 -> A3). Axes unchanged.
         See docs/skunkworks/uprev-flash-20260920.md. Modified-at records the
         source file timestamp, not the flash boundary.
+  # The first two UpRev flashes. No ROM file of either survives (each was
+  # saved over ZS44A-Tuned.OsirisROM, later overwritten by k106), but the
+  # operator edited only K on them, never a fuel-target cell (2026-10-03), so
+  # their map is the UpRev base they were edited from. One anchor, so k105
+  # cannot drift from it. No clamp declarations: the edge evidence above was
+  # logged on k106, and these maps are left NaN off the axes.
+  - &targets_uprev_base
+    revision: ZS44A-osiris-initial
+    load_axis_name: base_fuel_schedule
+    load_axis_unit: ms
+    rpm_breakpoints: [1200, 1600, 2000, 2800, 3600, 4000, 4400, 5200]
+    raw_rpm_breakpoints: [0x18, 0x20, 0x28, 0x38, 0x48, 0x50, 0x58, 0x68]
+    load_breakpoints: [8.76, 11.46, 15.67, 16.85, 18.20, 18.54, 21.40, 21.57]
+    raw_load_breakpoints: [0x34, 0x44, 0x5D, 0x64, 0x6C, 0x6E, 0x7F, 0x80]
+    # AFR = 14.7 * 128 / raw cell count. Rows 0-5 equal k106; k106 changed
+    # row 6 (4,400 rpm) columns 4-7 and row 7 (5,200 rpm) columns 2-7.
+    afr:
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.887671]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 14.700000, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 14.700000, 13.250704, 13.066667, 13.066667, 12.628188]
+      - [14.700000, 14.700000, 14.700000, 12.800000, 12.544000, 12.628188, 12.628188, 12.628188]
+      - [14.700000, 14.700000, 13.066667, 12.800000, 12.544000, 12.298039, 12.298039, 12.298039]
+      - [14.700000, 13.536691, 12.460927, 12.298039, 12.139355, 12.298039, 12.298039, 12.298039]
+      - [12.800000, 12.378947, 11.833962, 11.267066, 11.267066, 11.473171, 11.473171, 11.473171]
+    raw_values:
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x92]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x95]
+      - [0x80, 0x80, 0x80, 0x80, 0x8E, 0x90, 0x90, 0x95]
+      - [0x80, 0x80, 0x80, 0x93, 0x96, 0x95, 0x95, 0x95]
+      - [0x80, 0x80, 0x90, 0x93, 0x96, 0x99, 0x99, 0x99]
+      - [0x80, 0x8B, 0x97, 0x99, 0x9B, 0x99, 0x99, 0x99]
+      - [0x93, 0x98, 0x9F, 0xA7, 0xA7, 0xA4, 0xA4, 0xA4]
+    provenance: &provenance_uprev_base
+      method: verified_rom_decode
+      rom_file: ZS44A.OsirisROM
+      rom_sha256: 8468e11bedeab3d8247a7750b56c0f1b0dd475ef5c4509df1482425acfebb292
+      rom_modified_at: 2026-07-26T20:40:53.578007Z
+      recorded_on: 2026-10-03
+      map_slot: 1
+      cell_decode: 'AFR = 14.7 * 128 / raw cell count'
+      guide_reference: 'UpRev Nissan Tuning Guide Rev 8 (Feb 2022), pages 9-10'
+      notes: >
+        UpRev's own ZS44A base ROM (Desktop/Uprev/ROM Store, byte-identical to
+        ~/Uprev/ROMs/ZS44A.OsirisROM), the file every edit started from
+        (operator, 2026-10-03). Decoded with src.analysis.osiris and the
+        rom_targets.yaml definition k106 and 2026-09-20 decode with: the BFS
+        and rpm axis bytes at 0xC894 / 0xCAA5 equal k106's, and the image's
+        BE32 sum/XOR checksum passes. Decoded SHA-256
+        8201208033e0926b4f5f5d758f0f4efdfa2cef39e069d0dffae2d950683bc203.
+        This revision is the base plus a K 1.07 edit (tune_revisions.yaml);
+        the operator confirms no fuel-target cell was edited before k106.
+        The base's K was not read: the repo has no verified K address.
+  - <<: *targets_uprev_base
+    revision: ZS44A-k105
+    provenance:
+      <<: *provenance_uprev_base
+      notes: >
+        The UpRev base map, through the anchor above. k105 changed K
+        (1.07 -> 1.05), the fuel-compensation rpm axis and max-load
+        cells (tune_revisions.yaml), all tables other than fuel targets: the
+        operator confirms no fuel-target cell was edited before k106
+        (2026-10-03). No k105 ROM file survives.

@@ -53,6 +53,7 @@ from src.signals.afr import (
     LAMBDA_BANK_BALANCE_AF_VOLTAGE,
     LAMBDA_BANK_BALANCE_WIDEBAND,
     AfrCalibration,
+    NoFlashHistory,
     VoltageAfrTransfer,
     WidebandPairVerification,
     append_afr_channels,
@@ -383,6 +384,8 @@ def test_live_detector_sustains_exactly_where_the_evaluator_does(
 # B05.8 — lambda bank balance
 # ---------------------------------------------------------------------------
 
+#: These calibrations record no target map, so no row's revision is read.
+NO_HISTORY = NoFlashHistory("test: the target AFR lookup is not exercised")
 _TRANSFER = VoltageAfrTransfer(
     points=[
         {"voltage": 1.93, "afr": 14.25},  # type: ignore[list-item]
@@ -405,7 +408,9 @@ def _voltage_frame() -> pd.DataFrame:
 def test_lambda_balance_is_taken_in_lambda_after_each_banks_own_transfer() -> None:
     vehicle = VehicleParameters()
     calibration = AfrCalibration(voltage_transfer=_TRANSFER)
-    out = append_afr_channels(_voltage_frame(), vehicle, calibration, channel_units=None)
+    out = append_afr_channels(
+        _voltage_frame(), vehicle, calibration, channel_units=None, flash_history=NO_HISTORY
+    )
     balance = out[LAMBDA_BANK_BALANCE_AF_VOLTAGE]
     from src.signals.derived import fuel_properties
 
@@ -431,7 +436,11 @@ def test_the_wideband_pair_is_no_channel_until_the_bank_2_pid_is_verified() -> N
     frame = pd.DataFrame({"obd:O2_WR_LAMBDA_S1": [1.00, 1.02], "obd:O2_WR_LAMBDA_S5": [1.00, 0.99]})
     vehicle = VehicleParameters()
     unverified = append_afr_channels(
-        frame, vehicle, AfrCalibration(voltage_transfer=_TRANSFER), channel_units=None
+        frame,
+        vehicle,
+        AfrCalibration(voltage_transfer=_TRANSFER),
+        channel_units=None,
+        flash_history=NO_HISTORY,
     )
     assert LAMBDA_BANK_BALANCE_WIDEBAND not in unverified
     verified = AfrCalibration(
@@ -446,7 +455,9 @@ def test_the_wideband_pair_is_no_channel_until_the_bank_2_pid_is_verified() -> N
             basis="test",
         ),
     )
-    out = append_afr_channels(frame, vehicle, verified, channel_units=None)
+    out = append_afr_channels(
+        frame, vehicle, verified, channel_units=None, flash_history=NO_HISTORY
+    )
     assert out[LAMBDA_BANK_BALANCE_WIDEBAND].tolist() == pytest.approx([0.0, 0.03])
 
 

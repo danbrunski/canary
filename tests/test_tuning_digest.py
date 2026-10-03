@@ -577,3 +577,27 @@ def test_a_failed_capture_contract_is_carried_into_the_digest(
     assert digest.capture_quality["scope"] == "trailing_snapshot"
     note = next(note for note in digest.notes if "required_tuple_rate" in note)
     assert "trailing 60 s" in note
+
+
+def test_a_capture_with_no_resolvable_revision_names_it_and_gets_no_map(
+    tmp_path: Path, config: CanaryConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P02.16: ``AfrCalibration.target_map`` has no ``active_revision``
+    fallback, so a session whose revision does not resolve gets no target map
+    and the digest says why, rather than labelling the active map as its own."""
+    import src.analysis.tuning_digest as digest_module
+
+    monkeypatch.setattr(
+        digest_module,
+        "resolve_session_revision",
+        lambda _session, _registry: (None, "unknown", False),
+    )
+    session = _capture(
+        tmp_path, "_capture-fuel-map-2026-08-05T142720", [(3600, 92, 4, 1.2, 0.82)] * 4
+    )
+    digest = compute_tuning_digest(session, config)
+    assert digest is not None
+    assert digest.tune_revision is None
+    assert digest.target_map["available"] is False
+    assert digest.target_map["revision"] is None
+    assert digest.target_map["reason"].startswith("revision_unknown")

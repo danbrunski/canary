@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import types
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
@@ -23,6 +24,7 @@ from src.signals.afr import (
     target_afr,
 )
 from src.signals.vehicle_signals import LoadAxisChannel
+from src.vehicle.tune_revisions import TuneRevision, TuneRevisionRegistry
 
 #: A synthetic vehicle's verified channel for the target map's load axis. The
 #: real vehicle modules declare none (P02.13), so every test that needs the
@@ -33,6 +35,17 @@ AXIS = "did:TEST_BASE_FUEL_SCHEDULE_MS"
 UNITS = {AXIS: "ms"}.get
 #: The repo catalogs, through the real resolver.
 REPO_UNITS = channel_units_for(load_repo_did_map())
+#: The synthetic map's revision, flashed before every test row (P02.16: each
+#: row's map is the revision flashed at its timestamp).
+HISTORY = TuneRevisionRegistry(
+    revisions=[TuneRevision(revision="r1", flashed_at=datetime(2000, 1, 1, tzinfo=UTC))]
+)
+
+
+def _stamped(frame: pd.DataFrame) -> pd.DataFrame:
+    """``frame`` with one-second UTC timestamps, all after :data:`HISTORY`'s flash."""
+    stamps = pd.date_range("2026-01-01", periods=len(frame), freq="s", tz="UTC")
+    return frame.assign(timestamp=stamps)
 
 
 def _without_load_axes() -> tuple[types.SimpleNamespace, ...]:
@@ -93,7 +106,7 @@ def _calibration() -> AfrCalibration:
 
 def test_target_afr_bilinear_and_out_of_domain(monkeypatch: pytest.MonkeyPatch) -> None:
     _declare_axis(monkeypatch)
-    target = _calibration().target_map()
+    target = _calibration().target_map("r1")
     assert target is not None
     values = target_afr(
         pd.DataFrame({"obd:RPM": [1000.0, 2000.0, 9999.0], AXIS: [20.0, 60.0, 60.0]}),
@@ -115,7 +128,13 @@ def test_lambda_to_afr_target_error_and_censoring(monkeypatch: pytest.MonkeyPatc
             "obd:O2_WR_LAMBDA_S2": [1.01, 0.5],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
     assert out["derived:AFR_B1"].iloc[0] == pytest.approx(14.7)
     assert bool(out["derived:AFR_CENSORED_B1"].iloc[1]) is True
     assert pd.isna(out["derived:AFR_ERROR_B1"].iloc[1])
@@ -124,7 +143,13 @@ def test_lambda_to_afr_target_error_and_censoring(monkeypatch: pytest.MonkeyPatc
 
 def test_voltage_transfer_is_used_when_lambda_is_absent() -> None:
     frame = pd.DataFrame({"did:ECM_AF_SENSOR_V_B1": [2.0]})
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
     assert out["derived:AFR_B1"].iloc[0] == pytest.approx(14.0)
 
 
@@ -140,7 +165,7 @@ def test_target_grid_is_strictly_shaped() -> None:
 
 def test_afr_error_surface_excludes_censored_samples(monkeypatch: pytest.MonkeyPatch) -> None:
     _declare_axis(monkeypatch)
-    target = _calibration().target_map()
+    target = _calibration().target_map("r1")
     assert target is not None
     frame = pd.DataFrame(
         {
@@ -178,7 +203,13 @@ def test_decel_fuel_cut_is_censored_like_the_rich_floor(
             "obd:O2_WR_LAMBDA_S1": [1.0, 0.6, 2.2],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
     censored = out["derived:AFR_CENSORED_B1"].tolist()
     assert censored == [False, True, True]
 
@@ -186,7 +217,7 @@ def test_decel_fuel_cut_is_censored_like_the_rich_floor(
     assert pd.notna(out["derived:AFR_ERROR_B1"].iloc[0])
     assert out["derived:AFR_ERROR_B1"].iloc[1:].isna().all()
 
-    target = _calibration().target_map()
+    target = _calibration().target_map("r1")
     assert target is not None
     cells = afr_error_surface(out, target, bank=1, min_samples=1, channel_units=UNITS)
     assert sum(cell["count"] for cell in cells) == 1
@@ -202,7 +233,13 @@ def test_bank_falls_back_to_voltage_when_lambda_column_is_empty() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
     assert "derived:AFR_B2" in out
     assert out["derived:AFR_B2"].tolist() == pytest.approx([14.0, 14.0])
 
@@ -232,14 +269,21 @@ def test_bank_2_lambda_is_the_vehicle_declared_sensor_not_sensor_2() -> None:
             "did:ECM_AF_SENSOR_V_B2": [2.0, 2.0],
         }
     )
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
-    assert out["derived:AFR_B2"].tolist() == pytest.approx([14.7, 14.7])
-
-    without_s5 = append_afr_channels(
-        frame.drop(columns=["obd:O2_WR_LAMBDA_S5"]),
+    out = append_afr_channels(
+        _stamped(frame),
         VehicleParameters(),
         _calibration(),
         channel_units=UNITS,
+        flash_history=HISTORY,
+    )
+    assert out["derived:AFR_B2"].tolist() == pytest.approx([14.7, 14.7])
+
+    without_s5 = append_afr_channels(
+        _stamped(frame.drop(columns=["obd:O2_WR_LAMBDA_S5"])),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
     )
     assert without_s5["derived:AFR_B2"].tolist() == pytest.approx([14.0, 14.0])
 
@@ -269,9 +313,15 @@ def test_engine_load_never_reaches_the_target_lookup(monkeypatch: pytest.MonkeyP
     is no target, and the lookup names the missing channel. With no
     declaration at all it refuses by name. Neither computes one from load."""
     frame = _engine_load_frame()
-    target = _calibration().target_map()
+    target = _calibration().target_map("r1")
     assert target is not None
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=REPO_UNITS,
+        flash_history=HISTORY,
+    )
     assert "derived:AFR_B1" in out, "measured AFR is unaffected"
     for column in (TARGET_AFR, *AFR_ERROR_CHANNELS):
         assert column not in out
@@ -280,7 +330,13 @@ def test_engine_load_never_reaches_the_target_lookup(monkeypatch: pytest.MonkeyP
     assert afr_error_surface(out, target, bank=1, channel_units=REPO_UNITS) == []
 
     _undeclare_axis(monkeypatch)
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
+    )
     for column in (TARGET_AFR, *AFR_ERROR_CHANNELS):
         assert column not in out
     with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
@@ -329,12 +385,18 @@ def test_an_axis_channel_is_refused_unless_its_catalog_unit_is_the_axis_unit(
         monkeypatch, LoadAxisChannel(axis="base_fuel_schedule", channel=channel, evidence="x")
     )
     frame = _engine_load_frame().assign(**{channel: [15.0, 16.0]})
-    target = _calibration().target_map()
+    target = _calibration().target_map("r1")
     assert target is not None
     with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
         target_afr(frame, target, channel_units=REPO_UNITS)
     assert channel in refused.value.reason and why in refused.value.reason
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=REPO_UNITS,
+        flash_history=HISTORY,
+    )
     assert TARGET_AFR not in out
 
 
@@ -350,14 +412,26 @@ def test_the_catalog_check_passes_a_channel_the_catalog_puts_in_ms(
         monkeypatch, LoadAxisChannel(axis="base_fuel_schedule", channel=channel, evidence="x")
     )
     frame = _engine_load_frame().assign(**{channel: [40.0, 60.0]})
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=REPO_UNITS,
+        flash_history=HISTORY,
+    )
     assert out[TARGET_AFR].notna().all()
 
 
 def test_no_catalog_means_no_target(monkeypatch: pytest.MonkeyPatch) -> None:
     _declare_axis(monkeypatch)
     frame = _engine_load_frame().assign(**{AXIS: [15.0, 16.0]})
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=None)
+    out = append_afr_channels(
+        _stamped(frame),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=None,
+        flash_history=HISTORY,
+    )
     assert TARGET_AFR not in out
 
 
@@ -367,7 +441,11 @@ def test_a_verified_axis_channel_absent_from_the_frame_yields_no_target(
     """Declared but not captured: absent, and calculated load does not stand in."""
     _declare_axis(monkeypatch)
     out = append_afr_channels(
-        _engine_load_frame(), VehicleParameters(), _calibration(), channel_units=UNITS
+        _stamped(_engine_load_frame()),
+        VehicleParameters(),
+        _calibration(),
+        channel_units=UNITS,
+        flash_history=HISTORY,
     )
     assert TARGET_AFR not in out
 
