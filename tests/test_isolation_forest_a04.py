@@ -398,6 +398,32 @@ def test_seed_stability_sweep_reports_agreement_per_ensemble_size() -> None:
     assert sweep[400]["mean_jaccard"] >= sweep[20]["mean_jaccard"]
 
 
+def test_seed_stability_sweep_passes_model_params_to_every_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A04.10: the same sweep measures ``max_samples`` / ``max_features``."""
+    from src.models import isolation_forest as module
+
+    seen: list[dict[str, object]] = []
+    real = module._isolation_forest_cls()
+
+    def recording(**kwargs: object) -> object:
+        seen.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(module, "_isolation_forest_cls", lambda: recording)
+    rng = np.random.default_rng(0)
+    module.seed_stability_sweep(
+        rng.normal(0, 1, (200, 6)),
+        rng.normal(0, 1, (100, 6)),
+        n_estimators=(10,),
+        seeds=(0, 1),
+        params={"max_samples": 64, "max_features": 0.5},
+    )
+    assert len(seen) == 2
+    assert all(k["max_samples"] == 64 and k["max_features"] == 0.5 for k in seen)
+
+
 def test_the_daemon_loader_checks_the_feature_policy_against_its_config(tmp_path: Path) -> None:
     """A04.6: the daemon's IF loader resolves the same policy training uses
     (bindings catalog + serving capture profile) and names violations."""

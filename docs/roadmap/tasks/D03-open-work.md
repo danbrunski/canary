@@ -1399,6 +1399,20 @@ live here now, so the documents could be archived
   answer rate (2026-09-21).
   **Remaining — (a):** the batched-vs-single alternating-window cross-check on
   real data.
+  *Desk proxy for (a), 2026-10-03; it does not close it.* An offset walk in
+  batched decoding would show as a drifting ratio against an independent
+  instrument. Every September session on disk with both, 35 of them, was
+  checked: Mode 01 `obd:RPM` against broadcast `decoded:ECM_RPM`, paired
+  same-instant (`align_pairs`, 20 ms), above 600 rpm, 200–4,651 pairs per
+  session.
+  - The per-sample ratio's median is **0.992–0.999** in every session, with
+    p05–p95 inside 0.987–1.002.
+  - The first and last thirds of each drive differ by at most 0.004.
+  - So there is no walk on any drive. The small sub-1 bias is consistent
+    across sessions, which is what the 20 ms pairing skew on changing rpm
+    would give; it is not a drift.
+  - What only the truck can show is a single-read window beside a batched
+    one, which is (a) itself.
 - [~] **D03.25 Retrain and verify after the Phase-1 distribution change.**
   *From `../archive/ml-correctness-hardening.md` 1.6.* The laptop half landed
   (smoke retrain, LSTM replay diff —
