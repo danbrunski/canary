@@ -47,16 +47,17 @@ See ``docs/roadmap/archive/tuning-analysis-toolkit.md`` Phase 1.
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
 
 from src.decode import bindings as bindings_decode
 from src.decode import dids as dids_decode
+from src.decode.on_read import can_channel_spellings
 from src.paths import BINDINGS_YAML, DIDS_YAML
 from src.preprocessing.loader import DecodedRows, read_session
 from src.signals.afr import AfrCalibration
@@ -348,8 +349,76 @@ def _timestamp_basis(
     return basis.mask(acquired, "acquired")
 
 
-def _long_frame(session: Path | pd.DataFrame, *, acquired_time: bool = False) -> pd.DataFrame:
-    return _long_frame_with_metadata(session, acquired_time=acquired_time)[0]
+def _long_frame(
+    session: Path | pd.DataFrame, *, acquired_time: bool = False, filters: Any = None
+) -> pd.DataFrame:
+    return _long_frame_with_metadata(session, acquired_time=acquired_time, filters=filters)[0]
+
+
+#: Sources whose readers match the channel case-insensitively (see
+#: :func:`_numeric_series`): a parquet filter cannot, so these narrow by source.
+_CASE_FOLDED_SOURCES = frozenset({"obd", "uprev", "gps", "imu", "sensor", "kline"})
+
+
+def _raw_read_filters(parsed: Sequence[ChannelSpec], catalogs: _Catalogs) -> list[list[Any]]:
+    """The parquet rows ``parsed`` can read, as a pyarrow DNF (P02.2).
+
+    Each spec maps to the raw rows its reader selects, never to fewer, so a
+    filtered read returns exactly what the whole session would. The readers
+    still select exactly afterwards. ``decoded:`` asks for its own rows, which
+    ``read_session`` decodes from just their frames (P02.8). ``can:`` asks for
+    its binding's id in every spelling a recorder era used. A DID reads its
+    hex name from any source, so the reader can still say when the only rows
+    were some K-line module's.
+    """
+    terms: list[list[Any]] = []
+    for spec in parsed:
+        if spec.source == "obd" and spec.name.upper() == "COMMANDED_AFR":
+            terms.append([("source", "==", "obd"), ("channel", "==", _EQUIV_RATIO_CHANNEL)])
+        elif spec.source == "mem":
+            terms.append([("source", "==", "obd"), ("channel", "==", f"mem:{spec.name}")])
+        elif spec.source == "did":
+            terms.append([("channel", "==", f"DID_{catalogs.did(spec.name).did:04X}")])
+        elif spec.source == "decoded":
+            name = catalogs.signal(spec.name).name
+            terms.append([("source", "==", DECODED_SOURCE), ("channel", "==", name)])
+        elif spec.source == "can":
+            spellings = can_channel_spellings([catalogs.signal(spec.name).can_id])
+            terms.append([("source", "==", "can"), ("channel", "in", spellings)])
+        elif spec.source in _CASE_FOLDED_SOURCES:
+            terms.append([("source", "==", spec.source)])
+        else:  # pragma: no cover - parse_spec admits no other source
+            raise ChannelSpecError(f"no raw-read filter for {spec.text!r}")
+    unique: list[list[Any]] = []
+    for term in terms:
+        if term not in unique:
+            unique.append(term)
+    return unique
+
+
+def raw_read_filters(
+    specs: Sequence[str],
+    *,
+    bindings_path: Path = BINDINGS_YAML,
+    dids_path: Path = DIDS_YAML,
+) -> list[list[Any]]:
+    """:func:`_raw_read_filters` for a caller that reads a session once and
+    hands the frame to :func:`read_channels` spec by spec.
+
+    A spec that does not resolve contributes no rows: its own
+    :func:`read_channels` call then refuses it exactly as an unfiltered read
+    would, so one bad name cannot fail the shared read.
+    """
+    catalogs = _Catalogs(bindings_path=bindings_path, dids_path=dids_path)
+    terms: list[list[Any]] = []
+    for text in specs:
+        try:
+            parsed = parse_spec(text)
+            spec_terms = _raw_read_filters([parsed], catalogs)
+        except (ChannelSpecError, KeyError, ValueError):
+            continue
+        terms.extend(term for term in spec_terms if term not in terms)
+    return terms
 
 
 def _long_frame_with_metadata(
@@ -357,6 +426,7 @@ def _long_frame_with_metadata(
     *,
     acquired_time: bool = False,
     decoded: DecodedRows = "on_read",
+    filters: Any = None,
 ) -> tuple[pd.DataFrame, _MetadataFields | None]:
     """:func:`_long_frame` plus the metadata columns it had to parse.
 
@@ -373,7 +443,7 @@ def _long_frame_with_metadata(
     frame = (
         session.copy()
         if isinstance(session, pd.DataFrame)
-        else read_session(Path(session), decoded=decoded)
+        else read_session(Path(session), decoded=decoded, filters=filters)
     )
     if not acquired_time:
         return frame, None
@@ -384,7 +454,12 @@ def _long_frame_with_metadata(
     acquired = pd.to_datetime(fields.acquired_at, unit="s", utc=True)
     # Broadcast and legacy rows have no acquisition field; retain their stored
     # timestamp rather than dropping an otherwise valid cross-source series.
-    frame["timestamp"] = acquired.fillna(pd.to_datetime(frame["timestamp"], utc=True))
+    # One unit whatever rows are present (P02.2): ``fillna`` took the stored
+    # column's unit (µs) when no row had an acquisition stamp and ns when one
+    # did, so a narrower read of the same session changed the dtype.
+    frame["timestamp"] = acquired.fillna(pd.to_datetime(frame["timestamp"], utc=True)).astype(
+        "datetime64[ns, UTC]"
+    )
     return frame, fields
 
 
@@ -664,9 +739,13 @@ def read_channels(
     :func:`align_long` and ``compare.align_pairs`` apply that. A caller that
     counts these rows is counting payload changes, not frames.
     """
-    frame = _long_frame(session, acquired_time=acquired_time)
     catalogs = _Catalogs(bindings_path=bindings_path, dids_path=dids_path)
     parsed = [parse_spec(text) for text in specs]
+    frame = _long_frame(
+        session,
+        acquired_time=acquired_time,
+        filters=_raw_read_filters(parsed, catalogs) if parsed else None,
+    )
 
     readers = {
         "obd": lambda s: _numeric_series(frame, s, "obd"),

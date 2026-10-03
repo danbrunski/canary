@@ -300,7 +300,7 @@ recomputes the rolling frame over the whole buffered window every tick.
         `child_out_of_memory`. Named and safe; it waits for P02.2 (operator
         default recommended).
 
-- [ ] **P02.2 Push channel selection into the raw read.**
+- [~] **P02.2 Push channel selection into the raw read.**
   - `read_channels`, and every other `read_session(...)` followed by a channel
     filter (grep for them), passes the rows it needs down as `filters` and
     reads only the columns the result uses.
@@ -321,6 +321,72 @@ recomputes the rolling frame over the whole buffered window every tick.
     - `test_digest_reproduces_the_reference_capture`.
 
   Size **M**.
+
+  *Row filters done 2026-10-03; columns not narrowed, digest still reads per
+  spec.*
+  - **What changed.** `read_channels` builds a pyarrow DNF from its specs
+    (`_raw_read_filters`) and hands it to `read_session`, which already
+    widens a `decoded:` filter to that signal's frames for the on-read decode
+    (P02.8). Each spec maps to the rows its reader selects, never fewer:
+    - `mem:`, `did:` (the hex name from any source, so the K-line refusal can
+      still say which kind of empty) and `obd:COMMANDED_AFR` (PID 0x44) use
+      their exact channel;
+    - `decoded:` uses its signal name, and `can:` its binding's id in every
+      recorder-era spelling (`can_channel_spellings`, P01's translation);
+    - the sources whose readers match case-insensitively (`obd`, `uprev`,
+      `gps`, `imu`, `sensor`, `kline`) narrow by source only, because a
+      parquet filter cannot casefold.
+
+    The readers still select exactly afterwards.
+    - `raw_read_filters` is the public form for callers that read once and
+      ask spec by spec. A spec that will not resolve adds no rows and still
+      fails in its own call.
+    - `tuning._session_rows` uses it. Before, it narrowed only when every
+      spec was polled and otherwise read the whole session.
+    - `gps_export` reads GPS rows only, and
+      `tools/analyze_uprev_kline_capture.py` reads its wanted pairs only.
+  - **Found by the exactness check, fixed at source.** With
+    `acquired_time=True` the timestamp dtype depended on which rows were
+    read: `acquired.fillna(stored)` took the stored µs unit when no row had
+    an acquisition stamp, and ns when one did. It is now always
+    `datetime64[ns, UTC]`, which is what the whole-session read gave.
+  - **Exact** (`check_exact`), filters on against filters off, both clocks,
+    every spec the capture holds one at a time and then all together:
+    - `_capture-tuning-2026-09-21T223734`: 47 specs, 787,710 rows;
+    - `_capture-tuning-2026-09-24T161137`: 18 specs, 9,547 rows;
+    - `_capture-tuning-hybrid-research-2026-09-17T191712`: 40 specs,
+      1,032,755 rows.
+
+    `delivery_error` JSON is byte-identical on three captures, both measured
+    routes, with n of 19–101 per route.
+  - **Cost** (fresh process each, quiet laptop):
+
+    | | before | after |
+    |---|---|---|
+    | `build_tuning_frame` (= MCP `_capability_payload`), 09-21 capture | 68.1 s, 2.31 GB | 13.4 s, 0.30 GB |
+    | same, 09-17 hybrid capture | 117.7 s, 3.17 GB | 20.4 s, 0.32 GB |
+    | `test_digest_reproduces_the_reference_capture` | 187 s, 3.61 GB | 37.5 s, 0.36 GB |
+    | `delivery_error`, per route | 13–22 s | 2.6–4.1 s |
+  - **Tests.** `tests/test_channels_raw_read.py`, over two committed slices
+    that together hold every source (the ground-truth drive and a tuning
+    capture):
+    - filtered equals unfiltered, exactly, per spec and combined, on both
+      clocks;
+    - one timestamp unit;
+    - an unresolvable spec adds nothing.
+
+    Mutation: removing the dtype pin fails the unit test. The inner-loop tier
+    passes: 6,392.
+  - **Not done:**
+    - **Columns.** `read_session` still reads every column; `payload` is
+      the costly one, and a decoded read needs it anyway.
+    - **One read for the tuning digest.** It still calls `read_channels`
+      per role, but each call now reads only its own rows. Combining them
+      would save the repeated footer and row-group scans, which this
+      measurement no longer shows as dominant.
+
+    P02.1's row budget question changes with these numbers: the reference
+    digest's peak fell 10x. Re-measure on the Pi before choosing a budget.
 
 - [ ] **P02.3 A per-sample channel layer for acquisition-time readers.**
   - **Why.** P01.2 left the workbench on raw samples: it pairs channels

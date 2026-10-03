@@ -160,7 +160,13 @@ def load_reference_rows(
 
     if not wanted:
         return pd.DataFrame()
-    frame = read_session(session)
+    # Only the wanted rows are read (P02.2); the exact selection below stays.
+    frame = read_session(
+        session,
+        filters=[
+            [("source", "==", source), ("channel", "==", channel)] for source, channel in wanted
+        ],
+    )
     in_time = (frame["timestamp"] >= start) & (frame["timestamp"] <= end)
     in_channel = pd.Series(False, index=frame.index)
     for source, channel in wanted:

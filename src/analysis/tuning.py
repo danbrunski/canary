@@ -39,6 +39,7 @@ import pandas as pd
 
 from src.analysis.channels import (
     TIMESTAMP_BASIS_COLUMN,
+    raw_read_filters,
     read_aligned,
     read_channels,
     refuse_as_of,
@@ -318,20 +319,25 @@ class DeliveryInputs:
 _EMPTY_LONG = ["timestamp", "spec", "value", "unit"]
 
 
-def _session_rows(session: Path | pd.DataFrame, specs: list[str]) -> Path | pd.DataFrame:
-    """The session read once, polled rows only when every spec is a polled one.
+def _session_rows(
+    session: Path | pd.DataFrame,
+    specs: list[str],
+    *,
+    bindings_path: Path,
+    dids_path: Path,
+) -> Path | pd.DataFrame:
+    """The session read once, only the rows ``specs`` read (P02.2).
 
-    A whole-session read carries ~100k raw CAN frames per minute; every
-    delivery input on a Mode 01 or all-DID capture is a polled ``obd`` row.
+    A whole-session read carries ~100k raw CAN frames per minute. This used to
+    narrow to ``obd`` rows only when every spec was a polled one, and read the
+    whole session otherwise; :func:`raw_read_filters` narrows every source.
     """
     if not isinstance(session, Path):
         return session
-    from src.analysis.channels import parse_spec
     from src.preprocessing.loader import read_session
 
-    if all(parse_spec(spec).source in ("obd", "did", "mem") for spec in specs):
-        return read_session(session, filters=[("source", "==", "obd")])
-    return read_session(session)
+    filters = raw_read_filters(specs, bindings_path=bindings_path, dids_path=dids_path)
+    return read_session(session, filters=filters or None)
 
 
 def _refuse_not_captured(
@@ -417,7 +423,9 @@ def read_delivery_inputs(
         wanted["fuel_status"] = route.fuel_status_spec
     if route.load_spec is not None:
         wanted["load"] = route.load_spec
-    rows = _session_rows(session, list(wanted.values()))
+    rows = _session_rows(
+        session, list(wanted.values()), bindings_path=bindings_path, dids_path=dids_path
+    )
     frames: dict[str, pd.DataFrame] = {}
     missing: list[str] = []
     for role, spec in wanted.items():

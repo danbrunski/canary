@@ -39,8 +39,8 @@ def read_gps_track(session_dir: Path) -> list[TrackPoint]:
     coordinates isn't a track point. Altitude is carried when present,
     ``None`` otherwise (never fabricated as ``0``).
     """
-    frame = read_session(session_dir)
-    gps = frame[frame["source"] == GPS_SOURCE]
+    # Only the GPS rows are read (P02.2): the rest is ~100k CAN frames a minute.
+    gps = read_session(session_dir, filters=[("source", "==", GPS_SOURCE)])
     if gps.empty:
         return []
     pivoted = gps.pivot_table(

@@ -105,7 +105,7 @@ def test_load_reference_rows_filters_time_and_channel(
             "channel": ["ECM_RPM", "OTHER", "speed", "SHORT_FUEL_TRIM_1"],
         }
     )
-    monkeypatch.setattr("tools.analyze_uprev_kline_capture.read_session", lambda _: frame)
+    monkeypatch.setattr("tools.analyze_uprev_kline_capture.read_session", lambda _, **_kw: frame)
 
     result = load_reference_rows(
         tmp_path,
