@@ -246,10 +246,15 @@ dids:
     response_length: 2
     response_length_source: '2026-08-07T005351 single-DID capture payloads'
     byte_order: big
+    # Raw counts, deliberately: the deployed IF and LSTM were trained on them,
+    # so a scale here would change served feature values (a retrain). BFS in
+    # ms is the separate channel derived:BASE_FUEL_SCHEDULE (P02.14), scaled
+    # by the uprev_stream_definition_vs_displayed_csv evidence below; a scale
+    # here would make that view refuse rather than scale twice.
     scale: null          # counts; ~63,800 counts per g air per intake event at K 1.06 (steps with tune K)
     offset: null
-    unit: unknown        # air charge x K counts — not injector ms, not fuel mass; BFS ms scale lives in tuning_providers.yaml
-    confidence: high
+    unit: unknown        # BFS counts (air charge x K) -- not injector ms, not fuel mass
+    confidence: confirmed  # BFS, operator decision 2026-10-02 (P02.14); was high
     evidence:
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
@@ -302,8 +307,11 @@ dids:
           is shared by BFS: proportional to air through zero (+0.06 ms
           offset), ignores enrichment, holds in DFCO, and idle+A/C moves BFS
           +30 % vs air +31 %. Scale: 58,537/28.7 = 2040 (stock),
-          62,774/30.8 = 2038 (K 1.06). Name kept ECM_AIR_CHARGE until a
-          same-instant compare_channels window against UpRev BFS confirms it.
+          62,774/30.8 = 2038 (K 1.06). Superseded as the scale by the
+          405/405 same-reply identity above (0.00049, not 1/2040). The name
+          stays ECM_AIR_CHARGE after the 2026-10-02 acceptance because the
+          deployed models carry it as a feature; the BFS reading is
+          derived:BASE_FUEL_SCHEDULE (P02.14).
       - session: _capture-fuel-pw-research-2026-09-18T140805 + _capture-fuel-pw-research-2026-09-18T174742 + _capture-fuel-pw-research-2026-09-18T200809 (+ 09-17 blocks 6/7/9, desk)
         method: rich_row_and_dfco_mass_balance
         finding: >
@@ -349,18 +357,26 @@ dids:
           with air charge at stoichiometry, so this is consistent with air
           charge; it is not an ms scale for this register.
     notes: >
-      Air charge x tune K (behaves as Nissan Tp/BFS candidate), re-identified
-      2026-09-18 with operator approval; renamed from ECM_INJECTOR_PW_B1 the
-      same day (no alias — stored artifacts are migrated by
-      tools/migrate_channel_names.py). NOT injected fuel: it ignores
-      enrichment and does not drop in DFCO. Do not use it as injector pulse
-      width or fuel mass. The injected pulse is 0x1206/0x1207. Counts per g
-      air are stable within a tune (~62,200-64,500 across sessions and gates
-      on K 1.06) but step with K, so they are not a fixed air-mass scale.
-      Scale left null here: the candidate BFS scale (raw/2040 ms) lives in
-      the vehicle's tuning_providers.yaml (role base_fuel_schedule,
-      confidence candidate) with its envelope. 0x1209 is mass airflow (g/s),
-      a separate register.
+      Base fuel schedule (Nissan Tp/BFS = air charge x tune K). Accepted as
+      the verified BFS by the operator 2026-10-02 (P02.14) on the 405/405
+      same-reply identity: raw x 0.00049 ms. Re-identified from injector
+      pulse 2026-09-18 with operator approval; renamed from
+      ECM_INJECTOR_PW_B1 the same day (no alias — stored artifacts are
+      migrated by tools/migrate_channel_names.py). NOT injected fuel: it
+      ignores enrichment and does not drop in DFCO. Do not use it as
+      injector pulse width or fuel mass. The injected pulse is 0x1206/0x1207.
+      Counts per g air are stable within a tune (~62,200-64,500 across
+      sessions and gates on K 1.06) but step with K, so they are not a fixed
+      air-mass scale. Scale left null here on purpose (see the comment on
+      `scale`). The ms reading is derived:BASE_FUEL_SCHEDULE, the Xterra's
+      Target AFR load axis, computed from the 0.00049 evidence record; the
+      tuning workbench applies the same factor itself (tuning_providers.yaml,
+      role base_fuel_schedule, confidence confirmed), and a test holds the
+      two equal. Steady state only: BFS trails MAF by ~0.15 s. At key-on,
+      engine off it holds a frozen value (13.6-17.2 ms on 2026-09-20), so
+      read it only with the engine running. 0x1209 is mass airflow (g/s), a
+      separate register; its old alias ECM_BASE_FUEL_SCHEDULE_CANDIDATE is
+      not this channel.
 
   - did: 0x1209
     name: ECM_MAF_GPS

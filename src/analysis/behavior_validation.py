@@ -1691,7 +1691,7 @@ def build_evaluation_frame(
         )
     resampled = drop_fully_stale_rows(pd.concat(parts, ignore_index=True))
     operating = featurize_wide_frame(
-        resampled, config, behavior_models=models, bindings=bindings
+        resampled, config, behavior_models=models, did_map=did_map, bindings=bindings
     ).operating_frame
     # Each row's physical drive, as build_feature_frame stamps it, so the
     # evaluator's drive grouping is the trainers' (src.preprocessing.drives).

@@ -178,20 +178,22 @@ def test_renaming_a_did_cannot_break_a_saved_capture_profile() -> None:
 
 
 def test_no_did_claims_to_be_a_base_fuel_schedule_provider() -> None:
-    """Base Fuel Schedule is still UNLOCATED and must not be faked.
+    """No DID *name* presents itself as engineering BFS milliseconds.
 
-    This is the guarantee the old 0x1209 test was really protecting, hoisted off
-    that one DID so renaming it cannot quietly retire the protection. UpRev's
-    "B-FUEL SCHDL" moved 2.92/2.65/2.88/3.98 ms across the 2026-08-08 rungs and
-    NO catalogued DID matched that shape. Until one does, nothing may present
-    itself to target-map code as engineering BFS milliseconds.
+    Hoisted off 0x1209 so a rename cannot quietly retire it. BFS is located
+    now: 0x1208 (``ECM_AIR_CHARGE``), accepted 2026-10-02 (P02.14) on a
+    405/405 same-reply identity with UpRev's display. It keeps its name and
+    raw counts because the deployed models carry it as a feature, and the ms
+    reading reaches target-map code only as ``derived:BASE_FUEL_SCHEDULE``,
+    whose scale is that one evidence record (``tests/test_base_fuel_schedule.py``).
+    A DID named for BFS would be a second, unchecked path to the same claim.
     """
     for e in load_did_map(DIDS_PATH).dids:
         name = e.name.upper()
         claims_bfs = ("BASE_FUEL" in name or "BFS" in name) and "CANDIDATE" not in name
         assert not claims_bfs, (
-            f"0x{e.did:04X} {e.name} presents as a Base Fuel Schedule provider, but BFS "
-            "has never been matched to a DID — see the 2026-08-08 rung evidence."
+            f"0x{e.did:04X} {e.name} presents as a Base Fuel Schedule provider; BFS in ms "
+            "is derived:BASE_FUEL_SCHEDULE, the evidence-scaled view of 0x1208 (P02.14)."
         )
 
 

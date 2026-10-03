@@ -16,7 +16,7 @@ import multiprocessing
 import os
 from collections.abc import Collection, Iterator, Mapping, Sequence
 from concurrent.futures import BrokenExecutor, ProcessPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from pathlib import Path
 from typing import Any
@@ -45,10 +45,10 @@ from src.decode.behavior_models import (
 )
 from src.decode.bindings import Bindings, Signal, is_trainable_binding, load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, decode_can_rows_dbc, load_dbc_dir
-from src.decode.dids import decode_did_rows, load_did_map
+from src.decode.dids import DidMap, decode_did_rows, load_did_map
 from src.decode.engineering import DECODED_PREFIX, repo_bindings
 from src.paths import BINDINGS_YAML, DATA_DIR, DIDS_YAML
-from src.preprocessing.channel_units import catalog_channel_unit
+from src.preprocessing.channel_units import append_did_views, channel_units_for
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.derived import (
     ReducedSession,
@@ -91,6 +91,7 @@ from src.signals.committees import (
     non_trainable_committee_outputs,
 )
 from src.signals.derived import compute_anomaly_signals, compute_instantaneous_channels
+from src.signals.vehicle_signals import did_views
 from src.storage.broadcast_storage import (
     change_only_timeout,
     refuse_shorter_stored_timeout,
@@ -275,6 +276,14 @@ def _is_mode01_channel(column: str) -> bool:
     return column.removeprefix(OBD_PREFIX).upper() in _MODE01_CHANNELS
 
 
+#: Prefix of the standing exclusion of a vehicle DID view (P02.14).
+DID_VIEW_EXCLUSION = "did_view"
+
+
+def _did_view_channels() -> frozenset[str]:
+    return frozenset(view.channel for view in did_views())
+
+
 @dataclass(frozen=True)
 class FeaturePolicy:
     """Which *sourced* channels may become trained features — resolved facts.
@@ -306,11 +315,20 @@ class FeaturePolicy:
         has an input the serving profile supplies. The Xterra ``default``
         dropped ten PIDs on 2026-09-26 (D03.34) that the old corpus still
         carries. ``None`` = unresolvable, and then no Mode 01 channel trains.
+
+    ``did_map``
+        The DID catalog the frame was decoded with (P02.14 verification). The
+        load-axis refusal and the DID-view exclusion read units from it, never
+        from the repo file, so a frame decoded with another catalog is judged
+        by that catalog. ``None`` = no DID catalog decoded the frame, and then
+        every DID view and DID-backed load axis is refused. Required: a
+        default would be the repo file, which is the mismatch this prevents.
     """
 
     bindings: Bindings | None
     serving_dids: frozenset[str] | None
     serving_mode01: frozenset[str] | None
+    did_map: DidMap | None = field(hash=False)
 
     @cached_property
     def _signals_by_name(self) -> dict[str, Signal]:
@@ -330,9 +348,10 @@ class FeaturePolicy:
         the manifest, never to this policy); the load audit names it as a
         policy violation until the retrain replaces it.
         """
-        # P02.13 first: the source gate also refuses TARGET_AFR (its load input
-        # group is empty), and the load-axis reason is the one that says why.
-        if base in TARGET_AFR_CHANNELS:
+        # P02.13 first: the source gate also refuses TARGET_AFR while its load
+        # input group is empty, and the load-axis reason is the one that says
+        # why. P02.14's DID views are refused by name here too.
+        if base in TARGET_AFR_CHANNELS or base in _did_view_channels():
             standing = self.standing_exclusions().get(base)
             if standing is not None:
                 return standing
@@ -388,11 +407,24 @@ class FeaturePolicy:
         unit is the axis unit (:mod:`src.preprocessing.channel_units`). Recorded on
         every manifest (:func:`build_feature_spec`), so an artifact answers
         why the channels are absent even from a frame that never had them.
+
+        P02.14: each vehicle DID view (``derived:BASE_FUEL_SCHEDULE`` on the
+        Xterra) is its source DID times a constant. The source is already a
+        candidate, so the view would enter the detectors as a second copy of
+        one reading. It is refused by name, :data:`DID_VIEW_EXCLUSION`.
         """
-        axis_refusal = load_axis_refusal(channel_units=catalog_channel_unit)
-        if axis_refusal is None:
-            return {}
-        return dict.fromkeys(TARGET_AFR_CHANNELS, axis_refusal)
+        exclusions = {
+            view.channel: (
+                f"{DID_VIEW_EXCLUSION}: {view.channel} is {view.source} times a constant "
+                f"(dids.yaml evidence {view.scale_method!r}); the source is the feature, and "
+                "the view would be a second copy of one reading (P02.14)"
+            )
+            for view in did_views()
+        }
+        axis_refusal = load_axis_refusal(channel_units=channel_units_for(self.did_map))
+        if axis_refusal is not None:
+            exclusions.update(dict.fromkeys(TARGET_AFR_CHANNELS, axis_refusal))
+        return exclusions
 
     def _served(self, column: str, seen: frozenset[str]) -> bool:
         """Will the serving profile supply ``column``? Namespaces other than
@@ -430,11 +462,16 @@ def resolve_feature_policy(
     profile_slug: str | None = None,
     bindings: Bindings | None = None,
     bindings_path: Path | None = None,
+    dids_path: Path = DEFAULT_DIDS_PATH,
 ) -> FeaturePolicy:
     """The :class:`FeaturePolicy` for a training/selection run.
 
     Bindings resolve the way :mod:`src.decode.engineering` does it: an explicit
     catalog when threaded, else ``bindings_path``, else the repo catalog.
+
+    The DID catalog is ``dids_path`` (``None`` in the policy when absent), the
+    same default :func:`build_feature_frame` decodes with: a caller decoding
+    with another catalog passes that path here too.
 
     The serving DID set comes from the ``default`` capture profile — the saved
     catalog at the (vehicle-scoped, when profiles are enabled) configured path,
@@ -448,11 +485,13 @@ def resolve_feature_policy(
         catalog = (
             repo_bindings(bindings_path.resolve()) if bindings_path is not None else repo_bindings()
         )
+    did_map = load_did_map(dids_path) if dids_path.exists() else None
     if config is None:
         return FeaturePolicy(
             bindings=catalog,
             serving_dids=serving_mode22_dids(DEFAULT_CAPTURE_PROFILES_PATH),
             serving_mode01=serving_mode01_channels(DEFAULT_CAPTURE_PROFILES_PATH),
+            did_map=did_map,
         )
     scoped = config
     if config.profiles.enabled:
@@ -463,6 +502,7 @@ def resolve_feature_policy(
         bindings=catalog,
         serving_dids=serving_mode22_dids(scoped.daemon.capture_profiles, scoped.collection),
         serving_mode01=serving_mode01_channels(scoped.daemon.capture_profiles, scoped.collection),
+        did_map=did_map,
     )
 
 
@@ -959,7 +999,11 @@ def build_feature_frame(
         session_dirs, inputs, resample_config_for(config), max_workers=max_workers
     )
     features = featurize_wide_frame(
-        resampled, config, behavior_models=inputs.behavior_models, bindings=inputs.bindings
+        resampled,
+        config,
+        behavior_models=inputs.behavior_models,
+        did_map=inputs.did_map,
+        bindings=inputs.bindings,
     ).features
     if cache_path is not None and cache_metadata is not None:
         _write_feature_frame_cache(cache_path, features, cache_metadata)
@@ -1325,6 +1369,7 @@ def featurize_wide_frame(
     config: CanaryConfig,
     *,
     behavior_models: BehaviorModels | None,
+    did_map: DidMap | None,
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
 ) -> FeaturizedFrame:
@@ -1370,10 +1415,17 @@ def featurize_wide_frame(
     offline callers featurize without the deviations the daemon appends, so
     each caller states its set: :func:`configured_behavior_models` for the
     served one, the live source's hot-reloaded copy, or ``None`` on purpose.
+
+    P02.14 — ``did_map`` is the DID catalog ``wide`` was decoded with, and it
+    has no default either. The DID views (``derived:BASE_FUEL_SCHEDULE``) and
+    the target map's load-axis unit are judged against it. Read from the repo
+    file instead, a frame decoded with a catalog that scales 0x1208 got a base
+    fuel schedule scaled twice, silently. ``None``: no DID catalog decoded the
+    frame, so no view and no DID-backed load axis.
     """
     require_profile_scoped(config, reader="featurize_wide_frame")
     framed, segmenter_fell_back = segment_or_constant(wide, config, bindings=bindings)
-    framed = _append_derived_channels(framed, config)
+    framed = _append_derived_channels(framed, config, did_map=did_map)
     cfg = _feature_config(config, feature_config)
     if behavior_models is not None and behavior_models.models:
         framed = append_deviation_columns(
@@ -1391,7 +1443,9 @@ def _feature_config(config: CanaryConfig, feature_config: FeatureConfig | None) 
     )
 
 
-def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.DataFrame:
+def _append_derived_channels(
+    framed: pd.DataFrame, config: CanaryConfig, *, did_map: DidMap | None
+) -> pd.DataFrame:
     """Every derived channel :func:`featurize_wide_frame` appends between
     segmentation and the behavior deviations, in order: the one list both it
     and :func:`featurize_perturbed_frame` run."""
@@ -1409,13 +1463,17 @@ def _append_derived_channels(framed: pd.DataFrame, config: CanaryConfig) -> pd.D
         if config.daemon.afr_calibration.exists()
         else None
     )
+    # P02.14: a vehicle's DIDs read in an engineering unit their catalog entry
+    # does not carry (the Xterra's base fuel schedule in ms), before the
+    # target lookup that reads one of them as its load axis.
+    framed = append_did_views(framed, did_map=did_map)
     # P02.13: the load axis's unit comes from the channel catalogs, which
     # src.signals cannot import, so it is resolved here.
     framed = append_afr_channels(
         framed,
         config.vehicle.parameters,
         afr_calibration,
-        channel_units=catalog_channel_unit,
+        channel_units=channel_units_for(did_map),
     )
     framed = compute_anomaly_signals(framed, config.vehicle.parameters)
     # Performance channels (Task 1.1): fuel rate, instant economy,
@@ -1619,6 +1677,7 @@ def featurize_perturbed_frame(
     config: CanaryConfig,
     *,
     behavior_models: BehaviorModels | None,
+    did_map: DidMap | None,
     feature_config: FeatureConfig | None = None,
     bindings: Bindings | None = None,
 ) -> pd.DataFrame:
@@ -1658,6 +1717,7 @@ def featurize_perturbed_frame(
             wide,
             config,
             behavior_models=behavior_models,
+            did_map=did_map,
             feature_config=feature_config,
             bindings=bindings,
         ).features
@@ -1689,7 +1749,7 @@ def featurize_perturbed_frame(
     if reached:
         narrow = _narrowed(wide, _derived_ancestors(reached)).copy()
         narrow[MODE_COLUMN] = reference[MODE_COLUMN].to_numpy()
-        derived = _append_derived_channels(narrow, config)
+        derived = _append_derived_channels(narrow, config, did_map=did_map)
         outputs = derived.loc[:, [c for c in derived.columns if _column_root(str(c)) in reached]]
         moved = _changed_columns(outputs, reference)
         if moved is None:

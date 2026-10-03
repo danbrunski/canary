@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 from src.config import CanaryConfig, UnscopedConfigError
+from src.decode.dids import load_repo_did_map
 from src.models.sequence_feature_set import sequence_roles_path
 from src.preprocessing.feature_cache import build_feature_frame_cache_key
 from src.preprocessing.feature_pipeline import (
@@ -122,7 +123,9 @@ def test_yaml_cannot_claim_to_be_scoped() -> None:
 
 def test_featurize_wide_frame_refuses_an_unscoped_config_and_names_the_incident() -> None:
     with pytest.raises(UnscopedConfigError) as excinfo:
-        featurize_wide_frame(_wide(), _unscoped(), behavior_models=None)
+        featurize_wide_frame(
+            _wide(), _unscoped(), behavior_models=None, did_map=load_repo_did_map()
+        )
     message = str(excinfo.value)
     assert "P02.11" in message
     assert "afr_calibration" in message
@@ -132,10 +135,17 @@ def test_featurize_wide_frame_refuses_an_unscoped_config_and_names_the_incident(
 def test_every_featurization_entry_refuses_an_unscoped_config(tmp_path: Path) -> None:
     unscoped = _unscoped()
     clean_wide = _wide()
-    clean = featurize_wide_frame(clean_wide, _scoped(), behavior_models=None)
+    clean = featurize_wide_frame(
+        clean_wide, _scoped(), behavior_models=None, did_map=load_repo_did_map()
+    )
     with pytest.raises(UnscopedConfigError):
         featurize_perturbed_frame(
-            clean, clean_wide, clean_wide.copy(), unscoped, behavior_models=None
+            clean,
+            clean_wide,
+            clean_wide.copy(),
+            unscoped,
+            behavior_models=None,
+            did_map=load_repo_did_map(),
         )
     with pytest.raises(UnscopedConfigError):
         LiveFeatureSource(config=unscoped)
@@ -154,9 +164,11 @@ def test_build_feature_frame_refuses_before_the_cache(tmp_path: Path) -> None:
 
 
 def test_scoped_and_profile_less_configs_featurize() -> None:
-    assert not featurize_wide_frame(_wide(), _scoped(), behavior_models=None).features.empty
     assert not featurize_wide_frame(
-        _wide(), profiles_disabled(_unscoped()), behavior_models=None
+        _wide(), _scoped(), behavior_models=None, did_map=load_repo_did_map()
+    ).features.empty
+    assert not featurize_wide_frame(
+        _wide(), profiles_disabled(_unscoped()), behavior_models=None, did_map=load_repo_did_map()
     ).features.empty
     assert LiveFeatureSource(config=_scoped()) is not None
     assert LiveFeatureSource(config=profiles_disabled(_unscoped())) is not None
@@ -174,12 +186,15 @@ def test_the_calibration_reaches_offline_featurization_for_a_calibrated_profile(
     (``data/afr_calibration.yaml``, absent) produced none.
 
     ``derived:TARGET_AFR`` was this test's known answer until P02.13. It is
-    absent on both paths now: the Xterra has no verified channel for the
-    target map's load axis, and the lookup no longer reads calculated load."""
+    absent on both paths here: the lookup no longer reads calculated load, and
+    this frame lacks the Xterra's verified axis, 0x1208 in ms (P02.14; its
+    known answer is ``tests/test_base_fuel_schedule.py``)."""
     scoped = _scoped()
     assert scoped.daemon.afr_calibration.is_file()
     wide = _wide().assign(**{"did:ECM_AF_SENSOR_V_B1": np.linspace(1.0, 2.5, 40)})
-    operating = featurize_wide_frame(wide, scoped, behavior_models=None).operating_frame
+    operating = featurize_wide_frame(
+        wide, scoped, behavior_models=None, did_map=load_repo_did_map()
+    ).operating_frame
     calibration = load_afr_calibration(scoped.daemon.afr_calibration)
     assert calibration.voltage_transfer is not None
     expected = voltage_to_afr(wide["did:ECM_AF_SENSOR_V_B1"], calibration.voltage_transfer)
@@ -192,7 +207,9 @@ def test_the_calibration_reaches_offline_featurization_for_a_calibrated_profile(
     assert "derived:TARGET_AFR" not in operating.columns
     old = profiles_disabled(_unscoped())
     assert not old.daemon.afr_calibration.exists()
-    old_operating = featurize_wide_frame(wide, old, behavior_models=None).operating_frame
+    old_operating = featurize_wide_frame(
+        wide, old, behavior_models=None, did_map=load_repo_did_map()
+    ).operating_frame
     assert "derived:AFR_B1" not in old_operating.columns
     assert "derived:TARGET_AFR" not in old_operating.columns
 
@@ -223,7 +240,9 @@ def test_the_feature_spec_records_the_calibration_by_content() -> None:
 
     from src.preprocessing.feature_pipeline import build_feature_spec
 
-    features = featurize_wide_frame(_wide(), _scoped(), behavior_models=None).features
+    features = featurize_wide_frame(
+        _wide(), _scoped(), behavior_models=None, did_map=load_repo_did_map()
+    ).features
     scoped = _scoped()
     spec = build_feature_spec(features, ["obd:RPM"], config=scoped)
     assert spec["afr_calibration"] == {

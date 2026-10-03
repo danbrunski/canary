@@ -55,6 +55,7 @@ from src.decode.behavior_models import (
     load_behavior_models,
     serving_status,
 )
+from src.decode.dids import load_repo_did_map
 from src.preprocessing.feature_pipeline import featurize_wide_frame
 from src.preprocessing.live import LiveFeatureSource, build_prepared_live_tick
 from src.preprocessing.local_range import local_range_column
@@ -136,7 +137,9 @@ def _constant_rpm_wide(seconds: int = 40) -> pd.DataFrame:
 
 def test_b01_1_batch_deviation_exists_after_required_history(config: CanaryConfig) -> None:
     models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[_steady_model()])
-    result = featurize_wide_frame(_constant_rpm_wide(), config, behavior_models=models)
+    result = featurize_wide_frame(
+        _constant_rpm_wide(), config, behavior_models=models, did_map=load_repo_did_map()
+    )
 
     frame = result.operating_frame
     # The derivative the gate needs exists *before* behavior evaluation.
@@ -202,7 +205,9 @@ def test_local_range_gate_refuses_a_blip_identically_batch_and_live(config: Cana
     models = BehaviorModels(schema_version=CURRENT_SCHEMA_VERSION, models=[model])
     wide = _constant_rpm_wide()
     wide.loc[20:22, "obd:RPM"] = [1600.0, 1700.0, 1550.0]  # 725 -> 938 -> 750 in miniature
-    framed = featurize_wide_frame(wide, config, behavior_models=models).operating_frame
+    framed = featurize_wide_frame(
+        wide, config, behavior_models=models, did_map=load_repo_did_map()
+    ).operating_frame
     _, batch = explain_expected_column(framed, model)
     expected = [None] * len(wide)
     for i in range(5):
@@ -840,7 +845,9 @@ def _fitted_models(config: CanaryConfig, tmp_path: Path) -> BehaviorModels:
         _parity_drive(f"train-{i}", seed=i, started=T0 + timedelta(hours=3 * i)) for i in range(3)
     ]
     wide = pd.concat([_with_gap_flags(d, _CHANNELS) for d in drives], ignore_index=True)
-    features = featurize_wide_frame(wide, config, behavior_models=None).features
+    features = featurize_wide_frame(
+        wide, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     recipes = [
         Surface1DRecipe(
             name="steady_timing_vs_rpm",
@@ -885,7 +892,10 @@ def _batch_results(
     config: CanaryConfig, models: BehaviorModels, drive: pd.DataFrame
 ) -> list[dict[str, tuple[Any, ...]]]:
     framed = featurize_wide_frame(
-        _with_gap_flags(drive, _CHANNELS), config, behavior_models=models
+        _with_gap_flags(drive, _CHANNELS),
+        config,
+        behavior_models=models,
+        did_map=load_repo_did_map(),
     ).operating_frame
     out: list[dict[str, tuple[Any, ...]]] = []
     for row in framed.to_dict(orient="records"):

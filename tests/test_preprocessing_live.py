@@ -1103,3 +1103,29 @@ def test_arrival_flags_survive_the_live_feature_transform(config: CanaryConfig) 
     assert bool(row["obd:SPEED__arrived"].iloc[0]) is True
     assert bool(row["obd:RPM__arrived"].iloc[0]) is False
     assert not any(str(c).startswith("obd:SPEED__arrived__") for c in row.columns)
+
+
+@pytest.mark.parametrize("decodes_dids", [True, False])
+def test_the_live_tick_judges_did_views_by_the_sources_own_catalog(
+    config: CanaryConfig, decodes_dids: bool
+) -> None:
+    """P02.14 verification: the DID catalog the live source decodes polls with
+    rides the tick to the feature process, and the base fuel schedule view is
+    computed against it. A source with no DID catalog emits no view."""
+    from src.decode.dids import load_repo_did_map
+
+    did_map = load_repo_did_map() if decodes_dids else None
+    src = LiveFeatureSource(config=config, did_map=did_map)
+    now = datetime(2026, 9, 23, 16, 43, tzinfo=UTC)
+    src.observe(TelemetryRecord.obd(now.timestamp(), "RPM", 2900.0, "rpm"))
+    src.observe(
+        TelemetryRecord(timestamp=now, source="obd", channel="DID_1208", value=f"{20000:04x}")
+    )
+    prepared = src.prepare_tick(now)
+    assert prepared is not None and prepared.did_map is did_map
+    point = build_prepared_live_tick(pickle.loads(pickle.dumps(prepared))).operating_point
+    if decodes_dids:
+        assert point["did:ECM_AIR_CHARGE"] == 20000.0
+        assert point["derived:BASE_FUEL_SCHEDULE"] == pytest.approx(20000 * 0.00049)
+    else:
+        assert "derived:BASE_FUEL_SCHEDULE" not in point

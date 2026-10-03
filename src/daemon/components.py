@@ -403,6 +403,7 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
                 serving_mode01_channels,
                 serving_mode22_dids,
             )
+            from src.decode.dids import load_repo_did_map
             from src.decode.engineering import repo_bindings
             from src.preprocessing.feature_pipeline import FeaturePolicy
 
@@ -412,6 +413,9 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
                 serving_mode01=serving_mode01_channels(
                     config.daemon.capture_profiles, config.collection
                 ),
+                # The catalog the live source decodes DIDs with
+                # (inference.build_live_feature_source: the repo dids.yaml).
+                did_map=load_repo_did_map(),
             )
         except Exception:  # noqa: BLE001 — the audit is advisory; the model still loads
             log.exception("isolation_forest feature-policy audit unavailable")

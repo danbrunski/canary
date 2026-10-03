@@ -1619,6 +1619,207 @@ recomputes the rolling frame over the whole buffered window every tick.
       `_tuning-*` session gives exit 2 and names R03.12 and the session. The
       frame build and the trainer are patched to fail if reached.
 
+- [x] **P02.14 DID 0x1208 in ms is the Xterra's target-map load axis.**
+  Operator decision 2026-10-02: accept `did:ECM_AIR_CHARGE` as the verified
+  base fuel schedule. The evidence is UpRev's own stream definition, which puts
+  B-FUEL SCHDL at DID 0x1208, and raw × 0.00049 reproduces its displayed ms on
+  405/405 rows (2026-09-20). Declare it as the load-axis channel so
+  `derived:TARGET_AFR` / `AFR_ERROR_B*` come back, computed correctly. This
+  lifts P02.13.
+
+  *Done 2026-10-02.*
+  - **Pre-checks.**
+    - *Is the DID a deployed feature? Yes.*
+      - IF: `did:ECM_AIR_CHARGE`, `__mean`, `__roc`, `__std`.
+      - LSTM: raw and `__mean`.
+      - Also `sequence_roles.yaml` (target `air_charge`), behavior model
+        `air_charge_vs_rpm_throttle_did` (`output_unit: raw`) and
+        `fault_injection.yaml` (`airflow`).
+      - Committees, plausibility and fingerprints: no reference.
+
+      Scaling the DID in place would change served feature values, which is a
+      retrain. So it keeps decoding to raw counts, and a separate channel
+      carries ms.
+    - *Double scaling.* `tuning_providers.yaml` already scales the DID by
+      0.00049. Sweep of `ECM_AIR_CHARGE` / `0x1208` / `DID_1208` over `src`,
+      `scripts`, `tools`, `data`, `tests`, fixtures and `models`:
+      - The workbench (`tuning_frame` role `base_fuel_schedule`, and so
+        `tuning_digest`, `rom_trace`, `workbench`, `dashboard/routes/rom_maps`)
+        scales the raw DID once. Unchanged.
+      - Everything else reads raw counts and is unchanged: decode, `live.py`,
+        `capture_quality`, `record.py`, `validation/scenarios`, the analysis
+        recipe, capture profiles, the dashboard fixtures and the migrate tool.
+      - The ground-truth `catalog_pins` and expectations name no DID.
+    - *Polling on `default`.* `ECM_AIR_CHARGE` is in the `mode22` list at the
+      default weight, with no DID cadence override. Measured: read once per
+      **60.6 s** median on `2026-09-20T152758` (122 reads in 8,570 s) and
+      **60.9 s** on `2026-08-03T163440` (24 in 1,884 s). The poll list is not
+      changed (D03.34).
+  - **Mechanism: a DID view, `derived:BASE_FUEL_SCHEDULE`.**
+    - `src.signals.vehicle_signals.DidView(channel, source, scale_method)` and
+      a vehicle module's `DID_VIEWS`. The declaration carries no scale and no
+      unit.
+    - The scale is the `constant` of the source DID's one `dids.yaml`
+      evidence record whose `method` is `scale_method`. Its `constant_unit`
+      (`"<unit> per count"`) is the unit. For the Xterra that is
+      `uprev_stream_definition_vs_displayed_csv`: 0.00049, `ms per count`.
+      The constant is stated once, beside its evidence.
+    - `src.preprocessing.channel_units`:
+      - `did_view_refusal` / `did_view_scale` resolve the view.
+      - `catalog_channel_unit` resolves `derived:` for views only.
+      - `append_did_views` computes the channel, copying the source's `__gap`
+        and `__arrived`. `_append_derived_channels` runs it before the target
+        lookup.
+    - **Double scaling cannot be written.** A view is refused while its source
+      has a `scale` or a unit of its own: the frame would hold scaled values.
+      A missing or duplicated evidence record is refused too. A refused view is
+      not emitted, has no catalog unit, and so the load axis is refused with it.
+    - **The catalog that decoded the frame is the one that judges it**
+      (verifier round 1, MEDIUM). The first version's guards always read the
+      repo `dids.yaml`, but a frame can be decoded with a caller's catalog:
+      `build_feature_frame(dids_path=)`, `analyze_session(dids_path=)`,
+      `build_evaluation_frame(dids_path=)`, and the `--dids` CLIs. A catalog
+      that scales 0x1208 to ms gave a view scaled twice (max 0.0088) and no
+      `TARGET_AFR`, silently. P02.13's resolver had the same mismatch.
+      - `featurize_wide_frame` and `featurize_perturbed_frame` take
+        `did_map: DidMap | None` as a **required keyword with no default**,
+        like `behavior_models`. `_append_derived_channels` passes it to
+        `append_did_views(did_map=)` and to `channel_units_for(did_map)`, the
+        resolver the target lookup reads.
+      - `FeaturePolicy` gains the required field `did_map`, and
+        `standing_exclusions` resolves the load-axis units through it.
+        `resolve_feature_policy(dids_path=)` defaults to the same repo path
+        `build_feature_frame` decodes with.
+      - Every function in `channel_units` takes the catalog, required:
+        `catalog_channel_unit(channel, *, did_map)`, `did_view_scale`,
+        `did_view_refusal`, `append_did_views`. They no longer read the repo
+        file. A `None` catalog gives no `did:`/`mem:` unit, and it refuses
+        every view with "no DID catalog decoded this frame". Through the view,
+        it also refuses the DID-backed load axis.
+      - Callers pass the catalog they decoded with:
+        - `build_feature_frame`: `inputs.did_map` from `dids_path`.
+        - The live tick: `PreparedLiveTick.did_map`, the source's own catalog.
+          It is about 68 KB pickled, 0.6 ms a tick across the process
+          boundary.
+        - `session_deviations`, `behavior_validation`, `spec_producibility`:
+          the map loaded from their `dids_path`.
+        - `evaluate_detectors`: `default_decode_inputs().did_map`, the
+          catalog `load_resampled_session` decodes with; `DriveScorer` gains a
+          required `did_map`.
+        - The daemon's IF audit policy: `load_repo_did_map()`, which the live
+          source decodes with.
+        - `None`, with the reason in a comment, for chains that decode no
+          DID: `fingerprint` (the `value_number` chain), `replay.py` and
+          `train_anomaly_model.py`'s evaluation (no `decode_did_rows`).
+        - The synthetic fault harness's `evaluate_detectors` takes it as a
+          required keyword.
+    - The registry gets `derived:BASE_FUEL_SCHEDULE: ((did:ECM_AIR_CHARGE,),)`.
+      The Xterra's `LOAD_AXIS_CHANNELS` declares it for `base_fuel_schedule`,
+      citing the 405/405 evidence and its steady-state envelope.
+    - *Rejected alternatives.* A second `dids.yaml` entry for 0x1208 is refused
+      by `DidMap` (one entry per id). A decode-level alias would have to be
+      threaded through every decode path (`decode_did_rows`, the live mirror,
+      the derived store, the dashboard) and through the serving gate's DID
+      names.
+  - **Feature policy.**
+    - P02.13's standing exclusion lifts by itself: `load_axis_refusal` returns
+      `None` on the real catalog. `TARGET_AFR` / `AFR_ERROR_B*` pass the
+      source gate (`obd:RPM` + a polled DID).
+    - The view is refused by name (`DID_VIEW_EXCLUSION`, `did_view: ...`) in
+      `standing_exclusions` and on every manifest. It is the source times a
+      constant, so it would be a second copy of one feature.
+    - **Next-retrain verdict: they would not pass the coverage floor**
+      (`MIN_DETECTOR_COVERAGE` 0.5, `sparse_for_grid`). Two limits:
+      - 0x1208 is read once a minute on `default`;
+      - the table's domain is rpm 1,200–5,200 and BFS 8.76–21.57 ms, and
+        `target_afr` leaves rows off the map empty.
+
+      | column | 152758 rows / grid density | 163440 rows / grid density |
+      |---|---|---|
+      | `did:ECM_AIR_CHARGE`, `derived:BASE_FUEL_SCHEDULE` | 2.8 / 3.3 % | 2.5 / 3.1 % |
+      | `derived:TARGET_AFR` | 0.0 / 0.0 % (2 rows) | 0.4 / 0.5 % |
+      | `derived:AFR_ERROR_B1` | 0.0 / 0.0 % | 0.2 / 0.2 % |
+      | `derived:AFR_ERROR_B2` | 0.0 / 0.0 % | 0.3 / 0.3 % |
+    - **Deployed manifests are unaffected.** HEAD and the change were built on
+      both drives with `canary.yaml`, scoped. Frames grow 890 → 908 columns
+      (operating 459 → 465), and **no shared column changes**, the
+      `did:ECM_AIR_CHARGE` family included. The 18 new columns are the
+      `BASE_FUEL_SCHEDULE`, `TARGET_AFR` and `AFR_ERROR_B1/B2` families. IF
+      and LSTM manifests name none of them. `FEATURE_FRAME_CACHE_VERSION`
+      8 → 9.
+  - **BFS distribution (engine running, rpm ≥ 400).**
+    - Idle (< 1,000 rpm) reads 2.7–5.0 ms. At ≥ 1,000 rpm the range is
+      1.7–16.6 ms, median 3.7 ms on 152758 and 4.8 ms on 163440.
+    - Below the first breakpoint (8.76 ms): **98.8 %** of 86 running reads on
+      152758, which is mostly idle, and **68.2 %** of 22 on 163440.
+    - With the key on and the engine off, the register holds a frozen value:
+      36 reads at 13.59–17.20 ms on 152758.
+    - On the known-answer slice (below): 1.64–17.99 ms. 53 of 119 rows are on
+      the map, and 24 of those are richer than 14.7.
+  - **Known answer.** A real slice, committed as
+    `tests/fixtures/base_fuel_schedule/_capture-tuning-2026-09-23T164007`
+    (2 min, 72 KB). It holds a pull to 5,475 rpm on ZS44A-20260920.
+    `TARGET_AFR` equals an independently written four-cell bilinear lookup on
+    raw × 0.00049 × rpm to `rtol` 1e-9. Mutation check: a 1.48× axis fails it.
+  - **Tests.**
+    - `tests/test_base_fuel_schedule.py` (20), covering:
+      - the DID still decodes to raw;
+      - the view's scale is the evidence record;
+      - the workbench provider equals it, end to end on the slice;
+      - refusals for a source scaled in place and for 0 or 2 evidence
+        records;
+      - the gap and arrived flags, including a held finite value whose
+        source `__gap` is True (verifier round 1, LOW: the copy was unpinned);
+      - decoding the slice through `build_feature_frame(dids_path=)` with a
+        catalog that scales 0x1208: no view, no `TARGET_AFR`, and the policy
+        on that catalog names the refusal. The repo catalog gives both. A
+        mutation that reads the repo catalog again fails it;
+      - a `None` catalog: a named refusal, and no view or target;
+      - `did_map` has no default on either featurizer or on `FeaturePolicy`;
+      - declaration checks, and a duplicate-name refusal;
+      - the policy;
+      - the known answer, the axis sanity check, and AFR error as measured
+        minus target.
+    - Updated: `test_target_afr_load_axis.py` (its refusal tests remove the
+      declaration first, plus new lift and source-gate cases),
+      `test_afr.py`, `test_trainability.py` (the emission check runs the real
+      view), the `test_train_anomaly_model.py` golden feature-spec contract
+      (its standing exclusions are now the view alone), and the
+      `test_dids.py` / `test_featurization_profile_scope.py` docstrings.
+    - `tests/test_preprocessing_live.py`: the live tick carries the source's
+      catalog through a pickle round trip. It computes the view with one and
+      emits none without.
+    - The catalog threading adds `did_map=` to every featurization and
+      `FeaturePolicy` call in the tests: `load_repo_did_map()`, the catalog
+      those frames would be decoded with. The files are test_feature_pipeline,
+      `_incremental`, `_policy`, test_evaluation_detectors,
+      test_evaluate_detectors_script / `_default_profile`,
+      test_retrain_script, test_behavior_serving_contracts,
+      test_synthetic_fault_eval and test_trainability.
+    - Gate after the verifier fix:
+      - 1,113 passed (1 xfailed) over the 50 affected files, including every
+        featurization caller's tests, test_layering and the CLI snapshot;
+      - `-m ml_training -x`: 122 passed;
+      - `-m "not integration and not slow"`: 6,467 passed, 1 skipped;
+      - `tests/test_replay_isolation.py` (integration): passed;
+      - ruff, format and mypy are clean.
+  - **Pi cost, unmeasured.** Each live tick builds 18 more feature columns
+    (about 2 %): the `BASE_FUEL_SCHEDULE`, `TARGET_AFR` and `AFR_ERROR_B1/B2`
+    families. The DID catalog also crosses to the feature process every tick.
+    Neither is measured on the Pi.
+  - **Docs.** `dids.yaml` 0x1208 is `confidence: confirmed`, with notes and a
+    comment on why `scale` stays null. The `tuning_providers.yaml` comment no
+    longer says "candidate". The vehicle skill files are updated too.
+  - **Open, for the operator.** These are findings, not changes.
+    - UpRev's TARGET AFR shows that the ECM clamps BFS below the first
+      breakpoint to the first column. On the 2026-08-04 logs, 30 of 44 rows
+      with BFS < 8.76 ms at 4,400–5,200 rpm match the first column to
+      ≤ 0.05 AFR, and the largest miss is 0.18. `target_afr` leaves those rows
+      empty.
+    - UpRev's "Fuel Target X Trace" reads ≈ 1.48 × BFS − 0.09 on six logs,
+      so it is not BFS ms. `rom_viewer.yaml` keeps its axis mapping
+      `unverified`.
+
 ## Tracked elsewhere
 
 - **The sequence detector's tick cost is A06.6's.** It is not duplicated

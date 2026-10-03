@@ -17,7 +17,6 @@ from scripts.train_anomaly_model import (
 from src.columns import MODE_COLUMN
 from src.config import CanaryConfig
 from src.preprocessing import feature_pipeline
-from src.preprocessing.channel_units import catalog_channel_unit
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,
     build_feature_frame,
@@ -30,7 +29,6 @@ from src.preprocessing.feature_pipeline import (
 from src.preprocessing.feature_pipeline import (
     trainable_feature_columns as _trainable_feature_columns,
 )
-from src.signals.afr import TARGET_AFR_CHANNELS, load_axis_refusal
 from src.storage.parquet_writer import TELEMETRY_SCHEMA
 from tests.configs import example_config
 
@@ -374,11 +372,18 @@ def test_feature_spec_matches_golden_contract_for_fixture_frame():
         },
         # No decoded:/did: channel in this fixture, so policy gated nothing.
         "feature_policy_exclusions": {},
-        # P02.13 — refused by name whether or not the frame carries them: no
-        # channel is verified for the target map's load axis.
-        "feature_policy_standing_exclusions": dict.fromkeys(
-            TARGET_AFR_CHANNELS, load_axis_refusal(channel_units=catalog_channel_unit)
-        ),
+        # Refused by name whether or not the frame carries them. P02.13's
+        # TARGET_AFR / AFR_ERROR_B* refusal lifted once the Xterra verified its
+        # load axis (P02.14); the axis channel itself, a DID view of 0x1208, is
+        # refused as a second copy of did:ECM_AIR_CHARGE.
+        "feature_policy_standing_exclusions": {
+            "derived:BASE_FUEL_SCHEDULE": (
+                "did_view: derived:BASE_FUEL_SCHEDULE is did:ECM_AIR_CHARGE times a "
+                "constant (dids.yaml evidence 'uprev_stream_definition_vs_displayed_csv'); "
+                "the source is the feature, and the view would be a second copy of one "
+                "reading (P02.14)"
+            )
+        },
         "preprocessing": {
             "resample_hz": 1,
             "rolling_window_seconds": 30,

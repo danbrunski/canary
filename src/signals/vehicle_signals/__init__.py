@@ -27,6 +27,12 @@ A module defines either or both of:
   (:func:`src.signals.afr.target_load_axis`), so a vehicle with no verified
   channel for an axis gets no ``derived:TARGET_AFR``, rather than one looked
   up with whatever load-like channel happens to be in the frame.
+* ``DID_VIEWS: tuple[DidView, ...]`` -- a Mode 22 DID read in an engineering
+  unit its own catalog entry does not carry, as a separate ``derived:``
+  channel (P02.14). The DID stays in raw counts, because a served model was
+  trained on them; the view's scale and unit are one evidence record of the
+  DID's ``dids.yaml`` entry, resolved by
+  :func:`src.preprocessing.channel_units.did_view_scale`.
 
 The derived-channel registry is module-level (trainability and capture-profile
 validation read it without a config in hand), so it is built from **every**
@@ -170,11 +176,65 @@ def load_axis_columns(axis: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(channel.channel for channel in load_axis_channels(axis)))
 
 
+@dataclass(frozen=True)
+class DidView:
+    """A DID read in an engineering unit, as its own ``derived:`` channel (P02.14).
+
+    ``source`` (``did:<NAME>``) keeps decoding exactly as its catalog entry
+    says. ``channel`` is ``source`` times the ``constant`` of the one evidence
+    record of that entry whose ``method`` is ``scale_method``; the record's
+    ``constant_unit`` (``"<unit> per count"``) is the view's unit. So the scale
+    and the unit are stated once, in ``dids.yaml``, beside the evidence that
+    established them, and this declaration carries neither.
+
+    Why a second channel and not a scale on the DID: a served model was
+    trained on the raw counts, so scaling the DID in place would change its
+    feature values, which is a retrain. The view is refused while the source
+    entry has its own ``scale``: the frame would then hold scaled values, and
+    the view would scale them twice.
+    """
+
+    channel: str
+    source: str
+    scale_method: str
+
+    def __post_init__(self) -> None:
+        if not self.channel.startswith("derived:"):
+            raise ValueError(f"DID view {self.channel!r} must be a derived: channel")
+        if not self.source.startswith("did:"):
+            raise ValueError(f"DID view {self.channel!r} reads {self.source!r}, not a did: channel")
+        if not self.scale_method.strip():
+            raise ValueError(
+                f"DID view {self.channel!r} names no evidence method for its scale: a "
+                "scale with no recorded evidence is the P02.13 defect"
+            )
+
+
+def did_views() -> tuple[DidView, ...]:
+    """Every vehicle's declared DID views, in module order.
+
+    Refuses two declarations of one ``derived:`` name: the registry gives a
+    channel one input, so two vehicles reading different DIDs under one name
+    would be computed from whichever came first.
+    """
+    views: dict[str, DidView] = {}
+    for module in vehicle_modules():
+        for view in getattr(module, "DID_VIEWS", ()):
+            existing = views.setdefault(view.channel, view)
+            if existing != view:
+                raise ValueError(
+                    f"{view.channel} is declared as two different DID views: {existing} and {view}"
+                )
+    return tuple(views.values())
+
+
 __all__ = [
     "BANK_1_WIDEBAND_LAMBDA",
+    "DidView",
     "InputGroups",
     "LoadAxisChannel",
     "af_sensor_voltage_columns",
+    "did_views",
     "load_axis_channels",
     "load_axis_columns",
     "signal_inputs",

@@ -78,10 +78,13 @@ site.
 - **Some DIDs were misidentified for weeks.** The current names in
   `data/dids.yaml` are the corrected ones, so read the `description` and
   evidence before you trust a name:
-  - `0x1208` `ECM_AIR_CHARGE` is air charge × the injector constant K (a
-    Nissan base-fuel-schedule candidate). It is **not** injector pulse width: it
-    reads the same per gram of air in fuel cut as when fuelled. Never compute
-    fuel mass or φ from it, and never use it as a DFCO marker.
+  - `0x1208` `ECM_AIR_CHARGE` is the base fuel schedule: air charge × the
+    injector constant K, raw × 0.00049 ms (verified BFS, operator 2026-10-02).
+    The DID stays in raw counts because the deployed models were trained on
+    them. The ms reading is `derived:BASE_FUEL_SCHEDULE`, the Target AFR load
+    axis. It is **not** injector pulse width: it reads the same per gram of air
+    in fuel cut as when fuelled. Never compute fuel mass or φ from it, and never
+    use it as a DFCO marker. At key-on, engine off it holds a frozen value.
   - `0x1206`/`0x1207` `ECM_INJECTOR_PULSE_1/2` are the injected pulse. They are
     convex in air charge (about +7 % from idle to cruise), so a straight line
     fitted in one region does not extrapolate.

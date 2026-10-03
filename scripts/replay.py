@@ -106,7 +106,11 @@ def replay_sessions(
     behavior_models = (
         load_behavior_models(behavior_models_path) if behavior_models_path.exists() else None
     )
-    featurized = featurize_wide_frame(resampled, config, behavior_models=behavior_models)
+    # read_sessions -> to_wide decodes no Mode 22 DID, so no DID catalog
+    # describes this frame (P02.14: no DID view, no DID-backed load axis).
+    featurized = featurize_wide_frame(
+        resampled, config, behavior_models=behavior_models, did_map=None
+    )
     segmented = featurized.operating_frame
     features = featurized.features
 

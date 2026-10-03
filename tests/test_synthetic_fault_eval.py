@@ -28,6 +28,7 @@ from src.columns import (  # noqa: E402
     TIMESTAMP_COLUMN,
 )
 from src.config import CanaryConfig  # noqa: E402
+from src.decode.dids import load_repo_did_map
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.models.synthetic_fault_eval import (  # noqa: E402
     DEFAULT_FAULT_KINDS,
@@ -93,7 +94,9 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
     config = _config()
     resampled = _two_mode_resampled()
     # featurize → fit IF on the clean frame; calibration enabled in IFConfig.
-    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     trained = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -108,6 +111,7 @@ def test_evaluate_detectors_grades_each_fault_kind_and_keeps_nominal_fp_low() ->
         config,
         trained,
         fault_channel="obd:RPM",
+        did_map=None,
         # 2.4 scores through the production PersistenceGate (3 consecutive
         # sustained ticks by default) instead of "any single row in-window" —
         # a real, more honest bar, but one a single random window placement
@@ -202,7 +206,9 @@ def test_if_feature_subset_trains_and_evaluates_through_the_benchmark_harness(
 
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     full_columns = [
         c
         for c in trainable_feature_columns(nominal_features)
@@ -225,6 +231,7 @@ def test_if_feature_subset_trains_and_evaluates_through_the_benchmark_harness(
         config,
         trained,
         fault_channel="obd:RPM",
+        did_map=None,
         n_injections=4,
     )
     json.loads(json.dumps(report))  # still JSON-safe on every subset
@@ -243,7 +250,9 @@ def test_evaluate_detectors_skips_sequence_metrics_when_no_artifact_supplied() -
     not crash and not fabricate a ``sequence`` entry."""
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     trained_if = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -256,6 +265,7 @@ def test_evaluate_detectors_skips_sequence_metrics_when_no_artifact_supplied() -
         config,
         trained_if,
         fault_channel="obd:RPM",
+        did_map=None,
         n_injections=3,
     )
 
@@ -279,7 +289,9 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
 
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     trained_if = fit_isolation_forest(
         nominal_features,
         IFConfig(),
@@ -324,6 +336,7 @@ def test_evaluate_detectors_covers_sequence_detector_when_available() -> None:
         config,
         trained_if,
         fault_channel="obd:RPM",
+        did_map=None,
         n_injections=3,
         trained_sequence=trained_sequence,
     )
@@ -514,7 +527,9 @@ def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() 
     existing CI-floor test's job)."""
     config = _config()
     resampled = _two_mode_resampled()
-    nominal_features = featurize_wide_frame(resampled, config, behavior_models=None).features
+    nominal_features = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
     trained = fit_isolation_forest(
         nominal_features,
         IFConfig(target_flag_rate=0.15),
@@ -543,6 +558,7 @@ def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() 
         strict_config,
         trained,
         fault_channel="obd:RPM",
+        did_map=None,
         fault_kinds=(INTERMITTENT_FAULT_KIND,),
         n_injections=30,
     )
@@ -551,6 +567,7 @@ def test_intermittent_fault_caught_by_m_of_n_not_strict_at_unchanged_clean_fp() 
         config,
         trained,
         fault_channel="obd:RPM",
+        did_map=None,
         fault_kinds=(INTERMITTENT_FAULT_KIND,),
         n_injections=30,
     )

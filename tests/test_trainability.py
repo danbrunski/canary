@@ -8,7 +8,6 @@ Enforced by an allowlist of ECU-origin sources in ``src.telemetry``; a
 
 from __future__ import annotations
 
-import types
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import get_args
@@ -21,12 +20,13 @@ from src.analysis.refit import Surface1DRecipe, Surface2DRecipe
 from src.columns import is_flag_column
 from src.config import VehicleParameters
 from src.decode.behavior_models import load_behavior_models
+from src.decode.dids import load_repo_did_map
+from src.preprocessing.channel_units import append_did_views, channel_units_for
 from src.preprocessing.feature_pipeline import (
     candidate_feature_columns,
     feature_policy_exclusions,
     featurize_wide_frame,
 )
-from src.signals import vehicle_signals
 from src.signals.afr import append_afr_channels, load_afr_calibration
 from src.signals.committees import COMMITTEES, append_committee_residuals
 from src.signals.derived import (
@@ -35,7 +35,6 @@ from src.signals.derived import (
     compute_anomaly_signals,
     compute_derived_channels,
 )
-from src.signals.vehicle_signals import LoadAxisChannel
 from src.telemetry import (
     INPUT_GATED_SOURCES,
     NON_TRAINABLE_SOURCES,
@@ -201,25 +200,15 @@ def test_a_derived_channel_follows_every_input_including_optional_ones() -> None
         assert source_exclusion_reason(column) is None
 
 
-def test_every_derived_channel_the_pipeline_emits_declares_its_inputs(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_every_derived_channel_the_pipeline_emits_declares_its_inputs() -> None:
     """The registry covers every ``derived:`` output; an undeclared one would be
     silently non-trainable (safe) but also unexplained, so it is a failure.
 
-    No real vehicle has a verified channel for the target map's load axis
-    (P02.13), so a synthetic one is declared here, with a stub catalog putting
-    it in ms. Without it ``TARGET_AFR`` and ``AFR_ERROR_B*`` are never emitted
-    and would escape the check. It is still needed after the source gate's
-    empty-group fix: that fix is about trainability, and this is about emission."""
-    axis = LoadAxisChannel(
-        axis="base_fuel_schedule",
-        channel="did:TEST_BASE_FUEL_SCHEDULE_MS",
-        evidence="synthetic test vehicle",
-    )
-    real = vehicle_signals.vehicle_modules()
-    module = types.SimpleNamespace(LOAD_AXIS_CHANNELS=(axis,))
-    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (*real, module))
+    The Xterra's verified load axis (P02.14, ``derived:BASE_FUEL_SCHEDULE``, a
+    DID view of 0x1208) is computed here by the pipeline's own step and
+    resolved through the real catalog, so the view, ``TARGET_AFR`` and
+    ``AFR_ERROR_B*`` are all emitted and checked. Its raw counts are chosen to
+    land on the target map's axis (8.76-21.57 ms)."""
     vehicle = VehicleParameters(
         final_drive=3.357,
         gearbox_ratios=(3.79, 2.28, 1.45, 1.0, 0.82),
@@ -233,8 +222,11 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs(
         for member in committee.members:
             if member not in frame.columns:
                 frame[member] = np.linspace(0.0, 1.0, ROWS)
-    frame[axis.channel] = np.linspace(9.0, 21.0, ROWS)
-    frame = append_afr_channels(frame, vehicle, calibration, channel_units={axis.channel: "ms"}.get)
+    frame["did:ECM_AIR_CHARGE"] = np.linspace(9.0, 21.0, ROWS) / 0.00049
+    frame = append_did_views(frame, did_map=load_repo_did_map())
+    frame = append_afr_channels(
+        frame, vehicle, calibration, channel_units=channel_units_for(load_repo_did_map())
+    )
     frame = compute_anomaly_signals(frame, vehicle)
     frame = compute_derived_channels(frame, vehicle, calibration=calibration)
     frame = append_committee_residuals(frame)
@@ -247,6 +239,7 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs(
     produced = emitted - member_only
     assert "derived:GEAR_ESTIMATE" in produced
     assert "derived:AFR_ERROR_B1" in produced
+    assert "derived:BASE_FUEL_SCHEDULE" in produced
     assert "derived:VERTICAL_SPEED_DIVERGENCE" in produced
     assert sorted(produced - set(DERIVED_CHANNEL_INPUTS)) == []
 
@@ -259,7 +252,9 @@ def test_every_derived_channel_the_pipeline_emits_declares_its_inputs(
 def test_external_sensors_and_their_derived_channels_yield_no_feature() -> None:
     config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())
-    featurized = featurize_wide_frame(wide, config, behavior_models=None)
+    featurized = featurize_wide_frame(
+        wide, config, behavior_models=None, did_map=load_repo_did_map()
+    )
     features = featurized.features
     # The derived channel built from gps: is actually computed (for the
     # committee evaluator and fingerprint), but never enters the feature frame.
@@ -295,7 +290,9 @@ def test_committee_channels_leave_the_trained_feature_list_unchanged() -> None:
 
     config = example_config(REPO / "canary.example.yaml")
     wide = _session_frame(_external_sensor_channels())
-    featurized = featurize_wide_frame(wide, config, behavior_models=None)
+    featurized = featurize_wide_frame(
+        wide, config, behavior_models=None, did_map=load_repo_did_map()
+    )
     committee = ("derived:SPEED_SOURCE_DIVERGENCE", OBD_SPEED_ACCEL_G, GPS_SPEED_ACCEL_G)
     for channel in committee:
         assert featurized.operating_frame[channel].notna().any(), channel

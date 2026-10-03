@@ -7,7 +7,8 @@ import pandas as pd
 import pytest
 
 from src.config import VehicleParameters
-from src.preprocessing.channel_units import catalog_channel_unit
+from src.decode.dids import load_repo_did_map
+from src.preprocessing.channel_units import catalog_channel_unit, channel_units_for
 from src.signals import vehicle_signals
 from src.signals.afr import (
     AFR_ERROR_CHANNELS,
@@ -30,10 +31,30 @@ AXIS = "did:TEST_BASE_FUEL_SCHEDULE_MS"
 #: The synthetic channel's catalog unit. Real channels resolve through
 #: ``catalog_channel_unit``; this one is in no catalog.
 UNITS = {AXIS: "ms"}.get
+#: The repo catalogs, through the real resolver.
+REPO_UNITS = channel_units_for(load_repo_did_map())
+
+
+def _without_load_axes() -> tuple[types.SimpleNamespace, ...]:
+    """The real vehicle modules minus their load-axis declarations."""
+    return tuple(
+        types.SimpleNamespace(**{k: v for k, v in vars(m).items() if k != "LOAD_AXIS_CHANNELS"})
+        for m in vehicle_signals.vehicle_modules()
+    )
+
+
+def _undeclare_axis(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No vehicle declares a load-axis channel: the state before P02.14."""
+    stripped = _without_load_axes()
+    monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: stripped)
 
 
 def _declare_axis(monkeypatch: pytest.MonkeyPatch, *channels: LoadAxisChannel) -> None:
-    """Add a vehicle module declaring ``channels`` (default: :data:`AXIS` in ms)."""
+    """Make ``channels`` (default: :data:`AXIS` in ms) the only load-axis
+    declaration. The real vehicles' own (the Xterra's
+    ``derived:BASE_FUEL_SCHEDULE``, P02.14) are removed: :data:`UNITS` puts
+    only the synthetic channel in a catalog, and these tests are about the
+    lookup, not about which vehicle declares what."""
     declared = channels or (
         LoadAxisChannel(
             axis="base_fuel_schedule",
@@ -42,7 +63,7 @@ def _declare_axis(monkeypatch: pytest.MonkeyPatch, *channels: LoadAxisChannel) -
         ),
     )
     module = types.SimpleNamespace(LOAD_AXIS_CHANNELS=declared)
-    real = vehicle_signals.vehicle_modules()
+    real = _without_load_axes()
     monkeypatch.setattr(vehicle_signals, "vehicle_modules", lambda: (*real, module))
 
 
@@ -240,22 +261,33 @@ def _engine_load_frame() -> pd.DataFrame:
     )
 
 
-def test_engine_load_never_reaches_the_target_lookup() -> None:
-    """With the real vehicle modules no channel is verified for the axis, so
-    calculated load in the frame produces no target and no error, and the
-    lookup refuses by name rather than computing one from it."""
+def test_engine_load_never_reaches_the_target_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calculated load in the frame produces no target and no error.
+
+    With the real vehicle modules the axis is the Xterra's
+    ``derived:BASE_FUEL_SCHEDULE`` (P02.14), which this frame lacks, so there
+    is no target, and the lookup names the missing channel. With no
+    declaration at all it refuses by name. Neither computes one from load."""
     frame = _engine_load_frame()
-    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    target = _calibration().target_map()
+    assert target is not None
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
     assert "derived:AFR_B1" in out, "measured AFR is unaffected"
     for column in (TARGET_AFR, *AFR_ERROR_CHANNELS):
         assert column not in out
-    target = _calibration().target_map()
-    assert target is not None
+    with pytest.raises(KeyError, match="derived:BASE_FUEL_SCHEDULE"):
+        target_afr(frame, target, channel_units=REPO_UNITS)
+    assert afr_error_surface(out, target, bank=1, channel_units=REPO_UNITS) == []
+
+    _undeclare_axis(monkeypatch)
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=UNITS)
+    for column in (TARGET_AFR, *AFR_ERROR_CHANNELS):
+        assert column not in out
     with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
-        target_afr(frame, target, channel_units=catalog_channel_unit)
+        target_afr(frame, target, channel_units=REPO_UNITS)
     assert "base_fuel_schedule (ms)" in refused.value.reason
     with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED):
-        afr_error_surface(out, target, bank=1, channel_units=catalog_channel_unit)
+        afr_error_surface(out, target, bank=1, channel_units=REPO_UNITS)
 
 
 def test_the_lookup_takes_no_load_series_of_its_own() -> None:
@@ -277,7 +309,8 @@ def test_the_lookup_takes_no_load_series_of_its_own() -> None:
         # the Mode 01 registry, whatever a declaration claims.
         ("obd:ENGINE_LOAD", "catalog unit %"),
         ("obd:ABSOLUTE_LOAD", "catalog unit %"),
-        # The BFS candidate: unscaled in dids.yaml, so its frame values are counts.
+        # BFS itself, but in raw counts: the DID stays unscaled (a served feature),
+        # and only its P02.14 view, derived:BASE_FUEL_SCHEDULE, is in ms.
         ("did:ECM_AIR_CHARGE", "gives it no unit"),
         # RAM channels: one unscaled, one in another unit.
         ("mem:ECM_ENGINE_PERIOD", "gives it no unit"),
@@ -299,11 +332,9 @@ def test_an_axis_channel_is_refused_unless_its_catalog_unit_is_the_axis_unit(
     target = _calibration().target_map()
     assert target is not None
     with pytest.raises(LoadAxisUnavailableError, match=LOAD_AXIS_UNVERIFIED) as refused:
-        target_afr(frame, target, channel_units=catalog_channel_unit)
+        target_afr(frame, target, channel_units=REPO_UNITS)
     assert channel in refused.value.reason and why in refused.value.reason
-    out = append_afr_channels(
-        frame, VehicleParameters(), _calibration(), channel_units=catalog_channel_unit
-    )
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
     assert TARGET_AFR not in out
 
 
@@ -314,14 +345,12 @@ def test_the_catalog_check_passes_a_channel_the_catalog_puts_in_ms(
     injector pulse is not the load axis; it only shows the check is not a
     constant refusal.)"""
     channel = "did:ECM_INJECTOR_PULSE_1"
-    assert catalog_channel_unit(channel) == "ms"
+    assert catalog_channel_unit(channel, did_map=load_repo_did_map()) == "ms"
     _declare_axis(
         monkeypatch, LoadAxisChannel(axis="base_fuel_schedule", channel=channel, evidence="x")
     )
     frame = _engine_load_frame().assign(**{channel: [40.0, 60.0]})
-    out = append_afr_channels(
-        frame, VehicleParameters(), _calibration(), channel_units=catalog_channel_unit
-    )
+    out = append_afr_channels(frame, VehicleParameters(), _calibration(), channel_units=REPO_UNITS)
     assert out[TARGET_AFR].notna().all()
 
 

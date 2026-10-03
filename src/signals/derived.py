@@ -987,10 +987,15 @@ DERIVED_CHANNEL_INPUTS: dict[str, tuple[tuple[str, ...], ...]] = {
         vehicle_signals.wideband_lambda_columns(1),
         vehicle_signals.wideband_lambda_columns(2),
     ),
+    # P02.14 — a vehicle's DID read in an engineering unit its catalog entry
+    # does not carry (src.preprocessing.channel_units.append_did_views): the
+    # one DID, scaled. The Xterra's is base fuel schedule in ms (DID 0x1208).
+    **{view.channel: ((view.source,),) for view in vehicle_signals.did_views()},
     # P02.13 — the load input is the vehicle's verified channel for the target
-    # map's axis (``afr.DEFAULT_TARGET_LOAD_AXIS``). No vehicle declares one
-    # yet, so the group is empty: unsatisfiable, and the channel is never
-    # produced. It read obd:ENGINE_LOAD (%) on a ms axis until 2026-09-28.
+    # map's axis (``afr.DEFAULT_TARGET_LOAD_AXIS``). With no declaration the
+    # group is empty: unsatisfiable, and the channel is never produced. It read
+    # obd:ENGINE_LOAD (%) on a ms axis until 2026-09-28. The Xterra declares
+    # derived:BASE_FUEL_SCHEDULE since P02.14 (2026-10-02).
     "derived:TARGET_AFR": (
         ("obd:RPM",),
         vehicle_signals.load_axis_columns("base_fuel_schedule"),

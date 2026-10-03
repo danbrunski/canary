@@ -133,8 +133,10 @@ def compute_fingerprint(
     # anomaly signals, instantaneous channels, committee residuals and
     # behavior deviations, in the order the serve path runs them — so the
     # deviation statistics describe the frame the models actually score.
+    # The value_number chain above decodes no Mode 22 DID, so no DID catalog
+    # describes this frame: DID views and DID-backed load axes are refused.
     featurized = featurize_wide_frame(
-        frame, config, behavior_models=_behavior_models(config)
+        frame, config, behavior_models=_behavior_models(config), did_map=None
     ).operating_frame
     # The idle/cruise stats keep the session's *classification* modes (the
     # ones classification.json and the digest's mode_seconds report). The

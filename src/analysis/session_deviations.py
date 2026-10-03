@@ -526,7 +526,9 @@ def analyze_session(
     resampled = _decode_session_to_resampled(
         Path(session_dir), bindings, dbc_database, did_map, resample_config
     )
-    framed = featurize_wide_frame(resampled, config, behavior_models=models).operating_frame
+    framed = featurize_wide_frame(
+        resampled, config, behavior_models=models, did_map=did_map
+    ).operating_frame
     # Columns are always strings in this pipeline (channel keys like
     # "obd:RPM"); to_dict's Hashable key type is pandas being generic.
     records = (

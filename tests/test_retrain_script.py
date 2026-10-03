@@ -13,6 +13,7 @@ import pytest
 from scripts import _cli, retrain
 from src.alerts.feedback import FeedbackStore
 from src.config import CanaryConfig
+from src.decode.dids import load_repo_did_map
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
 from src.preprocessing.feature_pipeline import load_resampled_session
@@ -875,7 +876,10 @@ def test_run_benchmark_gate_runs_the_evaluation_protocol_and_discovers_prior_bas
     training = write_fixture_session(tmp_path / "train", "2026-05-11T000000", seed=2, n=120)
     session = write_fixture_session(tmp_path / "sessions", "2026-05-12T000000", seed=1, n=120)
     features = featurize_wide_frame(
-        load_resampled_session(training, config), config, behavior_models=None
+        load_resampled_session(training, config),
+        config,
+        behavior_models=None,
+        did_map=load_repo_did_map(),
     ).features
     trained = fit_isolation_forest(
         features,

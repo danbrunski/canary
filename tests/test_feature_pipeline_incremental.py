@@ -18,6 +18,7 @@ from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_models import load_behavior_models
 from src.decode.bindings import load_bindings
+from src.decode.dids import load_repo_did_map
 from src.preprocessing import feature_pipeline
 from src.preprocessing.anomaly_injection import (
     REALISTIC_FAULTS,
@@ -99,6 +100,7 @@ def _full(frame: pd.DataFrame, config: CanaryConfig, inputs: dict[str, object]):
         config,
         bindings=inputs["bindings"],  # type: ignore[arg-type]
         behavior_models=inputs["behavior"],  # type: ignore[arg-type]
+        did_map=load_repo_did_map(),
     )
 
 
@@ -110,6 +112,7 @@ def _incremental(clean, frame: pd.DataFrame, config: CanaryConfig, inputs: dict[
         config,
         bindings=inputs["bindings"],  # type: ignore[arg-type]
         behavior_models=inputs["behavior"],  # type: ignore[arg-type]
+        did_map=load_repo_did_map(),
     )
 
 
@@ -225,7 +228,7 @@ def test_every_derived_channel_reads_only_its_declared_inputs(
     frame: pd.DataFrame = inputs["frame"]  # type: ignore[assignment]
     framed = _full(frame, config, inputs).operating_frame
     wide = framed.loc[:, list(frame.columns) + ["operating_mode"]]
-    clean = _append_derived_channels(wide, config)
+    clean = _append_derived_channels(wide, config, did_map=load_repo_did_map())
     from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
     derived = sorted(
@@ -240,7 +243,9 @@ def test_every_derived_channel_reads_only_its_declared_inputs(
     checked = 0
     for index, column in enumerate(derived):
         keep = set(_derived_ancestors({column}))
-        moved = _append_derived_channels(_scrambled(wide, keep, index), config)
+        moved = _append_derived_channels(
+            _scrambled(wide, keep, index), config, did_map=load_repo_did_map()
+        )
         for name in (column, f"{column}__gap"):
             if name in clean.columns:
                 pd.testing.assert_series_equal(moved[name], clean[name], check_exact=True, obj=name)

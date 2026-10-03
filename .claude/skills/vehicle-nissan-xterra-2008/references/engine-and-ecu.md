@@ -117,10 +117,17 @@ this truck:
   silently opens the loop there, so trims freeze and the A/F error in that cell
   becomes the MAF/K/fuel-comp error directly. Fuel Comp has a separate *Cold*
   table used below 70 °C coolant.
-- **`0x1208` (`ECM_AIR_CHARGE`) is BFS**, confirmed at raw × 0.00049 ms. It
-  responds to air and to K, not to fuel. Its per-gram-of-air ratio stepped
-  +7.5 % at the first Osiris flash (2026-07-26, K 1.07), in lock-step with
-  UpRev's own BFS/air.
+- **`0x1208` (`ECM_AIR_CHARGE`) is BFS**, confirmed at raw × 0.00049 ms
+  (405/405 rows against UpRev's display) and accepted by the operator as the
+  verified BFS on 2026-10-02. It responds to air and to K, not to fuel. Its
+  per-gram-of-air ratio stepped +7.5 % at the first Osiris flash (2026-07-26,
+  K 1.07), in lock-step with UpRev's own BFS/air. The DID stays in raw counts
+  (a deployed-model feature). `derived:BASE_FUEL_SCHEDULE` is the ms channel,
+  and `derived:TARGET_AFR` is looked up on it. Idle and light cruise sit at
+  ~2.7–4 ms, below the table's first BFS breakpoint (8.76 ms), so the lookup
+  leaves those rows empty. UpRev's "Fuel Target X Trace" reads ≈ 1.48 × BFS
+  − 0.09 on six logs (2026-08-08..09-24), so it is not BFS ms. How it lands
+  on the table axis is still unverified (`rom_viewer.yaml`).
 - **Changing K (or the MAF table) walks every operating point across the BFS
   axis.** The same air now reads a different BFS, so each operating point lands
   in a different column of every BFS-indexed table. Raising K "to add fuel"

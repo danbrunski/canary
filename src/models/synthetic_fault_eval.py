@@ -68,6 +68,7 @@ from src.alerts.fusion import (
 )
 from src.columns import TIMESTAMP_COLUMN
 from src.config import CanaryConfig
+from src.decode.dids import DidMap
 from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult
 from src.models.isolation_forest import (
     CALIBRATED_THRESHOLD_COLUMN,
@@ -467,6 +468,7 @@ def evaluate_detectors(
     trained_if: TrainedIsolationForest,
     *,
     fault_channel: str,
+    did_map: DidMap | None,
     fault_kinds: Sequence[AnomalyKind] = DEFAULT_FAULT_KINDS,
     n_injections: int = 5,
     seed: int = 42,
@@ -476,7 +478,9 @@ def evaluate_detectors(
 
     ``resampled`` is the clean wide frame *before* ``featurize_wide_frame``
     (the harness re-featurizes after each injection so rolling stats reflect
-    the fault). ``trained_if`` is the model the harness grades. ``trained_sequence``
+    the fault). ``did_map`` is the DID catalog ``resampled`` was decoded with
+    (``None``: none), which featurization judges DID views against (P02.14).
+    ``trained_if`` is the model the harness grades. ``trained_sequence``
     (2.3) is optional — the LSTM/TCN artifact the daemon would actually load for
     its configured ``sequence_detector`` backbone; when ``None`` (no manifest
     configured/available, the common case in this test environment) the harness
@@ -526,7 +530,7 @@ def evaluate_detectors(
     # Nominal: one featurize + score pass — this is the FP rate every other
     # injection run is measured against.
     nominal_features = featurize_wide_frame(
-        resampled, config, behavior_models=behavior_models
+        resampled, config, behavior_models=behavior_models, did_map=did_map
     ).features
     nominal_scored = trained_if.score(nominal_features)
     nominal_signals = _persistence_gated_nominal(
@@ -559,7 +563,7 @@ def evaluate_detectors(
         for _ in range(n_injections):
             inj = _inject_one(resampled, kind=kind, channel=fault_channel, rng=rng, config=config)
             featurized = featurize_wide_frame(
-                inj.df, config, behavior_models=behavior_models
+                inj.df, config, behavior_models=behavior_models, did_map=did_map
             ).features
             scored = trained_if.score(featurized)
             timestamps = pd.to_datetime(featurized[TIMESTAMP_COLUMN], utc=True)

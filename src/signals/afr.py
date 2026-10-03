@@ -277,10 +277,11 @@ class LoadAxisUnavailableError(ValueError):
         self.reason = reason
 
 
-#: The unit a wide-frame column's values are in, per the repo's channel
-#: catalogs, or ``None`` when no catalog gives one. The catalogs (``dids.yaml``,
-#: the Mode 01 registry) sit above this layer, so the caller resolves the unit
-#: and hands the resolver in: ``src.preprocessing.channel_units.catalog_channel_unit``.
+#: The unit a wide-frame column's values are in, per the catalogs that decoded
+#: the frame, or ``None`` when no catalog gives one. The catalogs (the DID
+#: catalog, the Mode 01 registry) sit above this layer, so the caller resolves
+#: the unit and hands the resolver in:
+#: ``src.preprocessing.channel_units.channel_units_for(<the decoding DID map>)``.
 ChannelUnits = Callable[[str], str | None]
 
 #: Catalog placeholders that are not a unit.

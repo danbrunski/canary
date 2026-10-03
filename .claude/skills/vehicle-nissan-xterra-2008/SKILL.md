@@ -113,9 +113,10 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   is rejected, and Mode 22 takes one DID per request. Details:
   `references/diagnostic-access.md`.
 - **Several DIDs are not what they were first named.** The worst one is
-  `0x1208` (`ECM_AIR_CHARGE`): it is air charge × K, not injector pulse width,
-  so never derive fuel mass or φ from it. Read a DID's `description` and
-  evidence in `data/dids.yaml` before trusting its name.
+  `0x1208` (`ECM_AIR_CHARGE`): it is air charge × K, the base fuel schedule
+  (verified 2026-10-02; the ms channel is `derived:BASE_FUEL_SCHEDULE`), not
+  injector pulse width, so never derive fuel mass or φ from it. Read a DID's
+  `description` and evidence in `data/dids.yaml` before trusting its name.
 - **Long-term fuel trim resets on every flash and every battery disconnect, and
   relearns slowly.** After the 2026-06-28 disconnect it read exactly 0.00 % on
   both banks until sometime between 09-10 and 09-18. The 09-20 flash reset it

@@ -60,7 +60,11 @@ DEFAULT_DIDS_PATH = DIDS_YAML
 #:     P02.13: ``derived:TARGET_AFR`` / ``AFR_ERROR_B*`` are no longer looked up
 #:     with ``obd:ENGINE_LOAD``, so cached frames carry values the code no
 #:     longer produces.
-FEATURE_FRAME_CACHE_VERSION = 8
+#: 9 — P02.14: ``derived:BASE_FUEL_SCHEDULE`` (DID 0x1208 in ms) is the
+#:     Xterra's verified load axis, so frames gain it and, where ``obd:RPM`` is
+#:     present, ``derived:TARGET_AFR`` / ``AFR_ERROR_B*``. The vehicle module
+#:     that declares it is not a hashed input, so the version carries it.
+FEATURE_FRAME_CACHE_VERSION = 9
 
 
 def build_feature_frame_cache_key(

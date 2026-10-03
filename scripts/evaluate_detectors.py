@@ -94,7 +94,7 @@ from src.columns import MODE_COLUMN, TIMESTAMP_COLUMN
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels, load_behavior_models
 from src.decode.bindings import Bindings, load_bindings
-from src.decode.dids import load_did_map
+from src.decode.dids import DidMap, load_did_map
 from src.log import configure_logging
 from src.models.benchmark_gate import (
     DEFAULT_TOLERANCE,
@@ -742,6 +742,7 @@ class DriveScorer:
         feature_key: str,
         config: CanaryConfig,
         bindings: Bindings | None,
+        did_map: DidMap | None,
         behavior: BehaviorModels | None,
         persistence: PersistenceSpec,
         roles: Mapping[str, Sequence[str]],
@@ -758,6 +759,8 @@ class DriveScorer:
         self.feature_key = feature_key
         self.config = config
         self.bindings = bindings
+        # The catalog the session frames were decoded with (P02.14).
+        self.did_map = did_map
         self.behavior = behavior
         self.persistence = persistence
         self.roles = {role: list(channels) for role, channels in roles.items()}
@@ -768,7 +771,11 @@ class DriveScorer:
 
     def featurize(self, frame: pd.DataFrame) -> FeaturizedFrame:
         return featurize_wide_frame(
-            frame, self.config, bindings=self.bindings, behavior_models=self.behavior
+            frame,
+            self.config,
+            bindings=self.bindings,
+            behavior_models=self.behavior,
+            did_map=self.did_map,
         )
 
     def score_unit(
@@ -982,6 +989,7 @@ class DriveScorer:
             self.config,
             bindings=self.bindings,
             behavior_models=self.behavior,
+            did_map=self.did_map,
         )
 
     def injection_sweep(
@@ -1219,6 +1227,8 @@ def build_worker_scorer(spec: ScorerSpec) -> DriveScorer:
         if spec.bindings_path is not None and spec.bindings_path.exists()
         else None
     )
+    # The catalog load_resampled_session decoded the frames with.
+    did_map = default_decode_inputs().did_map
     raw: list[RawStreamDetector] = []
     if spec.plausibility:
         raw.append(
@@ -1243,6 +1253,7 @@ def build_worker_scorer(spec: ScorerSpec) -> DriveScorer:
         feature_key=spec.feature_key,
         config=config,
         bindings=bindings,
+        did_map=did_map,
         behavior=behavior,
         persistence=spec.persistence,
         roles=spec.roles,
@@ -2495,9 +2506,16 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
         inputs["data"],
     )
 
+    # The DID catalog load_resampled_session decoded every frame with (P02.14).
+    decoded_with = default_decode_inputs().did_map
+
     def featurize(name: str) -> pd.DataFrame:
         return featurize_wide_frame(
-            frames[name], config, bindings=bindings, behavior_models=behavior
+            frames[name],
+            config,
+            bindings=bindings,
+            behavior_models=behavior,
+            did_map=decoded_with,
         ).features
 
     stack = DeployedStack(
@@ -2691,6 +2709,7 @@ def _evaluate(args: argparse.Namespace, cleanup: ExitStack, early: Mapping[str, 
             feature_key=feature_key,
             config=config,
             bindings=bindings,
+            did_map=decoded_with,
             behavior=behavior,
             persistence=persistence,
             roles=roles,

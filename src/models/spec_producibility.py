@@ -348,7 +348,13 @@ def build_producible_catalog(
 
     models_path = behavior_models_path or config.daemon.behavior_models
     behavior_models = load_behavior_models(models_path) if models_path.exists() else None
-    features = featurize_wide_frame(probe, config, behavior_models=behavior_models).features
+    from src.decode.dids import load_did_map
+
+    # The probe carries every did: column of this catalog, so it describes them.
+    did_map = load_did_map(dids_path) if dids_path.exists() else None
+    features = featurize_wide_frame(
+        probe, config, behavior_models=behavior_models, did_map=did_map
+    ).features
     return ProducibleCatalog(
         captured=captured,
         producible=frozenset(str(column) for column in features.columns),

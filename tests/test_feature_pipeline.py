@@ -18,6 +18,7 @@ import pytest
 from src.columns import GAP_SUFFIX, MEAN_SUFFIX, MODE_COLUMN, ROC_SUFFIX, STD_SUFFIX
 from src.config import CanaryConfig
 from src.decode.behavior_models import BehaviorModels
+from src.decode.dids import load_repo_did_map
 from src.preprocessing.decode import decode_can_rows
 from src.preprocessing.drives import DRIVE_COLUMN
 from src.preprocessing.feature_pipeline import (
@@ -165,7 +166,7 @@ def test_featurize_wide_frame_appends_rolling_features_and_mode(
 ) -> None:
     wide = _wide(5)
 
-    result = featurize_wide_frame(wide, config, behavior_models=None)
+    result = featurize_wide_frame(wide, config, behavior_models=None, did_map=load_repo_did_map())
 
     assert isinstance(result, FeaturizedFrame)
     feats = result.features
@@ -202,7 +203,7 @@ def test_featurize_wide_frame_does_not_flag_fallback_with_real_segmentation(
             "obd:COOLANT_TEMP": [85.0] * n,
         }
     )
-    result = featurize_wide_frame(wide, config, behavior_models=None)
+    result = featurize_wide_frame(wide, config, behavior_models=None, did_map=load_repo_did_map())
     assert not result.segmenter_fell_back
 
 
@@ -214,7 +215,11 @@ def test_featurize_wide_frame_honors_feature_config_override(
     cfg = FeatureConfig(window_seconds=30, include_std=False, include_roc=False)
 
     feats = featurize_wide_frame(
-        wide := _wide(4), config, feature_config=cfg, behavior_models=None
+        wide := _wide(4),
+        config,
+        feature_config=cfg,
+        behavior_models=None,
+        did_map=load_repo_did_map(),
     ).features
 
     assert "obd:RPM__mean" in feats.columns
@@ -232,7 +237,9 @@ def test_featurize_wide_frame_skips_deviation_without_models(
     config: CanaryConfig,
     behavior_models: BehaviorModels | None,
 ) -> None:
-    result = featurize_wide_frame(_wide(3), config, behavior_models=behavior_models)
+    result = featurize_wide_frame(
+        _wide(3), config, behavior_models=behavior_models, did_map=load_repo_did_map()
+    )
 
     assert not [c for c in result.features.columns if str(c).startswith("deviation:")]
     assert not [c for c in result.operating_frame.columns if str(c).startswith("deviation:")]
@@ -256,7 +263,7 @@ def test_featurize_wide_frame_appends_instantaneous_derived_channels(
             "obd:BAROMETRIC_PRESSURE": [80.0] * n,
         }
     )
-    result = featurize_wide_frame(wide, config, behavior_models=None)
+    result = featurize_wide_frame(wide, config, behavior_models=None, did_map=load_repo_did_map())
     op = result.operating_frame
     assert "derived:FUEL_RATE_LPH" in op.columns
     assert (op["derived:FUEL_RATE_LPH"] > 0).all()
@@ -452,7 +459,9 @@ def test_build_feature_frame_tail_matches_standalone_featurize_wide_frame(
     )
     resampled = _decode_session_to_resampled(session, None, None, None, resample_config)
     resampled = _drop_fully_stale_rows(resampled)
-    standalone = featurize_wide_frame(resampled, config, behavior_models=None).features
+    standalone = featurize_wide_frame(
+        resampled, config, behavior_models=None, did_map=load_repo_did_map()
+    ).features
 
     combined = build_feature_frame(
         [session],

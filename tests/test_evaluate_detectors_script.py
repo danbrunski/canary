@@ -24,6 +24,7 @@ from scripts.evaluate_detectors import (  # noqa: E402
     summarize_recall,
 )
 from src.analysis.labelled_events import LabelledEvent  # noqa: E402
+from src.decode.dids import load_repo_did_map
 from src.models.evaluation import SessionSpan, group_into_drives  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
 from src.storage.sessions import recorded_sessions  # noqa: E402
@@ -162,7 +163,10 @@ def test_main_scores_only_unseen_drives_and_names_every_skip(tmp_path: Path) -> 
     seen = _write_session(root, "2026-05-12T000000", start=1_778_544_000.0, seed=1)
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
     features = featurize_wide_frame(
-        load_resampled_session(seen, config), config, behavior_models=None
+        load_resampled_session(seen, config),
+        config,
+        behavior_models=None,
+        did_map=load_repo_did_map(),
     ).features
     trained = fit_isolation_forest(
         features,
@@ -341,7 +345,10 @@ def _unseen_drive_fixture(tmp_path: Path) -> tuple[Path, Path]:
     _write_session(root, "2026-05-13T000000", start=1_778_630_400.0, seed=2)
     trained = fit_isolation_forest(
         featurize_wide_frame(
-            load_resampled_session(training, config), config, behavior_models=None
+            load_resampled_session(training, config),
+            config,
+            behavior_models=None,
+            did_map=load_repo_did_map(),
         ).features,
         IFConfig(n_estimators=40),
         feature_columns=["obd:RPM", "obd:SPEED"],
@@ -493,7 +500,10 @@ def _fit_if(session: Path, artifact: Path, *, seed: int) -> None:
     config = example_config(EXAMPLE_YAML)
     trained = fit_isolation_forest(
         featurize_wide_frame(
-            load_resampled_session(session, config), config, behavior_models=None
+            load_resampled_session(session, config),
+            config,
+            behavior_models=None,
+            did_map=load_repo_did_map(),
         ).features,
         IFConfig(n_estimators=40, random_state=seed),
         feature_columns=["obd:RPM", "obd:SPEED"],

@@ -19,6 +19,7 @@ import pytest
 pytest.importorskip("sklearn")
 
 from scripts.evaluate_detectors import main  # noqa: E402
+from src.decode.dids import load_repo_did_map
 from src.models.evaluation import default_profile_exclusion  # noqa: E402
 from src.storage.capture_manifest import CAPTURE_MANIFEST_FILENAME  # noqa: E402
 from src.storage.parquet_writer import write_records_to_parquet  # noqa: E402
@@ -91,7 +92,10 @@ def test_tuning_capture_rows_reach_no_metric(tmp_path: Path) -> None:
                       n=120, rpm=1500.0, seed=1)  # fmt: skip
     trained = fit_isolation_forest(
         featurize_wide_frame(
-            load_resampled_session(training, config), config, behavior_models=None
+            load_resampled_session(training, config),
+            config,
+            behavior_models=None,
+            did_map=load_repo_did_map(),
         ).features,
         _IFConfig(),
         feature_columns=["obd:RPM", "obd:SPEED"],

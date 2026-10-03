@@ -26,13 +26,17 @@ providers:
   - {role: injector_pw_b2, spec: 'did:ECM_INJECTOR_PULSE_2'}
   - {role: coolant_temp, spec: 'did:ECM_COOLANT_TEMP'}
   # Base Fuel Schedule (UpRev "B-FUEL SCHDL", ms) — the load axis of the
-  # fuel-target map. 0x1208 (ECM_AIR_CHARGE) behaves as air per event x K,
-  # i.e. Nissan Tp/BFS: its counts per g air stepped +7.5 % at the 07-27
-  # reflash exactly as UpRev BFS/air did (28.7 -> 30.8 ms per g). Scale is
-  # raw/2040 (+-1.5 %; 2048 within error), derived TRANSITIVELY through
-  # per-era ratios, never same-instant paired with UpRev BFS — so it stays
-  # `candidate` and only runs under build_tuning_frame(allow_candidates=True).
-  # Promote after one same-instant compare_channels window (slope 1 +- 2 %).
+  # fuel-target map. 0x1208 (ECM_AIR_CHARGE) is Nissan Tp/BFS (air per event
+  # x K): its counts per g air stepped +7.5 % at the 07-27 reflash exactly as
+  # UpRev BFS/air did. Confirmed 2026-09-20 on a same-reply identity (below),
+  # which replaced the transitive raw/2040 estimate, and accepted by the
+  # operator as the verified BFS on 2026-10-02 (P02.14).
+  #
+  # dids.yaml keeps 0x1208 in raw counts (a served feature), so this factor
+  # scales raw counts exactly once. Featurization's own ms channel,
+  # derived:BASE_FUEL_SCHEDULE, takes its scale from the 0x1208 evidence
+  # record in dids.yaml; tests/test_base_fuel_schedule.py holds this factor
+  # equal to it.
   - role: base_fuel_schedule
     spec: 'did:ECM_AIR_CHARGE'
     transform: scale

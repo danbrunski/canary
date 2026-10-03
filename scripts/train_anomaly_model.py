@@ -142,8 +142,10 @@ def evaluate(
 
     # Same shared wide→features builder the trainer/serve paths use, so the
     # injected-fault evaluation scores the model on byte-identical schema (7.1).
+    # read_session -> decode_can_rows decodes no Mode 22 DID: no DID catalog
+    # describes this frame (P02.14).
     features = featurize_wide_frame(
-        inj.df, config, behavior_models=configured_behavior_models(config)
+        inj.df, config, behavior_models=configured_behavior_models(config), did_map=None
     ).features
     labels = inj.labels()
     # featurize_wide_frame may reorder by session/timestamp; realign labels.
