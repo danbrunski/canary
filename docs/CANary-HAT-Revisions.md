@@ -1055,15 +1055,15 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9 |
 | 3 | MCU GPIO → high-side load switch on the J3 leg | §13.3.1 sleep/wake |
 | 4 | MCU ↔ Pi UART pair | handshake; works whenever the MCU is up |
-| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 on CAN1** (§13.5.4); re-decided in §13.3.9 |
+| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 — on the ADS8688 ADC, not CAN1** (§13.5.4, revised 2026-10-03); the conclusion for this item is unchanged, only the reason |
 | 6 | Pi 3V3 rail sense → MCU | the tri-state invariant in §13.3.2 |
-| 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. **Rev 2.1 adds U11 (CAN1/aux)**: its RXD fan-out is one more net and captures fuel pressure across the boot gap; wake from it is pointless (the gauge is on switched 12 V) — §13.3.9 |
+| 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. ~~Rev 2.1 adds U11 (CAN1/aux)~~ — **CAN1 was dropped 2026-10-03** (§13.5.4), so there is one transceiver and one RXD fan-out. Fuel pressure is an analog channel on U8, which means **capturing it across the boot gap now needs the MCU to read the ADC**, not a second RXD — a change in kind for §13.3.9 to absorb |
 | 8 | K-line RXD / TXD / EN → MCU | §13.3.4; supersedes the Pi's `uart0` connection |
 | 9 | GNSS TX + TIMEPULSE → MCU (fan-out) | time base, hot fix, absolute time at wake |
 | 10 | **LSM6DSOX INT2 (pin 9 — unconnected on rev 1.0)** → MCU | motion wake. **Landed in rev 2.0** as a net to a free Pi GPIO (§13.2.3); rev 3.0 re-points it |
 | 11 | Private MCU I2C → LSM6DSOX + BMP384 | §13.3.4 — **must not be I2C1** |
 | 12 | ~~GNSS antenna bias sense → MCU ADC~~ **→ u-blox two-pin antenna supervisor** | Open/short antenna detection, **but not via the MCU** — the M10M does it itself. Deferred here from rev 2.0 on 2026-08-22. See below. |
-| 13 | STB (U4), **STB (U11, rev 2.1)**, **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 adds U11 STB on GPIO19 and ties U9 EN to `+3V3` (§13.5.3, §13.5.4); rev 3.0 moves all of them to the MCU |
+| 13 | STB (U4), **U9 sensor-rail EN (rev 2.1)** and the §13.2 pull-up FET gate → MCU | safe-state ownership. **U4 STB and the FET gate exist in rev 2.0** as Pi GPIOs (§13.2.1, §13.2.4); rev 2.1 ties U9 EN to `+3V3` (§13.5.3). ~~STB (U11)~~ — **gone with CAN1, 2026-10-03** (§13.5.4). Rev 3.0 moves the rest to the MCU |
 | 14 | **A flash path from the Pi** — SWD bit-banged from Pi GPIO, or a UART bootloader with BOOT0 on a Pi-drivable pin | see below |
 | 15 | Status LEDs → MCU | §13.2, §13.3.4 |
 
@@ -1116,18 +1116,24 @@ series resistance there, not here.
 
 Header budget — **re-counted 2026-09-14 against rev 2.1.** §4.1's list of ten
 unconnected GPIOs is stale: rev 2.0 spent 22, 23 and 24 (STB, INT2, K-line
-FET gate) and rev 2.1 spends 7, 27 and 19 (CAN1 CS, nINT, STB). **What remains
-for rev 3.0 is GPIO12, 13, 20 and 21 — four pins.** `uart4` (GPIO12/13) is the
-home for item 4; GPIO20 is item 5's chip select; GPIO21 is the one pin left
-for item 14's `BOOT0`/reset. That closes with **zero spare**, which is why
-§13.3.9 rules out the bit-banged SWD variant of item 14. Items 3 and 6 are
+FET gate) and **rev 2.1 spends only GPIO7 (CE1, the ADS8688's native chip
+select)** — revised 2026-10-03, when CAN1 was dropped (§13.5.4) and with it
+the nINT and STB pins that had taken GPIO27 and GPIO19.
+
+**What remains for rev 3.0 is GPIO12, 13, 19, 20, 21 and 27 — six pins**, not
+four. `uart4` (GPIO12/13) is the home for item 4; GPIO20 is item 5's chip
+select; GPIO21 covers item 14's `BOOT0`/reset. That now closes with **two
+spare (GPIO19 and GPIO27)**, so §13.3.9's reason for ruling out the
+bit-banged SWD variant of item 14 — no pins left — **no longer holds and that
+decision should be re-opened.** Items 3 and 6 are
 MCU-side pins and cost no header GPIO. Note that item 8 *frees* `uart0`
 (GPIO14/15) on the Pi side — a net simplification of §11's K-line software work
 rather than an addition to it.
 
 **Recount, 2026-10-01 — that budget double-counts, and item 14 is not actually
 blocked.** The count above debits GPIO19, 22, 23 and 24 as "spent by rev 2.0/2.1"
-for U4 STB, U11 STB, INT2 and the K-line FET gate — but items 10 and 13 move
+for U4 STB, ~~U11 STB~~ (gone with CAN1, 2026-10-03 — GPIO19 was never spent),
+INT2 and the K-line FET gate — but items 10 and 13 move
 exactly those four functions to the MCU, and item 8 moves K-line off `uart0`.
 On a rev 3.0 *re-layout* those traces are simply not drawn to the header, so the
 pins come back: **19, 22, 23, 24 plus `uart0`'s 14/15 return, against 12, 13, 20
@@ -1240,19 +1246,24 @@ Rev 2.1 (`CANary-HAT-Rev2.1.md`, §13.5) was written after most of §13.3 and
 changes its starting point. Recorded here so rev 3.0 is drawn against the board
 that will actually exist, not against rev 2.0.
 
-**1. SPI0 CE1 is gone — item 5 re-decided.** Rev 2.1 puts the aux CAN
-controller (U10, CAN1) on CE1, the pin §13.3.6 item 5 had reserved for the MCU
-bulk link. Three ways out were weighed on 2026-09-14:
+**1. SPI0 CE1 is gone — item 5 re-decided.** Rev 2.1 puts the **ADS8688 ADC**
+on CE1, the pin §13.3.6 item 5 had reserved for the MCU bulk link. *(Revised
+2026-10-03: it was the aux CAN controller U10 until CAN1 was dropped — §13.5.4.
+CE1 is still spent, so item 5's re-decision stands unchanged; only the occupant
+differs. Note option (c) below is now moot.)* Three ways out were weighed on
+2026-09-14:
 
 | Option | Cost | Verdict |
 |---|---|---|
 | **(a) MCU on SPI0 with a GPIO chip select (GPIO20)** — the Pi's SPI0 overlays already drive CS through `cs-gpios`, so a third select is a small custom overlay, not a driver change | GPIO20; SPI0 shared three ways (bandwidth is a few percent at 20 MHz) | **Adopted.** Keeps every interface on the header, as §13.3.4 wanted |
 | (b) MCU as a USB device — bulk dump, DFU flashing, optional `gs_usb` channels on one cable | A USB connector on the HAT and a cable to a Pi port; frees GPIO20/21 | Fallback if (a) fails at bring-up. §13.3.4's objection (every other interface arrives through the header) is weaker now that the header is full, but it still stands |
-| (c) Fold CAN1 into the MCU and give CE1 back | Makes the aux bus depend on supervisor firmware; the §13.3.4 rejected-alternative argument applies | Rejected |
+| ~~(c) Fold CAN1 into the MCU and give CE1 back~~ | **Moot from 2026-10-03** — there is no CAN1 to fold, and CE1 is held by the ADC, which the MCU is not a substitute for | Moot |
 
-Consequence of (a): the header closes with **no spare GPIO** (budget above), so
-**item 14 must be the UART-bootloader form** (`uart4` + `BOOT0` on GPIO21), not
-bit-banged SWD, which needs two pins the Pi no longer has.
+Consequence of (a): ~~the header closes with **no spare GPIO**~~ — **revised
+2026-10-03.** With CAN1 dropped, the budget above closes with **two spare
+(GPIO19, GPIO27)**. Item 14 may therefore still be the UART-bootloader form
+(`uart4` + `BOOT0` on GPIO21), but **bit-banged SWD is no longer excluded for
+want of pins** — that comparison should be re-run on its merits.
 
 **2. The ADC is four channels, and three of them are a set.** Item 2 was
 written for one divider. Rev 2.1 adds `MAP`, `IAT` and `5V_SENS` on U8 and
@@ -1263,15 +1274,26 @@ is then deleted, which also takes the ADS1015's traffic off I2C1 (§13.5.3 item
 5's bus-loading concern goes with it). The crank-voltage instrument in
 §13.3.3(b) gains MAP-at-crank for free.
 
-**3. Two transceivers, one always-on rail.** Item 1's always-on VIO is for
-wake-on-CAN on the *vehicle* bus (U4). **U11 does not need it**: the AEM gauge
-is on switched 12 V and cannot wake anything. Item 7's RXD fan-out from U11 is
-still worth one net, for fuel pressure across the boot gap (§13.3.3a).
+**3. ~~Two transceivers~~ one transceiver, one always-on rail.** *(Revised
+2026-10-03: CAN1 and its U11 were dropped — §13.5.4.)* Item 1's always-on VIO
+is for wake-on-CAN on the *vehicle* bus (U4), which is now the only bus. The
+reasoning that U11 would not have needed it still holds for any future aux
+transceiver: a gauge on switched 12 V cannot wake anything. **What changed is
+item 7's boot-gap path** — fuel pressure is no longer a CAN frame to fan out,
+so capturing it across the boot gap means the MCU reading U8 (item 4 above).
 
-**4. Item 13 grows by two.** U11's STB (rev 2.1: GPIO19) and U9's EN (rev 2.1:
-tied to `+3V3` so the sensor rail follows the Pi) both move to the MCU. With
-the Pi off, the MCU decides whether the MAP/IAT sensor is powered; a parked
-MAP-equals-baro check is cheap, continuous sensor power is not.
+**4. Item 13 grows by one.** *(Revised 2026-10-03 — it was two until CAN1 and
+its U11 STB were dropped, §13.5.4.)* **U9's EN** (rev 2.1: tied to `+3V3` so
+the sensor rail follows the Pi) moves to the MCU. With the Pi off, the MCU
+decides whether the MAP/IAT sensor is powered; a parked MAP-equals-baro check
+is cheap, continuous sensor power is not.
+
+**A new one in its place: the MCU needs to reach the ADC.** Fuel pressure was
+going to arrive on CAN1, so §13.3.6 item 7's RXD fan-out captured it across
+the boot gap for free. As an analog channel on U8 it does not, so **boot-gap
+fuel-pressure capture now requires the MCU to read the ADS8688** — either
+sharing SPI0 or its own link. Weigh that in rev 3.0 rather than assuming item
+7 still covers it.
 
 **5. The terminal block starts from rev 2.1's.** J2 is the two-level MKKDS
 1,5/6-5,08 with all 12 positions used and the rev 2.0 vehicle pinout frozen on
@@ -1279,13 +1301,19 @@ the lower level (§13.5.5). §3.9's "rev 3.0 should weigh deleting J3" now has a
 concrete payoff: J3's ~10 mm is the only slack left on that edge.
 
 **6. Termination is decided per channel, not per revision.** CAN0 (vehicle)
-carries no termination footprint by design; CAN1 (aux) carries JP2-selectable
-120 Ω split termination (§13.5.4). §13.4.4's row assigning "DNI split
+carries no termination footprint by design. ~~CAN1 (aux) carries
+JP2-selectable 120 Ω split termination~~ — **no longer applicable from
+2026-10-03**; the aux channel it belonged to was dropped (§13.5.4). The
+principle stands for any future aux channel; a USB adapter brings its own. §13.4.4's row assigning "DNI split
 termination + solder bridge" to rev 2.0 is superseded — it was dropped there
-(§13.2.1) and lands only on CAN1 in rev 2.1. Do not re-add it on CAN0.
+(§13.2.1), and **with CAN1 dropped on 2026-10-03 rev 2.1 carries no
+termination footprint at all.** Do not re-add it on CAN0: the vehicle bus is
+terminated at both ends already.
 
-**7. More buses are USB, not board.** Rev 2.1 decided that additional CAN buses
-are `gs_usb` adapters under the aux-bus config role (§13.5.4). That leaves the
+**7. More buses are USB, not board — and from 2026-10-03, *every* aux bus is.**
+Rev 2.1 decided that additional CAN buses are `gs_usb` adapters under the
+aux-bus config role (§13.5.4); dropping CAN1 removed the one on-board
+exception, so the board carries exactly one CAN channel (vehicle). That leaves the
 §13.3.4 candleLight option exactly where it was — deferred — but the "route
 back to multi-bus" it describes now has a shipped alternative, so rev 3.0 does
 not need the MCU to carry vehicle CAN to satisfy the multi-vehicle intent.
@@ -1304,8 +1332,13 @@ The §13.3.2 note that "the regulator's quiescent current drives the sleep budge
 not the MCU's sleep mode" is what makes this a free choice rather than a
 µA-first one. Collecting the requirements this section has accumulated:
 
-- **≥2 CAN decode paths** — item 7's two RXD fan-outs (U4 vehicle, U11 aux),
-  with headroom for the channels §13.5.4 would put here.
+- **≥1 CAN decode path, with headroom for more** — item 7's RXD fan-out from
+  U4 (vehicle). The second path (U11 aux) is gone with CAN1 (2026-10-03,
+  §13.5.4); keep the headroom, since an aux channel folded into the MCU is
+  still a live rev 3.0 option.
+- **An SPI master that can read the ADS8688** — new requirement from
+  2026-10-03, replacing the aux-CAN decode path above: boot-gap fuel pressure
+  is an ADC read now, not a frame.
 - **Several hundred KB SRAM** — §13.3.3(a)'s boot-gap buffer. *Unmeasured; see
   the gating item below.*
 - **Four ADC channels on one converter with one reference** — §13.3.9 item 2's
@@ -1905,7 +1938,7 @@ measurement:
 | C0G/NP0 on C5/C6 and C4 | **rev 2.0** | BOM line only; no layout impact |
 | P-FET reverse protection | **rev 2.0** | Independent of the MCU, and it closes §3.7.4's accepted exposure |
 | PTC on the input | **rev 2.0** | Same input stage as the P-FET — do them together, once |
-| DNI split termination + solder bridge | ~~rev 2.0~~ → **dropped in rev 2.0 (§13.2.1); CAN1-only with a jumper in rev 2.1 (§13.5.4)** | The vehicle channel never gets a termination footprint; the aux channel's is a real, fitted, jumpered terminator — §13.3.9 item 6 |
+| DNI split termination + solder bridge | ~~rev 2.0~~ → **dropped in rev 2.0 (§13.2.1); ~~CAN1-only with a jumper in rev 2.1~~ — no termination footprint in rev 2.1 either, CAN1 having been dropped 2026-10-03 (§13.5.4)** | The vehicle channel never gets a termination footprint. A future aux channel would get a real, fitted, jumpered terminator — §13.3.9 item 6 |
 | 12V sense divider values | **rev 2.0** | Already queued there — but the divider had no destination until §13.2.3 added a small I2C ADC behind it. The M2's values transfer; the readback did not exist on rev 1.0 |
 | Current sense + over-current trip | ~~split — shunt in rev 2.0~~ → **all of it rev 3.0** | The escape clause fired and was then re-examined 2026-08-23. Its own premise — "continuous current data is only worth having when something is awake to read it" — is what kills the split: the thing that must be awake is the **MCU**, because the measurement that matters (parked parasitic draw) happens with the Pi off. Landing the shunt early buys nothing, and rev 3.0 re-lays-out that stage anyway. §13.2.3 |
 

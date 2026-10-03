@@ -6,8 +6,16 @@ CH340 USB ADC module.
 
 > **This is not the rev 2.1 plan.** `CANary-HAT-Rev2.1.md` §13.5.4 routes the
 > same gauge into an ADS8688 at 0–5.12 V with **no divider at all**. That board
-> does not exist yet. This document is the USB path on rev 2.0 hardware, and
-> nothing here carries over to the HAT.
+> does not exist yet; this document is the USB path on rev 2.0 hardware.
+>
+> **What carries over and what does not.** The *electrical* half is specific to
+> this path — the 10k/10k divider, the BAT54S, the module's reference, the
+> counts-to-volts fit. The *gauge* half is universal and rev 2.1 now depends on
+> it: the differential WHITE/BROWN output and the requirement to bond BROWN
+> (§13.5.3 item 7), AEM's published `psig = 25.00·V − 12.50`, and the
+> 0.50–4.50 V fault gate. **Write the volts-to-psi conversion and the gate once,
+> parameterised by the electrical leg** — two copies is how the two boards drift
+> apart.
 
 ## What the AEM manual settles
 
