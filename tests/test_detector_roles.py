@@ -22,8 +22,8 @@ from pydantic import ValidationError
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.alerts.fusion import FusionScorer, isolation_forest_source, lstm_source
 from src.config import CanaryConfig, DetectorRolesConfig, FusionConfig
+from src.models.fusion import FusionScorer, isolation_forest_source, lstm_source
 from src.models.inference import SequenceInferenceResult
 from tests.configs import example_config, isolated_from_yaml
 from tests.fakes import lstm_result

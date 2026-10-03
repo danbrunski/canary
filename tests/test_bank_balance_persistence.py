@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.alerts.fusion import BandExcessAccumulator, PersistenceGate
 from src.analysis.behavior_validation import (
     PERSISTENCE_NO_TRAINING_EXCURSION,
     EventPolicy,
@@ -48,6 +47,7 @@ from src.decode.behavior_models import (
     ValidationCriteria,
     contract_fingerprint,
 )
+from src.models.fusion import BandExcessAccumulator, PersistenceGate
 from src.paths import DATA_DIR
 from src.signals.afr import (
     LAMBDA_BANK_BALANCE_AF_VOLTAGE,

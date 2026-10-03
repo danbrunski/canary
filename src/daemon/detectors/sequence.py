@@ -5,11 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from src.alerts.fusion import (
-    FusionSource,
-    downgrade_unsustained,
-    lstm_source,
-)
 from src.columns import is_flag_column
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
@@ -22,6 +17,11 @@ from src.daemon.detectors.common import (
     log,
 )
 from src.daemon.inference_scheduling import GenerationToken
+from src.models.fusion import (
+    FusionSource,
+    downgrade_unsustained,
+    lstm_source,
+)
 from src.preprocessing.feature_pipeline import (
     reconcile_feature_frame_to_spec,
 )

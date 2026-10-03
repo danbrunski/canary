@@ -51,9 +51,9 @@ from typing import TYPE_CHECKING, Protocol
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger
-from src.alerts.fusion import PersistenceGate
 from src.collection import capture_generation
 from src.collection.replay import ReplayEmissionStats, replay_session
+from src.models.fusion import PersistenceGate
 from src.session import SessionKind, issue_isolated_id, session_kind
 from src.storage.async_writer import AsyncParquetTelemetryWriter, ensure_async_writer
 from src.storage.broadcast_storage import UnfaithfulReplayError, refuse_unfaithful_replay

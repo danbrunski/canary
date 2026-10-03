@@ -148,11 +148,11 @@ def test_mirror_constants_and_per_vehicle_catalogs_are_repo_rooted() -> None:
     default is that default, and the per-vehicle catalog defaults
     (``behavior_models`` and its siblings) are rooted at the checkout, so a
     tool started from another directory reads the daemon's own files."""
-    from src.alerts.feedback import DEFAULT_FEEDBACK_PATH
     from src.alerts.tuning import DEFAULT_TUNING_AUDIT_PATH, DEFAULT_TUNING_PATH
     from src.collection.custom_pids import DEFAULT_CUSTOM_PIDS_PATH
     from src.config import DaemonConfig, SensorCanConfig
     from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+    from src.models.feedback import DEFAULT_FEEDBACK_PATH
     from src.models.training_ledger import DEFAULT_TRAINING_LEDGER_PATH
     from src.preprocessing.feature_pipeline import DEFAULT_FEATURE_CACHE_DIR
 

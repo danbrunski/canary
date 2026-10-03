@@ -28,7 +28,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 import pandas as pd
 
@@ -38,9 +38,9 @@ from src.alerts.notifier import format_event_message
 from src.alerts.tuning import AlertTuner
 
 if TYPE_CHECKING:  # avoid importing torch-touching modules at import time
-    from src.alerts.fusion import FusedResult
     from src.alerts.notifier import Notifier
     from src.config import DetectorRole
+    from src.models.fusion import FusedResult
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
     from src.signals.committees import CommitteeFlag
@@ -584,17 +584,6 @@ def _seconds(timestamp: str) -> float:
     cleaned = timestamp.replace("Z", "+00:00") if timestamp.endswith("Z") else timestamp
     dt = datetime.fromisoformat(cleaned)
     return dt.timestamp()
-
-
-def __getattr__(name: str) -> Any:
-    """``IsolationForestInferenceEngine`` moved to :mod:`src.models.inference`
-    (R01.8), beside ``SequenceInferenceEngine``. Re-exported lazily so this
-    module stays pure wiring with no model-layer import at load time."""
-    if name == "IsolationForestInferenceEngine":
-        from src.models.inference import IsolationForestInferenceEngine
-
-        return IsolationForestInferenceEngine
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 __all__ = [

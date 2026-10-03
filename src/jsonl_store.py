@@ -1,6 +1,6 @@
 """Generic append-only JSONL store base (Task 3.4, refactoring.md).
 
-``FeedbackStore`` (``src.alerts.feedback``), ``TrainingLedger``
+``FeedbackStore`` (``src.models.feedback``), ``TrainingLedger``
 (``src.models.training_ledger``), and ``VehicleLedgerStore``
 (``src.vehicle.vehicle_ledger``) were three byte-for-byte identical
 implementations of the same shape: append one JSON line (mkdir + open

@@ -26,8 +26,8 @@ def _build_app(components: DaemonComponents) -> Any:
     """
     import uvicorn  # noqa: F401
 
-    from src.alerts.feedback import FeedbackStore
     from src.dashboard.api import create_app
+    from src.models.feedback import FeedbackStore
 
     # R03.5: the routes must drive the *same* capture lifecycle the shutdown
     # path stops, or an HTTP-started capture's start epoch lives in a session

@@ -983,7 +983,7 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   `behavior_models` from 69, `live` from 55. Check that no other
   session has `feature_pipeline.py` open first. Size **L**.
 
-- [ ] **R09.7 `alerts ↔ models`: fusion belongs to the detectors.**
+- [x] **R09.7 `alerts ↔ models`: fusion belongs to the detectors.**
   - **`alerts/fusion.py` → `models/fusion.py`.** It imports only `config`.
   - **`alerts/feedback.py` → `models/feedback.py`.** It imports only
     `jsonl_store` and `paths`. Its users are `models/retraining_policy.py`
@@ -997,6 +997,34 @@ No task here changes the order in `OVERNIGHT-QUEUE.md`.
   - Replay gives an empty diff, since the emitter is on the serve path.
 
   Size **S**.
+
+  *Done 2026-10-03.*
+  - **Moves.** `git mv` of `alerts/fusion.py` → `models/fusion.py` and
+    `alerts/feedback.py` → `models/feedback.py`, with the module bodies
+    unchanged. 41 importers across `src`, `scripts` and `tests` were
+    rewritten, and the import blocks re-sorted.
+  - **Re-export.** The emitter's lazy `__getattr__` re-export of
+    `IsolationForestInferenceEngine` is deleted. Its one user,
+    `tests/test_daemon.py`'s end-to-end IF test, imports it from
+    `src.models.inference`. `typing.Any` was then unused in the emitter.
+  - **Layering.** `("alerts", "models")` is out of `OWED_PAIRS`.
+    `tests/test_layering.py` passes, so `alerts → models` is one-way: what
+    is left are the emitter's and `events.py`'s `TYPE_CHECKING` imports of
+    `models.fusion` and `models.inference`.
+  - **Docs.** The current docs that named the old paths point at the new
+    ones (`sensor-committees.md`, `online-training-strategy.md`, B04, B05).
+    Completed records (`implementation-tasks.md`, R01, the archive, dated
+    analyses) keep the path they had.
+  - **Replay.** `tools/replay_event_diff.py run` on each tree in parallel,
+    then `diff`: `1cc5079` (`git archive`) against it plus this
+    change, session `2026-09-18T213818`, 900 s, the laptop's
+    `models/nissan-xterra-2008`.
+    - 18 events on both sides, identical: 8316 floats, max |delta| 0.
+    - Scores identical: IF 0 of 901, LSTM 0 of 872, fused 0 of 872 differ;
+      5255 floats, max |delta| 0.
+    - Counters and meta identical.
+  - **Tests.** Every file importing either module (16 files, 337 tests)
+    passes, and `mypy` is clean.
 
 - [ ] **R09.8 Top of the stack: `daemon`, `dashboard`, `companion`.**
   - **Daemon-owned objects move into `src/daemon/`:** `dashboard/broadcast.py`

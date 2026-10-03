@@ -81,7 +81,6 @@ except ImportError:  # loaded as `scripts.retrain` — repo root on path, not sc
         scoped_models_dir,
     )
 
-from src.alerts.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore
 from src.analysis.training_disposition import classify_dispositions, compute_quarantine_mask
 from src.artifact_hash import sha256_file_or_none
 from src.config import CanaryConfig
@@ -108,6 +107,7 @@ from src.models.evaluation import (
     pick_evaluation_holdouts,
     refuse_non_default_profile_sessions,
 )
+from src.models.feedback import DEFAULT_FEEDBACK_PATH, FeedbackStore
 from src.models.golden_baselines import (
     GoldenBaselines,
     golden_baselines_path,

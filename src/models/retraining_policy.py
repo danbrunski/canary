@@ -14,8 +14,8 @@ from typing import Any, Literal
 
 import pandas as pd
 
-from src.alerts.feedback import AnomalyFeedback
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
+from src.models.feedback import AnomalyFeedback
 
 RetrainingFeedbackAction = Literal["clean_baseline", "exclude"]
 

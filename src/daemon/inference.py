@@ -11,10 +11,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from src.alerts.fusion import (
-    FusionScorer,
-    FusionSource,
-)
 from src.coerce import finite_float
 from src.collection import tuning_profile
 from src.dashboard.broadcast import Broadcaster
@@ -27,6 +23,10 @@ from src.decode.behavior_models import (
 from src.decode.bindings import load_bindings
 from src.decode.dbc import DEFAULT_DBC_DIR, load_dbc_dir
 from src.decode.dids import load_did_map
+from src.models.fusion import (
+    FusionScorer,
+    FusionSource,
+)
 from src.paths import BINDINGS_YAML as DEFAULT_BINDINGS_PATH
 from src.preprocessing.feature_pipeline import (
     ALL_MODE,

@@ -19,7 +19,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.analysis.gps_tracker import GpsTracker
 from src.collection.capture_profiles import CaptureProfileStore
@@ -71,6 +70,7 @@ from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PAT
 from src.dashboard.version import _canary_version
 from src.dashboard.websockets import _publish_on_app_loop
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 

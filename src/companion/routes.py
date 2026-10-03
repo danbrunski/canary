@@ -12,7 +12,6 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
-from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.companion.library import CanaryLibrary, LibrarySession
 from src.companion.schemas import (
     ImportSessionRequest,
@@ -63,6 +62,7 @@ from src.dashboard.routes.stored_sessions import (
 )
 from src.dashboard.schemas import FeedbackRequest
 from src.dashboard.security import AUTH_MARKER
+from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 from src.models.manifest import compatibility_report, manifest_path_for
 
 

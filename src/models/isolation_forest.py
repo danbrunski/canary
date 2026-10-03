@@ -221,7 +221,7 @@ class ModeTrainingSummary:
     score_threshold: float | None = None
     #: Spread (std) of the held-out nominal scores — the scale 7.2 fusion
     #: sizes a fired IF source's severity against (the negated
-    #: decision-function threshold is a poor scale; see ``alerts.fusion``).
+    #: decision-function threshold is a poor scale; see ``models.fusion``).
     score_scale: float | None = None
     holdout_samples: int = 0
     #: The flag rate the threshold was *actually* calibrated at — equal to

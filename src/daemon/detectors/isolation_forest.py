@@ -9,12 +9,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.fusion import (
-    FusionSource,
-    PersistenceGate,
-    downgrade_unsustained,
-    isolation_forest_source,
-)
 from src.alerts.tuning import AlertTuner
 from src.daemon.components import DaemonComponents
 from src.daemon.detectors.common import (
@@ -28,6 +22,12 @@ from src.daemon.detectors.common import (
 )
 from src.daemon.health import HealthMonitor
 from src.dashboard.broadcast import Broadcaster
+from src.models.fusion import (
+    FusionSource,
+    PersistenceGate,
+    downgrade_unsustained,
+    isolation_forest_source,
+)
 from src.models.inference import IsolationForestInferenceEngine
 from src.preprocessing.feature_pipeline import (
     FeatureSpecReconciliation,

@@ -6,10 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from src.alerts.fusion import (
-    FusionScorer,
-    FusionSource,
-)
 from src.coerce import finite_float
 from src.columns import MODE_COLUMN
 from src.daemon.components import DaemonComponents
@@ -26,6 +22,10 @@ from src.decode.behavior_models import (
     BehaviorModel1D,
     FittedBandExcessPersistence,
     serving_status,
+)
+from src.models.fusion import (
+    FusionScorer,
+    FusionSource,
 )
 from src.preprocessing.live import LiveFeatureSource
 from src.telemetry import DECODED_SOURCE, SOURCE_SEP, channel_key

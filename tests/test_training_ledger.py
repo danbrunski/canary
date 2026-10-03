@@ -10,8 +10,8 @@ import pytest
 
 import scripts.ledger as ledger_cli
 from scripts import _cli, retrain
-from src.alerts.feedback import FeedbackStore
 from src.models import training_entry
+from src.models.feedback import FeedbackStore
 from src.models.manifest import ManifestValidationError
 from src.models.training_ledger import (
     TrainingLedger,

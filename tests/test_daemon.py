@@ -1705,9 +1705,9 @@ def test_persistence_sustained_tuner_override_replaces_not_stacks_with_gate() ->
     M-of-N) instead of also needing to clear a second, redundant
     requirement before the tuner's own ``min_consecutive`` debounce
     (applied separately, inside the emitter) even gets a look."""
-    from src.alerts.fusion import PersistenceGate
     from src.alerts.tuning import AlertTuner, DebouncePolicy, TuningConfig
     from src.daemon.inference import _persistence_sustained
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=3)  # strict 3-of-3 — would need 3 real hits
     tuner = AlertTuner(
@@ -1752,9 +1752,9 @@ def test_persistence_sustained_missing_tick_always_goes_through_gate() -> None:
     (frozen, per ``PersistenceGate``'s own semantics) regardless of any
     tuner bypass — there's no tuner debounce state to "pass through" for a
     tick that produced no verdict at all."""
-    from src.alerts.fusion import PersistenceGate
     from src.alerts.tuning import AlertTuner, DebouncePolicy, TuningConfig
     from src.daemon.inference import _persistence_sustained
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=3)
     tuner = AlertTuner(
@@ -1839,8 +1839,8 @@ async def test_run_live_inference_skips_when_no_manager(config: CanaryConfig) ->
 async def test_run_live_inference_emits_event_when_outlier(config: CanaryConfig) -> None:
     """End-to-end: feed an outlier into the live source, expect an anomalies
     broadcaster message and a JSONL line on disk."""
-    from src.alerts.emitter import IsolationForestInferenceEngine
     from src.daemon import build_live_feature_source, run_live_inference
+    from src.models.inference import IsolationForestInferenceEngine
 
     components = build_components(config)
 

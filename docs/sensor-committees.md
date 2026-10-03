@@ -4,7 +4,7 @@ Cross-checking **redundant sensors that measure the same physical quantity**.
 When independent sensors of one quantity disagree, the disagreement itself is a
 signal — a sensor is faulting. This is the "committee/ensemble for decisions"
 idea applied at the *sensor* level, complementing the detector-level committee
-in `alerts/fusion.py` (IF + LSTM + behavior).
+in `models/fusion.py` (IF + LSTM + behavior).
 
 ## What a committee is — and isn't
 

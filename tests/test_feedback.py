@@ -6,13 +6,13 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from src.alerts.feedback import (
+from src.dashboard.api import create_app
+from src.models.feedback import (
     FeedbackStore,
     annotate_events_with_feedback,
     anomaly_key,
     feedback_to_csv,
 )
-from src.dashboard.api import create_app
 from tests.configs import isolated_config
 
 _EVENT = {

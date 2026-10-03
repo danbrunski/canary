@@ -50,10 +50,10 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from src.alerts.fusion import PersistenceGate
 from src.config import CanaryConfig
 from src.decode.engineering import UnscaledDecodedChannelError, physical_series
 from src.models.false_positive_benchmark import V1_ALERTS_PER_HOUR_BUDGET
+from src.models.fusion import PersistenceGate
 from src.models.sequence_calibration import block_maxima as max_finite_per_block
 from src.models.sequence_registry import MIN_CALIBRATION_SESSIONS
 from src.operating import ENGINE_RUNNING_MIN_RPM

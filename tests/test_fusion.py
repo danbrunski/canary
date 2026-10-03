@@ -9,12 +9,12 @@ import pandas as pd
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.alerts.fusion import (
+from src.config import FusionConfig
+from src.models.fusion import (
     FusionScorer,
     isolation_forest_source,
     lstm_source,
 )
-from src.config import FusionConfig
 
 # ---------------------------------------------------------------------------
 # Source builders
@@ -324,7 +324,7 @@ def test_emit_if_falls_back_to_label_when_uncalibrated(tmp_path: Path) -> None:
 
 
 def test_persistence_gate_requires_consecutive_ticks() -> None:
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3)
     assert not gate.observe("lstm", True)
@@ -340,7 +340,7 @@ def test_persistence_gate_requires_consecutive_ticks() -> None:
 
 
 def test_persistence_gate_keys_are_independent() -> None:
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(2)
     assert not gate.observe("a", True)
@@ -353,7 +353,7 @@ def test_persistence_gate_m_of_n_catches_intermittent_fire_gap_fire() -> None:
     """6.1: a fire-gap-fire pattern (hits on ticks 1, 3, 5 of a 5-tick span)
     structurally can't sustain a strict 3-consecutive gate but does sustain
     3-of-5 M-of-N — the actual intermittent-fault case 6.1 exists for."""
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     pattern = [True, False, True, False, True]
 
@@ -370,7 +370,7 @@ def test_persistence_gate_m_of_n_still_suppresses_isolated_flicker() -> None:
     """Flood protection is preserved: a lone hit among mostly misses in the
     window still doesn't sustain — M-of-N needs the full M hits, not just
     "some" evidence within the window."""
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=5)
     pattern = [False, False, True, False, False]
@@ -383,7 +383,7 @@ def test_persistence_gate_wall_clock_bound_evicts_stale_hits_across_a_gap() -> N
     tighter — a long data/replay gap can't let hits from before the gap
     count toward a "fresh" streak once ticks resume, even though the raw
     tick count alone would still fit inside the N-tick window."""
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=5, window_seconds=10.0)
     assert not gate.observe("k", True, now=0.0)
@@ -400,7 +400,7 @@ def test_persistence_gate_missing_tick_freezes_not_resets() -> None:
     is a genuine no-op: it leaves the window untouched, so a run of missing
     ticks freezes rather than decays an in-progress streak (contrast with a
     real miss, which does displace a stale hit)."""
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=5)
     assert not gate.observe("k", True, now=0.0)
@@ -417,7 +417,7 @@ def test_persistence_gate_reset_clears_history_and_suppressed_count() -> None:
     """7.1 — replay-boundary isolation: a live streak in progress (and the
     running suppressed counter) must not survive into the next run,
     whichever direction the boundary crosses."""
-    from src.alerts.fusion import PersistenceGate
+    from src.models.fusion import PersistenceGate
 
     gate = PersistenceGate(3, window=5)
     gate.observe("lstm", True, now=0.0)
@@ -437,7 +437,7 @@ def test_persistence_gate_reset_clears_history_and_suppressed_count() -> None:
 
 
 def test_downgrade_unsustained_keeps_evidence_but_kills_severity() -> None:
-    from src.alerts.fusion import downgrade_unsustained
+    from src.models.fusion import downgrade_unsustained
 
     src = lstm_source(0.10, 0.05)
     assert src.fired
@@ -475,7 +475,7 @@ def test_one_measurement_is_one_voice_across_its_derived_channels() -> None:
     """B04.8/B05.3 — air mass and VE are one MAF/RPM reading; total trim,
     bank balance and STFT are one closed-loop fuel correction. Grouping by
     output channel let each transform vote as independent agreement."""
-    from src.alerts.fusion import behavior_fusion_group
+    from src.models.fusion import behavior_fusion_group
 
     fs = FusionScorer(FusionConfig(agreement_boost=0.25, severity_threshold=0.5, min_agreement=2))
     airflow = [

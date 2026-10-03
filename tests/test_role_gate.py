@@ -17,7 +17,6 @@ from typing import Any
 
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.events import AnomalyEvent
-from src.alerts.fusion import isolation_forest_source
 from src.daemon.health import HealthMonitor
 from src.models.alert_budget import (
     AlertBudgetCheck,
@@ -27,6 +26,7 @@ from src.models.alert_budget import (
     verdict_record,
     write_verdict,
 )
+from src.models.fusion import isolation_forest_source
 from src.models.role_gate import DetectorRoleGate, resolve_role
 from tests.configs import isolate
 

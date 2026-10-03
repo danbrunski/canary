@@ -17,11 +17,11 @@ from fastapi.testclient import TestClient
 
 from src.alerts.event_logger import AnomalyEventLogger
 from src.alerts.events import AnomalyEvent
-from src.alerts.feedback import FeedbackStore
 from src.companion import api as companion_api
 from src.companion.library import CanaryLibrary
 from src.config import CanaryConfig
 from src.control.jobs import JobController
+from src.models.feedback import FeedbackStore
 from src.storage.parquet_writer import write_records_to_parquet
 from src.telemetry import TelemetryRecord
 from tests.configs import write_isolated_config

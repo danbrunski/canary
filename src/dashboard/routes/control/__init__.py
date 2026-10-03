@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING, Any
 from fastapi import APIRouter, FastAPI
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.obd_scheduler import ForcePollTrigger
@@ -36,6 +35,7 @@ from src.dashboard.broadcast import Broadcaster
 from src.dashboard.routes.session_reads import build_session_read_router
 from src.dashboard.security import control_auth_dependency
 from src.dashboard.ups import DEFAULT_UPS_KEEPALIVE_PATH, DEFAULT_UPS_STATUS_PATH
+from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
 

@@ -21,7 +21,6 @@ import pytest
 pytest.importorskip("joblib")
 pytest.importorskip("sklearn")
 
-from src.alerts.fusion import PersistenceGate  # noqa: E402
 from src.columns import (  # noqa: E402
     MODE_COLUMN,  # noqa: E402
     SESSION_COLUMN,
@@ -29,6 +28,7 @@ from src.columns import (  # noqa: E402
 )
 from src.config import CanaryConfig  # noqa: E402
 from src.decode.dids import load_repo_did_map
+from src.models.fusion import PersistenceGate  # noqa: E402
 from src.models.isolation_forest import fit_isolation_forest  # noqa: E402
 from src.models.synthetic_fault_eval import (  # noqa: E402
     DEFAULT_FAULT_KINDS,
@@ -703,7 +703,7 @@ def test_fused_fires_only_when_both_sources_are_sustained_together() -> None:
     """The daemon gates each source, then fuses; one voice never fuses (6.2)."""
     from types import SimpleNamespace
 
-    from src.alerts.fusion import FusionScorer
+    from src.models.fusion import FusionScorer
     from src.models.synthetic_fault_eval import _fused_anomalous
 
     config = _config()

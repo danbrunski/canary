@@ -428,8 +428,8 @@ def test_behavior_deviations_stop_under_a_non_default_profile(config: CanaryConf
     """R03.12(b), operator decision 2026-09-25: a tuning capture drives
     atypically on purpose, so behavior-model deviations raise no event, cast
     no fusion vote and publish no score while it runs — and are counted."""
-    from src.alerts.fusion import FusionScorer
     from src.daemon.detectors.behavior import BehaviorDetector
+    from src.models.fusion import FusionScorer
 
     components = build_components(config)
     source = build_live_feature_source(components)

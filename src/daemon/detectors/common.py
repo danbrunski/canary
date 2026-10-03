@@ -10,14 +10,14 @@ from datetime import datetime
 from typing import Any, Generic, Protocol, TypeVar
 
 from src.alerts.emitter import EmitterCounters
-from src.alerts.fusion import (
-    FusionSource,
-    PersistenceGate,
-)
 from src.alerts.tuning import AlertTuner
 from src.coerce import finite_float
 from src.dashboard.broadcast import Broadcaster
 from src.models.feature_spec_health import observe_reconciliation
+from src.models.fusion import (
+    FusionSource,
+    PersistenceGate,
+)
 from src.preprocessing.feature_pipeline import (
     FeatureSpecReconciliation,
 )
@@ -78,7 +78,7 @@ def gate_and_collect(
     open-code the same "was this tick's verdict actually sustained, and if
     it fired-but-not-sustained bump ``suppressed_persistence``" pairing
     around their own :func:`_persistence_sustained` call — this is that
-    shared tail. Callers still apply :func:`~src.alerts.fusion.downgrade_unsustained`
+    shared tail. Callers still apply :func:`~src.models.fusion.downgrade_unsustained`
     themselves (IF defers it a layer up, in ``IsolationForestDetector.tick``,
     since ``_score_and_emit`` needs the raw ``sustained`` flag to decide
     whether to withhold its own per-source emit too).

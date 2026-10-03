@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any, cast
 from fastapi import FastAPI, HTTPException, Query
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.feedback import FeedbackStore, annotate_events_with_feedback
 from src.analysis.gps_tracker import GpsTracker
 from src.analysis.llm_assist import LlmAssistCardStore, card_to_dict
 from src.config import CanaryConfig
@@ -35,6 +34,7 @@ from src.dashboard.status import (
 )
 from src.dashboard.ups import DEFAULT_UPS_STATUS_PATH
 from src.decode.accepted_baselines import DEFAULT_ACCEPTED_BASELINES_PATH
+from src.models.feedback import FeedbackStore, annotate_events_with_feedback
 
 if TYPE_CHECKING:  # decode.dids is imported lazily inside the route bodies
     from src.daemon.health import HealthMonitor

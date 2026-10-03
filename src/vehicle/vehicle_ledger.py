@@ -9,7 +9,7 @@ repair that changes what "normal" looks like shouldn't have pre- and
 post-change sessions blended into one corpus without the operator opting
 in.
 
-Storage mirrors :class:`~src.alerts.feedback.FeedbackStore`: append-only
+Storage mirrors :class:`~src.models.feedback.FeedbackStore`: append-only
 JSONL under ``data/control/`` (gitignored, profile-scoped via
 ``src.vehicle.profiles.scope_config``). Unlike feedback verdicts (keyed on the
 anomaly they label), each ledger line is its own event — a correction is

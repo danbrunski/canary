@@ -42,7 +42,7 @@ and is out of scope until the guards below exist.
 | Hot-swap a new model into the live daemon, no restart | `src/models/manager.py` (`ModelManager`) | Done — atomic, manifest-schema-validated, rejects bad swaps |
 | Side-by-side IF + LSTM retrain over recent sessions | `scripts/retrain.py` | Done — "Manual trigger in v1; cron later" |
 | Training run lineage + promotion lifecycle + rollback | `src/models/training_ledger.py` | Done — `unpublished → active`, latest-line-wins per `run_id` |
-| Reactive operator verdicts feeding retrain | `src/alerts/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
+| Reactive operator verdicts feeding retrain | `src/models/feedback.py` | Done — `true_positive/false_positive/ignored/needs_review`, `data/control/anomaly_feedback.jsonl` |
 | Observed-vs-FSM-spec range scoring | `src/signals/fsm.py`, `src/analysis/range_match.py` | Done — built for DID binding; **reusable as the validation screen** |
 | Held-out threshold calibration in retrain | `scripts/retrain.py` (`--calibration-sessions`, automatic holdout via `src.models.evaluation.pick_calibration_holdouts`) | Done — and ml-hardening Phase 3 makes in-sample calibration a loud refusal at the library layer |
 | Per-vehicle data partitioning | `src/vehicle/profiles.py` (`scope_config`) | Done — everything this doc adds is per-vehicle state and must live under the profile scope |
@@ -349,7 +349,7 @@ as separate stages; a row must pass both.
 | Directional deviation | `src/decode/behavior_models.py` (`DeviationConfig` variant) |
 | Disposition lineage | `src/models/training_ledger.py` (add `dispositions` to the run record) |
 | Champion/challenger promotion | `src/models/manager.py` + the ledger lifecycle |
-| Reactive verdicts (existing) | `src/alerts/feedback.py` — the override's reactive cousin |
+| Reactive verdicts (existing) | `src/models/feedback.py` — the override's reactive cousin |
 | Regime gate (existing) | `src/preprocessing/segmenter.py` |
 
 ## Validity check vs the 2026-07 ML-hardening review (2026-07-19)

@@ -11,12 +11,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError as PydanticValidationError
 
-from src.alerts.feedback import FEEDBACK_LABELS, FeedbackStore
 from src.dashboard.routes.control.context import ControlContext, _require
 from src.dashboard.schemas import (
     FeedbackRequest,
     VehicleEventRequest,
 )
+from src.models.feedback import FEEDBACK_LABELS, FeedbackStore
 from src.vehicle.vehicle_ledger import VEHICLE_EVENT_KINDS, VehicleLedgerStore
 
 

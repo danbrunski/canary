@@ -57,7 +57,6 @@ import pandas as pd
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.alerts.fusion import BandExcessAccumulator, PersistenceGate
 from src.analysis.splits import (
     DEFAULT_JOIN_GAP_SECONDS,
     Drive,
@@ -98,6 +97,7 @@ from src.decode.behavior_models import (
     contract_fingerprint,
 )
 from src.decode.surface_eval import bin_indices, containing_cell_indices, trusted_cell_mask
+from src.models.fusion import BandExcessAccumulator, PersistenceGate
 from src.preprocessing import drives as _drives
 from src.preprocessing.session_context import (
     StartContextSpec,

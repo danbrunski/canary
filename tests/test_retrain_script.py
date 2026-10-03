@@ -11,11 +11,11 @@ import pandas as pd
 import pytest
 
 from scripts import _cli, retrain
-from src.alerts.feedback import FeedbackStore
 from src.config import CanaryConfig
 from src.decode.dids import load_repo_did_map
 from src.models import evaluation as model_evaluation
 from src.models import training_entry
+from src.models.feedback import FeedbackStore
 from src.preprocessing.feature_pipeline import load_resampled_session
 from tests.builders import IFConfig, write_fixture_session
 from tests.configs import example_config, retrain_argv

@@ -34,9 +34,9 @@ from typing import Any, Protocol
 import numpy as np
 import pandas as pd
 
-from src.alerts.fusion import FusionScorer
 from src.columns import GAP_SUFFIX, MODE_COLUMN, SESSION_COLUMN, TIMESTAMP_COLUMN, base_channel
 from src.config import CanaryConfig
+from src.models.fusion import FusionScorer
 from src.models.inference import SequenceInferenceEngine
 from src.models.isolation_forest import (
     CALIBRATED_THRESHOLD_COLUMN,

@@ -122,7 +122,6 @@ OWED: dict[tuple[str, str], str] = {
 
 #: Same-layer pairs present when the order was adopted, as sorted unit names.
 OWED_PAIRS: dict[tuple[str, str], str] = {
-    ("alerts", "models"): "R09.7",
     ("companion", "dashboard"): "R09.8",
 }
 

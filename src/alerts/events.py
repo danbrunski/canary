@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 if TYPE_CHECKING:  # avoid importing pandas/torch-touching modules at import time
     import pandas as pd
 
-    from src.alerts.fusion import FusedResult
+    from src.models.fusion import FusedResult
     from src.models.inference import SequenceInferenceResult
     from src.plausibility.evaluator import EvidenceRecord
     from src.signals.committees import CommitteeFlag

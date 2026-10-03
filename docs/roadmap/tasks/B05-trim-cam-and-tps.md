@@ -84,7 +84,7 @@ rather than building a second model system. Follow
 
   **Fusion (done 2026-09-23):** total trim B1/B2, STFT/LTFT per bank and
   both bank balances vote as one `behavior:fuel_trim` voice
-  (`src/alerts/fusion.py::behavior_fusion_group`, derived inside
+  (`src/models/fusion.py::behavior_fusion_group`, derived inside
   `FusionScorer.behavior_source`). Before, `fuel_trim_vs_rpm_load` (STFT B1)
   and `total_trim_b1` (STFT B1 + LTFT B1) were separate groups over the same
   reading. Evidence: `tests/test_fusion.py::test_one_measurement_is_one_voice_across_its_derived_channels`.

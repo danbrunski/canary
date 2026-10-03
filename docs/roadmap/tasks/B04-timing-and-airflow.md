@@ -174,7 +174,7 @@ Addresses the behavior-model part of D03.20. Follow
   refresh, B03.9).
   **Fusion grouping fixed 2026-09-23:** `FusionScorer.behavior_source` now
   takes the graded `channel` and derives the group itself
-  (`src/alerts/fusion.py::behavior_fusion_group`). Air mass and all VE
+  (`src/models/fusion.py::behavior_fusion_group`). Air mass and all VE
   channels vote as one `behavior:airflow` voice, and the caller can no
   longer pass a per-channel group. Evidence:
   `tests/test_fusion.py::test_one_measurement_is_one_voice_across_its_derived_channels`.

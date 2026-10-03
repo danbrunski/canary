@@ -14,9 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
-from src.alerts.feedback import AnomalyFeedback, FeedbackLabel, FeedbackStore, anomaly_key
 from src.columns import SESSION_COLUMN, TIMESTAMP_COLUMN
 from src.dashboard.api import create_app
+from src.models.feedback import AnomalyFeedback, FeedbackLabel, FeedbackStore, anomaly_key
 from src.models.retraining_policy import (
     apply_retraining_feedback_policy,
     build_retraining_feedback_report,

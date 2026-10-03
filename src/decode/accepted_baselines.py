@@ -2,7 +2,7 @@
 
 A known-accepted fault is not a mute — it's a *recentering with a one-sided
 band* (see the doc's "Directional overrides — the schema gap" section). This
-is the declarative, forward-looking cousin of ``src.alerts.feedback``:
+is the declarative, forward-looking cousin of ``src.models.feedback``:
 feedback records "that past alert was a false positive"; an override
 declares "I know this engine state and accept it going forward," with
 provenance (who/when/why) and a ``review_by`` date so an accepted fault

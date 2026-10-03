@@ -58,7 +58,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.alerts.fusion import (
+from src.columns import TIMESTAMP_COLUMN
+from src.config import CanaryConfig
+from src.decode.dids import DidMap
+from src.models.fusion import (
     FusionScorer,
     FusionSource,
     PersistenceGate,
@@ -66,9 +69,6 @@ from src.alerts.fusion import (
     isolation_forest_source,
     lstm_source,
 )
-from src.columns import TIMESTAMP_COLUMN
-from src.config import CanaryConfig
-from src.decode.dids import DidMap
 from src.models.inference import SequenceInferenceEngine, SequenceInferenceResult
 from src.models.isolation_forest import (
     CALIBRATED_THRESHOLD_COLUMN,

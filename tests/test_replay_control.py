@@ -23,13 +23,13 @@ import pytest
 from src.alerts.emitter import AnomalyEventEmitter
 from src.alerts.event_logger import AnomalyEventLogger, read_events_dir
 from src.alerts.events import AnomalyEvent
-from src.alerts.fusion import PersistenceGate
 from src.control.replay_control import (
     ReplayConflictError,
     ReplayController,
     ReplayNotFoundError,
     ReplayNotRunningError,
 )
+from src.models.fusion import PersistenceGate
 from src.preprocessing.live import LiveFeatureSource
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.parquet_writer import (

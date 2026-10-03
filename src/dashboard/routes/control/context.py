@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.alerts.emitter import AnomalyEventEmitter
-from src.alerts.feedback import FeedbackStore
 from src.alerts.tuning import AlertTuner
 from src.collection.capture_profiles import CaptureProfileStore
 from src.collection.obd_scheduler import ForcePollTrigger
@@ -31,6 +30,7 @@ from src.control.profile_capture import CaptureAutostart, EventPublisher, Profil
 from src.control.replay_control import ReplayController
 from src.control.sequence_detector import SequenceDetectorController
 from src.dashboard.broadcast import Broadcaster
+from src.models.feedback import FeedbackStore
 from src.storage.async_writer import AsyncParquetTelemetryWriter
 from src.storage.sessions import resolve_session
 from src.vehicle.vehicle_ledger import VehicleLedgerStore
