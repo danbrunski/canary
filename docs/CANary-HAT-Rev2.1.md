@@ -65,13 +65,13 @@ AEM gauge answers what the new system actually runs on first key-on.
 | # | Change | Parts (placeholder refs) |
 |---|---|---|
 | 1 | Protected 5V sensor supply off `+12V` | U9 TPS7A1650-Q1 + caps + EN resistor |
-| 2 | **U8 ADS1015 → ADS8688** — 8-ch, 16-bit, SPI0 **CE1**, programmable 0–5.12 V ranges with ±20 V input protection (§13.5.3 item 5) | U8 ADS8688 (TSSOP-38), decoupling, AVDD from `+5V` |
+| 2 | **U8 ADS1015 → ADS8688A** — 8-ch, 16-bit, SPI0 **CE1**, programmable 0–5.12 V ranges, pseudo-differential pin pairs, ±20 V DC input protection (§13.5.3 items 5/5a) | U8 `ADS8688A` (TSSOP-38); **REFIO 22 µF, REFCAP 22 µF + 1 µF**, AVDD/DVDD decoupling, AVDD bleed < 30 kΩ |
 | 3 | MAP input, **direct — no divider** | C19 (filter only) |
 | 4 | IAT (NTC) input | R19 pull-up, C20 |
 | 5 | Sensor-supply sense (ratiometric reference), direct | C21 |
-| 6 | **Fuel-pressure input** — gauge WHITE direct to CH4, BROWN bonded to analog ground (§13.5.4) | C22 only; **one channel, no divider, no reference** — settled from the manual 2026-10-03 |
+| 6 | **Fuel-pressure input** — gauge WHITE → `AIN_4P`, BROWN → `AIN_4GND` (§13.5.3 item 7) | C22 only; **one channel, no divider, no reference** — settled from the AEM manual and the ADC datasheet, 2026-10-03 |
 | 7 | ~~Second CAN channel (CAN1)~~ — **dropped 2026-10-03**, the gauge is not AEMnet (§13.5.4). CE1 goes to U8 | — (U10, U11, FL2, R24/R25, C24, JP2, D7/R26 all never added) |
-| 8 | ~~Divider networks for MAP / IAT / 5V_SENS~~ — **deleted**, the ADS8688 takes 0–5 V directly | R17/R18, R20/R21, R22/R23 and the 15 kΩ + 4.99 kΩ BOM values all dropped |
+| 8 | ~~Divider networks for MAP / IAT / 5V_SENS~~ — **deleted**, the ADS8688A takes 0–5 V directly | R17/R18, R20/R21, R22/R23 and the 15 kΩ BOM value dropped; replaced by DNF series / pull / `AIN_nGND`-matching pads (§13.5.3 item 8) |
 | 9 | `J2` → two-level terminal block, 12 positions | J2 MKKDS 1,5/6-5,08 |
 | 10 | ~~Correct U8's stale schematic note~~ — **moot**, the part is replaced (§13.5.6) | — |
 | 11 | **One 40 MHz oscillator replaces the Y1 Pierce loop**; Y1 + C5/C6 deleted | X1 MEMS oscillator, C25 100n, R27 33 Ω |
@@ -83,7 +83,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 **Roughly +8 components net**, on a 65 × 56 mm board that already carries 57.
 Dropping CAN1 and the dividers took about 18 parts back out of the ~25 the
 earlier plan added, which changes §13.5.7's conclusion: **single-sided
-placement is now the expectation, not the hope.** The ADS8688's TSSOP-38 is
+placement is now the expectation, not the hope.** The ADS8688A's TSSOP-38 is
 the one part that got bigger.
 
 ### 13.5.3 Analog front end — MAP, IAT, fuel pressure
@@ -139,7 +139,7 @@ J2-U2 (MAP) ──┬── U8 CH1          (range 0–5.12 V)
 ```
 
 **The divider is gone.** This is the single biggest simplification the
-ADS8688 brings. Its per-channel programmable range includes **0–5.12 V**, and
+ADS8688A brings. Its per-channel programmable range includes **0–5.12 V**, and
 its analog inputs are specified to survive **±20 V** regardless of the range
 selected — so a 0–5 V automotive sensor connects straight to the pin. R17/R18
 and the matched-reel tolerance argument that went with them are deleted.
@@ -148,20 +148,21 @@ and the matched-reel tolerance argument that went with them are deleted.
   fault all sit inside the 0–5.12 V range; the 5.5 V case clips the reading
   but harms nothing. Compare the old path, where the sensor's 0–5 V output
   could not reach a 3.3 V-powered ADS1015 at all without attenuation.
-- **Fault cases are the ADC's problem now, by design.** Harness shorted to
-  12 V, or D1's 38.9 V clamp: both are inside or near the specified input
-  protection rather than relying on a series resistor to limit current into a
-  clamp diode. **Confirm the ±20 V figure and whether it is specified with
-  AVDD live, dead, or both** — if protection is only guaranteed powered, a
-  series resistor comes back. This is the one electrical claim the whole
-  no-divider simplification rests on.
-- **Loading.** A direct connection, so Bosch's **≥ 10 kΩ pull-down
-  requirement is no longer satisfied by the divider's 25 kΩ.** Add an explicit
-  pull-down resistor to GND for that purpose — it is a sensor requirement, not
-  an ADC one, and deleting the divider deleted it by accident. *(Caught on
-  review; size it from the Bosch datasheet with item 1's pinout.)*
+- **Fault cases: mostly the ADC's problem, with one gap.** A harness short to
+  12 V sits inside the **±20 V** internal limit *provided* AVDD is live or
+  low-impedance; unpowered-and-floating the limit is **±11 V**, below battery
+  voltage. Item 5a specifies the AVDD bleed resistor that closes that gap, and
+  D1's 38.9 V clamp case needs the series pad populated. External transient
+  protection is separate and still wanted — the internal OVP is a DC limit,
+  not EFT immunity.
+- **Loading.** The input is **1 MΩ constant resistive**, not high-impedance,
+  and that does **not** satisfy Bosch's ≥ 10 kΩ pull-down — the divider's
+  25 kΩ used to. Add an explicit pull-down to GND on item 8's pad; it is a
+  sensor requirement, not an ADC one, and deleting the divider deleted it by
+  accident. *(Caught on review; size it from the Bosch datasheet with item 1's
+  pinout — open item 20.)*
 - **Filter.** C22 alone against the ADC's input impedance; size the corner
-  once the polling rate is chosen. The ADS8688's 500 kSPS means the
+  once the polling rate is chosen. The ADS8688A's 500 kSPS means the
   anti-alias corner is no longer pinned near a few hundred Hz, so this filter
   becomes a deliberate choice rather than a constraint — see item 5.
 - **Resolution.** 16-bit over 0–5.12 V is **78 µV/LSB**, ~26× finer than the
@@ -178,7 +179,7 @@ U9 5V_SENS ── R19 ──┬── J2-U3 (IAT) ── NTC (in sensor) ── 
                        └── C20 100n ── GND
 ```
 
-**R20/R21 are gone** — the pull-up node swings 0–5 V and the ADS8688 takes it
+**R20/R21 are gone** — the pull-up node swings 0–5 V and the ADS8688A takes it
 directly. Two consequences, both improvements:
 
 - **R19 pull-up — proposed 4.99 kΩ, final value after measuring the NTC.** At
@@ -189,12 +190,12 @@ directly. Two consequences, both improvements:
   should rarely exceed ~80 °C, so favour low self-heating.
 - **Pulled up to `5V_SENS`, not `+3V3`.** The IAT reading is then ratiometric
   against the same rail CH3 measures.
-- **Nothing loads the node any more.** The old 25 kΩ divider sat in parallel
-  with the NTC and had to be solved for in software with the real resistor
-  values. Against the ADS8688's high-impedance input, the pull-up and the NTC
-  are the whole network: the temperature solve is now R19 and the
-  Steinhart–Hart fit, nothing else. One fewer place for a wrong resistor value
-  to become a wrong temperature.
+- **Almost nothing loads the node any more.** The old 25 kΩ divider sat in
+  parallel with the NTC and had to be solved for in software with the real
+  resistor values. The ADS8688A presents **1 MΩ** instead — small against a
+  2.5 kΩ NTC, but not zero: it costs ~6 mV of offset, which item 7 cancels with
+  a matching resistor on `AIN_2GND`. The temperature solve is R19 and the
+  Steinhart–Hart fit, with no divider network to get wrong.
 - **Open sensor is still detectable, and more cleanly.** With the NTC
   unplugged the node pulls to the full `5V_SENS` rail — **~5.0 V at CH2**,
   hard against the top of range and unmistakable, rather than the old 2.50 V
@@ -207,7 +208,7 @@ directly. Two consequences, both improvements:
 #### 4. Sensor-supply sense → CH3
 
 `5V_SENS` straight to CH3 with C21 as the only part. **This channel survives
-the move to the ADS8688, and it is worth being clear why**, because the
+the move to the ADS8688A, and it is worth being clear why**, because the
 no-divider change removes one of its two original jobs:
 
 - It no longer has to cancel a **divider ratio** — there is no divider.
@@ -223,7 +224,7 @@ MAP_kPa  = a · ratio + b                     # a, b: THIS sensor's transfer fun
 boost    = MAP_kPa − baro_kPa (U5)
 ```
 
-The ADS8688's own reference (internal 4.096 V) cancels out of that ratio too,
+The ADS8688A's own reference (internal 4.096 V) cancels out of that ratio too,
 so its drift does not reach the result either.
 
 **`a` and `b` are not known yet and must not be guessed.** For a 0.5–4.5 V,
@@ -237,10 +238,10 @@ part number, and pin them in `catalog_pins` like every other decode constant.
 Sensed at the board, so harness drop (≤ 12.5 mA through a few metres of 22 AWG)
 is not included — small, and a calibration term if it ever matters.
 
-#### 5. U8 becomes an ADS8688 — channel map, rate, and what it costs
+#### 5. U8 becomes an ADS8688A — channel map, rate, and what it costs
 
 **Decision (operator, 2026-10-03): replace the ADS1015 with an 8-channel
-ADS8688 on SPI0 CE1**, rather than adding a second ADS1015 at I²C 0x49. The
+ADS8688A on SPI0 CE1**, rather than adding a second ADS1015 at I²C 0x49. The
 AEM gauge turning out analog (§13.5.4) needed a fifth input and the ADS1015 is
 a 4-channel part with all four spent; dropping CAN1 freed the CE1 chip select
 that makes an SPI part cost no GPIO.
@@ -251,10 +252,14 @@ that makes an SPI part cost no GPIO.
 | CH1 | `MAP` | 0–5.12 V | direct (item 2) |
 | CH2 | `IAT` | 0–5.12 V | R19 pull-up only (item 3) |
 | CH3 | `5V_SENS` | 0–5.12 V | ratiometric reference (item 4) |
-| CH4 | `FUEL_P` | 0–5.12 V | AEM gauge WHITE (analog +), direct. BROWN bonds to analog ground — item 7 |
-| CH5 | spare | — | **freed 2026-10-03**: the gauge needs no reference or sense channel (item 7) |
+| CH4 | `FUEL_P` | 0–5.12 V | gauge WHITE → `AIN_4P`, **BROWN → `AIN_4GND`** — pseudo-differential, item 7 |
+| CH5 | spare | — | **freed 2026-10-03**: the gauge needs no reference channel (§13.5.4) |
 | CH6 | spare | — | |
 | CH7 | spare | — | DNF conditioning pads to a test pad, not a terminal (item 8) |
+
+Each row is a **pin pair** — `AIN_nP` and `AIN_nGND` — not a single input; see
+item 7, which is what makes CH4 carry the gauge's differential output
+properly. Spare rows must be **tied to analog ground, not left open**.
 
 **Three channels spare**, since the gauge turned out to need exactly one. The
 4.50 V top of its valid window sits inside 0–5.12 V with no divider, at
@@ -304,12 +309,99 @@ analog front end — deleting the dividers removed the 15 kΩ and 4.99 kΩ lines
 that rev 2.1 was going to add, leaving only R19's pull-up value (item 3) to
 pick.
 
-> **Unverified, and load-bearing.** Every ADS8688 figure above — the 0–5.12 V
-> range, 500 kSPS, ±20 V input protection, the internal 4.096 V reference,
-> TSSOP-38 and the pinout — is from recollection and **must be confirmed
-> against TI's datasheet before schematic entry** (§13.5.9 item 17). The
-> ±20 V protection claim is the one the whole no-divider simplification rests
-> on: if it is conditional on AVDD being live, series resistors come back.
+#### 5a. Datasheet check — confirmed, with two corrections
+
+**Checked 2026-10-03 against SBAS680** (`ads8684a.pdf`, which covers both the
+4-channel `ADS8684A` and the 8-channel `ADS8688A`). **Use the `A` suffix** —
+`ADS8688A` is the later revision with tighter gain drift, and it is the part
+the datasheet in the repo describes.
+
+**Confirmed as assumed:**
+
+| Claim | Datasheet |
+|---|---|
+| 8 channels, 16-bit, 500 kSPS aggregate | ✅ `ADS8688A`, 500 kSPS, 850 ns conversion, 2 µs cycle |
+| 0–5.12 V unipolar range | ✅ `+1.25 × VREF`; also 0–10.24, 0–2.56, 0–1.28 V and bipolar ±10.24 … ±0.64 V |
+| Per-channel programmable range | ✅ software-programmable, independent per channel |
+| Internal 4.096 V reference | ✅ **4.095–4.097 V at 25 °C**, 6 ppm/°C typ, 10 ppm/°C max |
+| TSSOP-38, 9.7 × 4.4 mm | ✅ exactly |
+| AVDD 5 V, DVDD down to 1.65 V | ✅ AVDD 4.75–5.25, DVDD 1.65 V–AVDD, so 3.3 V I/O is fine |
+| Temperature range | ✅ **−40 to +125 °C** — better than the −40/+85 assumed |
+| No GPIOs beyond CE1 | ✅ RST/PD tied high, REFSEL low (internal ref), DAISY to GND, ALARM optional |
+
+**Correction 1 — the ±20 V protection is conditional, but not on what was
+feared.** It is conditional on AVDD's **impedance**, not on AVDD being live:
+
+| AVDD condition | Protection limit |
+|---|---|
+| AVDD = 5 V, **or** AVDD presents **< 30 kΩ** | **±20 V** |
+| AVDD floating with **> 30 kΩ** | **±11 V** — device not functional, but protected |
+
+**±11 V is below a 12.6 V battery.** So the hazard is narrow but real: vehicle
+12 V reaching an analog input while the HAT's `+5V` is both absent *and*
+high-impedance would sit beyond absolute maximum, which the datasheet says
+*"may cause irreversible damage."* Three responses, and the first is nearly
+free:
+
+1. **A bleed resistor from AVDD to AGND, < 30 kΩ.** One part that keeps the
+   device permanently in the ±20 V row whatever the Pi is doing. At 10 kΩ it
+   costs 500 µA while running and nothing when parked, since `+5V` comes from
+   the Pi header and dies with the Pi (§13.3.1). **Recommended.**
+2. **Series resistance raises the limit**, which the datasheet states outright:
+   *"if the sources driving the inputs have higher impedance, the current
+   flowing through the protection diodes reduces further, thereby increasing
+   the OVP voltage range."* This is a second, independent reason for item 8's
+   series pads — and its gain-error cost is cancelled by the `AIN_nGND`
+   matching in item 7.
+3. **External protection is still wanted.** The datasheet is explicit that
+   *"using external protection devices against surges, electrostatic discharge
+   (ESD), and electrical fast transient (EFT) conditions is highly
+   recommended."* **The internal OVP is a DC overvoltage limit, not transient
+   immunity** — so the earlier framing of this part as "±20 V protection on a
+   harness that sees ISO 7637 transients" overclaimed. Decide a clamp per
+   channel at schematic entry.
+
+**Correction 2 — the inputs are 1 MΩ, not high-impedance.** A *constant
+resistive* 1 MΩ, independent of range and sample rate. It does not satisfy
+Bosch's ≥ 10 kΩ pull-down (open item 20 stands), and it draws enough current
+through an external source resistance to matter — handled by the `AIN_nGND`
+matching in item 7.
+
+**Reference decoupling is larger than assumed.** Not 100 nF:
+
+- **REFIO:** 10 µF minimum, **22 µF typical**
+- **REFCAP:** 10 µF minimum (22 µF typical) **plus a 1 µF close to the pin**
+- Turn-on time **15 ms** at 22 µF/22 µF — a startup-sequencing note for the
+  driver, not a board problem
+- Do not load the reference buffer externally; its output impedance is ~1 Ω
+  and TI warns against driving external loads from it
+
+So the part count is **+1 IC and four capacitors** (two bulk, one 1 µF, one
+AVDD/DVDD group), not "+1 IC, +1 cap" as §13.5.2 first claimed.
+
+**SPI contention is now quantified, and it is small.** Max SCLK is **17 MHz**
+and a channel read is a 32-bit frame ≈ **1.9 µs**:
+
+| Polling | SPI0 occupancy |
+|---|---|
+| 6 channels at 100 Hz | 600 reads/s → **0.11 %** |
+| 6 channels at 1 kHz | 6000 reads/s → **1.1 %** |
+
+So the vehicle-CAN-latency worry in item 5 is real in principle and negligible
+in practice at any rate these signals need. **Per-device SPI speed is a
+devicetree property**, so clocking the ADC at 17 MHz does not pull U3's
+MCP2518FD below its own 20 MHz. Open item 22 drops from "risk" to "measure
+once at bring-up to confirm the arithmetic."
+
+**`AUX_IN`/`AUX_GND` is a ninth input but not a general-purpose one** — it
+bypasses the PGA and the OVP, `AUX_GND` tolerates only ±0.3 V and `AUX_IN`
+only 0 V to AVDD + 0.3 V. Not a spare for anything on a vehicle harness.
+
+**`ALARM` is worth remembering:** a digital output with programmable high and
+low thresholds *per channel*. It could implement §13.5.4's 0.50–4.50 V
+fuel-pressure fault gate in hardware, and GPIO19/27 are free again
+(§13.5.4). Not adopted — polling is simpler and the gate has to exist in
+software regardless — but recorded as available.
 
 #### 6. Calibration against known answers
 
@@ -327,76 +419,83 @@ available instead:
   different air (pre-blower vs post-intercooler), and that difference is the
   interesting part.
 
-#### 7. Ground references — BROWN is a differential negative, and must be bonded
+#### 7. Ground references — one `AIN_nGND` pin per channel settles this
 
-**Corrected 2026-10-03** against the AEM install manual, documented in
-[`aem-fuel-pressure-analog-input.md`](aem-fuel-pressure-analog-input.md).
-An earlier draft of this item specified the gauge's ground as a
-*high-impedance sense channel* on CH5, on the assumption that it was a single
-ground pin carrying the gauge's own supply current. **Both halves of that were
-wrong, and the design it produced would not have worked.**
+**Settled 2026-10-03 from the ADS8688A datasheet** (SBAS680, in
+`hardware/canary-hat/datasheets/ads8684a.pdf` — one document covers the
+4-channel `ADS8684A` and the 8-channel `ADS8688A`). This item has now been
+wrong twice; the datasheet supersedes both attempts, and the reason it
+supersedes them is a feature of the part neither draft knew about.
 
-Deleting the dividers made every analog channel single-ended against the HAT's
-ground plane, with no common-mode tolerance in the path. So "what is this
-referenced to" is a per-channel question:
-
-| Channel | Referenced to | Status |
+| Draft | Said | Wrong because |
 |---|---|---|
-| `MAP`, `IAT` | U9's `SENS_GND`, back to the HAT | **Clean by construction** — the HAT powers the sensor and provides its return, one local loop |
-| `V12_SENSE` | HAT ground via OBD pin 4 (chassis) | As built in rev 2.0, unchanged |
-| `FUEL_P` | **BROWN**, the gauge's own analog negative | **Settled** — see below |
+| First | gauge ground on a **high-impedance sense channel**, never bonded | leaves the gauge's output stage unreferenced — the AEM manual calls that meaningless |
+| Second | gauge ground **bonded to the analog plane** at the board | works, but throws away a better input structure and puts the offset back into the reading |
+| **Datasheet** | gauge ground to **`AIN_4GND`**, the channel's own negative input | — |
 
-**What the manual actually says.** The `30-0301`'s output is **differential**:
-WHITE is analog positive, BROWN analog negative. AEM prescribes the
-single-ended case explicitly — *"if the logging device or ECU does not have a
-differential analog input then connect the BROWN wire to the shared signal
-ground."* And BROWN is **not** tied to the gauge's power ground inside the
-gauge: the manual's bench-test note says you must jumper it yourself, because
-*"this connection is usually made by the circuitry inside an ECU or data
-logger."*
-
-**So BROWN must be bonded to the HAT's analog ground. It is not optional and
-it is not a compromise:**
+**The part is pseudo-differential per channel.** Every channel is a *pair* of
+pins — `AIN_nP` and `AIN_nGND` — and the device samples the **difference**:
 
 ```
-AEM WHITE (analog +) ──┬── U8 CH4        (range 0–5.12 V)
-                       └── C22 100n ── GND
-
-AEM BROWN (analog −) ───── analog GND, bonded at the board
+AEM WHITE (analog +) ──┬── U8 AIN_4P      range 0–5.12 V
+                       └── C22 ── AIN_4GND
+AEM BROWN (analog −) ───── U8 AIN_4GND    the channel's own negative input
 ```
 
-- **The bond is what makes the measurement correct.** Once BROWN *is* our
-  ground, reading WHITE against it **is** WHITE − BROWN — the differential
-  quantity the gauge drives. The gauge's own negative defines zero, and any
-  offset between the gauge's power ground and ours drops out.
-- **A high-impedance sense channel instead would be a defect.** Leaving BROWN
-  unbonded leaves the gauge's output stage without a reference, which the
-  manual calls meaningless. Sensing a floating node does not recover it.
-- **Once bonded, sensing it is pointless.** BROWN ≈ analog ground by
-  definition; a sense channel would read the IR drop of the bond trace, which
-  is microvolts. **CH5 is therefore free** (item 5), and so is the 7th
-  terminal position the earlier draft needed (§13.5.5).
-- **BROWN carries no meaningful current**, which is why this is safe where the
-  earlier draft's worry was not. With no divider on rev 2.1 the input draws
-  essentially nothing, against the rev 2.0 USB path's 225 µA. A few metres of
-  22 AWG at ~0.16 Ω develops microvolts, so none of §3.9's parallel-power-
-  return hazard applies. **That hazard was the premise of the earlier draft and
-  it was simply not true of this wire.**
-- **Bond it near U8's ground pin, not at the far end of the connector.**
-  §3.9 establishes that separate analog and digital grounds are not achievable
-  here — the plane is the Pi's ground — so the bond point is the only control
-  available over how much plane drop sits between BROWN and the ADC's own
-  reference. Star it at U8.
-- **One thing still worth measuring** (carried over from the rev 2.0 doc):
-  forcing BROWN to our ground means the gauge's output stage drives against a
-  reference possibly tens or hundreds of millivolts off its own power ground.
-  A driven differential output should handle that, but **20 mV is 0.5 psi**, so
-  measure the offset under load rather than assuming it.
+TI prescribes this for exactly our situation (§8.3.1): the device *"allows a
+**±0.1-V range on the AIN_nGND pin** for all analog input channels. This
+feature is useful in modular systems where the sensor or signal-conditioning
+block is further away from the ADC on the board and when a difference in the
+ground potential of the sensor or signal conditioner from the ADC ground is
+possible. In such cases, **running separate wires from the AIN_nGND pin of the
+device to the sensor or signal-conditioning ground is recommended.**"*
 
-**The terminal is still needed — as a bond, not a sense.** BROWN gets its own
-position on J2, net-tied to analog ground (one wire per clamp; `SENS_GND` is
-the same net but already carries the TMAP's return). Count: six, exactly
-(§13.5.5).
+- **The gauge's differential output stays differential.** WHITE − BROWN is the
+  measured quantity in hardware, not a software subtraction and not a bond
+  that forces BROWN to our potential.
+- **±0.1 V is a hard limit, and it is the open risk.** The rev 2.0 document
+  warns the gauge's ground may sit *"tens or hundreds of millivolts"* off ours.
+  **Hundreds would be out of spec.** That turns open item 28 from a curiosity
+  into a go/no-go measurement: if the offset exceeds ±100 mV, this channel
+  needs a different front end, and bonding BROWN at the board becomes the
+  fallback (it works, it just loses the rejection).
+- **Still one terminal position for BROWN** (§13.5.5). What changed is where it
+  lands on the chip, not whether it needs a screw.
+- **`AIN_nGND` is not a ground pin and must not be poured to.** It is an
+  analog input with its own net, routed as a pair with its `AIN_nP`. For the
+  four local channels, tie each `AIN_nGND` to the analog ground **at the ADC**;
+  for CH4 it runs out to the gauge.
+
+**Every other channel benefits too, and one needs it.** TI also notes
+(§8.3.2) that the 1-MΩ input impedance draws real current through any external
+source resistance, and that *"matching the external source impedance on the
+AIN_nP input pin with an equivalent resistance on the AIN_nGND pin is
+recommended"* to cancel the resulting offset:
+
+| Channel | Source impedance | `AIN_nGND` treatment |
+|---|---|---|
+| CH0 `V12_SENSE` | R11‖R12 Thevenin, kΩ-class | **match it** — a resistor of the same value to analog ground |
+| CH1 `MAP` | the sensor's driver, ~0 Ω | tie to analog ground at the ADC |
+| CH2 `IAT` | R19‖NTC, ~2.5 kΩ at 20 °C | **match it** — ~2.5 kΩ, or accept ~6 mV |
+| CH3 `5V_SENS` | U9's output, ~0 Ω | tie to analog ground at the ADC |
+| CH4 `FUEL_P` | gauge driver, ~0 Ω | **the gauge's BROWN wire** |
+| CH5–CH7 | — | see the floating-input trap below |
+
+The IAT case is worth the arithmetic: 2.5 V through 1 MΩ is 2.5 µA, and 2.5 µA
+across a 2.5 kΩ Thevenin is **~6 mV** — 80 LSB at 16 bits, though only ~0.1 °C
+once it is through the Steinhart–Hart fit. Matching costs one resistor and
+removes it. Item 3 is written to match: the 1 MΩ is not nothing, it is merely
+small — an earlier draft of that bullet claimed the input loaded the node not
+at all.
+
+> **A floating input reads a plausible number, not an obvious fault.** §8.3.1:
+> *"If the analog input pins (AIN_nP) to the devices are left floating, the
+> output of the ADC corresponds to an internal biasing voltage. The output from
+> the ADC must be considered as invalid."* So an unused channel does **not**
+> sit at a rail where software would notice. **Tie CH5–CH7's `AIN_nP` to analog
+> ground** rather than leaving them open, and have the driver refuse to publish
+> any channel not in the configured map. A spare input that reads mid-scale is
+> exactly the shape of thing that becomes a retracted finding.
 
 #### 8. Input conditioning — DNF pads, not jumpers
 
@@ -415,11 +514,16 @@ terminal ──┬── R_pulldown → GND     (DNF)
 ```
 
 - **The series pad on every channel is the highest-value part of this, and the
-  reason is open item 17.** If the ADS8688's ±20 V input protection turns out
-  conditional — guaranteed only with AVDD live, say — then *every* channel
-  needs a series resistor. With pads already there, that discovery is a BOM
-  change; without them it is a board revision. Fit 0 Ω and the no-divider
-  simplification is intact; fit a real value and it still works.
+  datasheet now backs it twice.** TI states that higher source impedance
+  *"reduces [the current through the protection diodes] further, thereby
+  increasing the OVP voltage range"* — so a series resistor directly buys
+  overvoltage headroom, which matters because the ±20 V limit degrades to
+  **±11 V** with AVDD floating (item 5a). Its usual cost, a gain error, is
+  cancelled by matching the same value on `AIN_nGND` (item 7). Fit 0 Ω and the
+  no-divider simplification is intact; fit a real value and you get headroom
+  for free.
+- **`AIN_nGND` gets a matching pad on every channel too**, for the same
+  reason — item 7's table says which channels actually need it populated.
 - **Pull-up and pull-down go on the terminal side of the series pad.** Then a
   pull-down loads the sensor as Bosch requires without forming a divider
   against an ADC input that draws nothing. Put it *after* the series resistor
@@ -439,13 +543,15 @@ terminal ──┬── R_pulldown → GND     (DNF)
 - **Vibration.** A 0.1" shunt on a vehicle-mounted board can walk off, and
   `MAP` losing its pull-down mid-drive is a silent wrong reading.
 - **Area.** A three-position header per channel across eight channels is more
-  board area than the ADS8688 itself. Two DNF 0603s are ~2 mm².
+  board area than the ADS8688A itself. Two DNF 0603s are ~2 mm².
 
-**Where configurability does earn its place: the spare channels.** CH6 and CH7
+**Where configurability does earn its place: the spare channels.** CH5–CH7
 have no known sensor, which is the one case where the value really is unknown
 until something is wired. Give the spares the full set — series, pull-up,
 pull-down — brought to **labelled test pads rather than terminal positions**,
-since §13.5.5 has none to give.
+since §13.5.5 has none to give. **Default them pulled to analog ground, not
+open:** a floating `AIN_nP` reads an internal bias voltage the datasheet calls
+invalid, which looks like data (item 7).
 
 **If a jumper is wanted anyway**, confine it to *one* designated experiment
 channel and make the position legible: silkscreen that reads as a state
@@ -462,7 +568,7 @@ analog output — brown and white** (operator, 2026-10-03). With no AEMnet node
 to talk to, CAN1 lost its entire justification.
 
 **Decision (operator, 2026-10-03): drop CAN1.** Its SPI0 **CE1** chip select
-goes to the ADS8688 instead (§13.5.3 item 5), which is what lets an 8-channel
+goes to the ADS8688A instead (§13.5.3 item 5), which is what lets an 8-channel
 SPI ADC cost zero GPIOs. Never added: U10 MCP2518FD, U11 TCAN1042, FL2,
 R24/R25 split termination, C24, JP2, D7/R26. GPIO19 and GPIO27 go back to the
 free pool, so **GPIO12/13 (reserved `uart4`), 19, 20, 21 and 27 are all
@@ -475,10 +581,15 @@ contention concern is ADC-against-CAN0 only, not a three-way.
 #### Wiring the analog output
 
 ```
-gauge white (signal) ──┬── J2-U4 ── U8 CH4      (range 0–5.12 V)
-                       └── C22 100n ── GND
-gauge brown  (ground) ──── J2-U6 (SENS_GND)
+gauge WHITE (analog +) ── J2-U4 ──┬── U8 AIN_4P     (range 0–5.12 V)
+                                  └── C22 ──┐
+gauge BROWN (analog −) ── J2-U5 ─────────────┴── U8 AIN_4GND
 ```
+
+**BROWN goes to the channel's own negative input, not to ground** — the
+ADS8688A samples `AIN_4P − AIN_4GND` and tolerates ±100 mV on the negative
+pin, which is exactly the remote-sensor case TI documents. §13.5.3 item 7 has
+the reasoning and the ±0.1 V limit that comes with it.
 
 **Settled by the manual (2026-10-03): WHITE is analog positive, BROWN is
 analog negative.** An earlier draft of this section said the colours had to be
@@ -548,8 +659,9 @@ confident wrong reading.
   parked.
 - **Power ground is separate from BROWN, and that is the whole point.** The
   gauge's power ground goes to chassis as AEM specifies; **BROWN is the analog
-  negative and comes back to the board** on its own terminal, bonded to analog
-  ground near U8 (§13.5.3 item 7). The gauge does not tie the two internally.
+  negative and comes back to the board** on its own terminal, landing on
+  `AIN_4GND` (§13.5.3 item 7). The gauge does not tie the two internally, and
+  the ADC does not need it to.
 - **Run WHITE and BROWN as a twisted pair.** They are a differential signal
   pair; treating them as "signal and ground" is what loses the benefit.
 - **Why a chassis return would not do.** A single-ended input has no
@@ -557,8 +669,8 @@ confident wrong reading.
   (§3.9) — so tying BROWN to a chassis stud instead would put whatever drop
   exists between the two chassis points straight into the pressure reading.
   **20 mV is 0.5 psi.** Bringing BROWN back on its own wire costs one terminal
-  and removes that error term entirely, because BROWN carries essentially no
-  current.
+  and removes that error term, because the ADC subtracts it in hardware — up to
+  the ±100 mV `AIN_nGND` limit, which open item 28 must confirm.
 
 #### Aux CAN buses are USB adapters
 
@@ -633,9 +745,9 @@ publishes a fixed transfer function, so there is no reference channel and no
 fifth wire. That contingency is dropped, and with it the ~2 mm fit margin it
 would have eaten between MH3 and MH4.
 
-**`FUEL_GND` is a bond, not a sense line.** BROWN is the gauge's differential
-negative and net-ties to analog ground on the board — its own terminal because
-one clamp takes one wire, not because it is a different net from `SENS_GND`.
+**`FUEL_GND` is an input pin, not a ground.** BROWN is the gauge's
+differential negative and lands on `AIN_4GND` — its own terminal because it is
+its own net, routed as a pair with `FUEL_P` (§13.5.3 item 7).
 
 From the rev 2.0 PCB:
 
@@ -676,7 +788,7 @@ again. Columns are grouped so each one reads as a single function.
 | 2 | GND (OBD 5, left unconnected per §3.9) | `MAP` — pressure signal |
 | 3 | GND (OBD 4, chassis) | `IAT` — NTC signal |
 | 4 | `CANH_RAW` (OBD 6) | `FUEL_P` — gauge signal |
-| 5 | `CANL_RAW` (OBD 14) | `FUEL_GND` — gauge BROWN (analog −), **bonded to analog ground** (§13.5.3 item 7) |
+| 5 | `CANL_RAW` (OBD 14) | `FUEL_GND` — gauge BROWN (analog −) → `AIN_4GND` (§13.5.3 item 7) |
 | 6 | `KLINE` (OBD 7) | `SENS_GND` — sensor return |
 
 Why this arrangement:
@@ -699,11 +811,11 @@ Why this arrangement:
   little 500 kbps edge energy couples across a 5.08 mm two-level block. If
   bring-up shows CAN edges in the pressure trace, the fix is the filter
   corner, not a re-land.
-- **`FUEL_GND` and `SENS_GND` are the same net on two terminals**, which is
-  ordinary practice — one wire per clamp. Both may read "ground" on the
-  silkscreen without hazard, unlike the earlier draft where one of them had to
-  stay unbonded. **Bond BROWN near U8**, though, not at the connector
-  (§13.5.3 item 7).
+- **`FUEL_GND` is *not* the same net as `SENS_GND`.** It is an analog input
+  pin (`AIN_4GND`), routed as a pair with `FUEL_P` and **never poured to
+  ground** (§13.5.3 item 7). Two adjacent terminals where one reads "ground"
+  and the other is a ground-referenced *input* needs silkscreen that
+  distinguishes them — `FGND` against `SGND` is not enough.
 - **There is no growth room left on this connector.** Spare ADC channels
   (CH5–CH7) go to labelled test pads, not terminals (§13.5.3 item 8).
 - `J3` (+12V pass-through to the X1202) is **unchanged**.
@@ -892,7 +1004,7 @@ wrong — 2.92 V is 16.2 V × 0.18, the Macchina M2's zener, which §13.2.3
 deliberately did not copy — though the FSR choice it defended was right.
 
 **Rev 2.1 deletes the note along with the ADS1015** (§13.5.3 item 5). The
-ADS8688 has programmable per-channel ranges, so there is no single FSR to
+ADS8688A has programmable per-channel ranges, so there is no single FSR to
 justify; CH0's range is a per-channel setting in the driver, documented where
 the channel map is. Nothing to carry over.
 
@@ -989,13 +1101,13 @@ builds none of them: X1 removes the question rather than answering it.
 HVSSOP regulator (U9), a 2.5 × 2.0 mm oscillator (X1) and a handful of
 passives, against which it *deletes* Y1 + C5/C6 (the HC49's ~54 mm²) and six
 divider resistors, and never adds U10, U11, FL2, the 1812 chokes, the split
-termination or D7/R26. The one part that grew is U8: **ADS8688 in TSSOP-38
+termination or D7/R26. The one part that grew is U8: **ADS8688A in TSSOP-38
 (9.7 × 4.4 mm) replacing an ADS1015 in VSSOP-10 (3 × 4.9 mm)**, about +30 mm²
 in the same spot.
 
 **So single-sided placement is now the expectation.** The earlier plan said
 "components on B.Cu are likely"; with ~18 parts taken back out, B.Cu should be
-unnecessary. The constraints are kept below because the ADS8688's footprint
+unnecessary. The constraints are kept below because the ADS8688A's footprint
 could still force the question locally, and because §13.5.7's clearance figure
 is worth recording either way:
 
@@ -1119,7 +1231,7 @@ it clears, not where the board edge happens to be.
 Listed so the hardware choices above are not made blind; none of it is
 committed work.
 
-- **U8 driver is new, not a modification.** The ADS1015 was I²C; the ADS8688
+- **U8 driver is new, not a modification.** The ADS1015 was I²C; the ADS8688A
   is SPI with per-channel range registers, so this is a fresh driver rather
   than an extra address. It reads CH0–CH7, sets each channel's range once at
   init, and publishes MAP / IAT as ratios against CH3 plus fuel pressure from
@@ -1141,7 +1253,7 @@ committed work.
   specifies the same gauge into a USB ADC on today's hardware. Both paths use
   AEM's published `psig = 25.00·V − 12.50` and both owe the same **0.50–4.50 V
   fault gate**; only the counts-to-volts leg differs (a 10k/10k divider and the
-  module's reference there, no divider and the ADS8688's reference here). Write
+  module's reference there, no divider and the ADS8688A's reference here). Write
   the volts-to-psi conversion and the gate **once**, parameterised by the
   electrical leg — not twice, which is how the two boards would drift apart.
 - **Nothing in `src/` reads an analog channel today.** The collector is new
@@ -1189,16 +1301,20 @@ the header closes with **GPIO 12/13/19/20/21/27 uncommitted** instead of none
 | 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided. The rev 2.0 board is reworked to a 13.5 mm part (§13.5.6), so this is now a **BOM/notes defect only** — capture the MPN of the part actually fitted | Read the MPN off the part in hand, then make `BOM.csv`, `FAB-NOTES.md` and `pcbway-assembly-notes.txt` agree |
 | 16 | J4 fix (§13.5.7): edge swap or U.FL pigtail. If swap: which terminals move, U7 spacing from the 12 V/K-line/CAN entry. If U.FL: receptacle + retention part number, pigtail length, bulkhead mount | Decide, then placement and a fit check on the rev 2.0 stack |
-| 17 | **ADS8688 datasheet confirmation, before anything else in the analog front end**: 0–5.12 V range availability, the ±20 V input-protection spec **and whether it holds with AVDD dead**, internal reference, TSSOP-38 pinout, AVDD/DVDD rails, SPI mode and max clock, 500 kSPS | TI datasheet. The no-divider simplification (§13.5.3 items 2–4) collapses if the protection spec is conditional — resolve this first |
+| 17 | ~~ADS8688A datasheet confirmation~~ — **closed 2026-10-03** against SBAS680 (§13.5.3 item 5a). Range, reference, package, rails, 500 kSPS, 17 MHz SCLK and −40/+125 °C all confirmed; part is **`ADS8688A`**. Two corrections: ±20 V protection is conditional on AVDD **impedance** (±11 V if floating > 30 kΩ), and inputs are **1 MΩ**, not high-Z | **Closed** |
+| 30 | **AVDD bleed resistor < 30 kΩ** — keeps the device in the ±20 V protection row whatever the Pi is doing; without it a 12 V fault on an input with `+5V` floating exceeds the ±11 V limit (§13.5.3 item 5a) | Pick a value (10 kΩ suggested), add to the schematic |
+| 31 | **External transient protection per analog channel** — the internal OVP is a DC limit; TI "highly recommends" external surge/ESD/EFT devices, and this is a vehicle harness | Decide a clamp at schematic entry; §13.2.3's D1 precedent |
+| 32 | **`AIN_nGND` matching resistors** — which channels get them populated and at what value (§13.5.3 item 7 table) | Falls out of R11/R12's Thevenin and R19's final value |
 | 18 | ~~Is the AEM gauge output sensor-ratiometric or buffered?~~ — **closed from the install manual, 2026-10-03.** Buffered, with a published fixed transfer function (`psig = 25.00·V − 12.50`): one channel, no divider, no reference, 6 terminal positions. The proposed ~0.5 V discriminator would have answered this **wrong** (§13.5.4) | **Closed** |
 | 25 | ~~Does the gauge have separate power and signal grounds?~~ — **closed: yes, and they are not tied internally.** BROWN (analog −) is separate from power ground, which is why BROWN must be bonded at the board (§13.5.3 item 7) | **Closed** |
 | 26 | ~~`MKKDS 1,5/7-5,08` fit between MH3 and MH4~~ — **moot**, item 18 closed as buffered so 6 positions suffice (§13.5.5) | **Closed** |
-| 28 | **Gauge-ground offset under load** — does the gauge's output stage drive correctly against our ground when that sits tens-to-hundreds of mV off its own power ground? 20 mV = 0.5 psi | Meter BROWN against the gauge's power ground, gauge powered, engine running (§13.5.3 item 7) |
+| 28 | **Gauge-ground offset under load — now a go/no-go against ±0.1 V.** `AIN_nGND` tolerates only **±100 mV**, and the rev 2.0 doc warns the offset may be "tens or hundreds of millivolts." Over spec, CH4 needs a different front end and bonding BROWN at the board becomes the fallback | Meter BROWN against the gauge's power ground, gauge powered, engine running (§13.5.3 item 7) |
 | 29 | **The 0.50–4.50 V fault gate is a decoder requirement, not a note** — out-of-window must return a fault state, never a clamped number (§13.5.4) | Implement with the collector; a broken WHITE at 0 V must not decode as 0.0 psig |
-| 27 | **DNF conditioning pads: which channels, and `R_series` populated at 0 Ω?** (item 8) | Falls out of item 17's protection answer |
+| 27 | **DNF conditioning pads: which channels, and is `R_series` populated at 0 Ω or a real value?** (§13.5.3 item 8) | Item 17 is closed: a real value buys OVP headroom and the gain error cancels via item 32, so this is now a deliberate choice rather than a wait |
+| 33 | **Spare channels CH5–CH7 tied to analog ground, and the driver refuses unmapped channels** — a floating `AIN_nP` reads an internal bias voltage the datasheet calls invalid, which looks like data (§13.5.3 item 7) | Schematic + driver; make it unrepresentable rather than documented |
 | 19 | ~~Which AEM wire is signal and which is ground~~ — **closed, and the question was mis-framed.** WHITE is analog **+**, BROWN analog **−**; neither is a ground (§13.5.3 item 7). Meter once as a build check | **Closed** |
 | 20 | **MAP sensor pull-down resistor** — deleting the divider removed the ≥ 10 kΩ Bosch requires (§13.5.3 item 2); lands on a DNF pad per item 8 | Value from the Bosch datasheet with item 1's pinout |
-| 21 | ~~Fuel-pressure transfer function~~ — **closed: AEM publishes it**, `psig = 25.00·V − 12.50`, valid 0.50–4.50 V. Only the *electrical* chain needs calibrating, and on rev 2.1 that is just the ADS8688's reference (no divider, no resistor tolerance). Gauge face remains the independent cross-check | **Closed**; pin in `catalog_pins` |
-| 22 | **SPI0 contention: does ADC polling cost CAN0 frames?** New risk, created by putting the ADC on CE1 | Bring-up measurement — CAN0 frame loss and latency, ADC idle vs polling (§13.5.3 item 5) |
+| 21 | ~~Fuel-pressure transfer function~~ — **closed: AEM publishes it**, `psig = 25.00·V − 12.50`, valid 0.50–4.50 V. Only the *electrical* chain needs calibrating, and on rev 2.1 that is just the ADS8688A's reference (no divider, no resistor tolerance). Gauge face remains the independent cross-check | **Closed**; pin in `catalog_pins` |
+| 22 | **SPI0 contention** — downgraded 2026-10-03 from a risk to a confirmation: the arithmetic gives **0.11 %** bus occupancy at 6 channels × 100 Hz (§13.5.3 item 5a), and per-device SPI speed is a devicetree property so CAN0 keeps its 20 MHz | Bring-up measurement to confirm the arithmetic, not to discover the answer |
 | 23 | **Re-verify `V12_SENSE` on the new ADC** — same divider, different part | Repeat `CANary-HAT-Revisions.md:119`: 0.000 V no vehicle, ~12.68 V key-off, ~12.43 V KOEO |
 | 24 | **Update §13.3.9 of `CANary-HAT-Revisions.md`** for the dropped CAN1 — rev 3.0's GPIO and safe-state assumptions changed (§13.5.8) | Edit that section |

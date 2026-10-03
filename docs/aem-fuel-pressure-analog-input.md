@@ -5,17 +5,24 @@ reaches the Pi **today**, on HAT rev 2.0, through a NOYITO 10-channel
 CH340 USB ADC module.
 
 > **This is not the rev 2.1 plan.** `CANary-HAT-Rev2.1.md` §13.5.4 routes the
-> same gauge into an ADS8688 at 0–5.12 V with **no divider at all**. That board
+> same gauge into an ADS8688A at 0–5.12 V with **no divider at all**. That board
 > does not exist yet; this document is the USB path on rev 2.0 hardware.
 >
 > **What carries over and what does not.** The *electrical* half is specific to
 > this path — the 10k/10k divider, the BAT54S, the module's reference, the
 > counts-to-volts fit. The *gauge* half is universal and rev 2.1 now depends on
-> it: the differential WHITE/BROWN output and the requirement to bond BROWN
-> (§13.5.3 item 7), AEM's published `psig = 25.00·V − 12.50`, and the
-> 0.50–4.50 V fault gate. **Write the volts-to-psi conversion and the gate once,
-> parameterised by the electrical leg** — two copies is how the two boards drift
-> apart.
+> it: the differential WHITE/BROWN output, AEM's published
+> `psig = 25.00·V − 12.50`, and the 0.50–4.50 V fault gate. **Write the
+> volts-to-psi conversion and the gate once, parameterised by the electrical
+> leg** — two copies is how the two boards drift apart.
+>
+> **One difference worth knowing** (from the ADS8688A datasheet, 2026-10-03):
+> the HAT does *not* bond BROWN to ground the way this path does. Every
+> ADS8688A channel is a pin pair and samples `AIN_nP − AIN_nGND`, tolerating
+> ±100 mV on the negative pin — so BROWN lands on `AIN_4GND` and the gauge's
+> output stays differential. That is strictly better than the module's
+> single-ended input, and it is why "Why BROWN on module GND is correct"
+> below is correct **for this module** rather than in general.
 
 ## What the AEM manual settles
 

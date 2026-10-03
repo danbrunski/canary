@@ -1055,7 +1055,7 @@ Fix this list before layout: a missing net is a re-spin, unused firmware is free
 | 2 | 12V divider → MCU ADC | crank/alternator/parasitic (§13.3.3b); K-line undervoltage disambiguation. **Divider lands in rev 2.0** behind a small I2C ADC (§13.2.3) — rev 3.0 re-points it at the MCU for kHz sampling. **Rev 2.1 makes this four channels** (`V12_SENSE`, `MAP`, `IAT`, `5V_SENS`; §13.5.3), and MAP/IAT are ratios against `5V_SENS`, so all three must land on the *same* ADC — §13.3.9 |
 | 3 | MCU GPIO → high-side load switch on the J3 leg | §13.3.1 sleep/wake |
 | 4 | MCU ↔ Pi UART pair | handshake; works whenever the MCU is up |
-| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 — on the ADS8688 ADC, not CAN1** (§13.5.4, revised 2026-10-03); the conclusion for this item is unchanged, only the reason |
+| 5 | MCU ↔ Pi on ~~SPI0 CE1 (GPIO7, pin 26)~~ **SPI0 with a GPIO chip select on GPIO20** | bulk buffer dump; a few hundred KB over UART is painful. **CE1 is spent by rev 2.1 — on the ADS8688A ADC, not CAN1** (§13.5.4, revised 2026-10-03); the conclusion for this item is unchanged, only the reason |
 | 6 | Pi 3V3 rail sense → MCU | the tri-state invariant in §13.3.2 |
 | 7 | TCAN1042 RXD → MCU (fan-out) | boot-gap capture, wake, timestamps. ~~Rev 2.1 adds U11 (CAN1/aux)~~ — **CAN1 was dropped 2026-10-03** (§13.5.4), so there is one transceiver and one RXD fan-out. Fuel pressure is an analog channel on U8, which means **capturing it across the boot gap now needs the MCU to read the ADC**, not a second RXD — a change in kind for §13.3.9 to absorb |
 | 8 | K-line RXD / TXD / EN → MCU | §13.3.4; supersedes the Pi's `uart0` connection |
@@ -1116,7 +1116,7 @@ series resistance there, not here.
 
 Header budget — **re-counted 2026-09-14 against rev 2.1.** §4.1's list of ten
 unconnected GPIOs is stale: rev 2.0 spent 22, 23 and 24 (STB, INT2, K-line
-FET gate) and **rev 2.1 spends only GPIO7 (CE1, the ADS8688's native chip
+FET gate) and **rev 2.1 spends only GPIO7 (CE1, the ADS8688A's native chip
 select)** — revised 2026-10-03, when CAN1 was dropped (§13.5.4) and with it
 the nINT and STB pins that had taken GPIO27 and GPIO19.
 
@@ -1246,7 +1246,7 @@ Rev 2.1 (`CANary-HAT-Rev2.1.md`, §13.5) was written after most of §13.3 and
 changes its starting point. Recorded here so rev 3.0 is drawn against the board
 that will actually exist, not against rev 2.0.
 
-**1. SPI0 CE1 is gone — item 5 re-decided.** Rev 2.1 puts the **ADS8688 ADC**
+**1. SPI0 CE1 is gone — item 5 re-decided.** Rev 2.1 puts the **ADS8688A ADC**
 on CE1, the pin §13.3.6 item 5 had reserved for the MCU bulk link. *(Revised
 2026-10-03: it was the aux CAN controller U10 until CAN1 was dropped — §13.5.4.
 CE1 is still spent, so item 5's re-decision stands unchanged; only the occupant
@@ -1291,7 +1291,7 @@ is cheap, continuous sensor power is not.
 **A new one in its place: the MCU needs to reach the ADC.** Fuel pressure was
 going to arrive on CAN1, so §13.3.6 item 7's RXD fan-out captured it across
 the boot gap for free. As an analog channel on U8 it does not, so **boot-gap
-fuel-pressure capture now requires the MCU to read the ADS8688** — either
+fuel-pressure capture now requires the MCU to read the ADS8688A** — either
 sharing SPI0 or its own link. Weigh that in rev 3.0 rather than assuming item
 7 still covers it.
 
@@ -1336,7 +1336,7 @@ not the MCU's sleep mode" is what makes this a free choice rather than a
   U4 (vehicle). The second path (U11 aux) is gone with CAN1 (2026-10-03,
   §13.5.4); keep the headroom, since an aux channel folded into the MCU is
   still a live rev 3.0 option.
-- **An SPI master that can read the ADS8688** — new requirement from
+- **An SPI master that can read the ADS8688A** — new requirement from
   2026-10-03, replacing the aux-CAN decode path above: boot-gap fuel pressure
   is an ADC read now, not a frame.
 - **Several hundred KB SRAM** — §13.3.3(a)'s boot-gap buffer. *Unmeasured; see
