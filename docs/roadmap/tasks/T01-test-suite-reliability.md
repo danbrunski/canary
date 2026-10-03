@@ -503,3 +503,36 @@ measurement in hand.
   results were consumed. It then `settle`s the task. Acceptance: 10 of 10
   copies (two rounds of five concurrent `pytest -n0`) beside 12 burners, load
   average 9.4. The whole file passed 29 of 29 under the same load.
+
+- [ ] **T01.15 `tests/test_control_can_activity.py::test_can_activity_reports_frame_rate_and_changed_bytes`
+  failed once under load and passes alone.**
+  - **Seen** 2026-10-03 in an inner-loop run (`-m "not integration and not
+    ml_training and not slow"`, 12 workers) while two replay processes ran
+    beside it, on an uncommitted R09.8 tree that touched no CAN or
+    can_activity code. 1 failed, 6,392 passed. The assertion was not
+    captured.
+  - **Not reproduced:** 4 of 4 alone, then 20 of 20 copies (four rounds of
+    five concurrent `pytest -n0`) beside 12 CPU burners.
+  - **Suspected shape.** The test's subject is a 0.3 s sampling window
+    (`seconds: 0.3`). A sender thread starved inside that window delivers
+    fewer than two frames, so `changed_byte_indices` (which needs two
+    frames that differ) or `frame_count > 0` fails. The window is the
+    subject, so its number stays (`tests/waits.py`). The fix is probably to
+    have the sender produce frames throughout the window regardless of
+    scheduling, or to assert on what arrived.
+  - **Do:** capture the failing assertion first. The gate now keeps failed
+    logs in `.git/ci-gate/failed-logs/` (T01.13), so the next occurrence will
+    have it. Then fix the test.
+
+- [x] **T01.16 `tests/test_multi_did_batching.py::test_known_answer_decode_matches_single_and_batched_scheduler_paths`
+  read no DID on a slow CI runner.**
+  - **Seen** 2026-10-03 in CI run 37153594932 (`12fcba9`, P02.2, which
+    touched no collection code). It failed with `assert {} == {'DID_1101': …}`:
+    the first of the two scheduler passes produced no DID reading at all. It is
+    a slow-tier test, so the push gate never ran it.
+  - **Cause.** `run_can_obd_loop` was given `time.monotonic() + 0.2` of real
+    wall clock, the same shape T01.8 fixed in the test below it.
+  - *Fixed 2026-10-03, test only.* Each pass runs on its own `FakeClock`
+    (`install_clock`, and `_SchedulerDidEcu(clock=clock)`), with a 0.5 s fake
+    deadline. The file passed 3 of 3 runs, and the test passed 20 of 20 copies
+    (four rounds of five concurrent `pytest -n0`) beside 12 CPU burners.

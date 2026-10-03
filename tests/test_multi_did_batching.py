@@ -309,17 +309,24 @@ def test_active_scheduler_batches_known_width_dids_with_full_provenance() -> Non
     assert all(reading.acquired_at is not None and reading.round_id is not None for reading in dids)
 
 
-def test_known_answer_decode_matches_single_and_batched_scheduler_paths() -> None:
+def test_known_answer_decode_matches_single_and_batched_scheduler_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # On a fake clock (T01.16): 0.2 s of wall clock read no DID at all on a
+    # slow CI runner (`assert {} == {...}`, 2026-10-03), as T01.8 found for
+    # the test below.
     decoded: list[dict[str, float]] = []
     for batch_max in (1, 3):
+        clock = FakeClock()
+        install_clock(monkeypatch, clock)
         readings: list = []
         run_can_obd_loop(
-            _SchedulerDidEcu(),  # type: ignore[arg-type]
+            _SchedulerDidEcu(clock=clock),  # type: ignore[arg-type]
             _scheduler_spec(did_batch_max_dids=batch_max),
             on_frame=lambda _message: None,
             on_reading=readings.append,
             stop_event=threading.Event(),
-            deadline_monotonic=time.monotonic() + 0.2,
+            deadline_monotonic=clock.monotonic() + 0.5,
         )
         decoded.append(
             {
