@@ -68,6 +68,7 @@ AEM gauge answers what the new system actually runs on first key-on.
 | 12 | **BT1 polarity reversed** — swap BT1's GND and D2-anode pins (§13.5.6) | BT1 (net change) |
 | 13 | **U5 barometer: fix whatever the rev 2.0 investigation finds** (§13.5.6) | U5 — TBD |
 | 14 | **J1 BOM line names the 13.5 mm stacking header by part number** (§13.5.6) | J1 (BOM only) |
+| 15 | **Swap edges: GNSS (U7 + J4 SMA) moves to the terminal-block edge, some terminals move to the right edge** — rev 2.0's edge-mount SMA collides with the Pi 5's USB ports (§13.5.7) | U7, J4, J2/J3 (placement) |
 
 Roughly **+25 components** on a 65 × 56 mm board that already carries 57 — see
 §13.5.7 for where they go.
@@ -742,6 +743,42 @@ oscillator and passives — minus Y1 and C5/C6, which gives back the HC49's
 - **Try single-sided first**, with CAN1 packed near U3 so SPI0 stays short.
   Move to B.Cu only when the placement actually fails to close.
 
+#### J4 (SMA) collides with the Pi 5's USB ports — swap the GNSS and terminal edges
+
+Found on the rev 2.0 stack (operator, 2026-10-02): **J4, the edge-mount SMA on
+the right edge (x ≈ 160.5, y ≈ 68.3, launching outward), physically collides
+with the Pi 5's USB ports** below it. Rev 2.1 fixes it by swapping edges:
+
+- **GNSS moves to where the Phoenix terminals are now** (the bottom edge,
+  y ≈ 93–96.5, J2 at x ≈ 109–139.5 and J3 at x ≈ 143–153 in rev 2.0). **U7
+  (MAX-M10M) moves with J4**, so the 50 Ω feed from J4 to `U7-RF_IN` stays as
+  short as it is today, along with the solid-ground SMA pads and the In1.Cu
+  anti-pad notch at the launch (§3.6.1). BT1, the antenna bias and the
+  TIMEPULSE/UART routing to GPIO4/5/18 follow U7.
+- **Some terminals move to where the GNSS is now** (the right edge, which
+  today also holds Q2/Q3, the K-line pull-up switch). Which positions move is
+  not decided yet. Splitting the block across two edges also reopens
+  §13.5.5's space problem: positions on the right edge free bottom-edge width,
+  so the two-level MKKDS (option A) may no longer be the only fit.
+
+**Constraints to check at placement:**
+- **The new SMA position must clear the Pi 5 too.** The bottom edge sits over
+  the Pi's USB-C power and micro-HDMI side. Check the SMA body and the
+  antenna cable's bend radius against those connectors and the case, the same
+  way the USB collision should have been caught.
+- **Keep the vehicle harness landing.** §13.5.5 holds rev 2.0's lower-level J2
+  pin map fixed because the harness was already re-landed once. Moving
+  positions to another edge re-lands the harness anyway, so do it once, in
+  this revision, and update §13.5.5's pin map to match.
+- **Keep the GNSS front end away from the noisy side.** Spec §8.4 (GNSS front
+  end) already notes the M10 has no SAW/LNA and sits above the Pi. Moving U7
+  next to the 12 V input, K-line and CAN terminals puts it nearer to
+  ISO 7637 transients and CAN edges. Keep the RF path over unbroken ground,
+  and leave room between U7 and those traces.
+- **Terminals on the right edge need the same keep-outs.** Their through-hole
+  pins protrude on B.Cu above the Pi's USB ports, and the wire entry must not
+  face into the USB plugs.
+
 ### 13.5.8 Software implied (for later, not part of the board)
 
 Listed so the hardware choices above are not made blind; none of it is
@@ -788,3 +825,4 @@ join the MCU's safe-state nets, and the header closes with no spare GPIO.
 | 15 | U5 pressure calibration against the U6 surrogate: fit `P = Bosch(raw, T_imu) + a + b·(T_imu − T0)` as pinned per-board data (deferred by operator 2026-09-23) | Cold-start warm-up log at the desk (constant pressure, phone as reference) separates a wrong temperature from a pressure offset; then the ECM baro PID 0x33 on a drive as the known answer |
 | 13 | BT1 cell/lead part number with known polarity; `+` on silkscreen | Pick the lead, meter it against the swapped footprint |
 | 14 | J1 13.5 mm stacking header MPN; assembler-fit or DNF decided | Measure on the rev 2.0 stack (item 4), order to MPN |
+| 16 | Edge swap (§13.5.7): which terminal positions move to the right edge; new J4 position clears the Pi 5's USB-C/micro-HDMI and the antenna cable bend; U7 spacing from the 12 V/K-line/CAN entry | Placement, then a fit check on the rev 2.0 stack |
