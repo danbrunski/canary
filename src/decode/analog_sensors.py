@@ -183,15 +183,17 @@ class AnalogFault:
     sensor_volts: float
 
 
-def sensor_volts(module: AdcModule, channel: AnalogChannel, counts: int) -> float:
+def sensor_volts(module: AdcModule, channel: AnalogChannel, counts: float) -> float:
     pin_volts = counts * module.reference_volts / module.full_scale_counts
     return pin_volts * channel.sensor_volts_per_pin_volt
 
 
 def decode_counts(
-    module: AdcModule, channel: AnalogChannel, counts: int
+    module: AdcModule, channel: AnalogChannel, counts: float
 ) -> AnalogReading | AnalogFault:
-    """ADC counts -> a value in ``channel.record_unit``, or the fault it is."""
+    """ADC counts -> a value in ``channel.record_unit``, or the fault it is.
+
+    ``counts`` may be fractional: the mean of several samples."""
     volts = sensor_volts(module, channel, counts)
     if volts < channel.valid_volts.min:
         return AnalogFault(channel.name, "below_window", volts)

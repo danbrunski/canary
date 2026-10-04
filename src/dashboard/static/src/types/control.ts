@@ -148,6 +148,11 @@ export interface CaptureProfile {
    * Refused on the default profile.
    */
   store_every_frame?: boolean;
+  /**
+   * Store every USB ADC sample (firmware v2: 503.9 Hz) instead of the mean of
+   * each five (~100 Hz). For studying the fuel rail's injector pulsation.
+   */
+  analog_full_rate?: boolean;
 }
 
 export interface CaptureProfileState {

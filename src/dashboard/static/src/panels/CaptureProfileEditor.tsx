@@ -394,6 +394,14 @@ export function CaptureProfileEditor({
           />{" "}
           store every CAN frame
         </label>
+        <label title="Normal collection stores each USB ADC input (fuel pressure) as the mean of five samples, about 100 Hz. Store every sample (503.9 Hz with the v2 firmware) to study the rail's injector pulsation. Five times the sensor rows.">
+          <input
+            type="checkbox"
+            checked={draft.analog_full_rate ?? false}
+            onChange={(event) => setDraft({ ...draft, analog_full_rate: event.target.checked })}
+          />{" "}
+          store every analog sample (fuel-pressure pulsation)
+        </label>
         <label title="Off by default: every selected channel is sampled each round, so a capture reads as synchronous rows. Uneven rates suit background monitoring, not tuning.">
           <input
             type="checkbox"

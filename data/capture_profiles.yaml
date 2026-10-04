@@ -241,3 +241,55 @@ profiles:
   behavior_model_recipes: []
   storage_prefix: _capture-broadcast-every-frame
   store_every_frame: true
+- name: fuel-pulsation
+  description: Normal polling, every fuel-pressure sample stored (503.9 Hz)
+  notes: 'Starter profile (2026-10-04). Stores every sample of the USB ADC''s analog
+    inputs (firmware/usb-adc v2: 503.9 Hz, anti-alias filtered to 180 Hz) instead of
+    the mean of each five, so the rail''s injector pulsation can be resolved. It sits
+    at engine-order harmonics of rpm/40 Hz, about 165 Hz near redline
+    (data/analyses/2026-10-04-fuel-pressure-first-drive.md). Analyse it by sample
+    index (metadata adc_seq) with tools/analyze_analog_pulsation.py.
+
+
+    Polls rpm and injector pulse width alongside, so the pulsation can be put in
+    engine orders; only the analog storage differs from normal collection. Five times
+    the sensor rows of a normal drive, so keep these captures to the window that needs
+    them. Needs the v2 firmware: with v1 (100 Hz, no sequence numbers) the samples
+    are stored as they come and nothing is gained.'
+  experimental: false
+  mode01:
+    RPM: 1.0
+    ENGINE_LOAD: 1.0
+    MAF: 1.0
+    THROTTLE_POS: 1.0
+    BAROMETRIC_PRESSURE: 1.0
+    INTAKE_TEMP: 1.0
+    SPEED: 1.0
+    COOLANT_TEMP: 1.0
+  mode01_batch_groups: []
+  mode22:
+  - ECM_RPM
+  - ECM_INJECTOR_PULSE_1
+  - ECM_INJECTOR_PULSE_2
+  mode22_rate_weights: {}
+  memory: []
+  mode01_enabled: true
+  mode22_enabled: true
+  did_interval_seconds: null
+  did_cycle_seconds: null
+  round_timestamps: false
+  target_rate_hz: null
+  did_continuous: false
+  bus_budget_override: null
+  priority_channels: null
+  expected_total_demand_hz: null
+  capacity_evidence: ''
+  required_tuple: []
+  min_achieved_rate_hz: null
+  max_tuple_skew_s: null
+  requires_tune_revision: false
+  corpus_eligible: false
+  behavior_model_recipes: []
+  storage_prefix: _capture-fuel-pulsation
+  store_every_frame: false
+  analog_full_rate: true

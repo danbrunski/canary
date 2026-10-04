@@ -275,6 +275,11 @@ class CaptureProfile(_Strict):
     #: needs those (receive-loss accounting, broadcast byte discovery, frame
     #: rates) sets this. The ``default`` profile may not: it is the corpus's.
     store_every_frame: bool = False
+    #: Store every sample of the USB ADC's analog inputs (fuel pressure) at
+    #: the firmware's full rate (firmware/usb-adc v2: 503.9 Hz, anti-alias
+    #: filtered to 180 Hz) instead of the mean of each ~10 ms, about 100 Hz.
+    #: For studying the rail's injector pulsation; 5x the sensor rows.
+    analog_full_rate: bool = False
 
     @field_validator("name")
     @classmethod

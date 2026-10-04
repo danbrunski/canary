@@ -219,6 +219,13 @@ def active_profile() -> CaptureProfile:
         return _profile.model_copy(deep=True)
 
 
+def analog_full_rate() -> bool:
+    """Whether the active profile stores every USB ADC sample, without
+    :func:`active_profile`'s deep copy (the collector asks ~50 times a second)."""
+    with _lock:
+        return _profile.analog_full_rate
+
+
 def active_profile_name() -> str:
     """The active profile's name, without :func:`active_profile`'s deep copy."""
     with _lock:
@@ -565,6 +572,7 @@ __all__ = [
     "DEFAULT_TUNING_CHANNELS",
     "activate",
     "active_profile",
+    "analog_full_rate",
     "channels",
     "capture_started_monotonic",
     "did_continuous_enabled",

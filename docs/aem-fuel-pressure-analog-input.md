@@ -250,6 +250,31 @@ pulsation (0.12–0.38 psi rms, at engine-order harmonics of rpm/40 Hz) and
 the 100 Hz samples alias it, so the gauge is not the bandwidth limit. Average
 over ≥ 0.5 s for pressure; a faster rate or an anti-alias filter is only for
 studying the pulsation (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`).
+That check could only see update rates below 50 Hz, the 100 Hz Nyquist limit.
+
+**Version 2, for studying the pulsation (written 2026-10-04, not yet flashed).**
+The ADC converts CH0 continuously into a DMA ring at 42,328/s. Every 21
+conversions are summed, then a 64-tap FIR keeps every 4th, giving **503.9 Hz**,
+flat to 180 Hz and ≥ 74 dB down on everything that would alias into 0–200 Hz.
+Together with the divider's 100 nF (corner ~243 Hz, −1.9 dB at 180 Hz, so keep
+it), this is the anti-alias filter. `firmware/usb-adc/design_fir.py` generates
+the taps, and `tests/test_usb_adc_firmware_filter.py` compiles the same filter
+code on the host and drives it with tones. Each line carries a sequence number
+(`CH0:2114\t7342`), and about once a second an `FW:2 503905 15864` line gives
+the rate and the 15.9 ms group delay. The collector stamps each sample by its
+sequence number on a clock fitted to the earliest USB arrivals, rather than by
+arrival: at 100 Hz the arrivals already come in ~2 ms bursts. It stores the
+mean of each 5 samples (100 Hz, as before) unless the capture profile sets
+`analog_full_rate`. The `fuel-pulsation` starter does, at ~400 more rows/s:
+1,190 → ~1,590 stored rows/s on the 2026-10-04 drives, under the ~2,355 the
+writer sustained before CAN went change-only. Watch `/status` storage
+`dropped_records` on the first capture all the same. Analysis is by sample
+index: `python -m tools.analyze_analog_pulsation <session>` reports the
+pulsation lines per steady-rpm band in Hz and engine orders. Its step check
+looks for a line in the spectrum of sample-to-sample change energy that stays
+at a fixed Hz across bands ≥ 600 rpm apart. That signature of an output held
+between updates is visible up to the 180 Hz passband. It needs two steady speeds
+600+ rpm apart, ~10 s each.
 
 ## Status
 
@@ -265,3 +290,6 @@ studying the pulsation (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`)
 - [x] Enabled in `/etc/canary/canary.yaml` on the Pi (`hardware.usb_adc`): first drive 2026-10-04, 205k rows at 100 Hz, one start-up stall (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`)
 - [ ] Offset settled with the sensor vented to atmosphere
 - [x] Faster firmware: `firmware/usb-adc`, 100 Hz, flashed 2026-10-04 via the BOOT0 jumper; stock image saved
+- [x] Version 2 written: 503.9 Hz anti-alias filtered, sequence numbers, collector stamping by sequence, `fuel-pulsation` capture profile, `tools/analyze_analog_pulsation.py` (2026-10-04)
+- [ ] Version 2 built on the Pi and flashed (BOOT0); ACC counts still match v1's 479 within a few counts
+- [ ] First `fuel-pulsation` capture: no storage drops; step check with two steady speeds 600+ rpm apart

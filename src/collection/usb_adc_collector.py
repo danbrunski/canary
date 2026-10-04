@@ -2,26 +2,45 @@
 
 The module (``hardware.usb_adc``; first: a NOYITO 10-channel STM32F103 + CH340
 board) needs no commands: on power-up it prints one text frame per period.
-The stock firmware prints every input every 0.5 s; CANary's own
-(``firmware/usb-adc``) prints only the configured inputs, averaged, at 100 Hz
-and without the volts column. This reads both::
+Three firmwares, all read here::
 
-    CH0:0477\t0.382V\r\n
-    CH1:1513\t1.218V\r\n
-    ...
-    CH9:2212\t1.782V\r\n
-    \r\n
+    CH0:0477\t0.382V\r\n      stock: every input every 0.5 s, with volts
+    CH0:2114\r\n              firmware/usb-adc v1: configured inputs, 100 Hz
+    FW:2 503905 15864\r\n     v2, about once a second: version, rate (mHz),
+    CH0:2114\t7342\r\n            group delay (us); then counts and the
+    \r\n                          sample's sequence number mod 10000, 503.9 Hz
 
-Only the counts are used. The stock firmware's volts column assumes a nominal
-3.3 V reference; the catalog (``data/usb_adc_sensors.yaml``) carries the measured
-one. Each configured input becomes a ``sensor:<name>`` record stamped when its
-line arrived, or a ``sensor:<name>_FAULT`` state when the sensor is outside its
-valid window (:mod:`src.decode.analog_sensors`). The raw line rides along as
-the payload, so a calibration correction can be re-applied to stored sessions.
+A blank line ends every frame. Only the counts are used. The stock
+firmware's volts column assumes a nominal 3.3 V reference; the catalog
+(``data/usb_adc_sensors.yaml``) carries the measured one. Each configured
+input becomes a ``sensor:<name>`` record, or a ``sensor:<name>_FAULT`` state
+when the sensor is outside its valid window (:mod:`src.decode.analog_sensors`).
+The raw line rides along as the payload, so a calibration correction can be
+re-applied to stored sessions.
+
+**Timestamps.** Stock and v1 samples are stamped when their line arrived.
+v2 samples are stamped by their sequence number, on a clock fitted to the
+lower envelope of the arrivals (:class:`SampleClock`: a sample cannot arrive
+before it was sent, and USB only ever adds delay), minus the filter's group
+delay, so the stamp is the instant the sample represents and the spacing is
+exactly the firmware's. Each v2 record carries ``adc_seq``, the unwrapped
+sequence number, for analysis that wants the sample index itself. v2 samples
+before the first ``FW`` line (up to ~1 s after opening) are dropped: without
+it their rate and delay are unknown.
+
+**Stored rate.** v2 delivers 503.9 samples/s. Unless the active capture
+profile sets ``analog_full_rate``, each run of :data:`STORED_HZ`-worth of
+consecutive samples (5) is stored as one record, their mean, stamped at their
+mean instant: the 100 Hz the corpus has always had, from better-filtered
+samples. A pulsation capture sets it and stores every sample.
 
 **The first frame after opening is discarded.** It can begin mid-line, and
 lines queued before the port was opened report an earlier moment than the
 stamp they would get.
+
+The port is read on a thread of its own, which stamps each line as it reads
+it: at ~1,000 lines/s, one event-loop hop per line would be a real cost to
+everything else the loop runs.
 """
 
 from __future__ import annotations
@@ -29,13 +48,17 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import threading
 import time
+from collections import deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from queue import Empty, SimpleQueue
 from typing import Protocol, cast
 
 import serial
 
+from src.collection import tuning_profile
 from src.collection.queueing import QueueDropCounter, put_nowait_or_drop
 from src.collection.reconnect import DEFAULT_RECONNECT_POLICY, ReconnectPolicy, run_with_reconnect
 from src.config import UsbAdcConfig
@@ -51,6 +74,16 @@ from src.telemetry import SENSOR_SOURCE, MetadataValue, TelemetryRecord
 log = logging.getLogger(__name__)
 
 _LINE = re.compile(rb"^CH(\d{1,2}):(\d{1,5})(?:\t|$)")
+_SEQ = re.compile(rb"^CH\d{1,2}:\d{1,5}\t(\d{1,5})$")
+_FW = re.compile(rb"^FW:(\d+) (\d+) (\d+)$")
+
+#: v2 prints the sequence number modulo this.
+SEQ_MODULUS = 10_000
+#: The rate a v2 stream is stored at unless the capture profile asks for every
+#: sample: the boxcar of each run of round(rate / STORED_HZ) samples.
+STORED_HZ = 100.0
+#: How often the loop processes what the reader thread has gathered.
+DRAIN_SECONDS = 0.02
 
 
 class UsbAdcStalledError(RuntimeError):
@@ -83,12 +116,138 @@ def parse_line(line: bytes) -> tuple[int, int] | None:
     return int(match.group(1)), int(match.group(2))
 
 
+def parse_sequence(line: bytes) -> int | None:
+    """A v2 line's sequence number (``b"CH0:2114\\t7342"`` -> 7342), else ``None``."""
+    match = _SEQ.match(line)
+    return None if match is None else int(match.group(1))
+
+
+@dataclass(frozen=True)
+class FirmwareInfo:
+    """What a v2 ``FW`` line announces."""
+
+    version: int
+    rate_hz: float
+    group_delay_s: float
+
+
+def parse_firmware_line(line: bytes) -> FirmwareInfo | None:
+    """``b"FW:2 503905 15864"`` -> version 2, 503.905 Hz, 15.864 ms."""
+    match = _FW.match(line)
+    if match is None:
+        return None
+    version, rate_mhz, delay_us = (int(g) for g in match.groups())
+    if rate_mhz == 0:
+        return None
+    return FirmwareInfo(version, rate_mhz / 1000.0, delay_us / 1e6)
+
+
+class SampleClock:
+    """Stamps v2 samples from their sequence numbers.
+
+    Sample ``n`` leaves the module at ``a + n * P``. It arrives later by a
+    latency that is never negative, so the earliest arrivals trace
+    ``a + n * P``: each block of :attr:`BLOCK` samples contributes its
+    least-delayed one, and a line through the last :attr:`KEEP` of those
+    gives the offset and corrects the nominal period ``P`` (the module's RC
+    oscillator is ~1 % off). The stamp is that line minus the filter's group
+    delay: the instant the sample represents, not the one it was sent.
+    """
+
+    BLOCK = 256
+    KEEP = 40
+
+    def __init__(self, info: FirmwareInfo) -> None:
+        self.info = info
+        self.period = 1.0 / info.rate_hz
+        self._last_n: int | None = None
+        self._last_arrival = 0.0
+        self._block: int | None = None
+        self._block_min: tuple[int, float] = (0, 0.0)
+        self._minima: deque[tuple[int, float]] = deque(maxlen=self.KEEP)
+        self._running_min: float | None = None
+        self._intercept = 0.0
+        self._slope = 0.0
+        self._fitted = False
+
+    def unwrap(self, seq: int, arrival: float) -> int:
+        """The full sequence number of a sample printed as ``seq`` mod
+        :data:`SEQ_MODULUS`: the one nearest where the elapsed time puts it."""
+        if self._last_n is None:
+            return seq
+        elapsed = max(1, round((arrival - self._last_arrival) / self.period))
+        expected = self._last_n + elapsed
+        n = expected + ((seq - expected + SEQ_MODULUS // 2) % SEQ_MODULUS - SEQ_MODULUS // 2)
+        if n <= self._last_n:
+            n += SEQ_MODULUS * ((self._last_n - n) // SEQ_MODULUS + 1)
+        return n
+
+    def observe(self, n: int, arrival: float) -> None:
+        offset = arrival - n * self.period
+        self._last_n, self._last_arrival = n, arrival
+        if self._running_min is None or offset < self._running_min:
+            self._running_min = offset
+        block = n // self.BLOCK
+        if block != self._block:
+            if self._block is not None:
+                self._minima.append(self._block_min)
+                self._refit()
+            self._block = block
+            self._block_min = (n, offset)
+        elif offset < self._block_min[1]:
+            self._block_min = (n, offset)
+
+    def _refit(self) -> None:
+        if len(self._minima) < 3:
+            return
+        ns = [float(n) for n, _ in self._minima]
+        offs = [o for _, o in self._minima]
+        mean_n = sum(ns) / len(ns)
+        mean_o = sum(offs) / len(offs)
+        var = sum((x - mean_n) ** 2 for x in ns)
+        if var == 0:
+            return
+        self._slope = sum((x - mean_n) * (y - mean_o) for x, y in zip(ns, offs, strict=True)) / var
+        self._intercept = mean_o - self._slope * mean_n
+        self._fitted = True
+
+    @property
+    def last_n(self) -> int | None:
+        """The last sequence number observed, unwrapped."""
+        return self._last_n
+
+    @property
+    def rate_hz(self) -> float:
+        """The measured output rate (nominal until the first fit)."""
+        return 1.0 / (self.period + self._slope)
+
+    def stamp(self, n: int) -> float:
+        if self._fitted:
+            sent = n * self.period + self._intercept + self._slope * n
+        else:
+            assert self._running_min is not None, "stamp() before observe()"
+            sent = n * self.period + self._running_min
+        return sent - self.info.group_delay_s
+
+
+@dataclass
+class _Run:
+    """Consecutive v2 samples of one input waiting to be stored as their mean."""
+
+    key: int
+    first_seq: int
+    counts: list[int] = field(default_factory=list)
+    stamps: list[float] = field(default_factory=list)
+    raw: list[bytes] = field(default_factory=list)
+
+
 def counts_to_records(
     catalog: AnalogSensorCatalog,
     adc_input: int,
-    counts: int,
+    counts: float,
     stamp: float,
     raw: bytes,
+    extra: dict[str, MetadataValue] | None = None,
 ) -> list[TelemetryRecord]:
     """The record one input's reading becomes; empty for an unconfigured input."""
     channel = catalog.channel_for_input(adc_input)
@@ -97,8 +256,9 @@ def counts_to_records(
     result = decode_counts(catalog.module, channel, counts)
     metadata: dict[str, MetadataValue] = {
         "adc_input": adc_input,
-        "adc_counts": counts,
+        "adc_counts": counts if isinstance(counts, int) else round(counts, 2),
         "sensor_volts": round(result.sensor_volts, 4),
+        **(extra or {}),
     }
     if isinstance(result, AnalogReading):
         return [
@@ -127,10 +287,117 @@ def counts_to_records(
 @dataclass
 class UsbAdcStats:
     lines: int = 0
-    #: Non-blank lines that were not a ``CHn:counts`` reading, dropped.
+    #: Non-blank lines that were not a reading or a ``FW`` line, dropped.
     parse_errors: int = 0
     #: Readings outside their sensor's valid window (recorded as ``_FAULT``).
     faults: int = 0
+    #: v2 samples the sequence numbers say never arrived.
+    missed_samples: int = 0
+    #: v2 samples dropped while waiting for the first ``FW`` line.
+    awaiting_firmware_line: int = 0
+    firmware_version: int | None = None
+    #: The v2 output rate measured against the host clock.
+    measured_rate_hz: float | None = None
+
+
+class _Assembler:
+    """Turns stamped lines into records: frame sync, v2 clocking, and the
+    stored-rate choice."""
+
+    def __init__(
+        self,
+        catalog: AnalogSensorCatalog,
+        stats: UsbAdcStats,
+        full_rate: Callable[[], bool],
+    ) -> None:
+        self.catalog = catalog
+        self.stats = stats
+        self.full_rate = full_rate
+        self.synced = False
+        self.clock: SampleClock | None = None
+        self.runs: dict[int, _Run] = {}
+        self.last_stamp: dict[int, float] = {}
+
+    def line(self, raw_line: bytes, arrival: float) -> tuple[list[TelemetryRecord], bool]:
+        """Records for one line, and whether it was a reading (for the stall
+        check)."""
+        line = raw_line.strip()
+        if not self.synced:
+            if raw_line and not line:
+                self.synced = True  # the blank line that ends a frame
+            return [], False
+        if not line:
+            return [], False
+        info = parse_firmware_line(line)
+        if info is not None:
+            self._firmware(info)
+            return [], True
+        parsed = parse_line(line)
+        if parsed is None:
+            self.stats.parse_errors += 1
+            return [], False
+        self.stats.lines += 1
+        adc_input, counts = parsed
+        seq = parse_sequence(line)
+        if seq is None:
+            return counts_to_records(self.catalog, adc_input, counts, arrival, line), True
+        if self.clock is None:
+            self.stats.awaiting_firmware_line += 1
+            return [], True
+        n = self.clock.unwrap(seq, arrival)
+        last = self.clock.last_n
+        if last is not None and n > last + 1:
+            self.stats.missed_samples += n - last - 1
+        self.clock.observe(n, arrival)
+        stamp = max(self.clock.stamp(n), self.last_stamp.get(adc_input, float("-inf")))
+        self.last_stamp[adc_input] = stamp
+        return self._sample(adc_input, counts, n, stamp, line), True
+
+    def _firmware(self, info: FirmwareInfo) -> None:
+        self.stats.firmware_version = info.version
+        if self.clock is None or self.clock.info != info:
+            self.clock = SampleClock(info)
+            self.runs.clear()
+        else:
+            self.stats.measured_rate_hz = round(self.clock.rate_hz, 3)
+
+    def _sample(
+        self, adc_input: int, counts: int, n: int, stamp: float, line: bytes
+    ) -> list[TelemetryRecord]:
+        assert self.clock is not None
+        out: list[TelemetryRecord] = []
+        if self.full_rate():
+            out += self.flush(adc_input)
+            out += counts_to_records(self.catalog, adc_input, counts, stamp, line, {"adc_seq": n})
+            return out
+        per_run = max(1, round(self.clock.info.rate_hz / STORED_HZ))
+        key = n // per_run
+        run = self.runs.get(adc_input)
+        if run is not None and run.key != key:
+            out += self.flush(adc_input)
+            run = None
+        if run is None:
+            run = self.runs[adc_input] = _Run(key=key, first_seq=n)
+        run.counts.append(counts)
+        run.stamps.append(stamp)
+        run.raw.append(line)
+        if len(run.counts) == per_run:
+            out += self.flush(adc_input)
+        return out
+
+    def flush(self, adc_input: int) -> list[TelemetryRecord]:
+        run = self.runs.pop(adc_input, None)
+        if run is None or not run.counts:
+            return []
+        count = len(run.counts)
+        return counts_to_records(
+            self.catalog,
+            adc_input,
+            sum(run.counts) / count,
+            sum(run.stamps) / count,
+            b"\n".join(run.raw),
+            {"adc_seq": run.first_seq, "adc_samples": count},
+        )
 
 
 async def collect_usb_adc(
@@ -144,6 +411,7 @@ async def collect_usb_adc(
     monotonic: Callable[[], float] = time.monotonic,
     drop_counter: QueueDropCounter | None = None,
     stats: UsbAdcStats | None = None,
+    full_rate: Callable[[], bool] = tuning_profile.analog_full_rate,
 ) -> None:
     """Read lines from ``reader`` and enqueue records until stopped.
 
@@ -152,30 +420,51 @@ async def collect_usb_adc(
     """
     on_drop = QueueDropCounter("usb_adc") if drop_counter is None else drop_counter
     counters = UsbAdcStats() if stats is None else stats
-    synced = False
+    assembler = _Assembler(catalog, counters, full_rate)
+    lines: SimpleQueue[tuple[bytes, float]] = SimpleQueue()
+    halt = threading.Event()
+    failures: list[BaseException] = []
+
+    def read() -> None:
+        try:
+            while not halt.is_set():
+                raw = reader.readline()
+                if raw:  # b"" is a read timeout, not a line
+                    lines.put((raw, now_fn()))
+        except BaseException as exc:  # handed to the loop below
+            failures.append(exc)
+
+    thread = threading.Thread(target=read, name="usb-adc-reader", daemon=True)
+    thread.start()
     last_reading = monotonic()
-    while not stop_event.is_set():
-        raw = await asyncio.to_thread(reader.readline)
-        stamp = now_fn()
-        line = raw.strip()
-        parsed = parse_line(line) if synced else None
-        if parsed is None:
+    try:
+        while True:
+            # Read stop before draining, so what was read before it is kept.
+            stopping = stop_event.is_set()
+            # Only what is there now, so one pass always finishes.
+            for _ in range(lines.qsize()):
+                try:
+                    raw, arrival = lines.get_nowait()
+                except Empty:
+                    break
+                records, reading = assembler.line(raw, arrival)
+                if reading:
+                    last_reading = monotonic()
+                for record in records:
+                    if isinstance(record.value, str):
+                        counters.faults += 1
+                    put_nowait_or_drop(queue, record, on_drop=on_drop)
+            on_drop.flush_drop_log()
+            if stopping:
+                return
+            if failures:
+                raise failures[0]
             if monotonic() - last_reading > stall_seconds:
                 raise UsbAdcStalledError(f"no reading from the USB ADC for {stall_seconds:g} s")
-            if not synced and raw and not line:
-                synced = True  # the blank line that ends a frame
-            elif synced and line:
-                counters.parse_errors += 1
-            continue
-        last_reading = monotonic()
-        counters.lines += 1
-        adc_input, counts = parsed
-        for record in counts_to_records(catalog, adc_input, counts, stamp, line):
-            if isinstance(record.value, str):
-                counters.faults += 1
-            put_nowait_or_drop(queue, record, on_drop=on_drop)
-        if adc_input == 0:
-            on_drop.flush_drop_log()
+            await asyncio.sleep(DRAIN_SECONDS)
+    finally:
+        halt.set()
+        await asyncio.to_thread(thread.join)
 
 
 async def collect_usb_adc_from_config(
@@ -235,11 +524,17 @@ async def collect_usb_adc_from_config(
 
 
 __all__ = [
+    "SEQ_MODULUS",
+    "STORED_HZ",
+    "FirmwareInfo",
+    "SampleClock",
     "SerialLines",
     "UsbAdcStalledError",
     "UsbAdcStats",
     "collect_usb_adc",
     "collect_usb_adc_from_config",
     "counts_to_records",
+    "parse_firmware_line",
     "parse_line",
+    "parse_sequence",
 ]
