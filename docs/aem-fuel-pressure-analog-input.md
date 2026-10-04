@@ -288,8 +288,8 @@ between updates is visible up to the 180 Hz passband. It needs two steady speeds
 - [ ] Loading check (divider on vs off at steady pressure). Bounded already: a fixed source impedance would show as a slope error against the face, and the offset held constant from 0 to 51 psi, so sag is ≲1 %
 - [x] Collector written: `sensor:FUEL_PRESSURE`, `sensor:FUEL_PRESSURE_FAULT`
 - [x] Enabled in `/etc/canary/canary.yaml` on the Pi (`hardware.usb_adc`): first drive 2026-10-04, 205k rows at 100 Hz, one start-up stall (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`)
-- [ ] Offset settled with the sensor vented to atmosphere
+- [ ] Offset settled with the sensor vented to atmosphere. Planned for the Aeromotive pump swap, a few weeks after 2026-10-04 (`docs/roadmap/supercharger-build.md` F0)
 - [x] Faster firmware: `firmware/usb-adc`, 100 Hz, flashed 2026-10-04 via the BOOT0 jumper; stock image saved
 - [x] Version 2 written: 503.9 Hz anti-alias filtered, sequence numbers, collector stamping by sequence, `fuel-pulsation` capture profile, `tools/analyze_analog_pulsation.py` (2026-10-04)
-- [ ] Version 2 built on the Pi and flashed (BOOT0); ACC counts still match v1's 479 within a few counts
+- [x] Version 2 built on the Pi and flashed 2026-10-04 (BOOT0): 503.6 samples/s, no sequence gaps, FW line once a second. Calibration checked against the face while KOEO pressure bled 33 → 30 psi: CANary 1.5–2.5 psi above the face, consistent with v1's 1.8 within the face's whole-psi display. Clock fix `0fa3da7` deployed: 503.4/s from the first window after a restart
 - [ ] First `fuel-pulsation` capture: no storage drops; step check with two steady speeds 600+ rpm apart

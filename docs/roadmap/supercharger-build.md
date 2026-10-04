@@ -291,6 +291,13 @@ before it is written:
 
 First-start monitoring, in order, each step gated on the one before:
 
+- [ ] **F0 — While the fuel system is open for the Aeromotive swap.** Vent the
+  AEM pressure sensor to atmosphere with the key on and record what
+  `sensor:FUEL_PRESSURE` reads. Set `offset` in `data/usb_adc_sensors.yaml` to
+  minus that. This settles the +1.8 psi analog-vs-face disagreement before the
+  new pump's set point is measured against it
+  (`docs/aem-fuel-pressure-analog-input.md`; v2 firmware re-checked against the
+  face 2026-10-04: 1.5-2.5 psi, within the face's 1 psi resolution).
 - [ ] **F1 — KOEO.** Fuel pump primes; no DTCs; `ignition_only`. Re-verify the
   RAM memory channels (`tools.verify_memory_channels`).
 - [ ] **F2 — Idle.** λ at stoich, STFT near 0 on both banks (a large STFT at idle
