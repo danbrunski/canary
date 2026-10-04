@@ -376,9 +376,15 @@ def test_tracked_manifests_consume_no_demoted_behavior_column(config: CanaryConf
 
     scoped = scope_config(config, resolve_profile_for_tooling(config, "nissan-xterra-2008"))
     assert scoped.daemon.behavior_models.resolve() == SHIPPED
+    # Models are not in git (S03): the deployed manifests' record is the
+    # fixture tests/test_manifest_producibility.py also reads.
+    deployed = REPO / "tests" / "fixtures" / "deployed_manifests" / "nissan-xterra-2008"
+    scoped = scoped.model_copy(
+        update={"daemon": scoped.daemon.model_copy(update={"models_dir": deployed})}
+    )
     inventory = build_inventory(scoped)
     manifests = inventory["dependent_manifests"]
-    assert manifests, "no tracked IF/sequence manifests found"
+    assert manifests, f"no deployed IF/sequence manifests found under {deployed}"
     for manifest in manifests:
         assert "error" not in manifest
         assert manifest["behavior_feature_conflicts"] == {}
