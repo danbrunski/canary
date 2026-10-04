@@ -73,24 +73,36 @@ def test_the_clock_recovers_the_true_rate_and_send_instant_from_late_arrivals() 
     assert max(abs(e) for e in errors) < 0.001
 
 
-def _v2_lines(counts: Iterable[int], start: int = 0, fw_every: int = 504) -> list[bytes]:
-    out: list[bytes] = [b"\r\n"]  # the sync point
+T0 = 1_790_000_000.0
+PERIOD = 1 / INFO.rate_hz
+#: Long enough for the clock to become ready (SampleClock.READY_SPAN_S).
+SECONDS = 8
+
+
+def _v2_lines(
+    counts: Iterable[int], start: int = 0, fw_every: int = 504
+) -> list[tuple[bytes, float]]:
+    """Each line with its arrival: the sample's send instant plus 1 ms."""
+    out: list[tuple[bytes, float]] = [(b"\r\n", T0)]  # the sync point
     for n, c in enumerate(counts, start):
+        arrival = T0 + n * PERIOD + 0.001
         if n % fw_every == 0:
-            out.append(b"FW:2 503905 15864\r\n")
-        out.append(f"CH0:{c:04d}\t{n % SEQ_MODULUS}\r\n".encode())
-        out.append(b"\r\n")
+            out.append((b"FW:2 503905 15864\r\n", arrival))
+        out.append((f"CH0:{c:04d}\t{n % SEQ_MODULUS}\r\n".encode(), arrival))
+        out.append((b"\r\n", arrival))
     return out
 
 
 class FakeSerial:
-    def __init__(self, lines: list[bytes], stop: asyncio.Event) -> None:
+    def __init__(self, lines: list[tuple[bytes, float]], stop: asyncio.Event) -> None:
         self.lines = lines
         self.stop = stop
+        self.arrival = T0
 
     def readline(self) -> bytes:
         if self.lines:
-            return self.lines.pop(0)
+            line, self.arrival = self.lines.pop(0)
+            return line
         self.stop.set()
         return b""
 
@@ -102,18 +114,18 @@ class FakeSerial:
 
 
 async def _collect(
-    lines: list[bytes], *, full_rate: bool, stats: UsbAdcStats | None = None
+    lines: list[tuple[bytes, float]], *, full_rate: bool, stats: UsbAdcStats | None = None
 ) -> list[TelemetryRecord]:
     stop = asyncio.Event()
     queue: asyncio.Queue[TelemetryRecord] = asyncio.Queue()
-    clock = iter(1_790_000_000.0 + i / 503.905 for i in range(100_000))
+    reader = FakeSerial(lines, stop)
     await collect_usb_adc(
-        FakeSerial(lines, stop),
+        reader,
         CATALOG,
         queue,
         stop,
         stall_seconds=60.0,
-        now_fn=lambda: next(clock),
+        now_fn=lambda: reader.arrival,
         stats=stats,
         full_rate=lambda: full_rate,
     )
@@ -124,23 +136,28 @@ async def _collect(
 
 
 async def test_normal_collection_stores_the_mean_of_each_five_samples() -> None:
-    counts = [2100, 2110, 2120, 2130, 2140] * 4
+    samples = SECONDS * 504
+    counts = [2100, 2110, 2120, 2130, 2140] * (samples // 5)
     records = await _collect(_v2_lines(counts), full_rate=False)
-    assert len(records) == 4
+    # Held until the clock was ready, then every run stamped and stored.
+    assert len(records) == len(counts) // 5
     assert {r.metadata["adc_counts"] for r in records} == {2120.0}
-    assert [r.metadata["adc_seq"] for r in records] == [0, 5, 10, 15]
+    assert [r.metadata["adc_seq"] for r in records[:3]] == [0, 5, 10]
     assert {r.metadata["adc_samples"] for r in records} == {5}
+    first = records[0].timestamp.timestamp()
+    # Stamped at the mean instant of its five samples, less the filter delay.
+    assert first == pytest.approx(T0 + 2 * PERIOD - INFO.group_delay_s, abs=1e-3)
     gaps = [
         (b.timestamp - a.timestamp).total_seconds()
         for a, b in zip(records, records[1:], strict=False)
     ]
-    assert gaps == pytest.approx([5 / 503.905] * 3, abs=1e-4)
+    assert max(abs(g - 5 * PERIOD) for g in gaps) < 2e-5
 
 
 async def test_a_pulsation_capture_stores_every_sample_by_sequence() -> None:
-    counts = [2114 + (n % 7) for n in range(30)]
+    counts = [2114 + (n % 7) for n in range(SECONDS * 504)]
     records = await _collect(_v2_lines(counts), full_rate=True)
-    assert [r.metadata["adc_seq"] for r in records] == list(range(30))
+    assert [r.metadata["adc_seq"] for r in records] == list(range(len(counts)))
     assert [r.metadata["adc_counts"] for r in records] == counts
     assert records[0].payload == b"CH0:2114\t0"
 
@@ -151,9 +168,33 @@ async def test_samples_before_the_firmware_line_are_dropped_and_gaps_counted() -
     assert await _collect(lines, full_rate=True, stats=stats) == []
     assert stats.awaiting_firmware_line == 30
 
-    lines = _v2_lines([2114] * 20)
+    lines = _v2_lines([2114] * (SECONDS * 504))
     del lines[2 * 6 + 2 : 2 * 9 + 2]  # samples 6, 7, 8 never arrive
     stats = UsbAdcStats()
     records = await _collect(lines, full_rate=True, stats=stats)
     assert stats.missed_samples == 3
     assert [r.metadata["adc_seq"] for r in records][5:7] == [5, 9]
+
+
+def test_a_starved_start_is_stamped_from_the_envelope_not_the_backlog() -> None:
+    """2026-10-04: the reader thread was starved for seconds while the daemon
+    started, and the queued lines all arrived late at once. The clock must not
+    be ready on them, and once it is, the held samples' stamps are right."""
+    clock = SampleClock(INFO)
+    rng = random.Random(9)
+    stamps_ready_at = None
+    n_total = 12 * 504
+    for n in range(n_total):
+        sent = T0 + n * PERIOD
+        if sent < T0 + 3.0:
+            # Starved: everything sent in the first 3 s arrives in a rush after it.
+            arrival = T0 + 3.0 + n * PERIOD * 0.05
+        else:
+            arrival = sent + 0.0005 + rng.expovariate(1 / 0.002)
+        clock.observe(clock.unwrap(n % SEQ_MODULUS, arrival), arrival)
+        if clock.ready and stamps_ready_at is None:
+            stamps_ready_at = sent
+    assert stamps_ready_at is not None and stamps_ready_at > T0 + 3.0 + 4.0
+    # Every sample, the starved ones included, stamped within a millisecond.
+    for n in range(0, n_total, 97):
+        assert clock.stamp(n) + INFO.group_delay_s == pytest.approx(T0 + n * PERIOD, abs=1e-3)

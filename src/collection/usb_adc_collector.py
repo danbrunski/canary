@@ -82,6 +82,9 @@ SEQ_MODULUS = 10_000
 #: The rate a v2 stream is stored at unless the capture profile asks for every
 #: sample: the boxcar of each run of round(rate / STORED_HZ) samples.
 STORED_HZ = 100.0
+#: Longest a v2 stream is held waiting for its clock (see SampleClock.ready);
+#: it is ready ~5 s after a clean start.
+MAX_PENDING_SECONDS = 60.0
 #: How often the loop processes what the reader thread has gathered.
 DRAIN_SECONDS = 0.02
 
@@ -148,14 +151,33 @@ class SampleClock:
     Sample ``n`` leaves the module at ``a + n * P``. It arrives later by a
     latency that is never negative, so the earliest arrivals trace
     ``a + n * P``: each block of :attr:`BLOCK` samples contributes its
-    least-delayed one, and a line through the last :attr:`KEEP` of those
-    gives the offset and corrects the nominal period ``P`` (the module's RC
+    least-delayed one, and a line under the last :attr:`KEEP` of those gives
+    the offset and corrects the nominal period ``P`` (the module's RC
     oscillator is ~1 % off). The stamp is that line minus the filter's group
     delay: the instant the sample represents, not the one it was sent.
+
+    A whole block can arrive late: while the daemon starts, the reader thread
+    was starved for seconds on 2026-10-04 and the lines queued in the kernel.
+    Those minima lie above the envelope, and a plain least-squares line
+    through them made the first ~30 s of stamps run 5-140 % fast. So the fit
+    keeps only minima within :attr:`ENVELOPE_S` of its own lower edge, and
+    the clock is :attr:`ready` only once that edge rests on enough of them,
+    the newest included (the reader has caught up).
     """
 
     BLOCK = 256
-    KEEP = 40
+    #: ~12 s of block minima; the fit tries every pair, so keep this small.
+    KEEP = 24
+    #: Pairs closer than this give too coarse a slope to try.
+    PAIR_SPAN_S = 2.0
+    #: A block minimum this far above the fitted edge was delayed, not sent late.
+    ENVELOPE_S = 0.002
+    #: Ready once this many minima, spanning this long, sit on the edge.
+    READY_MINIMA = 5
+    READY_SPAN_S = 4.0
+    #: The RC oscillator's tolerance, with margin: a fitted rate further than
+    #: this from nominal is a bad fit, not a fast module.
+    MAX_RATE_ERROR = 0.03
 
     def __init__(self, info: FirmwareInfo) -> None:
         self.info = info
@@ -165,10 +187,9 @@ class SampleClock:
         self._block: int | None = None
         self._block_min: tuple[int, float] = (0, 0.0)
         self._minima: deque[tuple[int, float]] = deque(maxlen=self.KEEP)
-        self._running_min: float | None = None
         self._intercept = 0.0
         self._slope = 0.0
-        self._fitted = False
+        self._ready = False
 
     def unwrap(self, seq: int, arrival: float) -> int:
         """The full sequence number of a sample printed as ``seq`` mod
@@ -185,8 +206,6 @@ class SampleClock:
     def observe(self, n: int, arrival: float) -> None:
         offset = arrival - n * self.period
         self._last_n, self._last_arrival = n, arrival
-        if self._running_min is None or offset < self._running_min:
-            self._running_min = offset
         block = n // self.BLOCK
         if block != self._block:
             if self._block is not None:
@@ -198,18 +217,48 @@ class SampleClock:
             self._block_min = (n, offset)
 
     def _refit(self) -> None:
-        if len(self._minima) < 3:
+        """The line under every block minimum that the most minima rest on.
+
+        Each pair of minima at least :attr:`PAIR_SPAN_S` apart proposes a
+        slope (within the oscillator's tolerance); the line of that slope is
+        lowered until no minimum is below it, and scored by how many minima
+        lie within :attr:`ENVELOPE_S` of it. Delayed blocks sit above every
+        such line, so they cannot tilt the winner: they only fail to score.
+        """
+        points = list(self._minima)
+        if len(points) < 2:
             return
-        ns = [float(n) for n, _ in self._minima]
-        offs = [o for _, o in self._minima]
-        mean_n = sum(ns) / len(ns)
-        mean_o = sum(offs) / len(offs)
-        var = sum((x - mean_n) ** 2 for x in ns)
-        if var == 0:
+        min_gap = self.PAIR_SPAN_S / self.period
+        bound = self.MAX_RATE_ERROR * self.period
+        best: tuple[int, float, float, float, list[tuple[int, float]]] | None = None
+        for i, (n1, o1) in enumerate(points):
+            for n2, o2 in points[i + 1 :]:
+                if n2 - n1 < min_gap:
+                    continue
+                slope = (o2 - o1) / (n2 - n1)
+                if abs(slope) > bound:
+                    continue
+                intercept = min(o - slope * n for n, o in points)
+                inliers = [
+                    (n, o) for n, o in points if o - (intercept + slope * n) <= self.ENVELOPE_S
+                ]
+                spread = sum(o - (intercept + slope * n) for n, o in inliers) / len(inliers)
+                key = (len(inliers), -spread)
+                if best is None or key > (best[0], -best[1]):
+                    best = (len(inliers), spread, slope, intercept, inliers)
+        if best is None:
             return
-        self._slope = sum((x - mean_n) * (y - mean_o) for x, y in zip(ns, offs, strict=True)) / var
-        self._intercept = mean_o - self._slope * mean_n
-        self._fitted = True
+        count, _, slope, intercept, inliers = best
+        self._slope, self._intercept = slope, intercept
+        span = (inliers[-1][0] - inliers[0][0]) * self.period
+        newest_on_edge = inliers[-1] == points[-1]
+        if count >= self.READY_MINIMA and span >= self.READY_SPAN_S and newest_on_edge:
+            self._ready = True
+
+    @property
+    def ready(self) -> bool:
+        """Whether stamps can be trusted (see the class docstring)."""
+        return self._ready
 
     @property
     def last_n(self) -> int | None:
@@ -222,11 +271,9 @@ class SampleClock:
         return 1.0 / (self.period + self._slope)
 
     def stamp(self, n: int) -> float:
-        if self._fitted:
-            sent = n * self.period + self._intercept + self._slope * n
-        else:
-            assert self._running_min is not None, "stamp() before observe()"
-            sent = n * self.period + self._running_min
+        if not self._ready:
+            raise RuntimeError("SampleClock.stamp() before the clock is ready")
+        sent = n * self.period + self._intercept + self._slope * n
         return sent - self.info.group_delay_s
 
 
@@ -295,6 +342,9 @@ class UsbAdcStats:
     missed_samples: int = 0
     #: v2 samples dropped while waiting for the first ``FW`` line.
     awaiting_firmware_line: int = 0
+    #: v2 samples dropped because the clock never became ready to stamp them
+    #: (more than :data:`MAX_PENDING_SECONDS` held).
+    untimed_dropped: int = 0
     firmware_version: int | None = None
     #: The v2 output rate measured against the host clock.
     measured_rate_hz: float | None = None
@@ -317,6 +367,9 @@ class _Assembler:
         self.clock: SampleClock | None = None
         self.runs: dict[int, _Run] = {}
         self.last_stamp: dict[int, float] = {}
+        #: Samples held until the clock is ready, then stamped retroactively:
+        #: the sequence numbers are exact, so nothing is lost by waiting.
+        self.pending: deque[tuple[int, int, int, bytes]] = deque()
 
     def line(self, raw_line: bytes, arrival: float) -> tuple[list[TelemetryRecord], bool]:
         """Records for one line, and whether it was a reading (for the stall
@@ -349,15 +402,28 @@ class _Assembler:
         if last is not None and n > last + 1:
             self.stats.missed_samples += n - last - 1
         self.clock.observe(n, arrival)
-        stamp = max(self.clock.stamp(n), self.last_stamp.get(adc_input, float("-inf")))
-        self.last_stamp[adc_input] = stamp
-        return self._sample(adc_input, counts, n, stamp, line), True
+        self.pending.append((adc_input, counts, n, line))
+        if not self.clock.ready:
+            limit = int(MAX_PENDING_SECONDS * self.clock.info.rate_hz)
+            while len(self.pending) > limit:
+                self.pending.popleft()
+                self.stats.untimed_dropped += 1
+            return [], True
+        out: list[TelemetryRecord] = []
+        while self.pending:
+            held_input, held_counts, held_n, held_line = self.pending.popleft()
+            stamp = max(self.clock.stamp(held_n), self.last_stamp.get(held_input, float("-inf")))
+            self.last_stamp[held_input] = stamp
+            out += self._sample(held_input, held_counts, held_n, stamp, held_line)
+        return out, True
 
     def _firmware(self, info: FirmwareInfo) -> None:
         self.stats.firmware_version = info.version
         if self.clock is None or self.clock.info != info:
             self.clock = SampleClock(info)
             self.runs.clear()
+            self.stats.untimed_dropped += len(self.pending)
+            self.pending.clear()
         else:
             self.stats.measured_rate_hz = round(self.clock.rate_hz, 3)
 
