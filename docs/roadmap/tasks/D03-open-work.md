@@ -2286,10 +2286,20 @@ live here now, so the documents could be archived
     route) and `TreadWearCard.test.ts` (4). The route-table, MCP-tool and
     script-CLI snapshots are updated.
 
-  **Remaining (Pi/operator):**
-  - deploy, then run the backfill on the Pi while parked;
+  *Pi, 2026-10-04:* deployed (`1e82c29`); the scoped profile resolves
+  2.559 m; the backfill measured 9 of 63 digests (54 refused: 38
+  `too_few_steady_pairs`, 16 `inputs_missing`), and 137 sessions have no
+  digest at all. The 9 drives (2026-08-05..09-20) scatter **0.43 %** σ,
+  not the laptop's 0.15 %. One drive, `2026-09-10T002208`, reads 2.584 m
+  (+1 %), and the rest sit within 2.546–2.571 m. So one Pi drive resolves
+  only ~±1.7 mm of tread; the median of 10 is ~±0.6 mm. Most drives
+  are too short or too slow to measure, so the trend fills in slowly.
+
+  **Remaining (operator):**
   - one gauge reading on the driven (rear) tyres, recorded from the card,
-    to turn the trend into depth.
+    to turn the trend into depth;
+  - worth a look: why `2026-09-10T002208` reads +1 % (its gears and speed
+    range are in its digest), and why 137 sessions have no trip digest.
 
 
 ## Deferred by decision, not blocked
