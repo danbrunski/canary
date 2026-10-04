@@ -429,7 +429,7 @@ Evidence this builds on:
     typecheck`, `pnpm lint`, `pnpm format:check` clean; `pnpm test` 71 files /
     557 tests passed.
 
-- [ ] **W08.9 Known answer on the truck** (needs the truck, key on, engine
+- [x] **W08.9 Known answer on the truck** (needs the truck, key on, engine
   off).
   - Run the backup from the dashboard.
   - **Accept:** the image's sha256 equals `a46baa24…be50`, the 2026-10-04
@@ -438,6 +438,29 @@ Evidence this builds on:
     re-read matches.
   - Record the duration and retries, and confirm normal polling resumed
     within a minute of the end.
+  - *Passed 2026-10-04 (Pi `896b3f7`, ECU calibration ID read that boot:
+    `1ZS44A00000`).* The run started 22:01:31Z, through
+    `POST /control/rom/backup`, the same job the dashboard button drives:
+    - 16,645 reads (1,048,576 bytes) in **610.3 s**, with 33,427 requests,
+      **4 retries / 4 timeouts**, 0 send errors and 0 NRCs.
+    - sha256 `a46baa248f16…1531be50`; `revision_match` ZS44A-20260920
+      `matched`.
+    - Checksum `be32_sum_xor` stored = computed (sum `0xF538FCAA`, xor
+      `0x0D3BBAC0`). Calibration ID image = ECU = `1ZS44A00000`. The 64-block
+      re-read had 0 mismatches.
+    - Stored and verified. Polling resumed 2.1 s after the release.
+  - *A first attempt at 21:58:32Z failed* at block 1,729 (0x01A97F): "session
+    0xFB: no response within 0.5 s" after 4 attempts. The key had been turned
+    off. Every ECM broadcast (0x23D, 0x231, 0x551, 0x7E8, …) stopped at
+    21:59:36Z, while 0x2D1/0x2DE/0x280 carried on. The job failed cleanly:
+    nothing stored, the session released, and the exit sequence sent.
+    - Gap found: the refusal names a timeout, not the cause. While the job
+      holds the ECM, `vehicle_state` reads `passive`, so the in-read re-check
+      cannot see key-off.
+    - A read timeout that coincides with the ECM's own broadcast frames going
+      silent could be reported as "ECM went silent (key off?)". This is not
+      implemented: an operator-facing message improvement, not a correctness
+      issue.
 
 ## Order
 
