@@ -227,3 +227,26 @@ modules:
               (16:51:04Z) together with 0x2000, and not set by VDC-off at
               16:52:16.2Z (SLIP stayed off, 0x2000 set alone). Session
               2026-09-24T164502 (operator-relayed; not re-derived here).
+  0x58:
+    name: SRS
+    key_bytes: [0x6D, 0x8F]
+    evidence: >-
+      The operator's scan tool reading and clearing airbag codes, KOEO,
+      session 2026-10-04T194342: 81 58 FC 81 56 -> 83 FC 58 C1 6D 8F 94, three
+      times (19:48:57.98, 19:49:00.52, 19:49:30.96Z). Just before it, at
+      19:48:54.56Z, the tool sent 02 10 C0 on CAN 0x752 and nothing answered,
+      so this module is K-line only (data/analyses/2026-10-04-srs-kline-scan-tool.md).
+      No reader: CANary has never commanded it.
+    dids:
+      - did: 0x1100
+        width: 4
+        evidence: one reply 62 11 00 80 41 FF FF, 2026-10-04T194342 19:49:01.4Z, before the clear
+        note: Unread meaning; read on the scan tool's code screen, so possibly a DTC record.
+      - did: 0x1120
+        width: 4
+        evidence: one reply 62 11 20 FF FF FF F9, 2026-10-04T194342 19:49:01.6Z, before the clear
+        note: Unread meaning.
+      - did: 0x113D
+        width: 1
+        evidence: one reply 62 11 3D 0C, 2026-10-04T194342 19:49:01.8Z, before the clear
+        note: Unread meaning.

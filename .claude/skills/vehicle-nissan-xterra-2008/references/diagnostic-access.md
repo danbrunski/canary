@@ -169,7 +169,10 @@ UpRev RPM, with scale stability 0.9985–1.0011 across 750–3700 rpm.
 
 - **10400 baud 8N1, KWP2000 (ISO 14230).** ECM address **`0x10`**. The **ABS
   module (`0x28`)** is on the same K-line and answers too, with its own reader
-  and DIDs in `kline.yaml`.
+  and DIDs in `kline.yaml`. The **airbag (SRS) module (`0x58`)** is K-line
+  only: it ignored `10 C0` on CAN 0x752. The scan tool clears its codes with
+  a bare `14`, which gets about 350 ms of `7F 14 78` and then `54`
+  (`data/analyses/2026-10-04-srs-kline-scan-tool.md`).
 - **Tester address `0xFC`, not the ISO 14230-4 default `0xF1`.** A
   StartCommunication from `0xF1` (or to `0x33`/`0x11`/`0x01`/`0x12`) gets
   silence, which reads exactly like dead hardware.

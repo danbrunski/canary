@@ -67,7 +67,11 @@ def _with_abs_did(**did: object) -> dict[str, object]:
 
 def test_the_modules_are_named_by_address_and_unnamed_ones_by_hex() -> None:
     profile = load_kline_profile(XTERRA)
-    assert {address: m.name for address, m in profile.modules.items()} == {0x10: "ECM", 0x28: "ABS"}
+    assert {address: m.name for address, m in profile.modules.items()} == {
+        0x10: "ECM",
+        0x28: "ABS",
+        0x58: "SRS",
+    }
     assert profile.module_label(0x28) == "ABS"
     assert profile.module_label(0x33) == "33"
     assert profile.module_label(None) == "unknown"
@@ -78,6 +82,9 @@ def test_the_modules_are_named_by_address_and_unnamed_ones_by_hex() -> None:
     abs_module = profile.modules[0x28]
     assert abs_module.key_bytes == (0x6D, 0x8F)
     assert kp.start_communication(0x28, profile.tester_address) == bytes.fromhex("81 28 fc 81 26")
+    # The airbag module, as the scan tool addressed it on 2026-10-04.
+    assert profile.modules[0x58].key_bytes == (0x6D, 0x8F)
+    assert kp.start_communication(0x58, profile.tester_address) == bytes.fromhex("81 58 fc 81 56")
 
 
 def test_the_abs_bindings_decode_their_known_answers() -> None:
