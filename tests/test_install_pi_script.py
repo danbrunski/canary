@@ -505,6 +505,8 @@ def test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud(installer: Insta
     assert "ExecStartPost=-/usr/bin/udevadm trigger --action=add /dev/pps-canary" in pps
     baud = (units / "canary-gpsd@ttyAMA2.service.d" / "canary-baud.conf").read_text()
     assert "/usr/bin/gpsctl -s 115200 /dev/ttyAMA2" in baud
+    # gpsctl can hang and ignores SIGTERM; an unbounded try never retries.
+    assert "/usr/bin/timeout -s KILL 20 /usr/bin/gpsctl" in baud
     assert "ExecStartPost=-" in baud
 
 

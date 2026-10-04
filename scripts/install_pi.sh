@@ -327,7 +327,11 @@ EOF
     # without network. 115200 brought the lag to ~65 ms. The receiver has no
     # backup cell, so the speed is lost at every power cut and is set on every
     # attach, through gpsd, which follows the port to the new speed. gpsctl
-    # refuses until gpsd has identified the receiver, hence the retries.
+    # refuses until gpsd has identified the receiver, hence the retries. It can
+    # also hang for good, ignoring SIGTERM: after a gpsd stop/start on
+    # 2026-10-04 one try sat for minutes, and a oneshot unit has no start
+    # timeout, so the loop never reached its next try. Each try is killed at
+    # 20 s, which bounds the loop at ~3.5 min.
     if [[ -n "${hat_product}" && "${hat_product}" == CANary-HAT* \
           && "${CANARY_GPS_DEVICE}" == /dev/ttyAMA* ]]; then
       _gps_unit="canary-gpsd@${CANARY_GPS_DEVICE#/dev/}.service"
@@ -335,7 +339,7 @@ EOF
       write_managed gpsd "${UNIT_DIR}/${_gps_unit}.d/canary-baud.conf" <<EOF
 # Managed by canary scripts/install_pi.sh — HAT GNSS at ${CANARY_HAT_GPS_BAUD:-115200} baud on every attach.
 [Service]
-ExecStartPost=-/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/gpsctl -s ${CANARY_HAT_GPS_BAUD:-115200} ${CANARY_GPS_DEVICE} && exit 0; sleep 1; done; echo "could not set ${CANARY_GPS_DEVICE} to ${CANARY_HAT_GPS_BAUD:-115200} baud" >&2; exit 1'
+ExecStartPost=-/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/timeout -s KILL 20 /usr/bin/gpsctl -s ${CANARY_HAT_GPS_BAUD:-115200} ${CANARY_GPS_DEVICE} && exit 0; sleep 1; done; echo "could not set ${CANARY_GPS_DEVICE} to ${CANARY_HAT_GPS_BAUD:-115200} baud" >&2; exit 1'
 EOF
     fi
     systemctl daemon-reload

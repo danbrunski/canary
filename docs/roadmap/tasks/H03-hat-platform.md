@@ -176,8 +176,13 @@ other checklist leans on.
   `canary-gpsd-pps`). Tests:
   `test_every_gpsd_start_replays_the_receivers_add_event`,
   `test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud`.
-  Installed by hand on the Pi 2026-10-04 (`daemon-reload`, nothing restarted).
-  A gpsd stop/start on a parked truck has not yet exercised them.
+  Installed by hand on the Pi 2026-10-04 (`daemon-reload`, nothing restarted;
+  byte-identical to the installer's output). **Exercised on the parked truck
+  the same day**, replaying the apt sequence with the receiver first forced to
+  9600: `systemctl stop gpsd.service gpsd.socket`, then `start`. The PPS and
+  `/dev/ttyAMA2` came back on their own, the daemon logged `gps collection
+  started` within 6 s, and the receiver was at 115200 30 s after the start,
+  with no `txbuf`.
 
 - [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
@@ -198,7 +203,19 @@ other checklist leans on.
   `canary-gpsd@ttyAMA2.service.d/canary-baud.conf` on a HAT install, which
   repeats that `gpsctl -s` after every attach (retried, since gpsd must
   identify the receiver first; `CANARY_HAT_GPS_BAUD` overrides the speed).
-  Installed on the Pi by hand; the next attach (a boot) exercises it.
+  Installed on the Pi by hand. **Verified 2026-10-04:**
+  - **A real power cut.** The Pi shut down on UPS at key-off, so the HAT's
+    receiver lost power and came back at 9600. At the 20:27Z boot, two
+    `gpsctl` tries timed out waiting for gpsd to identify the receiver, the
+    third set 115200, and gpsd reported 115200 with no `txbuf`.
+  - **A gpsd stop/start** (H03.3's test), from a forced 9600: back to 115200
+    in 30 s.
+  - **A defect, found and fixed.** On the first stop/start, one `gpsctl` try
+    hung for minutes and ignored SIGTERM. A oneshot unit has
+    `TimeoutStartSec=infinity`, so the loop never retried, and the port
+    stayed at 9600 until the try was SIGKILLed. Each try now runs under
+    `timeout -s KILL 20`. On the rerun the first try hung again, was killed at
+    20 s, and the second succeeded.
   **Still owed:** `CFG-RATE-MEAS` 100 ms, and the 10 Hz checks.
 - [x] **H03.5 uart0 on by default in the overlay** once H05 has a collector
   that uses it. The SysRq hazard needs a console on uart0, and on the Pi 5 the
