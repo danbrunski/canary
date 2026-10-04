@@ -134,8 +134,9 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   the speed byte (one byte, km/h = raw × 2). It tracks wheel speed with
   correlation 0.9997. The catalog's `0x1125` is bank-swapped as well. **Never
   carry a DID's meaning across transports.** See
-  `docs/ecu-firmware-analysis.md` → "Mode 22 catalog corrections"; the
-  `data/dids.yaml` fix is pending.
+  `docs/ecu-firmware-analysis.md` → "Mode 22 catalog corrections"; applied
+  to `data/dids.yaml` on 2026-10-04 (0x1102 is `ECM_VEHICLE_SPEED_COARSE`;
+  D03.36), and the catalog now refuses a DID backed only by K-line evidence.
 - **IAT reads engine-bay air at idle, not heat soak.** It is
   stagnation-dominated: above ~8 g/s it pins to ambient, and the high readings
   occur only at idle (corr with rpm −0.80). "IAT rose through the drive" was

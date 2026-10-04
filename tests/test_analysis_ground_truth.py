@@ -27,8 +27,14 @@ import pytest
 import yaml
 
 from src.analysis.broadcast_discovery import credible_fits, sweep_session
-from src.analysis.compare import PairingPolicy, compare_channels
+from src.analysis.compare import (
+    InputNotCapturedError,
+    PairingPolicy,
+    align_pairs,
+    compare_channels,
+)
 from src.decode.bindings import load_bindings
+from src.decode.dids import load_did_map
 from src.preprocessing.loader import read_session
 from src.storage.broadcast_storage import ChangeOnlyStorageError, change_only_copy
 
@@ -313,3 +319,142 @@ def test_segmenter_fallback_reproduces_mode01_labels() -> None:
         f"{int(fresh.sum())} rows:\n"
         f"{pd.crosstab(ref_labels, fallback.loc[fresh, MODE_COLUMN])}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Mode 22 DIDs on CAN (2026-10-04): 0x1102 is road speed, 0x1123-0x1126 are
+# the trims, and none of their meanings may come from the K-line DID table.
+# ---------------------------------------------------------------------------
+
+DIDS_PATH = Path("data/dids.yaml")
+DID_SESSION = FIXTURE_ROOT / EXPECTATIONS["did_fixture"]
+
+
+@pytest.fixture(scope="module")
+def did_frame() -> pd.DataFrame:
+    return read_session(DID_SESSION)
+
+
+def _did_ids(cases: list[dict[str, Any]]) -> list[str]:
+    return [f"{case['signal']}~{case['reference']}" for case in cases]
+
+
+def _per_sample_ratio(
+    frame: pd.DataFrame, case: dict[str, Any], dids_path: Path = DIDS_PATH
+) -> np.ndarray:
+    """signal / reference at each paired instant, where the reference is fast
+    enough that one quantisation step is not most of the reading."""
+    pairs = align_pairs(
+        frame, case["signal"], case["reference"], policy=POLICY, dids_path=dids_path
+    ).pairs
+    moving = pairs["b"] > case["ratio_min_reference"]
+    return (pairs["a"][moving] / pairs["b"][moving]).to_numpy(dtype=float)
+
+
+@pytest.mark.parametrize(
+    "pin", EXPECTATIONS["did_pins"], ids=[f"0x{p['did']:04X}" for p in EXPECTATIONS["did_pins"]]
+)
+def test_did_catalog_entries_are_pinned_to_the_firmware(pin: dict[str, Any]) -> None:
+    """The corrected CAN DIDs, exactly, and named for the PID that shares their RAM.
+
+    The firmware's CAN pointer table sends each DID to the RAM address the CAN
+    Mode 01 handler reads for ``mode01_pid``. The expected name is derived
+    from that PID's own Mode 01 meaning rather than copied, so swapping banks
+    (0x1125 as bank 2, the pre-2026-10-04 catalog) or short for long fails
+    here even though no capture can pair a trim DID with its PID yet.
+    """
+    from src.collection.pid_decoders import PID_DECODERS
+
+    entry = next(e for e in load_did_map(DIDS_PATH).dids if e.did == pin["did"])
+    assert entry.name == pin["name"]
+    assert entry.byte_start == pin["byte_start"]
+    assert entry.byte_length == pin["byte_length"]
+    assert entry.response_length == pin["byte_length"]
+    assert entry.scale == pytest.approx(pin["scale"])
+    assert (entry.offset or 0.0) == pytest.approx(pin["offset"])
+    assert entry.unit == pin["unit"]
+
+    pid_name = PID_DECODERS[pin["mode01_pid"]][0]
+    if "FUEL_TRIM" in pid_name:
+        # SHORT_FUEL_TRIM_1 -> ECM_SHORT_FUEL_TRIM_B1: kind and bank both
+        # come from the PID, so neither can drift from the firmware record.
+        kind, bank = pid_name.rsplit("_", 1)
+        assert entry.name == f"ECM_{kind}_B{bank}", (
+            f"0x{pin['did']:04X} reads the PID 0x{pin['mode01_pid']:02X} word "
+            f"({pid_name}) but is catalogued as {entry.name}"
+        )
+    else:
+        assert pid_name == "SPEED"
+        assert "SPEED" in entry.name
+    # Every corrected entry rests on CAN evidence, never on K-line alone.
+    assert "can" in {item.transport for item in entry.evidence}
+
+
+@pytest.mark.parametrize(
+    "case", EXPECTATIONS["did_agreement"], ids=_did_ids(EXPECTATIONS["did_agreement"])
+)
+def test_did_agrees_with_its_independent_reference(
+    case: dict[str, Any], did_frame: pd.DataFrame
+) -> None:
+    """A CAN DID decode and a road-speed reference must agree 1:1, pair by pair.
+
+    The same 1:1 hypothesis as the broadcast checks, plus the per-sample ratio
+    (AGENTS.md: read the ratio even when the verdict says stable).
+    """
+    result = compare_channels(did_frame, case["signal"], case["reference"], policy=POLICY)
+
+    assert abs(result.difference_bias) <= case["max_residual_bias"], (
+        f"{result.describe()} — mean b-a is {result.difference_bias:+.3f} km/h; "
+        "a correct decode sits within its quantisation of zero"
+    )
+    assert result.difference_spread <= case["max_residual_spread"], result.describe()
+    assert result.r_squared >= case["min_r_squared"], result.describe()
+    assert abs(result.slope - 1.0) * 100.0 <= case["max_scale_error_pct"], result.describe()
+    assert abs(result.offset) <= case["max_offset"], result.describe()
+    assert result.scale_verdict == "stable", result.describe()
+
+    ratio = _per_sample_ratio(did_frame, case)
+    assert len(ratio) >= 30, "fixture no longer moves fast enough for a ratio"
+    median = float(np.median(ratio))
+    assert abs(median - 1.0) * 100.0 <= case["max_ratio_error_pct"], (
+        f"per-sample ratio median {median:.4f} (p10 {np.percentile(ratio, 10):.4f}, "
+        f"p90 {np.percentile(ratio, 90):.4f}, n {len(ratio)})"
+    )
+
+
+def _did_catalog_with(tmp_path: Path, did: int, **changes: Any) -> Path:
+    raw = yaml.safe_load(DIDS_PATH.read_text())
+    entry = next(e for e in raw["dids"] if e["did"] == did)
+    entry.update(changes)
+    path = tmp_path / "dids.yaml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    return path
+
+
+def test_did_agreement_can_fail(did_frame: pd.DataFrame, tmp_path: Path) -> None:
+    """The check must be able to reject the two catalogs it replaced.
+
+    Pre-2026-10-04, 0x1102 was a 2-byte "percent" (UpRev's K-line LTFT B1):
+    that slice decodes nothing from the 1-byte CAN reply. The K-line reading
+    at the right width (scale 1) halves every speed. A +4 % scale edit, the
+    size the broadcast suite measured slipping past a 3 % slope bound, is
+    caught too.
+    """
+    case = EXPECTATIONS["did_agreement"][0]
+
+    old = _did_catalog_with(
+        tmp_path, 0x1102, byte_length=2, response_length=2, scale=1.0, unit="percent"
+    )
+    with pytest.raises(InputNotCapturedError):
+        compare_channels(did_frame, case["signal"], case["reference"], policy=POLICY, dids_path=old)
+
+    for scale in (1.0, 2.08):
+        mutated = _did_catalog_with(tmp_path, 0x1102, scale=scale)
+        result = compare_channels(
+            did_frame, case["signal"], case["reference"], policy=POLICY, dids_path=mutated
+        )
+        assert abs(result.slope - 1.0) * 100.0 > case["max_scale_error_pct"], (
+            scale,
+            result.describe(),
+        )
+        assert abs(result.difference_bias) > case["max_residual_bias"], (scale, result.describe())

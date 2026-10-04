@@ -2338,6 +2338,50 @@ live here now, so the documents could be archived
   - one gauge reading on the driven (rear) tyres, recorded from the card,
     to turn the trend into depth;
 
+- [~] **D03.36 Correct the CAN Mode 22 catalog from the firmware's DID tables
+  (2026-10-04).** The disassembly
+  ([`ecu-firmware-analysis.md`](../../ecu-firmware-analysis.md), "Mode 22
+  catalog corrections (CAN)") found separate K-line and CAN DID → RAM pointer
+  tables. `data/dids.yaml` had named 0x1102 `ECM_LONG_FUEL_TRIM_B1` and 0x1125
+  LTFT bank 2 from UpRev's K-line stream. On CAN, 0x1102 is the PID 0x0D speed
+  byte and 0x1125 is LTFT bank 1.
+  - [x] **Catalog.** 0x1102 → `ECM_VEHICLE_SPEED_COARSE` (1 byte, km/h = raw ×
+    2, `confirmed`). 0x1123/0x1124 → `ECM_SHORT_FUEL_TRIM_B1/B2`, 0x1125/0x1126
+    → `ECM_LONG_FUEL_TRIM_B1/B2` (1 byte, raw − 100 = trim %, the Mode 01 sign
+    convention, `medium`). Each rests on the CAN pointer-table entry equal to
+    the PID handler's RAM word. The K-line findings moved to
+    `evidence_against`. 0x121A gained its first CAN-transport evidence.
+  - [x] **Refusal, not a note.** `Evidence.transport` (`can`/`kline`) in
+    `src/decode/slices.py`; `DidEntry` refuses an entry whose only support is
+    `kline` and names this incident
+    (`tests/test_dids.py::test_kline_evidence_alone_cannot_establish_a_can_did`).
+  - [x] **Known answer for 0x1102.** New committed slice
+    `tests/fixtures/ground_truth/did-speed-slice` (60 KiB, from
+    `_capture-rom-trace-2026-09-21T142926`), `did_agreement` in
+    `expectations.yaml`. With `compare_channels` at 250 ms, n = 202, 0-104
+    km/h: against `can:WHEEL_SPEED_6F7_A`, slope 0.9953, b−a +0.22 ± 0.87
+    km/h, per-sample ratio median 0.9965 (p10 0.974, p90 1.011); against DID
+    0x121A, slope 1.0036, ratio median 0.988. The old catalog fails it (its
+    2-byte slice decodes nothing), and so do the K-line reading (slope 0.50)
+    and a +4 % scale (`test_did_agreement_can_fail`). Against HEAD's catalog
+    9 of the 10 new ground-truth tests fail; the tenth is 0x121A's check.
+  - [x] **Bank and short/long pins.** `did_pins` records each trim DID's RAM
+    word and Mode 01 PID; the test derives the expected name from
+    `PID_DECODERS`, so a bank or short/long swap fails
+    (`test_did_catalog_entries_are_pinned_to_the_firmware`).
+  - [x] **Callers swept.** No live profile, recipe, binding, committee or
+    dashboard file named the old names. No model manifest names any of the
+    five channels (in-repo `models/`, `~/canary-data/models-0920a/b`), so no
+    served feature changes. The K-line width tests
+    (`test_kline_protocol.py`, `test_kline_sniff.py`) were updated: 0x1126 now
+    has a width, and 0x1102 is 1 byte.
+  - [ ] **Data relation for the trims.** No capture holds a trim DID and its
+    Mode 01 PID together: Mode 01 and session 0xC0 exclude each other, and
+    learned trim has read 0.00 since the overnight 2026-09-20 flash (still on
+    2026-10-04), so `compare_channels` refuses LTFT as constant. Owed: a
+    capture that alternates 0x1123–0x1126 with PIDs 0x06–0x09 once learned
+    trim moves again. LTFT is slow enough to pair across the alternation;
+    short-term trim may not be. Until then the trim scale stays `medium`.
 
 ## Deferred by decision, not blocked
 

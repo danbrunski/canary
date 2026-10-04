@@ -15,8 +15,9 @@ Blocked until both are true (operator confirms):
   2026-09-18 on (84-100 % of samples nonzero, range -9.4..+9.4 %). It resumed
   learning somewhere in that eight-day window; what re-enabled it is not
   known. From 2026-09-18, trim analysis uses the total correction
-  `(1+STFT)(1+LTFT)-1`, not STFT alone. DIDs `0x1102`/`0x1125` read the
-  learned table directly (100 = neutral, cell-indexed). At home altitude the
+  `(1+STFT)(1+LTFT)-1`, not STFT alone. On CAN, DIDs `0x1125`/`0x1126`
+  read learned trim B1/B2 directly (raw 100 = neutral); `0x1102`, once listed
+  here, is road speed on CAN (D03.36, 2026-10-04). At home altitude the
   closed-loop total is within about ±2.5 % everywhere (2026-09-20, n=1,580);
   a -4..-5 % hump at 20-45 g/s appeared only on the 2026-09-18 altitude trip
   and did not reproduce at home. Everything below is the history of the gate

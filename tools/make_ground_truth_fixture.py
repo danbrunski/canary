@@ -18,6 +18,15 @@ Regenerate (paths are the operator's local pull, not the Pi)::
         --session sessions/nissan-xterra-2008/2026-08-03T163440 \\
         --start 2026-08-03T17:21:00-06:00 --seconds 120
 
+The DID speed slice (``did-speed-slice``) adds the Mode 22 rows it compares,
+which are stored ``source='obd'`` under their ``DID_<hex>`` channel::
+
+    .venv/bin/python tools/make_ground_truth_fixture.py \\
+        --session ~/canary-data/sessions/nissan-xterra-2008/_capture-rom-trace-2026-09-21T142926 \\
+        --start 2026-09-21T08:29:26-06:00 --seconds 212 --can-stride 10 \\
+        --can-id 0x6F7 --keep-obd DID_1102 --keep-obd DID_121A --keep-obd DID_1125 \\
+        --out tests/fixtures/ground_truth/did-speed-slice
+
 Keep the window short. This is a regression anchor, not a corpus — every byte
 of it lives in git forever.
 """
@@ -48,7 +57,14 @@ KEEP_GPS = ("speed", "heading")
 
 
 def extract(
-    session: Path, start: pd.Timestamp, seconds: float, out: Path, can_stride: int = 1
+    session: Path,
+    start: pd.Timestamp,
+    seconds: float,
+    out: Path,
+    can_stride: int = 1,
+    *,
+    can_ids: tuple[str, ...] = KEEP_CAN_IDS,
+    obd_channels: tuple[str, ...] = KEEP_OBD,
 ) -> pd.DataFrame:
     """Write the slice. Refuses a session that stores CAN frames change-only
     (P02.10): ``--can-stride`` keeps every Nth *frame* per id, which on
@@ -64,13 +80,13 @@ def extract(
         SELECT * FROM read_parquet('{pattern}')
         WHERE timestamp >= ? AND timestamp < ?
           AND (
-                (source = 'can' AND channel IN {KEEP_CAN_IDS})
-             OR (source = 'obd' AND channel IN {KEEP_OBD})
+                (source = 'can' AND list_contains(?, channel))
+             OR (source = 'obd' AND list_contains(?, channel))
              OR (source = 'gps' AND channel IN {KEEP_GPS})
           )
         ORDER BY timestamp
         """,
-        [start.to_pydatetime(), end.to_pydatetime()],
+        [start.to_pydatetime(), end.to_pydatetime(), list(can_ids), list(obd_channels)],
     ).df()
     if can_stride > 1:
         # Keep every Nth frame per broadcast id. These are still real frames —
@@ -101,6 +117,18 @@ def main() -> int:
         help="keep every Nth broadcast frame per id (real frames, just fewer)",
     )
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument(
+        "--can-id",
+        action="append",
+        default=None,
+        help=f"broadcast id to keep (repeatable; default {', '.join(KEEP_CAN_IDS)})",
+    )
+    parser.add_argument(
+        "--keep-obd",
+        action="append",
+        default=[],
+        help="extra source='obd' channel to keep, e.g. DID_1102 (repeatable)",
+    )
     args = parser.parse_args()
 
     try:
@@ -110,6 +138,8 @@ def main() -> int:
             args.seconds,
             args.out,
             can_stride=args.can_stride,
+            can_ids=tuple(args.can_id) if args.can_id else KEEP_CAN_IDS,
+            obd_channels=KEEP_OBD + tuple(args.keep_obd),
         )
     except ChangeOnlyStorageError as exc:
         print(f"refused: {exc}", file=sys.stderr)

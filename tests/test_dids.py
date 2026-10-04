@@ -227,3 +227,39 @@ def test_the_shipped_catalog_states_conditions_for_every_constant() -> None:
             if evidence.constant is not None:
                 assert evidence.conditions, f"0x{entry.did:04X} constant without conditions"
                 assert evidence.constant_unit, f"0x{entry.did:04X} constant without unit"
+
+
+# --- the catalog is CAN's; a K-line observation cannot name a CAN DID ---
+
+
+def test_kline_evidence_alone_cannot_establish_a_can_did() -> None:
+    """2026-10-04: 0x1102 was catalogued as long-term trim B1 from UpRev's K-line
+    stream; on CAN it is road speed, because the ECM keeps separate K-line and
+    CAN DID tables. A K-line finding may corroborate or refute, never stand alone.
+    """
+    kline = {"session": "s", "method": "uprev_stream", "finding": "f", "transport": "kline"}
+    can = {"session": "s", "method": "firmware", "finding": "f", "transport": "can"}
+    with pytest.raises(ValidationError, match="K-line and CAN DID tables differ"):
+        _entry(evidence=[kline])
+    assert _entry(evidence=[kline, can]).evidence[1].transport == "can"
+    assert _entry(evidence=[can], evidence_against=[kline]).evidence_against[0].transport == "kline"
+    # Legacy evidence (no transport recorded) is not judged.
+    assert _entry(evidence=[{"session": "s", "method": "m", "finding": "f"}]).evidence
+
+
+def test_the_2026_10_04_can_corrections_hold() -> None:
+    """0x1102 is road speed, 0x1123/0x1124 short-term and 0x1125/0x1126 long-term
+    trim, banks 1/2, on CAN (docs/ecu-firmware-analysis.md, firmware pointer
+    tables). Exact decode parameters are pinned in the ground-truth suite."""
+    by_did = {e.did: e for e in load_did_map(DIDS_PATH).dids}
+    assert by_did[0x1102].name == "ECM_VEHICLE_SPEED_COARSE"
+    assert by_did[0x1102].unit == "km/h"
+    assert [by_did[d].name for d in (0x1123, 0x1124, 0x1125, 0x1126)] == [
+        "ECM_SHORT_FUEL_TRIM_B1",
+        "ECM_SHORT_FUEL_TRIM_B2",
+        "ECM_LONG_FUEL_TRIM_B1",
+        "ECM_LONG_FUEL_TRIM_B2",
+    ]
+    for did in (0x1102, 0x1123, 0x1124, 0x1125, 0x1126):
+        assert "can" in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"
+        assert "kline" not in {item.transport for item in by_did[did].evidence}, f"0x{did:04X}"

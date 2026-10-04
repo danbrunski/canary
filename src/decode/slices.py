@@ -268,6 +268,13 @@ class Evidence(BaseModel):
     #: The operating envelope the constant was measured in, and outside which
     #: it must not be quoted.
     conditions: str | None = None
+    #: Which bus the identifier was read or defined on. The 2008 Xterra ECM
+    #: keeps separate Mode 22 DID tables for K-line and CAN, so DID 0x1102 is
+    #: long-term trim on K-line and road speed on CAN; a K-line observation
+    #: says nothing about the CAN DID of the same number. ``None`` is legacy
+    #: evidence recorded before the field existed. The DID catalog refuses an
+    #: entry whose only support is ``kline`` (:class:`src.decode.dids.DidEntry`).
+    transport: Literal["can", "kline"] | None = None
 
     @model_validator(mode="after")
     def _constant_requires_conditions_and_unit(self) -> Evidence:

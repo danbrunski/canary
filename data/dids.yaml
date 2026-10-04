@@ -836,6 +836,17 @@ dids:
           A new 200-reply live-idle stream on 2026-09-20 then reproduced raw
           zero in every reply while the simultaneous coarse-RPM DID reported
           raw 58-61 (725-762.5 rpm).
+      - session: _capture-rom-trace-2026-09-21T142926
+        method: compare_channels_vs_wheel_speed
+        transport: can
+        finding: >
+          The same 0.1 km/h decode holds on CAN (the entries above came from
+          UpRev's USB stream, which is K-line). Against confirmed broadcast
+          WHEEL_SPEED_6F7_A on same-instant pairs (250 ms policy, n = 202,
+          0-104 km/h): slope 0.9906, offset -0.06 km/h, r2 0.9998, b-a -0.50
+          +/-0.57 km/h, drift 0.39 % (stable); per-sample ratio above 20 km/h
+          median 1.0093 (p10 1.003, p90 1.017). Pinned in
+          tests/test_analysis_ground_truth.py `did_agreement`.
     notes: >
       Same raw representation as broadcast VEHICLE_SPEED_2D1. This is ECU
       indicated speed and inherits the vehicle's documented approximately 8%
@@ -1150,58 +1161,222 @@ dids:
       knock proxy this ECM offers (it does not stream knock; see
       docs/roadmap/engine-tuning-support.md).
 
+  # ---- CAN DID table corrections, 2026-10-04 ------------------------------
+  # 0x1102 and 0x1123-0x1126 were named from UpRev's K-LINE stream definition
+  # until 2026-10-04. The ECM keeps separate Mode 22 DID -> RAM pointer tables
+  # for K-line (0x022738 / 0x022938 / 0x022AB4) and CAN (0x024988 / 0x024B84 /
+  # 0x024D00), so one DID number can name different variables on the two
+  # transports (docs/ecu-firmware-analysis.md, "Mode 22 catalog corrections").
+  # This catalog is the CAN one. Evidence entries carry `transport`, and an
+  # entry whose only support is `transport: kline` is refused at load
+  # (src/decode/dids.py DidEntry).
   - did: 0x1102
-    name: ECM_LONG_FUEL_TRIM_B1
+    name: ECM_VEHICLE_SPEED_COARSE
     byte_start: 0
-    byte_length: 2
-    response_length: 2
-    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: bytes 45-46 of the checksum-validated 50-byte reply.'
+    byte_length: 1
+    response_length: 1
+    response_length_source: '_capture-rom-trace-2026-09-21T142926 (CAN, 0x7E0, session 0xC0): 202/202 single-DID payloads are 1 byte; the 2026-09-17 did_log discovery sweep on CAN recorded width 1 as well.'
     byte_order: big
-    scale: 1.0
+    scale: 2.0
     offset: 0.0
-    unit: percent
-    confidence: high
+    unit: km/h
+    confidence: confirmed
     plausible_min: 0.0
-    plausible_max: 200.0
+    plausible_max: 250.0
     evidence:
+      - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN Mode 22 handler (0x0D16B8) resolves DID 0x1102 through the
+          CAN pointer tables (0x024988 / 0x024B84 / 0x024D00) to the RAM byte
+          0xFFFF11A8. The CAN Mode 01 handler (0x0D3AFC) reads the same byte
+          for PID 0x0D, vehicle speed, at km/h = raw x 2.
+      - session: _capture-rom-trace-2026-09-21T142926
+        method: compare_channels_vs_did_0x121A_and_wheel_speed
+        transport: can
+        finding: >
+          The decode reproduces two independent road-speed references 1:1 on
+          same-instant pairs (compare_channels, 250 ms policy, n = 202, speed
+          0-104 km/h). Against confirmed broadcast WHEEL_SPEED_6F7_A (1/16
+          km/h, itself 1:1 with PID 0x0D): slope 0.9953, offset +0.44 km/h,
+          r2 0.9994, b-a +0.22 +/-0.87 km/h, drift 0.70 % (stable); the
+          per-sample ratio above 20 km/h has median 0.9965 (p10 0.974, p90
+          1.011, n 143). Against DID 0x121A (0.1 km/h) from the same poll
+          rounds, 13 ms median apart: slope 1.0036, b-a +0.78 +/-0.75 km/h,
+          ratio median 0.988. Raw x 1 (the K-line reading) gives slope 0.50.
+          Pinned in tests/test_analysis_ground_truth.py (`did_agreement`,
+          committed slice did-speed-slice) against the 2026-10-04 catalog.
+          Also reported by the firmware analysis: correlation 0.9997 with
+          wheel speed over the same 202 reads.
+    evidence_against:
       - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
         method: uprev_stream_definition_vs_displayed_csv
+        transport: kline
         finding: >
-          `LT Fuel Trim B1 (%)` equals the raw 16-bit value 1:1 on 405/405
-          rows. Nissan's convention is multiplicative: 100 means no
-          correction, and this log idled at 99.
+          REJECTED ON CAN: long-term fuel trim bank 1. UpRev's K-line stream
+          displays `LT Fuel Trim B1 (%)` from its DID 0x1102 1:1 on 405/405
+          rows, which is what this entry was named from until 2026-10-04. That
+          is a fact about the K-line DID table. On CAN, 0x1102 is road speed
+          (above), and LTFT bank 1 is 0x1125.
     notes: |
-      Long-term fuel trim is a Mode 01 PID (0x07) that a Mode 22 capture
-      cannot reach, since Mode 01 and session 0xC0 are mutually exclusive on
-      this ECM. This makes it available inside an all-DID capture.
+      Road speed at 2 km/h resolution: the same byte PID 0x0D reports. For
+      speed inside an all-DID capture prefer ECM_VEHICLE_SPEED (0x121A, 0.1
+      km/h); this one exists so a capture that polls 0x1102 is read correctly,
+      and so nobody re-reads it as trim. Any trim analysis that read
+      DID 0x1102 as learned trim before 2026-10-04 was reading road speed.
 
-      Do not confuse a flat 0.0 reading here with the Mode 01 LONG_FUEL_TRIM_1
-      sentinel problem: this register is a different encoding (100 = neutral,
-      not 0).
+      K-line is different: there, 0x1102 is UpRev's LTFT B1. Never carry a
+      K-line meaning back onto this CAN catalog.
+
+  - did: 0x1123
+    name: ECM_SHORT_FUEL_TRIM_B1
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers; 1-byte values in every reply.'
+    byte_order: big
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    confidence: medium
+    plausible_min: -50.0
+    plausible_max: 50.0
+    evidence:
+      - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer tables resolve DID 0x1123 to the RAM word
+          0xFFFF26B4, the word the CAN Mode 01 handler reads for PID 0x06
+          (short-term fuel trim, bank 1).
+      - session: data/analyses/did-sweep-20260804-koeo-baseline.json + did_log-2026-09-17-roadload-1..3
+        method: neutral_value_and_clamp_census
+        transport: can
+        finding: >
+          Supports the scale, does not pin it. Key on, engine off, all four
+          trim DIDs read raw 0x64 = 100, the neutral value. Driving on
+          2026-09-17 (2,683 reads) this DID spans raw 79-125 and 0x1124 82-125,
+          and 125 is the
+          +25 % clamp that Mode 01 SHORT_FUEL_TRIM_1/2 also reach (max +23.4
+          / +25.0 % on _capture-ram-study-2026-10-04T204557). This is
+          Nissan's alpha convention, 100 = no correction, 1 % per count.
+          These are not same-instant pairs, so they set nothing beyond
+          `medium`.
+    notes: |
+      Decodes to trim in percent with 0 = no correction, the same sign
+      convention as Mode 01 PIDs 0x06-0x09, so a correct decode compares 1:1
+      with SHORT_FUEL_TRIM_1. That comparison has not been made: Mode 01 and
+      session 0xC0 are mutually exclusive on this ECM, so no capture holds
+      both at the same instant. The scale stays `medium` until a capture
+      that alternates this DID with PID 0x06 settles it (expectations in
+      tests/fixtures/ground_truth/expectations.yaml `did_pins`).
+
+      On K-line, UpRev's 0x1123 is also `A/F CORR-B1`, but that agreement is
+      not evidence for this entry; the tables are separate.
+
+  - did: 0x1124
+    name: ECM_SHORT_FUEL_TRIM_B2
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers; 1-byte values in every reply.'
+    byte_order: big
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    confidence: medium
+    plausible_min: -50.0
+    plausible_max: 50.0
+    evidence:
+      - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer tables resolve DID 0x1124 to the RAM word
+          0xFFFF26B6, the word the CAN Mode 01 handler reads for PID 0x08
+          (short-term fuel trim, bank 2).
+    notes: |
+      Bank 2 of ECM_SHORT_FUEL_TRIM_B1 (0x1123); the same encoding and the
+      same open item: no same-instant comparison with PID 0x08 exists yet.
 
   - did: 0x1125
+    name: ECM_LONG_FUEL_TRIM_B1
+    byte_start: 0
+    byte_length: 1
+    response_length: 1
+    response_length_source: '_capture-rom-trace-2026-09-21T142926 (CAN, 0x7E0, session 0xC0): 202/202 single-DID payloads are 1 byte; the 2026-09-17 did_log sweeps on CAN recorded width 1.'
+    byte_order: big
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    confidence: medium
+    plausible_min: -50.0
+    plausible_max: 50.0
+    evidence:
+      - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
+        method: firmware_can_did_pointer_table
+        transport: can
+        finding: >
+          The CAN pointer tables resolve DID 0x1125 to the RAM word
+          0xFFFF26DE, the word the CAN Mode 01 handler reads for PID 0x07
+          (long-term fuel trim, BANK 1).
+      - session: _capture-rom-trace-2026-09-21T142926
+        method: neutral_value_after_flash
+        transport: can
+        finding: >
+          Raw 0x64 = 100 on 202/202 reads after the overnight 2026-09-20
+          flash reset learned trim. Mode 01 LONG_FUEL_TRIM_1 and _2 read 0.00
+          on every reply in 2026-09-21T142126 and 2026-09-21T143331, the
+          sessions either side of this capture. Neutral decodes to 0 %. A
+          constant cannot pin a scale.
+    evidence_against:
+      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
+        method: uprev_stream_definition_vs_displayed_csv
+        transport: kline
+        finding: >
+          REJECTED ON CAN: long-term fuel trim BANK 2. UpRev's K-line stream
+          displays `LT Fuel Trim B2 (%)` from its DID 0x1125 1:1 on 405/405
+          rows, and this entry was named ECM_LONG_FUEL_TRIM_B2 from that until
+          2026-10-04. On CAN the firmware points 0x1125 at the bank-1 word;
+          bank 2 is 0x1126.
+    notes: |
+      Bank 1. The name ECM_LONG_FUEL_TRIM_B1 belonged to 0x1102 until
+      2026-10-04 (a K-line meaning); a saved capture profile that asks for
+      ECM_LONG_FUEL_TRIM_B1 now polls this DID, which is the trim it meant.
+
+      LTFT has read 0.00 % since the 2026-09-20 flash (still 0.00 on
+      2026-10-04), so compare_channels refuses it as constant on every
+      capture since. The 1:1 check against LONG_FUEL_TRIM_1 waits for a
+      capture where learned trim has moved again. LTFT is slow, so pairs
+      across alternating Mode 01 / Mode 22 windows are defensible for it in
+      a way they are not for short-term trim.
+
+  - did: 0x1126
     name: ECM_LONG_FUEL_TRIM_B2
     byte_start: 0
     byte_length: 1
     response_length: 1
-    response_length_source: 'UpRev detailed-scheme stream, 2026-09-20: byte 47 of the checksum-validated 50-byte reply.'
+    response_length_source: 'did_log-2026-09-17 discovery sweeps (CAN, 0x7E0, session 0xC0, tools/did_log.py): width 1 in all four headers; 1-byte values in every reply.'
     byte_order: big
     scale: 1.0
-    offset: 0.0
+    offset: -100.0
     unit: percent
-    confidence: high
-    plausible_min: 0.0
-    plausible_max: 200.0
+    confidence: medium
+    plausible_min: -50.0
+    plausible_max: 50.0
     evidence:
-      - session: uprev-detailed_scheme + UpRev_Log9-20-2026_6-53-59_PM
-        method: uprev_stream_definition_vs_displayed_csv
+      - session: ZS44A-20260920 flash image (docs/ecu-firmware-analysis.md)
+        method: firmware_can_did_pointer_table
+        transport: can
         finding: >
-          `LT Fuel Trim B2 (%)` equals the raw byte 1:1 on 405/405 rows.
+          The CAN pointer tables resolve DID 0x1126 to the RAM word
+          0xFFFF26E0, the word the CAN Mode 01 handler reads for PID 0x09
+          (long-term fuel trim, bank 2).
     notes: |
-      Resolves an identity open since the first K-line captures. 0x1125
-      appeared in all three early isolated runs holding raw 95-99 and
-      docs/uprev-usb-kline-research.md recorded its identity as unknown --
-      those were bank-2 long fuel trim sitting near its neutral 100.
+      Bank 2 of ECM_LONG_FUEL_TRIM_B1 (0x1125); the same encoding and the
+      same open item. The name ECM_LONG_FUEL_TRIM_B2 belonged to 0x1125 until
+      2026-10-04.
 
   - did: 0x1106
     name: ECM_INTAKE_AIR_TEMP_1106

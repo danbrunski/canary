@@ -97,8 +97,10 @@ site.
   - **Learned trim on CAN:** `0x1125` is LTFT **B1** (the catalog says B2) and
     `0x1126` is LTFT B2. They are the same RAM words as PIDs `0x07`/`0x09`.
   - **Short-term trim on CAN:** `0x1123`/`0x1124` are STFT B1/B2.
-  - Firmware evidence is in `docs/ecu-firmware-analysis.md`; the
-    `data/dids.yaml` fix is pending.
+  - Firmware evidence is in `docs/ecu-firmware-analysis.md`. Applied to
+    `data/dids.yaml` on 2026-10-04 (D03.36): `ECM_VEHICLE_SPEED_COARSE`,
+    `ECM_SHORT_FUEL_TRIM_B1/B2`, `ECM_LONG_FUEL_TRIM_B1/B2`. Evidence entries
+    carry `transport`, and an entry backed only by `kline` is refused.
   - The firmware's DID → RAM pointer tables are at `0x024988`, `0x024B84` and
     `0x024D00` for CAN, and at `0x022738`, `0x022938` and `0x022AB4` for
     K-line.

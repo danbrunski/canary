@@ -133,7 +133,7 @@ def test_the_poll_reply_expands_to_all_three_chained_sets() -> None:
 
 
 def test_unknown_catalog_widths_are_refused_not_guessed() -> None:
-    """The real reply cannot be split with today's catalog: five of UpRev's
+    """The real reply cannot be split with today's catalog: four of UpRev's
     DIDs have no recorded width. Refusing is the right answer."""
     widths, _ = did_response_widths()
     values = kp.expand_local_id(0x83, _definitions())
@@ -143,7 +143,13 @@ def test_unknown_catalog_widths_are_refused_not_guessed() -> None:
 
 def test_the_reply_pins_the_unknown_widths_total() -> None:
     """Everything the catalog knows plus 17 RAM bytes is 43; the ECM sent 50,
-    so the five DIDs without a width take exactly 7 bytes between them."""
+    so the four DIDs without a width take exactly 7 bytes between them.
+
+    Five until 2026-10-04, when the CAN catalog gained 0x1126 (1 byte) and
+    corrected 0x1102 from 2 bytes to 1. The total is unchanged, and the
+    K-line layout in docs/uprev-usb-kline-research.md (1102 at 1 byte, 1204
+    at bytes 46-47) is the split used below. These widths come from the CAN
+    catalog; they agree with that K-line layout for every DID used here."""
     widths, _ = did_response_widths()
     values = kp.expand_local_id(0x83, _definitions())
     params = kp.expect_positive(0x21, kp.decode_length_frame(FRAMES["poll_83_reply"]))
@@ -155,11 +161,11 @@ def test_the_reply_pins_the_unknown_widths_total() -> None:
     unknown = sorted(
         {v.did for v in values if isinstance(v, DidDescriptor) and v.did not in widths}
     )
-    assert unknown == [0x1117, 0x1126, 0x1204, 0x1209, 0x122B]
+    assert unknown == [0x1117, 0x1204, 0x1209, 0x122B]
     assert len(params) - 1 - known == 7
 
     # Any assignment summing to 7 splits cleanly; a wrong total is refused.
-    hypothesis = {**widths, 0x1117: 1, 0x1126: 1, 0x1204: 1, 0x1209: 2, 0x122B: 2}
+    hypothesis = {**widths, 0x1117: 1, 0x1204: 2, 0x1209: 2, 0x122B: 2}
     split = kp.split_local_id_reply(0x83, params, kp.value_widths(values, hypothesis))
     assert len(split) == 38
     wrong = {**hypothesis, 0x1209: 1}

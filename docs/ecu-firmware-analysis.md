@@ -106,6 +106,8 @@ The `data/dids.yaml` entries below came from UpRev's **K-line** stream definitio
 
 Any earlier trim analysis that read DID `0x1102` as learned trim was reading road speed.
 
+Applied to `data/dids.yaml` on 2026-10-04 (roadmap D03.36): `ECM_VEHICLE_SPEED_COARSE`, `ECM_SHORT_FUEL_TRIM_B1/B2`, `ECM_LONG_FUEL_TRIM_B1/B2`. The 0x1102 decode is pinned against wheel speed in the ground-truth suite. Evidence entries now carry `transport`, and the catalog refuses an entry whose only support is K-line.
+
 ### Map-slot tables, confirmed from the code that reads the RAM copy
 
 | Slot offset (RAM) | Table | Confidence | Evidence |

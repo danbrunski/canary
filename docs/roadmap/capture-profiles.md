@@ -177,6 +177,9 @@ The first real profile, closing the UpRev-replacement gaps identified
   idle (one change in 82 rows) and step between learned cells, where alpha by
   this task's own signature oscillates around 100 %. The short-term correction
   still has no DID. See `data/analyses/2026-09-20-uprev-usb-road.md`.
+  *Correction 2026-10-04 (D03.36):* those are K-line DID meanings. On CAN,
+  the firmware's DID table makes `0x1102` road speed, `0x1125`/`0x1126` LTFT
+  B1/B2, and `0x1123`/`0x1124` short-term trim B1/B2.
 - [x] **4.2 — V→AFR transfer.** Export the A/F sensor transfer table
   from the UpRev ROM editor; decode `ECM_AF_SENSOR_V_B1/B2` (and/or
   Mode-01 λ PIDs 0x24/0x25) to AFR as a derived channel. Note the

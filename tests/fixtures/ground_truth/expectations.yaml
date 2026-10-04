@@ -258,3 +258,148 @@ segmenter_fallback:
   # The comparison is only meaningful if the slice exercises every threshold
   # the fallback feeds: rpm (idle bands), speed (city/highway at 80 km/h).
   required_reference_modes: ["city", "highway", "idle", "idle_transient"]
+
+# ---------------------------------------------------------------------------
+# Mode 22 DIDs on CAN (2026-10-04).
+#
+# The catalog named DID 0x1102 ECM_LONG_FUEL_TRIM_B1 and 0x1125 LTFT bank 2,
+# both taken from UpRev's K-LINE stream definition. The ECM keeps separate
+# K-line and CAN DID -> RAM pointer tables (docs/ecu-firmware-analysis.md,
+# "Mode 22 catalog corrections (CAN)"); on CAN 0x1102 is the PID 0x0D speed
+# byte and 0x1125 is LTFT bank 1. These checks run on their own slice, because
+# the 2026-08-03 drive above polls no Mode 22 at all.
+did_fixture: did-speed-slice
+did_source_session: _capture-rom-trace-2026-09-21T142926
+did_window: 2026-09-21T08:29:26-06:00 +212s
+did_notes: |
+  All-DID tuning capture, so no Mode 01 at all: the road-speed references are
+  the confirmed broadcast wheel speeds (0x6F7, 1/16 km/h, themselves 1:1 with
+  PID 0x0D in the drive-slice checks above) and DID 0x121A, read in the same
+  poll rounds as 0x1102. 0x6F7 frames decimated 10:1 (real frames, fewer).
+  Built by tools/make_ground_truth_fixture.py (command in its docstring).
+  Speed spans 0-104 km/h. DID 0x1125 rides along and reads raw 100 (neutral)
+  on all 202 reads: learned trim was reset by the overnight 2026-09-20 flash.
+
+# Exact catalog entries for the corrected DIDs. `ram` and `mode01_pid` record
+# the firmware fact the identification rests on: the CAN pointer table sends
+# the DID to the same RAM address the CAN Mode 01 handler reads for that PID.
+#
+# For the four trims this is the ONLY check today. Mode 01 and session 0xC0 are
+# mutually exclusive on this ECM, so no capture holds a trim DID and its PID at
+# the same instant, and learned trim has read a constant 0.00 since the flash,
+# which compare_channels refuses. The test derives the expected NAME from the
+# PID's Mode 01 meaning (src.collection.pid_decoders.PID_DECODERS: 0x06 short
+# bank 1, 0x07 long bank 1, 0x08 short bank 2, 0x09 long bank 2), so a bank or
+# short/long swap in data/dids.yaml fails against the firmware record here.
+did_pins:
+  - did: 0x1102
+    name: ECM_VEHICLE_SPEED_COARSE
+    byte_start: 0
+    byte_length: 1
+    scale: 2.0
+    offset: 0.0
+    unit: km/h
+    ram: 0xFFFF11A8
+    mode01_pid: 0x0D
+  - did: 0x1123
+    name: ECM_SHORT_FUEL_TRIM_B1
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    ram: 0xFFFF26B4
+    mode01_pid: 0x06
+  - did: 0x1124
+    name: ECM_SHORT_FUEL_TRIM_B2
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    ram: 0xFFFF26B6
+    mode01_pid: 0x08
+  - did: 0x1125
+    name: ECM_LONG_FUEL_TRIM_B1
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    ram: 0xFFFF26DE
+    mode01_pid: 0x07
+  - did: 0x1126
+    name: ECM_LONG_FUEL_TRIM_B2
+    byte_start: 0
+    byte_length: 1
+    scale: 1.0
+    offset: -100.0
+    unit: percent
+    ram: 0xFFFF26E0
+    mode01_pid: 0x09
+
+# DID vs an independent road-speed reference, both in engineering units, on
+# same-instant pairs (POLICY, 250 ms; the DID-to-frame separation is 32 ms
+# median, 51 ms max on this slice). Same columns as `unit_agreement`, plus the
+# per-sample ratio (AGENTS.md: the scale verdict can mislead in both
+# directions, so read the ratio anyway). Bounds, measured 2026-10-04:
+#   max_residual_bias   = |measured| + max(3 * spread / sqrt(n), 1.0 km/h,
+#                         half of 0x1102's 2 km/h step)
+#   max_residual_spread = measured * 1.25
+#   max_scale_error_pct = measured + ~0.5
+#   max_ratio_error_pct = |median ratio - 1| + ~1, ratio taken where the
+#                         reference exceeds `ratio_min_reference` (below it
+#                         one 2 km/h step is >10 % of the reading)
+# The old catalog (2-byte slice) decodes nothing from 0x1102's 1-byte reply,
+# and the K-line reading (scale 1, "percent") gives slope 0.50; both fail
+# (test_did_agreement_can_fail).
+did_agreement:
+  - signal: did:ECM_VEHICLE_SPEED_COARSE
+    reference: can:WHEEL_SPEED_6F7_A
+    min_r_squared: 0.99
+    max_scale_error_pct: 1.0    # measured 0.47 % (slope 0.99532)
+    max_offset: 3.0             # km/h
+    max_residual_bias: 1.25     # km/h; measured +0.219, spread 0.870, n 202
+    max_residual_spread: 1.1
+    ratio_min_reference: 20.0   # km/h
+    max_ratio_error_pct: 1.5    # median 0.9965, p10 0.9736, p90 1.0110, n 143
+    why: >
+      DID 0x1102 is road speed on CAN, km/h = raw x 2 (the PID 0x0D byte).
+      Against the confirmed wheel speed it agrees 1:1.
+  - signal: did:ECM_VEHICLE_SPEED_COARSE
+    reference: can:WHEEL_SPEED_6F7_C
+    min_r_squared: 0.99
+    max_scale_error_pct: 1.0    # measured 0.41 % (slope 0.99594)
+    max_offset: 3.0
+    max_residual_bias: 1.45     # measured +0.420, spread 0.793, n 202
+    max_residual_spread: 1.0
+    ratio_min_reference: 20.0
+    max_ratio_error_pct: 1.5    # median 0.9948, p10 0.9700, p90 1.0067, n 143
+    why: The same check against the third 0x6F7 wheel-speed field.
+  - signal: did:ECM_VEHICLE_SPEED_COARSE
+    reference: did:ECM_VEHICLE_SPEED
+    min_r_squared: 0.99
+    max_scale_error_pct: 0.9    # measured 0.36 % (slope 1.00356)
+    max_offset: 3.0
+    max_residual_bias: 1.8      # measured +0.775, spread 0.755, n 202
+    max_residual_spread: 0.95
+    ratio_min_reference: 20.0
+    max_ratio_error_pct: 2.0    # median 0.9877, p10 0.9644, p90 0.9986, n 143
+    why: >
+      Against DID 0x121A (0.1 km/h), read in the same poll rounds (13 ms
+      median apart), so this pairs two ECM copies of one speed. 0x1102 reads
+      0.78 km/h low on average, the size a 2 km/h step that truncates would
+      leave (a uniform floor gives -1.0); unexplained, so the bound keeps it.
+  - signal: did:ECM_VEHICLE_SPEED
+    reference: can:WHEEL_SPEED_6F7_A
+    min_r_squared: 0.99
+    max_scale_error_pct: 1.5    # measured 0.95 % (slope 0.99055)
+    max_offset: 3.0
+    max_residual_bias: 0.65     # measured -0.502, spread 0.569, n 202; half step 0.05
+    max_residual_spread: 0.75
+    ratio_min_reference: 20.0
+    max_ratio_error_pct: 2.0    # median 1.0093, p10 1.0029, p90 1.0172, n 143
+    why: >
+      DID 0x121A's first CAN-transport check. Its catalog evidence was the
+      UpRev USB (K-line) stream; this is the same decode on CAN, against the
+      same wheel speed. It reads ~0.9 % above 0x6F7_A.

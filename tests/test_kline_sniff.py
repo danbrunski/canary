@@ -110,7 +110,10 @@ def test_definitions_are_tracked_and_unknown_widths_refused_by_name() -> None:
 
 
 def test_with_the_missing_widths_every_reply_lays_out_into_38_values() -> None:
-    widths = {**did_response_widths()[0], 0x1117: 1, 0x1126: 1, 0x1204: 1, 0x1209: 2, 0x122B: 2}
+    # 0x1204 at 2 bytes and 0x1102 at 1, as the K-line layout in
+    # docs/uprev-usb-kline-research.md places them (0x1102 corrected to 1 byte
+    # in the catalog 2026-10-04).
+    widths = {**did_response_widths()[0], 0x1117: 1, 0x1204: 2, 0x1209: 2, 0x122B: 2}
     _, frames = _decode(STREAM)
     tracker = DefinitionTracker(widths)
     results = [r for pair in exchanges(frames) if (r := tracker.observe(pair)) is not None]

@@ -697,6 +697,10 @@ Every scale the catalog already had agrees. What is new or different:
   test uses `1204: 1`. Swapping the two gives the same total, which is why
   that test still lays out. One of the two is wrong for K-line. Check `1102`'s CAN
   reply length before changing either.
+  *Checked 2026-10-04:* 0x1102's CAN reply is 1 byte (202/202 on
+  `_capture-rom-trace-2026-09-21T142926`), and on CAN it is road speed, not
+  trim (D03.36). The catalog now says 1 byte, and the width tests use
+  `1204: 2`.
 
 **The sniffer lost ~10 % of the frames (fixed).** It saw 619 of ~650 requests
 and 588 of ~650 replies. The CSV, at 82 ms ± 15 ms with no gaps, shows that

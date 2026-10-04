@@ -19,13 +19,13 @@
       "id": 1,
       "name": "ltft-zero-after-flash",
       "prompt": "Since the flash on Saturday both LONG_FUEL_TRIM_1 and _2 read exactly 0.00 in every session, and warm idle STFT is sitting around -6%. Before the flash LTFT was moving around a few percent. Is the decode broken or did the flash kill something?",
-      "expected_output": "Neither. Every UpRev flash (and every battery disconnect) resets the learned trim on this ECM; 0.00 is the neutral value (raw 0x80 on the PID 0x07 scale), not a decode bug. Relearn has been slow on this truck (weeks after the 2026-06-28 disconnect), so trim analysis is STFT-only until it moves; when it does, use total trim (1+STFT)(1+LTFT)-1. Negative idle STFT with LTFT at zero was also seen after the 09-20 flash. Points at labelled_events.yaml and the 0x1102/0x1125 learned-trim DIDs.",
+      "expected_output": "Neither. Every UpRev flash (and every battery disconnect) resets the learned trim on this ECM; 0.00 is the neutral value (raw 0x80 on the PID 0x07 scale), not a decode bug. Relearn has been slow on this truck (weeks after the 2026-06-28 disconnect), so trim analysis is STFT-only until it moves; when it does, use total trim (1+STFT)(1+LTFT)-1. Negative idle STFT with LTFT at zero was also seen after the 09-20 flash. Points at labelled_events.yaml and the CAN learned-trim DIDs 0x1125/0x1126 (0x1102 is road speed on CAN).",
       "assertions": [
         "States that the flash reset the learned long-term trim and that 0.00 is the neutral value, not a decode fault",
         "Notes that relearn on this truck has taken weeks, so LTFT may stay at zero for a long time",
         "Says trim analysis is STFT-only while LTFT is zero, and to use total trim (1+STFT)(1+LTFT)-1 once it moves",
         "Does not diagnose a failed A/F sensor or ECM fault from the zero LTFT alone",
-        "Mentions a way to confirm (e.g. labelled_events.yaml history, or the Mode 22 learned-trim DIDs 0x1102/0x1125)"
+        "Mentions a way to confirm (e.g. labelled_events.yaml history, or the Mode 22 learned-trim DIDs 0x1125/0x1126)"
       ],
       "files": []
     },
