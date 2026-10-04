@@ -89,7 +89,7 @@ def test_a_gauge_reading_needs_a_depth() -> None:
     assert TyreRecord(action="rotated").tread_depth_mm is None
 
 
-def _digest(storage: Path, session: str, circumference: float) -> None:
+def _measured(storage: Path, session: str, circumference: float) -> None:
     session_dir = storage / session
     session_dir.mkdir(parents=True)
     block = {
@@ -100,7 +100,7 @@ def _digest(storage: Path, session: str, circumference: float) -> None:
         "n_pairs": 500,
         "se_pct": 0.03,
     }
-    (session_dir / "digest.json").write_text(json.dumps({"rolling_circumference": block}))
+    (session_dir / "rolling_circumference.json").write_text(json.dumps(block))
 
 
 def _ledger(tmp_path: Path) -> VehicleLedgerStore:
@@ -113,7 +113,7 @@ MM = 2 * math.pi / 1000.0  # metres of circumference per mm of tread
 def test_without_a_gauge_reading_there_is_a_circumference_and_no_depth(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
     for day in range(1, 6):
-        _digest(storage, f"2026-10-0{day}T120000", 2.559)
+        _measured(storage, f"2026-10-0{day}T120000", 2.559)
     status = tyre_status(storage, _ledger(tmp_path))
     assert status["current"]["circumference_m"] == pytest.approx(2.559)
     assert status["estimate"] is None
@@ -124,9 +124,9 @@ def test_a_gauge_reading_turns_circumference_into_tread_depth(tmp_path: Path) ->
     storage = tmp_path / "sessions"
     # Five drives around the 10 mm gauge reading, then the tyre loses 1.5 mm.
     for day in range(1, 6):
-        _digest(storage, f"2026-10-0{day}T120000", 2.559)
+        _measured(storage, f"2026-10-0{day}T120000", 2.559)
     for day in range(10, 20):
-        _digest(storage, f"2026-10-{day}T120000", 2.559 - 1.5 * MM)
+        _measured(storage, f"2026-10-{day}T120000", 2.559 - 1.5 * MM)
     ledger = _ledger(tmp_path)
     ledger.record(
         occurred_at=date(2026, 10, 3),
@@ -143,8 +143,8 @@ def test_a_gauge_reading_turns_circumference_into_tread_depth(tmp_path: Path) ->
 
 def test_a_rotation_restarts_the_series_and_retires_the_old_reading(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
-    _digest(storage, "2026-10-01T120000", 2.540)
-    _digest(storage, "2026-10-12T120000", 2.559)
+    _measured(storage, "2026-10-01T120000", 2.540)
+    _measured(storage, "2026-10-12T120000", 2.559)
     ledger = _ledger(tmp_path)
     ledger.record(
         occurred_at=date(2026, 10, 1),
@@ -167,7 +167,7 @@ def test_a_rotation_restarts_the_series_and_retires_the_old_reading(tmp_path: Pa
 def test_a_pressure_change_since_the_baseline_is_named(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
     for day in range(1, 8):
-        _digest(storage, f"2026-10-0{day}T120000", 2.559)
+        _measured(storage, f"2026-10-0{day}T120000", 2.559)
     ledger = _ledger(tmp_path)
     ledger.record(
         occurred_at=date(2026, 10, 2),
@@ -192,7 +192,7 @@ def test_the_tyres_route_serves_the_trend(tmp_path: Path) -> None:
 
     config = isolated_config(tmp_path)
     for day in range(1, 4):
-        _digest(config.collection.storage_path, f"2026-10-0{day}T120000", 2.559)
+        _measured(config.collection.storage_path, f"2026-10-0{day}T120000", 2.559)
     app = create_app(
         config,
         anomalies_dir=tmp_path / "anomalies",
@@ -204,3 +204,43 @@ def test_the_tyres_route_serves_the_trend(tmp_path: Path) -> None:
     body = response.json()
     assert len(body["drives"]) == 3
     assert body["current"]["circumference_m"] == pytest.approx(2.559)
+
+
+def test_the_backfill_measures_sessions_without_a_digest_and_copies_old_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The drives the digest refused are the long ones: the backfill measures
+    every session, and a 2026-10-03 digest field is copied, not re-measured."""
+    from scripts import backfill_rolling_circumference as backfill
+    from src.storage.session_products import read_rolling_circumference
+
+    storage = tmp_path / "sessions"
+    bare = _drive(storage, "2026-10-01T120000", circumference=2.559)
+    held = storage / "2026-10-02T120000"
+    held.mkdir()
+    old = {"available": True, "method_version": METHOD_VERSION, "median_m": 2.56}
+    (held / "digest.json").write_text(json.dumps({"rolling_circumference": old}))
+    (storage / "_replay-2026-10-01T120000").mkdir()
+    measured: list[str] = []
+
+    def _measure_session(session_dir: Path, _config: object) -> dict:  # type: ignore[type-arg]
+        measured.append(session_dir.name)
+        return {"available": True, "method_version": METHOD_VERSION, "median_m": 2.559}
+
+    class _Config:
+        class collection:  # noqa: N801
+            storage_path = storage
+
+    monkeypatch.setattr(backfill.CanaryConfig, "from_yaml", staticmethod(lambda _p: _Config))
+    monkeypatch.setattr(backfill, "resolve_profile_for_tooling", lambda *_a: None)
+    monkeypatch.setattr(backfill, "scope_config", lambda base, _p: base)
+    monkeypatch.setattr(backfill, "measure_session", _measure_session)
+
+    assert backfill.main(["--config", "unused.yaml"]) == 0
+    assert measured == [bare.name]
+    assert read_rolling_circumference(bare)["median_m"] == 2.559  # type: ignore[index]
+    assert read_rolling_circumference(held) == old
+    assert read_rolling_circumference(storage / "_replay-2026-10-01T120000") is None
+    # A second run finds both current and measures nothing.
+    assert backfill.main(["--config", "unused.yaml"]) == 0
+    assert measured == [bare.name]

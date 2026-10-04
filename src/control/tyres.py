@@ -1,7 +1,9 @@
 """Tyre wear from GPS: the trip digests' rolling circumference, trended.
 
-Every trip digest carries the driven tyres' rolling circumference over that
-drive's steady cruise (:mod:`src.analysis.rolling_circumference`). One
+Every drive's ``rolling_circumference.json`` holds the driven tyres' rolling
+circumference over its steady cruise (:mod:`src.analysis.rolling_circumference`;
+written by the trip-end digest, by trip end alone when the digest is refused,
+and by ``scripts/backfill_rolling_circumference.py``). One
 millimetre of tread is 2π mm of circumference, so a change in circumference
 is a change in tread depth:
 
@@ -14,7 +16,7 @@ ledger as a ``tyres: {action: tread_measured, tread_depth_mm}`` event: the
 drives around it fix the circumference that depth corresponds to, and later
 drives move it.
 
-What this reads, and nothing else: the digest sidecars (small JSON) and the
+What this reads, and nothing else: those sidecars (small JSON) and the
 ledger. Safe to serve live on the Pi.
 
 Rules:
@@ -25,7 +27,8 @@ Rules:
   About 6 psi moves the circumference as much as ~0.8 mm of tread.
 - Drives measured by a different method version are never combined.
 - Uncertainty comes from the drives themselves (their scatter / √n). The
-  2026-09 Xterra drives scattered by 0.15 % (≈0.6 mm of tread) per drive.
+  Xterra's drives on the Pi scattered by 0.43 % (≈1.7 mm of tread) per drive
+  (2026-10-04, 9 drives; one +1 % outlier).
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from typing import Any
 import numpy as np
 
 from src.analysis.rolling_circumference import METHOD_VERSION
-from src.storage.session_products import read_digest
+from src.storage.session_products import read_rolling_circumference
 from src.storage.sessions import is_session_dir_name, session_started_at
 from src.vehicle.vehicle_ledger import VehicleEvent, VehicleLedgerStore
 
@@ -148,15 +151,14 @@ def tyre_status(
 
 
 def _drives(storage_path: Path) -> list[dict[str, Any]]:
-    """Every live session's digest measurement, oldest first."""
+    """Every session's tyre measurement, oldest first."""
     found: list[dict[str, Any]] = []
     if not storage_path.is_dir():
         return found
     for session_dir in storage_path.iterdir():
         if not session_dir.is_dir() or not is_session_dir_name(session_dir.name):
             continue
-        digest = read_digest(session_dir)
-        block = (digest or {}).get("rolling_circumference")
+        block = read_rolling_circumference(session_dir)
         if not isinstance(block, dict) or not block.get("available"):
             continue
         if block.get("method_version") != METHOD_VERSION:

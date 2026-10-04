@@ -13,6 +13,7 @@ session that does digest digests byte-identically.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import resource
@@ -45,6 +46,7 @@ from src.analysis.digest import (
     digest_span_budget_seconds,
     get_or_compute_digest,
 )
+from src.analysis.rolling_circumference import METHOD_VERSION
 from src.config import CanaryConfig
 from src.control import trip_end
 from src.control.trip_end import (
@@ -60,6 +62,7 @@ from src.storage.session_products import (
     DIGEST_SKIPPED_FILENAME,
     read_digest,
     read_digest_skipped,
+    read_rolling_circumference,
 )
 from tests.builders import RICH_SESSION_END, digest_config, write_rich_session
 from tests.fakes import slow_digest
@@ -89,6 +92,30 @@ class _RefusingExecutor(Executor):
     def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
         self.submissions += 1
         raise AssertionError("a child was started for a session that should have been refused")
+
+
+class _TyresOnlyExecutor(Executor):
+    """Refuses a digest child, runs the tyre measurement inline (D03.35).
+
+    A drive refused a digest is still measured for tyre wear: two channels,
+    not the session, so the digest's budgets do not apply to it.
+    """
+
+    def __init__(self) -> None:
+        self.digests = 0
+        self.tyres = 0
+
+    def submit(self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Future[Any]:
+        if getattr(fn, "func", None) is not trip_end.measure_tyres_under_limit:
+            self.digests += 1
+            raise AssertionError("a digest child was started for a refused session")
+        self.tyres += 1
+        # Inline, so without the child's address-space cap: in this process
+        # it would cap the test worker itself.
+        call = functools.partial(fn, address_space_bytes=None)
+        future: Future[Any] = Future()
+        future.set_result(call(*args, **kwargs))
+        return future
 
 
 class _MemoryErrorExecutor(Executor):
@@ -159,7 +186,7 @@ async def test_concurrent_trip_end_requests_share_the_running_digest(
 # --- 2. the budgets refuse before anything is started ---------------------
 
 
-async def test_a_session_over_the_span_budget_is_refused_and_no_child_starts(
+async def test_a_session_over_the_span_budget_is_refused_and_only_its_tyres_are_measured(
     tmp_path: Path,
 ) -> None:
     """P02.1: the ``value_number`` chain reads part by part, so every digest is
@@ -169,12 +196,15 @@ async def test_a_session_over_the_span_budget_is_refused_and_no_child_starts(
     span = session_time_span_seconds(session)
     assert span is not None and span > 10
     config = _budgeted(digest_config(tmp_path), digest_span_budget_seconds=10)
-    pool = _RefusingExecutor()
+    pool = _TyresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
 
     assert result is None
-    assert pool.submissions == 0
+    assert pool.digests == 0
+    assert pool.tyres == 1
+    tyres = read_rolling_circumference(session)
+    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
     assert not (session / DIGEST_FILENAME).exists()
     skipped = read_digest_skipped(session)
     assert skipped is not None
@@ -190,7 +220,7 @@ async def test_a_session_over_the_span_budget_is_refused_and_no_child_starts(
     await asyncio.sleep(0)
 
 
-async def test_a_capture_over_the_row_budget_is_refused_and_no_child_starts(
+async def test_a_capture_over_the_row_budget_is_refused_and_only_its_tyres_are_measured(
     tmp_path: Path,
 ) -> None:
     """A capture's tuning section still reads the session whole (until P02.2),
@@ -199,12 +229,15 @@ async def test_a_capture_over_the_row_budget_is_refused_and_no_child_starts(
     rows = count_session_rows(session)
     assert rows is not None and rows > 10
     config = _budgeted(digest_config(tmp_path), digest_row_budget=10)
-    pool = _RefusingExecutor()
+    pool = _TyresOnlyExecutor()
 
     result = await handle_trip_end_off_loop(session, config, executor=pool)
 
     assert result is None
-    assert pool.submissions == 0
+    assert pool.digests == 0
+    assert pool.tyres == 1
+    tyres = read_rolling_circumference(session)
+    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
     skipped = read_digest_skipped(session)
     assert skipped is not None
     assert skipped["reason"] == REASON_OVER_ROW_BUDGET
@@ -224,6 +257,17 @@ def test_an_ordinary_drive_is_not_budgeted_by_rows(tmp_path: Path) -> None:
     assert read_digest_skipped(session) is None
 
 
+def test_a_digest_stores_its_tyre_measurement_as_its_own_sidecar(tmp_path: Path) -> None:
+    """D03.35: ``rolling_circumference.json`` is the tyre trend's only input,
+    so a digest writes it there and not into ``digest.json``."""
+    session = _session(tmp_path)
+    payload = get_or_compute_digest(session, digest_config(tmp_path), now=RICH_SESSION_END)
+    assert payload is not None
+    assert "rolling_circumference" not in payload
+    tyres = read_rolling_circumference(session)
+    assert tyres is not None and tyres["method_version"] == METHOD_VERSION
+
+
 async def test_a_replay_directory_is_refused_by_the_shared_function(tmp_path: Path) -> None:
     """The GET path refused ``_replay-*`` via ``resolve_session`` all along;
     the trip-end hook bypassed it and digested 5.9 M replayed rows."""
@@ -236,6 +280,7 @@ async def test_a_replay_directory_is_refused_by_the_shared_function(tmp_path: Pa
     assert skipped is not None
     assert skipped["reason"] == REASON_NOT_A_SESSION
     assert "_replay-2026-05-20T180000" in skipped["detail"]
+    assert read_rolling_circumference(session) is None, "a replay is not a drive"
 
 
 def test_the_in_process_path_is_gated_by_the_same_budget(tmp_path: Path) -> None:

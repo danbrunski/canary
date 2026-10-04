@@ -2260,10 +2260,18 @@ live here now, so the documents could be archived
       tolerance, and a tyre of another size is refused.
     - Reproduces the analysis on `2026-09-18T213818` (2.55465 m) and
       `2026-09-20T211925` (2.55779 m).
-  - **Every trip digest** carries it (`rolling_circumference`, in the
-    bounded digest child, two channels read).
-    `scripts/backfill_rolling_circumference.py` merges it into stored
-    digests, touching only that key. Run it parked on the Pi.
+  - **Each drive's own sidecar**, `rolling_circumference.json` (2026-10-04;
+    first built as a digest field). The digest measures it in its bounded
+    child and writes it there, not into `digest.json`. A drive refused a
+    digest is measured by trip end alone, in a child of its own. Not a
+    `_replay-*`: that is not a drive. `scripts/backfill_rolling_circumference.py`
+    measures every stored session, digest or not, and copies a 2026-10-03
+    digest field rather than re-measuring. Run it parked on the Pi.
+    - Why: a digest field meant no measurement for a drive with no digest.
+      On the Pi that was 17 drives refused `over_row_budget` before P02.1,
+      the two reference drives among them, and ~40 more of ≥10 MB with no
+      digest at all (pre-D03.6), the long highway drives the trend needs.
+      The 37 sessions of ≤1 MB were the Pi on with the engine off (operator).
   - **Ledger.** `VehicleEvent.tyres: TyreRecord` with `action` ∈
     {`tread_measured` (requires `tread_depth_mm`), `rotated`, `replaced`,
     `pressure_changed`}. Carried on `POST /control/vehicle-ledger` and the
@@ -2299,7 +2307,7 @@ live here now, so the documents could be archived
   - one gauge reading on the driven (rear) tyres, recorded from the card,
     to turn the trend into depth;
   - worth a look: why `2026-09-10T002208` reads +1 % (its gears and speed
-    range are in its digest), and why 137 sessions have no trip digest.
+    range are in its sidecar).
 
 
 ## Deferred by decision, not blocked

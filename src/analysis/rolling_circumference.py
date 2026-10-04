@@ -12,25 +12,38 @@ rpm/speed within :data:`STEADY_TOLERANCE`, above :data:`MIN_SPEED_KPH`, and its
 rpm/speed lies within :data:`GEAR_TOLERANCE` of one gear: a clutch-in coast or
 a shift never qualifies. The drive's value is the median of those pairs.
 
-Measured on the Xterra's September 2026 drives (H07.11): one drive's median has
-a standard error of 0.03-0.10 %; drive to drive they scatter by 0.15 % (σ) with
-no wear between them. One millimetre of tread is 2π mm of circumference, 0.25 %
-on a 2.56 m tyre, so a single drive resolves wear to about ±0.6 mm and a month
-of drives to about ±0.15 mm. Absolute tread depth needs a gauge reading as the
+Measured on the Xterra (H07.11, D03.35): one drive's median has a standard
+error of 0.03-0.10 %, but drives scatter from one another by more: 0.15 % (σ)
+over 18 September drives on the laptop, 0.43 % over the 9 drives the Pi first
+measured (2026-10-04). One millimetre of tread is 2π mm of circumference, 0.25 %
+on a 2.56 m tyre, so one drive resolves wear to about ±0.6-1.7 mm, and the
+trend is read from many. Absolute tread depth needs a gauge reading as the
 baseline (:mod:`src.control.tyres`); this module measures circumference only.
+
+Each drive's result is its own sidecar, ``rolling_circumference.json``: the
+digest writes it, trip end measures it alone when the digest is refused, and
+``scripts/backfill_rolling_circumference.py`` covers stored sessions.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 
 from src.analysis.compare import ComparisonRefusedError, align_pairs
 from src.signals.pairing import PairingPolicy
+from src.storage.session_products import ROLLING_CIRCUMFERENCE_FILENAME
+from src.storage.sidecar import write_json_sidecar
+
+if TYPE_CHECKING:
+    from src.config import CanaryConfig
+
+log = logging.getLogger(__name__)
 
 GPS_SPEED_CHANNEL = "gps:speed"
 #: Same-instant tolerance between an rpm sample and a GPS speed fix.
@@ -180,6 +193,48 @@ def measure_rolling_circumference(
     )
 
 
+def measure_session(session_dir: Path, config: CanaryConfig) -> dict[str, Any]:
+    """This drive's rolling circumference as the sidecar stores it, or why not.
+
+    The rpm sources are the vehicle's ``dyno.yaml`` ``motion_sources.rpm``,
+    else Mode 01 rpm; the gearbox, final drive and the gear-choice prior are
+    the profile's. Never raises but ``MemoryError``: it is a report, and the
+    digest and trip end call it beside work that must not fail with it.
+    """
+    from src.analysis.dyno import DYNO_FILENAME, load_dyno_profile
+    from src.vehicle.profiles import profile_dir
+
+    params = config.vehicle.parameters
+    try:
+        dyno = load_dyno_profile(profile_dir(config) / DYNO_FILENAME)
+        sources = dyno.motion_sources if dyno is not None else None
+        rpm_channels = list(sources.rpm) if sources is not None and sources.rpm else ["obd:RPM"]
+        return measure_rolling_circumference(
+            session_dir,
+            rpm_channels=rpm_channels,
+            gearbox_ratios=tuple(params.gearbox_ratios),
+            final_drive=params.final_drive or 0.0,
+            prior_m=params.tyre_loaded_circumference_m,
+        ).to_dict()
+    except MemoryError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — a report, not a gate
+        log.warning("rolling circumference failed for %s", session_dir.name, exc_info=True)
+        return {
+            "available": False,
+            "method_version": METHOD_VERSION,
+            "kind": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def write_rolling_circumference(session_dir: Path, block: dict[str, Any]) -> Path:
+    """Atomic write of the ``rolling_circumference.json`` sidecar."""
+    path = session_dir / ROLLING_CIRCUMFERENCE_FILENAME
+    write_json_sidecar(path, block)
+    return path
+
+
 def _refused(channels: list[str], reason: str, detail: str) -> RollingCircumference:
     return RollingCircumference(
         available=False,
@@ -194,4 +249,6 @@ __all__ = [
     "METHOD_VERSION",
     "RollingCircumference",
     "measure_rolling_circumference",
+    "measure_session",
+    "write_rolling_circumference",
 ]

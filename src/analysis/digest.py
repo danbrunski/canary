@@ -37,6 +37,7 @@ from typing import Any
 from src.alerts.event_logger import event_log_path, read_events
 from src.analysis.fingerprint import compute_fingerprint
 from src.analysis.reference_epoch import read_reference_epoch
+from src.analysis.rolling_circumference import measure_session, write_rolling_circumference
 from src.analysis.session_classifier import classify_session
 from src.config import CanaryConfig
 from src.preprocessing.loader import resample_and_segment
@@ -142,7 +143,11 @@ class SessionDigest:
     trip: dict[str, Any] | None = None
     #: The driven tyres' rolling circumference measured over this drive's
     #: steady cruise (:mod:`src.analysis.rolling_circumference`), or why there
-    #: is none. :mod:`src.control.tyres` trends it into tread wear.
+    #: is none. Computed here because the digest already reads the session in
+    #: its bounded child, but **not part of ``digest.json``**: :func:`write_digest`
+    #: stores it as its own ``rolling_circumference.json``, the one place
+    #: :mod:`src.control.tyres` reads, so a drive refused a digest can still
+    #: carry one.
     rolling_circumference: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -160,7 +165,6 @@ class SessionDigest:
             "new_ledger_events": list(self.new_ledger_events),
             "tuning": self.tuning,
             "trip": self.trip,
-            "rolling_circumference": self.rolling_circumference,
         }
 
 
@@ -676,7 +680,7 @@ def compute_digest(
         new_dtcs=_new_dtcs(session_dir),
         new_ledger_events=_new_ledger_events(ledger, start, end),
         tuning=_tuning_section(session_dir, config),
-        rolling_circumference=_rolling_circumference(session_dir, config),
+        rolling_circumference=measure_session(session_dir, config),
     )
 
 
@@ -685,6 +689,8 @@ def write_digest(session_dir: Path, digest: SessionDigest) -> Path:
     ``fingerprint.json`` / ``dtc.json`` / ``trip_summary.json``."""
     path = session_dir / DIGEST_FILENAME
     write_json_sidecar(path, digest.to_dict(), default=_json_default)
+    if digest.rolling_circumference is not None:
+        write_rolling_circumference(session_dir, digest.rolling_circumference)
     return path
 
 
@@ -711,36 +717,6 @@ def persist_digest(
 
     record_session_best_effort(catalog_db, session_dir)
     return read_digest(session_dir)
-
-
-def _rolling_circumference(session_dir: Path, config: CanaryConfig) -> dict[str, Any]:
-    """This drive's tyre rolling circumference (tyre wear), or why not.
-
-    The rpm sources are the vehicle's ``dyno.yaml`` ``motion_sources.rpm``,
-    else Mode 01 rpm; the gearbox, final drive and the gear-choice prior are
-    the profile's. Never raises but ``MemoryError``: a digest is a report.
-    """
-    from src.analysis.dyno import DYNO_FILENAME, load_dyno_profile
-    from src.analysis.rolling_circumference import measure_rolling_circumference
-    from src.vehicle.profiles import profile_dir
-
-    params = config.vehicle.parameters
-    try:
-        dyno = load_dyno_profile(profile_dir(config) / DYNO_FILENAME)
-        sources = dyno.motion_sources if dyno is not None else None
-        rpm_channels = list(sources.rpm) if sources is not None and sources.rpm else ["obd:RPM"]
-        return measure_rolling_circumference(
-            session_dir,
-            rpm_channels=rpm_channels,
-            gearbox_ratios=tuple(params.gearbox_ratios),
-            final_drive=params.final_drive or 0.0,
-            prior_m=params.tyre_loaded_circumference_m,
-        ).to_dict()
-    except MemoryError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — a digest is a report, not a gate
-        log.warning("rolling circumference failed for %s", session_dir.name, exc_info=True)
-        return {"available": False, "kind": "failed", "error": f"{type(exc).__name__}: {exc}"}
 
 
 def tuning_section(session_dir: Path, config: CanaryConfig) -> dict[str, Any] | None:
