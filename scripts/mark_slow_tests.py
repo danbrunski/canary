@@ -2,7 +2,7 @@
 """Write tests/slow_tests.txt from a pytest ``--durations`` report.
 
     pytest -m "not integration and not ml_training" --durations=0 --durations-min=2 > d.log
-    scripts/mark_slow_tests.py d.log [--threshold 2.0]
+    scripts/mark_slow_tests.py d.log [--threshold 1.5]
 
 A test whose setup + call + teardown took at least ``--threshold`` seconds is
 listed; ``tests/conftest.py`` marks every listed test ``slow``, which the
@@ -25,7 +25,7 @@ LINE = re.compile(r"^\s*([\d.]+)s (setup|call|teardown)\s+(\S+)")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("report", type=Path)
-    parser.add_argument("--threshold", type=float, default=2.0)
+    parser.add_argument("--threshold", type=float, default=1.5)
     args = parser.parse_args()
     seconds: dict[str, float] = defaultdict(float)
     for line in args.report.read_text().splitlines():

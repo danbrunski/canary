@@ -660,7 +660,7 @@ recomputes the rolling frame over the whole buffered window every tick.
     loading worker otherwise. Test:
     `test_decode_catalogs_load_once_per_process_and_reload_on_an_edit`.
 
-- [~] **P02.6 Re-measure the slow tier.**
+- [x] **P02.6 Re-measure the slow tier.**
   - Run `scripts/mark_slow_tests.py` on a fresh full timing log and regenerate
     `tests/slow_tests.txt`.
   - Check that this week's new tests land where their measured times put them:
@@ -703,6 +703,16 @@ recomputes the rolling frame over the whole buffered window every tick.
     start. Reaching ~90 s needs a lower threshold. 1.5 s moves 106 more tests
     to CI-only for roughly 15 s. That is the operator's call, because AGENTS.md
     defines `slow` as "measured at 2 s or more".
+  - *Threshold lowered to 1.5 s, 2026-10-03 (operator: "You can lower the
+    slow test threshold").* The list was regenerated from the same quiet
+    checkout measurement at `--threshold 1.5` (now the script's default):
+    **365 tests**, 2,219 s.
+    - The gate's selection was run back to back, same worktree: 173 s with
+      the 2 s list and 148 s with the 1.5 s list. The other session's load
+      had come back (1-min load 2.5–10), so both are above the quiet
+      figures. On the quiet 121 s, the ratio projects to ~103 s.
+    - AGENTS.md now says 1.5 s and ~365 tests. CI still runs the whole slow
+      tier.
 
 ## Pi (measure with the Pi connected)
 
