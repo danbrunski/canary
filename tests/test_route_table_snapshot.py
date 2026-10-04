@@ -99,6 +99,7 @@ def _config(tmp_path: Path) -> CanaryConfig:
                     "anomalies_dir": tmp_path / "anomalies",
                     "catalog_db": tmp_path / "catalog.db",
                     "capture_profiles": tmp_path / "capture_profiles.yaml",
+                    "capture_profile_overrides": tmp_path / "capture_profile_overrides.yaml",
                 }
             ),
         }

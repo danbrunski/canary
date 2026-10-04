@@ -160,6 +160,12 @@ finish() {
 # does not match the binary on disk: the 2026-07-26 blind IF was manifests from
 # a pull beside binaries two weeks older. A retrain on the Pi rewrites the
 # tracked manifest, which is why a dirty models/ is normal and not refused.
+#
+# Since S03 (2026-10-04) nothing under models/ is tracked and the Pi keeps its
+# models in daemon.state_dir (/data/canary/models), so keep_models is a no-op
+# on a current tree. It stays for the pull that crosses the untracking commit
+# (which would otherwise delete the two manifests it removed from git) and for
+# a rollback to an older commit that tracked them.
 # ---------------------------------------------------------------------------
 MODELS_PATH="models"
 

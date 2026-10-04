@@ -21,7 +21,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from src.collection import bus_budget, tuning_profile
-from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.config import CanaryConfig
 from src.control import capture_finalize
 from src.control.capture import CaptureController
@@ -53,7 +53,10 @@ def _process_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
 def _session(tmp_path: Path) -> tuple[ProfileCaptureSession, AsyncParquetTelemetryWriter]:
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = CaptureProfileStore(
-        tmp_path / "vehicle" / "capture_profiles.yaml",
+        CaptureProfileSources(
+            tmp_path / "vehicle" / "capture_profiles.yaml",
+            tmp_path / "state" / "capture_profile_overrides.yaml",
+        ),
         config.collection,
         tmp_path / "missing-behavior-models.yaml",
     )

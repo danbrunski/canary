@@ -113,7 +113,7 @@ def _register(
         profile.name = name
     if vin is not None:
         profile.vin = vin
-    profiles = load_registry(config.profiles.registry_path)
+    profiles = load_registry(config.profiles)
     existing = next((p for p in profiles if p.slug == profile.slug), None)
     if existing is None:
         profiles.append(profile)
@@ -122,7 +122,7 @@ def _register(
             existing.name = name
         if vin is not None:
             existing.vin = vin
-    save_registry(config.profiles.registry_path, profiles)
+    save_registry(config.profiles, profiles)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

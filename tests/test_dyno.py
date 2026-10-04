@@ -58,7 +58,7 @@ from src.analysis.dyno import (
 )
 from src.config import VehicleParameters
 from src.signals.committees import STANDARD_GRAVITY as G
-from src.vehicle.profiles import load_registry
+from src.vehicle.profiles import read_registry_file
 
 REPO = Path(__file__).resolve().parents[1]
 
@@ -1186,7 +1186,8 @@ def test_two_gear_fit_refuses_degenerate_pulls(driveline: Driveline) -> None:
 
 
 def test_xterra_profile_builds_a_driveline_with_estimated_inertia() -> None:
-    (xterra,) = [p for p in load_registry(REPO / "profiles.yaml") if p.slug == "nissan-xterra-2008"]
+    registry = read_registry_file(REPO / "profiles.yaml")
+    (xterra,) = [p for p in registry if p.slug == "nissan-xterra-2008"]
     profile = load_dyno_profile(REPO / "data" / "nissan-xterra-2008" / DYNO_FILENAME)
     assert profile is not None
     built = Driveline.from_vehicle(xterra.parameters, profile.inertia)

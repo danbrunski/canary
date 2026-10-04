@@ -24,6 +24,7 @@ from src.collection import bus_budget, tuning_profile
 from src.collection.capture_profiles import (
     CaptureProfile,
     CaptureProfileCatalog,
+    CaptureProfileSources,
     CaptureProfileStore,
     seed_catalog,
 )
@@ -146,7 +147,11 @@ def test_preview_equals_the_live_plan(
     tmp_path: Path,
     restore_runtime: None,
 ) -> None:
-    store = CaptureProfileStore(tmp_path / "profiles.yaml", collection, tmp_path / "bm.yaml")
+    store = CaptureProfileStore(
+        CaptureProfileSources(tmp_path / "profiles.yaml", tmp_path / "overrides.yaml"),
+        collection,
+        tmp_path / "bm.yaml",
+    )
     preview = store.resolved_plan(profile)
     live = _live_plan(collection, profile)
     assert preview == live
@@ -203,6 +208,7 @@ def test_dashboard_preview_includes_the_daemons_custom_pids(tmp_path: Path) -> N
                 update={
                     "custom_pids": custom,
                     "capture_profiles": tmp_path / "capture_profiles.yaml",
+                    "capture_profile_overrides": tmp_path / "capture_profile_overrides.yaml",
                 }
             )
         }

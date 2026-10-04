@@ -214,10 +214,13 @@ dashboard:
   port: 8000
 
 daemon:
-  anomalies_dir: /data/canary/anomalies
-  models_dir: models
-  jobs_dir: /data/canary/control/jobs
-  audit_log: /data/canary/control/audit.jsonl
+  # Everything the daemon writes at runtime lives under here, not in the git
+  # checkout (S03): anomalies/, models/<vehicle>/ (with behavior_models.yaml),
+  # control/ (jobs, ledgers, audit, catalog, capture-profile overrides, the
+  # vehicle registry overlay). canary-update refuses a checkout with tracked
+  # edits, so nothing may write there. Don't pin the individual paths too: an
+  # explicit value wins over state_dir.
+  state_dir: /data/canary
   isolation_forest_artifact: isolation_forest/model.joblib
   lstm_artifact: lstm_autoencoder/model.pt
   model_poll_seconds: 30.0

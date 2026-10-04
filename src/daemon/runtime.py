@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from src.collection import tuning_profile, tx_gate
-from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.kline.plan import KlineCatalog
 from src.collection.record_arming import RecordArmingGate
 from src.config import CanaryConfig
@@ -546,7 +546,7 @@ async def run_daemon(
         storage_writer=storage_writer,
         capture_controller=components.capture_controller,
         profile_store=CaptureProfileStore(
-            config.daemon.capture_profiles,
+            CaptureProfileSources.of(config.daemon),
             config.collection,
             config.daemon.behavior_models,
             custom_pids_path=config.daemon.custom_pids,

@@ -59,6 +59,7 @@ COVERED_MODULES: frozenset[str] = frozenset(
 COVERED_GLOBALS: frozenset[tuple[str, str]] = frozenset(
     {
         ("capture_lifetime.py", "_ledger"),
+        ("capture_profiles.py", "_SHADOW_WARNED"),
         ("discovery.py", "_remembered"),
         ("kline/sessions.py", "MODULE_SESSIONS"),
         ("queueing.py", "_CAN_FRAME_DROP_LOGS"),

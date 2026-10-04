@@ -81,9 +81,13 @@ def test_pi_example_yaml_loads():
     assert config.hardware.can.interface == "socketcan"
     assert config.hardware.can.channel == "can0"
     assert config.collection.storage_path == Path("/data/canary/sessions")
+    # Everything the daemon writes is under the state root, nothing in the
+    # checkout (S03): models included.
+    assert config.daemon.state_dir == Path("/data/canary")
     assert config.daemon.anomalies_dir == Path("/data/canary/anomalies")
-    assert config.daemon.models_dir == Path("models")
+    assert config.daemon.models_dir == Path("/data/canary/models")
     assert config.daemon.jobs_dir == Path("/data/canary/control/jobs")
+    assert config.daemon.behavior_models == Path("/data/canary/models/behavior_models.yaml")
     assert config.models.lstm_autoencoder.enabled is False
     assert config.dashboard.host == "0.0.0.0"
     assert config.daemon.control_token_env == "CANARY_CONTROL_TOKEN"

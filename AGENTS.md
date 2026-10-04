@@ -204,8 +204,16 @@ to direct HTTP.
 - **Pi deployment path**: `ssh canary@192.168.137.2` (or
   `canary.local`); install via `sudo bash scripts/install_pi.sh`; data
   lives under `/data/canary/`; control token at
-  `/etc/canary/control.token`. Model binaries are gitignored — they
-  travel by `scp`, not `git pull`. `192.168.137.2` is the **Ethernet** link.
+  `/etc/canary/control.token`. **Nothing the Pi writes lives in the
+  checkout** (S03): `daemon.state_dir: /data/canary` puts models (manifests
+  and `behavior_models.yaml` included) under `/data/canary/models/<vehicle>/`
+  and every ledger, job and override under `/data/canary/control/`. Models are
+  not in git at all — they travel by `canaryctl models upload` or `scp`. A
+  capture profile saved in the Pi's dashboard is an override layered over the
+  repo's catalog by name (revert with `POST
+  /control/capture/profiles/{name}/revert`). Don't add a runtime writer to a
+  tracked file; `tests/test_state_dir.py` makes every daemon path pick a side.
+  `192.168.137.2` is the **Ethernet** link.
   In the vehicle the Pi often has no DNS, so `git pull` fails there: deploy
   with a bundle (`git bundle create x.bundle <pi-head>..main`, `scp`, then
   `git fetch x.bundle main:refs/remotes/bundle/x && git merge --ff-only`).

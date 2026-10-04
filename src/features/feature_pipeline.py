@@ -475,7 +475,14 @@ def resolve_feature_policy(
     or what that catalog would be seeded with (``collection.obd_dids``). With no
     ``config`` it falls back to the repo's ``data/capture_profiles.yaml``.
     """
-    from src.collection.capture_profiles import serving_mode01_channels, serving_mode22_dids
+    from src.collection.capture_profiles import (
+        CaptureProfileSources,
+        serving_mode01_channels,
+        serving_mode22_dids,
+    )
+
+    # No config: the starter catalog alone, with no machine's overrides.
+    starter_only = CaptureProfileSources(DEFAULT_CAPTURE_PROFILES_PATH, None)
 
     catalog = bindings
     if catalog is None:
@@ -486,8 +493,8 @@ def resolve_feature_policy(
     if config is None:
         return FeaturePolicy(
             bindings=catalog,
-            serving_dids=serving_mode22_dids(DEFAULT_CAPTURE_PROFILES_PATH),
-            serving_mode01=serving_mode01_channels(DEFAULT_CAPTURE_PROFILES_PATH),
+            serving_dids=serving_mode22_dids(starter_only),
+            serving_mode01=serving_mode01_channels(starter_only),
             did_map=did_map,
         )
     scoped = config
@@ -497,8 +504,12 @@ def resolve_feature_policy(
         scoped = scope_config(config, resolve_profile_for_tooling(config, profile_slug))
     return FeaturePolicy(
         bindings=catalog,
-        serving_dids=serving_mode22_dids(scoped.daemon.capture_profiles, scoped.collection),
-        serving_mode01=serving_mode01_channels(scoped.daemon.capture_profiles, scoped.collection),
+        serving_dids=serving_mode22_dids(
+            CaptureProfileSources.of(scoped.daemon), scoped.collection
+        ),
+        serving_mode01=serving_mode01_channels(
+            CaptureProfileSources.of(scoped.daemon), scoped.collection
+        ),
         did_map=did_map,
     )
 

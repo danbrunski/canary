@@ -62,6 +62,7 @@ def _base(tmp_path: Path) -> CanaryConfig:
     raw.setdefault("collection", {})["storage_path"] = str(tmp_path / "sessions")
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw.setdefault("profiles", {})["registry_path"] = str(tmp_path / "profiles.yaml")
+    raw["profiles"]["registry_overlay_path"] = str(tmp_path / "profiles.overlay.yaml")
     return CanaryConfig.model_validate(raw)
 
 
@@ -221,8 +222,8 @@ def test_a_verify_only_legacy_dir_is_migrated_for_the_only_registered_profile(
 
     # A second vehicle registering later cannot orphan it: the marker holds.
     save_registry(
-        base.profiles.registry_path,
-        [*load_registry(base.profiles.registry_path), VehicleProfile(slug="work-truck", vin="W")],
+        base.profiles,
+        [*load_registry(base.profiles), VehicleProfile(slug="work-truck", vin="W")],
     )
     assert legacy_adoption(xterra).adopted
     assert legacy_adoption(_scoped(base, "work-truck")).adopted is False
@@ -235,7 +236,7 @@ def test_an_unowned_legacy_dir_warns_and_is_surfaced(
     base = _base(tmp_path)
     legacy, _channel = _verify_only_legacy(base)
     save_registry(
-        base.profiles.registry_path,
+        base.profiles,
         [VehicleProfile(slug=XTERRA, vin="X"), VehicleProfile(slug="work-truck", vin="W")],
     )
     with caplog.at_level("WARNING", logger="src.vehicle.profiles"):
@@ -255,6 +256,7 @@ def test_a_hand_added_tracked_flash_does_not_orphan_dashboard_flashes(tmp_path: 
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw["daemon"]["afr_calibration"] = str(tmp_path / "data" / "afr_calibration.yaml")
     raw.setdefault("profiles", {})["registry_path"] = str(tmp_path / "profiles.yaml")
+    raw["profiles"]["registry_overlay_path"] = str(tmp_path / "profiles.overlay.yaml")
     base = CanaryConfig.model_validate(raw)
     xterra = _scoped(base)
     tracked = source_registry_path(xterra)

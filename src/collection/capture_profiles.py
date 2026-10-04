@@ -7,9 +7,12 @@ small enough to reload on every API operation.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +24,7 @@ from src.collection.bus_budget import (
     MAX_BUDGET_REQUESTS_PER_SECOND,
     MIN_BUDGET_REQUESTS_PER_SECOND,
 )
-from src.config import CollectionConfig
+from src.config import CollectionConfig, DaemonConfig
 from src.signals.derived import DERIVED_CHANNEL_INPUTS
 
 if TYPE_CHECKING:
@@ -32,11 +35,11 @@ log = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 DEFAULT_PROFILE_NAME = "default"
-#: The catalog a vehicle starts from when it has none. Only ``default`` is
-#: built in code, because it mirrors the running collection config; every other
-#: profile is data. A new vehicle's catalog copies this file's non-default
-#: profiles once and is its own from then on -- nothing re-seeds or upgrades a
-#: saved catalog, so an operator's deletion or edit is final.
+#: The catalog a vehicle starts from when it has no tracked one. Only
+#: ``default`` is built in code, because it mirrors the running collection
+#: config; every other profile is data. It stands in, in memory, for the missing
+#: tracked catalog; an operator's edits and deletions are this machine's
+#: overrides layered over it (S03.4), so they are final until reverted.
 STARTER_CATALOG_PATH = Path(__file__).resolve().parents[2] / "data" / "capture_profiles.yaml"
 #: Keys older catalogs carry from the retired built-in upgrade machinery
 #: (``builtin_revision`` / ``operator_modified``, removed 2026-09-21). Dropped
@@ -609,10 +612,11 @@ class CaptureProfileCatalog(_Strict):
 
 
 def _reset_for_tests() -> None:
-    """Forget that the ``broadcast_decode`` retirement was already reported
-    (``src.collection.process_state``)."""
+    """Forget that the ``broadcast_decode`` retirement and any shadowed
+    override were already reported (``src.collection.process_state``)."""
     global _broadcast_decode_warned
     _broadcast_decode_warned = False
+    _SHADOW_WARNED.clear()
 
 
 def _warn_broadcast_decode_retired() -> None:
@@ -672,32 +676,171 @@ def seed_catalog(
     return CaptureProfileCatalog(profiles=profiles)
 
 
+@dataclass(frozen=True)
+class CaptureProfileSources:
+    """Where a vehicle's capture profiles come from (S03.4).
+
+    Two files, layered by profile name (operator decision 2026-10-04):
+
+    - ``catalog``: the tracked catalog, laptop-authored and never written at
+      runtime. A vehicle without one starts from :func:`seed_catalog`, in
+      memory.
+    - ``overrides``: what this machine saved or deleted from the dashboard.
+      An override replaces the tracked profile of the same name; a deletion
+      hides it. Every profile not overridden keeps following the repo. ``None``
+      reads the tracked catalog alone (a tool with no config).
+    """
+
+    catalog: Path
+    overrides: Path | None
+
+    @classmethod
+    def of(cls, daemon: DaemonConfig) -> CaptureProfileSources:
+        return cls(daemon.capture_profiles, daemon.capture_profile_overrides)
+
+
+class CaptureProfileOverrides(_Strict):
+    """This machine's layer over the tracked catalog (S03.4)."""
+
+    schema_version: int = SCHEMA_VERSION
+    #: Profiles saved here: each replaces the tracked one of its name, or adds one.
+    profiles: list[CaptureProfile] = Field(default_factory=list)
+    #: Tracked profiles deleted here.
+    deleted: list[str] = Field(default_factory=list)
+    #: The tracked profile each override replaced, as it was when saved
+    #: (:func:`profile_digest`), so a later repo change to it is reported.
+    base_digests: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> CaptureProfileOverrides:
+        names = [profile.name for profile in self.profiles]
+        if len(names) != len(set(names)):
+            raise ValueError("capture profile override names must be unique")
+        if DEFAULT_PROFILE_NAME in self.deleted:
+            raise ValueError("the default capture profile cannot be deleted")
+        if set(names) & set(self.deleted):
+            raise ValueError("a capture profile cannot be both overridden and deleted")
+        return self
+
+
+def profile_digest(profile: CaptureProfile) -> str:
+    """A stable fingerprint of a profile's content."""
+    payload = json.dumps(profile.model_dump(mode="json"), sort_keys=True)
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
 def save_capture_profiles(path: Path, catalog: CaptureProfileCatalog) -> None:
+    """Write a whole catalog: authoring tools only, never the daemon (S03.4)."""
     payload = catalog.model_dump(mode="json")
     atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False), mkdir=True)
 
 
-def load_capture_profiles(path: Path, collection: CollectionConfig) -> CaptureProfileCatalog:
-    """Load a vehicle's catalog, creating it from the seed the first time.
-
-    A saved catalog is authoritative and is never rewritten on load: no
-    profile is appended, upgraded or restored behind the operator's back. The
-    built-in upgrade machinery that used to do that (``builtin_revision``)
-    kept re-adding profiles the operator had deleted, and it rewrote a tracked
-    file on the Pi, which then blocked ``git pull``.
-    """
+def _read_catalog(path: Path) -> CaptureProfileCatalog | None:
     if not path.exists():
-        catalog = seed_catalog(collection)
-        save_capture_profiles(path, catalog)
-        return catalog
+        return None
     return CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
 
 
-_SERVING_DID_CACHE: dict[Path, tuple[int, frozenset[str]]] = {}
+def load_overrides(path: Path | None) -> CaptureProfileOverrides:
+    if path is None or not path.exists():
+        return CaptureProfileOverrides()
+    return CaptureProfileOverrides.model_validate(yaml.safe_load(path.read_text()) or {})
+
+
+def save_overrides(path: Path, overrides: CaptureProfileOverrides) -> None:
+    payload = overrides.model_dump(mode="json")
+    atomic_write_text(path, yaml.safe_dump(payload, sort_keys=False), mkdir=True)
+
+
+#: ``(name, digest now in the repo)`` already reported as shadowed, so a
+#: catalog read on every API call reports each change once per process.
+_SHADOW_WARNED: set[tuple[str, str]] = set()
+
+
+def layer_catalog(
+    base: CaptureProfileCatalog, overrides: CaptureProfileOverrides
+) -> CaptureProfileCatalog:
+    """``base`` with ``overrides`` applied by name; tracked order kept, additions last."""
+    replaced = {profile.name: profile for profile in overrides.profiles}
+    deleted = set(overrides.deleted)
+    profiles: list[CaptureProfile] = []
+    for profile in base.profiles:
+        if profile.name in deleted:
+            continue
+        override = replaced.pop(profile.name, None)
+        if override is None:
+            profiles.append(profile)
+            continue
+        current = profile_digest(profile)
+        saved = overrides.base_digests.get(profile.name)
+        if saved != current and (profile.name, current) not in _SHADOW_WARNED:
+            _SHADOW_WARNED.add((profile.name, current))
+            log.warning(
+                "capture profile %r is overridden on this machine, and the repo's version "
+                "has changed since; the override still wins (revert it to take the repo's)",
+                profile.name,
+                extra={"profile": profile.name},
+            )
+        profiles.append(override)
+    profiles.extend(sorted(replaced.values(), key=lambda item: item.name))
+    return CaptureProfileCatalog(profiles=profiles)
+
+
+def load_capture_profiles(
+    sources: CaptureProfileSources, collection: CollectionConfig
+) -> CaptureProfileCatalog:
+    """A vehicle's effective catalog: the tracked one (or the seed) under this
+    machine's overrides. Never writes anything.
+
+    The tracked catalog used to double as the saved one, and the daemon wrote
+    it on the Pi, which then blocked ``git pull``/``canary-update`` (the last
+    time, 2026-10-04, for two empty ``kline: []``). Nothing appends, upgrades or
+    restores a profile behind the operator's back: a deletion here stays
+    deleted, and only a revert brings the repo's version back.
+    """
+    base = _read_catalog(sources.catalog) or seed_catalog(collection)
+    return layer_catalog(base, load_overrides(sources.overrides))
+
+
+def _serving_default(
+    sources: CaptureProfileSources, collection: CollectionConfig | None
+) -> tuple[bool, CaptureProfile | None]:
+    """``(resolved, default profile)`` for the serving-set readers, read-only."""
+    base = _read_catalog(sources.catalog)
+    if base is None:
+        if collection is None:
+            override = load_overrides(sources.overrides)
+            default = next((p for p in override.profiles if p.name == DEFAULT_PROFILE_NAME), None)
+            return default is not None, default
+        base = seed_catalog(collection)
+    return True, layer_catalog(base, load_overrides(sources.overrides)).by_name(
+        DEFAULT_PROFILE_NAME
+    )
+
+
+def _sources_stamp(sources: CaptureProfileSources) -> tuple[int, int | None] | None:
+    """Both files' mtimes, or ``None`` when the tracked catalog is absent (then
+    the answer depends on the collection config, so it is not cached)."""
+    try:
+        catalog = sources.catalog.stat().st_mtime_ns
+    except FileNotFoundError:
+        return None
+    overrides = None
+    if sources.overrides is not None:
+        try:
+            overrides = sources.overrides.stat().st_mtime_ns
+        except FileNotFoundError:
+            overrides = None
+    return catalog, overrides
+
+
+_SERVING_DID_CACHE: dict[
+    CaptureProfileSources, tuple[tuple[int, int | None], frozenset[str] | None]
+] = {}
 
 
 def serving_mode22_dids(
-    path: Path, collection: CollectionConfig | None = None
+    sources: CaptureProfileSources, collection: CollectionConfig | None = None
 ) -> frozenset[str] | None:
     """Upper-cased Mode-22 DID names the *serving* (``default``) profile polls.
 
@@ -707,44 +850,44 @@ def serving_mode22_dids(
     that exists in the corpus solely because a ``_capture-*`` research profile
     polled it is NaN forever at serve.
 
-    Strictly read-only, unlike :func:`load_capture_profiles` (which seeds and
-    upgrades the file): feature selection must not rewrite operator data. The
-    same precedence though — a saved catalog is authoritative; with no file the
-    ``default`` profile *is* ``collection.obd_dids`` (see :func:`seed_catalog`).
+    Read-only: feature selection must not rewrite operator data. The answer is
+    the effective ``default`` (tracked catalog under this machine's overrides,
+    S03.4); with no catalog the ``default`` profile *is* ``collection.obd_dids``
+    (see :func:`seed_catalog`). A laptop does not see the Pi's overrides, so a
+    ``default`` edited in the Pi's dashboard is invisible to a laptop retrain.
 
     ``None`` means *unresolvable* — no catalog on disk and no collection config
     to seed one from — which is a different answer from an empty set ("the
     serving profile polls no DIDs"). Callers must not conflate them.
     """
-    try:
-        mtime = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        if collection is None:
-            return None
-        return frozenset(item.strip().upper() for item in collection.obd_dids if item.strip())
-    cached = _SERVING_DID_CACHE.get(path)
-    if cached is not None and cached[0] == mtime:
+    stamp = _sources_stamp(sources)
+    cached = _SERVING_DID_CACHE.get(sources)
+    if stamp is not None and cached is not None and cached[0] == stamp:
         return cached[1]
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
-    default = catalog.by_name(DEFAULT_PROFILE_NAME)
-    polled = (
-        frozenset(item.upper() for item in default.mode22)
-        if default is not None and default.mode22_enabled
-        else frozenset()
-    )
-    _SERVING_DID_CACHE[path] = (mtime, polled)
+    resolved, default = _serving_default(sources, collection)
+    polled: frozenset[str] | None
+    if not resolved:
+        polled = None
+    elif default is None or not default.mode22_enabled:
+        polled = frozenset()
+    else:
+        polled = frozenset(item.strip().upper() for item in default.mode22 if item.strip())
+    if stamp is not None:
+        _SERVING_DID_CACHE[sources] = (stamp, polled)
     return polled
 
 
 #: The serving profile's Mode 01 selection, keyed like ``_SERVING_DID_CACHE``.
-_SERVING_MODE01_CACHE: dict[Path, tuple[int, frozenset[str]]] = {}
+_SERVING_MODE01_CACHE: dict[
+    CaptureProfileSources, tuple[tuple[int, int | None], frozenset[str] | None]
+] = {}
 
 #: In a :func:`serving_mode01_channels` answer: every supported PID is polled.
 MODE01_AUTO = "AUTO"
 
 
 def serving_mode01_channels(
-    path: Path, collection: CollectionConfig | None = None
+    sources: CaptureProfileSources, collection: CollectionConfig | None = None
 ) -> frozenset[str] | None:
     """Upper-cased Mode 01 channel names the serving (``default``) profile polls.
 
@@ -754,23 +897,22 @@ def serving_mode01_channels(
     on 2026-09-26 (D03.34), and without this answer the next retrain would have
     learned them. Contains :data:`MODE01_AUTO` when the profile polls every
     supported PID. Empty when Mode 01 is disabled. ``None`` is unresolvable,
-    as for DIDs. Same precedence: a saved catalog is authoritative, and with
-    no file the ``default`` profile is the one :func:`seed_catalog` would
-    write.
+    as for DIDs. Same layering and precedence.
     """
-    try:
-        mtime = path.stat().st_mtime_ns
-    except FileNotFoundError:
-        if collection is None:
-            return None
-        return _mode01_selection(default_profile(collection))
-    cached = _SERVING_MODE01_CACHE.get(path)
-    if cached is not None and cached[0] == mtime:
+    stamp = _sources_stamp(sources)
+    cached = _SERVING_MODE01_CACHE.get(sources)
+    if stamp is not None and cached is not None and cached[0] == stamp:
         return cached[1]
-    catalog = CaptureProfileCatalog.model_validate(yaml.safe_load(path.read_text()))
-    default = catalog.by_name(DEFAULT_PROFILE_NAME)
-    polled = _mode01_selection(default) if default is not None else frozenset()
-    _SERVING_MODE01_CACHE[path] = (mtime, polled)
+    resolved, default = _serving_default(sources, collection)
+    polled: frozenset[str] | None
+    if not resolved:
+        polled = None
+    elif default is None:
+        polled = frozenset()
+    else:
+        polled = _mode01_selection(default)
+    if stamp is not None:
+        _SERVING_MODE01_CACHE[sources] = (stamp, polled)
     return polled
 
 
@@ -817,14 +959,14 @@ def channel_satisfied(channel: str, profile: CaptureProfile, seen: frozenset[str
 class CaptureProfileStore:
     def __init__(
         self,
-        path: Path,
+        sources: CaptureProfileSources,
         collection: CollectionConfig,
         behavior_models_path: Path,
         *,
         custom_pids_path: Path | None = None,
         kline_catalog: KlineCatalog | None = None,
     ):
-        self.path = path
+        self.sources = sources
         self.collection = collection
         self.behavior_models_path = behavior_models_path
         #: The daemon's custom-PID file, so the preview's request universe
@@ -836,7 +978,15 @@ class CaptureProfileStore:
         self.kline_catalog = kline_catalog
 
     def load(self) -> CaptureProfileCatalog:
-        return load_capture_profiles(self.path, self.collection)
+        return load_capture_profiles(self.sources, self.collection)
+
+    def _base(self) -> CaptureProfileCatalog:
+        return _read_catalog(self.sources.catalog) or seed_catalog(self.collection)
+
+    def _overrides_path(self) -> Path:
+        if self.sources.overrides is None:
+            raise ValueError("this capture profile store is read-only (no overrides file)")
+        return self.sources.overrides
 
     def resolved_plan(self, profile: CaptureProfile) -> dict[str, Any]:
         """The identifier-level plan ``profile`` would run: the live plan, asked early.
@@ -875,9 +1025,29 @@ class CaptureProfileStore:
         if any(item.name == profile.name for item in profiles):
             raise ValueError(f"capture profile already exists: {profile.name}")
         self._check_kline(profile)
-        profiles.append(profile)
-        profiles.sort(key=lambda item: (item.name != DEFAULT_PROFILE_NAME, item.name))
-        save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
+        # Only this machine's layer is written (S03.4); the tracked catalog never is.
+        path = self._overrides_path()
+        base = {item.name: item for item in self._base().profiles}
+        overrides = load_overrides(path)
+        kept = [item for item in overrides.profiles if item.name not in {target, profile.name}]
+        deleted = [name for name in overrides.deleted if name != profile.name]
+        digests = {
+            name: digest
+            for name, digest in overrides.base_digests.items()
+            if name not in {target, profile.name}
+        }
+        if target != profile.name and target in base:
+            deleted.append(target)  # a rename hides the tracked original
+        if profile.name in base:
+            digests[profile.name] = profile_digest(base[profile.name])
+        save_overrides(
+            path,
+            CaptureProfileOverrides(
+                profiles=sorted([*kept, profile], key=lambda item: item.name),
+                deleted=sorted(set(deleted)),
+                base_digests=digests,
+            ),
+        )
 
     def _check_kline(self, profile: CaptureProfile) -> None:
         """Resolve ``profile.kline`` exactly as the K-line collector will
@@ -905,14 +1075,67 @@ class CaptureProfileStore:
         normalized = name.strip().lower()
         if normalized == DEFAULT_PROFILE_NAME:
             raise ValueError("the default capture profile cannot be deleted")
-        catalog = self.load()
-        profiles = [item for item in catalog.profiles if item.name != normalized]
-        if len(profiles) == len(catalog.profiles):
+        if self.load().by_name(normalized) is None:
             raise KeyError(normalized)
-        save_capture_profiles(self.path, CaptureProfileCatalog(profiles=profiles))
+        path = self._overrides_path()
+        overrides = load_overrides(path)
+        deleted = set(overrides.deleted)
+        if self._base().by_name(normalized) is not None:
+            deleted.add(normalized)
+        save_overrides(
+            path,
+            CaptureProfileOverrides(
+                profiles=[item for item in overrides.profiles if item.name != normalized],
+                deleted=sorted(deleted),
+                base_digests={
+                    name: digest
+                    for name, digest in overrides.base_digests.items()
+                    if name != normalized
+                },
+            ),
+        )
+
+    def revert(self, name: str) -> CaptureProfile | None:
+        """Drop this machine's override or deletion of ``name``; return the
+        profile now in effect (the repo's), or ``None`` if the repo has none.
+
+        Raises ``KeyError`` when this machine has nothing to revert for it.
+        """
+        normalized = name.strip().lower()
+        path = self._overrides_path()
+        overrides = load_overrides(path)
+        overridden = any(item.name == normalized for item in overrides.profiles)
+        if not overridden and normalized not in overrides.deleted:
+            raise KeyError(normalized)
+        save_overrides(
+            path,
+            CaptureProfileOverrides(
+                profiles=[item for item in overrides.profiles if item.name != normalized],
+                deleted=[item for item in overrides.deleted if item != normalized],
+                base_digests={
+                    key: digest
+                    for key, digest in overrides.base_digests.items()
+                    if key != normalized
+                },
+            ),
+        )
+        return self._base().by_name(normalized)
+
+    def overridden_names(self) -> dict[str, str]:
+        """``{name: "overridden" | "added" | "deleted"}`` for this machine's layer."""
+        base = {item.name for item in self._base().profiles}
+        overrides = load_overrides(self.sources.overrides)
+        out = {
+            item.name: ("overridden" if item.name in base else "added")
+            for item in overrides.profiles
+        }
+        out.update({name: "deleted" for name in overrides.deleted})
+        return out
 
 
 __all__ = [
+    "CaptureProfileOverrides",
+    "CaptureProfileSources",
     "channel_satisfied",
     "CAPTURE_CONTEXT_MODE01",
     "DEFAULT_PROFILE_NAME",
@@ -923,6 +1146,9 @@ __all__ = [
     "CaptureProfileStore",
     "FUEL_DELIVERY_TUPLE",
     "default_profile",
+    "layer_catalog",
     "load_capture_profiles",
+    "load_overrides",
+    "profile_digest",
     "seed_catalog",
 ]

@@ -20,6 +20,7 @@ from src.collection.capture_profiles import (
     DEFAULT_PROFILE_NAME,
     CaptureProfile,
     CaptureProfileCatalog,
+    CaptureProfileSources,
     save_capture_profiles,
     seed_catalog,
     serving_mode22_dids,
@@ -373,7 +374,9 @@ def test_the_xterra_serving_profile_gates_its_dropped_pids() -> None:
     """End to end on the tracked Xterra catalog."""
     from src.collection.capture_profiles import serving_mode01_channels
 
-    served = serving_mode01_channels(REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml")
+    served = serving_mode01_channels(
+        CaptureProfileSources(REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml", None)
+    )
     assert served is not None and "AUTO" not in served
     policy = FeaturePolicy(
         bindings=None, serving_dids=frozenset(), serving_mode01=served, did_map=load_repo_did_map()
@@ -410,23 +413,25 @@ def test_serving_dids_come_from_the_default_profile_only(tmp_path: Path) -> None
     catalog = tmp_path / "capture_profiles.yaml"
     _write_catalog(catalog, mode22=["ecm_rpm", "ECM_AIR_CHARGE"])
     # The research profile's DID is in the corpus but never served.
-    assert serving_mode22_dids(catalog) == frozenset({"ECM_RPM", "ECM_AIR_CHARGE"})
+    assert serving_mode22_dids(CaptureProfileSources(catalog, None)) == frozenset(
+        {"ECM_RPM", "ECM_AIR_CHARGE"}
+    )
 
 
 def test_serving_dids_empty_when_the_default_profile_disables_mode22(tmp_path: Path) -> None:
     catalog = tmp_path / "capture_profiles.yaml"
     _write_catalog(catalog, mode22=["ECM_RPM"], enabled=False)
-    assert serving_mode22_dids(catalog) == frozenset()
+    assert serving_mode22_dids(CaptureProfileSources(catalog, None)) == frozenset()
 
 
 def test_serving_dids_without_a_catalog_seed_from_config_and_never_write(tmp_path: Path) -> None:
     missing = tmp_path / "nope" / "capture_profiles.yaml"
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
-    seeded = serving_mode22_dids(missing, config.collection)
+    seeded = serving_mode22_dids(CaptureProfileSources(missing, None), config.collection)
     assert seeded == frozenset(name.upper() for name in config.collection.obd_dids)
     assert seeded  # the example config polls DIDs; an empty set would prove nothing
     # Unresolvable is a different answer from "polls nothing".
-    assert serving_mode22_dids(missing) is None
+    assert serving_mode22_dids(CaptureProfileSources(missing, None)) is None
     assert not missing.exists() and not missing.parent.exists()  # strictly read-only
 
 

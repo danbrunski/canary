@@ -530,6 +530,14 @@
     {
       "auth": "control",
       "body": false,
+      "method": "POST",
+      "path": "/control/capture/profiles/{name}/revert",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
       "method": "GET",
       "path": "/control/capture/quality",
       "query": [],

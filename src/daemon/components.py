@@ -405,6 +405,7 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
     if config is not None:
         try:
             from src.collection.capture_profiles import (
+                CaptureProfileSources,
                 serving_mode01_channels,
                 serving_mode22_dids,
             )
@@ -414,9 +415,11 @@ def _load_isolation_forest(artifact_path: Path, *, config: CanaryConfig | None =
 
             policy = FeaturePolicy(
                 bindings=repo_bindings(),
-                serving_dids=serving_mode22_dids(config.daemon.capture_profiles, config.collection),
+                serving_dids=serving_mode22_dids(
+                    CaptureProfileSources.of(config.daemon), config.collection
+                ),
                 serving_mode01=serving_mode01_channels(
-                    config.daemon.capture_profiles, config.collection
+                    CaptureProfileSources.of(config.daemon), config.collection
                 ),
                 # The catalog the live source decodes DIDs with
                 # (inference.build_live_feature_source: the repo dids.yaml).

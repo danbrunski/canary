@@ -59,6 +59,7 @@ def _config(tmp_path: Path) -> CanaryConfig:
     raw.setdefault("daemon", {})["jobs_dir"] = str(tmp_path / "control" / "jobs")
     raw["daemon"]["afr_calibration"] = str(tmp_path / "data" / "afr_calibration.yaml")
     raw.setdefault("profiles", {})["registry_path"] = str(tmp_path / "profiles.yaml")
+    raw["profiles"]["registry_overlay_path"] = str(tmp_path / "profiles.overlay.yaml")
     base = CanaryConfig.model_validate(raw)
     return scope_config(base, resolve_profile_for_tooling(base, None))
 

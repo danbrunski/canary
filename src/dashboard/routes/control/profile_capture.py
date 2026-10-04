@@ -48,6 +48,9 @@ def build_router(ctx: ControlContext) -> APIRouter:
             "resolved_plans": {
                 profile.name: profile_store.resolved_plan(profile) for profile in catalog.profiles
             },
+            # This machine's layer over the tracked catalog (S03.4): name ->
+            # "overridden" | "added" | "deleted". Absent names follow the repo.
+            "overrides": profile_store.overridden_names(),
         }
 
     @router.put("/control/capture/profiles")
@@ -83,6 +86,28 @@ def build_router(ctx: ControlContext) -> APIRouter:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         payload = {"deleted": name}
         publish_control_event("capture_profile.delete", "ok", payload)
+        return payload
+
+    @router.post("/control/capture/profiles/{name}/revert")
+    def revert_capture_profile(name: str) -> dict[str, Any]:
+        """Drop this machine's override or deletion of ``name`` (S03.4): the
+        repo's version, if it has one, is in effect again."""
+        normalized = name.strip().lower()
+        if tuning_profile.is_active() and tuning_profile.active_profile().name == normalized:
+            raise HTTPException(status_code=409, detail="cannot revert the active capture profile")
+        try:
+            restored = profile_store.revert(normalized)
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=404, detail=f"no override of capture profile {name} on this machine"
+            ) from exc
+        if restored is not None and restored.name == "default" and not tuning_profile.is_active():
+            tuning_profile.activate(restored, source="capture-profile-revert")
+        payload = {
+            "reverted": normalized,
+            "profile": None if restored is None else restored.model_dump(mode="json"),
+        }
+        publish_control_event("capture_profile.revert", "ok", payload)
         return payload
 
     @router.post("/control/capture")

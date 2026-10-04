@@ -298,10 +298,10 @@ def reset_process_state(default_profile: CaptureProfile) -> None:
 def resolved_plan_for(config: CanaryConfig, profile: CaptureProfile) -> dict[str, Any] | None:
     """The identifier-level plan the control route writes into the capture
     manifest (C09); ``None`` on a tree that predates it."""
-    from src.collection.capture_profiles import CaptureProfileStore
+    from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 
     store = CaptureProfileStore(
-        config.daemon.capture_profiles, config.collection, config.daemon.behavior_models
+        CaptureProfileSources.of(config.daemon), config.collection, config.daemon.behavior_models
     )
     builder = getattr(store, "resolved_plan", None)
     if builder is None:

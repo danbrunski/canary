@@ -4,17 +4,20 @@ D02.5: "a binding retraction is a feature-spec change". The July IF went blind
 because 6 of its 88 features were corrected out of ``data/bindings.yaml``
 after training, and nothing noticed until a drive read
 ``missing_feature_rate: 1.0``. This suite makes the next such edit fail CI:
-any column of a tracked ``models/**/model.manifest.json`` that no current
-source produces fails, unless it is listed — pinned to the model version — in
+any column of a deployed model's manifest that no current source produces
+fails, unless it is listed — pinned to the model version — in
 ``tests/fixtures/manifest_unproducible_allowlist.yaml``. The allowlist can
 only shrink: an entry that is producible again, gone from the manifest, or
 belongs to a retrained model is itself a failure.
+
+The manifests are ``tests/fixtures/deployed_manifests/<slug>/<type>/``: models
+left git on 2026-10-04 (S03), so this copy of what the Pi runs is the record,
+refreshed when a model is deployed (that directory's README).
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -37,23 +40,22 @@ ALLOWLIST_PATH = REPO_ROOT / "tests" / "fixtures" / "manifest_unproducible_allow
 DIDS_PATH = REPO_ROOT / "data" / "dids.yaml"
 
 
+DEPLOYED_MANIFESTS_DIR = REPO_ROOT / "tests" / "fixtures" / "deployed_manifests"
+
+
 def _tracked_manifests() -> list[str]:
-    out = subprocess.run(
-        ["git", "ls-files", "models/**/model.manifest.json"],
-        cwd=REPO_ROOT,
-        capture_output=True,
-        text=True,
-        check=True,
+    return sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in DEPLOYED_MANIFESTS_DIR.glob("*/*/model.manifest.json")
     )
-    return sorted(line for line in out.stdout.splitlines() if line.strip())
 
 
 TRACKED_MANIFESTS = _tracked_manifests()
 
 
 def _slug(manifest: str) -> str:
-    # models/<slug>/<model_type>/model.manifest.json
-    return Path(manifest).parts[1]
+    # tests/fixtures/deployed_manifests/<slug>/<model_type>/model.manifest.json
+    return Path(manifest).relative_to(DEPLOYED_MANIFESTS_DIR.relative_to(REPO_ROOT)).parts[0]
 
 
 _CATALOGS: dict[tuple[str, str], ProducibleCatalog] = {}
@@ -114,7 +116,7 @@ def allowlist_violations(
 
 def test_tracked_manifests_exist() -> None:
     # An empty discovery would make every check below vacuous.
-    assert TRACKED_MANIFESTS, "no tracked models/**/model.manifest.json found"
+    assert TRACKED_MANIFESTS, f"no deployed manifests under {DEPLOYED_MANIFESTS_DIR}"
 
 
 @pytest.mark.parametrize("manifest", TRACKED_MANIFESTS)

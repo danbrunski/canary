@@ -429,7 +429,7 @@ def test_a_saved_catalog_carrying_broadcast_decode_loads_and_says_so(
     """Saved catalogs on the Pi carry the retired field and are never
     re-seeded: they load, the field is dropped, and the load names it (once
     per process; the conftest reset makes each test a fresh process here)."""
-    from src.collection.capture_profiles import load_capture_profiles
+    from src.collection.capture_profiles import CaptureProfileSources, load_capture_profiles
 
     config = example_config(REPO / "canary.example.yaml")
     saved = yaml.safe_load((REPO / "data" / "capture_profiles.yaml").read_text())
@@ -438,8 +438,8 @@ def test_a_saved_catalog_carrying_broadcast_decode_loads_and_says_so(
     path = tmp_path / "capture_profiles.yaml"
     path.write_text(yaml.safe_dump(saved, sort_keys=False))
     with caplog.at_level(logging.WARNING, logger="src.collection.capture_profiles"):
-        catalog = load_capture_profiles(path, config.collection)
-        load_capture_profiles(path, config.collection)
+        catalog = load_capture_profiles(CaptureProfileSources(path, None), config.collection)
+        load_capture_profiles(CaptureProfileSources(path, None), config.collection)
     assert [p.name for p in catalog.profiles] == [p["name"] for p in saved["profiles"]]
     assert all("broadcast_decode" not in p.model_dump() for p in catalog.profiles)
     warnings = [r for r in caplog.records if "broadcast_decode is retired" in r.getMessage()]

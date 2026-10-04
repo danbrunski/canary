@@ -28,7 +28,7 @@ from src.collection.can_obd_collector import (
     ObdSchedulerMetrics,
     collect_can_obd_from_config,
 )
-from src.collection.capture_profiles import CaptureProfileStore
+from src.collection.capture_profiles import CaptureProfileSources, CaptureProfileStore
 from src.collection.gps_collector import GpsSpec, collect_gps_from_config
 from src.collection.gps_gpsd import GpsdSpec, collect_gpsd_from_config
 from src.collection.imu_collector import ImuHealth, collect_imu_from_config
@@ -81,7 +81,7 @@ def default_collectors(
     in, so ``/status`` can read them.
     """
     capture_store = CaptureProfileStore(
-        config.daemon.capture_profiles,
+        CaptureProfileSources.of(config.daemon),
         config.collection,
         config.daemon.behavior_models,
         custom_pids_path=config.daemon.custom_pids,

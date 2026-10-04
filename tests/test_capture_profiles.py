@@ -20,6 +20,7 @@ from src.collection.capture_profiles import (
     STORAGE_SAFE_REQUESTS_PER_SECOND,
     CaptureProfile,
     CaptureProfileCatalog,
+    CaptureProfileSources,
     CaptureProfileStore,
     load_capture_profiles,
     save_capture_profiles,
@@ -49,7 +50,10 @@ def _reset_runtime() -> Iterator[None]:
 
 def _store(tmp_path: Path, config: CanaryConfig) -> CaptureProfileStore:
     return CaptureProfileStore(
-        tmp_path / "vehicle" / "capture_profiles.yaml",
+        CaptureProfileSources(
+            tmp_path / "vehicle" / "capture_profiles.yaml",
+            tmp_path / "state" / "capture_profile_overrides.yaml",
+        ),
         config.collection,
         tmp_path / "missing-behavior-models.yaml",
     )
@@ -93,7 +97,7 @@ def test_vehicle_tuning_profile_is_the_one_research_capture() -> None:
     """
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     catalog = load_capture_profiles(
-        REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml",
+        CaptureProfileSources(REPO_ROOT / "data/nissan-xterra-2008/capture_profiles.yaml", None),
         config.collection,
     )
     # Only `default` is built in code, and nothing re-seeds a saved catalog, so
@@ -835,7 +839,7 @@ def test_only_default_is_built_in_and_starters_are_data(tmp_path: Path) -> None:
 
 
 def test_a_saved_catalog_is_never_rewritten_on_load(tmp_path: Path) -> None:
-    """Deleting a starter is final, and loading does not touch the file.
+    """Deleting a starter is final, and loading touches no file.
 
     The retired built-in machinery re-appended deleted profiles on every load
     and rewrote a tracked file on the Pi, which then blocked `git pull`.
@@ -844,10 +848,130 @@ def test_a_saved_catalog_is_never_rewritten_on_load(tmp_path: Path) -> None:
     store = _store(tmp_path, config)
     store.load()
     store.delete("tuning-did")
-    before = store.path.read_text()
+    assert store.sources.overrides is not None
+    before = store.sources.overrides.read_text()
     loaded = store.load()
     assert loaded.by_name("tuning-did") is None
-    assert store.path.read_text() == before
+    assert store.sources.overrides.read_text() == before
+    assert not store.sources.catalog.exists()  # the seed is never written out
+
+
+# --- S03.4: this machine's overrides layered over the tracked catalog -------
+
+
+def _tracked_store(tmp_path: Path) -> tuple[CaptureProfileStore, CanaryConfig]:
+    config = CanaryConfig.from_yaml(EXAMPLE_YAML)
+    tracked = tmp_path / "repo" / "capture_profiles.yaml"
+    save_capture_profiles(tracked, seed_catalog(config.collection))
+    store = CaptureProfileStore(
+        CaptureProfileSources(tracked, tmp_path / "state" / "capture_profile_overrides.yaml"),
+        config.collection,
+        tmp_path / "missing-behavior-models.yaml",
+    )
+    return store, config
+
+
+def _retitled(profile: CaptureProfile, description: str) -> CaptureProfile:
+    return profile.model_copy(update={"description": description})
+
+
+def test_saving_on_this_machine_never_writes_the_tracked_catalog(tmp_path: Path) -> None:
+    store, _ = _tracked_store(tmp_path)
+    tracked_before = store.sources.catalog.read_text()
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    store.save(_retitled(fuel_map, "edited on the Pi"), previous_name="fuel-map")
+    store.delete("tuning-did")
+    assert store.sources.catalog.read_text() == tracked_before
+    loaded = store.load()
+    assert loaded.by_name("fuel-map").description == "edited on the Pi"  # type: ignore[union-attr]
+    assert loaded.by_name("tuning-did") is None
+    assert store.overridden_names() == {"fuel-map": "overridden", "tuning-did": "deleted"}
+
+
+def test_laptop_edits_reach_every_profile_this_machine_did_not_touch(tmp_path: Path) -> None:
+    store, _ = _tracked_store(tmp_path)
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    store.save(_retitled(fuel_map, "edited on the Pi"), previous_name="fuel-map")
+    tracked = CaptureProfileCatalog.model_validate(
+        yaml.safe_load(store.sources.catalog.read_text())
+    )
+    save_capture_profiles(  # a git pull lands a laptop edit to two profiles
+        store.sources.catalog,
+        CaptureProfileCatalog(
+            profiles=[
+                _retitled(p, "edited on the laptop") if p.name in {"fuel-map", "tuning-did"} else p
+                for p in tracked.profiles
+            ]
+        ),
+    )
+    loaded = store.load()
+    assert loaded.by_name("tuning-did").description == "edited on the laptop"  # type: ignore[union-attr]
+    assert loaded.by_name("fuel-map").description == "edited on the Pi"  # type: ignore[union-attr]
+
+
+def test_a_shadowed_profile_that_changed_in_the_repo_is_reported(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    store, _ = _tracked_store(tmp_path)
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    store.save(_retitled(fuel_map, "edited on the Pi"), previous_name="fuel-map")
+    with caplog.at_level("WARNING", logger="src.collection.capture_profiles"):
+        store.load()
+    assert not [r for r in caplog.records if "overridden on this machine" in r.getMessage()]
+    tracked = CaptureProfileCatalog.model_validate(
+        yaml.safe_load(store.sources.catalog.read_text())
+    )
+    save_capture_profiles(
+        store.sources.catalog,
+        CaptureProfileCatalog(
+            profiles=[
+                _retitled(p, "laptop") if p.name == "fuel-map" else p for p in tracked.profiles
+            ]
+        ),
+    )
+    with caplog.at_level("WARNING", logger="src.collection.capture_profiles"):
+        store.load()
+    assert [r for r in caplog.records if "'fuel-map' is overridden" in r.getMessage()]
+
+
+def test_revert_takes_the_repos_version_back(tmp_path: Path) -> None:
+    store, _ = _tracked_store(tmp_path)
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    store.save(_retitled(fuel_map, "edited on the Pi"), previous_name="fuel-map")
+    store.delete("tuning-did")
+    assert store.revert("fuel-map") == fuel_map
+    assert store.revert("tuning-did") is not None
+    assert store.load().by_name("fuel-map") == fuel_map
+    assert store.load().by_name("tuning-did") is not None
+    assert store.overridden_names() == {}
+    with pytest.raises(KeyError):
+        store.revert("fuel-map")
+
+
+def test_a_profile_added_here_is_removed_by_delete_or_revert(tmp_path: Path) -> None:
+    store, _ = _tracked_store(tmp_path)
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    added = fuel_map.model_copy(update={"name": "my-test", "storage_prefix": "_capture-my-test"})
+    store.save(added)
+    assert store.overridden_names() == {"my-test": "added"}
+    assert store.revert("my-test") is None
+    assert store.load().by_name("my-test") is None
+
+
+def test_renaming_a_tracked_profile_hides_the_original(tmp_path: Path) -> None:
+    store, _ = _tracked_store(tmp_path)
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    renamed = fuel_map.model_copy(update={"name": "fuel-map-2", "storage_prefix": "_capture-fm2"})
+    store.save(renamed, previous_name="fuel-map")
+    names = [p.name for p in store.load().profiles]
+    assert "fuel-map" not in names and "fuel-map-2" in names
+    assert store.overridden_names() == {"fuel-map-2": "added", "fuel-map": "deleted"}
 
 
 def test_retired_builtin_keys_are_accepted_and_dropped(tmp_path: Path) -> None:
@@ -859,7 +983,7 @@ def test_retired_builtin_keys_are_accepted_and_dropped(tmp_path: Path) -> None:
         profile["builtin_revision"] = 5
         profile["operator_modified"] = True
     path.write_text(yaml.safe_dump(payload, sort_keys=False))
-    loaded = load_capture_profiles(path, config.collection)
+    loaded = load_capture_profiles(CaptureProfileSources(path, None), config.collection)
     assert "builtin_revision" not in loaded.model_dump(mode="json")["profiles"][0]
 
 
@@ -872,7 +996,12 @@ def test_model_input_warnings_resolve_derived_and_decoded_channels(tmp_path: Pat
         pytest.skip("vehicle behavior models are not present in this checkout")
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     store = CaptureProfileStore(
-        tmp_path / "vehicle" / "capture_profiles.yaml", config.collection, behavior_models
+        CaptureProfileSources(
+            tmp_path / "vehicle" / "capture_profiles.yaml",
+            tmp_path / "state" / "capture_profile_overrides.yaml",
+        ),
+        config.collection,
+        behavior_models,
     )
     profile = CaptureProfile(
         name="default",
@@ -1225,7 +1354,7 @@ def test_load_does_not_overwrite_an_operator_edited_profile(tmp_path: Path) -> N
     path = tmp_path / "capture_profiles.yaml"
     save_capture_profiles(path, CaptureProfileCatalog(profiles=edited))
 
-    loaded = load_capture_profiles(path, collection)
+    loaded = load_capture_profiles(CaptureProfileSources(path, None), collection)
     fuel = loaded.by_name("fuel-map")
     assert fuel is not None and fuel.target_rate_hz == 33.0
 
@@ -1519,7 +1648,10 @@ def _kline_store(
 
     config = CanaryConfig.from_yaml(EXAMPLE_YAML)
     return CaptureProfileStore(
-        tmp_path / "vehicle" / "capture_profiles.yaml",
+        CaptureProfileSources(
+            tmp_path / "vehicle" / "capture_profiles.yaml",
+            tmp_path / "state" / "capture_profile_overrides.yaml",
+        ),
         config.collection,
         tmp_path / "missing-behavior-models.yaml",
         kline_catalog=KlineCatalog(profile_path, DIDS_YAML, poll_interval_seconds),
@@ -1616,6 +1748,7 @@ def test_the_apps_own_store_checks_kline_against_the_configured_catalog(
             "daemon": config.daemon.model_copy(
                 update={
                     "capture_profiles": tmp_path / "capture_profiles.yaml",
+                    "capture_profile_overrides": tmp_path / "capture_profile_overrides.yaml",
                     "kline_profile": KLINE_PROFILE,
                 }
             )
@@ -1635,3 +1768,34 @@ def test_the_apps_own_store_checks_kline_against_the_configured_catalog(
     # The daemon's store (runtime.py) is built the same way.
     runtime_src = (REPO_ROOT / "src" / "daemon" / "runtime.py").read_text()
     assert "kline_catalog=KlineCatalog.from_config(config)" in runtime_src
+
+
+def test_the_revert_route_restores_the_repo_profile_and_lists_overrides(tmp_path: Path) -> None:
+    store, config = _tracked_store(tmp_path)
+    client = TestClient(
+        create_app(
+            config,
+            anomalies_dir=tmp_path / "anomalies",
+            control_token="secret",
+            capture_profile_store=store,
+        )
+    )
+    auth = {"Authorization": "Bearer secret"}
+    fuel_map = store.load().by_name("fuel-map")
+    assert fuel_map is not None
+    edited = _retitled(fuel_map, "edited on the Pi").model_dump(mode="json")
+    saved = client.put(
+        "/control/capture/profiles",
+        headers=auth,
+        json={"profile": edited, "previous_name": "fuel-map"},
+    )
+    assert saved.status_code == 200
+    listing = client.get("/control/capture/profiles", headers=auth).json()
+    assert listing["overrides"] == {"fuel-map": "overridden"}
+
+    reverted = client.post("/control/capture/profiles/fuel-map/revert", headers=auth)
+    assert reverted.status_code == 200
+    assert reverted.json()["profile"]["description"] == fuel_map.description
+    assert client.get("/control/capture/profiles", headers=auth).json()["overrides"] == {}
+    missing = client.post("/control/capture/profiles/fuel-map/revert", headers=auth)
+    assert missing.status_code == 404

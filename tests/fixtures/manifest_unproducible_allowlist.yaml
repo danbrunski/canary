@@ -7,4 +7,20 @@
 #   - any listed column that is producible again, no longer in the manifest,
 #     or whose model_version changed (retrained) — "stale allowlist entry".
 # So this list can only shrink unless someone deliberately reviews a new line.
-entries: []
+entries:
+  - manifest: tests/fixtures/deployed_manifests/nissan-xterra-2008/lstm_autoencoder/model.manifest.json
+    model_version: lstm_autoencoder_2026-09-24T035125.284392Z
+    columns:
+      - obd:mem:ECM_ENGINE_SPEED_RAM
+      - obd:mem:ECM_ENGINE_SPEED_RAM__mean
+      - obd:mem:ECM_IGNITION_TIMING_RAM
+      - obd:mem:ECM_IGNITION_TIMING_RAM__mean
+    reason: >-
+      Found 2026-10-04 when S03 moved the guard from git's stale 09-20 manifest
+      to the one the Pi actually runs. These RAM channels are polled only by
+      the tuning capture profile (the Xterra default has memory: []), so the
+      serving profile never collects them and the LSTM scores with these four
+      inputs missing -- the IF-blind-at-serve shape (D02.5). The model was
+      trained 2026-09-24 03:51Z, apparently before the R03.12 gate kept tuning
+      captures out of training. Debt, not a fix: retrain the LSTM on
+      default-profile sessions; this entry then fails as stale and is deleted.

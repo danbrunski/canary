@@ -92,6 +92,7 @@ from src.behavior.behavior_models import (
     ValidationCriteria,
     ValidationEvidence,
     contract_fingerprint,
+    governing_profile_file,
 )
 from src.behavior.session_context import (
     StartContextSpec,
@@ -263,7 +264,9 @@ class BehaviorValidationDocument(_Strict):
 
 
 def validation_document_path(behavior_models_path: Path) -> Path:
-    return behavior_models_path.parent / VALIDATION_FILENAME
+    """The tracked validation document for the artifact (S03.3: from the profile
+    directory when the artifact is a machine's own copy outside the checkout)."""
+    return governing_profile_file(behavior_models_path, VALIDATION_FILENAME)
 
 
 def load_validation_document(path: Path) -> BehaviorValidationDocument | None:

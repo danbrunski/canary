@@ -49,6 +49,7 @@ from src.operating import (
     ENGINE_RUNNING_MIN_RPM,
     FUEL_STATUS_STATES,
 )
+from src.paths import DATA_DIR
 from src.telemetry import source_of
 from src.trainability import source_exclusion_reason
 
@@ -1471,9 +1472,30 @@ def diagnostic_only_models(models: BehaviorModels) -> dict[str, list[str]]:
     return out
 
 
+def governing_profile_file(behavior_models_path: Path, filename: str) -> Path:
+    """The tracked profile file (policy, validation document) that governs the
+    artifact at ``behavior_models_path``.
+
+    Beside the artifact when one is there, or when the artifact is itself in
+    the checkout's ``data/``. An artifact elsewhere is a machine's own copy:
+    on the Pi it lives under ``state_dir/models/<slug>/`` (S03.3, operator
+    decision 2026-10-04: trained artifacts are Pi-owned). The files that govern
+    it are laptop-authored facts, still in the checkout, so they are read from
+    the tracked profile directory ``data/<slug>/``. The slug is the artifact
+    directory's name, as everywhere ``scope_config`` nests a path; when no
+    tracked profile directory has that name, the artifact has no tracked
+    profile and the file beside it is the answer (a scratch or test artifact).
+    """
+    beside = behavior_models_path.parent / filename
+    if beside.exists() or behavior_models_path.parent.is_relative_to(DATA_DIR):
+        return beside
+    tracked_profile = DATA_DIR / behavior_models_path.parent.name
+    return tracked_profile / filename if tracked_profile.is_dir() else beside
+
+
 def behavior_policy_path(behavior_models_path: Path) -> Path:
     """The profile policy file governing the artifact at ``behavior_models_path``."""
-    return behavior_models_path.parent / BEHAVIOR_POLICY_FILENAME
+    return governing_profile_file(behavior_models_path, BEHAVIOR_POLICY_FILENAME)
 
 
 def load_behavior_policy(path: Path) -> BehaviorPolicy:
