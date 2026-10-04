@@ -2303,11 +2303,18 @@ live here now, so the documents could be archived
   only ~±1.7 mm of tread; the median of 10 is ~±0.6 mm. Most drives
   are too short or too slow to measure, so the trend fills in slowly.
 
+  *Pi, after the sidecar change (`54ffc64`):* the backfill measured **48**
+  drives (2026-08-05..09-21; 39 new, 9 copied from digests, 98 refused).
+  Spread is 0.26 % σ over all 48 and **0.14 %** over the 23 with ≥300
+  pairs, the laptop's figure again. Every drive more than 0.5 % off had
+  fewer than 100 pairs and a per-drive SE ≥0.14 %; `2026-09-10T002208` is
+  one of them (55 pairs, SE 0.25 %). Current: 2.5587 m ± 0.0021 (last 10).
+  Not yet used: the trend weights the last 10 drives equally, though
+  each drive carries its own SE.
+
   **Remaining (operator):**
   - one gauge reading on the driven (rear) tyres, recorded from the card,
     to turn the trend into depth;
-  - worth a look: why `2026-09-10T002208` reads +1 % (its gears and speed
-    range are in its sidecar).
 
 
 ## Deferred by decision, not blocked
