@@ -181,7 +181,7 @@ def test_tables_and_compare_routes(client: TestClient) -> None:
     b = _upload(client, synthetic_image(k=28715), "b.bin").json()["sha256"]
     tables = client.get(f"/control/rom/library/{a}/tables", headers=AUTH).json()
     k1 = next(t for t in tables["tables"] if t["id"] == "k_constant" and t["slot"] == 1)
-    assert k1["raw"] == [[27089]] and k1["confidence"] == "inferred"
+    assert k1["raw"] == [[27089]] and k1["confidence"] == "verified"
     fuel = next(t for t in tables["tables"] if t["id"] == "fuel_targets" and t["slot"] == 1)
     assert fuel["decoded"][0][0] == pytest.approx(14.7)
 

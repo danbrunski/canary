@@ -32,6 +32,9 @@ OPERATOR_ROMS = {
     "base": UPREV / "ROM Store" / "ZS44A.OsirisROM",
     "k106": UPREV / "Tuned ROMs" / "ZS44A-Tuned.OsirisROM",
     "r20260920": UPREV / "Tuned ROMs" / "ZS44A-Tuned-20260920.OsirisROM",
+    # k106 with one Fuel Compensation cell edited in UpRev, 103.13 -> 102.34 %
+    # (docs/uprev-rom-container-research.md): a known answer for that table.
+    "map1change": Path("/home/dan/Uprev/ROMs/ZS44A-Tuned-Map1Change.OsirisROM"),
 }
 OPERATOR_BACKUP_DIR = UPREV / "ROM Backup"
 #: sha256 of the 2026-10-04 ECU read (docs/skunkworks/uprev-backup-20261004.md),

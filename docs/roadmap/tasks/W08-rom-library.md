@@ -64,6 +64,30 @@ Evidence this builds on:
     repo, so it was not compared row by row. One correction from the bytes:
     0x006000-0x007FFF is not wholly erased (48 non-0xFF bytes at
     0x006EFE-0x006F2D, recorded as an `unknown` region).
+  - *Follow-up 2026-10-04, slot tables from the firmware*
+    (`docs/ecu-firmware-analysis.md`, "Map-slot tables"): the two slot spans
+    became tables. Timing trims A (+0x020) and B (+0x120), each 16 × 16 u8,
+    rows = rpm axis 0xCC93 (raw × 50), cols = BFS-X axis 0xCC83 (raw), cells
+    `(raw & 0x7F)` counts. Fuel Compensation (+0x660), 16 × 16 u8,
+    `raw × 0.78125` %. Load Point Scaler at 0x9416 (BE16, read by the code;
+    `raw × 0.00049` = BFS at load point 128 in ms) and its unread slot copy
+    at +0x760. K (+0x762) is now `verified`, still raw. Each slot table is
+    `verified` in Map 1 and `inferred` in Maps 2-5, because no map switch has
+    been seen live. +0x260-0x45F and +0x460-0x65F are `unknown` spans.
+    `Decode` gained `mask`, applied before the scale, because the trims carry
+    a flag in bit 7 on 143 of 256 cells. **The Fuel Comp axes are
+    `inferred`:** the ECM's code searches 0xCACD with engine speed and 0xCB29
+    with `0xFFFF118A`, while UpRev's editor labels them the other way round.
+    Known answers on the operator's files (`slow` tier): Map1Change is one
+    Fuel Comp cell, Map 1 row 15 col 15, 132 → 131, which decodes to 103.13
+    → 102.34 as UpRev displayed. The trims differ in 9 cells per slot in the
+    base, and in 19 in Map 1 of k106 and 20260920. k106's "added spark"
+    edit lands in rows 7-9 (2,800-3,600 rpm) × the four highest load
+    columns. The scaler is 44,019 in all three images and all five slots,
+    and `raw × 44019/128 × 0.00049` reproduces every BFS breakpoint in
+    `afr_calibration.yaml`. Tests: `tests/test_rom_map.py` (29 passed) and
+    `tests/test_rom_image.py` with `-m ""` (28 passed, the operator tests
+    included).
   - Add `data/nissan-xterra-2008/rom_map.yaml` with a validated schema
     (pydantic, required fields, refusal by name), covering:
     - image size and calibration-ID location;

@@ -6,7 +6,10 @@ schema_version: 1
 # decoded ZS44A-Tuned-20260920.OsirisROM (docs/skunkworks/uprev-backup-20261004.md);
 # docs/uprev-rom-table-verification.md, "2026-10-04: image map and three
 # candidate tables"; the erase geometry seen in the 2026-09-20 flash
-# (docs/skunkworks/uprev-flash-20260920.md).
+# (docs/skunkworks/uprev-flash-20260920.md); the slot tables, Load Point
+# Scaler and map selector from the firmware (docs/ecu-firmware-analysis.md).
+# Code addresses quoted in evidence are where the ECM's program reads a
+# table; the disassembly itself stays outside Git.
 #
 # Offsets are into the plain image (the decoded ROMData, or what an ECU read
 # returns), never Osiris container offsets. Confidence is a field:
@@ -233,29 +236,41 @@ map_slots:
     Five 2 KiB copies at 0x0E0000 + (n-1) x 0x800: Fuel Targets sits at +0x220
     and K at +0x762 in all five, and in the UpRev base all five Fuel Targets
     copies equal the calibration's own table at 0x00A169. The tunes edited only
-    slot 1, UpRev's "Map 1", except K, which they wrote to all five.
+    slot 1, UpRev's "Map 1", except K, which they wrote to all five. The
+    firmware agrees (docs/ecu-firmware-analysis.md, "UpRev's map switching"):
+    UpRev's routine at 0x0DE3E4 copies slot n, 2 KiB, from 0x0E0000 +
+    0x800 x (n-1) into RAM at 0xFFFFB040, start-up (0x0DE1A4) copies slot 1,
+    and Nissan's readers take every switchable table from that RAM copy at a
+    fixed offset. The slot is chosen by a debounced discrete input (bits 1 and
+    3 of 0xFFFF2EE0, 0x0DE358); the committed slot is RAM byte 0xFFFFB008
+    (mem:ECM_ACTIVE_MAP), 0 after a cold boot meaning slot 1. No switch has
+    been observed live (0 on 196/196 reads, 2026-10-04), which is why the
+    Maps 2-5 copies of each table stay inferred.
   regions:
-    - name: Ignition timing (probable)
-      start: 0x09C
-      end: 0x0BF
-      kind: calibration
-      confidence: inferred
+    - name: Unidentified 16-bit map
+      start: 0x260
+      end: 0x45F
+      kind: unknown
+      confidence: unknown
       added_by_uprev: true
       evidence: >-
-        These cells rose one count in slot 1 in k106, whose note says "added
-        spark at 3000-4500 high load". The table's bounds and axes are
-        unknown, so it is a span, not a table.
-    - name: Fuel Compensation (span)
-      start: 0x670
-      end: 0x761
-      kind: calibration
-      confidence: inferred
+        Read from its RAM copy 0xFFFFB2A0 by at least 21 call sites through the
+        wrapper 0x026B14, the most-read switchable table. That wrapper searches
+        a 16-entry byte axis (0xCAE9, rpm-like) and a 16-entry 16-bit axis
+        (0xE25E, 0 to 65,535) and interpolates 16-bit cells (0x027018), so the
+        span is 16 x 16 x 2 bytes. What it controls is not known (cam phasing
+        or throttle/torque are candidates); it is a span, not a table, until it
+        is identified.
+    - name: Unidentified slot data (+0x460)
+      start: 0x460
+      end: 0x65F
+      kind: unknown
+      confidence: unknown
       added_by_uprev: true
       evidence: >-
-        The base -> k106 changed bytes around the one cell verified earlier
-        (slot 1 +0x75F, the operator's Map1Change edit in
-        docs/uprev-rom-table-verification.md). Rows, columns and axes are not
-        established, so it is a span, not a table.
+        512 bytes between the 16-bit map and Fuel Compensation, none of them
+        0xFF in the 2026-10-04 image. One literal reference reaches its RAM
+        copy (0xFFFFB4A0, at 0x065FB4). Shape and meaning are not decoded.
 tables:
   - id: fuel_targets
     kind: fuel_targets
@@ -345,9 +360,206 @@ tables:
       The only match for raw 34 44 5D 64 6C 6E 7F 80 in the image. No scale to
       ms is established (the ms values in afr_calibration.yaml are the
       editor's transcription), so it is shown raw.
-  - id: fuel_comp_rpm_axis
-    name: Fuel Compensation rpm axis
-    offset: 0xCB29
+  # -- Slot tables confirmed from the code that reads the RAM copy
+  # (docs/ecu-firmware-analysis.md, "Map-slot tables"). Every 2-D lookup here
+  # goes through the same wrapper shape as Target AFR's (0x0269AC, verified):
+  # the axis passed in r5 is searched against the 12.5 rpm/count engine-speed
+  # word compared with axis byte << 2 (0x027194), so it is the rpm axis and
+  # raw x 50 is rpm; the axis passed in r6 is compared byte for byte with the
+  # load input (0x027114); and the cell address is table + 16 x rpm index +
+  # load index. Rows are rpm, columns are load, row-major.
+  - id: timing_trim_a
+    kind: timing_trim_a
+    name: Ignition timing trim A
+    slot_offset: 0x020
+    slots: [1]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: timing trim
+      unit: count
+      scale: 1
+      mask: 0x7F
+      confidence: verified
+      evidence: >-
+        The trim interpolator 0x026F9C masks every cell with 0x7F before
+        interpolating and ORs bit 7 of the lower-left cell back into the result,
+        which the reader at 0x04A4F6 strips again; bit 7 is a flag (set on 143
+        of 256 cells, one contiguous block), not part of the value. Masked, the
+        cells form one smooth surface (43-68); raw they jump by 128 at the
+        block's edge. There are no degrees: the UpRev guide says the trim has no
+        conversion to degrees BTDC (docs/roadmap/engine-tuning-support.md), so
+        the unit is counts, and more counts is more advance.
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: verified
+    evidence: >-
+      Read from its RAM copy 0xFFFFB060 (slot +0x020) by 0x04A18C at 0x04A4F2
+      and by 0x04E65C, through the wrapper 0x026A64 with r5 = 0xCC93 (rpm,
+      against 0xFFFF11D8) and r6 = 0xCC83 (load, against the X byte
+      0xFFFF103E). Known answer for the orientation: k106 ("added spark at
+      3000-4500 high load") raised 10 cells, all inside rows 7-9 x columns
+      12-15, by one or two counts: 2,800-3,600 rpm at the four highest load
+      columns. Read the other way round it would be mid load at 4,800-6,000
+      rpm. The
+      +0x09C-0x0BF cells once listed as a separate "timing (probable)" span
+      are those cells. A and B differ in 9 cells in every slot of the UpRev
+      base, and in 19 in Map 1 of k106 and 20260920. Which of A and B is
+      UpRev's Main and which is High Det is not established: the flag at
+      0xFFFF2842 that selects between them read a constant 4 all through the
+      2026-10-04 drive.
+  - id: timing_trim_a_maps_2_5
+    kind: timing_trim_a
+    name: Ignition timing trim A
+    slot_offset: 0x020
+    slots: [2, 3, 4, 5]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: timing trim
+      unit: count
+      scale: 1
+      mask: 0x7F
+      confidence: verified
+      evidence: The trim A decode; the same interpolator reads both tables.
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: inferred
+    evidence: >-
+      The slot copy routine puts slot n's +0x020 where the readers look when
+      map n is active, but no map switch has been observed live and no edit in
+      Maps 2-5 has confirmed the layout there.
+  - id: timing_trim_b
+    kind: timing_trim_b
+    name: Ignition timing trim B
+    slot_offset: 0x120
+    slots: [1]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: timing trim
+      unit: count
+      scale: 1
+      mask: 0x7F
+      confidence: verified
+      evidence: The trim A decode; the same interpolator reads both tables.
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: verified
+    evidence: >-
+      Read from its RAM copy 0xFFFFB160 (slot +0x120) by 0x04A18C at 0x04A506
+      through the same wrapper and axes as trim A, straight after it; its last
+      byte is the one before Target AFR at +0x220. A flag bit at 0xFFFF2842
+      chooses between A and B. Its role (Main or High Det) is not
+      established.
+  - id: timing_trim_b_maps_2_5
+    kind: timing_trim_b
+    name: Ignition timing trim B
+    slot_offset: 0x120
+    slots: [2, 3, 4, 5]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: timing trim
+      unit: count
+      scale: 1
+      mask: 0x7F
+      confidence: verified
+      evidence: The trim A decode; the same interpolator reads both tables.
+    axes: {rows: timing_trim_rpm_axis, cols: timing_trim_load_axis}
+    confidence: inferred
+    evidence: >-
+      As trim A in Maps 2-5: placed by the slot copy, not seen live.
+  - id: timing_trim_rpm_axis
+    name: Timing trim rpm axis
+    offset: 0xCC93
+    rows: 16
+    cols: 1
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: rpm
+      unit: rpm
+      scale: 50
+      confidence: verified
+      evidence: >-
+        Searched by 0x027194 against the 12.5 rpm/count word 0xFFFF11D8 as axis
+        byte << 2, the search whose raw x 50 reproduces the transcribed Target
+        AFR rpm breakpoints; raw 08 0C 10 18 ... 78 is 400, 600, 800, 1,200 ...
+        6,000 rpm.
+    confidence: verified
+    evidence: >-
+      The literal passed in r5 to the trim wrapper 0x026A64 at 0x04A4F0, and
+      one of the pair {0xCC83, 0xCC93} in UpRev's axis list at 0x0DE460.
+      Unchanged across base, k106 and 20260920.
+  - id: timing_trim_load_axis
+    name: Timing trim load axis (BFS X counts)
+    offset: 0xCC83
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: verified
+    evidence: >-
+      The literal passed in r6 to 0x026A64, compared directly with the X byte
+      0xFFFF103E: the same units as the Target AFR BFS axis at 0x00C894 (raw
+      08 10 18 ... 80; 0x80 is that axis's last point too). Shown raw, as that
+      axis is: one X count is load_point_scaler / 128 BFS counts, so a fixed
+      ms scale here would go wrong the moment the scaler is edited.
+  - id: fuel_compensation
+    kind: fuel_compensation
+    name: Fuel Compensation
+    slot_offset: 0x660
+    slots: [1]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: fuel compensation
+      unit: '%'
+      scale: 0.78125
+      confidence: verified
+      evidence: >-
+        100 x raw / 128: the operator's Map1Change edit displayed 103.13 ->
+        102.34 in UpRev for the bytes 132 -> 131 at 0x0E075F
+        (docs/uprev-rom-codec-decoded.md). 128 is 100 %.
+    axes: {rows: fuel_comp_engine_speed_axis, cols: fuel_comp_flow_axis}
+    confidence: verified
+    evidence: >-
+      Read from its RAM copy 0xFFFFB6A0 (slot +0x660) by 0x02D5F4 (at
+      0x02DC44) and 0x03C4D0 (at 0x03D0F4) through the wrapper 0x026A24:
+      16 x 16 bytes, +0x660-0x75F, row-major. Its last byte is the one cell
+      edited in UpRev (slot 1 +0x75F, row 15, column 15, "7200 RPM / 50.00 %
+      Volumetric Flow Ratio"). The axes are inferred: see them for the
+      conflict between the code and UpRev's editor over which axis is rpm.
+  - id: fuel_compensation_maps_2_5
+    kind: fuel_compensation
+    name: Fuel Compensation
+    slot_offset: 0x660
+    slots: [2, 3, 4, 5]
+    rows: 16
+    cols: 16
+    dtype: u8
+    decode:
+      kind: linear
+      quantity: fuel compensation
+      unit: '%'
+      scale: 0.78125
+      confidence: verified
+      evidence: The Map 1 decode; the bytes are the same table.
+    axes: {rows: fuel_comp_engine_speed_axis, cols: fuel_comp_flow_axis}
+    confidence: inferred
+    evidence: >-
+      Placed by the slot copy, not seen live; no edit in Maps 2-5 has
+      confirmed the layout there.
+  - id: fuel_comp_engine_speed_axis
+    name: Fuel Compensation rpm axis (as the ECM reads it)
+    offset: 0xCACD
     rows: 16
     cols: 1
     dtype: u8
@@ -358,12 +570,81 @@ tables:
       scale: 50
       confidence: inferred
       evidence: >-
-        The k105 note's rescale, 800-12750 -> 800-7200 rpm, is exactly base
-        0x10..0xFF and k106 0x10..0x90 at x 50.
+        Searched by 0x027194 against the engine-speed word 0xFFFF1210 as axis
+        byte << 2, as Target AFR's rpm axis is; raw 08 10 ... 80 is 400-6,400
+        rpm, the range of this ECM's other rpm axes. Inferred only because
+        UpRev's editor labels this axis Volumetric Flow Ratio.
     confidence: inferred
     evidence: >-
-      Sixteen steps that changed base -> k106 exactly as the k105 note
-      describes. Needs a deliberate single-change save to confirm.
+      The code says rpm: both Fuel Comp readers pass 0xCACD in r5 with the
+      engine-speed word, and the wrapper makes it the row index (table + 16 x
+      index). UpRev's editor says otherwise: it shows 0xCACD as the Volumetric
+      Flow Ratio columns (0x80 displayed as 50.00 %) and 0xCB29 as the rpm
+      rows. Settle it with a live check before trusting either label.
+  - id: fuel_comp_flow_axis
+    name: Fuel Compensation flow axis (as the ECM reads it)
+    offset: 0xCB29
+    rows: 1
+    cols: 16
+    dtype: u8
+    confidence: inferred
+    evidence: >-
+      The code compares it byte for byte with 0xFFFF118A
+      (mem:ECM_FUEL_COMP_X_INPUT, load-like, 0-218 on the 2026-10-04 drive),
+      which makes it the column axis. UpRev's editor shows it as the rpm rows
+      at raw x 50, and the tune notes rescaled it on that belief: base raw 10
+      20 30 ... F0 FF ("800-12,750 rpm", a range no rpm axis on this ECM has)
+      became k106 10 18 20 ... 90 ("800-7,200 rpm"), and UpRev moved the table
+      rows with it (k106 rows 2, 4, 6 equal base rows 1, 2, 3). If the code
+      is right, that edit compressed this load axis and shifted the rows along
+      rpm. Shown raw: no scale is established.
+  - id: load_point_scaler
+    kind: load_point_scaler
+    name: Load Point Scaler
+    offset: 0x9416
+    rows: 1
+    cols: 1
+    dtype: be16
+    decode:
+      kind: linear
+      quantity: BFS at load point 128
+      unit: ms
+      scale: 0.00049
+      confidence: verified
+      evidence: >-
+        X = BFS x 128 / scaler, so load point 0x80 sits at BFS = scaler. At the
+        verified 0.00049 ms per BFS count (DID 0x1208), 44,019 is 21.57 ms, and
+        raw x scaler / 128 x 0.00049 reproduces every displayed Target AFR BFS
+        breakpoint in afr_calibration.yaml (8.76 ... 21.40, 21.57).
+    confidence: verified
+    evidence: >-
+      0x03C4D0 divides the BFS word by the word at 0x9416 (literal at
+      0x03CCD8, read at 0x03CC04) to make the X byte: X = min(255, BFS x 128 /
+      44019), confirmed on 1,564/1,564 same-read rows (P02.14) and 168/194 on
+      the 2026-10-04 drive (the rest at transients, both signs). Five other
+      code sites load the same literal. The name is UpRev's; editing it moves
+      every operating point along the Target AFR and timing load axes.
+  - id: load_point_scaler_slot_copy
+    kind: load_point_scaler
+    name: Load Point Scaler (map copy)
+    slot_offset: 0x760
+    rows: 1
+    cols: 1
+    dtype: be16
+    decode:
+      kind: linear
+      quantity: BFS at load point 128
+      unit: ms
+      scale: 0.00049
+      confidence: inferred
+      evidence: The 0x9416 decode, assumed for an equal copy the code does not read.
+    confidence: inferred
+    evidence: >-
+      44,019 in all five slots of base, k106 and 20260920, equal to 0x9416,
+      directly after Fuel Compensation and before K. No code reads it: there
+      is no literal reference to its RAM copy 0xFFFFB7A0, and all six
+      references to the scaler are to 0x9416. Probably UpRev's per-map copy;
+      whether UpRev writes 0x9416 when it is edited is not known.
   - id: k_constant
     kind: k_constant
     name: K (injector constant)
@@ -371,8 +652,11 @@ tables:
     rows: 1
     cols: 1
     dtype: be16
-    confidence: inferred
+    confidence: verified
     evidence: >-
-      UpRev base 27,089 and k106 28,715 in all five slots: the ratio 1.0600
-      matches the registry's K 1.06 for k106. Raw only, no scale declared.
-      Needs a deliberate single-change save to confirm.
+      Read from its RAM copy 0xFFFFB7A2 at 0x03C6E0 inside the BFS routine
+      0x03C4D0 and multiplied into the air-charge accumulator (Tp = K x Qa /
+      Ne). UpRev base 27,089 and k106 28,715 in all five slots: the ratio
+      1.0600 matches the registry's K 1.06 for k106, and UpRev wrote the K
+      edit to every slot. Raw only: K is relative to an injector the ECM
+      does not name, so no scale is declared.

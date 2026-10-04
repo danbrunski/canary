@@ -126,6 +126,12 @@ class Decode(_Strict):
     ``value = numerator / raw`` (a raw 0 has no value). A decode that has not
     been confirmed against an independent answer is not declared at all — the
     table is then shown raw.
+
+    ``mask`` keeps only the bits that carry the value, before either formula.
+    It exists because the ECM strips a flag bit before using some cells (the
+    timing trims' bit 7, which marks 143 of their 256 cells): decoding such a
+    cell unmasked reads a flagged cell 128 counts higher than its neighbour.
+    The raw cell, flag included, is still reported beside the decoded value.
     """
 
     kind: Literal["linear", "reciprocal"]
@@ -134,6 +140,7 @@ class Decode(_Strict):
     scale: float | None = None
     offset: float = 0.0
     numerator: float | None = None
+    mask: int | None = Field(default=None, ge=1, le=0xFFFF)
     confidence: Literal["verified", "inferred"]
     evidence: str = Field(min_length=1)
 
@@ -147,6 +154,8 @@ class Decode(_Strict):
         return self
 
     def apply(self, raw: int) -> float | None:
+        if self.mask is not None:
+            raw &= self.mask
         if self.kind == "linear":
             assert self.scale is not None
             return raw * self.scale + self.offset
@@ -155,10 +164,11 @@ class Decode(_Strict):
 
     @property
     def formula(self) -> str:
+        cell = "raw" if self.mask is None else f"(raw & 0x{self.mask:X})"
         if self.kind == "linear":
             offset = f" + {self.offset:g}" if self.offset else ""
-            return f"{self.quantity} = raw × {self.scale:g}{offset}"
-        return f"{self.quantity} = {self.numerator:g} / raw"
+            return f"{self.quantity} = {cell} × {self.scale:g}{offset}"
+        return f"{self.quantity} = {self.numerator:g} / {cell}"
 
 
 class TableAxes(_Strict):
@@ -200,6 +210,11 @@ class Table(_Strict):
             raise ValueError(f"table {self.id!r}: slots only apply with slot_offset")
         if self.slots is not None and (not self.slots or len(set(self.slots)) != len(self.slots)):
             raise ValueError(f"table {self.id!r}: slots must be a nonempty list without repeats")
+        mask = None if self.decode is None else self.decode.mask
+        if mask is not None and mask >= 1 << (8 * DTYPE_BYTES[self.dtype]):
+            raise ValueError(
+                f"table {self.id!r}: mask 0x{mask:X} is wider than a {self.dtype} cell"
+            )
         return self
 
     @property

@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from src.analysis.rom_map import RomMap, check_against_targets, load_rom_map
 from src.analysis.rom_targets import Definition
+from src.signals.afr import load_afr_calibration
 from tests.rom_fixtures import PROFILE
 
 
@@ -44,11 +45,11 @@ def test_shipped_map_loads_and_matches_every_verified_rom_targets_fact() -> None
 def test_shipped_map_carries_the_2026_10_04_findings_with_their_confidence() -> None:
     rom_map = load_rom_map(PROFILE)
     by_id = {t.id: t for t in rom_map.tables}
-    assert by_id["k_constant"].confidence == "inferred"
+    # The firmware confirmed K (read at 0x03C6E0), and UpRev wrote it to all five slots.
+    assert by_id["k_constant"].confidence == "verified"
     assert by_id["k_constant"].decode is None  # raw only: no scale is established
     assert (by_id["k_constant"].slot_offset, by_id["k_constant"].dtype) == (0x762, "be16")
-    assert by_id["fuel_comp_rpm_axis"].offset == 0xCB29
-    assert by_id["fuel_comp_rpm_axis"].confidence == "inferred"
+    assert by_id["k_constant"].slots is None  # every slot
     assert by_id["fuel_targets_maps_2_5"].confidence == "inferred"
     assert rom_map.map_slots is not None
     assert (rom_map.map_slots.base, rom_map.map_slots.stride, rom_map.map_slots.count) == (
@@ -56,12 +57,15 @@ def test_shipped_map_carries_the_2026_10_04_findings_with_their_confidence() -> 
         0x800,
         5,
     )
+    # The 2026-10-04 diff spans became tables once the code that reads them was
+    # found; the spans left are the two slot areas nobody has identified.
     spans = {r.name: r for r in rom_map.map_slots.regions}
-    assert spans["Ignition timing (probable)"].confidence == "inferred"
-    assert (spans["Fuel Compensation (span)"].start, spans["Fuel Compensation (span)"].end) == (
-        0x670,
-        0x761,
-    )
+    assert "Ignition timing (probable)" not in spans
+    assert "Fuel Compensation (span)" not in spans
+    assert {(s.start, s.end, s.confidence) for s in spans.values()} == {
+        (0x260, 0x45F, "unknown"),
+        (0x460, 0x65F, "unknown"),
+    }
     regions = {(r.start, r.end): r for r in rom_map.regions}
     assert regions[(0x000000, 0x000007)].confidence == "verified"  # boot vectors
     assert regions[(0x020004, 0x02000B)].confidence == "verified"  # app vectors
@@ -184,7 +188,7 @@ def test_partially_overlapping_regions_are_refused_but_nesting_is_allowed() -> N
 def test_axis_must_reference_a_one_dimensional_table_of_the_right_length() -> None:
     data = _shipped()
     fuel = next(t for t in data["tables"] if t["id"] == "fuel_targets")
-    fuel["axes"]["rows"] = "fuel_comp_rpm_axis"  # 16 entries for 8 rows
+    fuel["axes"]["rows"] = "fuel_comp_engine_speed_axis"  # 16 entries for 8 rows
     _refuse(data, "16 entries for 8 rows")
     data = _shipped()
     next(t for t in data["tables"] if t["id"] == "fuel_targets")["axes"]["cols"] = "nowhere"
@@ -223,3 +227,113 @@ def test_drift_from_rom_targets_is_refused_by_name(tmp_path: Path) -> None:
     (tmp_path / "rom_targets.yaml").write_text(yaml.safe_dump(drifted))
     with pytest.raises(ValueError, match="checksums differ"):
         load_rom_map(tmp_path)
+
+
+# -- slot tables confirmed from the firmware (docs/ecu-firmware-analysis.md) --
+
+
+def test_slot_tables_pack_the_slot_as_the_firmware_reads_it() -> None:
+    """Each table at the RAM-copy offset its reader uses, at the size its lookup walks."""
+    rom_map = load_rom_map(PROFILE)
+    spans = {
+        t.id: (t.slot_offset, t.slot_offset + t.size - 1)
+        for t in rom_map.tables
+        if t.slot_offset is not None and (t.slots is None or 1 in t.slots)
+    }
+    assert spans == {
+        "timing_trim_a": (0x020, 0x11F),  # RAM 0xFFFFB060, 16 x 16 bytes
+        "timing_trim_b": (0x120, 0x21F),  # RAM 0xFFFFB160
+        "fuel_targets": (0x220, 0x25F),  # RAM 0xFFFFB260, 8 x 8
+        "fuel_compensation": (0x660, 0x75F),  # RAM 0xFFFFB6A0, 16 x 16
+        "load_point_scaler_slot_copy": (0x760, 0x761),
+        "k_constant": (0x762, 0x763),  # RAM 0xFFFFB7A2, BE16
+    }
+    fuel_comp = rom_map.table("fuel_compensation")
+    # The operator's one-cell UpRev edit (0x0E075F, 132 -> 131) is its last cell.
+    last = rom_map.table_address(fuel_comp, 1) + fuel_comp.size - 1
+    assert last == 0x0E075F
+
+
+def test_every_slot_table_is_verified_in_map_1_and_inferred_in_maps_2_to_5() -> None:
+    # No map switch has been observed live, so only the slot the ECM runs is verified.
+    rom_map = load_rom_map(PROFILE)
+    for kind in ("timing_trim_a", "timing_trim_b", "fuel_compensation"):
+        copies = [t for t in rom_map.tables if t.kind == kind]
+        assert {t.confidence: t.slots for t in copies} == {
+            "verified": [1],
+            "inferred": [2, 3, 4, 5],
+        }, kind
+        shapes = {
+            (t.slot_offset, t.rows, t.cols, t.dtype, t.axes.rows, t.axes.cols) for t in copies
+        }
+        assert len(shapes) == 1, kind
+        decodes = {(t.decode.scale, t.decode.mask) for t in copies if t.decode is not None}
+        assert len(decodes) == 1, kind
+
+
+def test_slot_table_axes_are_the_ones_the_lookup_wrappers_search() -> None:
+    rom_map = load_rom_map(PROFILE)
+    for table_id in ("timing_trim_a", "timing_trim_b"):
+        trim = rom_map.table(table_id)
+        rows = rom_map.table(trim.axes.rows or "")
+        cols = rom_map.table(trim.axes.cols or "")
+        # r5 = 0xCC93 is searched against engine speed; r6 = 0xCC83 against the X byte.
+        assert (rows.offset, rows.rows, rows.confidence) == (0xCC93, 16, "verified")
+        assert rows.decode is not None and (rows.decode.scale, rows.decode.unit) == (50, "rpm")
+        assert (cols.offset, cols.cols, cols.decode) == (0xCC83, 16, None)
+        assert trim.decode is not None and trim.decode.mask == 0x7F
+    fuel_comp = rom_map.table("fuel_compensation")
+    rows = rom_map.table(fuel_comp.axes.rows or "")
+    cols = rom_map.table(fuel_comp.axes.cols or "")
+    # The code and UpRev's editor disagree over which of these is rpm: inferred.
+    assert (rows.offset, rows.confidence) == (0xCACD, "inferred")
+    assert rows.decode is not None and rows.decode.scale == 50
+    assert (cols.offset, cols.confidence, cols.decode) == (0xCB29, "inferred", None)
+    assert fuel_comp.decode is not None
+    assert fuel_comp.decode.apply(132) == pytest.approx(103.125)  # UpRev showed 103.13
+    assert fuel_comp.decode.apply(131) == pytest.approx(102.34375)  # and 102.34
+
+
+def test_load_point_scaler_reproduces_every_displayed_bfs_breakpoint() -> None:
+    """X = BFS x 128 / scaler, so raw x scaler / 128 x 0.00049 ms is UpRev's BFS axis."""
+    rom_map = load_rom_map(PROFILE)
+    scaler = rom_map.table("load_point_scaler")
+    assert (scaler.offset, scaler.dtype, scaler.confidence) == (0x9416, "be16", "verified")
+    assert scaler.decode is not None
+    full_scale_ms = scaler.decode.apply(44019)  # the value at 0x9416 in every ZS44A image
+    assert full_scale_ms is not None and round(full_scale_ms, 2) == 21.57
+    calibration = load_afr_calibration(PROFILE / "afr_calibration.yaml")
+    checked = 0
+    for target in calibration.target_maps:
+        if target.raw_load_breakpoints is None:
+            continue
+        derived = [round(raw * full_scale_ms / 128, 2) for raw in target.raw_load_breakpoints]
+        assert derived == pytest.approx(target.load_breakpoints, abs=1e-9), target.revision
+        checked += 1
+    assert checked >= 1
+    copy_ = rom_map.table("load_point_scaler_slot_copy")
+    assert (copy_.slot_offset, copy_.confidence) == (0x760, "inferred")  # no code reads it
+
+
+def test_a_decode_mask_applies_before_the_scale_and_is_shown() -> None:
+    rom_map = load_rom_map(PROFILE)
+    trim = rom_map.table("timing_trim_a").decode
+    assert trim is not None
+    assert trim.apply(0xBD) == 0x3D  # the flag bit is not part of the value
+    assert trim.apply(0x3D) == 0x3D
+    assert trim.formula == "timing trim = (raw & 0x7F) × 1"
+    assert rom_map.table("fuel_compensation").decode is not None
+    assert rom_map.table("fuel_compensation").decode.formula == (  # type: ignore[union-attr]
+        "fuel compensation = raw × 0.78125"
+    )
+
+
+@pytest.mark.parametrize(
+    ("mask", "match"),
+    [(0x1FF, "wider than a u8 cell"), (0, "greater than or equal to 1")],
+)
+def test_a_mask_must_fit_the_cell(mask: int, match: str) -> None:
+    data = _shipped()
+    trim = next(t for t in data["tables"] if t["id"] == "timing_trim_a")
+    trim["decode"]["mask"] = mask
+    _refuse(data, match)

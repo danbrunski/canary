@@ -118,7 +118,7 @@ def test_describe_synthetic_image() -> None:
     assert result["map_slots"]["count"] == 5
     assert result["map_reason"] is None
     names = {r["name"] for r in result["regions"]}
-    assert {"Boot vector table", "Map 1: Fuel Compensation (span)", "UpRev map slots"} <= names
+    assert {"Boot vector table", "Map 1: Unidentified 16-bit map", "UpRev map slots"} <= names
     fuel = [t for t in result["tables"] if t["kind"] == "fuel_targets" and t["slot"] == 1]
     assert fuel[0]["offset"] == 0xE0220 and fuel[0]["confidence"] == "verified"
 
@@ -218,7 +218,7 @@ def test_tables_synthetic_fuel_targets_and_k() -> None:
     for slot in range(1, 6):
         k = _table(payload, "k_constant", slot)
         assert k["raw"] == [[27089]] and k["decoded"] is None
-        assert k["confidence"] == "inferred"
+        assert k["confidence"] == "verified"
     assert _table(payload, "fuel_targets_maps_2_5", 3)["raw"] == target_raw("ZS44A-k106")
 
 
@@ -239,7 +239,7 @@ def test_tables_known_answer_k() -> None:
         payload = tables_payload(_operator(name), xterra_map())
         k = _table(payload, "k_constant", 1)
         assert k["raw"] == [[expected]], name
-        assert k["confidence"] == "inferred"
+        assert k["confidence"] == "verified"
 
 
 # -- compare (W08.5) ---------------------------------------------------------
@@ -281,11 +281,11 @@ def test_compare_known_answer_base_to_k106() -> None:
     ranges = result["ranges"]
     assert len(ranges) == 9
     assert {"Checksum sum word", "Checksum XOR word"} <= set(ranges[0]["labels"])
-    assert "Fuel Compensation rpm axis" in ranges[1]["labels"]
-    assert "Map 1: Ignition timing (probable)" in ranges[2]["labels"]
+    assert "Fuel Compensation flow axis (as the ECM reads it)" in ranges[1]["labels"]
+    assert "Ignition timing trim A (Map 1)" in ranges[2]["labels"]
     assert "Fuel Targets (Map 1)" in ranges[3]["labels"]
     assert len(ranges[3]["cells"]) == 10
-    assert {"Map 1: Fuel Compensation (span)", "K (injector constant) (Map 1)"} <= set(
+    assert {"Fuel Compensation (Map 1)", "K (injector constant) (Map 1)"} <= set(
         ranges[4]["labels"]
     )
     for slot, item in zip(range(2, 6), ranges[5:], strict=True):
@@ -304,3 +304,119 @@ def test_compare_known_answer_k106_to_20260920() -> None:
     assert (cell["row"], cell["col"]) == (7, 4)
     assert round(cell["old_decoded"], 2) == 11.61
     assert round(cell["new_decoded"], 2) == 11.54
+
+
+# -- slot tables from the firmware: known answers ------------------------------
+
+
+def test_tables_synthetic_slot_tables_decode_at_their_addresses() -> None:
+    """Values documented in Git, placed where the map says, come back decoded."""
+    rom_map = xterra_map()
+    image = bytearray(synthetic_image())
+    struct.pack_into(">H", image, 0x9416, 44019)  # the Load Point Scaler
+    for slot in range(1, 6):
+        base = 0xE0000 + (slot - 1) * 0x800
+        image[base + 0x75F] = 132  # Fuel Compensation's last cell, 103.13 % in UpRev
+        image[base + 0x020 + 2 * 16 + 5] = 0xBD  # a flagged timing-trim cell
+    payload = tables_payload(with_checksums(bytes(image), rom_map), rom_map)
+    for slot in range(1, 6):
+        fuel_comp_id = "fuel_compensation" if slot == 1 else "fuel_compensation_maps_2_5"
+        fuel_comp = _table(payload, fuel_comp_id, slot)
+        assert fuel_comp["raw"][15][15] == 132
+        assert fuel_comp["decoded"][15][15] == pytest.approx(103.125)
+        trim_id = "timing_trim_a" if slot == 1 else "timing_trim_a_maps_2_5"
+        trim = _table(payload, trim_id, slot)
+        assert (trim["raw"][2][5], trim["decoded"][2][5]) == (0xBD, 0x3D)
+        assert trim["decode"]["formula"] == "timing trim = (raw & 0x7F) × 1"
+    scaler = _table(payload, "load_point_scaler", None)
+    assert scaler["raw"] == [[44019]]
+    assert scaler["decoded"][0][0] == pytest.approx(21.56931)
+
+
+@operator_rom
+def test_known_answer_fuel_compensation_is_the_operators_uprev_edit() -> None:
+    """Map1Change: UpRev showed the 7200 rpm / 50 % cell go 103.13 -> 102.34."""
+    edited = _operator("map1change")
+    result = compare_images(_operator("k106"), edited, xterra_map())
+    assert result["changed_bytes"] == 3
+    cells = [cell for item in result["ranges"] for cell in item["cells"]]
+    assert len(cells) == 1
+    (cell,) = cells
+    assert (cell["table"], cell["slot"], cell["row"], cell["col"]) == (
+        "fuel_compensation",
+        1,
+        15,
+        15,
+    )
+    assert (cell["old"], cell["new"]) == (132, 131)
+    # UpRev rounds half up to two places; Python's round() would give 103.12.
+    assert cell["old_decoded"] == pytest.approx(103.13, abs=0.005)
+    assert cell["new_decoded"] == pytest.approx(102.34, abs=0.005)
+    assert cell["unit"] == "%"
+
+
+def _trim_differences(payload: dict) -> list[int]:  # type: ignore[type-arg]
+    counts = []
+    for slot in range(1, 6):
+        suffix = "" if slot == 1 else "_maps_2_5"
+        a = _table(payload, f"timing_trim_a{suffix}", slot)["raw"]
+        b = _table(payload, f"timing_trim_b{suffix}", slot)["raw"]
+        counts.append(
+            sum(x != y for ra, rb in zip(a, b, strict=True) for x, y in zip(ra, rb, strict=True))
+        )
+    return counts
+
+
+@operator_rom
+def test_known_answer_timing_trims() -> None:
+    rom_map = xterra_map()
+    base = tables_payload(_operator("base"), rom_map)
+    assert _trim_differences(base) == [9, 9, 9, 9, 9]
+    for name in ("k106", "r20260920"):
+        assert _trim_differences(tables_payload(_operator(name), rom_map)) == [19, 9, 9, 9, 9]
+    # k106's note: "added spark at 3000-4500 high load". With rows on the rpm
+    # axis and columns on the load axis, the edit is exactly that region.
+    result = compare_images(_operator("base"), _operator("k106"), rom_map)
+    cells = [
+        cell
+        for item in result["ranges"]
+        for cell in item["cells"]
+        if cell["table"] == "timing_trim_a"
+    ]
+    assert len(cells) == 10
+    assert {(c["row"], c["col"]) for c in cells} <= {
+        (row, col) for row in (7, 8, 9) for col in (12, 13, 14, 15)
+    }
+    assert all(c["new_decoded"] > c["old_decoded"] for c in cells)  # more advance
+    trim = _table(base, "timing_trim_a", 1)
+    assert trim["axes"]["rows"]["decoded"][7:10] == [2800, 3200, 3600]
+    load_axis = trim["axes"]["cols"]["raw"]
+    assert load_axis[12:] == [0x68, 0x70, 0x78, 0x80] and max(load_axis) == 0x80
+    # Masked, the trim is one surface; the flag bit marks a block of cells.
+    assert max(max(row) for row in trim["decoded"]) < 0x80
+    assert sum(v >= 0x80 for row in trim["raw"] for v in row) == 143
+
+
+@operator_rom
+def test_known_answer_load_point_scaler_and_k_in_every_slot() -> None:
+    rom_map = xterra_map()
+    for name, k in (("base", 27089), ("k106", 28715), ("r20260920", 28715)):
+        payload = tables_payload(_operator(name), rom_map)
+        assert _table(payload, "load_point_scaler", None)["raw"] == [[44019]], name
+        for slot in range(1, 6):
+            assert _table(payload, "load_point_scaler_slot_copy", slot)["raw"] == [[44019]]
+            assert _table(payload, "k_constant", slot)["raw"] == [[k]], name
+
+
+@operator_rom
+def test_known_answer_the_k106_fuel_comp_rescale_followed_uprevs_axis_labels() -> None:
+    """The evidence behind the inferred Fuel Comp axes: UpRev moved the table's
+    rows with 0xCB29, which the ECM's code searches with the load input."""
+    rom_map = xterra_map()
+    base = _table(tables_payload(_operator("base"), rom_map), "fuel_compensation", 1)
+    k106 = _table(tables_payload(_operator("k106"), rom_map), "fuel_compensation", 1)
+    assert base["axes"]["cols"]["raw"] == [*range(0x10, 0x100, 0x10), 0xFF]
+    assert k106["axes"]["cols"]["raw"] == [*range(0x10, 0x88, 8), 0x90]
+    assert base["axes"]["rows"]["raw"] == k106["axes"]["rows"]["raw"] == list(range(8, 0x88, 8))
+    for k106_row, base_row in ((2, 1), (4, 2), (6, 3)):
+        assert k106["raw"][k106_row] == base["raw"][base_row]
