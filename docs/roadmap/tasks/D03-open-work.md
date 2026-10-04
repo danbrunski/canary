@@ -1265,6 +1265,34 @@ cannot, and an estimator matching BFS cannot identify where UpRev computes it.
   - **Remaining:** (truck) one live fast-exit retry, as above. Separately,
     the FF-only failure needs a decision on whether to bound the CF wait
     under this item or a new one.
+  - *CF wait bounded 2026-10-03 (operator: "if it is a good feature then yes
+    implement it").* `isotp.await_response`, the one receive policy for every
+    exchange (collector and standalone client), now bounds a started
+    multi-frame response by ISO 15765-2 N_Cr:
+    `CONSECUTIVE_FRAME_TIMEOUT_SECONDS = 0.15`.
+    - **Why 150 ms.** We send flow control with STmin 0. The stored 0x7E8
+      frames of `2026-09-23T150658` put all 2,155 FF→CF and 2,251 CF→CF gaps
+      under 0.1 ms at the recorder's resolution, so 150 ms is far above any
+      healthy gap and frees ~0.85 s per loss.
+    - **No CF at all after the FF** (70 of 71 losses): flow control is
+      re-sent once and the bound restarts. Ours may not have reached the
+      ECM, which waits its own N_Bs for it. Then the exchange ends.
+    - **A CF lost mid-response** (the 02.422 case: receive-side loss): it
+      ends at N_Cr, with no resend.
+    - **Visible.** `Exchange.continuation_lost` / `flow_control_resent` name
+      the outcome. The loop counts `continuation_losses`,
+      `flow_control_resends` and `flow_control_rescues`, all in
+      `/status` `health.obd_scheduler.receive`, so a slower ECU would show
+      up as losses rather than hide. `consecutive_frame_timeout=None` keeps
+      the old wait-to-deadline.
+    - **Effect on the 2026-09-23 pair:** two 1.0 s timeouts become at most
+      2 × 0.30 s (FF-only, resend included) or 0.15 s (mid-response). Not
+      yet observed live; the next drive's `receive` counters will say how
+      often the resend rescues.
+    - Tests: `tests/test_isotp_continuation_timeout.py` (6: healthy, FF-only
+      with resend, a resend rescue, mid-response loss, unbounded, silence and
+      single frames not counted) and
+      `test_obd_scheduler_receive_metrics.py`.
 
 - [x] **D03.19 A key-off boot disabled multi-PID batching for the whole session.**
   Silent timeouts from a sleeping ECM counted as batch rejections (6→4→2→off in

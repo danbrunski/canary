@@ -14,11 +14,18 @@ def test_receive_metrics_surface_the_loop_counters() -> None:
     stats.frames_seen = 131_346
     stats.discovery_frames_seen = 412
     stats.parse_errors = 3
+    stats.continuation_losses = 71
+    stats.flow_control_resends = 70
+    stats.flow_control_rescues = 12
 
     assert _receive_metrics(stats) == {
         "frames_seen": 131_346,
         "discovery_frames_seen": 412,
         "parse_errors": 3,
+        # D03.18: lost ISO-TP continuations, and what re-sent flow control did.
+        "continuation_losses": 71,
+        "flow_control_resends": 70,
+        "flow_control_rescues": 12,
     }
 
 

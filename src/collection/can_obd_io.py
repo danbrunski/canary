@@ -387,7 +387,7 @@ def _await_exchange(
             what="flow-control",
         )
 
-    return await_response(
+    exchange = await_response(
         lambda remaining: _recv_and_tap(
             bus, on_frame, stats, timeout=min(0.05, max(0.001, remaining))
         ),
@@ -399,6 +399,13 @@ def _await_exchange(
         stop=stop_event.is_set,
         hard_deadline=deadline_monotonic,
     )
+    if exchange.continuation_lost:
+        stats.continuation_losses += 1
+    if exchange.flow_control_resent:
+        stats.flow_control_resends += 1
+        if exchange.response is not None:
+            stats.flow_control_rescues += 1
+    return exchange
 
 
 def _exchange_arrivals(

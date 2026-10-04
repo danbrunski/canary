@@ -408,6 +408,11 @@ class IsoTpResponseAssembler:
         self.identifier = identifier
         self._pending: dict[int, ReassemblyBuffer] = {}
 
+    @property
+    def assembling(self) -> bool:
+        """A multi-frame response has started and is not complete."""
+        return bool(self._pending)
+
     def accept(self, responder_id: int, data: bytes) -> IsoTpFrameResult:
         frame_type = pci_type(data)
         if frame_type == PCI_SINGLE_FRAME:
@@ -487,6 +492,17 @@ RESPONSE_PENDING_EXTENSION_SECONDS = 0.5
 #: Exceeding it is a real failure and is reported as NRC 0x78.
 MAX_RESPONSE_PENDING_EXTENSIONS = 4
 
+#: ISO 15765-2 N_Cr: how long a receiver waits for the next Consecutive Frame
+#: of a multi-frame response, once flow control has gone out (D03.18). We ask
+#: for STmin 0 (``FLOW_CONTROL_CTS``), so the sender owes CFs back to back; the
+#: Xterra's ECM sends them within a few ms (stored 0x7E8 frames, 2026-09-23:
+#: 2,155 FF->CF and 2,251 CF->CF gaps, all under 0.1 ms at the recorder's
+#: resolution). Without a bound, a response that lost its CFs (0.5 % of
+#: multi-frame replies on three 2026-09-23 sessions) held the request for the
+#: whole request timeout, 1.0 s, twice in a row on 2026-09-23 for a 2.48 s
+#: Mode 01 gap. 150 ms is far above any healthy gap and frees ~0.85 s per loss.
+CONSECUTIVE_FRAME_TIMEOUT_SECONDS = 0.15
+
 
 class ReceivedFrame(Protocol):
     """What :func:`await_response` needs of a received frame (a ``can.Message``)."""
@@ -516,6 +532,11 @@ class Exchange(Generic[FrameT]):
     negative_response_code: int | None = None
     first_frame: FrameT | None = None
     final_frame: FrameT | None = None
+    #: A First Frame arrived but the response never completed within the
+    #: consecutive-frame bound (N_Cr): not silence, a lost continuation.
+    continuation_lost: bool = False
+    #: Flow control was re-sent once after a First Frame drew no CF at all.
+    flow_control_resent: bool = False
 
 
 def expected_responder(
@@ -550,6 +571,7 @@ def await_response(
     stop: Callable[[], bool] | None = None,
     hard_deadline: float | None = None,
     response_ids: tuple[int, int] = (DEFAULT_RESPONSE_ID_MIN, DEFAULT_RESPONSE_ID_MAX),
+    consecutive_frame_timeout: float | None = CONSECUTIVE_FRAME_TIMEOUT_SECONDS,
 ) -> Exchange[FrameT]:
     """The one receive-loop policy for a request just sent (R02.5).
 
@@ -566,7 +588,14 @@ def await_response(
       ``hard_deadline`` (a shutdown or capture deadline);
     * an NRC ends the wait at once;
     * a First Frame is answered with flow control and remembered as the
-      acquisition instant.
+      acquisition instant;
+    * **a started multi-frame response is bounded** (D03.18): each CF must
+      follow the last frame within ``consecutive_frame_timeout`` (N_Cr). If
+      the First Frame draws no CF at all, flow control is re-sent once (ours
+      may not have reached the sender, which still waits its own N_Bs for it)
+      and the bound restarts. Otherwise the exchange ends at once as
+      ``continuation_lost`` instead of holding the request to its deadline.
+      ``None`` waits to the deadline (the pre-D03.18 behaviour).
 
     ``recv(remaining_seconds)`` returns the next frame or ``None``; the caller
     bounds each slice and taps the frame. ``stop()`` ends the wait early.
@@ -575,11 +604,31 @@ def await_response(
     owner = expected_responder(request_id, response_ids)
     extensions = 0
     first_frame: FrameT | None = None
+    #: N_Cr bookkeeping for a started multi-frame response.
+    cf_deadline: float | None = None
+    cf_seen = False
+    flow_control_id: int | None = None
+    resent = False
     while True:
         now = clock()
         if now >= deadline or (stop is not None and stop()):
-            return Exchange(first_frame=first_frame)
-        frame = recv(deadline - now)
+            return Exchange(
+                first_frame=first_frame,
+                continuation_lost=assembler.assembling,
+                flow_control_resent=resent,
+            )
+        if cf_deadline is not None and now >= cf_deadline:
+            if not cf_seen and not resent and flow_control_id is not None:
+                send_flow_control(flow_control_id)
+                resent = True
+                assert consecutive_frame_timeout is not None
+                cf_deadline = now + consecutive_frame_timeout
+                continue
+            return Exchange(
+                first_frame=first_frame, continuation_lost=True, flow_control_resent=resent
+            )
+        wait_until = deadline if cf_deadline is None else min(deadline, cf_deadline)
+        frame = recv(wait_until - now)
         if frame is None:
             continue
         responder = int(frame.arbitration_id)
@@ -606,13 +655,31 @@ def await_response(
             # acquisition instant. Flow control goes to the responder's
             # tester address (responder - 8, e.g. 0x7E8 -> 0x7E0).
             first_frame = frame
+            flow_control_id = result.flow_control_id
             send_flow_control(result.flow_control_id)
+            if consecutive_frame_timeout is not None:
+                cf_deadline = clock() + consecutive_frame_timeout
             continue
         if result.response is not None:
-            return Exchange(response=result.response, first_frame=first_frame, final_frame=frame)
+            return Exchange(
+                response=result.response,
+                first_frame=first_frame,
+                final_frame=frame,
+                flow_control_resent=resent,
+            )
+        if cf_deadline is not None and pci_type(data) == PCI_CONSECUTIVE_FRAME:
+            # Progress on the response: the bound restarts from this frame. A
+            # sequence error drops the buffer, and with it the bound.
+            cf_seen = True
+            cf_deadline = (
+                clock() + consecutive_frame_timeout
+                if assembler.assembling and consecutive_frame_timeout is not None
+                else None
+            )
 
 
 __all__ = [
+    "CONSECUTIVE_FRAME_TIMEOUT_SECONDS",
     "MAX_RESPONSE_PENDING_EXTENSIONS",
     "RESPONSE_PENDING_EXTENSION_SECONDS",
     "Exchange",
