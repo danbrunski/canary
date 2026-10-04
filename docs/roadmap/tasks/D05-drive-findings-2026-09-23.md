@@ -102,7 +102,7 @@ Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md)
     passive mode armed by another session (no CAN transmit), so they don't
     count and their three captures are void.
 
-- [~] **D05.2 The trip-end digest summarised the wrong session.** Handed to the
+- [x] **D05.2 The trip-end digest summarised the wrong session.** Handed to the
   D03.29 owner on 2026-09-23, who folded it into D03.29 as a sub-item; tracked
   there, listed here only so the finding is not lost. The GPS trip end fired at
   16:57:33Z, 300 s after the last movement, and wrote `digest.json` for
@@ -116,3 +116,9 @@ Evidence: [drive log, "Drive 2"](../../../data/analyses/2026-09-23-drive-log.md)
   touched. `tests/test_trip_speed_sources.py::test_a_capture_stopped_after_the_stop_digests_the_capture_not_the_parked_session`
   replays this exact sequence (`ended == [capture]`). **Still owed:** one real
   capture drive whose `digest.json` lands in the `_capture-*` directory.
+  *Closed 2026-10-04:* capture `_capture-ram-study-2026-10-04T204557` (a `default`
+  copy plus RAM channels, started 20:45:56Z by another session, held open past
+  parking on request). The trip stopped at 21:06:30Z ("stationary for 300 s on
+  obd:SPEED"), and `digest.json` was computed at 21:11:33Z **in that `_capture-*`
+  directory**. Its `trip` block names the capture as `end_session` and spans
+  `2026-10-04T204542` + the capture. The capture was stopped at 21:12:49Z.

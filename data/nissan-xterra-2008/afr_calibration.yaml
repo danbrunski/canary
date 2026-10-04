@@ -58,6 +58,28 @@ active_revision: ZS44A-20260920
 # bands. Both conventions read 1.0 at stoich, so this could only be settled
 # under enrichment.
 commanded_equiv_ratio_convention: phi
+# D03.34 known answer, 2026-10-04. Mode 01 and Mode 22 alternate on this ECM,
+# so PID and DID are never read together: pairs sit 1.25 s apart (median), and
+# across the whole range transients and fuel-cut pegs (λ 2.000 on the PID) swamp
+# the fit (slope ~2, r² ~0.5 for bank 1 too). Near stoich, where λ barely moves,
+# the bank-1 control reproduces the 2026-08-07 answer (PID/DID 1.0041 here vs
+# +0.52 % then), and bank 2 agrees at least as tightly. Rich of λ 0.97 is
+# untested. Bank 2 at 2.0 s pairing: 0.9998, n=80.
+wideband_bank_balance:
+  session: _capture-ram-study-2026-10-04T204557
+  comparison: >-
+    compare_channels obd:O2_WR_LAMBDA_S5 -> did:ECM_AF_SENSOR_V_B2 through
+    voltage_transfer / 14.7, PairingPolicy.within(1500ms), per-sample ratio over
+    pairs with both sides in λ 0.97-1.03
+  n_pairs: 51
+  ratio_median: 0.9991
+  ratio_spread: 0.0065
+  verified_on: 2026-10-04
+  basis: >-
+    Same method, same session, bank 1 (PID 0x24 vs DID 0x1225): ratio 1.0041,
+    IQR 0.9931-1.0164, n=55, reproducing the 2026-08-07 +0.52 % agreement.
+    Bank 2: IQR 0.9914-1.0043 (spread is half the IQR). 0x28 answered inside a
+    multi-PID Mode 01 response on 517 of 542 reads.
 voltage_transfer:
   censored_floor_afr: 10.0
   points:

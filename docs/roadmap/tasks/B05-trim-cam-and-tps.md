@@ -398,8 +398,11 @@ rather than building a second model system. Follow
   A tuning profile cannot supply these rows: non-default profiles are never
   corpus-eligible (R03.12(a)).
 
-  **Remaining:** that decision, then default drives and a refit. Also the
-  D03.34 0x28 verification (truck).
+  **Remaining:** that decision, then default drives and a refit. The D03.34
+  0x28 verification is done (2026-10-04): `wideband_bank_balance` is recorded
+  in `afr_calibration.yaml` (bank 2 PID/DID 0.9991 near stoich, n=51, vs
+  bank 1's 1.0041 control), so `derived:LAMBDA_BANK_BALANCE_WIDEBAND` now
+  exists and the recipe switch is available.
 - [~] **B05.9 — Publish the qualified subset.** Archive B02 reports and run
   B03 compatibility/replay/rollout steps per accepted model. Record explicit
   reasons for each unfitted recipe and the smallest missing capture. Dashboard

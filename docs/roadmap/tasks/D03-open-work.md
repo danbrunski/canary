@@ -1630,7 +1630,7 @@ live here now, so the documents could be archived
     1 overrun (startup model load, before the requests). **Still owed:** the
     same with the engine running and a capture recording.
 
-- [~] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
+- [x] **D03.29 Trip end is detected from GPS speed alone, so a drive without a fix
   never ends a trip and the trip-end digest never runs.** *(Fix landed; the
   no-fix investigation remains; it needs the truck.)* On 2026-09-23 the GPS
   reported `fix_quality` 0 on all 3,278 samples of a 27-min drive (14:29–14:56Z),
@@ -1774,9 +1774,15 @@ live here now, so the documents could be archived
     `::test_replayed_speed_does_not_make_an_install_readable`.
     Known limit: a session holds one `digest.json`, so a second trip ending in a
     session that already has one is still skipped as "already handled".
-  - [ ] Unexplained, separate from the fix: why the receiver held no fix for the
+  - [x] Unexplained, separate from the fix: why the receiver held no fix for the
     whole drive after being powered all night. Check the next drive's first
     minutes; if it repeats, it is a hardware or antenna question for the operator.
+    *2026-10-04: did not repeat.* That day's three drives all had a 3D fix within
+    the first minutes (19:45:52Z TPV, 2 min after a boot; 18 satellites 1 min
+    after the 20:27Z boot). Cause still unexplained. Separately, that day found
+    GPS dark for unrelated reasons: no receiver attached after the 2026-10-03
+    gpsd upgrade, and 14 s NMEA lag at 9600 baud, both fixed (H03.3/H03.4).
+    The capture-digest evidence D05.2 owed landed too: see D05.2.
     *2026-09-24 16:04Z key-on (Pi up since 04:55Z):* `/status.gps` showed a fix
     within ~1 min of the engine starting (fix_quality 1, 10 satellites, HDOP
     1.07, 2,014 m). One good start; the 09-23 no-fix drive stays unexplained.
@@ -2190,7 +2196,7 @@ live here now, so the documents could be archived
     - **Truck (owed).** On the first drive after deploy, measure each core
       channel's samples ÷ the OBD-active span (not the session span), and
       the first TIMING_ADVANCE row after engine start.
-  - [~] **Bank-2 wide-band A/F from PID 0x28 (operator, 2026-09-26): desk
+  - [x] **Bank-2 wide-band A/F from PID 0x28 (operator, 2026-09-26): desk
     done, truck confirmation owed.**
     - `PID_DECODERS[0x28] = ("O2_WR_LAMBDA_S5", decode_wide_lambda)`. The
       registry entry now takes its name from `PID_DECODERS` and moves to the
@@ -2230,6 +2236,22 @@ live here now, so the documents could be archived
       (its fixture is the 2026-08-03 slice), so nothing is added there yet.
     - **Truck (owed).** Confirm that 0x28 answers in a batch, and run the
       check above.
+    - *Both done 2026-10-04* on `_capture-ram-study-2026-10-04T204557`:
+      - **Batching:** 0x28 answered inside a multi-PID Mode 01 response on
+        517 of 542 reads.
+      - **Known answer:** Mode 01 and Mode 22 alternate, so PID and DID pairs
+        sit 1.25 s apart (median). Across the whole range that gap lets
+        transients and fuel-cut pegs swamp the fit: slope ~2, r² ~0.5, bank 1
+        included, so the fit is no test.
+      - **Near stoich** (both sides λ 0.97–1.03, 1.5 s pairing), the per-sample
+        PID/DID ratio is 1.0041 for bank 1 (IQR 0.9931–1.0164, n=55), which
+        reproduces the 2026-08-07 +0.52 %. Bank 2 is **0.9991** (IQR
+        0.9914–1.0043, n=51), and 0.9998 (n=80) at 2.0 s pairing.
+      - Recorded as `wideband_bank_balance` in
+        `data/nissan-xterra-2008/afr_calibration.yaml`, which lets
+        `derived:LAMBDA_BANK_BALANCE_WIDEBAND` exist (B05.8). No recipe reads
+        it yet.
+      - Rich of λ 0.97 is untested.
   - **Not decided here:**
     - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
       reason to keep the dropped throttle PIDs, and it was not built.
