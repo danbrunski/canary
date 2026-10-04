@@ -197,7 +197,19 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
     after = load_did_map(copy)  # must still load: no mixed windows
     assert {c.verified_tune_revision for c in after.memory} == {"ZS44A-20260920"}
     carried = {c.name for c in after.memory if c.revision_carried_reason}
-    assert carried == {"ECM_FUEL_TARGET_MAP_X_TRACE", "ECM_THROTTLE_MAP_X_TRACE"}
+    # Carried = no known answer to re-check: the two trace channels, plus the
+    # firmware-located ones added 2026-10-04 (hypothesized until a drive).
+    assert carried == {
+        "ECM_FUEL_TARGET_MAP_X_TRACE",
+        "ECM_THROTTLE_MAP_X_TRACE",
+        "ECM_UPREV_MAP_SELECTOR",
+        "ECM_UPREV_MAGIC",
+        "ECM_ACTIVE_MAP",
+        "ECM_FUEL_COMP_X_INPUT",
+        "ECM_PEDAL_ENRICH_FLAGS",
+        "ECM_TIMING_TRIM_SELECT_FLAGS",
+        "ECM_MAP_SELECT_INPUT",
+    }
     assert sum(1 for line in copy.read_text().splitlines() if "#" in line) == comments_before
     # and only the memory section moved: every DID entry is byte-identical
     assert copy.read_text().split("\nmemory:")[0] == _CATALOG.read_text().split("\nmemory:")[0]
@@ -206,7 +218,9 @@ def test_restamping_the_real_catalog_keeps_every_comment_and_still_loads(
 def test_restamp_is_idempotent(tmp_path: Path) -> None:
     copy = tmp_path / "dids.yaml"
     copy.write_text(_CATALOG.read_text())
-    stamps = {c.name: None for c in load_did_map(copy).memory}
+    memory = load_did_map(copy).memory
+    stamps = {c.name: None for c in memory}
+    stale = [c for c in memory if c.verified_tune_revision != "ZS44A-20260920"]
 
-    assert restamp(copy, stamps, "ZS44A-20260920") == len(stamps)
+    assert restamp(copy, stamps, "ZS44A-20260920") == len(stale)
     assert restamp(copy, stamps, "ZS44A-20260920") == 0
