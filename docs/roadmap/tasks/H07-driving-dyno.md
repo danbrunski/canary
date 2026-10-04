@@ -596,11 +596,17 @@ under GPS. Defects a dyno would inherit:
     +0.4 % on 24 pairs; 3rd, 4th and 6th within 0.1 % on 412–5,952 pairs).
   - **4th's 2 % is explained.** Every gear reads +1.85–2.34 % against the
     profile, by one common factor in final drive × tyre, not the gearbox. With
-    the 4.08 regear, these drives imply a loaded circumference of about
-    **2.660 m**, not the profile's 2.609 m (5th: 9,611 pairs, 22 sessions,
-    p10–p90 ±1.1 %).
-  - **Operator decision owed:** whether to change
-    `tyre_loaded_circumference_m` (it moves the dyno's wheel force by ~2 %).
+    the 4.08 regear, these drives imply a rolling circumference of
+    **2.559 m** (2.609 / 1.0194), not the profile's 2.609 m (5th: 9,611
+    pairs, 22 sessions, p10–p90 ±1.1 %).
+    - The first version said 2.660 m, multiplying where it should divide;
+      corrected the same day.
+    - Cross-checked against the LT285/75R16 load-range-E tyre at ~34 psi:
+      free circumference 2.617 m, published 634 rev/mi = 2.538 m, and a
+      Rhyne-stiffness load/pressure model gives 2.583 m new. The 0.9 % gap is
+      about 4 mm of tread wear. Details in the note.
+  - **Operator decision owed:** whether to set `tyre_loaded_circumference_m:
+    2.559` (it moves the dyno's wheel force by ~2 %).
   - **Still owed (truck):** 1st, which has 2 steady pairs on disk.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
