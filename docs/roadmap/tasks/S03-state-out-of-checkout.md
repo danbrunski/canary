@@ -110,9 +110,10 @@ Moving the manifest guard from git's copy (LSTM 2026-09-20) to what the Pi
 actually runs (LSTM `2026-09-24T035125`, retrained in place) showed
 `obd:mem:ECM_ENGINE_SPEED_RAM`, `obd:mem:ECM_IGNITION_TIMING_RAM` and their
 `__mean` columns unproducible: only the `tuning` profile polls RAM channels
-(the Xterra `default` has `memory: []`). Those inputs are missing while it
-scores. The model predates the R03.12 gate that keeps tuning captures out of
-training. Recorded as reviewed debt in
+(the Xterra `default` has `memory: []`). *Corrected the same day:* they were
+near-absent in training as well (4 rows across the nine training sessions), so
+the model learned them as missing and the serve-time gap costs little. They
+exist only because the coverage floor that drops near-empty channels (D03.34)
+landed two days after the model. Recorded as reviewed debt in
 `tests/fixtures/manifest_unproducible_allowlist.yaml`, pinned to that model
-version; **retrain owed** on default-profile sessions, after which the entry
-fails as stale and is deleted.
+version; the next retrain drops them, and the entry then fails as stale.
