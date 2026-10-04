@@ -10,6 +10,7 @@ import type {
   RomBackupState,
   RomBlock,
   RomBlockClass,
+  RomEditorDisagreement,
   RomEraseSector,
   RomLibraryEntry,
   RomRegion,
@@ -198,6 +199,20 @@ export function refusalText(err: unknown): string {
     if (detail) return detail;
   }
   return describeError(err);
+}
+
+/** The on-screen warning for a table whose axes a tuning editor labels
+ *  differently from the ECM's code. Shared by the ROM Library and ROM Maps,
+ *  so both say the same thing: whether a cell may be matched by position,
+ *  and how to read the editor's labels. */
+export function describeEditorDisagreement(d: RomEditorDisagreement): string {
+  const positions = d.positions_match
+    ? `Grid positions agree: row i, column j is the same cell in ${d.editor} and here. Its axis labels do not.`
+    : `Grid positions differ: do not match cells between ${d.editor} and here by position.`;
+  return (
+    `${d.editor} labels these axes differently: rows = ${d.editor_row_labels}; ` +
+    `columns = ${d.editor_col_labels}. ${positions} ${d.consequence} ${d.translation}`
+  );
 }
 
 /** True for the Fuel Targets table, which the page draws with `MapTable`. */

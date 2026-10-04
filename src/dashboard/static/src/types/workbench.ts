@@ -3,6 +3,8 @@
 // lib/romTrace.ts and CalibrationPage; the functions that call the routes
 // live in api/workbench.ts.
 
+import type { RomEditorDisagreement } from "./romLibrary";
+
 // ---------------------------------------------------------------- logs
 
 /** One row of the capture browser (`GET /control/logs`, W04.1). */
@@ -407,6 +409,9 @@ export interface RomTable {
   /** W05.1: the ECM's trace channels for this table and whether their
    *  mapping onto its axes is verified. Null on TBD tables. */
   trace?: TableTrace | null;
+  /** Where a tuning editor labels this table's axes differently from the
+   *  ECM's code; shown on the card even while the table is TBD. */
+  editor_disagreement?: RomEditorDisagreement | null;
 }
 
 export interface RomInspection {

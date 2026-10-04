@@ -79,12 +79,42 @@ tables:
         is found.
   - kind: fuel_compensation
     title: Fuel Compensation
-    x_label: Volumetric Flow Ratio
-    x_unit: '%'
+    # The column axis is the load byte the code compares with RAM 0xFFFF118A
+    # (mem:ECM_FUEL_COMP_X_INPUT), not UpRev's "Volumetric Flow Ratio" %; its
+    # physical unit is not established, so it has none (rom_map.yaml
+    # fuel_comp_flow_axis).
+    x_label: Load input (0xFFFF118A, raw counts)
+    x_unit: ''
     y_label: Rotations Per Minute
     y_unit: rpm
     unit: '%'
+    # The same record as rom_map.yaml's fuel_compensation entry
+    # (tests/test_rom_trace.py keeps the two equal).
+    editor_disagreement:
+      editor: UpRev
+      editor_row_labels: >-
+        0xCB29 (the load axis) x 50, named "RPM"
+      editor_col_labels: >-
+        0xCACD (the rpm axis) x 100 / 256, named "Volumetric Flow Ratio" (%)
+      positions_match: true
+      consequence: >-
+        Picking a cell by its row and column position is safe, but UpRev's
+        row and column labels are wrong: to move Fuel Comp's load breakpoints
+        in UpRev edit its "RPM" axis, and to move its rpm breakpoints edit its
+        "VFR" axis.
+      translation: >-
+        Real rpm of row i = UpRev's column-i "VFR %" label x 128; real load of
+        column j = UpRev's row-j "RPM" label / 128 as UpRev's VFR %, or / 50
+        as the raw count shown here.
+      evidence: >-
+        Operator check 2026-10-04 (docs/ecu-firmware-analysis.md, "UpRev's
+        Fuel Comp display, checked against memory"; d4fee9e): UpRev's Map 1
+        grid for ZS44A-Tuned-20261004 equals the decoded table at 0x0E0660
+        row-major on 256/256 cells (transposed, 60/256), while its row list is
+        0xCB29 x 50 (800-12,750) and its column list 0xCACD / 256
+        (3.13-50.00 %). The code reads 0xCACD as rpm and 0xCB29 as load (call
+        site 0x02DC34-46, wrapper 0x026A24).
 warnings:
   - 'RPM/BFS tracing is an inferred lookup, not an ECU-reported active cell. The ECM cell, drawn beside it, comes from the map-trace memory channels and only where their axis mapping is verified; past an axis end it is the edge cell, because the ECM clamps there. Pedal enrichment moves the ECM''s read to the last load column without moving the X trace, so neither marker shows it.'
-  - 'Fuel Compensation has one verified cell but not a verified complete layout. Its load (Volumetric Flow Ratio) input is the RAM byte 0xFFFF118A (mem:ECM_FUEL_COMP_X_INPUT) and its axes are verified from code (0xCACD rpm, 0xCB29 load, the reverse of UpRev''s labels), but what that byte measures is still open, so no operating point is traced on it; throttle, calculated load and BFS are not substitutes.'
+  - 'Fuel Compensation has one verified cell but not a verified complete layout. Its axes are verified from code: 0xCACD is the rpm rows and 0xCB29 the load columns, whose input is the RAM byte 0xFFFF118A (mem:ECM_FUEL_COMP_X_INPUT). UpRev calls that column axis Volumetric Flow Ratio but labels it with the rpm axis''s bytes, and labels its rows with the load axis''s (see the note on the table). What the load byte measures is still open, so no operating point is traced on it; throttle, calculated load and BFS are not substitutes.'
   - 'Map selection is for viewing only. CANary does not read or change the ECU active map slot here.'

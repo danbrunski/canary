@@ -31,8 +31,9 @@ export function MapTable({
   return (
     <div className="space-y-3">
       <p className="text-xs text-fg-dim">
-        X: {table.x_label} ({table.x_unit}) · Y: {table.y_label} ({table.y_unit}) · Cells:{" "}
-        {table.unit}
+        X: {table.x_label}
+        {table.x_unit ? ` (${table.x_unit})` : ""} · Y: {table.y_label}
+        {table.y_unit ? ` (${table.y_unit})` : ""} · Cells: {table.unit}
       </p>
       {table.status === "tbd" ? (
         <div className="rounded-lg border border-dashed border-border p-6 text-fg-dim">

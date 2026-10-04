@@ -7,6 +7,7 @@ import { describeError, useControlResource } from "../hooks/useControlResource";
 import { tableKey, useCoverageOverlay, type CoverageSource } from "../hooks/useCoverageOverlay";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
 import type { LoadedRom } from "../hooks/useTuningContext";
+import { describeEditorDisagreement } from "../lib/romLibrary";
 import { liveValue, streamRow, tracePosition } from "../lib/romMaps";
 import type { RomInspection, RomTable } from "../lib/romMaps";
 import {
@@ -233,6 +234,15 @@ export function RomMapsPanel({
     const source = overlay.sourceFor(table);
     return (
       <div key={key} className="space-y-2">
+        {table.editor_disagreement && (
+          <p
+            role="note"
+            aria-label={`Editor labels Map ${table.slot} ${table.title}`}
+            className="text-sm text-warn"
+          >
+            {describeEditorDisagreement(table.editor_disagreement)}
+          </p>
+        )}
         {table.status === "available" && table.trace && state && (
           <div
             className="space-y-1 text-sm"

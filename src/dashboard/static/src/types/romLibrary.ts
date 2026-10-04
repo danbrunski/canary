@@ -243,6 +243,24 @@ export interface RomTableAxis {
 
 /** One table in one slot: `GET /control/rom/library/{sha}/tables` (W08.4).
  *  A table whose decode is unconfirmed has no `decoded` and is shown raw. */
+/** Where a tuning editor labels a 2-D table's axes differently from the
+ *  ECM's code (`EditorDisagreement` in src/analysis/rom_map.py). Data, so
+ *  every view of the table warns from the same record. */
+export interface RomEditorDisagreement {
+  /** The tool whose display disagrees, e.g. `UpRev`. */
+  editor: string;
+  /** What the editor labels the rows with. */
+  editor_row_labels: string;
+  /** What the editor labels the columns with. */
+  editor_col_labels: string;
+  /** Row i, column j in the editor is the same memory cell as here. */
+  positions_match: boolean;
+  consequence: string;
+  /** How to recover the true breakpoints from the editor's labels. */
+  translation: string;
+  evidence: string;
+}
+
 export interface RomTableValues {
   /** The definition's table id, unique per file. */
   id?: string;
@@ -273,6 +291,8 @@ export interface RomTableValues {
   axes: { rows?: RomTableAxis | null; cols?: RomTableAxis | null };
   confidence: RomConfidence;
   evidence: string;
+  /** Page reads: shown as a warning on every slot copy of the table. */
+  editor_disagreement?: RomEditorDisagreement | null;
 }
 
 export interface RomTablesResponse {

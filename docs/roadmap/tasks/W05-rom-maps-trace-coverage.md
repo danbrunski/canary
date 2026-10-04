@@ -123,6 +123,14 @@ once that stall is found.
   `mem:ECM_PEDAL_ENRICH_FLAGS`) is set the ECM reads the last column but the
   X byte keeps its BFS value, so the ECM cell sits off the column read; stated
   in the X evidence and the page warning, not modelled.
+  *2026-10-04 addendum:* `rom_viewer.yaml` Fuel Comp's x axis is now "Load
+  input (0xFFFF118A, raw counts)" with no unit (was UpRev's "Volumetric Flow
+  Ratio" %), and `TableInfo.editor_disagreement` (the `rom_map.yaml` record)
+  puts UpRev's swapped-label warning on the TBD card. Tests:
+  `test_rom_trace.py::test_shipped_fuel_compensation_labels_its_load_axis_not_uprevs_vfr`,
+  `test_rom_maps_api.py::test_profile_driven_slots_and_unverified_tables`,
+  `RomMapsPanel.test.tsx` "warns on the TBD Fuel Compensation card that
+  UpRev's axis labels differ, not on Target AFR".
 - [x] **W05.2 — Draw the ECM's cell.** From the live telemetry stream
   (`useTelemetryStream`), outline the cell the trace channels point at. Keep
   today's nearest-breakpoint / dashed-neighbour rendering for the *inferred*

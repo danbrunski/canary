@@ -4,6 +4,7 @@ import { getRomTables } from "../../api/workbench";
 import { useControlResource } from "../../hooks/useControlResource";
 import {
   cellBytes,
+  describeEditorDisagreement,
   formatBytes,
   formatCell,
   hexAddress,
@@ -122,6 +123,11 @@ function TableSection({ table }: { table: RomTableValues }) {
           .join(" · ")}
       </p>
       <p className="text-xs text-fg-dim">{table.evidence}</p>
+      {table.editor_disagreement && (
+        <p role="note" aria-label={`${table.name} editor labels`} className="text-sm text-warn">
+          {describeEditorDisagreement(table.editor_disagreement)}
+        </p>
+      )}
       {asMap ? (
         <MapTable
           table={asMap}

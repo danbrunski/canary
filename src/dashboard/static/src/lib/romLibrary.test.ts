@@ -1,10 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { HttpError, NetworkError } from "../api/core";
-import { ENTRY_K106, ENTRY_TUNED, REGIONS, TABLES, readyStatus } from "../test/romLibraryFixtures";
+import {
+  ENTRY_K106,
+  ENTRY_TUNED,
+  REGIONS,
+  TABLES,
+  UPREV_FUEL_COMP_LABELS,
+  readyStatus,
+} from "../test/romLibraryFixtures";
 import {
   backupPreconditions,
   backupStartBlocker,
+  describeEditorDisagreement,
   downloadName,
   absoluteRegions,
   eraseSectorSummary,
@@ -262,5 +270,25 @@ describe("tables", () => {
     expect(table.values[0][0]).toBeCloseTo(14.7, 2);
     expect(table.raw[0][0]).toBe(128);
     expect(mapTableOf({ ...fuel, decoded: null })).toBeNull();
+  });
+});
+
+describe("editor disagreement", () => {
+  it("says whether cells may be matched by position, then how to read the labels", () => {
+    const agrees = describeEditorDisagreement(UPREV_FUEL_COMP_LABELS);
+    expect(agrees).toMatch(
+      /^UpRev labels these axes differently: rows = 0xCB29 .*; columns = 0xCACD /,
+    );
+    expect(agrees).toContain("Grid positions agree");
+    expect(agrees).not.toContain("Grid positions differ");
+    expect(agrees).toContain(UPREV_FUEL_COMP_LABELS.translation);
+    const differs = describeEditorDisagreement({
+      ...UPREV_FUEL_COMP_LABELS,
+      positions_match: false,
+    });
+    expect(differs).toContain(
+      "Grid positions differ: do not match cells between UpRev and here by position.",
+    );
+    expect(differs).not.toContain("Grid positions agree");
   });
 });

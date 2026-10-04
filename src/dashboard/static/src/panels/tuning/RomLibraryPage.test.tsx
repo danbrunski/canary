@@ -11,6 +11,7 @@ import {
   SHA_K106,
   SHA_TUNED,
   TABLES,
+  TABLES_WITH_FUEL_COMP,
   backupState,
   readyStatus,
 } from "../../test/romLibraryFixtures";
@@ -381,6 +382,41 @@ describe("ROM Library page — list, memory map, regions and tables", () => {
     expect(screen.getByRole("table", { name: "Map 2 Fuel Targets values" })).toBeVisible();
     expect(
       screen.queryByRole("region", { name: "K (injector constant) slot 1" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("warns on every slot's Fuel Compensation that UpRev's axis labels differ, and nowhere else", async () => {
+    withEntries([ENTRY_TUNED], DESCRIPTION, {
+      [`GET /control/rom/library/${SHA_TUNED}/tables`]: TABLES_WITH_FUEL_COMP,
+    });
+    render(<RomLibraryPage token="t" status={null} />);
+    const fuelComp = await screen.findByRole("region", { name: "Fuel Compensation slot 1" });
+    const note = within(fuelComp).getByRole("note", { name: "Fuel Compensation editor labels" });
+    expect(note).toHaveTextContent(
+      'UpRev labels these axes differently: rows = 0xCB29 (the load axis) x 50, named "RPM"; columns = 0xCACD (the rpm axis)',
+    );
+    expect(note).toHaveTextContent(
+      "Grid positions agree: row i, column j is the same cell in UpRev and here. Its axis labels do not.",
+    );
+    expect(note).toHaveTextContent(/Real rpm of row i = UpRev's column-i "VFR %" label x 128/);
+    // The code-correct layout is unchanged: rpm rows, raw load columns.
+    expect(
+      within(fuelComp).getByText(
+        "Rows: Fuel Compensation rpm axis (as the ECM reads it) (rpm) · Columns: Fuel Compensation flow axis (as the ECM reads it) · Cells: %",
+      ),
+    ).toBeInTheDocument();
+    for (const name of ["Fuel Targets slot 1", "K (injector constant) slot 1"])
+      expect(
+        within(screen.getByRole("region", { name })).queryByRole("note"),
+      ).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Table map slot"), { target: { value: "2" } });
+    expect(
+      within(screen.getByRole("region", { name: "Fuel Compensation slot 2" })).getByRole("note", {
+        name: "Fuel Compensation editor labels",
+      }),
+    ).toHaveTextContent("Grid positions agree");
+    expect(
+      within(screen.getByRole("region", { name: "Fuel Targets slot 2" })).queryByRole("note"),
     ).not.toBeInTheDocument();
   });
 

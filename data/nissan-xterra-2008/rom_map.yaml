@@ -537,6 +537,30 @@ tables:
       edited in UpRev (slot 1 +0x75F, row 15, column 15, "7200 RPM / 50.00 %
       Volumetric Flow Ratio"). Axis roles are verified from the code and are
       the reverse of UpRev's editor labels: see the axes.
+    editor_disagreement: &uprev_fuel_comp_labels
+      editor: UpRev
+      editor_row_labels: >-
+        0xCB29 (the load axis) x 50, named "RPM"
+      editor_col_labels: >-
+        0xCACD (the rpm axis) x 100 / 256, named "Volumetric Flow Ratio" (%)
+      positions_match: true
+      consequence: >-
+        Picking a cell by its row and column position is safe, but UpRev's
+        row and column labels are wrong: to move Fuel Comp's load breakpoints
+        in UpRev edit its "RPM" axis, and to move its rpm breakpoints edit its
+        "VFR" axis.
+      translation: >-
+        Real rpm of row i = UpRev's column-i "VFR %" label x 128; real load of
+        column j = UpRev's row-j "RPM" label / 128 as UpRev's VFR %, or / 50
+        as the raw count shown here.
+      evidence: >-
+        Operator check 2026-10-04 (docs/ecu-firmware-analysis.md, "UpRev's
+        Fuel Comp display, checked against memory"; d4fee9e): UpRev's Map 1
+        grid for ZS44A-Tuned-20261004 equals the decoded table at 0x0E0660
+        row-major on 256/256 cells (transposed, 60/256), while its row list is
+        0xCB29 x 50 (800-12,750) and its column list 0xCACD / 256
+        (3.13-50.00 %). The code reads 0xCACD as rpm and 0xCB29 as load (call
+        site 0x02DC34-46, wrapper 0x026A24).
   - id: fuel_compensation_maps_2_5
     kind: fuel_compensation
     name: Fuel Compensation
@@ -557,6 +581,7 @@ tables:
     evidence: >-
       Placed by the slot copy, not seen live; no edit in Maps 2-5 has
       confirmed the layout there.
+    editor_disagreement: *uprev_fuel_comp_labels
   - id: fuel_comp_engine_speed_axis
     name: Fuel Compensation rpm axis (as the ECM reads it)
     offset: 0xCACD
@@ -583,9 +608,11 @@ tables:
       16 x index). Same helpers as the Target AFR wrapper 0x0269AC, whose
       mapping is live-verified (W05.1); the second reader (0x03D0F4) passes
       the same pair. UpRev's editor labels this axis the other way round (it
-      shows 0xCACD as the Volumetric Flow Ratio columns, 0x80 as 50.00 %, and
-      0xCB29 as the rpm rows), so cells picked by UpRev's labels are
-      transposed in meaning. Not yet seen live on this table.
+      labels the columns with 0xCACD as "Volumetric Flow Ratio", 0x80 as
+      50.00 %, and the rows with 0xCB29 as rpm). UpRev's grid positions match
+      memory (256/256 row-major, d4fee9e); only its breakpoint labels are
+      swapped, so a cell's rpm and load read from UpRev's labels are wrong
+      (the table's editor_disagreement). Not yet seen live on this table.
   - id: fuel_comp_flow_axis
     name: Fuel Compensation flow axis (as the ECM reads it)
     offset: 0xCB29

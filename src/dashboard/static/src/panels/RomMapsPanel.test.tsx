@@ -1,10 +1,11 @@
 import { StrictMode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { controlJson } from "../api/core";
 import type { RomInspection } from "../lib/romMaps";
 import type { TableTrace } from "../lib/romTrace";
 import type { ChannelSnapshot } from "../hooks/useTelemetryStream";
+import { UPREV_FUEL_COMP_LABELS } from "../test/romLibraryFixtures";
 import type { StatusResponse } from "../types";
 import { RomMapsPanel } from "./RomMapsPanel";
 
@@ -47,11 +48,13 @@ const result: RomInspection = {
       title: kind === "fuel_targets" ? "Target AFR" : "Fuel Compensation",
       status: slot === 1 && kind === "fuel_targets" ? ("available" as const) : ("tbd" as const),
       reason: "TBD — complete table location and axes not verified.",
-      x_label: kind === "fuel_targets" ? "Base Fuel Schedule" : "Volumetric Flow Ratio",
-      x_unit: kind === "fuel_targets" ? "ms" : "%",
+      x_label:
+        kind === "fuel_targets" ? "Base Fuel Schedule" : "Load input (0xFFFF118A, raw counts)",
+      x_unit: kind === "fuel_targets" ? "ms" : "",
       y_label: "Rotations Per Minute",
       y_unit: "rpm",
       unit: kind === "fuel_targets" ? "AFR" : "%",
+      editor_disagreement: kind === "fuel_compensation" ? UPREV_FUEL_COMP_LABELS : null,
       x_axis: [8.76, 11.46],
       y_axis: [1200, 1600],
       values: [
@@ -119,6 +122,30 @@ describe("ROM maps panel", () => {
       "TBD",
     );
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("warns on the TBD Fuel Compensation card that UpRev's axis labels differ, not on Target AFR", async () => {
+    render(<RomMapsPanel {...props()} />);
+    await upload();
+    for (const slot of [1, 3]) {
+      if (slot !== 1)
+        fireEvent.change(screen.getByLabelText("Map slot"), { target: { value: String(slot) } });
+      const card = screen.getByRole("region", { name: `Map ${slot} Fuel Compensation` });
+      expect(card).toHaveTextContent("TBD");
+      const note = within(card).getByRole("note", {
+        name: `Editor labels Map ${slot} Fuel Compensation`,
+      });
+      expect(note).toHaveTextContent(
+        "Grid positions agree: row i, column j is the same cell in UpRev and here. Its axis labels do not.",
+      );
+      expect(note).toHaveTextContent(
+        'columns = 0xCACD (the rpm axis) x 100 / 256, named "Volumetric',
+      );
+      expect(card).toHaveTextContent("X: Load input (0xFFFF118A, raw counts) · Y:");
+      expect(
+        within(screen.getByRole("region", { name: `Map ${slot} Target AFR` })).queryByRole("note"),
+      ).not.toBeInTheDocument();
+    }
   });
 
   it("requires explicit active-slot confirmation and removes a stale highlight", async () => {

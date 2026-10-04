@@ -178,6 +178,36 @@ class TableAxes(_Strict):
     cols: str | None = None
 
 
+class EditorDisagreement(_Strict):
+    """How a tuning editor shows a 2-D table's axes, where that disagrees
+    with the ECM's code.
+
+    UpRev's Fuel Compensation grid matches memory cell for cell (256/256
+    row-major), but its two breakpoint lists are swapped: it labels the rpm
+    rows with the load axis's bytes × 50 and the load columns with the rpm
+    axis's bytes as "VFR %" (operator check 2026-10-04, d4fee9e). In an
+    evidence string nothing showed that to someone reading UpRev beside the
+    dashboard; as a field, every view of the table draws the same warning.
+    ``positions_match`` is required so the record always says whether a cell
+    may be matched between the two by position.
+    """
+
+    #: The tool whose display disagrees, e.g. ``UpRev``.
+    editor: str = Field(min_length=1)
+    #: What the editor labels the table's rows with.
+    editor_row_labels: str = Field(min_length=1)
+    #: What the editor labels the table's columns with.
+    editor_col_labels: str = Field(min_length=1)
+    #: Row *i*, column *j* in the editor is the same memory cell as row
+    #: *i*, column *j* here.
+    positions_match: bool
+    #: One sentence: what a reader of the editor gets wrong, and what is safe.
+    consequence: str = Field(min_length=1)
+    #: How to recover the true breakpoints from the editor's labels.
+    translation: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
 class Table(_Strict):
     """A table at one absolute offset, or at one offset inside each map slot."""
 
@@ -201,6 +231,9 @@ class Table(_Strict):
     axes: TableAxes = Field(default_factory=TableAxes)
     confidence: Confidence
     evidence: str = Field(min_length=1)
+    #: Where a tuning editor labels this table's axes differently from the
+    #: code (:class:`EditorDisagreement`). Only on a table with both axes.
+    editor_disagreement: EditorDisagreement | None = None
 
     @model_validator(mode="after")
     def _placement(self) -> Table:
@@ -214,6 +247,13 @@ class Table(_Strict):
         if mask is not None and mask >= 1 << (8 * DTYPE_BYTES[self.dtype]):
             raise ValueError(
                 f"table {self.id!r}: mask 0x{mask:X} is wider than a {self.dtype} cell"
+            )
+        if self.editor_disagreement is not None and (
+            self.axes.rows is None or self.axes.cols is None
+        ):
+            raise ValueError(
+                f"table {self.id!r}: editor_disagreement describes a 2-D table's row and "
+                "column axes, so it needs both axes.rows and axes.cols"
             )
         return self
 
@@ -495,6 +535,7 @@ __all__ = [
     "CalibrationIdLocation",
     "Confidence",
     "Decode",
+    "EditorDisagreement",
     "EraseSector",
     "MapSlots",
     "RefusedFormat",

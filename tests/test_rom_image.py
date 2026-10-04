@@ -420,3 +420,19 @@ def test_known_answer_the_k106_fuel_comp_rescale_followed_uprevs_axis_labels() -
     assert base["axes"]["rows"]["raw"] == k106["axes"]["rows"]["raw"] == list(range(8, 0x88, 8))
     for k106_row, base_row in ((2, 1), (4, 2), (6, 3)):
         assert k106["raw"][k106_row] == base["raw"][base_row]
+
+
+def test_tables_carry_the_editor_disagreement_in_every_fuel_comp_slot() -> None:
+    """Every slot's Fuel Comp carries UpRev's swapped-label record, so the ROM
+    Library warns wherever the table appears; no other table carries one."""
+    rom_map = xterra_map()
+    payload = tables_payload(synthetic_image(), rom_map)
+    expected = rom_map.table("fuel_compensation").editor_disagreement
+    assert expected is not None
+    for slot in range(1, 6):
+        table_id = "fuel_compensation" if slot == 1 else "fuel_compensation_maps_2_5"
+        record = _table(payload, table_id, slot)["editor_disagreement"]
+        assert record == expected.model_dump()
+        assert record["positions_match"] is True
+    others = [t for t in payload["tables"] if t["kind"] != "fuel_compensation"]
+    assert others and all(t["editor_disagreement"] is None for t in others)

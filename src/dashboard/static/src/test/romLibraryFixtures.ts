@@ -7,8 +7,10 @@ import type {
   RomBackupState,
   RomBlock,
   RomDescription,
+  RomEditorDisagreement,
   RomLibraryEntry,
   RomRegion,
+  RomTableValues,
   RomTablesResponse,
 } from "../types/romLibrary";
 
@@ -303,6 +305,84 @@ export const TABLES: RomTablesResponse = {
       evidence: "In the UpRev base all five slots hold this table; no Map 2-5 edit confirmed it.",
     },
   ],
+};
+
+/** UpRev's Fuel Comp labels as rom_map.yaml records them (operator check
+ *  2026-10-04): grid positions match, the two breakpoint lists are swapped. */
+export const UPREV_FUEL_COMP_LABELS: RomEditorDisagreement = {
+  editor: "UpRev",
+  editor_row_labels: '0xCB29 (the load axis) x 50, named "RPM"',
+  editor_col_labels: '0xCACD (the rpm axis) x 100 / 256, named "Volumetric Flow Ratio" (%)',
+  positions_match: true,
+  consequence:
+    "Picking a cell by its row and column position is safe, but UpRev's row and column labels are wrong.",
+  translation:
+    'Real rpm of row i = UpRev\'s column-i "VFR %" label x 128; real load of column j = UpRev\'s row-j "RPM" label / 128.',
+  evidence: "UpRev's Map 1 grid equals the decoded table row-major on 256/256 cells.",
+};
+
+const FUEL_COMP_RPM_RAW = Array.from({ length: 16 }, (_, i) => 8 + 8 * i);
+const FUEL_COMP_LOAD_RAW = [...Array.from({ length: 15 }, (_, i) => 16 + 16 * i), 255];
+
+/** Fuel Compensation in `slot`, with the code-correct axes and UpRev's
+ *  swapped-label record, as the daemon lists every slot copy. */
+export function fuelCompTable(slot: number): RomTableValues {
+  const raw = FUEL_COMP_RPM_RAW.map((_, r) => FUEL_COMP_LOAD_RAW.map((_, c) => 120 + r + c));
+  return {
+    id: slot === 1 ? "fuel_compensation" : "fuel_compensation_maps_2_5",
+    name: "Fuel Compensation",
+    label: `Fuel Compensation (Map ${slot})`,
+    slot,
+    kind: "fuel_compensation",
+    role: "table",
+    decode: {
+      formula: "fuel compensation = raw × 0.78125",
+      kind: "linear",
+      quantity: "fuel compensation",
+      unit: "%",
+      confidence: "verified",
+      evidence: "100 x raw / 128.",
+    },
+    offset: 0x0e0660 + (slot - 1) * 0x800,
+    end: 0x0e075f + (slot - 1) * 0x800,
+    rows: 16,
+    cols: 16,
+    dtype: "u8",
+    unit: "%",
+    raw,
+    decoded: raw.map((row) => row.map((value) => value * 0.78125)),
+    axes: {
+      rows: {
+        id: "fuel_comp_engine_speed_axis",
+        name: "Fuel Compensation rpm axis (as the ECM reads it)",
+        offset: 0xcacd,
+        raw: FUEL_COMP_RPM_RAW,
+        decoded: FUEL_COMP_RPM_RAW.map((value) => value * 50),
+        unit: "rpm",
+        decode: null,
+        confidence: "verified",
+      },
+      cols: {
+        id: "fuel_comp_flow_axis",
+        name: "Fuel Compensation flow axis (as the ECM reads it)",
+        offset: 0xcb29,
+        raw: FUEL_COMP_LOAD_RAW,
+        decoded: null,
+        unit: null,
+        decode: null,
+        confidence: "verified",
+      },
+    },
+    confidence: slot === 1 ? "verified" : "inferred",
+    evidence: "Read from its RAM copy 0xFFFFB6A0 through the wrapper 0x026A24.",
+    editor_disagreement: UPREV_FUEL_COMP_LABELS,
+  };
+}
+
+/** TABLES plus Fuel Compensation in slots 1 and 2. */
+export const TABLES_WITH_FUEL_COMP: RomTablesResponse = {
+  ...TABLES,
+  tables: [...TABLES.tables, fuelCompTable(1), fuelCompTable(2)],
 };
 
 export function backupState(overrides: Partial<RomBackupState> = {}): RomBackupState {

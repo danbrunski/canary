@@ -99,5 +99,13 @@ def test_profile_driven_slots_and_unverified_tables(tmp_path, monkeypatch):
     assert available[0]["y_axis_raw"] == [0x14, 0x28]
     assert all(t["trace"] is None for t in result["tables"] if t["status"] == "tbd")
     assert all(t["x_axis_raw"] == [] for t in result["tables"] if t["status"] == "tbd")
+    # UpRev's swapped Fuel Comp labels ride on every Fuel Comp card, TBD or not.
+    for table in result["tables"]:
+        record = table["editor_disagreement"]
+        if table["kind"] == "fuel_compensation":
+            assert record["editor"] == "UpRev" and record["positions_match"] is True
+            assert table["x_unit"] == "" and "Volumetric Flow Ratio" not in table["x_label"]
+        else:
+            assert record is None
     with pytest.raises(ValueError, match="empty"):
         rom_maps.inspect_rom(b"", tmp_path, revisions=None)

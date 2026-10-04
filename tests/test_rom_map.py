@@ -341,3 +341,64 @@ def test_a_mask_must_fit_the_cell(mask: int, match: str) -> None:
     trim = next(t for t in data["tables"] if t["id"] == "timing_trim_a")
     trim["decode"]["mask"] = mask
     _refuse(data, match)
+
+
+FUEL_COMP_IDS = {"fuel_compensation", "fuel_compensation_maps_2_5"}
+
+
+def test_shipped_map_flags_uprevs_swapped_fuel_comp_labels_on_every_copy_and_nowhere_else() -> None:
+    """UpRev's Fuel Comp grid matches memory cell for cell; only its two
+    breakpoint lists are swapped (operator check 2026-10-04). That is data on
+    both Fuel Comp copies, so every slot's view warns, and on nothing else."""
+    rom_map = load_rom_map(PROFILE)
+    flagged = {t.id for t in rom_map.tables if t.editor_disagreement is not None}
+    assert flagged == FUEL_COMP_IDS
+    records = {t.id: t.editor_disagreement for t in rom_map.tables if t.id in FUEL_COMP_IDS}
+    assert len({r.model_dump_json() for r in records.values() if r is not None}) == 1
+    record = records["fuel_compensation"]
+    assert record is not None
+    assert record.editor == "UpRev"
+    assert record.positions_match is True
+    assert "0xCB29" in record.editor_row_labels and "RPM" in record.editor_row_labels
+    assert "0xCACD" in record.editor_col_labels
+    assert "Volumetric Flow Ratio" in record.editor_col_labels
+    assert "x 128" in record.translation and "/ 128" in record.translation
+
+
+def _fuel_comp(data: dict[str, Any]) -> dict[str, Any]:
+    (table,) = [t for t in data["tables"] if t["id"] == "fuel_compensation"]
+    return table
+
+
+@pytest.mark.parametrize("missing", ["rows", "cols"])
+def test_editor_disagreement_needs_both_axes(missing: str) -> None:
+    data = _shipped()
+    del _fuel_comp(data)["axes"][missing]
+    _refuse(data, "editor_disagreement .* needs both axes.rows and axes.cols")
+
+
+def test_editor_disagreement_is_refused_on_a_table_without_axes() -> None:
+    data = _shipped()
+    (k,) = [t for t in data["tables"] if t["id"] == "k_constant"]
+    k["editor_disagreement"] = copy.deepcopy(_fuel_comp(data)["editor_disagreement"])
+    _refuse(data, "editor_disagreement")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "editor",
+        "editor_row_labels",
+        "editor_col_labels",
+        "positions_match",
+        "consequence",
+        "translation",
+        "evidence",
+    ],
+)
+def test_editor_disagreement_fields_are_required(field: str) -> None:
+    data = _shipped()
+    record = copy.deepcopy(_fuel_comp(data)["editor_disagreement"])
+    del record[field]
+    _fuel_comp(data)["editor_disagreement"] = record
+    _refuse(data, field)

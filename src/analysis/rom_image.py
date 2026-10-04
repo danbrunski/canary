@@ -483,6 +483,11 @@ def table_values(image: bytes, rom_map: RomMap) -> list[dict[str, Any]]:
                 },
                 "confidence": table.confidence,
                 "evidence": table.evidence,
+                # Where a tuning editor labels these axes differently from
+                # the code; every slot copy carries it, so every view warns.
+                "editor_disagreement": None
+                if table.editor_disagreement is None
+                else table.editor_disagreement.model_dump(),
             }
         )
     return out

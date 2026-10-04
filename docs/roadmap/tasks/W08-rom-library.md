@@ -108,6 +108,16 @@ Evidence this builds on:
     confidence value. A test pins that the shipped file matches every
     verified fact already in `rom_targets.yaml` (table offset, axes,
     checksum offsets), so the two files cannot drift.
+  - *2026-10-04 addendum:* `Table.editor_disagreement` (`EditorDisagreement`
+    in `src/analysis/rom_map.py`; refused without both `axes.rows` and
+    `axes.cols`) records UpRev's swapped Fuel Comp breakpoint labels (grid
+    positions match, 256/256) on both Fuel Comp entries; the tables payload
+    carries it and the page warns in every slot. Tests:
+    `test_rom_map.py::test_shipped_map_flags_uprevs_swapped_fuel_comp_labels_on_every_copy_and_nowhere_else`,
+    `::test_editor_disagreement_needs_both_axes`,
+    `test_rom_image.py::test_tables_carry_the_editor_disagreement_in_every_fuel_comp_slot`,
+    `RomLibraryPage.test.tsx` "warns on every slot's Fuel Compensation that
+    UpRev's axis labels differ, and nowhere else".
 
 - [x] **W08.2 Image analysis core.** Given bytes, return a description.
   - *Done 2026-10-04:* `src/analysis/rom_image.py` (`load_image`,

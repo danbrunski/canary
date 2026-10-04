@@ -40,6 +40,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.analysis.channels import ChannelSpecError, as_of_refusal, read_channels
+from src.analysis.rom_map import EditorDisagreement
 from src.decode.dids import MEMORY_SOURCE, load_did_map
 from src.decode.slices import linear_factors
 from src.signals.pairing import PairingPolicy, match_ordered, to_seconds
@@ -159,11 +160,16 @@ class TableInfo(_Strict):
     kind: TableKind
     title: str
     x_label: str
+    #: ``""`` for an axis with no established unit (shown as raw counts).
     x_unit: str
     y_label: str
     y_unit: str
     unit: str
     trace: TableTrace | None = None
+    #: Where a tuning editor labels this table's axes differently from the
+    #: ECM's code (the same record ``rom_map.yaml`` carries). Shown on the
+    #: table's card whether or not the table is drawn.
+    editor_disagreement: EditorDisagreement | None = None
 
 
 class ViewerDefinition(_Strict):

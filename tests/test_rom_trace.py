@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from src.analysis.channels import read_channels
+from src.analysis.rom_map import load_rom_map
 from src.analysis.rom_trace import (
     MAX_DWELL_S,
     AxisTrace,
@@ -237,6 +238,26 @@ def test_shipped_fuel_compensation_table_still_has_no_trace() -> None:
     assert table is not None and table.trace is None
     refusal = mapping_refusal(table.trace)
     assert refusal is not None and refusal["reason"] == "no_trace_mapping"
+
+
+def test_shipped_fuel_compensation_labels_its_load_axis_not_uprevs_vfr() -> None:
+    """The column axis is the load byte compared with 0xFFFF118A, unit not
+    established; UpRev's "Volumetric Flow Ratio" % is a label UpRev puts on
+    the rpm axis's bytes. The viewer carries the same swapped-label record as
+    rom_map.yaml, so the ROM Maps card warns even while the table is TBD."""
+    table = load_viewer_definition(PROFILE).table("fuel_compensation")
+    assert table is not None
+    assert table.x_unit == ""
+    assert "%" not in table.x_unit
+    assert "Volumetric Flow Ratio" not in table.x_label
+    assert "0xFFFF118A" in table.x_label
+    assert table.y_unit == "rpm"
+    assert table.editor_disagreement is not None
+    assert table.editor_disagreement.positions_match is True
+    rom_map = load_rom_map(PROFILE)
+    assert table.editor_disagreement == rom_map.table("fuel_compensation").editor_disagreement
+    target = load_viewer_definition(PROFILE).table("fuel_targets")
+    assert target is not None and target.editor_disagreement is None
 
 
 def test_request_channel_names_the_memory_window_that_carries_the_trace() -> None:
