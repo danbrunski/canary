@@ -216,7 +216,7 @@ on the current code.
   *Remaining (Pi):* deploy, then hot-swap one artifact and read
   `worker_swaps.last_swap_seconds` and `last_load_seconds` from `/status`.
   `startup_seconds` is available from the first boot.
-- [~] **A01.7 — Check dropped ticks inside a window.** *Suspected.* The
+- [x] **A01.7 — Check dropped ticks inside a window.** *Suspected.* The
   depth-1 queue (`src/daemon/inference.py`) drops ticks under load, so a
   30-tick window can span more than 30 s of wall time while Δt accounting
   assumes one tick per row.
@@ -273,7 +273,11 @@ on the current code.
     2 lost rows per window on the current scheduler, the effect does not
     matter.
 
-  *Remaining (truck):* one drive with this code deployed, then read
+  *Closed 2026-10-04 drive (Pi `a1da058`, daemon up 19:43:17Z, profile `default`; engine running 19:43–20:16Z, passive 19:48:23–~20:00Z by another caller, non-passive otherwise):* `sequence_windows` read **1,739 scored, 0 stretched, 0
+  unmeasured**; span ratio median 1.000, p95 1.000, max 1.001; longest step
+  p95 and max 1.02 s, over 2,271 ticks with 23 missed (8 `compute_busy`, 15
+  `overrun`). A dropped tick does not stretch a scored window on the truck,
+  so Δt needs no change. *Was:* one drive with this code deployed, then read
   `detectors.inference.sequence_windows` (`stretched` / `scored`) to replace
   the counter bound with a per-window count and close.
 

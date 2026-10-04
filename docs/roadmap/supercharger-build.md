@@ -176,12 +176,18 @@ uses the `tuning` profile, so the baseline and the new engine share a schema.
   profile itself is sound. `POST /control/capture/autostart` now arms the
   capture for the whole drive, which is what NA1 needs; the pulls still need
   3rd gear from ≤ 2,500 rpm.
-- [ ] **NA2 — Fuel pressure through a pull.** The AEM CAN gauge (P2) on the
+- [~] **NA2 — Fuel pressure through a pull.** The AEM CAN gauge (P2) on the
   stock system, logged through NA1 — which means P2's fuel-pressure half must
   land *before* teardown, not after. Settles the 2026-09-21 question — steady pressure
   says MAF curve, falling pressure says delivery — and gives the stock pump's
   figure to compare the Aeromotive against. The single most useful baseline
   number the ECM cannot give.
+  *2026-10-04, first drive with the gauge (no pull; max 118 g/s):* pressure
+  falls with airflow, steepening, from 50.8 psi below 10 g/s to 48.9 psi at
+  ~107 g/s (analog reading, +1.8 psi over the face). That is −1.9 % injector
+  flow, about half the measured WOT lean, so the answer leans **delivery**. A
+  3rd-gear pull is still owed to read it at WOT airflow
+  ([analysis](../../data/analyses/2026-10-04-fuel-pressure-first-drive.md)).
 - [ ] **NA3 — Closed-loop trim map.** Warm, rpm × MAF, both banks, across idle,
   cruise at several speeds, and light load. **Wait for LTFT to relearn first**:
   it read exactly 0.00 % after the 2026-09-20 flash, so today's map is STFT

@@ -56,7 +56,7 @@ training envelope". That is useful to know. It is not a diagnosis.
     global 3.38; fused 0.00. A05's deterministic plausibility checks are
     committed (`06a3188`, [A05](A05-plausibility-checks.md)). The role
     mechanism the decision would switch is in A06.5.
-- [~] **A06.2 — Decision: what the sequence detector is for.** **Decided
+- [x] **A06.2 — Decision: what the sequence detector is for.** **Decided
   by the operator, 2026-09-23: (b) a non-alerting novelty screen.** The
   non-alerting half is in force: `sequence` now defaults to `evidence`. It
   rests on the A02.11 table: 45.4 false alarms per engine-hour as served,
@@ -120,7 +120,13 @@ training envelope". That is useful to know. It is not a diagnosis.
     The Pi has run `6892c2c` since 2026-09-24 16:53:24Z
     ([scan-tool note](../../../data/analyses/2026-09-24-scan-tool-bcm-ecm-session.md)),
     but CANary was passive in that session, so it says nothing about
-    scoring. **Still owed (truck):** read
+    scoring. *Closed 2026-10-04 drive (Pi `a1da058`, daemon up 19:43:17Z, profile `default`; engine running 19:43–20:16Z, passive 19:48:23–~20:00Z by another caller, non-passive otherwise):* `sequence_envelope` counted **1,739 windows**
+    (`envelope_recorded: true`, r2 LSTM): 367 inside, 904 outside, 468
+    `not_compared`, 0 `mode_not_trained`. Outside by mode: highway 631/634
+    (IAT outside on all 631 compared, baro on 283), warmup 99/167 (IAT),
+    city 108/629, idle_transient 66/232, idle 0/77. The meter is nonzero.
+    The highway IAT result says the trained highway envelope is narrower in
+    intake temperature than an October afternoon. *Was:* read
     `detectors.inference.sequence_envelope` and A01.7's `sequence_windows`
     over an engine-running, non-passive drive on `default`. Only a nonzero
     meter closes the box.

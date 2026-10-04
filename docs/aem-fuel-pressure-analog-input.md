@@ -245,6 +245,11 @@ in `firmware/usb-adc/README.md`.
 **What to check before going faster.** The gauge regenerates its analog output
 at some rate of its own. Sampling faster than that only oversamples. At 100 Hz,
 look at a WOT pull's trace for steps before raising `OUTPUT_HZ`.
+*Answered 2026-10-04:* no steps. The output carries the rail's injector
+pulsation (0.12–0.38 psi rms, at engine-order harmonics of rpm/40 Hz) and
+the 100 Hz samples alias it, so the gauge is not the bandwidth limit. Average
+over ≥ 0.5 s for pressure; a faster rate or an anti-alias filter is only for
+studying the pulsation (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`).
 
 ## Status
 
@@ -257,6 +262,6 @@ look at a WOT pull's trace for steps before raising `OUTPUT_HZ`.
 - [x] Cross-checked against the gauge face: constant +1.8 psi, unresolved (see above)
 - [ ] Loading check (divider on vs off at steady pressure). Bounded already: a fixed source impedance would show as a slope error against the face, and the offset held constant from 0 to 51 psi, so sag is ≲1 %
 - [x] Collector written: `sensor:FUEL_PRESSURE`, `sensor:FUEL_PRESSURE_FAULT`
-- [ ] Enabled in `/etc/canary/canary.yaml` on the Pi (`hardware.usb_adc`)
+- [x] Enabled in `/etc/canary/canary.yaml` on the Pi (`hardware.usb_adc`): first drive 2026-10-04, 205k rows at 100 Hz, one start-up stall (`data/analyses/2026-10-04-fuel-pressure-first-drive.md`)
 - [ ] Offset settled with the sensor vented to atmosphere
 - [x] Faster firmware: `firmware/usb-adc`, 100 Hz, flashed 2026-10-04 via the BOOT0 jumper; stock image saved

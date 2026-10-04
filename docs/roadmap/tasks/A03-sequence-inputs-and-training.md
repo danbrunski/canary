@@ -15,7 +15,7 @@ what the code says it means.
 
 ## Checklist
 
-- [~] **A03.1 — Make the mask mean "a sample arrived".** The mask is
+- [x] **A03.1 — Make the mask mean "a sample arrived".** The mask is
   `¬<channel>__gap`, and `__gap` means "no sample within `max_gap`": 2 s for
   fast channels, 120 s for slow ones (`resampler.py`, `live.py`). So
   forward-filled cells read as observed, contrary to the docstrings in
@@ -91,7 +91,12 @@ what the code says it means.
     - **Harness:** `BatchedSequenceScorer` reads the artifact's rule
       through `observation_mask_from_schema`
       (`src/models/evaluation_detectors.py`).
-    - **Still owed (truck):** serving validation on an engine-running,
+    - *Closed 2026-10-04 drive (Pi `a1da058`, daemon up 19:43:17Z, profile `default`; engine running 19:43–20:16Z, passive 19:48:23–~20:00Z by another caller, non-passive otherwise):* the `arrived_sample` r2 LSTM scored 1,739 windows
+      with 0 compute failures and 0 stretched windows (A01.7, A06.2). One
+      `swap_timeout` worker fallback at boot: the worker took > 31 s to
+      acknowledge its cold load from the SD card (A01.6's territory, not the
+      mask). `stages.sequence` ran a median of 625 ms (p95 730), up from
+      344 ms on 2026-09-24. *Was:* serving validation on an engine-running,
       non-passive drive. It is the same drive as A06.2 and A01.7.
 - [~] **A03.2 — Condition on driving conditions; reconstruct engine
   responses.** Split the columns into:
