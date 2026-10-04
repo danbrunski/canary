@@ -43,6 +43,8 @@ export interface TyreStatus {
     tread_depth_mm: number;
     worn_since_baseline_mm: number;
     uncertainty_mm: number;
+    /** Drives measured after the gauge reading; 0 = the estimate is the reading. */
+    drives_since_reading: number;
     as_of: string;
   } | null;
   caveats: string[];

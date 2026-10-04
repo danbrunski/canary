@@ -22,6 +22,9 @@ interface TreadWearCardProps {
 export function treadHeadline(status: TyreStatus): string {
   const estimate = status.estimate;
   if (estimate) {
+    if (estimate.drives_since_reading === 0) {
+      return `${estimate.tread_depth_mm.toFixed(1)} mm (the gauge reading; no drive measured since)`;
+    }
     return `${estimate.tread_depth_mm.toFixed(1)} mm ± ${estimate.uncertainty_mm.toFixed(1)}`;
   }
   if (status.baseline?.status === "pending") {

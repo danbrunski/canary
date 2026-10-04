@@ -127,14 +127,35 @@ def tyre_status(
     base_m = float(np.median([d["median_m"] for d in near]))
     base_se_m = base_m * scatter_pct / 100.0 / math.sqrt(len(near))
     baseline.update({"status": "fixed", "circumference_m": round(base_m, 5)})
-    worn_mm = (base_m - current_m) / (2.0 * math.pi) * 1000.0
-    worn_se_mm = math.hypot(base_se_m, current_se_m) / (2.0 * math.pi) * 1000.0
-    out["estimate"] = {
-        "tread_depth_mm": round(measured.tyres.tread_depth_mm - worn_mm, 2),
-        "worn_since_baseline_mm": round(worn_mm, 2),
-        "uncertainty_mm": round(worn_se_mm, 2),
-        "as_of": (now or datetime.now(UTC)).date().isoformat(),
-    }
+    # Wear is read only from drives after the reading. The latest drives
+    # overall can be the very drives that fixed the baseline, and their
+    # difference is two noisy medians of one tyre, not wear (2026-10-04: a
+    # reading taken 13 days after the last drive showed 0.23 mm "worn").
+    since = [d for d in drives if d["date"] > measured.occurred_at][-CURRENT_DRIVES:]
+    as_of = (now or datetime.now(UTC)).date().isoformat()
+    if not since:
+        out["estimate"] = {
+            "tread_depth_mm": measured.tyres.tread_depth_mm,
+            "worn_since_baseline_mm": 0.0,
+            "uncertainty_mm": 0.0,
+            "drives_since_reading": 0,
+            "as_of": as_of,
+        }
+        out["caveats"].append(
+            "no measured drive since the gauge reading yet: the estimate is the reading itself"
+        )
+    else:
+        since_m = float(np.median([d["median_m"] for d in since]))
+        since_se_m = since_m * scatter_pct / 100.0 / math.sqrt(len(since))
+        worn_mm = (base_m - since_m) / (2.0 * math.pi) * 1000.0
+        worn_se_mm = math.hypot(base_se_m, since_se_m) / (2.0 * math.pi) * 1000.0
+        out["estimate"] = {
+            "tread_depth_mm": round(measured.tyres.tread_depth_mm - worn_mm, 2),
+            "worn_since_baseline_mm": round(worn_mm, 2),
+            "uncertainty_mm": round(worn_se_mm, 2),
+            "drives_since_reading": len(since),
+            "as_of": as_of,
+        }
     pressure = [
         e
         for e in events

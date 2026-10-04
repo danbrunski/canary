@@ -141,6 +141,31 @@ def test_a_gauge_reading_turns_circumference_into_tread_depth(tmp_path: Path) ->
     assert status["estimate"]["uncertainty_mm"] > 0
 
 
+def test_before_any_drive_since_the_reading_the_estimate_is_the_reading(
+    tmp_path: Path,
+) -> None:
+    """The latest drives are the ones that fixed the baseline: their spread is
+    not wear (2026-10-04, a reading 13 days after the last drive read 0.23 mm
+    "worn")."""
+    storage = tmp_path / "sessions"
+    spread = (2.556, 2.561, 2.558, 2.563, 2.555, 2.560, 2.557, 2.559, 2.562)
+    for day, c in enumerate(spread, start=1):
+        _measured(storage, f"2026-09-0{day}T120000", c)
+    ledger = _ledger(tmp_path)
+    ledger.record(
+        occurred_at=date(2026, 9, 20),
+        kind="maintenance",
+        title="gauge",
+        tyres=TyreRecord(action="tread_measured", tread_depth_mm=12.0),
+    )
+    status = tyre_status(storage, ledger)
+    assert status["baseline"]["status"] == "fixed"
+    assert status["estimate"]["tread_depth_mm"] == 12.0
+    assert status["estimate"]["worn_since_baseline_mm"] == 0.0
+    assert status["estimate"]["drives_since_reading"] == 0
+    assert any("no measured drive since the gauge reading" in c for c in status["caveats"])
+
+
 def test_a_rotation_restarts_the_series_and_retires_the_old_reading(tmp_path: Path) -> None:
     storage = tmp_path / "sessions"
     _measured(storage, "2026-10-01T120000", 2.540)
