@@ -78,7 +78,7 @@ system starting beside it.
 
 ## Desk
 
-- [~] **S01.1 Make startup timing a first-class, measured thing.** Today the
+- [x] **S01.1 Make startup timing a first-class, measured thing.** Today the
   only way to know when recording began is to query the session's parquet or
   run `py-spy`. That is how a log line claiming "collectors started" hid a 25 s
   stall behind it. **Do:** record monotonic and wall timestamps for: process
@@ -123,6 +123,17 @@ system starting beside it.
   the records went to `2026-09-24T035130`, a name taken from the pre-GPS clock
   (no RTC cell, `docs/time-sync.md`), so the wall clock stepped under the
   stamps. It needs a boot whose clock is right at start.
+  *Closed 2026-10-04, Pi reboot at 19:43:10Z with the engine already running
+  (code `a1da058`):* the clock was right from the start: `rpi-rtc` set the
+  system clock to 19:43:02Z at kernel boot (the RTC kept time through a reboot
+  on UPS power), and chrony selected a source at 19:43:32Z with no step. The
+  stages, seconds from process start (19:43:17.796Z): main 6.62, daemon
+  imported 24.37, collectors 37.11, **first record stored 37.776 s** (can and
+  gps; sensor and obd 37.812), live source 39.69, app 45.39, HTTP 45.66, models
+  polled 78.20. `first_record_timestamp_by_source.can` = 19:43:54.913424Z,
+  identical to the earliest row of `2026-10-04T194342/telemetry-00000.parquet`;
+  the store happened 0.66 s after that record (19:43:55.572Z), inside the 5 s
+  `flush_interval_seconds`. Session named 19:43:42 from the same correct clock.
 
 - [x] **S01.2 Don't import torch until a sequence model loads.** Chain, found
   with a `sys.meta_path` finder on the Pi: `src/daemon/runtime.py` →

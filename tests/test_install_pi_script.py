@@ -477,6 +477,43 @@ def test_without_a_hat_chrony_has_no_pps_source(installer: Installer) -> None:
     assert not (installer.root / "etc" / "systemd" / "system" / "canary-gpsd-pps.service").exists()
 
 
+def _unit_dir(installer: Installer) -> Path:
+    return installer.root / "etc" / "systemd" / "system"
+
+
+def test_every_gpsd_start_replays_the_receivers_add_event(installer: Installer) -> None:
+    """2026-10-03: `apt upgrade` stopped gpsd and started it again. PartOf
+    carries a stop to the attach unit but not a start, so GPS stayed dark
+    until a reboot."""
+    installer.run()
+
+    dropin = (_unit_dir(installer) / "gpsd.service.d" / "canary-reattach.conf").read_text()
+    assert f"ExecStartPost=-/usr/bin/udevadm trigger --action=add {GPS_DEVICE}" in dropin
+    assert not (_unit_dir(installer) / "gpsd.service.d" / "canary-reattach-pps.conf").exists()
+
+
+def test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud(installer: Installer) -> None:
+    """At 9600 baud the HAT's MAX-M10M overflowed its transmit buffer and its
+    time ran ~14 s late (2026-10-04). It forgets the speed at every power cut,
+    so it is set on every attach."""
+    installer.run(CANARY_GPS_DEVICE="", CANARY_HAT_PRODUCT_FILE=str(_hat_product_file(installer)))
+
+    units = _unit_dir(installer)
+    reattach = (units / "gpsd.service.d" / "canary-reattach.conf").read_text()
+    assert "udevadm trigger --action=add /dev/ttyAMA2" in reattach
+    pps = (units / "gpsd.service.d" / "canary-reattach-pps.conf").read_text()
+    assert "ExecStartPost=-/usr/bin/udevadm trigger --action=add /dev/pps-canary" in pps
+    baud = (units / "canary-gpsd@ttyAMA2.service.d" / "canary-baud.conf").read_text()
+    assert "/usr/bin/gpsctl -s 115200 /dev/ttyAMA2" in baud
+    assert "ExecStartPost=-" in baud
+
+
+def test_a_usb_receiver_gets_no_baud_change(installer: Installer) -> None:
+    installer.run()
+
+    assert not list(_unit_dir(installer).glob("canary-gpsd@*.service.d"))
+
+
 def test_fitting_a_hat_later_restarts_chrony_once(installer: Installer) -> None:
     installer.run()
     hat = str(_hat_product_file(installer))

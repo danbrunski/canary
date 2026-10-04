@@ -307,6 +307,37 @@ EOF
 # Managed by canary scripts/install_pi.sh — see systemd/canary-gpsd@.service
 ACTION=="add", SUBSYSTEM=="tty", ${GPS_MATCH}, TAG+="systemd", ENV{SYSTEMD_WANTS}+="canary-gpsd@%k.service"
 EOF
+    # PartOf=gpsd.service carries a gpsd *stop* and *restart* to the attach
+    # unit, but not a fresh *start*. A package upgrade stops gpsd and starts it
+    # again, so on 2026-10-03 an `apt upgrade` left gpsd running with no
+    # receiver and GPS dark until a reboot. Replaying the receiver's add event
+    # after every gpsd start pulls the attach unit back in through the same
+    # udev path as boot and hotplug (a no-op while it is already active).
+    UNIT_DIR="$(dirname "${CANARY_SERVICE}")"
+    install -d -m 0755 "${UNIT_DIR}/gpsd.service.d"
+    write_managed gpsd "${UNIT_DIR}/gpsd.service.d/canary-reattach.conf" <<EOF
+# Managed by canary scripts/install_pi.sh — re-attach the receiver after any gpsd start.
+[Service]
+ExecStartPost=-/usr/bin/udevadm trigger --action=add ${CANARY_GPS_DEVICE}
+EOF
+    # The HAT's MAX-M10M powers up at 9600 baud, and at 9600 one second of its
+    # NMEA (14 GSV lines for 28 satellites, plus GGA/RMC/GSA/GBS/ZDA) does not
+    # fit: it reported `$GNTXT txbuf alloc` and its time arrived ~14 s late and
+    # growing (2026-10-04), which would have stepped the clock 14 s on a boot
+    # without network. 115200 brought the lag to ~65 ms. The receiver has no
+    # backup cell, so the speed is lost at every power cut and is set on every
+    # attach, through gpsd, which follows the port to the new speed. gpsctl
+    # refuses until gpsd has identified the receiver, hence the retries.
+    if [[ -n "${hat_product}" && "${hat_product}" == CANary-HAT* \
+          && "${CANARY_GPS_DEVICE}" == /dev/ttyAMA* ]]; then
+      _gps_unit="canary-gpsd@${CANARY_GPS_DEVICE#/dev/}.service"
+      install -d -m 0755 "${UNIT_DIR}/${_gps_unit}.d"
+      write_managed gpsd "${UNIT_DIR}/${_gps_unit}.d/canary-baud.conf" <<EOF
+# Managed by canary scripts/install_pi.sh — HAT GNSS at ${CANARY_HAT_GPS_BAUD:-115200} baud on every attach.
+[Service]
+ExecStartPost=-/bin/sh -c 'for i in 1 2 3 4 5 6 7 8 9 10; do /usr/bin/gpsctl -s ${CANARY_HAT_GPS_BAUD:-115200} ${CANARY_GPS_DEVICE} && exit 0; sleep 1; done; echo "could not set ${CANARY_GPS_DEVICE} to ${CANARY_HAT_GPS_BAUD:-115200} baud" >&2; exit 1'
+EOF
+    fi
     systemctl daemon-reload
     udevadm control --reload || true
 
@@ -340,6 +371,13 @@ EOF
   if [[ "${hat_product:-}" == CANary-HAT* ]]; then
     write_managed chrony "$(dirname "${CANARY_SERVICE}")/canary-gpsd-pps.service" \
       <"${CANARY_HOME}/systemd/canary-gpsd-pps.service"
+    # Same PartOf gap as the receiver's attach unit (see canary-reattach.conf).
+    install -d -m 0755 "$(dirname "${CANARY_SERVICE}")/gpsd.service.d"
+    write_managed chrony "$(dirname "${CANARY_SERVICE}")/gpsd.service.d/canary-reattach-pps.conf" <<'EOF'
+# Managed by canary scripts/install_pi.sh — re-attach the HAT PPS after any gpsd start.
+[Service]
+ExecStartPost=-/usr/bin/udevadm trigger --action=add /dev/pps-canary
+EOF
     write_managed chrony "${ROOT}/etc/udev/rules.d/70-canary-pps.rules" <<'EOF'
 # Managed by canary scripts/install_pi.sh — stable name for the CANary-HAT's GNSS PPS,
 # and canary-gpsd-pps.service attaches it to gpsd for chrony's SOCK refclock (H03.3).

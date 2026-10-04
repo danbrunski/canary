@@ -149,6 +149,36 @@ other checklist leans on.
   gpsd writes nothing, the H03.3 note above about the direct refclock taking
   no samples applies here too.
 
+  **Pi, 2026-10-04 (on the road, `a1da058`): chrony takes nothing from either
+  source.** `chronyc sources` shows `#? GPS` and `#? PPS` at reach 0 with a 3D
+  fix; time came from NTP the whole time. What `ntpshmmon` (as root) showed:
+  - **SHM unit numbering depends on attach order.** gpsd hands out units as
+    devices activate. At this boot `/dev/pps-canary` attached first
+    (19:43:20Z), and the receiver's NMEA time went to **NTP1**, while
+    `refclock SHM 0` reads unit 0, which carried no samples. A fixed unit
+    number in `canary-gps.conf` cannot be right in both orders.
+  - **The standalone PPS device writes no samples**, to SHM or to the SOCK.
+    gpsd runs as user `gpsd` after start, and `/run/chrony.pps-canary.sock` is
+    `root 0755`; whether that, or gpsd not pairing a bare `/dev/pps*` with the
+    receiver, is the cause is not settled.
+  - **Before the baud fix the NMEA time was ~14 s late** (H03.4), so a working
+    GPS refclock would have stepped the clock 14 s on a boot without network
+    (`makestep 1 -1`). The NMEA lag is now 62–68 ms.
+
+  Also found that day, and fixed (`install_pi.sh`): `PartOf=gpsd.service`
+  carries a stop and a restart of gpsd to `canary-gpsd@` and
+  `canary-gpsd-pps`, but not a fresh start. The 2026-10-03 `apt upgrade`
+  upgraded gpsd (stop at 19:48:43, start at 19:49:50), which left gpsd with
+  only the PPS device attached and **no receiver** until the 2026-10-04 reboot.
+  gpsd drop-ins `canary-reattach.conf` / `canary-reattach-pps.conf` now
+  `udevadm trigger --action=add` the receiver and the PPS after every gpsd
+  start (checked on the Pi: re-firing the add event restarted a stopped
+  `canary-gpsd-pps`). Tests:
+  `test_every_gpsd_start_replays_the_receivers_add_event`,
+  `test_a_canary_hat_reattaches_its_pps_and_sets_the_gnss_baud`.
+  Installed by hand on the Pi 2026-10-04 (`daemon-reload`, nothing restarted).
+  A gpsd stop/start on a parked truck has not yet exercised them.
+
 - [ ] **H03.4 GNSS at 10 Hz.** **Do:** configure the MAX-M10M on every gpsd
   attach (it has no backup cell fitted, so settings in RAM do not survive a
   power cut): UBX `CFG-VALSET` for `CFG-RATE-MEAS` 100 ms and a UART1 baud that
@@ -156,6 +186,20 @@ other checklist leans on.
   `canary-gpsd@.service` before `gpsdctl add`, or by gpsd's own `-s`/`ubxtool`.
   **Accept:** **(Pi)** `gpspipe -w` shows TPV at 10 Hz; the daemon's
   `gps:speed` arrives at ~10 Hz.
+  **Baud half done 2026-10-04, found on the road.** At the power-up 9600 baud,
+  one second of the M10's NMEA (14 GSV lines for 28 satellites across four
+  constellations, plus GGA/RMC/GSA/GBS/ZDA) does not fit in ~960 chars/s. The
+  receiver reported `$GNTXT,01,01,00,txbuf alloc`, and `ntpshmmon` put its
+  time **13.6–14.1 s behind** the NTP-disciplined clock, growing ~45 ms a
+  second, then snapping back. TPV and the daemon's `gps:` rows were that late
+  as well. The 2026-09-23 figure of +154..161 ms was with fewer satellites
+  tracked. `gpsctl -s 115200 /dev/ttyAMA2` (live, through gpsd) brought it to
+  62–68 ms steady, with no further `txbuf`. `install_pi.sh` now writes
+  `canary-gpsd@ttyAMA2.service.d/canary-baud.conf` on a HAT install, which
+  repeats that `gpsctl -s` after every attach (retried, since gpsd must
+  identify the receiver first; `CANARY_HAT_GPS_BAUD` overrides the speed).
+  Installed on the Pi by hand; the next attach (a boot) exercises it.
+  **Still owed:** `CFG-RATE-MEAS` 100 ms, and the 10 Hz checks.
 - [x] **H03.5 uart0 on by default in the overlay** once H05 has a collector
   that uses it. The SysRq hazard needs a console on uart0, and on the Pi 5 the
   console is `ttyAMA10`; make `install_pi.sh` refuse a `console=` on
