@@ -304,6 +304,14 @@ system starting beside it.
   tick reads **0 footers in 0.59–0.86 s** (10 hourly ticks). **Still owed:**
   a tick during a drive. The pre-change tick was never logged on the Pi, so
   the "before" is the laptop's 3.0–3.3 s measurement above.
+  *2026-10-04 (partial):* four ticks fell in drives, each one the first after a
+  start, so each read every footer: 70.5 s after the 19:43Z cold boot (142
+  sessions, 44,738 footers), 68.4 s after the 20:27Z boot, and 15.3 s / 16.9 s
+  after warm restarts at 20:41Z and 20:45Z (engine running, moving). Over the
+  same drives inference missed 23 of 2,271 ticks, none attributed to storage.
+  The first-tick cost has grown with the corpus (49.8 s cold on 2026-09-24 at
+  33,273 files). Still owed: a *steady-state* tick (0 footers) during a drive,
+  which needs a drive running at least an hour past the daemon's last start.
 
 ## Needs the truck
 
