@@ -535,8 +535,8 @@ tables:
       0x02DC44) and 0x03C4D0 (at 0x03D0F4) through the wrapper 0x026A24:
       16 x 16 bytes, +0x660-0x75F, row-major. Its last byte is the one cell
       edited in UpRev (slot 1 +0x75F, row 15, column 15, "7200 RPM / 50.00 %
-      Volumetric Flow Ratio"). The axes are inferred: see them for the
-      conflict between the code and UpRev's editor over which axis is rpm.
+      Volumetric Flow Ratio"). Axis roles are verified from the code and are
+      the reverse of UpRev's editor labels: see the axes.
   - id: fuel_compensation_maps_2_5
     kind: fuel_compensation
     name: Fuel Compensation
@@ -568,27 +568,35 @@ tables:
       quantity: rpm
       unit: rpm
       scale: 50
-      confidence: inferred
+      confidence: verified
       evidence: >-
-        Searched by 0x027194 against the engine-speed word 0xFFFF1210 as axis
-        byte << 2, as Target AFR's rpm axis is; raw 08 10 ... 80 is 400-6,400
-        rpm, the range of this ECM's other rpm axes. Inferred only because
-        UpRev's editor labels this axis Volumetric Flow Ratio.
-    confidence: inferred
+        Searched by 0x027194 against the engine-speed word 0xFFFF1210 (12.5
+        rpm per count) as axis byte << 2, so one axis count is 50 rpm; raw 08
+        10 ... 80 is 400-6,400 rpm, the range of this ECM's other rpm axes.
+    confidence: verified
     evidence: >-
-      The code says rpm: both Fuel Comp readers pass 0xCACD in r5 with the
-      engine-speed word, and the wrapper makes it the row index (table + 16 x
-      index). UpRev's editor says otherwise: it shows 0xCACD as the Volumetric
-      Flow Ratio columns (0x80 displayed as 50.00 %) and 0xCB29 as the rpm
-      rows. Settle it with a live check before trusting either label.
+      Verified from the code, 2026-10-04 (docs/ecu-firmware-analysis.md,
+      Map-slot tables, +0x660; commit 6f9c885): call site 0x02DC34-46 loads
+      r4 = 0xFFFFB6A0, r5 = 0xCACD, r6 = 0xCB29, r7 = the word at 0xFFFF1210
+      (engine speed, the PID 0x0C word), and the wrapper 0x026A24 searches
+      r5's axis with r7 through 0x027194 and uses it as the row index (table +
+      16 x index). Same helpers as the Target AFR wrapper 0x0269AC, whose
+      mapping is live-verified (W05.1); the second reader (0x03D0F4) passes
+      the same pair. UpRev's editor labels this axis the other way round (it
+      shows 0xCACD as the Volumetric Flow Ratio columns, 0x80 as 50.00 %, and
+      0xCB29 as the rpm rows), so cells picked by UpRev's labels are
+      transposed in meaning. Not yet seen live on this table.
   - id: fuel_comp_flow_axis
     name: Fuel Compensation flow axis (as the ECM reads it)
     offset: 0xCB29
     rows: 1
     cols: 16
     dtype: u8
-    confidence: inferred
+    confidence: verified
     evidence: >-
+      Role verified from the code (call site 0x02DC34-46, wrapper 0x026A24,
+      0x027114: a direct byte compare with the stack byte loaded from
+      0xFFFF118A); its physical unit is not established, so it is shown raw.
       The code compares it byte for byte with 0xFFFF118A
       (mem:ECM_FUEL_COMP_X_INPUT, load-like, 0-218 on the 2026-10-04 drive),
       which makes it the column axis. UpRev's editor shows it as the rpm rows

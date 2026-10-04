@@ -410,7 +410,7 @@ def test_known_answer_load_point_scaler_and_k_in_every_slot() -> None:
 
 @operator_rom
 def test_known_answer_the_k106_fuel_comp_rescale_followed_uprevs_axis_labels() -> None:
-    """The evidence behind the inferred Fuel Comp axes: UpRev moved the table's
+    """What UpRev did to the Fuel Comp axes: it moved the table's
     rows with 0xCB29, which the ECM's code searches with the load input."""
     rom_map = xterra_map()
     base = _table(tables_payload(_operator("base"), rom_map), "fuel_compensation", 1)

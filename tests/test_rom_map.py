@@ -285,10 +285,14 @@ def test_slot_table_axes_are_the_ones_the_lookup_wrappers_search() -> None:
     fuel_comp = rom_map.table("fuel_compensation")
     rows = rom_map.table(fuel_comp.axes.rows or "")
     cols = rom_map.table(fuel_comp.axes.cols or "")
-    # The code and UpRev's editor disagree over which of these is rpm: inferred.
-    assert (rows.offset, rows.confidence) == (0xCACD, "inferred")
-    assert rows.decode is not None and rows.decode.scale == 50
-    assert (cols.offset, cols.confidence, cols.decode) == (0xCB29, "inferred", None)
+    # Verified from the call site 0x02DC34-46 + wrapper 0x026A24, the reverse
+    # of UpRev's editor labels: 0xCACD is the rpm rows, 0xCB29 the load columns.
+    assert (rows.offset, rows.confidence) == (0xCACD, "verified")
+    assert rows.decode is not None and (rows.decode.scale, rows.decode.confidence) == (
+        50,
+        "verified",
+    )
+    assert (cols.offset, cols.confidence, cols.decode) == (0xCB29, "verified", None)
     assert fuel_comp.decode is not None
     assert fuel_comp.decode.apply(132) == pytest.approx(103.125)  # UpRev showed 103.13
     assert fuel_comp.decode.apply(131) == pytest.approx(102.34375)  # and 102.34
