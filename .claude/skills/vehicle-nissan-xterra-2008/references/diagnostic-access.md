@@ -90,8 +90,18 @@ site.
     fitted in one region does not extrapolate.
   - `0x1134` is an open-loop rich target (raw/64 as φ), not the commanded φ: it
     holds 64 through closed loop.
-  - `0x1102`/`0x1125` `ECM_LONG_FUEL_TRIM_B1/B2` read the cell-indexed learned
-    trim on a 100-is-neutral scale, a different encoding from PID `0x07`/`0x09`.
+  - **On CAN, `0x1102` is vehicle speed** (one byte, km/h = raw × 2), not
+    `ECM_LONG_FUEL_TRIM_B1` as catalogued. The catalog took that meaning from
+    UpRev's K-line stream, and the firmware's K-line and CAN DID tables
+    differ.
+  - **Learned trim on CAN:** `0x1125` is LTFT **B1** (the catalog says B2) and
+    `0x1126` is LTFT B2. They are the same RAM words as PIDs `0x07`/`0x09`.
+  - **Short-term trim on CAN:** `0x1123`/`0x1124` are STFT B1/B2.
+  - Firmware evidence is in `docs/ecu-firmware-analysis.md`; the
+    `data/dids.yaml` fix is pending.
+  - The firmware's DID → RAM pointer tables are at `0x024988`, `0x024B84` and
+    `0x024D00` for CAN, and at `0x022738`, `0x022938` and `0x022AB4` for
+    K-line.
   - `0x1225`/`0x1226` are the A/F sensor voltages. `afr_calibration.yaml` maps
     them to AFR with a monotone table. Fitted curves were tried and are far
     worse, so don't replace it with one.

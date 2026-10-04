@@ -72,8 +72,10 @@ An annotated map is published as an artifact ("Xterra ECM Flash Map").
 - Application vector table at 0x020004: reset 0x00021C24, behind the header
   word 0x1F95FFFF at 0x020000, which the checksum skips.
 - Calibration ID `1ZS44A00000` at 0x008204, where the checksum range starts.
-- Erased: 0x006000–0x007FFF, 0x012000–0x01FFFF, 0x0DF000–0x0DFFFF and
-  0x0E3000–0x0FEFFF.
+- Erased: 0x006000–0x007FFF (except 48 bytes at 0x006EFE–0x006F2D),
+  0x012000–0x01FFFF, 0x0DF000–0x0DFFFF and 0x0E3000–0x0FEFFF.
+- Candidates below are now confirmed from the code (2026-10-04): see
+  `docs/ecu-firmware-analysis.md` → "Map-slot tables".
 - The text `UpRev` at 0x0DE194, in a sparse block.
 - End values 0x01 at 0x0FFF80 and 0x4E4855F9 at 0x0FFF84 (meaning unknown).
 

@@ -125,8 +125,17 @@ copying them. Paths are under `data/nissan-xterra-2008/` unless shown.
   again, and it was still 0.00 on 09-23. That 0.00 is the neutral value (raw
   `0x80` on the PID `0x07` scale), not a decode bug or a fault. While it sits
   there, trim analysis is STFT-only. Once it is active, use total trim
-  `(1+STFT)(1+LTFT)−1`. The Mode 22 learned-trim DIDs `0x1102`/`0x1125` show
-  the cell-indexed table directly.
+  `(1+STFT)(1+LTFT)−1`. Over Mode 22 on CAN, learned trim is DID `0x1125`
+  (B1) and `0x1126` (B2), and short-term trim is `0x1123`/`0x1124`. These are
+  the same RAM words PIDs `0x06`–`0x09` read (firmware, 2026-10-04).
+- **DID `0x1102` is vehicle speed on CAN, not learned trim.** The catalog
+  named it `ECM_LONG_FUEL_TRIM_B1` from UpRev's *K-line* stream definition.
+  The firmware has separate K-line and CAN DID tables, and on CAN `0x1102` is
+  the speed byte (one byte, km/h = raw × 2). It tracks wheel speed with
+  correlation 0.9997. The catalog's `0x1125` is bank-swapped as well. **Never
+  carry a DID's meaning across transports.** See
+  `docs/ecu-firmware-analysis.md` → "Mode 22 catalog corrections"; the
+  `data/dids.yaml` fix is pending.
 - **IAT reads engine-bay air at idle, not heat soak.** It is
   stagnation-dominated: above ~8 g/s it pins to ambient, and the high readings
   occur only at idle (corr with rpm −0.80). "IAT rose through the drive" was

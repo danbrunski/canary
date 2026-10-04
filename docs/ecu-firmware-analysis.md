@@ -34,7 +34,7 @@ observation. **Inferred** means strong evidence, not yet confirmed.
 | The 2-D lookup used only for Target AFR | `0x0269AC` | Verified | It has one caller, `0x055DB2`. |
 | Load-side input to the lookup | RAM byte `0xFFFF103E` | Verified | Passed straight into the lookup. This is CANary's `mem:ECM_FUEL_TARGET_MAP_X_TRACE`. |
 | Rpm-side input to the lookup | RAM word `0xFFFF11D8` | Verified | Read as base `0xFFFF11C4` + `0x14`. This is CANary's `mem:ECM_ENGINE_SPEED_RAM`. |
-| The inputs are compared with the axes' raw bytes, so the X trace is in BFS axis counts (≈0.1685 ms per count) | — | Inferred | The value is passed unscaled. P02.14 fitted UpRev's X trace at ≈0.1695 ms per count. Confirming means decoding the lookup's interpolation helpers (open below). |
+| The inputs are compared with the axes' raw bytes, so the X trace is in BFS axis counts (0.1685 ms per count) | — | Verified | See "Target AFR lookup, decoded" below. |
 | Pedal-switch enrichment: when a flag is set, the load input becomes `0xFF`, which is the last BFS column | `0x055DB2` | Verified (code); matches the 2026-09-18 data finding | The flag sets and clears with +8 counts of hysteresis on a value read from the 1-D table at `0xCEDB`. Its flag bit is bit 0 of `0xFFFF283F + 2`. |
 
 ### UpRev's map switching (UpRev's patch)
@@ -56,13 +56,102 @@ observation. **Inferred** means strong evidence, not yet confirmed.
 | 8-entry byte-curve lookup (returns entry 7 past the end) | `0x026BA4` | Verified | Decompiled. It has 93 call sites. |
 | About 120 distinct curves packed in the calibration block | `0x00CC1B–0x00D379` | Verified locations; names unknown | The call-site arguments. Each call shows which variable a curve is read with, and naming a curve means identifying that variable. |
 
+### Target AFR lookup, decoded (settles W05.1)
+
+The lookup at `0x0269AC` calls three helpers:
+- `0x027194`, the rpm-axis search;
+- `0x027114`, the load-axis search;
+- `0x026F40`, bilinear interpolation, with cell interpolation at `0x026F10` and division at `0x027448`.
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The load byte at `0xFFFF103E` is compared **directly** with the raw BFS axis bytes (`0x34…0x80` at `0xC894`), with no scale or offset. | Verified | The search at `0x027114`. |
+| The rpm word at `0xFFFF11D8` counts 12.5 rpm per unit and is compared with `axis byte << 2`, so an axis byte × 4 × 12.5 = axis × 50 rpm. | Verified | The search at `0x027194`, which agrees with the rpm axis decode (raw × 50). |
+| Interpolation is bilinear over 8 rpm rows × 8 BFS columns, row by row. Past either end it **clamps** to the first or last row and column. | Verified | `0x026F40`. The clamp is the edge behaviour P02.15 found from UpRev logs. |
+| `0xFFFF103E = min(255, BFS × 128 / 44019)`, where BFS is the word at `0xFFFF103A` (the variable DID `0x1208` reports). One X count is 343.9 BFS counts, which is **0.1685 ms**. | Verified | The code, plus a capture: X equals floor(BFS × 128 / 44019) on 1,564 of 1,564 same-read rows, while control divisors fail. It matches P02.14's fitted 0.1695 ms per count. |
+| **44019 is UpRev's "Load Point Scaler".** It sits at `0x9416` in the calibration block, and a copy sits in each map slot at `+0x760`, just before K. | Verified (value at both addresses); which copy the code reads is inferred to be `0x9416` | The bytes. Editing it moves every operating point along the Target AFR and timing load axes, which is the edit UpRev warns against doing by hand. |
+
+### Diagnostic service handlers
+
+| What | Where | Confidence |
+|---|---|---|
+| Service dispatcher. It keeps the request's service byte at RAM `0xFFFF8003` and the response byte (service + 0x40) at `0xFFFF810A`; transmit is at `0x02FB7C` and negative responses at `0x034F34`. | `0x030714` | Verified |
+| Mode 01 handler. Its support mask at `0xC85C` equals the 41 PIDs the 2026-07-22 probe found. Handlers exist for PID `0x0B` (MAP) and `0x43` (absolute load), but the mask leaves them off, so they never answer. | `0x0D3AFC` | Verified |
+| Mode 22 DID → RAM pointer tables, **separate for K-line and CAN**. The same DID number can point at different variables on each transport. | K-line `0x022738`, `0x022938`, `0x022AB4`; CAN `0x024988`, `0x024B84`, `0x024D00` | Verified |
+
+RAM anchors, each tied to a Mode 01 PID or a CANary channel:
+
+| RAM address | Quantity | Tied to |
+|---|---|---|
+| `0xFFFF4706` | coolant | PID 0x05 |
+| `0xFFFF26B4` / `0xFFFF26B6` | STFT B1 / B2 | PID 0x06 / 0x08 |
+| `0xFFFF26DE` / `0xFFFF26E0` | LTFT B1 / B2 | PID 0x07 / 0x09 |
+| `0xFFFF1210` | rpm | PID 0x0C |
+| `0xFFFF11FF` | timing, as 110 − raw | PID 0x0E |
+| `0xFFFF11A8` | vehicle speed | PID 0x0D |
+| `0xFFFF26BE` | commanded φ | PID 0x44; the same word as `mem:ECM_TARGET_EQUIV_RATIO`, which ties that memory channel to commanded φ |
+
+The full list is in `~/ecu-re/out/ram_vars.yaml`.
+
+### Mode 22 catalog corrections (CAN)
+
+The `data/dids.yaml` entries below came from UpRev's **K-line** stream definition, applied to the CAN DIDs. The firmware shows the transports have separate tables.
+
+| DID | Catalog says | It actually is | Confidence |
+|---|---|---|---|
+| `0x1102` | `ECM_LONG_FUEL_TRIM_B1`, 2 bytes, % | **Vehicle speed**: the byte at `0xFFFF11A8`, which PID 0x0D also reads. One byte on CAN, km/h = raw × 2. | Verified: the firmware pointer, plus data. On `_capture-rom-trace-2026-09-21T142926`, DID 0x1102 tracks broadcast wheel speed with correlation 0.9997 over 202 pairs, and its per-sample ratio is steady (median 32.1, p10–p90 31.6–33.6). |
+| `0x1125` | `ECM_LONG_FUEL_TRIM_B2` | **LTFT B1** (`0xFFFF26DE`, the PID 0x07 word) | Verified (firmware pointer equals the PID handler's) |
+| `0x1126` | (not catalogued) | **LTFT B2** (`0xFFFF26E0`) | Verified (firmware) |
+| `0x1123` / `0x1124` | (not catalogued) | **STFT B1 / B2** (`0xFFFF26B4` / `B6`) | Verified (firmware) |
+
+Any earlier trim analysis that read DID `0x1102` as learned trim was reading road speed.
+
+### Map-slot tables, confirmed from the code that reads the RAM copy
+
+| Slot offset (RAM) | Table | Confidence | Evidence |
+|---|---|---|---|
+| `+0x020` (`0xFFFFB060`) and `+0x120` (`0xFFFFB160`) | **Ignition timing trims**, two 16 × 16 tables. Their axes are BFS-X counts (`0xCC93`) × rpm (`0xCC83`), and cells are read masked with `& 0x7F`. A flag bit at `0xFFFF2842` chooses between them. | Verified location; the Main / High Det roles are inferred | The readers of both tables, and the flag gating. The `+0x09C` cells k106 changed are **inside** the `+0x020` table (cell `0x7C`), not a separate table. |
+| `+0x220` (`0xFFFFB260`) | Target AFR, 8 × 8 | Verified | As above. |
+| `+0x260` (`0xFFFFB2A0`) | A 16-bit-valued map on the axes `0xCAE9` (rpm-like) and `0xE25E` (16-bit). It is the most-read switchable map, with at least 21 readers. | Location verified; identity unknown | Candidates: cam phasing, or electronic throttle / torque. |
+| `+0x660` (`0xFFFFB6A0`) | **Fuel Compensation**, 16 × 16 (`+0x660–0x75F`). Its x-axis is `0xCACD` (Volumetric Flow Ratio) and its rpm axis is `0xCB29`. | Verified | Readers at `0x02D5F4` and `0x03C4D0`. The base is `+0x660`; the diff only showed changed cells from about `+0x670`. |
+| `+0x760` | Load Point Scaler copy (44019) | Verified (bytes) | See above. |
+| `+0x762` (`0xFFFFB7A2`) | **K**, big-endian 16-bit, multiplied into the air-charge accumulator: Tp = K · Qa / Ne. | Verified | The read at `0x03C6E0` inside `0x03C4D0`. It holds 28,715 in all five slots, and the base value 27,089 is in the ratio 1.0600. |
+
+UpRev's axis list at `0x0DE460` resolves to these four switchable maps, as axis pairs:
+- `{0xCC83, 0xCC93}` timing trims;
+- `{0xC894, 0xCAA5}` Target AFR;
+- `{0xCACD, 0xCB29}` Fuel Comp;
+- `{0xCAE9, 0xE25E}` the `+0x260` map.
+
+### UpRev's map selector
+
+| What | Confidence | Evidence |
+|---|---|---|
+| The map is chosen by a **discrete input**, not by a DID or a K-line command. Bits 1 and 3 of RAM byte `0xFFFF2EE0` are debounced through `0xFFFFB002`. On a transition the code increments the selector at `0xFFFFB003` and runs the slot copy. | Verified | `0x0DE358`, which runs periodically. |
+| `0xFFFFB008` holds the committed active map, 1–5, and is safe to read. It reads **0 after a cold boot**, meaning "slot 1, loaded by default, not yet re-selected". | Verified (code) | The slot copy clamps the selector to 1–5 before committing. |
+
+### Curves and other maps
+
+| What | Confidence |
+|---|---|
+| 153 distinct 1-D byte curves are read through three routines: `0x026BA4` (8 entries), `0x026BBC` (16) and `0x026BD4` (16). Inputs: 4 strongly identified, 118 inferred, 35 unknown. Naming the rest needs tracing each caller. | Locations verified |
+| About 30 flash-resident 2-D maps are enumerated with their axes and callers. Their identities are not yet resolved. | Locations verified |
+
+Local outputs: `~/ecu-re/out/ram_vars.yaml`, `tables_1d.yaml`, `tables_2d.yaml`, `lookup_trace.txt`.
+
+### Corrections to earlier notes
+
+- `0x006000–0x007FFF` is not entirely erased: 48 bytes at `0x006EFE–0x006F2D` are in use. `rom_map.yaml` records this.
+
 ## Open
 
-- Decode the Target AFR lookup's interpolation helpers, to confirm the inputs
-  are compared with raw axis bytes (W05.1's X axis).
-- Find the Mode 01 and Mode 22 handlers. Their PID/DID → RAM tables name RAM
-  variables by quantity, which are the anchors for naming every curve.
-- Find the other table routines: Fuel Comp (16 rpm × N), timing trims, MAF
-  scaling, cranking, and enumerate their call sites.
-- Confirm the candidate K (`+0x762`) and timing cells (`+0x09C`) from the ROM map
-  by finding the code that reads them in the RAM slot copy (`0xFFFFB040 +` offset).
+- **Catalog:** apply the Mode 22 corrections to `data/dids.yaml`, with the
+  known answers.
+- **New channel:** add `mem:ECM_ACTIVE_MAP` (`0xFFFFB008`) to the memory
+  catalog. Verify it on the truck: it reads 0 or 1 after a boot, and the
+  live Target AFR copy at `0xFFFFB260` equals that slot's flash table.
+- **ROM map data:** move the confirmed slot tables (timing trims, Fuel
+  Comp, K, Load Point Scaler) into `rom_map.yaml`, and lift `rom_trace`'s
+  BFS-axis refusal (W05.1).
+- **Unidentified tables:** the `+0x260` map, the remaining 1-D curve
+  inputs, and the flash-resident 2-D maps.

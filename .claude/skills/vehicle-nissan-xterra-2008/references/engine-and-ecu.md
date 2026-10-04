@@ -163,17 +163,26 @@ this truck:
   `0x055DB2` replaces the lookup's load input with `0xFF`, the last column,
   while a flag is set. The flag switches with +8 counts of hysteresis on a
   value from the 1-D table at `0xCEDB`.
-- **Fuel Compensation** is the second fuel table (x = "Volumetric Flow Ratio"
-  %, y = rpm). Only one cell of its layout is verified, and its live x channel
-  is unresolved, so don't place an operating point on it yet.
+- **Fuel Compensation** is the second fuel table: 16 × 16 at slot `+0x660`.
+  Its x-axis is "Volumetric Flow Ratio" % (`0xCACD`, raw `08…80`) and its rpm
+  axis is `0xCB29` (raw × 50 = 800–7,200 rpm). The layout is code-verified.
+  Its x input is RAM byte `0xFFFF118A` (inferred from the reader at
+  `0x03C4D0`). That isn't a CANary channel yet, so don't place an operating
+  point on this table until it is verified.
 - The RAM map-trace channels (`mem:ECM_FUEL_TARGET_MAP_X_TRACE`,
   `mem:ECM_ENGINE_SPEED_RAM`) are the ECM's *own* coordinates into the Target
   AFR table. The disassembly shows they are exactly the two inputs the code
-  passes to the lookup: the load byte at `0xFFFF103E` and the rpm word at
-  `0xFFFF11D8`. The rpm axis mapping is verified. The BFS axis mapping is
-  inferred (raw axis counts, ≈0.1685 ms each) until the lookup's interpolation
-  helpers are decoded (W05.1). Until then `src.analysis.rom_trace` refuses to
-  place a cell on that axis.
+  passes to the lookup:
+  - the load byte at `0xFFFF103E` is compared directly with the raw BFS axis
+    bytes;
+  - the rpm word at `0xFFFF11D8` counts 12.5 rpm per unit and is compared
+    with axis byte × 4.
+  Interpolation is bilinear, clamped at the edges.
+  `X = min(255, BFS × 128 / 44019)`, where 44019 is UpRev's **Load Point
+  Scaler** (at `0x9416`, with a copy in each slot at `+0x760`). One X count is
+  0.1685 ms. Both axis mappings are code-verified (W05.1);
+  `src.analysis.rom_trace` still refuses the BFS axis until its data is
+  updated.
 
 ## Spark and knock on this ECM
 
@@ -211,9 +220,25 @@ this truck:
   `+4`, selector nibble at `+3`, current map number at `+8`. At start-up it
   loads slot 1. Nissan's Target AFR pointer now points at the RAM copy
   (`0xFFFFB260` = copy + `0x220`), and the calibration's own table at
-  `0x00A169` is unused. The active map number is probably readable at
-  `0xFFFFB008`, but that is not a CANary channel yet. Until it is, confirm the
-  active slot with the operator before tracing a table.
+  `0x00A169` is unused.
+- **The map is selected by a switch input, not a command.** Bits 1 and 3 of
+  RAM byte `0xFFFF2EE0` are debounced, and each transition steps the
+  selector. The committed active map is at `0xFFFFB008`, as 1–5; it reads 0
+  after a cold boot, meaning slot 1 is loaded by default. That address is not
+  a CANary channel yet, so until it is, confirm the active slot with the
+  operator before tracing a table.
+- **What's in a slot, confirmed from the code that reads the RAM copy:**
+
+  | Offset | Table |
+  |---|---|
+  | `+0x020` and `+0x120` | two 16 × 16 **timing trims** (BFS-X × rpm, cells masked `& 0x7F`; a flag at `0xFFFF2842` picks one, likely Main vs High Det) |
+  | `+0x220` | Target AFR, 8 × 8 |
+  | `+0x260` | a heavily used 16-bit map whose identity is still unknown |
+  | `+0x660` | **Fuel Comp**, 16 × 16 (Volumetric Flow Ratio `0xCACD` × rpm `0xCB29`) |
+  | `+0x760` | Load Point Scaler |
+  | `+0x762` | **K**, big-endian 16-bit, multiplied into Tp = K · Qa / Ne |
+
+  The k106 "added spark" cells (`+0x09C`) are inside the first timing trim.
 - **Flash image layout** (`docs/uprev-rom-table-verification.md`, 2026-10-04
   section, and the "Xterra ECM Flash Map" artifact):
   - boot block `0x000000–0x007FFF`, with vectors at `0x0`;
