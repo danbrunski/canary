@@ -605,8 +605,10 @@ under GPS. Defects a dyno would inherit:
       free circumference 2.617 m, published 634 rev/mi = 2.538 m, and a
       Rhyne-stiffness load/pressure model gives 2.583 m new. The 0.9 % gap is
       about 4 mm of tread wear. Details in the note.
-  - **Operator decision owed:** whether to set `tyre_loaded_circumference_m:
-    2.559` (it moves the dyno's wheel force by ~2 %).
+  - **Set 2026-10-03 (operator: "yes on tire value"):**
+    `tyre_loaded_circumference_m: 2.559` in `profiles.yaml`, with the
+    evidence string. `dyno.yaml`'s inertia note follows: r = 0.407 m, and the
+    3rd-gear rotating equivalent is ~184 kg, up from ~181.
   - **Still owed (truck):** 1st, which has 2 steady pairs on disk.
 - [ ] **H07.12 NA baseline.** On one flat, straight road: coast-downs both
   directions for H07.5, flat-ground accelerations for H07.4, then three pull
