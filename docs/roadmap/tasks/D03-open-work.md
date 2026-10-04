@@ -2234,6 +2234,64 @@ live here now, so the documents could be archived
     - A throttle cross-check (commanded vs actual, pedal D vs E) was the one
       reason to keep the dropped throttle PIDs, and it was not built.
 
+- [~] **D03.35 Tyre wear from GPS: rolling circumference trended into tread
+  depth.** *Operator request, 2026-10-03.* H07.11 showed that a drive's steady
+  cruise fixes the driven tyres' rolling circumference: same-instant rpm /
+  GPS speed through the gearbox and final drive.
+  **Reliability, measured first** (18 September drives, so no wear between
+  them):
+  - one drive's median carries a standard error of 0.03–0.10 %;
+  - drive to drive they scatter by 0.15 % σ (2.550–2.564 m);
+  - 1 mm of tread is 2π mm of circumference, 0.25 %;
+  - so one drive resolves ~±0.6 mm of tread, and a month of drives
+    ~±0.15 mm. Tread wears ~1 mm per 5,000–10,000 km.
+
+  It is a trend, not an absolute depth: a tyre model is good to ~±1 %, about
+  ±4 mm. Absolute depth needs one gauge reading as the baseline.
+  *Built 2026-10-03:*
+  - **Measurement.** `src/analysis/rolling_circumference.py` takes the
+    steady-cruise pairs (5 GPS fixes ≤ 6 s, speed and rpm/speed within 1 %,
+    > 40 km/h, within 5 % of a gear at the profile's circumference) and
+    returns the median, n, SE, gears and speed range, or a named refusal
+    (`too_few_steady_pairs`, `inputs_missing`, `not_configured`).
+    - The rpm sources come from the vehicle's `dyno.yaml`
+      `motion_sources.rpm`, else Mode 01. Nothing names a vehicle.
+    - The prior only picks the gear: wear moves C far less than the 5 %
+      tolerance, and a tyre of another size is refused.
+    - Reproduces the analysis on `2026-09-18T213818` (2.55465 m) and
+      `2026-09-20T211925` (2.55779 m).
+  - **Every trip digest** carries it (`rolling_circumference`, in the
+    bounded digest child, two channels read).
+    `scripts/backfill_rolling_circumference.py` merges it into stored
+    digests, touching only that key. Run it parked on the Pi.
+  - **Ledger.** `VehicleEvent.tyres: TyreRecord` with `action` ∈
+    {`tread_measured` (requires `tread_depth_mm`), `rotated`, `replaced`,
+    `pressure_changed`}. Carried on `POST /control/vehicle-ledger` and the
+    MCP `record_vehicle_event` (`tyres=`).
+  - **Trend.** `src/control/tyres.py`, served at `GET /control/tyres`, reads
+    the digests and the ledger only. Rules:
+    - a rotation or replacement starts a new series;
+    - the gauge reading is tied to the ≤5 measured drives nearest it within
+      21 days, so a wide window cannot absorb later wear;
+    - estimated depth = gauge − (C_baseline − C_now) / 2π, with an
+      uncertainty from the drives' own scatter;
+    - a pressure change since the baseline is named.
+  - **Dashboard.** Diagnose ▸ **Tyres** (was TPMS): a "Tread wear" card
+    under the TPMS stub shows estimated depth ± uncertainty, worn since the
+    gauge, rolling circumference ± and drives, a sparkline, the caveats, and
+    a form to record a gauge reading, pressure, rotation or replacement.
+  - **Tests.** `tests/test_tyre_wear.py` (9: recovery from a synthetic
+    drive, refusals, `TyreRecord` validation, no baseline, a fixed estimate
+    of 1.5 mm worn, a rotation restarting the series, a pressure caveat, the
+    route) and `TreadWearCard.test.ts` (4). The route-table, MCP-tool and
+    script-CLI snapshots are updated.
+
+  **Remaining (Pi/operator):**
+  - deploy, then run the backfill on the Pi while parked;
+  - one gauge reading on the driven (rear) tyres, recorded from the card,
+    to turn the trend into depth.
+
+
 ## Deferred by decision, not blocked
 
 - [~] **D01.4 Get the feature build off the event loop — implemented; Pi

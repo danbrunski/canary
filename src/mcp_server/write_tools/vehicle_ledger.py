@@ -28,6 +28,7 @@ async def record_vehicle_event(
     affected_channels: list[str] | None = None,
     corpus_boundary: bool = False,
     event_id: str | None = None,
+    tyres: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Append one entry to the vehicle ledger.
 
@@ -55,6 +56,11 @@ async def record_vehicle_event(
         is append-only and keeps the latest line per id, so the original
         stays on disk while reads see the correction. Pass the id from
         ``list_vehicle_events``; omit it for a new event.
+    tyres:
+        A tyre fact the tyre-wear trend reads: ``{"action": "tread_measured",
+        "tread_depth_mm": 9.5}`` (a gauge reading on the driven axle, the
+        baseline), or ``{"action": "rotated" | "replaced" | "pressure_changed",
+        "pressure_psi": ...}``.
     """
     body: dict[str, Any] = {
         "occurred_at": occurred_at,
@@ -67,6 +73,8 @@ async def record_vehicle_event(
     }
     if event_id is not None:
         body["event_id"] = event_id
+    if tyres is not None:
+        body["tyres"] = tyres
     return await audited_post(
         client, audit, tool="record_vehicle_event", path="/control/vehicle-ledger", body=body
     )

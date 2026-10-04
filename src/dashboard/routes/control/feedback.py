@@ -93,6 +93,7 @@ def build_router(ctx: ControlContext) -> APIRouter:
             affected_channels=request.affected_channels,
             corpus_boundary=request.corpus_boundary,
             event_id=request.event_id,
+            tyres=request.tyres,
         )
         publish_control_event("vehicle_ledger.record", "ok", event.to_dict())
         return {"event": event.to_dict()}

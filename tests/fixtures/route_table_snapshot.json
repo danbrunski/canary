@@ -1117,6 +1117,14 @@
       "auth": "control",
       "body": false,
       "method": "GET",
+      "path": "/control/tyres",
+      "query": [],
+      "status_code": null
+    },
+    {
+      "auth": "control",
+      "body": false,
+      "method": "GET",
       "path": "/control/vehicle-ledger",
       "query": [],
       "status_code": null
